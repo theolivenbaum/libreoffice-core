@@ -673,10 +673,29 @@ is read and verified, so what remains is the filling of pages rather than the me
         nominal one (triple is five times, a wave is the wave's own height), then
         `editeng::ConvertBorderWidthFromWord` applies the style's multiplier — double is three times, thick
         twice, and the composites add fixed line and gap widths. A zero width means three quarters of a point.
-      - What is **not** read: `sprmTTableBorders`, the table's own six defaults, which fill in only the sides no
-        cell stated and pick between the outer and interior code by the row's place in the table and the cell's
-        in the row (`ww8par2.cxx`, third pass over the bands). Neither corpus file uses it and a table stating
-        only those gets no borders rather than wrong ones.
+      - `sprmTTableBorders` — the table's own **six** defaults, outer top/left/bottom/right plus the two
+        interior lines — is read now, and it is the one border read that **cannot be verified against
+        LibreOffice**: LibreOffice *reads* the sprm and never *writes* it, stating all four edges on every cell
+        descriptor instead, so no round trip through `soffice` can produce a document that carries one. Word
+        writes it constantly, which is the reason to read it. The rule is transcribed from `ww8par2.cxx` —
+        `ProcessSprmTTableBorders` for the operand and the third pass over the bands for the fill-in — and
+        `TableDefaultBorderTests` pins that transcription against hand-built operands.
+
+        Three things about it that are easy to get wrong, and all three silent:
+        - They are **defaults, not overrides**. Only a side whose `brcType` is zero is filled in; the nil
+          border is a *stated absence* and survives, which is what lets a document turn one edge off inside a
+          table that otherwise has a grid.
+        - Which of the six a side takes is **positional**: a top edge is the outer top only in the first row
+          and the interior horizontal line everywhere else, a left edge the outer left only in the first
+          column. Laying the four outer codes on every cell draws a box round each cell rather than round the
+          table — and a one-cell table cannot tell the two apart, so it is the wrong case to test on.
+        - They are stated **per band and inherited**, so a table whose first row states them and whose later
+          rows do not applies them throughout. The assembler carries the last stated set forward.
+
+        This is also why the fill-in and the merge fold both moved to table-close time. The fill-in needs the
+        row's place in the table, which is not known until the first paragraph that is not another row; and it
+        has to run *before* the fold, because the cell's place in the row decides which default its left and
+        right take while the fold changes both the count and the indices.
 - [x] A table inside a cell, in all four formats. A cell holds *blocks* rather than paragraphs and
       `FlowLayouter` places a table among its lines, so a cell's content is exactly what a header's is —
       which is what made this a small change rather than a second layout path. The subtle part is that a

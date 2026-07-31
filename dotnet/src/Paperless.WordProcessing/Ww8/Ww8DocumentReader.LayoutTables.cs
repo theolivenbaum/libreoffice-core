@@ -166,11 +166,15 @@ public sealed partial class Ww8DocumentReader
 
             Ww8TableDefinition? definition = format.TableDefinition;
 
+            // The table's own defaults are stated per band and a band inherits the previous band's, so a row
+            // that states none keeps whatever the last row that did said.
+            level.Defaults = format.TableBorders ?? level.Defaults;
+
             for (int i = 0; i < level.RowCells.Count; i++)
             {
                 level.RowCells[i].RightEdge = definition?.RightEdgeOf(i) ?? 0;
                 level.RowCells[i].Padding = PaddingOf(format, i);
-                level.RowCells[i].Borders = BordersOf(format, definition, i);
+                level.RowCells[i].RawBorders = BordersOf(format, definition, i);
                 level.RowCells[i].Shading = ShadingOf(format, i);
 
                 Ww8CellDefinition cell = definition?.CellAt(i) ?? default;
@@ -178,19 +182,52 @@ public sealed partial class Ww8DocumentReader
                 level.RowCells[i].ContinuesMergeAbove = cell.IsVerticallyMerged && !cell.StartsVerticalMerge;
             }
 
-            ApplyExplicitMerges(level.RowCells);
-
             Ww8RowDraft row = new()
             {
                 Index = level.Rows.Count,
                 LeftEdge = definition?.LeftEdge ?? 0,
                 IsHeader = format.IsTableHeaderRow,
                 HeightTwips = format.RowHeightTwips,
+                Defaults = level.Defaults,
             };
             row.Cells.AddRange(level.RowCells);
             level.Rows.Add(row);
 
             level.RowCells.Clear();
+        }
+
+        /// <summary>
+        /// Fills in every cell's unstated sides from its row's defaults, then folds the flagged merges.
+        /// </summary>
+        /// <remarks>
+        /// In that order, and both once the table is complete, because both need what a single row does not
+        /// know. The fill-in needs the row's place in the table — a top edge is the outer top only in the
+        /// first row — and it has to happen <em>before</em> the fold, because the cell's place in the row
+        /// decides which default its left and right take and the fold changes both the count and the indices.
+        /// </remarks>
+        private static void ResolveBorders(List<Ww8RowDraft> rows)
+        {
+            for (int r = 0; r < rows.Count; r++)
+            {
+                Ww8RowDraft row = rows[r];
+
+                if (row.Defaults is { } defaults)
+                {
+                    for (int c = 0; c < row.Cells.Count; c++)
+                    {
+                        row.Cells[c].RawBorders = defaults.FillIn(
+                            row.Cells[c].RawBorders,
+                            isFirstRow: r == 0,
+                            isLastRow: r == rows.Count - 1,
+                            isFirstColumn: c == 0,
+                            isLastColumn: c == row.Cells.Count - 1);
+                    }
+                }
+
+                ApplyExplicitMerges(row.Cells);
+
+                foreach (Ww8CellDraft cell in row.Cells) cell.Borders = cell.RawBorders.AsCellBorders();
+            }
         }
 
         /// <summary>
@@ -213,6 +250,10 @@ public sealed partial class Ww8DocumentReader
 
                 if (open.Rows.Count > 0)
                 {
+                    // Before the grid is assigned, because folding a merge is part of this and the grid is
+                    // derived from the edges the fold widens.
+                    ResolveBorders(open.Rows);
+
                     AssignColumns(open.Rows);
                     ResolveVerticalMerges(open.Rows);
 
@@ -238,6 +279,15 @@ public sealed partial class Ww8DocumentReader
 
             /// <summary>The section its rows were in, taken from the paragraphs that made them.</summary>
             public int Section { get; set; }
+
+            /// <summary>
+            /// The table's six default border codes as the last row to state them left them.
+            /// </summary>
+            /// <remarks>
+            /// Carried on the level rather than taken per row, because WW8 states them per band and a band
+            /// inherits the previous band's — so a table whose first row states them applies them throughout.
+            /// </remarks>
+            public Ww8TableBorders? Defaults { get; set; }
         }
     }
 
@@ -371,7 +421,7 @@ public sealed partial class Ww8DocumentReader
             // The widened cell's right edge is now where the swallowed one's was, so it is that cell's
             // right border that bounds it — the same thing LibreOffice's own WW6 read does when it folds a
             // merge. Keeping the owner's would draw the line down the middle of the merged cell.
-            owner.Borders = owner.Borders with { Right = cells[index].Borders.Right };
+            owner.RawBorders = owner.RawBorders with { Right = cells[index].RawBorders.Right };
 
             cells.RemoveAt(index);
         }
@@ -397,7 +447,7 @@ public sealed partial class Ww8DocumentReader
     /// table and the cell's in the row. A table stating only those gets no borders rather than wrong ones.
     /// </para>
     /// </remarks>
-    private static CellBorders BordersOf(
+    private static Ww8CellBorders BordersOf(
         Ww8ParagraphFormat format, Ww8TableDefinition? definition, int cell)
     {
         Ww8CellBorders borders = definition?.CellAt(cell).Borders ?? default;
@@ -407,7 +457,7 @@ public sealed partial class Ww8DocumentReader
             if (stated.Covers(cell)) borders = borders.With(stated.Sides, stated.Border);
         }
 
-        return borders.AsCellBorders();
+        return borders;
     }
 
     /// <summary>

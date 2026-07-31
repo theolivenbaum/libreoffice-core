@@ -440,6 +440,17 @@ public sealed partial class Ww8DocumentReader
         /// <summary>Its four edges, from the cell descriptor and whatever <c>sprmTSetBrc</c> laid over it.</summary>
         public Layout.CellBorders Borders { get; set; }
 
+        /// <summary>
+        /// The same four before the table's own defaults have filled in the sides it left unstated.
+        /// </summary>
+        /// <remarks>
+        /// Kept as well as <see cref="Borders"/> because the fill-in cannot happen when the row closes: which
+        /// default a side takes depends on the row's place in the <em>table</em>, and the table is not
+        /// finished until the first paragraph that is not another row. So the codes are carried unresolved
+        /// and <see cref="Borders"/> is set once the whole table exists.
+        /// </remarks>
+        public Ww8CellBorders RawBorders { get; set; }
+
         /// <summary>Its background, or null when the row's shading sprms give it none.</summary>
         public Colour? Shading { get; set; }
 
@@ -459,6 +470,15 @@ public sealed partial class Ww8DocumentReader
 
         /// <summary>Its declared height in twips, signed: negative means exact rather than a floor.</summary>
         public int HeightTwips { get; init; }
+
+        /// <summary>
+        /// The table's six default border codes in force for this row, or null when it has none.
+        /// </summary>
+        /// <remarks>
+        /// Per row rather than per table because a band can restate them, and already resolved through the
+        /// inheritance: this is what the row was given, not what it stated.
+        /// </remarks>
+        public Ww8TableBorders? Defaults { get; init; }
 
         public List<Ww8CellDraft> Cells { get; } = [];
     }

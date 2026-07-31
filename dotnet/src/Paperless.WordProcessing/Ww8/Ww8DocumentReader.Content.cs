@@ -462,6 +462,19 @@ public sealed partial class Ww8DocumentReader
                 case Ww8SprmReader.Ids.CellShading80:
                     format = format with { CellShading80 = Ww8Shading.ReadShort(sprm.Operand) };
                     break;
+
+                case Ww8SprmReader.Ids.TableBorders or Ww8SprmReader.Ids.TableBorders80:
+                    // Kept only when it parses. A short operand leaves whatever an earlier sprm — or an
+                    // earlier row, since the defaults carry forward — already said, which is better than
+                    // replacing six real codes with six blanks.
+                    if (Ww8TableBorders.Read(
+                            sprm.Operand.Span,
+                            isLongForm: sprm.Identifier == Ww8SprmReader.Ids.TableBorders) is { } defaults)
+                    {
+                        format = format with { TableBorders = defaults };
+                    }
+
+                    break;
             }
         }
         return format;
@@ -720,6 +733,16 @@ public readonly record struct Ww8ParagraphFormat
 
     /// <summary>The same from <c>sprmTDefTableShd80</c>, which the newer form beats per cell.</summary>
     public IReadOnlyList<Colour?>? CellShading80 { get; init; }
+
+    /// <summary>
+    /// The table's six default border codes, or null when this row states none.
+    /// </summary>
+    /// <remarks>
+    /// Null means "this row said nothing", not "this table has no defaults": WW8 states them per band and a
+    /// band inherits the previous band's, so the assembler carries the last non-null forward. A table whose
+    /// first row states them and whose later rows do not is the ordinary case.
+    /// </remarks>
+    public Ww8TableBorders? TableBorders { get; init; }
 }
 
 /// <summary>

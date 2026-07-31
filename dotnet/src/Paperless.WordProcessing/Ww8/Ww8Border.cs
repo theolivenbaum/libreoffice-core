@@ -232,3 +232,97 @@ public readonly record struct Ww8CellBorders(
         Top.AsTableBorder(),
         Bottom.AsTableBorder());
 }
+
+/// <summary>
+/// A table's six default border codes, from <c>sprmTTableBorders</c>.
+/// </summary>
+/// <remarks>
+/// <para>
+/// Six rather than four, because a table states its outer edges and its interior lines separately — which is
+/// how Word's table dialogue expresses "a box around it and a grid inside", and why the defaults cannot
+/// simply be laid over a cell: which of the six a cell's top takes depends on whether the cell is in the
+/// table's first row, and which its left takes on whether it is in the row's first column.
+/// </para>
+/// <para>
+/// They are <em>defaults</em>, not overrides. A cell that states a side keeps it; only a side whose type is
+/// zero — unstated, as distinct from the nil border, which is a stated absence — is filled in. That is the
+/// whole of <c>ww8par2.cxx</c>'s third pass over the bands, and it is what makes a table that carries nothing
+/// but these draw at all.
+/// </para>
+/// <para>
+/// Not written by LibreOffice's own DOC export, which states every edge per cell instead, so a corpus
+/// document cannot be produced by round-tripping one. Word writes it constantly.
+/// </para>
+/// </remarks>
+/// <param name="Top">The table's outer top edge.</param>
+/// <param name="Left">Its outer left edge.</param>
+/// <param name="Bottom">Its outer bottom edge.</param>
+/// <param name="Right">Its outer right edge.</param>
+/// <param name="Horizontal">The line between two rows.</param>
+/// <param name="Vertical">The line between two columns.</param>
+public readonly record struct Ww8TableBorders(
+    Ww8Border Top,
+    Ww8Border Left,
+    Ww8Border Bottom,
+    Ww8Border Right,
+    Ww8Border Horizontal,
+    Ww8Border Vertical)
+{
+    /// <summary>How many codes the operand holds.</summary>
+    public const int Count = 6;
+
+    /// <summary>
+    /// Reads the operand: six border codes end to end, in the same order the cell descriptor uses plus the
+    /// two interior lines.
+    /// </summary>
+    /// <param name="operand">The sprm's operand.</param>
+    /// <param name="isLongForm">
+    /// True for <c>sprmTTableBorders</c> (0xD613), whose codes are the eight-byte <c>BRCVer9</c>; false for
+    /// <c>sprmTTableBorders80</c> (0xD605), whose codes are the four-byte <c>BRC80</c>. Word writes both, the
+    /// newer after the older, so the newer must be applied last — which it is, since a grpprl is walked in
+    /// order.
+    /// </param>
+    /// <returns>The six codes, or null when the operand is too short to hold them.</returns>
+    public static Ww8TableBorders? Read(ReadOnlySpan<byte> operand, bool isLongForm)
+    {
+        int size = isLongForm ? Ww8Border.LongLength : Ww8Border.ShortLength;
+        if (operand.Length < size * Count) return null;
+
+        Ww8Border[] sides = new Ww8Border[Count];
+        for (int i = 0; i < Count; i++)
+        {
+            ReadOnlySpan<byte> code = operand.Slice(i * size, size);
+            sides[i] = (isLongForm ? Ww8Border.ReadLong(code) : Ww8Border.ReadShort(code))
+                       ?? default;
+        }
+
+        return new Ww8TableBorders(sides[0], sides[1], sides[2], sides[3], sides[4], sides[5]);
+    }
+
+    /// <summary>
+    /// A cell's four edges with the sides it did not state filled in from these defaults.
+    /// </summary>
+    /// <remarks>
+    /// The choice per side is positional, and the position that matters is the cell's place in the
+    /// <em>unmerged</em> row and the row's place in the table: a top edge is the table's outer top only in the
+    /// first row and the interior horizontal line everywhere else, and a left edge is the outer left only in
+    /// the first column. Reading the four outer codes onto every cell draws a box round each one instead of
+    /// round the table.
+    /// </remarks>
+    /// <param name="stated">What the cell descriptor and its overrides said.</param>
+    /// <param name="isFirstRow">True when the cell is in the table's first row.</param>
+    /// <param name="isLastRow">True when it is in the last.</param>
+    /// <param name="isFirstColumn">True when it is the first of its row.</param>
+    /// <param name="isLastColumn">True when it is the last of its row.</param>
+    public Ww8CellBorders FillIn(
+        Ww8CellBorders stated,
+        bool isFirstRow,
+        bool isLastRow,
+        bool isFirstColumn,
+        bool isLastColumn)
+        => new(
+            stated.Top.IsUnstated ? (isFirstRow ? Top : Horizontal) : stated.Top,
+            stated.Left.IsUnstated ? (isFirstColumn ? Left : Vertical) : stated.Left,
+            stated.Bottom.IsUnstated ? (isLastRow ? Bottom : Horizontal) : stated.Bottom,
+            stated.Right.IsUnstated ? (isLastColumn ? Right : Vertical) : stated.Right);
+}

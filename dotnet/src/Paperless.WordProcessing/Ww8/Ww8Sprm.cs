@@ -167,6 +167,19 @@ public static class Ww8SprmReader
         /// </remarks>
         public const ushort CellShading80 = 0xD609;
 
+        /// <summary>
+        /// <c>sprmTTableBorders</c>: the table's own six default border codes, in the newer eight-byte form.
+        /// </summary>
+        /// <remarks>
+        /// Six rather than four — the outer edges and the two interior lines — and they fill in only the
+        /// sides no cell stated. A table carrying nothing else draws no borders at all without them, which is
+        /// how Word's table dialogue writes "a box with a grid inside".
+        /// </remarks>
+        public const ushort TableBorders = 0xD613;
+
+        /// <summary><c>sprmTTableBorders80</c>: the same six, in the older four-byte form.</summary>
+        public const ushort TableBorders80 = 0xD605;
+
         /// <summary><c>sprmTCellPadding</c>: cell padding for a range of a row's cells.</summary>
         public const ushort CellPadding = 0xD632;
 
