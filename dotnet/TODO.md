@@ -90,7 +90,7 @@ binary.
 | ❌ | `xlsx`/`pptx`, `xls`/`ppt` and CSV readers |
 | ❌ | Decryption (detection works; decryption does not) |
 | ❌ | Rendering backends: `Paperless.Rendering`'s rasteriser and PDF writer are stubs |
-| ❌ | RTF list labels; the RTF and DOC frame reads; multi-level labels; note restarts; vertical and RTL text |
+| ❌ | RTF list labels; the RTF and DOC frame reads; note restarts; vertical and RTL text |
 | ❌ | Spreadsheet print layout and slide rendering |
 | ❌ | Vector import (WMF/EMF/EMF+/SVG) |
 | ❌ | The CLI beyond `identify`, `extract` and `metadata` |
@@ -244,6 +244,10 @@ was found because a page comparison put a word a measurable distance from where 
       `LVL` record, which `Ww8Numbering` was stepping over without keeping; and DOC has no run walker to hand a
       prefix to, so the label is spliced into text that is already assembled, into the parallel array of source
       positions as well, with every note anchor shifted by its length.
+- [x] **Multi-level labels** — `1.ii.` rather than `ii.` — which needed only the ODF layout path to stop
+      formatting labels itself and call the renderer the extraction pass already used. Its counter array wants
+      each level seeded at its start value, which is also the only arrangement that can work once a label reads
+      its ancestors' counters.
 - [ ] List labels for RTF, whose labels the extraction path already computes. Easier than DOC was — prepending
       a run shifts every offset for free — but unverifiable against the reference, since LibreOffice's own RTF
       export loses the numbering, so it needs a hand-written corpus file.

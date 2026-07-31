@@ -60,6 +60,12 @@ public sealed class ListComparisonTests : IDisposable
     // one of the four formats whose label has to be spliced into text that is already assembled, so a
     // mistake in the splice shows up here as a run in the wrong font rather than as a position.
     [InlineData("list-numbered.doc")]
+    // A three-deep outline whose second level shows its parent's counter too, in all three formats. Two rules
+    // that a single-level list cannot reach: a label made of several components, each formatted by *its own*
+    // level — so `1.ii.` and not `1.2.` — and a shallower level advancing restarting every level under it.
+    [InlineData("list-multilevel.fodt")]
+    [InlineData("list-multilevel.docx")]
+    [InlineData("list-multilevel.doc")]
     public void EveryLineOfAListStartsWhereLibreOfficeStartsIt(string fileName)
     {
         Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");

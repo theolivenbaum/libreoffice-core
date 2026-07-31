@@ -308,7 +308,7 @@ public sealed partial class OdtLayoutSource
 
             if (ns == OdfNamespaces.Text && name == "list-item")
             {
-                EnterListItem();
+                EnterListItem(child);
                 Walk(child, into, depth + 1);
                 continue;
             }

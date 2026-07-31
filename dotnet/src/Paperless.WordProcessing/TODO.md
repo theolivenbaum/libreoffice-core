@@ -128,9 +128,27 @@ indexes or resolvable style chains.
       rendered text first, and `ListLabelTests` pins the label's own characters, the two indents and the stop
       for all three formats.
 
-      Still open here: `text:display-levels` and its OOXML equivalent, a `w:lvlText` of `%1.%2.%3`, so a level
-      asking for `1.2.3` shows `3`; an image label, which needs a decoder; and **RTF**, which is the *less*
-      useful one to do next despite looking the easiest:
+      **Multi-level labels** are done, and were mostly already done: a label showing its ancestors' counters
+      as well as its own — `1.ii.` rather than `ii.` — needs `%1.%2` in OOXML and `text:display-levels` in ODF,
+      and *both* the OOXML and the WW8 label renderers already walked their templates for placeholders. Only
+      the ODF layout path was short, and only because it was formatting the label itself rather than calling
+      `OdfListStyle.FormatLabel`, which the extraction pass has used all along and which handles the whole of
+      it. Two things had to change to use it:
+      - Its counter array is one value per level, so a level's counter has to be **seeded at its start value**
+        when the list is entered rather than adjusted at formatting time. Adjusting at formatting time works
+        for a one-component label and cannot work for a multi-component one, because the ancestors' counters
+        are read out of the array with no level in hand to adjust them by.
+      - Its null answer means three different things — an image label, an empty `style:num-format`, and a
+        bullet level with no character — and only the last should fall back to a default bullet. The first two
+        are levels that deliberately draw nothing.
+
+      Measured across all three formats: LibreOffice renders `1.`, `1.i.`, `1.ii.`, `a)`, `b)`, `2.`, `2.i.`
+      for `list-multilevel.*`, which is three rules at once — each component in *its own* level's format, a
+      level asking for one component getting one, and a shallower level advancing restarting everything under
+      it.
+
+      Still open here: an image label, which needs a decoder; and **RTF**, which is the *less* useful one to do
+      next despite looking the easiest:
       - Its layout text is `string.Concat(flow.PendingRuns.Select(run => run.Text))`, so prepending a *run*
         would carry the label and shift every offset for free — no arithmetic at all, and easier than DOC was.
       - But LibreOffice's own RTF render of a list shows **no numbers**: its export loses them, exactly as it

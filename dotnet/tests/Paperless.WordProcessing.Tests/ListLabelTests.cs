@@ -96,6 +96,25 @@ public sealed class ListLabelTests
         }
     }
 
+    [Theory]
+    [InlineData("list-multilevel.fodt")]
+    [InlineData("list-multilevel.docx")]
+    [InlineData("list-multilevel.doc")]
+    public void ALabelCanShowItsAncestorsCountersToo(string fileName)
+    {
+        // Verified against LibreOffice's own render of all three, which puts exactly these seven labels at
+        // 74.80, 92.80, 92.80, 146.80, 146.80, 74.80 and 92.80 pt. Three rules at once:
+        //
+        //  - `1.ii.` and not `1.2.`, because each component takes the format of *its own* level;
+        //  - `a)` alone at the third level, whose definition asks for one component only, so the count of
+        //    components is per level rather than per document;
+        //  - `2.i.` after the second top-level item, because a shallower level advancing restarts every level
+        //    under it. Without that the nested count would read `2.iii.`.
+        Items(fileName, expected: 7)
+            .Select(item => item.Text.Split('\t')[0])
+            .ShouldBe(["1.", "1.i.", "1.ii.", "a)", "b)", "2.", "2.i."]);
+    }
+
     /// <summary>
     /// The paragraphs that a list numbered, in order.
     /// </summary>
@@ -104,7 +123,9 @@ public sealed class ListLabelTests
     /// puts an unnumbered paragraph either side of the list — the two that prove a list's indents do not
     /// leak onto the paragraphs around it.
     /// </remarks>
-    private static List<PageParagraph> Items(string fileName)
+    /// <param name="fileName">The corpus document.</param>
+    /// <param name="expected">How many numbered items it holds.</param>
+    private static List<PageParagraph> Items(string fileName, int expected = 3)
     {
         string path = Corpus.Require(fileName);
 
@@ -119,7 +140,9 @@ public sealed class ListLabelTests
             .. pages.Paragraphs.Where(paragraph => paragraph.Text.Contains('\t', StringComparison.Ordinal)),
         ];
 
-        items.Count.ShouldBe(3, $"{fileName}: the corpus document has three numbered items");
+        items.Count.ShouldBe(
+            expected, $"{fileName}: the corpus document has {expected} numbered items");
+
         return items;
     }
 }

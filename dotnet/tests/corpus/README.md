@@ -345,6 +345,17 @@ its separator is `ixchFollow` — whose default of zero means *tab*, the same tr
 differently. LibreOffice's DOC render keeps the numbers (labels at 74.80, text at 92.80), so this one verifies
 the label and not merely the geometry.
 
+`list-multilevel.fodt`, `.docx` and `.doc` are a three-deep outline, and they exist for the labels a one-level
+list cannot reach. LibreOffice renders the same seven in all three: `1.`, `1.i.`, `1.ii.`, `a)`, `b)`, `2.`,
+`2.i.` — which pins three separate rules. Each component is formatted by **its own** level, so the second level
+reads `1.ii.` and not `1.2.`; the third level's definition asks for one component and gets one, so the count is
+per level rather than per document; and `2.i.` after the second top-level item is what proves a shallower level
+advancing restarts everything under it, since without that the nested count would read `2.iii.`.
+
+Its second level also has the wider hanging indent a two-component label needs (1.27 cm against 0.635), which
+is why the geometry differs per level rather than being uniform: a label wider than its hanging indent overruns
+its own tab stop, and a document where all three levels hang by the same amount could not show the difference.
+
 There is deliberately **no `list-numbered.rtf`**, for the same reason there are no RTF wrap files: LibreOffice's
 RTF export loses the list numbering. Its own render of the exported file shows the items' text at 74.80 and
 92.80 — the indents survive — and no numbers at all. Since Paperless already reads those indents from `\li`

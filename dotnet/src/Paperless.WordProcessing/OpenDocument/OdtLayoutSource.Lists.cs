@@ -61,7 +61,16 @@ public sealed partial class OdtLayoutSource
             list.Attribute(XName.Get("style-name", OdfNamespaces.Text))?.Value
             ?? (_lists.Count > 0 ? _lists[^1].StyleName : null);
 
-        _lists.Add(new OdtOpenList { StyleName = styleName });
+        // Seeded one below the level's own start value, so that the first item's increment lands *on* it.
+        // Carrying the offset to formatting time instead cannot work once a label shows its ancestors'
+        // counters too: those are read straight out of this list, with no level in hand to adjust them by.
+        int depth = Math.Min(_lists.Count + 1, MaxListLevels);
+
+        _lists.Add(new OdtOpenList
+        {
+            StyleName = styleName,
+            Counter = (LevelOf(styleName, depth)?.StartValue ?? 1) - 1,
+        });
     }
 
     /// <summary>Leaves the innermost list.</summary>
@@ -75,9 +84,18 @@ public sealed partial class OdtLayoutSource
     /// A <c>text:list-header</c> is deliberately not this. It is an unnumbered heading inside a list, so it
     /// takes the level's indents, shows no label, and does not advance the counter.
     /// </remarks>
-    private void EnterListItem()
+    /// <param name="item">The <c>text:list-item</c>, which may restart the count with a start value.</param>
+    private void EnterListItem(XElement item)
     {
         if (_lists.Count == 0) return;
+
+        // An item may restart its level's count, which is how a document continues a numbering interrupted by
+        // a paragraph between two lists. Set one below, because the increment below is what lands on it.
+        if (OdfValue.ParseInt(item.Attribute(XName.Get("start-value", OdfNamespaces.Text))?.Value)
+            is { } start)
+        {
+            _lists[^1].Counter = start - 1;
+        }
 
         _lists[^1].Counter++;
         _labelPending = true;
@@ -101,7 +119,8 @@ public sealed partial class OdtLayoutSource
 
         _labelPending = false;
 
-        return new OdtListLabel(TextOf(level, _lists[^1].Counter), level?.TextStyleName, geometry);
+        return new OdtListLabel(
+            TextOf(_lists[^1].StyleName, depth, level), level?.TextStyleName, geometry);
     }
 
     /// <summary>The definition for a nesting depth, falling back to the deepest shallower one.</summary>
@@ -124,52 +143,36 @@ public sealed partial class OdtLayoutSource
     }
 
     /// <summary>
-    /// The label's text: a bullet character, or a formatted counter between its prefix and suffix.
+    /// The label's text: a bullet character, or the level's counters between its prefix and suffix.
     /// </summary>
     /// <remarks>
-    /// <c>text:display-levels</c> is not honoured, so a level asking for <c>1.2.3</c> shows <c>3</c>. It
-    /// needs every ancestor's counter <em>and</em> its format, which is a walk rather than a lookup, and the
-    /// single-level form is what a plain list writes.
+    /// <para>
+    /// Rendered by <see cref="OdfListStyle.FormatLabel"/>, which the extraction pass already uses. It is the
+    /// one piece of a label that is genuinely shared: <c>text:display-levels</c> means a level's label can
+    /// show its ancestors' counters as well as its own — <c>1.2.3</c> rather than <c>3</c> — and each
+    /// component takes the <em>format of its own level</em>, so a roman level two under a decimal level one
+    /// reads <c>1.ii</c>. A second implementation of that would be a second set of rules to get wrong, and
+    /// the walk state this pass keeps is exactly the counter array it wants.
+    /// </para>
+    /// <para>
+    /// A null answer means the level draws nothing — an image label, which needs a decoder, or an empty
+    /// <c>style:num-format</c>, which is how an outline level contributes to the hierarchy without appearing.
+    /// A bullet level with no character is the one case worth substituting for, since losing it loses the
+    /// fact that the paragraph is in a list at all.
+    /// </para>
     /// </remarks>
-    private static string TextOf(OdfListLevel? level, int counter)
+    /// <param name="styleName">The list style in force, inherited from the outermost list that named one.</param>
+    /// <param name="depth">The one-based nesting depth, which is the level being labelled.</param>
+    /// <param name="level">That level's definition, already resolved.</param>
+    private string TextOf(string? styleName, int depth, OdfListLevel? level)
     {
-        if (level is null) return DefaultBullet;
+        if (level is null || styleName is null) return DefaultBullet;
+        if (!_styles.ListStyles.TryGetValue(styleName, out OdfListStyle? style)) return DefaultBullet;
 
-        string prefix = level.Prefix ?? "";
-        string suffix = level.Suffix ?? "";
-
-        return level.Kind switch
-        {
-            OdfListLabelKind.Bullet => prefix
-                + (level.BulletCharacter is { Length: > 0 } bullet ? bullet : DefaultBullet)
-                + suffix,
-
-            // An image label draws the image and no text. There is no decoder yet, so it contributes the
-            // indents and nothing visible — which is better than a bullet the document never asked for.
-            OdfListLabelKind.Image => "",
-
-            _ => prefix
-                 + Formatted(Math.Max(1, level.StartValue + counter - 1), level.NumberFormat)
-                 + suffix,
-        };
+        // Every open level's counter, outermost first, which is what a display-levels label indexes into.
+        return style.FormatLabel(depth, [.. _lists.Select(open => open.Counter)])
+               ?? (level.Kind == OdfListLabelKind.Bullet ? DefaultBullet : "");
     }
-
-    /// <summary>A counter as one of ODF's five by-example sequences.</summary>
-    /// <remarks>
-    /// ODF names a sequence by giving its first term, which is why the values are <c>1</c> and <c>i</c>
-    /// rather than <c>decimal</c> and <c>lowerRoman</c>. An <em>empty</em> format is not an absent one: it
-    /// means a level that counts and shows nothing, which is how an outline level contributes to the
-    /// hierarchy without being drawn.
-    /// </remarks>
-    private static string Formatted(int value, string? format) => format switch
-    {
-        "i" => OutlineNumbers.Roman(value, upperCase: false),
-        "I" => OutlineNumbers.Roman(value, upperCase: true),
-        "a" => OutlineNumbers.Alphabetic(value, upperCase: false),
-        "A" => OutlineNumbers.Alphabetic(value, upperCase: true),
-        "" => "",
-        _ => OutlineNumbers.Digits(value),
-    };
 
     /// <summary>The bullet a level with no definition at all uses.</summary>
     /// <remarks>
