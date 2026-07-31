@@ -273,6 +273,17 @@ and all four make the properties take effect. The switch is the attribute's pres
 older wrap documents have no parent style and so are drawing-shape frames; their wrap geometry is the same
 either way, which is why nothing noticed until a border was wanted.
 
+`frame-box.docx` is LibreOffice's export of it, and it earns its place by drawing the same box under different
+rules: an OOXML text box is a DrawingML shape, so its outline is **centred** on the shape's edge rather than
+inside it — 56.65 pt against the frame's 56.7, where the ODF render strokes 57.7. Only its *fill* is compared
+against the reference, because LibreOffice writes a shape's outline as one closed path and `PdfStrokes` reads
+two-point lines; the border's width, colour and placement are pinned in `FrameDecorationTests` instead.
+
+One export behaviour to know before reading either file: LibreOffice's DOCX export **bakes a drawing shape's
+defaults into the document**. `wrap-frame.docx` therefore has an explicit #729FCF fill and a #3465A4 outline
+where `wrap-frame.fodt` has neither, and LibreOffice's own renders of the two differ accordingly. A reader
+agreeing with the DOCX render is right to disagree with the ODF one.
+
 `wrap-frame-text.fodt` is the same document with the frame's text box **filled**, which checks the two things
 the empty one cannot: that the frame's own lines break at the frame's width rather than the page's, and that
 they are inset by its padding. Building it turned up two LibreOffice behaviours worth knowing, because each

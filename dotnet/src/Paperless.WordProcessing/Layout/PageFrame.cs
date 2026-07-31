@@ -150,6 +150,19 @@ public sealed record PageFrame
     /// </remarks>
     public CellBorders Borders { get; init; }
 
+    /// <summary>
+    /// True when the border is centred on the frame's edge rather than drawn inside it.
+    /// </summary>
+    /// <remarks>
+    /// The difference between a <em>frame</em> and a <em>shape</em>, and it is a whole border width across.
+    /// LibreOffice renders an ODF text frame's border inside the frame's own edge; the same box arriving as a
+    /// DrawingML shape — which is what an OOXML text box is, and what an ODF frame with no parent graphic
+    /// style becomes — has its outline centred on the edge, so half of it falls outside the box. Measured on
+    /// one document exported both ways: the ODF render strokes the left edge at 57.7 pt and the DOCX render
+    /// strokes it at 56.65, where the frame's edge is 56.7.
+    /// </remarks>
+    public bool BorderStraddlesTheEdge { get; init; }
+
     /// <summary>True when the frame takes room from the text rather than being ignored by it.</summary>
     public bool Obstructs => Wrap != TextWrap.Through;
 

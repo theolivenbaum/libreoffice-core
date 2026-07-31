@@ -384,10 +384,16 @@ public static class PageDrawing
         CellBorders borders = frame.Frame.Borders;
         DocRect bounds = frame.Bounds;
 
-        Side(borders.Top, true, bounds.Y + (borders.Top.Width / 2));
-        Side(borders.Bottom, true, bounds.Bottom - (borders.Bottom.Width / 2));
-        Side(borders.Left, false, bounds.X + (borders.Left.Width / 2));
-        Side(borders.Right, false, bounds.Right - (borders.Right.Width / 2));
+        // A shape's outline is centred on its edge and a frame's border sits inside it — see
+        // PageFrame.BorderStraddlesTheEdge, which is a whole border width's difference.
+        bool straddles = frame.Frame.BorderStraddlesTheEdge;
+
+        Side(borders.Top, true, bounds.Y + Inset(borders.Top));
+        Side(borders.Bottom, true, bounds.Bottom - Inset(borders.Bottom));
+        Side(borders.Left, false, bounds.X + Inset(borders.Left));
+        Side(borders.Right, false, bounds.Right - Inset(borders.Right));
+
+        Length Inset(TableBorder border) => straddles ? Length.Zero : border.Width / 2;
 
         void Side(TableBorder border, bool isHorizontal, Length at)
         {

@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Xml.Linq;
 using Paperless.Core.Geometry;
+using Paperless.Core.Graphics;
 using Paperless.Core.Units;
 using Paperless.Ooxml;
 using Paperless.WordProcessing.Layout;
@@ -50,6 +51,14 @@ public sealed partial class DocxLayoutSource
                     Emu(anchor, "distL"), Emu(anchor, "distR"),
                     Emu(anchor, "distT"), Emu(anchor, "distB")),
                 Padding = PaddingOf(anchor),
+                Background = BackgroundOf(anchor),
+                Borders = BordersOf(anchor),
+
+                // An OOXML text box is a DrawingML shape, and a shape's outline is centred on its edge rather
+                // than drawn inside it. Measured on one document exported both ways: LibreOffice strokes the
+                // ODF frame's left border at 57.7 pt and the DOCX shape's at 56.65, for a frame whose left
+                // edge is 56.7.
+                BorderStraddlesTheEdge = true,
                 Blocks = ContentOf(anchor),
             });
         }
@@ -86,6 +95,83 @@ public sealed partial class DocxLayoutSource
         static Length Inset(XElement? body, string name, Length fallback)
             => Plain(body, name) is { } stated ? Emu(stated) : fallback;
     }
+
+    /// <summary>
+    /// The shape's fill colour, or null when it has none.
+    /// </summary>
+    /// <remarks>
+    /// DrawingML rather than WordprocessingML: the colour is <c>a:solidFill/a:srgbClr</c> on the shape's
+    /// <c>spPr</c>, as a six-digit hex string, and <c>a:noFill</c> is how a shape says it is transparent. Only
+    /// the solid case is read; a gradient, a pattern or a picture fill contributes nothing rather than its
+    /// first stop, since a wrong flat colour behind text is more visible than no colour at all.
+    /// </remarks>
+    private static Colour? BackgroundOf(XElement anchor)
+    {
+        XElement? properties = ShapeProperties(anchor);
+        if (properties is null) return null;
+
+        return Drawn(properties, "noFill") is not null
+            ? null
+            : SolidColour(Drawn(properties, "solidFill"));
+    }
+
+    /// <summary>
+    /// The shape's outline, applied to all four sides.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// One outline, not four: DrawingML gives a shape a single <c>a:ln</c> and every side takes it, which is
+    /// the difference from ODF and from a table cell. Its width is <c>@w</c> in EMUs — 25400 for the two points
+    /// LibreOffice's export writes for a 2 pt border — and its colour is the same <c>a:solidFill</c> nesting
+    /// the fill uses.
+    /// </para>
+    /// <para>
+    /// A shape with no <c>a:ln</c> at all gets no border. That is not what Word does — DrawingML's real default
+    /// comes from the theme's line style, which nothing here reads — but it is what every file LibreOffice
+    /// writes means, since its export always states the element.
+    /// </para>
+    /// </remarks>
+    private static CellBorders BordersOf(XElement anchor)
+    {
+        XElement? line = Drawn(ShapeProperties(anchor), "ln");
+        if (line is null || Drawn(line, "noFill") is not null) return default;
+
+        Length width = Emu(line, "w");
+        if (width <= Length.Zero) return default;
+
+        TableBorder border = new(width, SolidColour(Drawn(line, "solidFill")) ?? Colour.Black);
+
+        return new CellBorders(border, border, border, border);
+    }
+
+    /// <summary>
+    /// The shape's <c>spPr</c>, found by local name.
+    /// </summary>
+    /// <remarks>
+    /// By local name for the same reason <see cref="PaddingOf"/> finds <c>bodyPr</c> that way: a Word shape
+    /// writes <c>wps:spPr</c> and a DrawingML picture <c>pic:spPr</c>, and the element is the same either way.
+    /// </remarks>
+    private static XElement? ShapeProperties(XElement anchor)
+        => anchor.Descendants().FirstOrDefault(element => element.Name.LocalName == "spPr");
+
+    /// <summary>An <c>a:solidFill</c>'s colour, or null when it is not a plain RGB one.</summary>
+    /// <remarks>
+    /// <c>a:srgbClr</c> only. A theme colour — <c>a:schemeClr</c> — needs the theme's palette and the
+    /// <c>lumMod</c>/<c>shade</c>/<c>tint</c> chain resolved, which is a body of work of its own and is
+    /// recorded as such in this library's TODO.
+    /// </remarks>
+    private static Colour? SolidColour(XElement? fill)
+    {
+        string? value = Plain(Drawn(fill, "srgbClr"), "val");
+
+        return value is not null
+               && uint.TryParse(value, NumberStyles.HexNumber, CultureInfo.InvariantCulture, out uint rgb)
+            ? Colour.FromRgb(rgb)
+            : null;
+    }
+
+    private static XElement? Drawn(XElement? parent, string name)
+        => parent?.Element(XName.Get(name, OoxmlNamespaces.DrawingML));
 
     /// <summary>DrawingML's default left and right text inset: a tenth of an inch.</summary>
     private static readonly Length DefaultSideInset = Length.FromEmu(91440);

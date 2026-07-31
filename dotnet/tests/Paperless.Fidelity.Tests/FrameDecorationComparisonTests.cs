@@ -63,6 +63,10 @@ public sealed class FrameDecorationComparisonTests : IDisposable
 
     [Theory]
     [InlineData("frame-box.fodt")]
+    // The same box in DOCX, where the fill is `a:solidFill/a:srgbClr` on the shape's `spPr` rather than a
+    // property of a graphic style. Only the fill: the border cannot be compared here, because LibreOffice
+    // strokes a shape's outline as one closed five-point path and `PdfStrokes` reads two-point lines.
+    [InlineData("frame-box.docx")]
     public void AFramesFillCoversWhatLibreOfficeFills(string fileName)
     {
         Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");

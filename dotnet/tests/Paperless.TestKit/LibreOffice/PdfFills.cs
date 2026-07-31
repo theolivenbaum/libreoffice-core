@@ -67,10 +67,19 @@ public static partial class PdfFills
     /// The closed rectangles one content stream fills.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// Two spellings, because PDF has two: <c>re</c> states a rectangle outright, and a run of
-    /// <c>m</c>/<c>l</c> draws one as four lines — which is the one LibreOffice's own export uses for a rule.
-    /// The painting operator is checked as well as the geometry, since a path that is only clipped or only
-    /// stroked is not a fill: <c>f</c>, <c>F</c>, <c>f*</c>, <c>B</c> and <c>B*</c> all fill.
+    /// <c>m</c>/<c>l</c> draws one as lines — which is the one LibreOffice's own export uses for a rule. The
+    /// painting operator is checked as well as the geometry, since a path that is only clipped or only stroked
+    /// is not a fill: <c>f</c>, <c>F</c>, <c>f*</c>, <c>B</c> and <c>B*</c> all fill.
+    /// </para>
+    /// <para>
+    /// The line form allows more corners than a rectangle has, and that is not slackness. LibreOffice writes a
+    /// rule as five points, the last repeating the first — but it writes a <em>shape's</em> fill starting from
+    /// the midpoint of an edge, so the same rectangle arrives as six. Insisting on five reads a Writer text
+    /// frame's fill and silently misses an OOXML text box's. The bounding box of the points is taken, which is
+    /// the rectangle either way.
+    /// </para>
     /// </remarks>
     private static IEnumerable<PdfFill> RectanglesIn(string content, int page, double pageHeight)
     {
@@ -83,12 +92,27 @@ public static partial class PdfFills
 
         foreach (Match match in LineRectangle().Matches(content))
         {
-            if (Numbers(match, 8) is not { } r) continue;
+            List<double> numbers =
+            [
+                .. Coordinate().Matches(match.Value)
+                    .Select(number => double.TryParse(
+                        number.Value, NumberStyles.Float, CultureInfo.InvariantCulture, out double value)
+                        ? value
+                        : double.NaN),
+            ];
 
-            double left = Math.Min(Math.Min(r[0], r[2]), Math.Min(r[4], r[6]));
-            double right = Math.Max(Math.Max(r[0], r[2]), Math.Max(r[4], r[6]));
-            double lower = Math.Min(Math.Min(r[1], r[3]), Math.Min(r[5], r[7]));
-            double upper = Math.Max(Math.Max(r[1], r[3]), Math.Max(r[5], r[7]));
+            if (numbers.Count < 8 || numbers.Count % 2 != 0 || numbers.Exists(double.IsNaN)) continue;
+
+            double left = double.MaxValue, right = double.MinValue;
+            double lower = double.MaxValue, upper = double.MinValue;
+
+            for (int i = 0; i + 1 < numbers.Count; i += 2)
+            {
+                left = Math.Min(left, numbers[i]);
+                right = Math.Max(right, numbers[i]);
+                lower = Math.Min(lower, numbers[i + 1]);
+                upper = Math.Max(upper, numbers[i + 1]);
+            }
 
             yield return Fill(page, pageHeight, left, lower, right, upper);
         }
@@ -121,12 +145,19 @@ public static partial class PdfFills
         RegexOptions.Singleline)]
     private static partial Regex ExplicitRectangle();
 
-    /// <summary>A move and three lines closing back to the start, then a filling operator.</summary>
+    /// <summary>A move, three to nine lines, a close, then a filling operator.</summary>
+    /// <remarks>
+    /// Bounded above so that a long path — a curve's flattening, a glyph outline — cannot match and be read as
+    /// a rectangle, and below at three lines because fewer cannot enclose an area.
+    /// </remarks>
     [GeneratedRegex(
-        @"(-?[\d.]+)\s+(-?[\d.]+)\s+m\s+(-?[\d.]+)\s+(-?[\d.]+)\s+l\s+(-?[\d.]+)\s+(-?[\d.]+)\s+l\s+"
-        + @"(-?[\d.]+)\s+(-?[\d.]+)\s+l\s+-?[\d.]+\s+-?[\d.]+\s+l\s+h\s+[fFB]\*?\b",
+        @"-?[\d.]+\s+-?[\d.]+\s+m(?:\s+-?[\d.]+\s+-?[\d.]+\s+l){3,9}\s+h\s+[fFB]\*?\b",
         RegexOptions.Singleline)]
     private static partial Regex LineRectangle();
+
+    /// <summary>One number inside a matched path.</summary>
+    [GeneratedRegex(@"-?[\d.]+")]
+    private static partial Regex Coordinate();
 
     /// <summary>The page height in points, for converting PDF space to top-down coordinates.</summary>
     private static double PageHeight(byte[] bytes)

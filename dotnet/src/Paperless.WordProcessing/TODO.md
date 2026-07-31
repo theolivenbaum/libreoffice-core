@@ -859,8 +859,22 @@ is read and verified, so what remains is the filling of pages rather than the me
           colour; `style:background-transparency="100%"` does too; `fo:background-color="transparent"` is a
           value rather than an absence; and where `draw:fill-color` and `fo:background-color` disagree, the
           `draw:` one wins — measured, green over blue.
-        - Still ODF only. DOCX states this in DrawingML (`a:solidFill`, `a:ln`) and RTF as shape properties,
-          and neither is read.
+        - **DOCX too, and it draws differently.** OOXML states it in DrawingML on the shape's `spPr`: an
+          `a:solidFill/a:srgbClr` for the fill, one `a:ln` with its width in EMUs for *all four* sides, and
+          `a:noFill` for either meaning none. But a frame's border sits inside its edge while a **shape's**
+          outline is centred on it, so half falls outside — measured on one document exported both ways, the
+          ODF render strokes the left border at 57.7 pt and the DOCX render at 56.65, for a frame whose edge is
+          56.7. Hence `PageFrame.BorderStraddlesTheEdge`, true for OOXML.
+        - Two things that fall out of the export rather than out of either format. LibreOffice's DOCX export
+          **bakes the shape defaults into the file**: `wrap-frame.fodt`'s frame has no fill and no border, and
+          its DOCX has an explicit #729FCF `a:solidFill` and a #3465A4 `a:ln`, so the two genuinely render
+          differently and reading the DOCX faithfully means agreeing with the DOCX. And that `a:ln` has a width
+          of **zero**, which LibreOffice draws as a hairline and Paperless draws as nothing — a divergence under
+          a tenth of a point, recorded rather than special-cased.
+        - RTF is what is left. It states this as shape properties, in the `{\*\shpinst}` group that is still
+          skipped.
+        - A theme colour — `a:schemeClr` rather than `a:srgbClr` — is not read on either side, and needs the
+          theme palette and the `lumMod`/`shade`/`tint` chain.
       - **Contour wrap**, where the region is the image's outline rather than its box.
       - **`Dynamic`**'s threshold: Writer gives up and pushes the line down when the wider side is too narrow
         to be worth using. Treated as `Parallel` until the threshold is measured.
