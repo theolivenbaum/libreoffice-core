@@ -356,8 +356,16 @@ Its second level also has the wider hanging indent a two-component label needs (
 is why the geometry differs per level rather than being uniform: a label wider than its hanging indent overruns
 its own tab stop, and a document where all three levels hang by the same amount could not show the difference.
 
-There is deliberately **no `list-numbered.rtf`**, for the same reason there are no RTF wrap files: LibreOffice's
-RTF export loses the list numbering. Its own render of the exported file shows the items' text at 74.80 and
-92.80 — the indents survive — and no numbers at all. Since Paperless already reads those indents from `\li`
-and `\fi`, such a document would verify nothing a reader could get wrong. An RTF list document has to be written
-by hand, with the numbers stated.
+`list-numbered.rtf` is the one list file **written by hand**, and the reason is worth keeping. LibreOffice's own
+RTF export writes no `\listtable` at all — only the rendered label in a `{\listtext}` group and a bare `\ls1` —
+and its own importer skips `{\listtext}` on the grounds that a reader supporting Word 97 numbering has no need
+of it. So it looks up a list that is not in the file and renders the exported document with the indents intact
+(74.80 and 92.80) and no numbers. Comparing against that would prove nothing, since Paperless reads the
+`{\listtext}` group and gets all three labels out of the same file that defeats LibreOffice.
+
+The hand-written file carries a real `\listtable` and `\listoverridetable` as Word writes them, so LibreOffice
+numbers from the table while Paperless numbers from the group and the two land in the same places. It is
+otherwise the same document as the other three — same margins, same font, same bold span in the third item.
+
+There is deliberately no multi-level RTF: RTF writes the whole label out, `1.ii.` included, so a nested list
+exercises nothing the single-level file does not.

@@ -90,7 +90,7 @@ binary.
 | ❌ | `xlsx`/`pptx`, `xls`/`ppt` and CSV readers |
 | ❌ | Decryption (detection works; decryption does not) |
 | ❌ | Rendering backends: `Paperless.Rendering`'s rasteriser and PDF writer are stubs |
-| ❌ | RTF list labels; the RTF and DOC frame reads; note restarts; vertical and RTL text |
+| ❌ | The RTF and DOC frame reads; note restarts; vertical and RTL text |
 | ❌ | Spreadsheet print layout and slide rendering |
 | ❌ | Vector import (WMF/EMF/EMF+/SVG) |
 | ❌ | The CLI beyond `identify`, `extract` and `metadata` |
@@ -248,9 +248,11 @@ was found because a page comparison put a word a measurable distance from where 
       formatting labels itself and call the renderer the extraction pass already used. Its counter array wants
       each level seeded at its start value, which is also the only arrangement that can work once a label reads
       its ancestors' counters.
-- [ ] List labels for RTF, whose labels the extraction path already computes. Easier than DOC was — prepending
-      a run shifts every offset for free — but unverifiable against the reference, since LibreOffice's own RTF
-      export loses the numbering, so it needs a hand-written corpus file.
+- [x] List labels for **RTF**, the odd one out and the easiest: RTF writes the rendered label out in a
+      `{\listtext}` group, so there is nothing to count. It is also the one place Paperless beats LibreOffice —
+      whose own RTF export writes no `\listtable`, and whose importer skips `{\listtext}`, so it draws no
+      numbers in a file it wrote itself. The corpus file is hand-written with a real list table so that the two
+      can be compared at all.
 - [ ] The rest of it: the RTF and DOC frame reads, contour wrap, and the vertical and right-to-left writing
       modes. The RTF numbers are measured and recorded in the word-processing TODO, including that
       LibreOffice's own RTF export loses the wrap mode and that its `\shpwr` numbering is not the

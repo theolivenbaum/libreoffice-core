@@ -17,10 +17,12 @@ namespace Paperless.WordProcessing.Tests;
 /// label's own text is pinned here, along with the two indents that make it hang.
 /// </para>
 /// <para>
-/// The three formats state the same list three ways and one of them has a further wrinkle: DOC has no run
-/// walker to hand a prefix to, so the label is spliced into text that is already assembled and every run
-/// offset after it has to move. That is what the run assertions are for — a splice that shifted the text and
-/// not the offsets would leave every run naming the wrong characters while the drawn positions stayed right.
+/// The four formats state the same list four ways, and two have further wrinkles. DOC has no run walker to
+/// hand a prefix to, so its label is spliced into text that is already assembled and every run offset after it
+/// has to move — which is what the run assertions are for, since a splice that shifted the text and not the
+/// offsets would leave every run naming the wrong characters while the drawn positions stayed right. RTF is the
+/// other way round: it writes the rendered label out and stores no counters at all, so what can go wrong there
+/// is the separator rather than the number.
 /// </para>
 /// </remarks>
 public sealed class ListLabelTests
@@ -29,17 +31,19 @@ public sealed class ListLabelTests
     [InlineData("list-numbered.fodt")]
     [InlineData("list-numbered.docx")]
     [InlineData("list-numbered.doc")]
+    [InlineData("list-numbered.rtf")]
     public void AnItemsLabelIsItsPrefix(string fileName)
     {
         List<PageParagraph> items = Items(fileName);
 
-        // Counted rather than stored: all three formats hold a template and a start value, so a reader that
-        // failed to count would repeat the first number rather than draw nothing.
+        // Counted in three of the four formats and read in the fourth: ODF, OOXML and WW8 hold a template and
+        // a start value, so a reader that failed to count would repeat the first number rather than draw
+        // nothing, while RTF writes the rendered label out in a `{\listtext}` group.
         items.Select(item => item.Text.Split('\t')[0])
             .ShouldBe(["1.", "2.", "3."]);
 
-        // A tab, not a space — the separator every one of the three defaults to, and the one that makes the
-        // level's stop position matter at all.
+        // A tab, not a space — the separator all four default to, and the one that makes the level's stop
+        // position matter at all.
         items[0].Text.ShouldBe("1.\tFirst item of the numbered list.");
     }
 
@@ -47,6 +51,7 @@ public sealed class ListLabelTests
     [InlineData("list-numbered.fodt")]
     [InlineData("list-numbered.docx")]
     [InlineData("list-numbered.doc")]
+    [InlineData("list-numbered.rtf")]
     public void TheLevelsIndentsReplaceTheParagraphsOwn(string fileName)
     {
         // The corpus document's level hangs its label 360 twips — a quarter inch, 0.635 cm — from a block
@@ -65,6 +70,7 @@ public sealed class ListLabelTests
     [InlineData("list-numbered.fodt")]
     [InlineData("list-numbered.docx")]
     [InlineData("list-numbered.doc")]
+    [InlineData("list-numbered.rtf")]
     public void AStopSitsWhereTheItemsTextBegins(string fileName)
     {
         // Measured from the line's start, which for a hanging label is the hanging distance itself: the first
@@ -82,6 +88,7 @@ public sealed class ListLabelTests
     [InlineData("list-numbered.fodt")]
     [InlineData("list-numbered.docx")]
     [InlineData("list-numbered.doc")]
+    [InlineData("list-numbered.rtf")]
     public void TheLabelDoesNotDisturbTheRunsAfterIt(string fileName)
     {
         foreach (PageParagraph item in Items(fileName))

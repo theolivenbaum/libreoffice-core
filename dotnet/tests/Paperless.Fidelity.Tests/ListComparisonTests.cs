@@ -66,6 +66,12 @@ public sealed class ListComparisonTests : IDisposable
     [InlineData("list-multilevel.fodt")]
     [InlineData("list-multilevel.docx")]
     [InlineData("list-multilevel.doc")]
+    // RTF, hand-written rather than exported, because LibreOffice's own RTF export writes no `\listtable` at
+    // all and so its own render of what it wrote shows no numbers. This file carries the table, which is what
+    // LibreOffice numbers from — while Paperless reads the `{\listtext}` group the same file also carries, as
+    // Word-written files do. So the two reach the same labels by different routes, which is the whole point of
+    // comparing them.
+    [InlineData("list-numbered.rtf")]
     public void EveryLineOfAListStartsWhereLibreOfficeStartsIt(string fileName)
     {
         Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");

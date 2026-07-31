@@ -937,22 +937,23 @@ public sealed partial class RtfDocumentReader
         if (cell is null && into is null) return;
         if ((cell?.Count ?? into!.Count) >= MaxLayoutParagraphs) return;
 
-        // A note's own citation, which layout draws at the head of the note's first line and extraction
-        // deliberately leaves out. Prefixing it here rather than in the text builder is what keeps the two
-        // apart; the runs already recorded shift along by its length.
+        // Two things layout draws at the head of a paragraph's first line that extraction deliberately leaves
+        // out: a note's own citation, and a list item's label. Prefixing them here rather than in the text
+        // builder is what keeps the extracted text and the laid-out text apart; the runs already recorded
+        // shift along by the prefix's length. Only one can apply — a note's first paragraph is not a list
+        // item — so the citation wins and the choice never has to be made.
         List<RtfLayoutRun> runs = [.. flow.LayoutRuns];
+        bool labelled = false;
 
-        if (flow.LayoutPrefix is { Length: > 0 } prefix)
+        if (flow.LayoutPrefix is { Length: > 0 } citation)
         {
             flow.LayoutPrefix = null;
-
-            for (int i = 0; i < runs.Count; i++)
-            {
-                runs[i] = runs[i] with { Start = runs[i].Start + prefix.Length };
-            }
-
-            runs.Insert(0, CitationRun(state, 0, prefix.Length));
-            text = prefix + text;
+            Prefix(runs, ref text, citation, PrefixRun(state, citation.Length, Layout.Escapement.Superscript));
+        }
+        else if (LabelPrefixOf(flow) is { Length: > 0 } label)
+        {
+            labelled = true;
+            Prefix(runs, ref text, label, PrefixRun(state, label.Length, EscapementOf(state)));
         }
 
         RtfLayoutParagraph recorded = new(
@@ -975,7 +976,7 @@ public sealed partial class RtfDocumentReader
             }.ToParagraphFormat(SizeOf(state)) with
             {
                 Alignment = state.Alignment,
-                TabStops = [.. state.TabStops.OrderBy(stop => stop.Position.Emu)],
+                TabStops = StopsFor(state, labelled),
                 DefaultTabInterval = _defaultTabInterval,
             },
             _fontFamilies.GetValueOrDefault(state.FontIndex),
@@ -993,18 +994,101 @@ public sealed partial class RtfDocumentReader
     }
 
     /// <summary>
-    /// The run a note's own citation is drawn in: superscript, at the size that goes with it.
+    /// Puts a prefix in front of a paragraph's layout text, moving the runs already recorded along.
+    /// </summary>
+    /// <param name="runs">The paragraph's runs, which are shifted in place.</param>
+    /// <param name="text">The layout text, which the prefix is put in front of.</param>
+    /// <param name="prefix">What to prepend.</param>
+    /// <param name="run">The run the prefix itself is drawn in, which starts at zero.</param>
+    private static void Prefix(
+        List<RtfLayoutRun> runs, ref string text, string prefix, RtfLayoutRun run)
+    {
+        for (int i = 0; i < runs.Count; i++)
+        {
+            runs[i] = runs[i] with { Start = runs[i].Start + prefix.Length };
+        }
+
+        runs.Insert(0, run);
+        text = prefix + text;
+    }
+
+    /// <summary>
+    /// A list item's label, as the prefix its paragraph's first line begins with.
     /// </summary>
     /// <remarks>
-    /// Defaulted rather than read, because RTF does not state it. LibreOffice writes the number inside the
-    /// note body as a bare second <c>\chftn</c> with no <c>\super</c> around it — unlike the reference in the
-    /// sentence, which it does wrap — and leaves the superscript to its built-in <c>Footnote Symbol</c>
-    /// character style, which no RTF document defines. A reader taking the file at its word draws the number
-    /// full size on the baseline, where it fuses with the note's first word.
+    /// <para>
+    /// RTF is the one format that writes the label out rather than storing counters, in a
+    /// <c>{\listtext}</c> group — so there is nothing to count and nothing to look up in a list table. The
+    /// separator is written out with it, which is why the group's trailing tab is kept rather than trimmed: it
+    /// is what sends the item's text to its indent.
+    /// </para>
+    /// <para>
+    /// A group with <em>no</em> label in it is a different thing and contributes nothing. A level that numbers
+    /// nothing still writes <c>{\listtext\pard\plain \tab}</c>, which is how LibreOffice writes an unnumbered
+    /// heading that belongs to a chapter-numbering level — and its own render of one puts the heading's text at
+    /// the margin rather than one tab in, which is also what the other three readers do, since each prefixes
+    /// nothing for a label whose text is empty.
+    /// </para>
+    /// <para>
+    /// The <em>leading</em> spaces are an artefact and are dropped. A <c>{\listtext}</c> group holds control
+    /// words before its text and the space after the last of them is the word's delimiter, but LibreOffice's
+    /// own export writes two — <c>{\listtext\pard\plain  1.\tab}</c> — so one survives tokenising as literal
+    /// text and would draw the number a space right of where LibreOffice draws it.
+    /// </para>
     /// </remarks>
-    private RtfLayoutRun CitationRun(GroupState state, int start, int length)
+    private static string LabelPrefixOf(Flow flow)
+    {
+        string marker = flow.ListMarker.ToString();
+        if (marker.Trim().Length == 0) return string.Empty;
+
+        int at = 0;
+        while (at < marker.Length && marker[at] == ' ') at++;
+
+        return marker[at..];
+    }
+
+    /// <summary>
+    /// A paragraph's tab stops, with the one a hanging label needs added.
+    /// </summary>
+    /// <remarks>
+    /// RTF states no list geometry of its own: the item's paragraph carries <c>\li</c> and <c>\fi</c>
+    /// directly, so the stop the label's tab goes to is the hanging distance measured from the line's start —
+    /// which is where the block's indent is, since the first line begins that far left of it. The same
+    /// arrangement the other three formats reach from their level definitions, with no level to read.
+    /// </remarks>
+    /// <param name="state">The paragraph's formatting.</param>
+    /// <param name="labelled">True when a list label was prefixed, which is what needs the stop.</param>
+    private static List<Text.Layout.TabStop> StopsFor(GroupState state, bool labelled)
+    {
+        List<Text.Layout.TabStop> stops = [.. state.TabStops.OrderBy(stop => stop.Position.Emu)];
+        if (!labelled) return stops;
+
+        Core.Units.Length hanging = Core.Units.Length.FromTwips(-(state.FirstLineIndent ?? 0));
+        if (hanging <= Core.Units.Length.Zero) return stops;
+
+        stops.Add(new Text.Layout.TabStop(hanging));
+        stops.Sort((left, right) => left.Position.Emu.CompareTo(right.Position.Emu));
+
+        return stops;
+    }
+
+    /// <summary>
+    /// The run a prefix is drawn in: the paragraph's own formatting, with an escapement handed in.
+    /// </summary>
+    /// <remarks>
+    /// The escapement is the parameter because it is the one thing that differs between the two prefixes, and
+    /// for a note's citation it is <em>defaulted rather than read</em> — RTF does not state it. LibreOffice
+    /// writes the number inside the note body as a bare second <c>\chftn</c> with no <c>\super</c> around it,
+    /// unlike the reference in the sentence, which it does wrap, and leaves the superscript to its built-in
+    /// <c>Footnote Symbol</c> character style, which no RTF document defines. A reader taking the file at its
+    /// word draws the number full size on the baseline, where it fuses with the note's first word.
+    /// </remarks>
+    /// <param name="state">The paragraph's formatting.</param>
+    /// <param name="length">How many characters the prefix occupies.</param>
+    /// <param name="escapement">Superscript for a citation; the paragraph's own for a label.</param>
+    private RtfLayoutRun PrefixRun(GroupState state, int length, Layout.Escapement escapement)
         => new(
-            start,
+            0,
             length,
             _fontFamilies.GetValueOrDefault(state.FontIndex),
             SizeOf(state),

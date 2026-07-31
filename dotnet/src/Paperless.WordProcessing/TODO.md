@@ -44,11 +44,13 @@ indexes or resolvable style chains.
       would take one style's parent from the other's chain. Cycle-guarded; the family's defaults lead
       a chain that does not reach them.
 - [x] Tables: rows, cells, spans, nested tables, and the column-edge grid the spans index into
-- [ ] Lists and numbering with multi-level definitions and restart semantics. The note here originally
+- [x] Lists and numbering with multi-level definitions and restart semantics — all four formats, in the
+      extraction path and the layout path alike. What is left is an image label, which waits on a decoder. The
+      note here originally
       **understated it**: all four readers compute a label for *extraction*, and the layout path had none at
       all, so every numbered and bulleted list rendered with no number and no bullet and its text started at
-      the wrong indent besides. That was the most visible gap in the layout engine. **Three of the four formats
-      now draw them** — ODF, DOCX and DOC — and RTF is what is left.
+      the wrong indent besides. That was the most visible gap in the layout engine. **All four formats now draw
+      them.**
 
       The geometry is measured and is not complicated, which is the point of writing it down. On an ODF list
       declaring `text:label-followed-by="listtab"` with `text:list-tab-stop-position="1.27cm"`,
@@ -147,16 +149,37 @@ indexes or resolvable style chains.
       level asking for one component getting one, and a shallower level advancing restarting everything under
       it.
 
-      Still open here: an image label, which needs a decoder; and **RTF**, which is the *less* useful one to do
-      next despite looking the easiest:
-      - Its layout text is `string.Concat(flow.PendingRuns.Select(run => run.Text))`, so prepending a *run*
-        would carry the label and shift every offset for free — no arithmetic at all, and easier than DOC was.
-      - But LibreOffice's own RTF render of a list shows **no numbers**: its export loses them, exactly as it
-        loses a frame's wrap mode. The indents survive (74.80 and 92.80, the same as ODF), and Paperless
-        already reads those from `\li`/`\fi`, so an RTF list document written by LibreOffice verifies
-        nothing a reader could get wrong. Implementing it is still right for a Word-written file — RTF has two
-        numbering systems, the old `\pn` group and the `\listtable`/`\ls`/`\ilvl` tables — but it cannot
-        be checked against the reference, so it needs a hand-written file with the numbers stated.
+      **RTF too**, and it is the odd one out in a way that made it the easiest of the four: RTF writes the
+      *rendered* label out, in a `{\listtext}` group, so there is nothing to count and no list table to
+      consult. The reader already collected that group for extraction, and layout now takes the same string as
+      its prefix. Three details:
+      - **The trailing tab is kept and the leading spaces are not.** The separator is written out with the
+        label, so `{\listtext 1.\tab}` carries both — and trimming the group as extraction does would lose the
+        tab that sends the item's text to its indent. The leading spaces are the opposite: a `{\listtext}`
+        group holds control words before its text, and LibreOffice's export writes *two* spaces after the last
+        of them — `{\listtext\pard\plain  1.\tab}` — so one survives tokenising as literal text.
+      - **A group with no label in it contributes nothing at all.** A level that numbers nothing still writes
+        `{\listtext\pard\plain \tab}`, which is how LibreOffice writes an unnumbered heading belonging to a
+        chapter-numbering level. `paginated.rtf` has one, and keeping the bare tab moved its heading 35.35 pt
+        right of where LibreOffice draws it. So an empty label prefixes nothing — which is what the other three
+        readers already did.
+      - **The stop comes from the paragraph, not from a level.** RTF states no list geometry of its own: the
+        item's paragraph carries `\li` and `\fi` directly, so the stop the tab goes to is the hanging distance
+        measured from the line's start. The same arrangement as the other three, with no level to read.
+
+      This is also the one place Paperless is *better* than LibreOffice rather than merely equal, and it is
+      worth being exact about why. **LibreOffice's RTF export writes no `\listtable` at all** — only
+      `{\listtext}` and a bare `\ls1` — and its own importer skips `{\listtext}` on the grounds that a reader
+      supporting Word 97 numbering does not need it (`rtfdispatchdestination.cxx`: `RTFKeyword::LISTTEXT` and
+      `PNTEXT` both go to `Destination::SKIP`). So it looks up `\ls1` in a table that is not there and draws no
+      number. Paperless reads the group and recovers all three labels from the same file. The corpus therefore
+      has a *hand-written* `list-numbered.rtf` carrying a real `\listtable`, so that LibreOffice numbers from
+      the table while Paperless numbers from the group and the two can be compared at all.
+
+      Still open here: an image label, which needs a decoder; and the older `{\*\pn}` paragraph-numbering
+      syntax, which needs almost nothing — it is a starred destination and so already skipped, and its rendered
+      label arrives in `{\pntext}`, the same shape `{\listtext}` has. Routing `\pntext` to the same
+      destination is a one-line change whenever a corpus file needs it.
 
       This also turned up an inconsistency, since **settled by measurement**: `TabStop.Position`'s own
       documentation said it was measured "from the text area's start edge, not from the indent", while
