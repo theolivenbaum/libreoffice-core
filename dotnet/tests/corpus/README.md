@@ -296,3 +296,9 @@ them to test anything: LibreOffice's RTF export loses the wrap mode. A `parallel
 where the ODF render wraps to 204.15. Its `\shpwr` numbering is its own rather than the specification's —
 1 means no-text-beside where the spec says "around", and the exporter is the exact inverse of the importer, so
 it round-trips itself and disagrees with everyone else.
+
+`tab-decimal.fodt` is `tabbed.fodt` with two rows added, and the two rows are the whole point: `3.5.` and
+`7.25.9` each hold two full stops, so they tell apart "align on the first occurrence of the stated character"
+from "align on the last of `.` or `,`". LibreOffice puts both at 462.20 pt — the same place as `9.125`, which
+has one digit before its only stop — and the last-separator rule puts `3.5.` at 453.77. Both rules agree on
+every value with a single separator, which is why the older documents could not catch it.

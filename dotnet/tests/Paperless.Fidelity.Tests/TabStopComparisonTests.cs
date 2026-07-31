@@ -63,6 +63,11 @@ public sealed class TabStopComparisonTests : IDisposable
     [InlineData("tabbed.docx")]
     [InlineData("tabbed.doc")]
     [InlineData("tabbed.rtf")]
+    // A decimal stop aligns on the *first* occurrence of the character its document names, not the last of a
+    // guessed pair. This document is the one that tells the two rules apart: `3.5.` and `7.25.9` each hold two
+    // full stops, and LibreOffice puts both at 462.20 pt — the same place as `9.125`, whose single stop follows
+    // one digit. A last-separator rule moves both of them.
+    [InlineData("tab-decimal.fodt")]
     public void EveryTabAdvancesToLibreOfficesStop(string fileName)
     {
         Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");

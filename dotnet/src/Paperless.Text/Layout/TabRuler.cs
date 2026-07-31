@@ -154,7 +154,7 @@ public static class TabRuler
             TabAlignment.Right => stop.Position - width,
             TabAlignment.Centre => stop.Position - (width / 2.0),
             TabAlignment.DecimalSeparator =>
-                stop.Position - widthBetween(start, SeparatorIn(text, start, end)),
+                stop.Position - widthBetween(start, SeparatorIn(stop, text, start, end)),
             _ => stop.Position,
         };
 
@@ -165,21 +165,36 @@ public static class TabRuler
     /// Where the decimal separator in a stretch is, or its end when it has none.
     /// </summary>
     /// <remarks>
-    /// Both spellings, because the separator is a comma across most of Europe and a document does not say
-    /// which it meant. Taking the <em>last</em> one: <c>1.234,56</c> uses both, and it is the comma that
-    /// separates the fraction. A stretch with no separator aligns on its end, which is what makes a column
-    /// of whole numbers line up with a column of fractional ones.
+    /// <para>
+    /// The <strong>first</strong> occurrence of the <strong>stop's own</strong> character, both of which are
+    /// Writer's rules rather than guesses. It matches one character and then stops looking —
+    /// <c>SwTextFormatter::NewPortion</c> calls <c>rInf.SetTabDecimal(0)</c> as soon as it has found one
+    /// (<c>sw/source/core/text/itrform2.cxx</c>) — and the character it looks for is
+    /// <c>pTabStop-&gt;GetDecimal()</c>, which ODF states as <c>style:char</c>.
+    /// </para>
+    /// <para>
+    /// What this replaced was "the last of <c>.</c> or <c>,</c>", which gets both ordinary cases right by
+    /// accident — <c>1,234.56</c> and <c>1.234,56</c> both end at their true separator — and fails the two
+    /// that matter: a figure followed by a sentence's full stop, and any stretch holding a stop that is not a
+    /// separator. Measured: <c>9.125</c>, <c>3.5.</c> and <c>7.25.9</c> all start at 462.20 pt, and the old
+    /// rule put <c>3.5.</c> at 453.77.
+    /// </para>
+    /// <para>
+    /// A stretch with no separator aligns on its end, which makes the stop behave as a right stop — and that
+    /// too is Writer's: <c>SwTabPortion::Format</c> leaves the width uncorrected when
+    /// "no value was set =&gt; no decimal character was found".
+    /// </para>
     /// </remarks>
-    private static int SeparatorIn(string text, int start, int end)
+    private static int SeparatorIn(TabStop stop, string text, int start, int end)
     {
         int last = Math.Min(end, text.Length);
-        int found = -1;
+        char separator = stop.Separator;
 
         for (int at = start; at < last; at++)
         {
-            if (text[at] is '.' or ',') found = at;
+            if (text[at] == separator) return at;
         }
 
-        return found >= 0 ? found : last;
+        return last;
     }
 }

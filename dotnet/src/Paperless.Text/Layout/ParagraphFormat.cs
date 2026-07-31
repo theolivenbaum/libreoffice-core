@@ -221,7 +221,29 @@ public enum TabAlignment
 /// The character filling the space before the stop, or <c>'\0'</c> for none — a dot leader in a table
 /// of contents is the common case.
 /// </param>
-public readonly record struct TabStop(Length Position, TabAlignment Alignment = TabAlignment.Left, char Leader = '\0');
+/// <param name="DecimalCharacter">
+/// The character a <see cref="TabAlignment.DecimalSeparator"/> stop aligns on, or <c>'\0'</c> to take the
+/// invariant full stop.
+/// </param>
+public readonly record struct TabStop(
+    Length Position,
+    TabAlignment Alignment = TabAlignment.Left,
+    char Leader = '\0',
+    char DecimalCharacter = '\0')
+{
+    /// <summary>
+    /// The character this stop really aligns on.
+    /// </summary>
+    /// <remarks>
+    /// A full stop when the document names none, which is a deliberate divergence from LibreOffice and the
+    /// only one available: LibreOffice fills an unstated separator in from the <em>machine's</em> locale
+    /// (<c>SvxTabStopItem</c> replaces its <c>cDfltDecimalChar</c> with
+    /// <c>getLocaleData().getNumDecimalSep()</c>), so the same file lays out differently in Lisbon and in
+    /// London. A document has to render the same everywhere, so the invariant separator is used and the
+    /// difference is confined to documents that state nothing and mean a comma.
+    /// </remarks>
+    public char Separator => DecimalCharacter == '\0' ? '.' : DecimalCharacter;
+}
 
 /// <summary>
 /// A paragraph's resolved layout properties.

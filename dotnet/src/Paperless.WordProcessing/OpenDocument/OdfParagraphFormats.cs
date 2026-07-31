@@ -450,11 +450,17 @@ internal static class OdfParagraphFormats
                 {
                     "center" or "centre" => TabAlignment.Centre,
                     "right" => TabAlignment.Right,
-                    "char" when character is "." or "," => TabAlignment.DecimalSeparator,
+
+                    // Any character, not just the two obvious ones. ODF's `char` stop aligns on whatever
+                    // `style:char` names — a colon in a glossary and a hyphen in a date range are both legal
+                    // — and restricting it to a full stop and a comma turned every other one into a right
+                    // stop, which puts the whole column's text where its separator should have been.
+                    "char" when character is { Length: > 0 } => TabAlignment.DecimalSeparator,
                     "char" => TabAlignment.Right,
                     _ => TabAlignment.Left,
                 },
-                leader is { Length: > 0 } ? leader[0] : '\0'));
+                leader is { Length: > 0 } ? leader[0] : '\0',
+                character is { Length: > 0 } ? character[0] : '\0'));
         }
 
         stops.Sort((left, right) => left.Position.Emu.CompareTo(right.Position.Emu));

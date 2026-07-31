@@ -922,9 +922,25 @@ is read and verified, so what remains is the filling of pages rather than the me
       decimal tab and gives each stretch between tabs its own space-add, which is a per-stretch answer where
       the engine has one per line; stretching the blanks anyway would move text out of the columns the tabs
       put it in, which is the more visible error.
-- [ ] A decimal stop aligns on the last `.` or `,` in the stretch rather than on the character the document
-      named. `TabStop` would need to carry it; ODF states it as `style:char` and OOXML does not state it at
-      all, so the two would disagree about a `1.234,56`.
+- [x] A decimal stop aligns on the **first** occurrence of the **character the document named**, both of which
+      are Writer's rules and neither of which was what this did. It matched the last of a guessed `.`-or-`,`
+      pair, which gets the two ordinary cases right by accident — `1,234.56` and `1.234,56` both end at their
+      real separator — and fails the two that matter: a figure followed by a sentence's full stop, and any
+      stretch holding a stop that is not a separator.
+
+      Writer matches one character and stops looking (`rInf.SetTabDecimal(0)` in `itrform2.cxx`), and the
+      character is `pTabStop->GetDecimal()` — ODF's `style:char`. Measured: `9.125`, `3.5.` and `7.25.9` all
+      start at 462.20 pt, since each has one digit before its *first* stop. The old rule put `3.5.` at 453.77.
+
+      Two further things fell out. ODF's `char` stop takes **any** character — a colon in a glossary, a hyphen
+      in a date range — and restricting it to a full stop and a comma silently turned every other one into a
+      right stop. And an unstated separator has to be the invariant `.` rather than the machine's locale
+      separator, which is what LibreOffice uses (`SvxTabStopItem` fills `cDfltDecimalChar` from
+      `getNumDecimalSep()`): a document must lay out the same in Lisbon as in London, so that is a deliberate
+      divergence confined to documents that state nothing and mean a comma.
+
+      Not modelled: Writer places the separator **one twip** past the stop in `TAB_COMPAT` mode
+      (`nPorWidth = nPrePorWidth - 1` in `txttab.cxx`). A twentieth of a point, and mode-dependent.
 
 ## Known deviations, measured
 
