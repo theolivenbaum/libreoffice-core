@@ -277,3 +277,15 @@ resume at the full width, exactly at the region's bottom. It is worth its own fi
 mode that changes how many lines fit on a page, and because the horizontal check alone cannot tell a pushed
 line from one narrowed to nothing — the comparison of vertical gaps is what distinguishes them, and it caught
 a push of 197 pt where 126.9 was wanted.
+
+`wrap-frame.docx`, `wrap-none.docx` and `wrap-frame-text.docx` are LibreOffice's own exports of the three flat
+ODF files above, and they are worth having as well as the originals rather than instead of them: the two
+formats describe the same frame with opposite vocabulary. OOXML's `wp:wrapNone` is ODF's *run-through*, and
+ODF's `none` is OOXML's `wp:wrapTopAndBottom`. A reader that mapped the two by name would pass every ODF case
+and fail every DOCX one in the least obvious way — the watermark shoving the page apart and the inset picture
+being run over.
+
+One measured caveat for these: the *vertical* comparison of a pushed line needs a looser tolerance than the
+horizontal one, because the distance carries three roundings rather than one — the frame's offset, its height,
+and the line height above it. LibreOffice's own two renders disagree by 0.1 pt for exactly that reason: 3 cm
+rounds to 1701 twips from ODF and 1079500 EMUs round to 1700 from DOCX.

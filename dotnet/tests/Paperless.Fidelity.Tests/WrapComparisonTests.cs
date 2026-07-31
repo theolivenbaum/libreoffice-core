@@ -30,6 +30,20 @@ public sealed class WrapComparisonTests : IDisposable
     /// <inheritdoc cref="TableComparisonTests.TolerancePoints"/>
     private const double TolerancePoints = 0.25;
 
+    /// <summary>
+    /// How far a <em>pushed</em> line's position may differ, in points.
+    /// </summary>
+    /// <remarks>
+    /// Looser than the horizontal tolerance, and for a stated reason rather than to make a test pass: where a
+    /// line's left edge carries one rounding, the distance a frame pushes a line carries three — the frame's
+    /// own offset, its height, and the line height above it, each converted between the file's unit and
+    /// Writer's twips. It shows in the references themselves. The same 3 cm frame at the same 1 cm offset puts
+    /// the resumed line at 183.6 pt in LibreOffice's ODF render and 183.7 pt in its DOCX render, because ODF's
+    /// 3 cm rounds to 1701 twips and DOCX's 1079500 EMUs to 1700. A third of a point covers the set and is
+    /// still an eighth of a line.
+    /// </remarks>
+    private const double VerticalTolerancePoints = 0.35;
+
     /// <summary>What LibreOffice's PDF export adds to every horizontal pen position.</summary>
     private const double PdfPenOffsetPoints = 0.1;
 
@@ -63,6 +77,12 @@ public sealed class WrapComparisonTests : IDisposable
     // is a vertical answer rather than a narrowing, and the one wrap mode that changes how many lines fit on
     // a page.
     [InlineData("wrap-none.fodt")]
+    // The same two in DOCX, whose spelling is the friendliest of the four — every measurement is already in
+    // EMUs — and whose names are the least: `wp:wrapNone` is ODF's *run-through*, and ODF's `none` is
+    // `wp:wrapTopAndBottom`. Mapping the two by name gives a watermark that shoves the page apart.
+    [InlineData("wrap-frame.docx")]
+    [InlineData("wrap-none.docx")]
+    [InlineData("wrap-frame-text.docx")]
     public void TextGoesRoundAFrameWhereLibreOfficePutsIt(string fileName)
     {
         Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
@@ -109,7 +129,7 @@ public sealed class WrapComparisonTests : IDisposable
             double theirs = rendered[i].At - rendered[0].At;
 
             Math.Abs(mine - theirs).ShouldBeLessThanOrEqualTo(
-                TolerancePoints,
+                VerticalTolerancePoints,
                 $"{fileName}: line {i + 1} (\"{rendered[i].First}\") sits {mine:F2} pt below the first "
                 + $"drawn, {theirs:F2} pt rendered");
         }

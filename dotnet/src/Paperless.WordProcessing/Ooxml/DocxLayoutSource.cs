@@ -1,8 +1,10 @@
 using System.Globalization;
 using System.Text;
 using System.Xml.Linq;
+using Paperless.Core.Geometry;
 using Paperless.Core.Graphics;
 using Paperless.Core.Units;
+using Paperless.Ooxml;
 using Paperless.Text.Fonts;
 using Paperless.Text.Shaping;
 using Paperless.WordProcessing.Layout;
@@ -287,6 +289,7 @@ public sealed partial class DocxLayoutSource
             Shaping = new ShapingOptions(Language: text.Language),
             Runs = RunsOf(walker.Ranges, properties, text, face),
             Notes = NotesOf(walker.Notes),
+            Frames = FramesOf(walker.Frames),
             Source = element,
         };
     }
@@ -551,6 +554,9 @@ public sealed partial class DocxLayoutSource
         /// <summary>The number a <c>w:footnoteRef</c> stands for, when this paragraph is a note's.</summary>
         private string? _citation;
 
+        /// <summary>The floating drawings anchored in this paragraph, in document order.</summary>
+        internal List<DocxFrameAnchor> Frames { get; } = [];
+
         private void Append(XElement element, int depth)
         {
             if (depth > MaxDepth) return;
@@ -627,7 +633,35 @@ public sealed partial class DocxLayoutSource
 
                         break;
 
-                    case "commentReference" or "drawing" or "pict" or "object":
+                    case "drawing" when !_inInstruction:
+                    {
+                        // `wp:anchor` floats and `wp:inline` sits in the line. Only the second occupies a
+                        // character position; the first is recorded so that the text can be laid out around
+                        // it, and contributes nothing to the paragraph's own text.
+                        XElement? anchor = child
+                            .Descendants(XName.Get("anchor", OoxmlNamespaces.DrawingMLWordprocessing))
+                            .FirstOrDefault();
+
+                        if (anchor is not null) Frames.Add(new DocxFrameAnchor(_builder.Length, anchor));
+                        else Emit(AnchorCharacter.ToString());
+
+                        break;
+                    }
+
+                    case "AlternateContent":
+                        // One drawing written twice: `mc:Choice` in DrawingML and `mc:Fallback` in VML for
+                        // readers that predate it. Walking both counts the same picture twice — an anchor
+                        // character for each — so the fallback is read only when there is no choice to make.
+                        Append(
+                            child.Elements(XName.Get("Choice", OoxmlNamespaces.MarkupCompatibility))
+                                .FirstOrDefault()
+                            ?? child.Elements(XName.Get("Fallback", OoxmlNamespaces.MarkupCompatibility))
+                                .FirstOrDefault()
+                            ?? child,
+                            depth + 1);
+                        break;
+
+                    case "commentReference" or "pict" or "object":
                         Emit(AnchorCharacter.ToString());
                         break;
 

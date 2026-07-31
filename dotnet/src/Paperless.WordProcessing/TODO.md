@@ -649,6 +649,24 @@ is read and verified, so what remains is the filling of pages rather than the me
       - And the push distance is a *position*, so it has to be translated between page and paragraph
         coordinates where the width does not — `LineSpace.RelativeTo`. Without it the line is pushed down by
         the distance from the page's top a second time: 197 pt where 126.9 was wanted.
+- [x] **Floating frames for DOCX**, which is the friendliest of the four spellings and has the least friendly
+      names:
+      - Every measurement is already in **EMUs** — the extent, both offsets, the four wrap distances, the
+        text insets — so nothing converts or rounds. That is Paperless's own unit.
+      - **`wp:wrapNone` is ODF's `run-through`, and ODF's `none` is `wp:wrapTopAndBottom`.** The two formats
+        use the word "none" for opposite things. Mapping by name gives a watermark that shoves the page apart
+        and an inset picture the text runs over.
+      - **A `wp:` element's attributes are in no namespace.** `cx`, `distL`, `wrapText`, `relativeFrom` are
+        all plain names, so the `w:`-prefixing helper every other DOCX read uses returns null for every one of
+        them. The symptom is a frame of no size, which is dropped — so the document lays out as though it had
+        no frames at all, which looks like the feature never having been wired up.
+      - **`bodyPr` has to be found by local name.** A Word shape writes `wps:bodyPr` and a DrawingML shape
+        `a:bodyPr`, and it is the same element. Looking only in DrawingML's namespace falls back to the
+        defaults, which are themselves not zero and not symmetrical — 91440 EMUs at the sides and 45720 top
+        and bottom — and puts the first line 2.95 pt out.
+      - `mc:AlternateContent` holds the same drawing twice, once in DrawingML and once in VML for readers
+        that predate it. Walking both counted the picture twice; only the choice is read now, with the
+        fallback used when there is none. That was a pre-existing bug — two anchor characters per drawing.
 - [ ] The rest of floating frames:
       - **A frame's picture.** An image needs a decoder, which is the rasteriser's business; the frame is
         placed and its text drawn, and only the picture is missing.
@@ -660,8 +678,7 @@ is read and verified, so what remains is the filling of pages rather than the me
       - **Page and character anchors** resolve as paragraph anchors do; `horizontal-rel` and `vertical-rel`
         are read as "from the paragraph" whatever they say, and the named positions (`left`, `center`,
         `right`) are not read at all.
-      - **DOCX, DOC and RTF.** Only ODF is read. DOCX has `w:anchor`/`w:inline` with `wp:positionH`, DOC has
-        the Escher anchor record, RTF the `\shp` destinations.
+      - **DOC and RTF.** DOC has the Escher anchor record, RTF the `\shp` destinations. Neither is read.
 - [x] Footnote **placement**, which is the half that changes pagination rather than appearance. The note
       area takes its room out of the body's, so a page with notes holds less text — and adding a note can
       push the line that cites it onto the next page, which removes the note again. That is a feedback loop
