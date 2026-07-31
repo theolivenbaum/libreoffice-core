@@ -57,7 +57,7 @@ public static class PageDrawing
             DrawFlow(page.Header, sink);
             DrawBody(page, blocks, sink);
             foreach (PlacedTable table in page.Tables) DrawTable(table, sink);
-            foreach (PlacedFrame frame in page.Frames) DrawFlow(frame.Content, sink);
+            foreach (PlacedFrame frame in page.Frames) DrawFrame(frame, sink);
             DrawSeparator(page.NoteSeparator, sink);
             DrawFlow(page.Notes, sink);
             DrawFlow(page.Footer, sink);
@@ -350,6 +350,59 @@ public static class PageDrawing
         }
 
         return runs;
+    }
+
+    /// <summary>
+    /// Draws a floating frame: its fill, then its text, then its border.
+    /// </summary>
+    /// <remarks>
+    /// The same order a table's cells go in, and for the same reason — a fill is opaque and a border belongs
+    /// over what it encloses. The frame's picture is what is still missing, and it needs a decoder rather than
+    /// anything here.
+    /// </remarks>
+    private static void DrawFrame(PlacedFrame frame, IDrawingSink sink)
+    {
+        if (frame.Frame.Background is { } colour) Fill(frame.Bounds, colour, sink);
+
+        DrawFlow(frame.Content, sink);
+
+        DrawFrameBorders(frame, sink);
+    }
+
+    /// <summary>
+    /// Draws a frame's four edges, each inset by half its own width and spanning its whole side.
+    /// </summary>
+    /// <remarks>
+    /// Not the table path, which consolidates a grid: a frame has four independent sides that overlap at the
+    /// corners, and LibreOffice writes them as four separate strokes doing exactly that. Measured on a 5 cm
+    /// frame with a 2 pt border at the left margin of a 2 cm-margined page: the left stroke runs down x = 57.7
+    /// where the frame's left edge is 56.7, and it spans the frame's full height rather than stopping at the
+    /// horizontal strokes.
+    /// </remarks>
+    private static void DrawFrameBorders(PlacedFrame frame, IDrawingSink sink)
+    {
+        CellBorders borders = frame.Frame.Borders;
+        DocRect bounds = frame.Bounds;
+
+        Side(borders.Top, true, bounds.Y + (borders.Top.Width / 2));
+        Side(borders.Bottom, true, bounds.Bottom - (borders.Bottom.Width / 2));
+        Side(borders.Left, false, bounds.X + (borders.Left.Width / 2));
+        Side(borders.Right, false, bounds.Right - (borders.Right.Width / 2));
+
+        void Side(TableBorder border, bool isHorizontal, Length at)
+        {
+            if (border.IsNone) return;
+
+            GraphicsPath path = isHorizontal
+                ? new GraphicsPath()
+                    .MoveTo(new DocPoint(bounds.X, at))
+                    .LineTo(new DocPoint(bounds.Right, at))
+                : new GraphicsPath()
+                    .MoveTo(new DocPoint(at, bounds.Y))
+                    .LineTo(new DocPoint(at, bounds.Bottom));
+
+            sink.StrokePath(path, new Stroke(Paint.Solid(border.Colour), border.Width));
+        }
     }
 
     /// <summary>Fills a rectangle, which is what a shade and a rule both are.</summary>

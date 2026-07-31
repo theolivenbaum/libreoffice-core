@@ -257,6 +257,22 @@ once.
 
 ODF only, for now — the frame reading is done for ODF and the DOCX, DOC and RTF spellings are still open.
 
+`frame-box.fodt` is that same frame with a 2 pt red border and a pale green fill, and it exists because a
+comparison of *word positions* cannot see either. It is checked against the rectangles and strokes in
+LibreOffice's PDF instead, which pins two things a table's borders do not: a frame's border grows **inwards**
+from the frame's edge — 57.7 pt for a border whose frame starts at 56.7 — rather than straddling it, and it is
+four independent strokes each spanning its whole side rather than a consolidated grid.
+
+It is a separate file rather than two attributes added to `wrap-frame.fodt`, and the reason is a LibreOffice
+behaviour worth knowing before writing any frame document: **a `draw:frame` whose graphic style has no
+`style:parent-style-name` is imported as a drawing shape, and `fo:border` and `fo:background-color` are ignored
+outright.** LibreOffice draws its own shape defaults in their place — a #729fcf fill and a #3465a4 hairline —
+so a file testing a border without a parent style tests nothing and looks like it works. Adding *any* parent
+name fixes it: `Frame`, `Graphics`, `Default Drawing Style` and a name that exists nowhere were all measured,
+and all four make the properties take effect. The switch is the attribute's presence, not what it names. The
+older wrap documents have no parent style and so are drawing-shape frames; their wrap geometry is the same
+either way, which is why nothing noticed until a border was wanted.
+
 `wrap-frame-text.fodt` is the same document with the frame's text box **filled**, which checks the two things
 the empty one cannot: that the frame's own lines break at the frame's width rather than the page's, and that
 they are inset by its padding. Building it turned up two LibreOffice behaviours worth knowing, because each

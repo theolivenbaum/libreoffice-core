@@ -472,6 +472,8 @@ public sealed partial class OdtLayoutSource
                 Wrap = WrapOf(styleName),
                 Margins = FrameMargins(styleName),
                 Padding = FramePadding(styleName),
+                Background = FrameBackground(styleName),
+                Borders = Borders(styleName, OdfStyleFamily.Graphic, OdfPropertyKind.Graphic),
                 Blocks = FrameBlocks(drawing),
             });
         }
@@ -514,6 +516,47 @@ public sealed partial class OdtLayoutSource
     /// </remarks>
     private CellPadding FramePadding(string? styleName)
         => FrameSides(styleName, "padding", withShorthand: false);
+
+    /// <summary>
+    /// The colour filling a frame, or null when it is transparent.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// ODF spells this two ways and LibreOffice honours both, with <c>draw:fill-color</c> winning where they
+    /// disagree — measured: a frame stating a green <c>draw:fill-color</c> and a blue
+    /// <c>fo:background-color</c> renders green. Its companion <c>draw:fill</c> is a switch and beats both, so
+    /// <c>draw:fill="none"</c> makes a frame transparent however loudly it states a colour.
+    /// </para>
+    /// <para>
+    /// Two further spellings of "no fill", both measured and both easy to miss: a
+    /// <c>fo:background-color</c> of <c>transparent</c>, which is a value rather than an absence, and
+    /// <c>style:background-transparency="100%"</c>, which LibreOffice's own export writes beside a colour it
+    /// wants ignored. A reader taking the colour alone paints a box the document asked to be invisible.
+    /// </para>
+    /// </remarks>
+    private Colour? FrameBackground(string? styleName)
+    {
+        if (Graphic(styleName, OdfNamespaces.Draw, "fill") == "none") return null;
+        if (Graphic(styleName, OdfNamespaces.Style, "background-transparency") == "100%") return null;
+
+        OdfProperty fill = _styles.ResolveProperty(
+            styleName, OdfStyleFamily.Graphic, OdfPropertyKind.Graphic,
+            OdfNamespaces.Draw, "fill-color");
+
+        if (fill.AsColour() is { } stated) return stated;
+
+        OdfProperty background = _styles.ResolveProperty(
+            styleName, OdfStyleFamily.Graphic, OdfPropertyKind.Graphic,
+            OdfNamespaces.FoCompatible, "background-color");
+
+        return background.Value == "transparent" ? null : background.AsColour();
+    }
+
+    /// <summary>One property of a graphic style, as the document stated it.</summary>
+    private string? Graphic(string? styleName, string propertyNamespace, string propertyName)
+        => _styles.ResolveProperty(
+            styleName, OdfStyleFamily.Graphic, OdfPropertyKind.Graphic,
+            propertyNamespace, propertyName).Value;
 
     /// <summary>What a drawing's <c>text:anchor-type</c> means to layout.</summary>
     /// <remarks>

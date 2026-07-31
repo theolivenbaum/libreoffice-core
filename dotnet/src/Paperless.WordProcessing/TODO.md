@@ -834,8 +834,33 @@ is read and verified, so what remains is the filling of pages rather than the me
 - [ ] The rest of floating frames:
       - **A frame's picture.** An image needs a decoder, which is the rasteriser's business; the frame is
         placed and its text drawn, and only the picture is missing.
-      - **A frame's own border and background**, which are on the graphic style beside the wrap and are read
-        for neither.
+      - ~~**A frame's own border and background**~~ — done for ODF, and the interesting part is not the
+        reading but what it took to make LibreOffice render one at all. **A `draw:frame` whose graphic style
+        has no `style:parent-style-name` is imported as a drawing shape, and `fo:border` and
+        `fo:background-color` are ignored outright**: LibreOffice draws its own shape defaults instead, a
+        #729fcf fill and a #3465a4 hairline. Adding *any* parent name — measured with `Frame`, `Graphics`,
+        `Default Drawing Style` and a name that exists nowhere — makes it a Writer text frame and both
+        properties take effect. The switch is the attribute's presence, not what it names.
+        `XMLTextFrameContext_Impl::Create` does `sStyleName = pStyle->GetParentName()` and then sets
+        `FrameStyleName` only when that resolves, which is the code path; why it also changes whether the
+        automatic style's own hard properties apply is not pinned down.
+
+        That is why the corpus needed a new file rather than an attribute on `wrap-frame.fodt`: the existing
+        wrap documents are drawing-shape frames, and their wrap geometry happens to be the same.
+
+        The rest is measured and unsurprising:
+        - **The border grows inwards.** A frame's edge is where the document says the frame is and the stroke
+          sits half its width inside it — 57.7 for a 2 pt border whose frame starts at 56.7 — and each of the
+          four spans its whole side, overlapping at the corners. Unlike a table's grid line, which straddles
+          the boundary it sits on. Four independent strokes, not a consolidated grid.
+        - **The fill covers the whole bounds**, padding included, and is drawn after the body text and before
+          the frame's own.
+        - **Four spellings of "no fill", all of which a document uses.** `draw:fill="none"` beats a stated
+          colour; `style:background-transparency="100%"` does too; `fo:background-color="transparent"` is a
+          value rather than an absence; and where `draw:fill-color` and `fo:background-color` disagree, the
+          `draw:` one wins — measured, green over blue.
+        - Still ODF only. DOCX states this in DrawingML (`a:solidFill`, `a:ln`) and RTF as shape properties,
+          and neither is read.
       - **Contour wrap**, where the region is the image's outline rather than its box.
       - **`Dynamic`**'s threshold: Writer gives up and pushes the line down when the wider side is too narrow
         to be worth using. Treated as `Parallel` until the threshold is measured.

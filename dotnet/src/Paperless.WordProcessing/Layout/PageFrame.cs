@@ -1,4 +1,5 @@
 using Paperless.Core.Geometry;
+using Paperless.Core.Graphics;
 using Paperless.Core.Units;
 
 namespace Paperless.WordProcessing.Layout;
@@ -126,6 +127,28 @@ public sealed record PageFrame
     /// beside it should be.
     /// </remarks>
     public CellPadding Padding { get; init; }
+
+    /// <summary>
+    /// The colour filling the frame, or null when it is transparent.
+    /// </summary>
+    /// <remarks>
+    /// Drawn over the frame's whole bounds rather than over its content area: the padding is inside the fill,
+    /// which is what makes a padded coloured frame look like a box with a margin round its text rather than
+    /// like a coloured word.
+    /// </remarks>
+    public Colour? Background { get; init; }
+
+    /// <summary>
+    /// The frame's own four edges.
+    /// </summary>
+    /// <remarks>
+    /// Drawn <em>inside</em> the bounds by half each side's width, which is measured rather than assumed:
+    /// LibreOffice puts a 2 pt border on a frame whose left edge is at 56.7 pt at 57.7, and the stroke spans
+    /// the whole side rather than stopping short at the corners. So the frame's outer edge is where the
+    /// document said the frame is, and the border grows inwards from it — unlike a table's grid line, which
+    /// straddles the boundary it sits on.
+    /// </remarks>
+    public CellBorders Borders { get; init; }
 
     /// <summary>True when the frame takes room from the text rather than being ignored by it.</summary>
     public bool Obstructs => Wrap != TextWrap.Through;

@@ -568,15 +568,24 @@ public sealed partial class OdtLayoutSource
     /// <c>fo:border</c> sets all four and each <c>fo:border-left</c> and friends overrides its own side, which
     /// is CSS's rule and ODF's — the same cascade <see cref="Padding"/> follows for the same reason.
     /// </remarks>
-    private CellBorders Borders(string? styleName)
+    /// <param name="styleName">The style to resolve through.</param>
+    /// <param name="family">
+    /// Which family the style belongs to. A frame's border is spelled identically and lives on a graphic
+    /// style, so the parser is shared rather than written twice.
+    /// </param>
+    /// <param name="kind">Which property set within that family holds it.</param>
+    private CellBorders Borders(
+        string? styleName,
+        OdfStyleFamily family = OdfStyleFamily.TableCell,
+        OdfPropertyKind kind = OdfPropertyKind.TableCell)
     {
-        TableBorder all = Border(styleName, "border");
+        TableBorder all = Border(styleName, "border", default, family, kind);
 
         return new CellBorders(
-            Border(styleName, "border-left", all),
-            Border(styleName, "border-right", all),
-            Border(styleName, "border-top", all),
-            Border(styleName, "border-bottom", all));
+            Border(styleName, "border-left", all, family, kind),
+            Border(styleName, "border-right", all, family, kind),
+            Border(styleName, "border-top", all, family, kind),
+            Border(styleName, "border-bottom", all, family, kind));
     }
 
     /// <summary>
@@ -588,11 +597,20 @@ public sealed partial class OdtLayoutSource
     /// to beat the fallback: a style setting <c>fo:border</c> and then <c>fo:border-top="none"</c> means three
     /// borders, not four.
     /// </remarks>
-    private TableBorder Border(string? styleName, string propertyName, TableBorder fallback = default)
+    /// <param name="styleName">The style to resolve through.</param>
+    /// <param name="propertyName">The property, <c>border</c> or one of its four sides.</param>
+    /// <param name="fallback">What an unstated side takes, which is the shorthand's value.</param>
+    /// <param name="family">Which family the style belongs to.</param>
+    /// <param name="kind">Which property set within that family holds it.</param>
+    private TableBorder Border(
+        string? styleName,
+        string propertyName,
+        TableBorder fallback = default,
+        OdfStyleFamily family = OdfStyleFamily.TableCell,
+        OdfPropertyKind kind = OdfPropertyKind.TableCell)
     {
         string? stated = _styles.ResolveProperty(
-            styleName, OdfStyleFamily.TableCell, OdfPropertyKind.TableCell,
-            OdfNamespaces.FoCompatible, propertyName).Value;
+            styleName, family, kind, OdfNamespaces.FoCompatible, propertyName).Value;
 
         if (string.IsNullOrWhiteSpace(stated)) return fallback;
         if (stated.Trim() == "none") return default;
