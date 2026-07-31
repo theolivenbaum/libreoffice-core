@@ -90,7 +90,7 @@ binary.
 | ❌ | `xlsx`/`pptx`, `xls`/`ppt` and CSV readers |
 | ❌ | Decryption (detection works; decryption does not) |
 | ❌ | Rendering backends: `Paperless.Rendering`'s rasteriser and PDF writer are stubs |
-| ❌ | DOC/RTF list labels and frames; multi-level labels; note restarts; vertical and RTL text |
+| ❌ | RTF list labels; the RTF and DOC frame reads; multi-level labels; note restarts; vertical and RTL text |
 | ❌ | Spreadsheet print layout and slide rendering |
 | ❌ | Vector import (WMF/EMF/EMF+/SVG) |
 | ❌ | The CLI beyond `identify`, `extract` and `metadata` |
@@ -235,8 +235,18 @@ was found because a page comparison put a word a measurable distance from where 
       and the level's indents replace the paragraph's own.
 - [x] List labels for **DOCX**, the same shape from different parts: the structure is on the paragraph rather
       than in nested elements, and the geometry is `w:ind` on the level. `w:suff` defaults to `tab`, which is
-      the trap.
-- [ ] List labels for DOC and RTF, whose labels the extraction path already computes.
+      the trap. The first attempt at this drew nothing at all — the label was handed to the run walker as its
+      *citation*, which is only emitted where a `w:footnoteRef` marks a place — and the comparison test passed
+      anyway, because the corpus document's hanging indent equals its tab distance and so an unlabelled item
+      starts its first line exactly where the label should have been. Comparing the drawn text as well as the
+      line starts is what caught it.
+- [x] List labels for **DOC**, the one that needed something new. The level's indents are a `grpprl` inside its
+      `LVL` record, which `Ww8Numbering` was stepping over without keeping; and DOC has no run walker to hand a
+      prefix to, so the label is spliced into text that is already assembled, into the parallel array of source
+      positions as well, with every note anchor shifted by its length.
+- [ ] List labels for RTF, whose labels the extraction path already computes. Easier than DOC was — prepending
+      a run shifts every offset for free — but unverifiable against the reference, since LibreOffice's own RTF
+      export loses the numbering, so it needs a hand-written corpus file.
 - [ ] The rest of it: the RTF and DOC frame reads, contour wrap, and the vertical and right-to-left writing
       modes. The RTF numbers are measured and recorded in the word-processing TODO, including that
       LibreOffice's own RTF export loses the wrap mode and that its `\shpwr` numbering is not the

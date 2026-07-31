@@ -22,6 +22,9 @@
    <style:text-properties style:font-name="Carlito" fo:font-family="Carlito" fo:font-size="11pt"
        fo:language="en" fo:country="GB"/>
   </style:style>
+  <style:style style:name="Strong" style:family="text">
+   <style:text-properties fo:font-weight="bold"/>
+  </style:style>
   <text:list-style style:name="Numbered">
    <text:list-level-style-number text:level="1" style:num-suffix="." style:num-format="1">
     <style:list-level-properties text:list-level-position-and-space-mode="label-alignment">
@@ -39,7 +42,7 @@
    <text:list text:style-name="Numbered">
     <text:list-item><text:p text:style-name="Body">First item of the numbered list.</text:p></text:list-item>
     <text:list-item><text:p text:style-name="Body">Second item, which is deliberately long enough to wrap onto a second line and a third so that the continuation lines show where the hanging indent really puts them.</text:p></text:list-item>
-    <text:list-item><text:p text:style-name="Body">Third item.</text:p></text:list-item>
+    <text:list-item><text:p text:style-name="Body">Third item, whose <text:span text:style-name="Strong">emboldened</text:span> word proves that a label prepended to an item's text does not shift the formatting of what follows it.</text:p></text:list-item>
    </text:list>
    <text:p text:style-name="Body">After the list.</text:p>
   </office:text></office:body>

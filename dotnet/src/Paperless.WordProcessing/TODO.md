@@ -44,11 +44,11 @@ indexes or resolvable style chains.
       would take one style's parent from the other's chain. Cycle-guarded; the family's defaults lead
       a chain that does not reach them.
 - [x] Tables: rows, cells, spans, nested tables, and the column-edge grid the spans index into
-- [ ] Lists and numbering with multi-level definitions and restart semantics. The note here was
-      **understating it**, so it is worth being plain: all four readers compute a label for *extraction*, and
-      the **layout path has no labels at all** — `PageParagraph` carries none, so every numbered and bulleted
-      list renders with no number and no bullet, and its text starts at the wrong indent besides. That is the
-      most visible gap left in the layout engine.
+- [ ] Lists and numbering with multi-level definitions and restart semantics. The note here originally
+      **understated it**: all four readers compute a label for *extraction*, and the layout path had none at
+      all, so every numbered and bulleted list rendered with no number and no bullet and its text started at
+      the wrong indent besides. That was the most visible gap in the layout engine. **Three of the four formats
+      now draw them** — ODF, DOCX and DOC — and RTF is what is left.
 
       The geometry is measured and is not complicated, which is the point of writing it down. On an ODF list
       declaring `text:label-followed-by="listtab"` with `text:list-tab-stop-position="1.27cm"`,
@@ -92,30 +92,53 @@ indexes or resolvable style chains.
         same document, so they are reset before the layout walk. Two independent copies would each start at
         one; not resetting continues from where extraction stopped.
 
+      **DOC too**, and it is the one of the three that needed something new. The label itself was already
+      computed for extraction by `_numbering.Advance(format.ListNumber, listLevel)`; what had to be built was
+      the two halves the other formats got for free:
+      - **The level's indents were being thrown away.** `Ww8Numbering.ReadLevel` stepped over the `LVL`'s two
+        grpprls without keeping either, and the first of them is the PAPX holding `sprmPDxaLeft` (0x845E) and
+        `sprmPDxaLeft1` (0x8460) — the level's indent and its hanging first line. `Ww8ListLevel` now keeps that
+        span, and the geometry is decoded by the layout pass's own `ApplyLayoutSprms` rather than by a second
+        decoder: it is an ordinary grpprl holding the same sprms a paragraph states its indents with, so a
+        second decoder would be a second place for the rules to drift. The `LVLF` also carries `ixchFollow` at
+        byte 15 — 0 a tab, 1 a space, 2 nothing — whose default of **zero means tab**, the same trap `w:suff`
+        has.
+      - **DOC has no prefix hook.** The other two hand their label to a run walker, which emits it before the
+        paragraph's own text and so keeps every offset right for free. `Ww8DocumentReader.Describe` assembles
+        the text first and `ReadRuns(text, positions, …)` walks it by index against a parallel array of source
+        positions, so the label goes into **both** — the text and the positions, one repeated position per
+        label character — and the note anchors the walk collected are shifted by the label's length. Prepending
+        to only one of the two arrays does not fail loudly: `ReadRuns` takes `Math.Min` of the two lengths, so
+        the paragraph would simply lose its last few characters' formatting.
+      - The counters need scoping that the other formats did not. A note's body is read from the *middle* of
+        the paragraph that cites it, so clearing the counters for it would restart the body's list after every
+        footnote and leaving them alone would make a list inside a note continue the body's count. Hence
+        `Ww8Numbering.SuspendCounters`/`ResumeCounters`, used for a note's body and for each furniture story.
+
+      **This also turned up that the DOCX labels never reached the page**, though the commit that added them
+      said they did. The prefix was passed to `RunWalker.Walk` as its `citation` argument, and a citation is
+      only emitted where the file's own `w:footnoteRef` marks a place for it — so a numbered paragraph, which
+      has no such element, drew nothing. The walker now takes the label as a parameter of its own and emits it
+      before the walk.
+
+      What hid it is worth recording, because it is a way a comparison test can pass while proving nothing:
+      the corpus document's hanging indent is **exactly** its tab distance, so an item drawn with no label at
+      all starts its first line at 74.7 pt — precisely where the label should have been. A test comparing line
+      *starts* cannot see the difference. `ListComparisonTests` now compares the drawn text against the
+      rendered text first, and `ListLabelTests` pins the label's own characters, the two indents and the stop
+      for all three formats.
+
       Still open here: `text:display-levels` and its OOXML equivalent, a `w:lvlText` of `%1.%2.%3`, so a level
-      asking for `1.2.3` shows `3`; an image label, which needs a decoder; and DOC and RTF, which need more
-      than the other two did and where the extra is worth stating:
-      - **DOC has no prefix hook.** `OdtLayoutSource` and `DocxLayoutSource` both hand their label to a run
-        walker that emits it *before* the paragraph's own text, which is what keeps every run offset and every
-        anchor correct. `Ww8DocumentReader.Describe` assembles the text first and `ReadRuns(text, positions,
-        …)` indexes into it, so the label has to be prepended and **every run offset shifted by its length**.
-        That is the whole of the difference; the label itself is already computed for extraction by
-        `_numbering.Advance(format.ListNumber, listLevel)`.
-      - **DOC's level indents are currently thrown away.** `Ww8Numbering.ReadLevel` steps over the `LVL`'s two
-        grpprls without keeping them — the comment there says so — and the first of them is the PAPX holding
-        `sprmPDxaLeft` (0x845E) and `sprmPDxaLeft1` (0x8460), which are the level's indent and its hanging
-        first line. Keeping the PAPX span on `Ww8ListLevel` is the prerequisite.
-      - **RTF is the *less* useful of the two to do next, which is the opposite of what it looks like.** Its
-        layout text is `string.Concat(flow.PendingRuns.Select(run => run.Text))`, so prepending a *run* would
-        carry the label and shift every offset for free — no arithmetic at all, and easier than DOC. But
-        LibreOffice's own RTF render of a list shows **no numbers**: its export loses them, exactly as it
+      asking for `1.2.3` shows `3`; an image label, which needs a decoder; and **RTF**, which is the *less*
+      useful one to do next despite looking the easiest:
+      - Its layout text is `string.Concat(flow.PendingRuns.Select(run => run.Text))`, so prepending a *run*
+        would carry the label and shift every offset for free — no arithmetic at all, and easier than DOC was.
+      - But LibreOffice's own RTF render of a list shows **no numbers**: its export loses them, exactly as it
         loses a frame's wrap mode. The indents survive (74.80 and 92.80, the same as ODF), and Paperless
         already reads those from `\li`/`\fi`, so an RTF list document written by LibreOffice verifies
         nothing a reader could get wrong. Implementing it is still right for a Word-written file — RTF has two
         numbering systems, the old `\pn` group and the `\listtable`/`\ls`/`\ilvl` tables — but it cannot
-        be checked against the reference, so it should be done after DOC and with a hand-written file.
-      - **DOC keeps its numbers**, so it is the one that can be verified: LibreOffice's DOC render of the same
-        list shows 1., 2. and 3. where its RTF render shows none.
+        be checked against the reference, so it needs a hand-written file with the numbers stated.
 
       This also turned up an inconsistency, since **settled by measurement**: `TabStop.Position`'s own
       documentation said it was measured "from the text area's start edge, not from the indent", while

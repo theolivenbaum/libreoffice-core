@@ -307,12 +307,21 @@ every value with a single separator, which is why the older documents could not 
 once because a list has three: the **label** sits at the level's margin plus its negative indent (74.70 pt), the
 item's **first line** at the level's tab stop (92.70), and a **continuation** line at the margin alone (92.70) —
 so the label hangs to the left of the block. Its second item is deliberately long enough to wrap, since without
-a wrapped item the third rule is untested and a reader that put continuations back at the margin would pass.
+a wrapped item the third rule is untested and a reader that put continuations back at the margin would pass. Its
+third item holds a bold span, which is there for the DOC reader in particular: DOC is the one format whose label
+has to be spliced into text that has already been assembled, and a splice that shifted the text without shifting
+the run offsets shows up as a run naming the wrong characters while every drawn position stays right.
 
 Compared by *line starts* rather than by every word, in `ListComparisonTests` rather than the tab tests. That is
 not a loosening: a list is checked by where each line begins, and comparing every word on a 120 pt line measures
 the recorded ~0.15% difference between LibreOffice's own width and HarfBuzz's, which exceeds the tab tolerance
 and has nothing to do with lists.
+
+But the *text* is compared first, and that is not belt-and-braces. This document's hanging indent is exactly its
+tab distance, so an item drawn with **no label at all** starts its first line at 74.70 pt — precisely where the
+label should have been. A test comparing only line starts passes on a reader that draws no numbers, which is how
+a DOCX bug of exactly that kind survived a green run. The label's own characters are pinned separately, in
+`ListLabelTests`.
 
 `tab-indented.fodt` exists to answer one question that no other document here can: what a tab stop's position
 is measured *from*. Its paragraphs are indented 2 cm and its stops are at 4 cm and 8 cm, so the word after the
@@ -330,8 +339,14 @@ numbers from different parts: ODF nests elements and states a separate stop posi
 `w:numPr` on the paragraph and derives everything from the level's `w:ind`. The trap on that side is `w:suff`,
 whose default is `tab` — the one value a level usually does not state and the one it usually means.
 
+`list-numbered.doc` is the same document again in the format that reaches those numbers from a third place: the
+level's indents are a `grpprl` inside its own `LVL` record, holding the very sprms a paragraph would use, and
+its separator is `ixchFollow` — whose default of zero means *tab*, the same trap `w:suff` has spelled
+differently. LibreOffice's DOC render keeps the numbers (labels at 74.80, text at 92.80), so this one verifies
+the label and not merely the geometry.
+
 There is deliberately **no `list-numbered.rtf`**, for the same reason there are no RTF wrap files: LibreOffice's
 RTF export loses the list numbering. Its own render of the exported file shows the items' text at 74.80 and
 92.80 — the indents survive — and no numbers at all. Since Paperless already reads those indents from `\li`
-and `\fi`, such a document would verify nothing a reader could get wrong. `list-numbered.doc` is the opposite
-case and is worth adding when DOC labels land: its render keeps 1., 2. and 3.
+and `\fi`, such a document would verify nothing a reader could get wrong. An RTF list document has to be written
+by hand, with the numbers stated.

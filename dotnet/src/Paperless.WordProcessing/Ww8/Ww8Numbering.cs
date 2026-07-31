@@ -26,6 +26,17 @@ namespace Paperless.WordProcessing.Ww8;
 /// <param name="RestartLimit">
 /// The level whose advance restarts this one; deeper levels than this do not.
 /// </param>
+/// <param name="FollowedBy">
+/// The <c>ixchFollow</c>: what goes between the label and the item's text — 0 a tab, 1 a space, 2 nothing.
+/// </param>
+/// <param name="ParagraphProperties">
+/// The level's <c>grpprlPapx</c>, which is where its indents live.
+/// </param>
+/// <remarks>
+/// The PAPX is kept rather than decoded here because it is an ordinary grpprl and the sprms in it —
+/// <c>sprmPDxaLeft</c> and <c>sprmPDxaLeft1</c> among them — are already read by the layout pass's own sprm
+/// walk. Decoding it twice would be two places for the indent rules to drift apart.
+/// </remarks>
 public readonly record struct Ww8ListLevel(
     int StartAt,
     byte NumberFormat,
@@ -33,7 +44,9 @@ public readonly record struct Ww8ListLevel(
     ReadOnlyMemory<byte> PlaceholderOffsets,
     bool IsLegalNumbering,
     bool NeverRestarts,
-    byte RestartLimit)
+    byte RestartLimit,
+    byte FollowedBy = 0,
+    ReadOnlyMemory<byte> ParagraphProperties = default)
 {
     /// <summary>The <c>nfc</c> meaning "this level draws a bullet, not a number".</summary>
     public const byte BulletFormat = 23;
@@ -43,6 +56,18 @@ public readonly record struct Ww8ListLevel(
 
     /// <summary>True when the level draws a bullet rather than a counter.</summary>
     public bool IsBullet => NumberFormat == BulletFormat;
+
+    /// <summary>What separates the label from the item's text, as a string to prepend.</summary>
+    /// <remarks>
+    /// A tab is the default and by far the commonest, which is why the codes are worth spelling out: an
+    /// <c>ixchFollow</c> nobody set is zero, and zero means tab rather than nothing.
+    /// </remarks>
+    public string Separator => FollowedBy switch
+    {
+        1 => " ",
+        2 => "",
+        _ => "\t",
+    };
 }
 
 /// <summary>One WW8 list definition: an <c>LSTF</c> and the levels that follow it.</summary>
@@ -161,6 +186,47 @@ public sealed class Ww8Numbering
 
     /// <summary>Resets every counter, so a second flow does not continue the body's numbering.</summary>
     public void ResetCounters() => _counters.Clear();
+
+    /// <summary>
+    /// The level definition a paragraph is laid out by, or null when it names no list.
+    /// </summary>
+    /// <remarks>
+    /// The counters are untouched: this answers "what does this level look like" rather than "what is this
+    /// item's number", so it can be asked alongside <see cref="Advance"/> without numbering an item twice.
+    /// </remarks>
+    /// <param name="instance">The paragraph's one-based <c>ilfo</c>.</param>
+    /// <param name="level">Its zero-based level.</param>
+    public Ww8ListLevel? FindLevel(int instance, int level)
+        => Resolve(instance, level, out _, out Ww8ListLevel found) ? found : null;
+
+    /// <summary>
+    /// Sets the live counters aside and clears them, for a flow that numbers its own lists.
+    /// </summary>
+    /// <remarks>
+    /// A note's body is read from the middle of the paragraph that cites it, so the two flows interleave
+    /// rather than follow one another: clearing the counters outright would make the body's list restart at
+    /// one after every footnote, and leaving them alone would make a list inside a note continue the body's
+    /// count. Both are wrong, so the state is saved and put back.
+    /// </remarks>
+    public Ww8NumberingCounters SuspendCounters()
+    {
+        Ww8NumberingCounters saved = new(_counters);
+        _counters.Clear();
+        return saved;
+    }
+
+    /// <summary>Puts back what <see cref="SuspendCounters"/> set aside.</summary>
+    /// <param name="counters">What that call returned.</param>
+    public void ResumeCounters(Ww8NumberingCounters counters)
+    {
+        ArgumentNullException.ThrowIfNull(counters);
+
+        _counters.Clear();
+        foreach (KeyValuePair<(int Instance, int Level), int> entry in counters.Values)
+        {
+            _counters[entry.Key] = entry.Value;
+        }
+    }
 
     /// <summary>
     /// The level definition in force for a list instance, or false when there is none.
@@ -343,9 +409,10 @@ public sealed class Ww8Numbering
     /// template.
     /// </summary>
     /// <remarks>
-    /// The two grpprls are skipped rather than kept: they hold the label's indent and its character
-    /// formatting, which extraction does not use but which must still be stepped over exactly, since
-    /// the template follows them.
+    /// The PAPX is kept and the CHPX is not. Both have to be stepped over exactly, since the template
+    /// follows them, but only the first is wanted: it holds the level's indents, which are what put a
+    /// hanging label to the left of the text it labels. The CHPX holds the label's own character
+    /// formatting, which layout takes from the paragraph's first run instead.
     /// </remarks>
     private static bool ReadLevel(ReadOnlySpan<byte> stream, ref int position, out Ww8ListLevel level)
     {
@@ -364,11 +431,18 @@ public sealed class Ww8Numbering
 
         byte[] placeholders = header[6..15].ToArray();
 
+        byte followedBy = header[15];
+
         byte characterPropertiesLength = header[24];
         byte paragraphPropertiesLength = header[25];
         byte restartLimit = header[26];
 
-        // PAPX first, then CHPX: the order matters only because the template comes after both.
+        // PAPX first, then CHPX. The order matters twice over: the template comes after both, and the one
+        // that is kept is the first of the two.
+        if (position + paragraphPropertiesLength > stream.Length) return false;
+
+        byte[] paragraphProperties = stream.Slice(position, paragraphPropertiesLength).ToArray();
+
         position += paragraphPropertiesLength + characterPropertiesLength;
         if (position < 0 || position + 2 > stream.Length) return false;
 
@@ -382,7 +456,8 @@ public sealed class Ww8Numbering
         position += bytes;
 
         level = new Ww8ListLevel(
-            startAt, numberFormat, numberText, placeholders, isLegal, neverRestarts, restartLimit);
+            startAt, numberFormat, numberText, placeholders, isLegal, neverRestarts, restartLimit,
+            followedBy, paragraphProperties);
         return true;
     }
 
@@ -463,4 +538,20 @@ public sealed class Ww8Numbering
 
     /// <summary>What one instance changes about one level.</summary>
     private readonly record struct Ww8OverrideLevel(int? StartAt, Ww8ListLevel? Replacement);
+}
+
+/// <summary>
+/// A snapshot of where every list's counters stood, so a nested flow can be numbered and the outer one
+/// resumed.
+/// </summary>
+/// <remarks>
+/// Opaque on purpose: what a counter is keyed by is <see cref="Ww8Numbering"/>'s business, and the only
+/// thing a caller does with this is hand it back.
+/// </remarks>
+public sealed class Ww8NumberingCounters
+{
+    internal Ww8NumberingCounters(Dictionary<(int Instance, int Level), int> counters)
+        => Values = new Dictionary<(int Instance, int Level), int>(counters);
+
+    internal Dictionary<(int Instance, int Level), int> Values { get; }
 }

@@ -283,10 +283,10 @@ public sealed partial class DocxLayoutSource
         OpenTypeFace? face = Face(text);
         if (face is null) return null;
 
-        // A numbered paragraph's label is a prefix, like a footnote's citation and for the same reason: the
-        // walker emits it so that prefixing text does not shift the offsets of anything anchored in the
-        // paragraph. A note's own first paragraph carries a citation instead and is never in a list, so the
-        // two prefixes cannot collide.
+        // A numbered paragraph's label is a prefix, and the walker emits it so that prefixing text does not
+        // shift the offsets of anything anchored in the paragraph. A note's own first paragraph is never in
+        // a list, so it needs no label — and its citation is a different mechanism entirely, emitted where
+        // the file's own `w:footnoteRef` marks rather than prepended.
         DocxListLabel? label = citation is null
             ? LabelOf(properties, Word.Value(properties, "pStyle"))
             : null;
@@ -294,7 +294,8 @@ public sealed partial class DocxLayoutSource
         RunWalker walker = new(CitationOf, _footnoteNumber, _endnoteNumber);
         walker.Walk(
             element,
-            citation ?? (label is { Text.Length: > 0 } list ? list.Text + Separator(list.Suffix) : null));
+            citation,
+            label is { Text.Length: > 0 } list ? list.Text + Separator(list.Suffix) : null);
 
         // Notes are numbered across the document, so the counters advance by however many this paragraph
         // referenced — and the bodies are read after the walk, since reading one recurses into this method
@@ -572,9 +573,19 @@ public sealed partial class DocxLayoutSource
         /// contains a <c>w:footnoteRef</c>, inside a run whose character style is what makes the number
         /// superscript. So the citation is emitted where the file says rather than prepended.
         /// </param>
-        internal void Walk(XElement paragraph, string? citation = null)
+        /// <param name="label">
+        /// A numbered paragraph's label and the separator after it, or null when it is in no list. This one
+        /// <em>is</em> prepended: the file marks no place for it, because a list's label is not text at all
+        /// in OOXML's model — Word draws it from the numbering definition at the head of the first line.
+        /// </param>
+        internal void Walk(XElement paragraph, string? citation = null, string? label = null)
         {
             _citation = citation;
+
+            // Before the walk rather than after it, so that every offset the walk goes on to record — a
+            // note's anchor, a floating drawing's — already counts the label's characters.
+            if (label is { Length: > 0 }) Emit(label);
+
             Append(paragraph, depth: 0);
         }
 

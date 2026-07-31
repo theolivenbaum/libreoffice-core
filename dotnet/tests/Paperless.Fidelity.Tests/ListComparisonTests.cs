@@ -55,6 +55,11 @@ public sealed class ListComparisonTests : IDisposable
     // paragraph rather than in nested elements, and the geometry is `w:ind` on the level rather than a
     // separate stop position — Word puts the text at `w:start` and the label at `w:start` less `w:hanging`.
     [InlineData("list-numbered.docx")]
+    // And in DOC, where the geometry is a grpprl inside the level's own `LVL` record rather than an attribute
+    // — the same `sprmPDxaLeft` and `sprmPDxaLeft1` a paragraph would state its indents with. This is also the
+    // one of the four formats whose label has to be spliced into text that is already assembled, so a
+    // mistake in the splice shows up here as a run in the wrong font rather than as a position.
+    [InlineData("list-numbered.doc")]
     public void EveryLineOfAListStartsWhereLibreOfficeStartsIt(string fileName)
     {
         Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
@@ -66,10 +71,19 @@ public sealed class ListComparisonTests : IDisposable
             words.Count == 0,
             "pdftotext is not available; install poppler-utils — see check-env.sh");
 
-        List<double> rendered = Starts(
-            ReadingOrder.Of(words), word => word.Top, word => word.Left);
-        List<double> drawn = Starts(
-            ReadingOrder.Of(Drawn(path)), word => word.Baseline, word => word.Left);
+        List<PdfWord> renderedWords = ReadingOrder.Of(words);
+        List<DrawnWord> drawnWords = ReadingOrder.Of(Drawn(path));
+
+        // Before the positions, because a label that is missing entirely does not necessarily move a line:
+        // this document's hanging indent is exactly its tab distance, so an item drawn with no number starts
+        // its first line where the number should have been. The text is what tells the two apart.
+        string.Join(' ', drawnWords.Select(word => word.Text))
+            .ShouldBe(
+                string.Join(' ', renderedWords.Select(word => word.Text)),
+                $"{fileName}: the drawn text differs from the rendered text");
+
+        List<double> rendered = Starts(renderedWords, word => word.Top, word => word.Left);
+        List<double> drawn = Starts(drawnWords, word => word.Baseline, word => word.Left);
 
         drawn.Count.ShouldBe(
             rendered.Count, $"{fileName}: laid out {drawn.Count} lines, LibreOffice {rendered.Count}");

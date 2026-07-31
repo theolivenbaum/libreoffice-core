@@ -130,6 +130,11 @@ public sealed partial class Ww8DocumentReader
     {
         _layoutNoteNumber = 0;
         _layoutEndnoteNumber = 0;
+
+        // The body starts its lists at one however many times the document has been read, and whatever the
+        // content pass did to the counters beforehand.
+        _numbering.ResetCounters();
+
         return ReadLayoutBlocks(Ranges.Body, keepTrailingEmpty: true);
     }
 
@@ -267,7 +272,12 @@ public sealed partial class Ww8DocumentReader
             // Blocks rather than paragraphs, so a table in a running head survives: a two-part running head
             // is a two-cell table, and stacking its cells as loose paragraphs would give the header a height
             // no table has and push the body text down by the difference on every page.
+            //
+            // Each story numbers its own lists: a numbered paragraph in a footer is not the next item of a
+            // list in the body, and a header drawn on every page must not count once per page either.
+            Ww8NumberingCounters counters = _numbering.SuspendCounters();
             List<Ww8LayoutBlock> blocks = ReadLayoutBlocks(stories[story], keepTrailingEmpty: false);
+            _numbering.ResumeCounters(counters);
 
             // Word writes all six stories whether the section uses them or not, so an empty paragraph is a
             // placeholder rather than a blank line — but only when there is nothing else in the story.
@@ -446,10 +456,20 @@ public sealed partial class Ww8DocumentReader
         {
             Ww8ParagraphFormat format = ResolveParagraphFormat(markPosition);
 
+            // Advanced here, once, and in the order the paragraphs appear — a label is a count rather than a
+            // stored string, so asking for one out of order numbers the document wrongly from there on.
+            Ww8ListLabel? label = LabelOf(format);
+            int prefix = label?.Prefix.Length ?? 0;
+
             assembler.Add(
-                Describe(current.ToString(), positions, body.Start + start, markPosition) with
+                Describe(current.ToString(), positions, body.Start + start, markPosition, label) with
                 {
-                    Notes = _pendingNotes.Count == 0 ? null : [.. _pendingNotes],
+                    // Every note's anchor is an offset into the paragraph's text, and the label went in
+                    // front of it.
+                    Notes = _pendingNotes.Count == 0
+                        ? null
+                        : [.. _pendingNotes.Select(
+                            note => prefix == 0 ? note : note with { Offset = note.Offset + prefix })],
                 },
                 format,
                 endsCell);
@@ -479,8 +499,14 @@ public sealed partial class Ww8DocumentReader
         List<Ww8LayoutNote> outer = [.. _pendingNotes];
         _pendingNotes.Clear();
 
+        // And the same for the list counters, for the same reason: a note is read from the middle of the
+        // paragraph that cites it, so a list inside it must neither continue the body's count nor restart it.
+        Ww8NumberingCounters counters = _numbering.SuspendCounters();
+
         List<Ww8LayoutBlock> blocks =
             ReadLayoutBlocks(range, keepTrailingEmpty: false, noteCitation: citation);
+
+        _numbering.ResumeCounters(counters);
 
         _pendingNotes.Clear();
         _pendingNotes.AddRange(outer);
@@ -523,11 +549,27 @@ public sealed partial class Ww8DocumentReader
     /// mark that ends it. Looking up the first character instead finds the <em>previous</em> paragraph's
     /// properties, which is a mistake that produces a document formatted one paragraph out of step.
     /// </remarks>
+    /// <param name="text">The paragraph's text as the walk assembled it, without any list label.</param>
+    /// <param name="positions">Where each of those characters came from, one per character.</param>
+    /// <param name="start">The paragraph's first character position.</param>
+    /// <param name="markPosition">The position of the mark that ended it.</param>
+    /// <param name="label">Its list label, or null when it is in no list.</param>
     private Ww8LayoutParagraph Describe(
-        string text, List<int> positions, int start, int markPosition)
+        string text, List<int> positions, int start, int markPosition, Ww8ListLabel? label = null)
     {
         Ww8LayoutFormat layout = ResolveLayoutFormat(markPosition);
         Ww8ParagraphFormat paragraph = ResolveParagraphFormat(markPosition);
+
+        // The label goes in front of the text and in front of the positions together, so that the run walk
+        // below — which pairs the two by index — gives the label the formatting of the character it precedes.
+        // Prepending to only one of them misattributes every run in the paragraph.
+        if (label?.Prefix is { Length: > 0 } prefix)
+        {
+            int from = positions.Count > 0 ? positions[0] : Math.Max(markPosition, 0);
+
+            text = prefix + text;
+            positions.InsertRange(0, Enumerable.Repeat(from, prefix.Length));
+        }
 
         // The run properties at the paragraph's mark, which is what its mark carries and what an empty
         // paragraph is as tall as. The text's own formatting comes from the runs below.
@@ -539,10 +581,12 @@ public sealed partial class Ww8DocumentReader
         return new Ww8LayoutParagraph(
             SectionAt(markPosition),
             text,
-            layout.ToParagraphFormat(size) with
-            {
-                DefaultTabInterval = DocumentProperties.DefaultTabInterval,
-            },
+            Listed(
+                layout.ToParagraphFormat(size) with
+                {
+                    DefaultTabInterval = DocumentProperties.DefaultTabInterval,
+                },
+                label),
             character.FontIndex is { } index ? Fonts.Name(index) : null,
             size,
             character.IsBold == true ? 700 : 400,
