@@ -330,6 +330,7 @@ public sealed class RtfDocument : IWordProcessingDocument, IPaginatedDocument
                 Shaping = new Text.Shaping.ShapingOptions(Language: paragraph.Language),
                 Runs = RunsOf(fonts, paragraph, face),
                 Notes = NotesOf(fonts, paragraph.Notes),
+                Frames = FramesOf(fonts, paragraph.Frames),
             });
         }
 
@@ -362,6 +363,49 @@ public sealed class RtfDocument : IWordProcessingDocument, IPaginatedDocument
         }
 
         return notes;
+    }
+
+    /// <summary>
+    /// The floating shapes anchored in a paragraph, as frames.
+    /// </summary>
+    /// <remarks>
+    /// The step the other two formats do not need: their layout sources hold the document's fonts and build a
+    /// frame outright, while this reader is a token-stream state machine with none. So the shape arrives with
+    /// its geometry finished and its content still unconverted, and the conversion happens here — through the
+    /// same <see cref="Convert(LayoutFonts, IReadOnlyList{RtfLayoutBlock})"/> a note's body and a cell's
+    /// content go through, which is what lets a shape hold a table.
+    /// </remarks>
+    private static List<PageFrame> FramesOf(LayoutFonts fonts, IReadOnlyList<RtfLayoutFrame>? stated)
+    {
+        if (stated is null || stated.Count == 0) return [];
+
+        List<PageFrame> frames = new(stated.Count);
+
+        foreach (RtfLayoutFrame frame in stated)
+        {
+            frames.Add(new PageFrame
+            {
+                Offset = frame.Offset,
+                Size = frame.Size,
+                Wrap = frame.Wrap,
+                HorizontalRelativeTo = frame.HorizontalRelativeTo,
+                VerticalRelativeTo = frame.VerticalRelativeTo,
+                Margins = frame.Margins,
+                Padding = frame.Padding,
+                Background = frame.Background,
+                Borders = new CellBorders(
+                    frame.Border, frame.Border, frame.Border, frame.Border),
+
+                // Inside the edge, not centred on it — unlike OOXML's text box, which is the same shape model
+                // written differently. Measured on one document exported both ways: LibreOffice's render of the
+                // RTF strokes the left border at 57.7 pt where its render of the DOCX strokes 56.65, for a
+                // frame whose edge is 56.7. Its RTF import builds a Writer text frame from a `{\shp}` of shape
+                // type 202 and draws it as one.
+                Blocks = Convert(fonts, frame.Blocks),
+            });
+        }
+
+        return frames;
     }
 
     /// <summary>

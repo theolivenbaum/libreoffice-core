@@ -440,7 +440,7 @@ public sealed partial class RtfDocumentReader
             case "bkmkstart" or "bkmkend" or "atnid" or "atnref" or "atndate" or "atnparent"
                  or "annotprot" or "xe" or "tc" or "tcn" or "datafield" or "fname" or "ftnsep"
                  or "ftnsepc" or "ftncn" or "aftnsep" or "aftnsepc" or "aftncn" or "nonshppict"
-                 or "mmath" or "do" or "shpinst" or "shprslt" or "svb" or "template"
+                 or "mmath" or "do" or "shprslt" or "svb" or "template"
                  or "keycode" or "password" or "passwordhash" or "protend" or "protstart":
                 state.Destination = RtfDestination.Skip;
                 return;
@@ -473,8 +473,8 @@ public sealed partial class RtfDocumentReader
                 return;
             case "shptxt" or "txbxtext":
                 // A shape's or text box's own text flow, which is not part of the paragraph it
-                // is anchored in.
-                BeginFlow(state, SectionKind.Frame, null);
+                // is anchored in — and is staged for layout, since it is what the frame draws.
+                BeginFlow(state, SectionKind.Frame, null, stagesBlocks: true);
                 return;
 
             // ---- fields
@@ -490,6 +490,22 @@ public sealed partial class RtfDocumentReader
             case "fldrslt":
                 // The cached result, which is what a reader displays.
                 state.Destination = RtfDestination.Body;
+                return;
+
+            // ---- floating shapes
+            case "shp":
+                // The group itself, whose braces bound the shape. `\shpinst` inside it is a starred
+                // destination and would otherwise be skipped whole, which is where the geometry lives.
+                BeginShape();
+                return;
+            case "shpinst":
+                state.Destination = RtfDestination.Body;
+                return;
+            case "sn":
+                state.Destination = RtfDestination.ShapePropertyName;
+                return;
+            case "sv":
+                state.Destination = RtfDestination.ShapePropertyValue;
                 return;
 
             // ---- list labels
@@ -955,6 +971,11 @@ public sealed partial class RtfDocumentReader
                 return;
 
             default:
+                // A floating shape's positioning words, which are a family of a dozen rather than a case
+                // each. Tried before the skip below, because they arrive inside `{\*\shpinst}` and would
+                // otherwise be discarded with it.
+                if (ApplyShapeWord(token.Name, token.Parameter)) return;
+
                 // An unknown destination marked with \* must be skipped whole: RTF puts private
                 // extensions in the same syntax as content, and reading one emits its internals
                 // as text.

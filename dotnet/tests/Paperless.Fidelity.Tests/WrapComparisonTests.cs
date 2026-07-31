@@ -83,6 +83,11 @@ public sealed class WrapComparisonTests : IDisposable
     [InlineData("wrap-frame.docx")]
     [InlineData("wrap-none.docx")]
     [InlineData("wrap-frame-text.docx")]
+    // RTF, whose `{\shp}` group states the same thing in three vocabularies at once: the position as four
+    // edges in twips, the insets and colours as Escher properties in EMUs, and the text as a flow. Its wrap
+    // mode survives LibreOffice's export after all — for a real text frame, which is what a graphic style with
+    // a parent produces; a drawing shape exports as `\shpwr3` and loses it.
+    [InlineData("frame-box.rtf")]
     public void TextGoesRoundAFrameWhereLibreOfficePutsIt(string fileName)
     {
         Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");

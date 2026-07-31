@@ -255,7 +255,7 @@ test whichever way it is read. And the frame's text box is left **empty**: a fra
 words of its own to the page, and a comparison of body-text positions would then be comparing two features at
 once.
 
-ODF only, for now — the frame reading is done for ODF and the DOCX, DOC and RTF spellings are still open.
+ODF and DOCX for the wrap documents; DOC waits on Escher, which `Paperless.MsBinary` has yet to read.
 
 `frame-box.fodt` is that same frame with a 2 pt red border and a pale green fill, and it exists because a
 comparison of *word positions* cannot see either. It is checked against the rectangles and strokes in
@@ -292,6 +292,17 @@ indented 3 cm and 1 cm and still lands at the column's centre. And the two axes 
 `paragraph` vertically means where the paragraph *is*. Its frames all use `style:wrap="none"`, which also made
 it the document that caught a pagination bug `wrap-none.fodt` could not: a push landing on a paragraph's *first*
 line was being normalised away, so a frame moved its own paragraph's later lines and nothing else.
+
+`frame-box.rtf` is LibreOffice's RTF export of the same box, and it is a comparison rather than a documented
+divergence — which corrects an earlier note here. LibreOffice's RTF export was recorded as losing the wrap mode;
+it does not, for a real text frame. It writes a text frame as `\shpwr2`, which its importer reads as parallel,
+and a *drawing shape* as `\shpwr3`, which it reads as run-through — the parent-style quirk again. So this file
+wraps in LibreOffice's own render and can be compared line for line.
+
+Two things it pins that the other two cannot. Its `{\shp}` group states one shape in **three vocabularies**:
+edges in twips, Escher properties in EMUs with BGR colours, and a text flow. And an RTF shape's border is drawn
+**inside** its edge, unlike DOCX's: LibreOffice's RTF import builds a Writer text frame from a shape of type 202
+and draws it as one, so the same box strokes its left border at 57.7 pt in RTF and 56.65 in DOCX.
 
 One export behaviour to know before reading either file: LibreOffice's DOCX export **bakes a drawing shape's
 defaults into the document**. `wrap-frame.docx` therefore has an explicit #729FCF fill and a #3465A4 outline

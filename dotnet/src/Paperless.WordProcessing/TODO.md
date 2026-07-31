@@ -906,26 +906,34 @@ is read and verified, so what remains is the filling of pages rather than the me
         with it. So a `none`-wrapped frame moved the later lines of its own paragraph and no other paragraph at
         all: measured, the three following paragraphs sat 29, 58 and 87 pt too high. `wrap-none.fodt` could not
         catch it because its push lands on a line that is not the paragraph's first.
-      - **RTF**, whose grammar is already half in place — `RtfDocumentReader` routes `\shptxt` to a
-        `SectionKind.Frame` flow — and whose numbers are measured and recorded here so the next attempt starts
-        from arithmetic:
-        - The shape sits inside `{\field{\*\fldinst SHAPE }{\fldrslt{\shp{\*\shpinst …}}}}`, and
-          `\shpinst` is currently *skipped*, which is where the geometry goes.
-        - Geometry in **twips**, as four edges rather than an offset and an extent: `\shpleft`, `\shptop`,
-          `\shpright`, `\shpbottom`. Measured on the corpus frame: 0, 567, 2833, 2266.
-        - The text insets are shape *properties* in **EMUs**, not twips:
-          `{\sp{\sn dyTextTop}{\sv 54000}}` and its three siblings. Two units in one shape.
-        - **`\shpwr`'s numbering is LibreOffice's own, not the RTF specification's.** The spec says
-          1 = around, 2 = tight, 3 = through, 4 = top-and-bottom, 5 = none. LibreOffice's importer
-          (`rtfdispatchvalue.cxx`) reads 1 as *no text beside*, 2 as parallel, 3 as run-through, 4 as parallel
-          with a contour, and 5 as run-through; its exporter (`rtfsdrexport.cxx`) is the exact inverse. So it
-          round-trips itself perfectly and disagrees with the specification, and matching LibreOffice means
-          taking LibreOffice's numbering. `\shpwrk` is the side: 0 both, 1 left, 2 right, 3 largest.
-        - **LibreOffice's RTF export loses the wrap mode outright**, so the RTF corpus files cannot test the
-          wrap geometry at all. A `parallel` ODF frame exports as `\shpwr3`, which its own importer reads as
-          run-through, and its RTF render puts every line at 56.80 pt where the ODF render wraps to 204.15.
-          A faithful reader therefore *agrees* with the reference by also drawing no wrap — which is still
-          worth a test, since a reader ignoring `\shpwr` and defaulting to parallel would fail it.
+      - ~~**RTF**~~ — done, and the recorded grammar was right about the shape of it and wrong about one
+        conclusion. A `{\shp}` group states the same thing in three vocabularies at once: the position as four
+        **edges in twips** (`\shpleft`/`\shptop`/`\shpright`/`\shpbottom`, so the size needs no separate
+        statement), the insets, wrap distances, fill and line as Escher `{\sp{\sn name}{\sv value}}` pairs in
+        **EMUs** with **BGR** colours, and the text as an ordinary flow inside `{\shptxt}`. `lineColor` is what
+        proves the colour order: 1974729 is 0x1E21C9, and the document's border is #C9211E.
+
+        Four things worth keeping:
+        - **`\shpinst` had to come out of the skip list.** It is a starred destination, so the whole geometry
+          was being discarded as an unknown private extension — which is the right default and wrong here.
+          The positioning words are a family of a dozen and are tried in the dispatcher's `default` arm, before
+          the skip.
+        - **`\shpbxignore` and `\shpbyignore` are deliberately ignored.** They tell a reader to disregard the
+          *preceding* positioning keyword, for readers predating the current pair — and LibreOffice writes one
+          after every one of them, so honouring them discards the reference just stated.
+        - **A shape's text is a flow that has to be staged.** `\shptxt` already opened a `SectionKind.Frame`
+          flow whose paragraphs were dropped; it now collects blocks, and hands them to the enclosing shape
+          when its group closes — which works because the shape's brace is still open at that point.
+        - **The correction: LibreOffice's RTF export does *not* lose the wrap mode.** The earlier note said it
+          did, and measured a frame that stayed at 56.80 pt where the ODF render wrapped to 204.15. That was
+          the parent-style quirk again: LibreOffice exports a real text frame as `\shpwr2`, which its importer
+          reads as parallel, and a *drawing shape* as `\shpwr3`, which it reads as run-through. So a frame with
+          a parent graphic style round-trips its wrap correctly, and `frame-box.rtf` is a comparison rather
+          than a documented divergence. `\shpwr`'s numbering is still LibreOffice's own rather than the
+          specification's, exactly as recorded.
+        - And a second surprise: **an RTF shape's border is drawn *inside* its edge, not centred on it.**
+          LibreOffice's RTF import builds a Writer text frame from a `{\shp}` of shape type 202 and draws it as
+          one, so the same box strokes its left border at 57.7 pt in RTF and 56.65 in DOCX.
       - **DOC**, which is the Escher anchor record through `Paperless.MsBinary` — and that library's Escher
         reading is itself not written, so this one waits on more than the frame model.
 - [x] Footnote **placement**, which is the half that changes pagination rather than appearance. The note

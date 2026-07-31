@@ -67,6 +67,9 @@ public sealed class FrameDecorationComparisonTests : IDisposable
     // property of a graphic style. Only the fill: the border cannot be compared here, because LibreOffice
     // strokes a shape's outline as one closed five-point path and `PdfStrokes` reads two-point lines.
     [InlineData("frame-box.docx")]
+    // And in RTF, where the fill is an Escher `fillColor` property holding a **BGR** integer. Its companion
+    // `lineColor` is what proves the order: 1974729 is 0x1E21C9, and the document's border is #C9211E.
+    [InlineData("frame-box.rtf")]
     public void AFramesFillCoversWhatLibreOfficeFills(string fileName)
     {
         Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
@@ -100,6 +103,10 @@ public sealed class FrameDecorationComparisonTests : IDisposable
 
     [Theory]
     [InlineData("frame-box.fodt")]
+    // RTF, and not DOCX: LibreOffice's RTF import builds a Writer *text frame* from a `{\shp}` of shape type
+    // 202 and draws its border inside the edge, exactly as it does for ODF — while the same box in DOCX is a
+    // DrawingML shape whose outline straddles the edge and is written as one closed path.
+    [InlineData("frame-box.rtf")]
     public void AFramesBorderIsInsetByHalfItsWidthOnEverySide(string fileName)
     {
         Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");

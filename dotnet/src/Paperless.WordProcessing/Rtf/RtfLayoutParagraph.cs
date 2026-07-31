@@ -90,6 +90,10 @@ public readonly record struct RtfLayoutRun(
 /// </param>
 /// <param name="SectionIndex">Which of the document's sections the paragraph sits in.</param>
 /// <param name="Notes">The notes anchored in the paragraph's text, or null when it cites none.</param>
+/// <param name="Frames">
+/// The floating shapes anchored in it, or null when it carries none. Unlike a note these occupy no character
+/// position: a shape is placed beside the text rather than in it.
+/// </param>
 public readonly record struct RtfLayoutParagraph(
     string Text,
     ParagraphFormat Format,
@@ -101,7 +105,8 @@ public readonly record struct RtfLayoutParagraph(
     Colour? Colour = null,
     IReadOnlyList<RtfLayoutRun>? Runs = null,
     int SectionIndex = 0,
-    IReadOnlyList<RtfLayoutNote>? Notes = null);
+    IReadOnlyList<RtfLayoutNote>? Notes = null,
+    IReadOnlyList<RtfLayoutFrame>? Frames = null);
 
 /// <summary>
 /// A footnote or endnote as layout sees it: where it is cited, and the blocks of its body.

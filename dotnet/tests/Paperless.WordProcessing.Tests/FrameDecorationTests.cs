@@ -29,6 +29,7 @@ public sealed class FrameDecorationTests
     [Theory]
     [InlineData("frame-box.fodt")]
     [InlineData("frame-box.docx")]
+    [InlineData("frame-box.rtf")]
     public void AFrameCarriesTheColoursTheDocumentStates(string fileName)
     {
         PageFrame frame = OnlyFrame(fileName);
@@ -46,8 +47,19 @@ public sealed class FrameDecorationTests
         }
     }
 
+    [Theory]
+    [InlineData("frame-box.fodt")]
+    // RTF too, which is the surprise: an RTF `{\shp}` is a shape by name and a Writer text frame by
+    // behaviour — LibreOffice's import builds one from shape type 202 and draws its border inside the edge,
+    // where the same box in DOCX has its outline centred on it.
+    [InlineData("frame-box.rtf")]
+    public void AFramesBorderSitsInsideItsEdge(string fileName)
+    {
+        OnlyFrame(fileName).BorderStraddlesTheEdge.ShouldBeFalse(fileName);
+    }
+
     [Fact]
-    public void AnOdfFramesBorderSitsInsideItsEdge()
+    public void AnOdfFramesBorderSitsInsideItsEdgeAtTheMeasuredPlace()
     {
         // Measured: LibreOffice strokes this frame's 2 pt left border down x = 57.7 pt where the frame's own
         // left edge is 56.7. So the frame is where the document says and the border grows inwards.

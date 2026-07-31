@@ -50,6 +50,12 @@ public sealed partial class RtfDocumentReader
 
         /// <summary>A picture, recorded as a graphic without decoding its bytes.</summary>
         Picture,
+
+        /// <summary>The name half of a shape property pair, <c>{\sn}</c>.</summary>
+        ShapePropertyName,
+
+        /// <summary>Its value half, <c>{\sv}</c>, which arrives second.</summary>
+        ShapePropertyValue,
     }
 
     /// <summary>
@@ -362,6 +368,25 @@ public sealed partial class RtfDocumentReader
         /// <summary>The blocks of this flow, when it is a note's; null for every other flow.</summary>
         public Staged? NoteBlocks { get; init; }
 
+        /// <summary>
+        /// The blocks of this flow, when it is a shape's own text; null for every other flow.
+        /// </summary>
+        /// <remarks>
+        /// Its own list rather than <see cref="NoteBlocks"/> because the two go to different places when the
+        /// flow closes — a note's body to the paragraph that cites it, a shape's text to the shape — and a
+        /// shape inside a note's text is a flow that is both.
+        /// </remarks>
+        public Staged? FrameBlocks { get; init; }
+
+        /// <summary>
+        /// The floating shapes found in the paragraph being read, waiting for it to close.
+        /// </summary>
+        /// <remarks>
+        /// Per paragraph rather than per flow, because that is what anchors them: a <c>{\shp}</c> group sits
+        /// part way through the sentence it belongs to.
+        /// </remarks>
+        public List<RtfLayoutFrame> PendingFrames { get; } = [];
+
         /// <summary>Where this note's citation sits in the paragraph that cites it.</summary>
         public int NoteOffset { get; init; }
 
@@ -597,6 +622,8 @@ public sealed partial class RtfDocumentReader
             case RtfDestination.InfoField:
             case RtfDestination.AnnotationAuthor:
             case RtfDestination.FieldInstruction:
+            case RtfDestination.ShapePropertyName:
+            case RtfDestination.ShapePropertyValue:
                 state.Collected.Append(text);
                 return;
 
@@ -916,7 +943,7 @@ public sealed partial class RtfDocumentReader
         // slot. A shape's text flow has nowhere, and its paragraphs are dropped.
         Staged? destination = ReferenceEquals(flow, _flows[0])
             ? _layoutBlocks
-            : flow.NoteBlocks ?? FurnitureList(flow);
+            : flow.NoteBlocks ?? flow.FrameBlocks ?? FurnitureList(flow);
 
         if (flow.InTable)
         {
@@ -987,7 +1014,8 @@ public sealed partial class RtfDocumentReader
             ColourAt(state.ForegroundColourIndex),
             runs,
             _sectionIndex,
-            flow.PendingNotes.Count == 0 ? null : [.. flow.PendingNotes]);
+            flow.PendingNotes.Count == 0 ? null : [.. flow.PendingNotes],
+            flow.PendingFrames.Count == 0 ? null : [.. flow.PendingFrames]);
 
         if (cell is not null) cell.Add(new RtfLayoutBlock(recorded));
         else into!.Add(recorded);
@@ -1219,6 +1247,7 @@ public sealed partial class RtfDocumentReader
         flow.LayoutRuns.Clear();
         flow.LayoutLength = 0;
         flow.PendingNotes.Clear();
+        flow.PendingFrames.Clear();
         flow.PendingRuns.Clear();
         flow.PendingImages.Clear();
         flow.ListMarker.Clear();
@@ -1233,7 +1262,14 @@ public sealed partial class RtfDocumentReader
     /// Starts a nested flow — a note, comment, header, footer or shape text — in the current
     /// group.
     /// </summary>
-    private void BeginFlow(GroupState state, SectionKind kind, string? name)
+    /// <param name="state">The group state, whose destination becomes the flow's body.</param>
+    /// <param name="kind">What kind of flow it is, which is what the extracted section becomes.</param>
+    /// <param name="name">Its name, for a header slot or a comment's author.</param>
+    /// <param name="stagesBlocks">
+    /// True to collect the flow's blocks for layout as well as its content. Right for a shape's own text,
+    /// which becomes the frame's content; wrong for a comment, which layout does not draw at all.
+    /// </param>
+    private void BeginFlow(GroupState state, SectionKind kind, string? name, bool stagesBlocks = false)
     {
         state.Destination = RtfDestination.Body;
         _flows.Add(new Flow(new ContentSection
@@ -1244,6 +1280,7 @@ public sealed partial class RtfDocumentReader
         })
         {
             Depth = _groupDepth,
+            FrameBlocks = stagesBlocks ? new Staged() : null,
         });
     }
 
@@ -1303,7 +1340,25 @@ public sealed partial class RtfDocumentReader
                 // extraction, and nothing in RTF gives a picture a name or alternative text.
                 CurrentFlow.PendingImages.Add(new ContentImage());
                 break;
+
+            case RtfDestination.ShapePropertyName:
+                // Held until the value arrives: RTF writes the two as separate groups, name first.
+                _shapeProperty = state.Collected.ToString().Trim();
+                break;
+
+            case RtfDestination.ShapePropertyValue:
+                if (_shapeProperty is { Length: > 0 } property)
+                {
+                    ApplyShapeProperty(property, state.Collected.ToString().Trim());
+                    _shapeProperty = null;
+                }
+
+                break;
         }
+
+        // Before the flow check below, because a shape's text flow closes with the group *inside* the shape's
+        // and the shape has to still be open to receive it.
+        CloseShapes();
 
         // A field's hyperlink applies only within that field.
         if (_fieldDepth >= 0 && _groupDepth <= _fieldDepth)
@@ -1321,6 +1376,12 @@ public sealed partial class RtfDocumentReader
             _flows.RemoveAt(_flows.Count - 1);
 
             if (finished.Target.Children.Count > 0) _hoisted.Add(finished.Target);
+
+            // A shape's text goes to the shape, whose group encloses this one and is therefore still open.
+            if (finished.FrameBlocks is { } inside && OpenShape is { } shape)
+            {
+                shape.Blocks.AddRange(inside.Finished());
+            }
 
             // A note hands its body to the paragraph that cited it, which is still open: the citing
             // paragraph's own \par has not been read yet, since the note group sits inside the sentence.
