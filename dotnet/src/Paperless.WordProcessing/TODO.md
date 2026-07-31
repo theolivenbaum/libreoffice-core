@@ -60,9 +60,31 @@ indexes or resolvable style chains.
 
       So the label is a run drawn at its own position and the first line's start comes from
       `text:label-followed-by`: `listtab` gives the stop, `space` a single space after the label, `nothing`
-      the label's own width. What is *not* settled is the multi-level and restart semantics — which is the
-      circular part, since a restart per page depends on pagination — and DOCX's `w:numbering` definitions,
-      which the extraction path resolves but the layout path would need too.
+      the label's own width.
+
+      **Done for ODF**, and it needed no new machinery in the layout engine, which is the part worth
+      remembering. Writer models a label as a portion at the head of the item's first line followed by a tab,
+      and modelling it the same way means the label is just the paragraph's *prefix* — the mechanism a
+      footnote's citation already uses, which exists precisely so that prefixing text does not shift the
+      offsets of anything anchored in the paragraph — with the level's indents replacing the paragraph's own
+      and the level's stop added to its tab stops. Three things had to be right:
+      - The level's indents **replace** the paragraph's rather than adding to them, which is ODF's rule for
+        the label-alignment mode. Adding them indents a list twice.
+      - A level with no definition of its own takes the nearest one **above** it, since a style commonly
+        defines level one and a document nests three deep. Without that a nested list shows no label.
+      - `text:list-tab-stop-position` is measured from the **text area** and `TabRuler`'s stops from the
+        **line's start**, so the level's stop has the line's own start taken off it. Measured: a list whose
+        margin and stop are both 1.27 cm puts its text at 92.70 pt, the area plus *one* of them. Skipping the
+        conversion put the text 18 pt right, by exactly the hanging indent.
+
+      Still open here: `text:display-levels`, so a level asking for `1.2.3` shows `3`; an image label, which
+      needs a decoder; and the other three formats, whose labels the extraction path already computes.
+
+      And one **inconsistency this turned up and did not settle**: `TabStop.Position`'s own documentation says
+      it is measured "from the text area's start edge, not from the indent", while `TabRuler` measures it from
+      the line's start. Every tabbed corpus document has a zero indent, so none of them can tell the two
+      apart. One document with an indented paragraph and a stated stop would settle it — and if the comment is
+      the right one, every tab in an indented paragraph is currently placed wrongly.
 - [x] **Page geometry**, in `Model/PageGeometry.cs`, read from all four formats and verified against
       LibreOffice's own rendering. The interesting part is that the formats do not mean the same thing
       by "top margin": Word's `w:top` is the distance to the first line of *body* text with the header

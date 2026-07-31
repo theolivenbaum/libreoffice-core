@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<office:document
+    xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0"
+    xmlns:style="urn:oasis:names:tc:opendocument:xmlns:style:1.0"
+    xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0"
+    xmlns:fo="urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0"
+    xmlns:dc="http://purl.org/dc/elements/1.1/"
+    office:version="1.3" office:mimetype="application/vnd.oasis.opendocument.text">
+ <office:meta><dc:title>Paperless numbered list</dc:title>
+  <dc:subject>A hanging numbered label and its list tab stop, for layout comparison</dc:subject></office:meta>
+ <office:automatic-styles>
+  <style:page-layout style:name="PL">
+   <style:page-layout-properties fo:page-width="21cm" fo:page-height="29.7cm"
+       fo:margin-left="2cm" fo:margin-right="2cm" fo:margin-top="2cm" fo:margin-bottom="2cm"/>
+  </style:page-layout>
+ </office:automatic-styles>
+ <office:styles>
+  <style:style style:name="Body" style:family="paragraph">
+   <style:paragraph-properties fo:text-align="start" fo:text-indent="0cm" fo:hyphenate="false"
+       fo:margin-top="0cm" fo:margin-bottom="0cm" fo:line-height="100%"
+       fo:orphans="0" fo:widows="0"/>
+   <style:text-properties style:font-name="Carlito" fo:font-family="Carlito" fo:font-size="11pt"
+       fo:language="en" fo:country="GB"/>
+  </style:style>
+  <text:list-style style:name="Numbered">
+   <text:list-level-style-number text:level="1" style:num-suffix="." style:num-format="1">
+    <style:list-level-properties text:list-level-position-and-space-mode="label-alignment">
+     <style:list-level-label-alignment text:label-followed-by="listtab"
+         text:list-tab-stop-position="1.27cm" fo:text-indent="-0.635cm" fo:margin-left="1.27cm"/>
+    </style:list-level-properties>
+   </text:list-level-style-number>
+  </text:list-style>
+ </office:styles>
+ <office:master-styles>
+  <style:master-page style:name="Standard" style:page-layout-name="PL"/>
+ </office:master-styles>
+ <office:body><office:text>
+   <text:p text:style-name="Body">Before the list.</text:p>
+   <text:list text:style-name="Numbered">
+    <text:list-item><text:p text:style-name="Body">First item of the numbered list.</text:p></text:list-item>
+    <text:list-item><text:p text:style-name="Body">Second item, which is deliberately long enough to wrap onto a second line and a third so that the continuation lines show where the hanging indent really puts them.</text:p></text:list-item>
+    <text:list-item><text:p text:style-name="Body">Third item.</text:p></text:list-item>
+   </text:list>
+   <text:p text:style-name="Body">After the list.</text:p>
+  </office:text></office:body>
+</office:document>

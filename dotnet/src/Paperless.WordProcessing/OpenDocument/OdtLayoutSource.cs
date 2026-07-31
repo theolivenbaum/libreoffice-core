@@ -212,6 +212,8 @@ public sealed partial class OdtLayoutSource
         ArgumentNullException.ThrowIfNull(body);
 
         _sectionIndex = 0;
+        _lists.Clear();
+        _labelPending = false;
         List<PageBlock> blocks = [];
         Walk(body, blocks, depth: 0);
         return blocks;
@@ -294,8 +296,25 @@ public sealed partial class OdtLayoutSource
                 continue;
             }
 
+            if (ns == OdfNamespaces.Text && name == "list")
+            {
+                // A list is transparent to the walk and *not* transparent to the paragraphs inside it: they
+                // take the level's label and its indents. So the nesting is tracked rather than ignored.
+                EnterList(child);
+                Walk(child, into, depth + 1);
+                LeaveList();
+                continue;
+            }
+
+            if (ns == OdfNamespaces.Text && name == "list-item")
+            {
+                EnterListItem();
+                Walk(child, into, depth + 1);
+                continue;
+            }
+
             if (ns == OdfNamespaces.Text
-                && name is "list" or "list-item" or "list-header" or "section" or "index-body"
+                && name is "list-header" or "section" or "index-body"
                     or "table-of-content" or "alphabetical-index" or "illustration-index"
                     or "table-index" or "object-index" or "user-index" or "bibliography"
                     or "tracked-changes" or "deletion" or "insertion")
@@ -303,6 +322,9 @@ public sealed partial class OdtLayoutSource
                 // A deletion's content is inside a change region and is not part of the text a reader
                 // sees, so it is skipped rather than walked — the same decision every one of Paperless's
                 // extraction readers makes.
+                //
+                // A `text:list-header` is walked but does not enter an item: it is an unnumbered heading
+                // inside a list, so it takes the level's indents and shows no label.
                 if (name is not ("tracked-changes" or "deletion")) Walk(child, into, depth + 1);
                 continue;
             }
@@ -374,6 +396,20 @@ public sealed partial class OdtLayoutSource
         OpenTypeFace? face = Face(text);
         if (face is null) return null;
 
+        // A list item's label is a prefix like a footnote's citation, and takes the same route for the same
+        // reason: prefixing the text afterwards would shift every run's offset and every anchor in the
+        // paragraph by the label's length. A paragraph that is already carrying a prefix — a note's own first
+        // paragraph — is never in a list, so the two cannot collide.
+        OdtListLabel? list = PendingLabel();
+
+        if (prefix is null && list is { Text: { } label })
+        {
+            prefix = label + Separator(list.Value.Geometry);
+            prefixStyle = list.Value.StyleName is { Length: > 0 } name
+                ? new OdfStyleReference(name, OdfStyleFamily.Text)
+                : null;
+        }
+
         RunWalker walker = new(styleName, CitationOf, _footnoteNumber, _endnoteNumber);
         walker.Walk(element, prefix, prefixStyle);
 
@@ -390,7 +426,7 @@ public sealed partial class OdtLayoutSource
             Face = face,
             Font = _references.GetValueOrDefault(text.FaceKey),
             Colour = text.Colour ?? Colour.Black,
-            Format = OdfParagraphFormats.Resolve(_styles, styleName),
+            Format = Listed(OdfParagraphFormats.Resolve(_styles, styleName), list),
             EmSize = text.Size,
             Language = text.Language,
             Shaping = new ShapingOptions(Language: text.Language),

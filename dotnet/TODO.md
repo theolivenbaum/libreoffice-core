@@ -90,7 +90,7 @@ binary.
 | ❌ | `xlsx`/`pptx`, `xls`/`ppt` and CSV readers |
 | ❌ | Decryption (detection works; decryption does not) |
 | ❌ | Rendering backends: `Paperless.Rendering`'s rasteriser and PDF writer are stubs |
-| ❌ | List labels in layout; the RTF/DOC frame reads; note-numbering restarts; vertical and RTL text |
+| ❌ | Non-ODF list labels; the RTF/DOC frame reads; note-numbering restarts; vertical and RTL text |
 | ❌ | Spreadsheet print layout and slide rendering |
 | ❌ | Vector import (WMF/EMF/EMF+/SVG) |
 | ❌ | The CLI beyond `identify`, `extract` and `metadata` |
@@ -229,9 +229,11 @@ was found because a page comparison put a word a measurable distance from where 
 - [x] A frame's own content, and the DOCX frame read — where OOXML's `wp:wrapNone` turns out to be ODF's
       *run-through* and ODF's `none` to be `wp:wrapTopAndBottom`, so the two formats use one word for
       opposite things.
-- [ ] **List labels in the layout path**, which is the most visible gap left: all four readers compute a
-      label for extraction and none of them reaches layout, so every numbered and bulleted list renders with
-      no number and no bullet. The geometry is measured and recorded in the word-processing TODO.
+- [x] **List labels in the layout path for ODF**, which was the most visible gap left: every numbered and
+      bulleted list rendered with no number and no bullet. It needed no new machinery — Writer models a label
+      as a portion at the head of the first line followed by a tab, so the label is the paragraph's *prefix*
+      and the level's indents replace the paragraph's own.
+- [ ] List labels for DOCX, DOC and RTF, whose labels the extraction path already computes.
 - [ ] The rest of it: the RTF and DOC frame reads, contour wrap, and the vertical and right-to-left writing
       modes. The RTF numbers are measured and recorded in the word-processing TODO, including that
       LibreOffice's own RTF export loses the wrap mode and that its `\shpwr` numbering is not the

@@ -302,3 +302,14 @@ it round-trips itself and disagrees with everyone else.
 from "align on the last of `.` or `,`". LibreOffice puts both at 462.20 pt — the same place as `9.125`, which
 has one digit before its only stop — and the last-separator rule puts `3.5.` at 453.77. Both rules agree on
 every value with a single separator, which is why the older documents could not catch it.
+
+`list-numbered.fodt` is a three-item numbered list with a hanging label, and it checks three separate rules at
+once because a list has three: the **label** sits at the level's margin plus its negative indent (74.70 pt), the
+item's **first line** at the level's tab stop (92.70), and a **continuation** line at the margin alone (92.70) —
+so the label hangs to the left of the block. Its second item is deliberately long enough to wrap, since without
+a wrapped item the third rule is untested and a reader that put continuations back at the margin would pass.
+
+Compared by *line starts* rather than by every word, in `ListComparisonTests` rather than the tab tests. That is
+not a loosening: a list is checked by where each line begins, and comparing every word on a 120 pt line measures
+the recorded ~0.15% difference between LibreOffice's own width and HarfBuzz's, which exceeds the tab tolerance
+and has nothing to do with lists.
