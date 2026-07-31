@@ -59,6 +59,10 @@ public sealed partial class DocxLayoutSource
                 // ODF frame's left border at 57.7 pt and the DOCX shape's at 56.65, for a frame whose left
                 // edge is 56.7.
                 BorderStraddlesTheEdge = true,
+                HorizontalAlignment = AlignmentOf(Drawing(anchor, "positionH")),
+                VerticalAlignment = AlignmentOf(Drawing(anchor, "positionV")),
+                HorizontalRelativeTo = ReferenceOf(Drawing(anchor, "positionH")),
+                VerticalRelativeTo = ReferenceOf(Drawing(anchor, "positionV")),
                 Blocks = ContentOf(anchor),
             });
         }
@@ -200,10 +204,8 @@ public sealed partial class DocxLayoutSource
     /// One of the two position offsets, in EMUs.
     /// </summary>
     /// <remarks>
-    /// <c>wp:posOffset</c> is a measure and <c>wp:align</c> a named position — <c>left</c>, <c>center</c>,
-    /// <c>right</c> and their vertical counterparts. Only the measure is read; a named position comes back as
-    /// zero, which puts the frame at its reference's start. That is the honest answer until the reference
-    /// rectangle each <c>relativeFrom</c> names is resolved, since "centre" is meaningless without it.
+    /// <c>wp:posOffset</c> is a measure and <c>wp:align</c> a named position; a position stating the second has
+    /// no offset to read, and its alignment comes from <see cref="AlignmentOf"/> instead.
     /// </remarks>
     private static Length Offset(XElement anchor, string name)
     {
@@ -211,6 +213,46 @@ public sealed partial class DocxLayoutSource
 
         return position is null ? Length.Zero : Emu(Drawing(position, "posOffset")?.Value);
     }
+
+    /// <summary>
+    /// How one axis is stated, from <c>wp:align</c>.
+    /// </summary>
+    /// <remarks>
+    /// An <em>element</em> rather than an attribute, and the alternative to <c>wp:posOffset</c> rather than a
+    /// modifier of it — a position states one or the other. Its vocabulary is shared between the two axes and
+    /// so overlaps confusingly: <c>center</c> means both centres, while <c>left</c> and <c>top</c> are the same
+    /// case seen twice. <c>inside</c> and <c>outside</c> are the binding and outer edges of a two-sided
+    /// document and are read as start and end, since nothing here knows which side a page is.
+    /// </remarks>
+    /// <param name="position">The <c>wp:positionH</c> or <c>wp:positionV</c>.</param>
+    private static FrameAlignment AlignmentOf(XElement? position)
+        => Drawing(position, "align")?.Value?.Trim() switch
+        {
+            "left" or "top" or "inside" => FrameAlignment.Start,
+            "center" => FrameAlignment.Centre,
+            "right" or "bottom" or "outside" => FrameAlignment.End,
+            _ => FrameAlignment.Offset,
+        };
+
+    /// <summary>
+    /// Which rectangle the position is measured against, from <c>relativeFrom</c>.
+    /// </summary>
+    /// <remarks>
+    /// <c>page</c> is the whole sheet and <c>margin</c> — with its four one-sided spellings — is the text area,
+    /// which is the distinction that matters: reading them as the same thing puts a page-centred picture off by
+    /// half the difference between the two margins. <c>column</c> is the text column, which for a single-column
+    /// page is the text area again, and is what LibreOffice's own export writes; treating it as the paragraph
+    /// instead is right only while the paragraph has no indent.
+    /// </remarks>
+    /// <param name="position">The <c>wp:positionH</c> or <c>wp:positionV</c>.</param>
+    private static FrameReference ReferenceOf(XElement? position)
+        => Plain(position, "relativeFrom") switch
+        {
+            "page" => FrameReference.Page,
+            "margin" or "leftMargin" or "rightMargin" or "topMargin" or "bottomMargin"
+                or "insideMargin" or "outsideMargin" or "column" => FrameReference.TextArea,
+            _ => FrameReference.Paragraph,
+        };
 
     /// <summary>What the offsets are measured from.</summary>
     /// <remarks>

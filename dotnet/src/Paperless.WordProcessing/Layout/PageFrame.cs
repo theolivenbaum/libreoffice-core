@@ -22,6 +22,71 @@ public enum FrameAnchor
     Page,
 }
 
+/// <summary>How a frame's position is stated along one axis.</summary>
+/// <remarks>
+/// Every format spells this as a small vocabulary rather than as a number, because "centred" cannot be written
+/// as an offset: it depends on the frame's own size and on the width of whatever it is centred in. So the
+/// alignment and the thing it is relative to are read separately and resolved together, at the point where both
+/// rectangles are known.
+/// </remarks>
+public enum FrameAlignment
+{
+    /// <summary>A measured distance from the reference's start edge, which is what most frames state.</summary>
+    Offset,
+
+    /// <summary>Against the reference's start edge, ignoring the stated offset.</summary>
+    Start,
+
+    /// <summary>Centred in the reference.</summary>
+    Centre,
+
+    /// <summary>Against the reference's end edge.</summary>
+    End,
+}
+
+/// <summary>What a frame's position is measured against.</summary>
+/// <remarks>
+/// Three rather than the dozen each format names, because those dozen collapse: ODF's
+/// <c>page-start-margin</c> and OOXML's <c>leftMargin</c> both mean an edge of the text area, and every
+/// paragraph-ish value means the paragraph. What matters to placement is only <em>which rectangle</em>, and
+/// there are three of those.
+/// </remarks>
+public enum FrameReference
+{
+    /// <summary>The anchoring paragraph, including its indents.</summary>
+    Paragraph,
+
+    /// <summary>The text area — the page less its margins, or the column within it.</summary>
+    TextArea,
+
+    /// <summary>The whole page, margins included.</summary>
+    Page,
+}
+
+/// <summary>
+/// The rectangles a frame's position can be measured against, resolved for one placement.
+/// </summary>
+/// <remarks>
+/// Handed in rather than reachable from the frame, because only layout knows any of it: where the anchoring
+/// paragraph ended up, how wide it is after its indents, and which page it landed on. A frame in a table cell
+/// or a running head has no page of its own, and there the flow's own rectangle stands in for all three —
+/// which is right, since a page-relative frame inside a cell is not a thing any of the four formats can state.
+/// </remarks>
+/// <param name="Anchor">The anchoring paragraph's top-left, in page coordinates.</param>
+/// <param name="ParagraphWidth">How wide that paragraph is, after its indents.</param>
+/// <param name="TextArea">The column the paragraph is in.</param>
+/// <param name="Page">The whole page.</param>
+public readonly record struct FrameSpace(
+    DocPoint Anchor, Length ParagraphWidth, DocRect TextArea, DocRect Page)
+{
+    /// <summary>A space with no page of its own: a cell's, a header's, or another frame's.</summary>
+    /// <param name="area">The flow's rectangle, which stands in for all three.</param>
+    /// <param name="anchor">The anchoring paragraph's top-left.</param>
+    /// <param name="paragraphWidth">How wide that paragraph is.</param>
+    public static FrameSpace In(DocRect area, DocPoint anchor, Length paragraphWidth)
+        => new(anchor, paragraphWidth, area, area);
+}
+
 /// <summary>How text behaves where a frame is in its way.</summary>
 /// <remarks>
 /// The names are ODF's, and the other three formats' spellings map onto them: DOCX's <c>w:wrap</c> values,
@@ -166,26 +231,61 @@ public sealed record PageFrame
     /// <summary>True when the frame takes room from the text rather than being ignored by it.</summary>
     public bool Obstructs => Wrap != TextWrap.Through;
 
-    /// <summary>
-    /// The region text keeps clear of, given where the anchor resolved to.
-    /// </summary>
-    /// <param name="anchor">The anchor's own top-left in page coordinates.</param>
-    public DocRect RegionFrom(DocPoint anchor) => new(
-        anchor.X + Offset.X - Margins.Left,
-        anchor.Y + Offset.Y - Margins.Top,
-        Size.Width + Margins.Horizontal,
-        Size.Height + Margins.Vertical);
+    /// <summary>Where the frame's position is measured from along the horizontal.</summary>
+    public FrameAlignment HorizontalAlignment { get; init; } = FrameAlignment.Offset;
 
-    /// <summary>The frame itself, given where the anchor resolved to — what would be drawn.</summary>
-    /// <param name="anchor">The anchor's own top-left in page coordinates.</param>
-    public DocRect BoundsFrom(DocPoint anchor)
-        => new(anchor.X + Offset.X, anchor.Y + Offset.Y, Size.Width, Size.Height);
+    /// <summary>And along the vertical.</summary>
+    public FrameAlignment VerticalAlignment { get; init; } = FrameAlignment.Offset;
+
+    /// <summary>Which rectangle the horizontal position is measured against.</summary>
+    public FrameReference HorizontalRelativeTo { get; init; } = FrameReference.Paragraph;
+
+    /// <summary>And which the vertical is.</summary>
+    public FrameReference VerticalRelativeTo { get; init; } = FrameReference.Paragraph;
+
+    /// <summary>
+    /// The region text keeps clear of, given the rectangles the position resolves against.
+    /// </summary>
+    /// <param name="space">Where the anchor, its paragraph, its column and its page are.</param>
+    public DocRect RegionIn(FrameSpace space)
+    {
+        DocRect bounds = BoundsIn(space);
+
+        return new DocRect(
+            bounds.X - Margins.Left,
+            bounds.Y - Margins.Top,
+            bounds.Width + Margins.Horizontal,
+            bounds.Height + Margins.Vertical);
+    }
+
+    /// <summary>
+    /// The frame itself — what would be drawn.
+    /// </summary>
+    /// <remarks>
+    /// The two axes are resolved independently, because the formats state them independently: a picture
+    /// centred on the page and two centimetres below its paragraph is ordinary, and it is two different
+    /// rectangles that answer the two halves.
+    /// </remarks>
+    /// <param name="space">Where the anchor, its paragraph, its column and its page are.</param>
+    public DocRect BoundsIn(FrameSpace space) => new(
+        Placed(
+            HorizontalAlignment,
+            Offset.X,
+            Size.Width,
+            Horizontally(space, HorizontalRelativeTo)),
+        Placed(
+            VerticalAlignment,
+            Offset.Y,
+            Size.Height,
+            Vertically(space, VerticalRelativeTo)),
+        Size.Width,
+        Size.Height);
 
     /// <summary>The rectangle the frame's own text is laid out in: its bounds less its padding.</summary>
-    /// <param name="anchor">The anchor's own top-left in page coordinates.</param>
-    public DocRect ContentAreaFrom(DocPoint anchor)
+    /// <param name="space">Where the anchor, its paragraph, its column and its page are.</param>
+    public DocRect ContentAreaIn(FrameSpace space)
     {
-        DocRect bounds = BoundsFrom(anchor);
+        DocRect bounds = BoundsIn(space);
 
         return new DocRect(
             bounds.X + Padding.Left,
@@ -193,4 +293,50 @@ public sealed record PageFrame
             Length.Max(Length.Zero, bounds.Width - Padding.Horizontal),
             Length.Max(Length.Zero, bounds.Height - Padding.Vertical));
     }
+
+    /// <summary>
+    /// One axis resolved: an offset, or an alignment within the reference's extent.
+    /// </summary>
+    /// <remarks>
+    /// An extent of nothing falls back to the offset whatever the alignment says, which is the paragraph's
+    /// case vertically: a paragraph's height is not known when its frames are placed — the frame is what
+    /// changes it — so "centred in the paragraph" cannot be answered and "at the paragraph's top" is the
+    /// nearest honest one. Centring against zero would put half the frame above the paragraph.
+    /// </remarks>
+    private static Length Placed(
+        FrameAlignment alignment, Length offset, Length size, (Length Start, Length Extent) reference)
+    {
+        if (reference.Extent <= Length.Zero) return reference.Start + offset;
+
+        return alignment switch
+        {
+            FrameAlignment.Start => reference.Start,
+            FrameAlignment.Centre => reference.Start + ((reference.Extent - size) / 2),
+            FrameAlignment.End => reference.Start + reference.Extent - size,
+            _ => reference.Start + offset,
+        };
+    }
+
+    private static (Length Start, Length Extent) Horizontally(
+        FrameSpace space, FrameReference reference) => reference switch
+        {
+            FrameReference.TextArea => (space.TextArea.X, space.TextArea.Width),
+            FrameReference.Page => (space.Page.X, space.Page.Width),
+            _ => (space.Anchor.X, space.ParagraphWidth),
+        };
+
+    /// <summary>
+    /// The vertical reference, whose paragraph case has a start and no extent.
+    /// </summary>
+    /// <remarks>
+    /// Deliberately zero rather than a guess: see <see cref="Placed"/>. Every other reference has a real
+    /// height, which is what lets a watermark be centred on the page.
+    /// </remarks>
+    private static (Length Start, Length Extent) Vertically(
+        FrameSpace space, FrameReference reference) => reference switch
+        {
+            FrameReference.TextArea => (space.TextArea.Y, space.TextArea.Height),
+            FrameReference.Page => (space.Page.Y, space.Page.Height),
+            _ => (space.Anchor.Y, Length.Zero),
+        };
 }

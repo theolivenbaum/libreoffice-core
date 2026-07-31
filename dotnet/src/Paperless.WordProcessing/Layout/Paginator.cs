@@ -494,7 +494,13 @@ public sealed class Paginator
             // for every line after it.
             Length paragraphBase = used + spaceAbove;
             Length top = paragraphBase;
-            Length origin = layout.Lines[lineIndex].Top;
+            // Zero when the paragraph *begins* here, because then its first line's own top is part of the
+            // paragraph and has to be paid for: a frame that pushed that line down pushed the whole paragraph
+            // down with it. Normalising it away — which is right for a paragraph carried over, whose
+            // continuation starts at the page's top whatever its lines' tops say — silently cancels every
+            // push that lands on a first line, so a `none`-wrapped frame moved the text of its own paragraph
+            // and of no other.
+            Length origin = lineIndex == 0 ? Length.Zero : layout.Lines[lineIndex].Top;
             Length dropped = columnIsEmpty ? layout.Lines[lineIndex].SpaceAbove : Length.Zero;
 
             for (int i = 0; i < allowed; i++)
@@ -582,15 +588,20 @@ public sealed class Paginator
 
             foreach (PageFrame frame in paragraph.Frames)
             {
-                DocPoint anchor = new(
-                    area.X + paragraph.Format.StartIndent, area.Y + paragraphTop);
+                // The one place all three reference rectangles are real: a frame centred on the page or held
+                // against the text area's right edge can only be resolved where the page is known.
+                FrameSpace space = new(
+                    new DocPoint(area.X + paragraph.Format.StartIndent, area.Y + paragraphTop),
+                    FlowLayouter.ParagraphWidth(area, paragraph.Format),
+                    area,
+                    new DocRect(Length.Zero, Length.Zero, page.Size.Width, page.Size.Height));
 
                 frames.Add(new PlacedFrame(
                     frame,
-                    frame.BoundsFrom(anchor),
-                    frame.RegionFrom(anchor),
+                    frame.BoundsIn(space),
+                    frame.RegionIn(space),
                     FlowLayouter.LayOut(
-                        frame.Blocks, frame.ContentAreaFrom(anchor), Length.Zero)));
+                        frame.Blocks, frame.ContentAreaIn(space), Length.Zero)));
             }
 
             reflowed.Remove(index);
@@ -716,7 +727,9 @@ public sealed class Paginator
         // Measured from the first line's own top rather than by adding heights up, because the two differ
         // once a frame has pushed a line past itself: the gap belongs to the paragraph and has to be paid
         // for out of the page's room like anything else.
-        Length origin = from < layout.Lines.Count ? layout.Lines[from].Top : Length.Zero;
+        // Zero for a paragraph that begins here, for the reason the placement loop records: a push that
+        // moved its first line moved the paragraph, and the room it takes has to be counted.
+        Length origin = from > 0 && from < layout.Lines.Count ? layout.Lines[from].Top : Length.Zero;
 
         // The leading the first line gives up at the top of a frame. It comes out of that line's height but
         // not out of the tops of the lines below it, so every later reach has to have it taken off too — and

@@ -474,6 +474,10 @@ public sealed partial class OdtLayoutSource
                 Padding = FramePadding(styleName),
                 Background = FrameBackground(styleName),
                 Borders = Borders(styleName, OdfStyleFamily.Graphic, OdfPropertyKind.Graphic),
+                HorizontalAlignment = HorizontalAlignmentOf(styleName),
+                VerticalAlignment = VerticalAlignmentOf(styleName),
+                HorizontalRelativeTo = HorizontalReferenceOf(styleName),
+                VerticalRelativeTo = VerticalReferenceOf(styleName),
                 Blocks = FrameBlocks(drawing),
             });
         }
@@ -551,6 +555,86 @@ public sealed partial class OdtLayoutSource
 
         return background.Value == "transparent" ? null : background.AsColour();
     }
+
+    /// <summary>
+    /// How the frame's horizontal position is stated, from <c>style:horizontal-pos</c>.
+    /// </summary>
+    /// <remarks>
+    /// <c>from-left</c> and <c>from-inside</c> are the measured cases and everything else is an alignment.
+    /// The mirrored values — <c>inside</c> and <c>outside</c> — are read as <c>left</c> and <c>right</c>: they
+    /// mean the binding edge and the outer edge of a two-sided document, and Paperless does not yet know
+    /// whether a page is a left- or a right-hand one. On a one-sided document they are the same thing.
+    /// </remarks>
+    private FrameAlignment HorizontalAlignmentOf(string? styleName)
+        => Graphic(styleName, OdfNamespaces.Style, "horizontal-pos") switch
+        {
+            "left" or "inside" => FrameAlignment.Start,
+            "center" => FrameAlignment.Centre,
+            "right" or "outside" => FrameAlignment.End,
+            _ => FrameAlignment.Offset,
+        };
+
+    /// <summary>
+    /// And the vertical, from <c>style:vertical-pos</c>.
+    /// </summary>
+    /// <remarks>
+    /// <c>below</c> is read as a measured offset rather than as an alignment: it means "under the anchoring
+    /// line", which is where a frame with a zero offset already goes.
+    /// </remarks>
+    private FrameAlignment VerticalAlignmentOf(string? styleName)
+        => Graphic(styleName, OdfNamespaces.Style, "vertical-pos") switch
+        {
+            "top" => FrameAlignment.Start,
+            "middle" => FrameAlignment.Centre,
+            "bottom" => FrameAlignment.End,
+            _ => FrameAlignment.Offset,
+        };
+
+    /// <summary>
+    /// Which rectangle the horizontal position is measured against, from <c>style:horizontal-rel</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// ODF names a dozen values and they collapse to three. Two distinctions matter and both were measured on
+    /// <c>frame-aligned.fodt</c>, whose margins are deliberately unequal so that no two of the three answers
+    /// coincide.
+    /// </para>
+    /// <para>
+    /// <c>page</c> is the whole sheet, margins included — a 3 cm frame centred on a 21 cm page lands at
+    /// 255.15 pt — while <c>page-content</c> and the margin edges mean the text area, where the same frame
+    /// centres at 226.75. Reading the one as the other is off by half the difference between the two margins.
+    /// </para>
+    /// <para>
+    /// And <strong><c>paragraph</c> is the paragraph <em>frame's</em> area, which is the column, not the
+    /// indented box its text sits in</strong> — that is <c>paragraph-content</c>. Writer's own two relations,
+    /// <c>FRAME</c> and <c>PRINT_AREA</c>. A frame centred in a paragraph indented 3 cm at the left and 1 at
+    /// the right still lands at 226.75, the column's centre, and not at the 255.1 the indented box would give.
+    /// </para>
+    /// </remarks>
+    private FrameReference HorizontalReferenceOf(string? styleName)
+        => Graphic(styleName, OdfNamespaces.Style, "horizontal-rel") switch
+        {
+            "page" => FrameReference.Page,
+            "paragraph-content" or "frame-content" => FrameReference.Paragraph,
+            _ => FrameReference.TextArea,
+        };
+
+    /// <summary>
+    /// And which the vertical is measured against, from <c>style:vertical-rel</c>.
+    /// </summary>
+    /// <remarks>
+    /// Its own method because <c>paragraph</c> means something different on this axis: horizontally it is the
+    /// column, vertically it is where the paragraph <em>is</em> — measured at 70.82 pt for a frame half a
+    /// centimetre below a paragraph whose top is 56.7. Sharing one mapping between the axes puts every
+    /// paragraph-anchored frame at the top of the text area.
+    /// </remarks>
+    private FrameReference VerticalReferenceOf(string? styleName)
+        => Graphic(styleName, OdfNamespaces.Style, "vertical-rel") switch
+        {
+            "page" => FrameReference.Page,
+            "page-content" or "frame" or "frame-content" => FrameReference.TextArea,
+            _ => FrameReference.Paragraph,
+        };
 
     /// <summary>One property of a graphic style, as the document stated it.</summary>
     private string? Graphic(string? styleName, string propertyNamespace, string propertyName)

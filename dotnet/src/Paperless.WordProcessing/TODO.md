@@ -878,9 +878,34 @@ is read and verified, so what remains is the filling of pages rather than the me
       - **Contour wrap**, where the region is the image's outline rather than its box.
       - **`Dynamic`**'s threshold: Writer gives up and pushes the line down when the wider side is too narrow
         to be worth using. Treated as `Parallel` until the threshold is measured.
-      - **Page and character anchors** resolve as paragraph anchors do; `horizontal-rel` and `vertical-rel`
-        are read as "from the paragraph" whatever they say, and the named positions (`left`, `center`,
-        `right`) are not read at all.
+      - ~~**Page and character anchors**~~ — the named positions and their reference rectangles are read now,
+        for ODF and DOCX both. `FrameAlignment` says how an axis is stated and `FrameReference` says against
+        what, and `FrameSpace` carries the three rectangles that answer it — the anchoring paragraph, its
+        column and the page — because only layout knows any of them. `frame-aligned.fodt` has deliberately
+        **unequal margins**, 2 cm and 4 cm, so that no two of the three answers coincide; without that a
+        page-centred frame and a text-area-centred one land in the same place and the distinction is untested.
+
+        Two mappings that are not what their names suggest, both measured:
+        - **ODF's `paragraph` reference means the paragraph *frame's* area, which is the column** — not the
+          indented box its text sits in, which is `paragraph-content`. Writer's own `FRAME` and `PRINT_AREA`
+          relations. A frame centred in a paragraph indented 3 cm at the left and 1 at the right lands at
+          226.75 pt, the column's centre, not the 255.1 the indented box would give.
+        - **The two axes need different mappings.** Horizontally `paragraph` is the column; vertically it is
+          where the paragraph *is* — 70.82 pt for a frame half a centimetre below a paragraph whose top is
+          56.7. Sharing one mapping puts every paragraph-anchored frame at the top of the text area.
+
+        Still open: `inside`/`outside`, which mean the binding and outer edges of a two-sided document and are
+        read as start and end, since nothing here knows which side a page is on. And a *vertical* alignment
+        relative to the paragraph, which cannot be answered — a paragraph's height is not known when its frames
+        are placed, since the frame is what changes it — so it falls back to the paragraph's top.
+
+        This also found a **pre-existing pagination bug** that no corpus document could reach before. The
+        placement loop normalised each paragraph's first placed line to zero, which is right for a paragraph
+        *carried over* — its continuation starts at the page's top whatever its lines' tops say — and wrong for
+        one that *begins* on the page, where a frame that pushed the first line down pushed the whole paragraph
+        with it. So a `none`-wrapped frame moved the later lines of its own paragraph and no other paragraph at
+        all: measured, the three following paragraphs sat 29, 58 and 87 pt too high. `wrap-none.fodt` could not
+        catch it because its push lands on a line that is not the paragraph's first.
       - **RTF**, whose grammar is already half in place — `RtfDocumentReader` routes `\shptxt` to a
         `SectionKind.Frame` flow — and whose numbers are measured and recorded here so the next attempt starts
         from arithmetic:

@@ -279,6 +279,20 @@ inside it — 56.65 pt against the frame's 56.7, where the ODF render strokes 57
 against the reference, because LibreOffice writes a shape's outline as one closed path and `PdfStrokes` reads
 two-point lines; the border's width, colour and placement are pinned in `FrameDecorationTests` instead.
 
+`frame-aligned.fodt` and `.docx` are three frames aligned three ways — centred in the paragraph, held against
+the text area's right edge, and centred on the whole page — each with its own fill colour, so that a frame's
+*position* is directly measurable as a filled rectangle. Its margins are deliberately **unequal**, 2 cm and
+4 cm, and this is the whole design: with equal margins a page-centred frame and a text-area-centred one land in
+the same place, and a reader confusing the two would pass. LibreOffice puts them at 226.75, 396.85 and 255.15 pt
+and renders the DOCX export identically.
+
+Two things it settled. **ODF's `paragraph` reference means the paragraph frame's area, which is the column** —
+not the indented box its text sits in, which is `paragraph-content`; the first frame is centred in a paragraph
+indented 3 cm and 1 cm and still lands at the column's centre. And the two axes need different mappings, since
+`paragraph` vertically means where the paragraph *is*. Its frames all use `style:wrap="none"`, which also made
+it the document that caught a pagination bug `wrap-none.fodt` could not: a push landing on a paragraph's *first*
+line was being normalised away, so a frame moved its own paragraph's later lines and nothing else.
+
 One export behaviour to know before reading either file: LibreOffice's DOCX export **bakes a drawing shape's
 defaults into the document**. `wrap-frame.docx` therefore has an explicit #729FCF fill and a #3465A4 outline
 where `wrap-frame.fodt` has neither, and LibreOffice's own renders of the two differ accordingly. A reader

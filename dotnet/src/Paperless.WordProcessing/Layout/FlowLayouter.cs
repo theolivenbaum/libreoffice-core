@@ -108,18 +108,22 @@ public static class FlowLayouter
             // does not reach back up, which is what Writer does for anything but a negative offset.
             foreach (PageFrame frame in paragraph.Frames)
             {
-                DocPoint anchor = new(
-                    area.X + paragraph.Format.StartIndent, area.Y + paragraphTop);
+                // The flow's own rectangle stands in for the column and the page alike: a cell, a running head
+                // or another frame has neither, and no format can state a page-relative frame inside one.
+                FrameSpace space = FrameSpace.In(
+                    area,
+                    new DocPoint(area.X + paragraph.Format.StartIndent, area.Y + paragraphTop),
+                    ParagraphWidth(area, paragraph.Format));
 
                 frames.Add(new PlacedFrame(
                     frame,
-                    frame.BoundsFrom(anchor),
-                    frame.RegionFrom(anchor),
+                    frame.BoundsIn(space),
+                    frame.RegionIn(space),
 
                     // The frame's own text, at the frame's width — the same flow a table cell's content is,
                     // and nested one deeper so that a frame inside a frame cannot recurse forever.
                     nesting < MaxNesting
-                        ? LayOut(frame.Blocks, frame.ContentAreaFrom(anchor), Length.Zero, nesting + 1)
+                        ? LayOut(frame.Blocks, frame.ContentAreaIn(space), Length.Zero, nesting + 1)
                         : null));
             }
 
@@ -258,6 +262,23 @@ public static class FlowLayouter
     /// pushes it below the frame, which is a vertical decision and belongs where the tops are assigned.
     /// </para>
     /// </remarks>
+    /// <summary>
+    /// How wide a paragraph is in its area, which is what a frame aligned to it is aligned within.
+    /// </summary>
+    /// <remarks>
+    /// Its indents taken off, both of them, because ODF's <c>paragraph</c> reference means the paragraph's own
+    /// box rather than the column's — so a frame centred in an indented paragraph is not centred in the column.
+    /// The first line's indent is deliberately not part of it: it moves one line, not the block.
+    /// </remarks>
+    /// <param name="area">The flow's rectangle.</param>
+    /// <param name="format">The paragraph's format, for its indents.</param>
+    public static Length ParagraphWidth(DocRect area, ParagraphFormat format)
+    {
+        ArgumentNullException.ThrowIfNull(format);
+
+        return Length.Max(Length.Zero, area.Width - format.StartIndent - format.EndIndent);
+    }
+
     /// <param name="frames">The frames already placed, in page coordinates.</param>
     /// <param name="area">The area the line is being laid out in.</param>
     /// <param name="lineTop">The line box's top, in page coordinates.</param>

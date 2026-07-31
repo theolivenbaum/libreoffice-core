@@ -145,6 +145,44 @@ public sealed class FrameDecorationComparisonTests : IDisposable
         static bool Horizontal(DrawnStroke stroke) => stroke.Bounds.Width > stroke.Bounds.Height;
     }
 
+    [Theory]
+    [InlineData("frame-aligned.fodt")]
+    // The same three frames in DOCX, where the named positions are `wp:align` elements and the references are
+    // `relativeFrom` attributes — `column`, `margin` and `page` against ODF's `paragraph`, `page-content` and
+    // `page`. LibreOffice renders the two identically, which is the point of having both.
+    [InlineData("frame-aligned.docx")]
+    public void AnAlignedFrameLandsWhereLibreOfficePutsIt(string fileName)
+    {
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+
+        string pdf = _libreOffice.ConvertToPdf(Corpus.Require(fileName), _workDirectory);
+
+        // Each frame is coloured, so its fill *is* its position — which is what makes this measurable at all:
+        // a frame's placement is otherwise only visible in where the text it pushed aside went, and these
+        // frames deliberately push nothing sideways.
+        List<PdfFill> rendered =
+        [
+            .. PdfFills.Read(pdf)
+                .Where(fill => fill.Width > 1 && fill.Height > 1)
+                .OrderBy(fill => fill.Top),
+        ];
+
+        Assert.SkipWhen(rendered.Count == 0, $"{fileName}: LibreOffice filled nothing");
+
+        rendered.Count.ShouldBe(3, $"{fileName}: the document has three coloured frames");
+
+        List<DrawnFill> drawn = [.. Fills(fileName).OrderBy(fill => fill.Bounds.Y.Emu)];
+
+        drawn.Count.ShouldBe(3, $"{fileName}: drew {drawn.Count} fills");
+
+        for (int i = 0; i < rendered.Count; i++)
+        {
+            Close(drawn[i].Bounds.X, rendered[i].Left, $"{fileName}: frame {i + 1}'s left edge");
+            Close(drawn[i].Bounds.Y, rendered[i].Top, $"{fileName}: frame {i + 1}'s top edge");
+            Close(drawn[i].Bounds.Width, rendered[i].Width, $"{fileName}: frame {i + 1}'s width");
+        }
+    }
+
     // ------------------------------------------------------------------------- the machinery
 
     private static void Compare(
