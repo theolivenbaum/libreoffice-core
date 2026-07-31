@@ -226,8 +226,13 @@ was found because a page comparison put a word a measurable distance from where 
 - [x] Floating frames and text wrap for ODF, which needed a seam in `Paperless.Text` — a line's room is
       now asked for per line rather than being a property of its paragraph — and a change in the paginator,
       which lays blocks out once up front and cannot for a paragraph whose room depends on where it landed.
-- [ ] The rest of it: a frame's own content, the DOCX/DOC/RTF frame reads, contour wrap, and the vertical
-      and right-to-left writing modes.
+- [x] A frame's own content, and the DOCX frame read — where OOXML's `wp:wrapNone` turns out to be ODF's
+      *run-through* and ODF's `none` to be `wp:wrapTopAndBottom`, so the two formats use one word for
+      opposite things.
+- [ ] The rest of it: the RTF and DOC frame reads, contour wrap, and the vertical and right-to-left writing
+      modes. The RTF numbers are measured and recorded in the word-processing TODO, including that
+      LibreOffice's own RTF export loses the wrap mode and that its `\shpwr` numbering is not the
+      specification's.
 - [ ] Spreadsheet print layout — `ScPrintFunc`'s pagination is the routine to port
       faithfully. A spreadsheet has **no intrinsic pagination**: print settings *are* its
       page geometry.

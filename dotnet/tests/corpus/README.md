@@ -289,3 +289,10 @@ One measured caveat for these: the *vertical* comparison of a pushed line needs 
 horizontal one, because the distance carries three roundings rather than one — the frame's offset, its height,
 and the line height above it. LibreOffice's own two renders disagree by 0.1 pt for exactly that reason: 3 cm
 rounds to 1701 twips from ODF and 1079500 EMUs round to 1700 from DOCX.
+
+There are deliberately **no RTF wrap files**, and the reason is worth recording so nobody adds them expecting
+them to test anything: LibreOffice's RTF export loses the wrap mode. A `parallel` ODF frame comes out as
+`\shpwr3`, which its own importer reads as run-through, and its RTF render then puts every line at 56.80 pt
+where the ODF render wraps to 204.15. Its `\shpwr` numbering is its own rather than the specification's —
+1 means no-text-beside where the spec says "around", and the exporter is the exact inverse of the importer, so
+it round-trips itself and disagrees with everyone else.

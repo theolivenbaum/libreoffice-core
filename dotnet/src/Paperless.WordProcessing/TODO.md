@@ -678,7 +678,28 @@ is read and verified, so what remains is the filling of pages rather than the me
       - **Page and character anchors** resolve as paragraph anchors do; `horizontal-rel` and `vertical-rel`
         are read as "from the paragraph" whatever they say, and the named positions (`left`, `center`,
         `right`) are not read at all.
-      - **DOC and RTF.** DOC has the Escher anchor record, RTF the `\shp` destinations. Neither is read.
+      - **RTF**, whose grammar is already half in place — `RtfDocumentReader` routes `\shptxt` to a
+        `SectionKind.Frame` flow — and whose numbers are measured and recorded here so the next attempt starts
+        from arithmetic:
+        - The shape sits inside `{\field{\*\fldinst SHAPE }{\fldrslt{\shp{\*\shpinst …}}}}`, and
+          `\shpinst` is currently *skipped*, which is where the geometry goes.
+        - Geometry in **twips**, as four edges rather than an offset and an extent: `\shpleft`, `\shptop`,
+          `\shpright`, `\shpbottom`. Measured on the corpus frame: 0, 567, 2833, 2266.
+        - The text insets are shape *properties* in **EMUs**, not twips:
+          `{\sp{\sn dyTextTop}{\sv 54000}}` and its three siblings. Two units in one shape.
+        - **`\shpwr`'s numbering is LibreOffice's own, not the RTF specification's.** The spec says
+          1 = around, 2 = tight, 3 = through, 4 = top-and-bottom, 5 = none. LibreOffice's importer
+          (`rtfdispatchvalue.cxx`) reads 1 as *no text beside*, 2 as parallel, 3 as run-through, 4 as parallel
+          with a contour, and 5 as run-through; its exporter (`rtfsdrexport.cxx`) is the exact inverse. So it
+          round-trips itself perfectly and disagrees with the specification, and matching LibreOffice means
+          taking LibreOffice's numbering. `\shpwrk` is the side: 0 both, 1 left, 2 right, 3 largest.
+        - **LibreOffice's RTF export loses the wrap mode outright**, so the RTF corpus files cannot test the
+          wrap geometry at all. A `parallel` ODF frame exports as `\shpwr3`, which its own importer reads as
+          run-through, and its RTF render puts every line at 56.80 pt where the ODF render wraps to 204.15.
+          A faithful reader therefore *agrees* with the reference by also drawing no wrap — which is still
+          worth a test, since a reader ignoring `\shpwr` and defaulting to parallel would fail it.
+      - **DOC**, which is the Escher anchor record through `Paperless.MsBinary` — and that library's Escher
+        reading is itself not written, so this one waits on more than the frame model.
 - [x] Footnote **placement**, which is the half that changes pagination rather than appearance. The note
       area takes its room out of the body's, so a page with notes holds less text — and adding a note can
       push the line that cites it onto the next page, which removes the note again. That is a feedback loop
