@@ -93,7 +93,22 @@ indexes or resolvable style chains.
         one; not resetting continues from where extraction stopped.
 
       Still open here: `text:display-levels` and its OOXML equivalent, a `w:lvlText` of `%1.%2.%3`, so a level
-      asking for `1.2.3` shows `3`; an image label, which needs a decoder; and DOC and RTF.
+      asking for `1.2.3` shows `3`; an image label, which needs a decoder; and DOC and RTF, which need more
+      than the other two did and where the extra is worth stating:
+      - **DOC has no prefix hook.** `OdtLayoutSource` and `DocxLayoutSource` both hand their label to a run
+        walker that emits it *before* the paragraph's own text, which is what keeps every run offset and every
+        anchor correct. `Ww8DocumentReader.Describe` assembles the text first and `ReadRuns(text, positions,
+        …)` indexes into it, so the label has to be prepended and **every run offset shifted by its length**.
+        That is the whole of the difference; the label itself is already computed for extraction by
+        `_numbering.Advance(format.ListNumber, listLevel)`.
+      - **DOC's level indents are currently thrown away.** `Ww8Numbering.ReadLevel` steps over the `LVL`'s two
+        grpprls without keeping them — the comment there says so — and the first of them is the PAPX holding
+        `sprmPDxaLeft` (0x845E) and `sprmPDxaLeft1` (0x8460), which are the level's indent and its hanging
+        first line. Keeping the PAPX span on `Ww8ListLevel` is the prerequisite.
+      - **RTF's counters are not the reader's.** Its labels are computed in `RtfDocumentReader.State`, which
+        the layout path shares, so the marker may already be reachable — but RTF has two numbering systems,
+        the old `\pn` group and the `\listtable`/`\ls`/`\ilvl` tables, and which one a file uses decides
+        where the geometry comes from.
 
       This also turned up an inconsistency, since **settled by measurement**: `TabStop.Position`'s own
       documentation said it was measured "from the text area's start edge, not from the indent", while
