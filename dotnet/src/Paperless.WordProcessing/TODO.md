@@ -44,8 +44,25 @@ indexes or resolvable style chains.
       would take one style's parent from the other's chain. Cycle-guarded; the family's defaults lead
       a chain that does not reach them.
 - [x] Tables: rows, cells, spans, nested tables, and the column-edge grid the spans index into
-- [ ] Lists and numbering with multi-level definitions and restart semantics. The four readers each
-      compute labels already; the model holds the label but not yet the definitions that produced it.
+- [ ] Lists and numbering with multi-level definitions and restart semantics. The note here was
+      **understating it**, so it is worth being plain: all four readers compute a label for *extraction*, and
+      the **layout path has no labels at all** — `PageParagraph` carries none, so every numbered and bulleted
+      list renders with no number and no bullet, and its text starts at the wrong indent besides. That is the
+      most visible gap left in the layout engine.
+
+      The geometry is measured and is not complicated, which is the point of writing it down. On an ODF list
+      declaring `text:label-followed-by="listtab"` with `text:list-tab-stop-position="1.27cm"`,
+      `fo:margin-left="1.27cm"` and `fo:text-indent="-0.635cm"`, LibreOffice puts:
+      - the **label** at the text area's left plus the margin plus the (negative) indent — 56.7 + 36 − 18 =
+        74.7 pt, measured 74.70;
+      - the item's **first line** at the list tab stop, 56.7 + 36 = 92.7 pt, measured 92.70;
+      - a **continuation** line at the margin alone, 92.7 pt, so the label hangs to the left of the block.
+
+      So the label is a run drawn at its own position and the first line's start comes from
+      `text:label-followed-by`: `listtab` gives the stop, `space` a single space after the label, `nothing`
+      the label's own width. What is *not* settled is the multi-level and restart semantics — which is the
+      circular part, since a restart per page depends on pagination — and DOCX's `w:numbering` definitions,
+      which the extraction path resolves but the layout path would need too.
 - [x] **Page geometry**, in `Model/PageGeometry.cs`, read from all four formats and verified against
       LibreOffice's own rendering. The interesting part is that the formats do not mean the same thing
       by "top margin": Word's `w:top` is the distance to the first line of *body* text with the header
