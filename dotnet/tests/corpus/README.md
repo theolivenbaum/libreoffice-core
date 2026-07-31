@@ -329,3 +329,9 @@ two different places.
 numbers from different parts: ODF nests elements and states a separate stop position, while OOXML puts a
 `w:numPr` on the paragraph and derives everything from the level's `w:ind`. The trap on that side is `w:suff`,
 whose default is `tab` — the one value a level usually does not state and the one it usually means.
+
+There is deliberately **no `list-numbered.rtf`**, for the same reason there are no RTF wrap files: LibreOffice's
+RTF export loses the list numbering. Its own render of the exported file shows the items' text at 74.80 and
+92.80 — the indents survive — and no numbers at all. Since Paperless already reads those indents from `\li`
+and `\fi`, such a document would verify nothing a reader could get wrong. `list-numbered.doc` is the opposite
+case and is worth adding when DOC labels land: its render keeps 1., 2. and 3.

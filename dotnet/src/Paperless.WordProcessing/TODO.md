@@ -105,10 +105,17 @@ indexes or resolvable style chains.
         grpprls without keeping them — the comment there says so — and the first of them is the PAPX holding
         `sprmPDxaLeft` (0x845E) and `sprmPDxaLeft1` (0x8460), which are the level's indent and its hanging
         first line. Keeping the PAPX span on `Ww8ListLevel` is the prerequisite.
-      - **RTF's counters are not the reader's.** Its labels are computed in `RtfDocumentReader.State`, which
-        the layout path shares, so the marker may already be reachable — but RTF has two numbering systems,
-        the old `\pn` group and the `\listtable`/`\ls`/`\ilvl` tables, and which one a file uses decides
-        where the geometry comes from.
+      - **RTF is the *less* useful of the two to do next, which is the opposite of what it looks like.** Its
+        layout text is `string.Concat(flow.PendingRuns.Select(run => run.Text))`, so prepending a *run* would
+        carry the label and shift every offset for free — no arithmetic at all, and easier than DOC. But
+        LibreOffice's own RTF render of a list shows **no numbers**: its export loses them, exactly as it
+        loses a frame's wrap mode. The indents survive (74.80 and 92.80, the same as ODF), and Paperless
+        already reads those from `\li`/`\fi`, so an RTF list document written by LibreOffice verifies
+        nothing a reader could get wrong. Implementing it is still right for a Word-written file — RTF has two
+        numbering systems, the old `\pn` group and the `\listtable`/`\ls`/`\ilvl` tables — but it cannot
+        be checked against the reference, so it should be done after DOC and with a hand-written file.
+      - **DOC keeps its numbers**, so it is the one that can be verified: LibreOffice's DOC render of the same
+        list shows 1., 2. and 3. where its RTF render shows none.
 
       This also turned up an inconsistency, since **settled by measurement**: `TabStop.Position`'s own
       documentation said it was measured "from the text area's start edge, not from the indent", while
