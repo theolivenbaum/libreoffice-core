@@ -77,8 +77,23 @@ indexes or resolvable style chains.
         margin and stop are both 1.27 cm puts its text at 92.70 pt, the area plus *one* of them. Skipping the
         conversion put the text 18 pt right, by exactly the hanging indent.
 
-      Still open here: `text:display-levels`, so a level asking for `1.2.3` shows `3`; an image label, which
-      needs a decoder; and the other three formats, whose labels the extraction path already computes.
+      **DOCX too**, which is the same shape from different parts. OOXML puts the list *structure* on the
+      paragraph — a `w:numPr` naming an instance and a level — so there is no walk state to keep: a numbered
+      paragraph says so itself, and `WordNumbering` already resolves the counter, the format and the
+      `w:lvlText` template for the extraction pass. Only the geometry was missing, and it is `w:ind` on the
+      level rather than a separate stop position: Word puts the text at `w:start` and the label at `w:start`
+      less `w:hanging`, so there is no third number. Three things to know:
+      - **`w:suff` defaults to `tab`.** The one value a level usually does not state is the one it usually
+        means, so treating its absence as "nothing" runs the number into the first word.
+      - The first line's indent is stated as **either** `w:hanging` or `w:firstLine` — a positive
+        "back by this much" or a signed "forward by this much". Reading one as the other puts the number to
+        the *right* of the text it should be left of.
+      - The numbering's counters are **stateful**, and the extraction pass has already advanced them over the
+        same document, so they are reset before the layout walk. Two independent copies would each start at
+        one; not resetting continues from where extraction stopped.
+
+      Still open here: `text:display-levels` and its OOXML equivalent, a `w:lvlText` of `%1.%2.%3`, so a level
+      asking for `1.2.3` shows `3`; an image label, which needs a decoder; and DOC and RTF.
 
       This also turned up an inconsistency, since **settled by measurement**: `TabStop.Position`'s own
       documentation said it was measured "from the text area's start edge, not from the indent", while

@@ -51,6 +51,10 @@ public sealed class ListComparisonTests : IDisposable
 
     [Theory]
     [InlineData("list-numbered.fodt")]
+    // The same list in DOCX, where the same three numbers come from a different place: the structure is on the
+    // paragraph rather than in nested elements, and the geometry is `w:ind` on the level rather than a
+    // separate stop position — Word puts the text at `w:start` and the label at `w:start` less `w:hanging`.
+    [InlineData("list-numbered.docx")]
     public void EveryLineOfAListStartsWhereLibreOfficeStartsIt(string fileName)
     {
         Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");

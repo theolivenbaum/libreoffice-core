@@ -323,3 +323,9 @@ how a wrong comment on `TabStop.Position` survived until a list needed the answe
 The pair of them is the point: an ordinary `style:tab-stop` is measured from the paragraph's edge and a list
 level's `text:list-tab-stop-position` from the text area's, so one document can hold two stops measured from
 two different places.
+
+`list-numbered.docx` is LibreOffice's export of the flat ODF one, and its render is identical to the original's
+— the same three x positions, 74.70 / 92.70 / 92.70. That is worth having because the two formats reach those
+numbers from different parts: ODF nests elements and states a separate stop position, while OOXML puts a
+`w:numPr` on the paragraph and derives everything from the level's `w:ind`. The trap on that side is `w:suff`,
+whose default is `tab` — the one value a level usually does not state and the one it usually means.

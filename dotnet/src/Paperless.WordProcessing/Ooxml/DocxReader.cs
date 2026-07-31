@@ -227,8 +227,13 @@ public sealed class OoxmlWordDocument : IWordProcessingDocument, IPaginatedDocum
         XElement? body = _file.Body;
         if (body is null) return new WordProcessingPages([]);
 
+        // The numbering's counters are stateful, so they are reset before the layout walk numbers the lists
+        // again — the extraction pass has already advanced them once over the same document.
+        _file.Numbering.ResetCounters();
+
         DocxLayoutSource source = new(
-            _file.Styles, _file.Settings, footnotes: _file.Footnotes, endnotes: _file.Endnotes);
+            _file.Styles, _file.Settings, footnotes: _file.Footnotes, endnotes: _file.Endnotes,
+            numbering: _file.Numbering);
         List<PageBlock> blocks = source.Read(body);
 
         // Read from the document rather than assumed per format. LibreOffice's PARA_SPACE_MAX means the

@@ -21,6 +21,7 @@ public sealed class WordNumberingLevel
         Suffix = Word.Value(element, "suff");
         IsLegalNumbering = Word.Child(element, "isLgl") is not null;
         RunProperties = Word.Child(element, "rPr");
+        ParagraphProperties = Word.Child(element, "pPr");
     }
 
     /// <summary>The zero-based level this definition applies to.</summary>
@@ -67,6 +68,16 @@ public sealed class WordNumberingLevel
 
     /// <summary>The label's own character formatting, which carries the bullet's font.</summary>
     public XElement? RunProperties { get; }
+
+    /// <summary>
+    /// The level's own <c>w:pPr</c>, which is where its indents live.
+    /// </summary>
+    /// <remarks>
+    /// Only <c>w:ind</c> is of interest, and it is the level's rather than the paragraph's: a numbered
+    /// paragraph takes its indent from the list definition, so a reader using the paragraph's own puts every
+    /// item at the margin with its number hanging off the page.
+    /// </remarks>
+    public XElement? ParagraphProperties { get; }
 }
 
 /// <summary>

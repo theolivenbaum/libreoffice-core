@@ -63,15 +63,21 @@ public sealed partial class DocxLayoutSource
     /// <param name="fonts">The font resolver, or null to build one over the installed fonts.</param>
     /// <param name="footnotes">The footnote bodies by <c>w:id</c>, or null for a document with none.</param>
     /// <param name="endnotes">The endnote bodies by <c>w:id</c>.</param>
+    /// <param name="numbering">
+    /// The document's list definitions, for the labels a numbered paragraph draws. Null leaves every list
+    /// unnumbered, which is what a document with no <c>numbering.xml</c> means.
+    /// </param>
     public DocxLayoutSource(
         WordStyles styles,
         XElement? settings = null,
         SystemFontResolver? fonts = null,
         IReadOnlyDictionary<string, XElement>? footnotes = null,
-        IReadOnlyDictionary<string, XElement>? endnotes = null)
+        IReadOnlyDictionary<string, XElement>? endnotes = null,
+        WordNumbering? numbering = null)
     {
         ArgumentNullException.ThrowIfNull(styles);
         _styles = styles;
+        _numbering = numbering;
         _fonts = fonts ?? new SystemFontResolver(SystemFontIndex.Build());
         _defaultTabInterval = TabInterval(settings);
         _footnotes = footnotes ?? new Dictionary<string, XElement>(StringComparer.Ordinal);
@@ -79,6 +85,16 @@ public sealed partial class DocxLayoutSource
         _footnoteNumbering = NumberingIn(settings, "footnotePr", NoteNumbering.Footnotes);
         _endnoteNumbering = NumberingIn(settings, "endnotePr", NoteNumbering.Endnotes);
     }
+
+    /// <summary>
+    /// The document's list definitions, or null when it has none.
+    /// </summary>
+    /// <remarks>
+    /// The same instance the extraction pass uses, and that is deliberate rather than convenient: its
+    /// counters are stateful, and two independent copies numbering the same document would each start from
+    /// one. The reader resets them between passes for the same reason.
+    /// </remarks>
+    private readonly WordNumbering? _numbering;
 
     /// <summary>The footnote bodies by <c>w:id</c>, from <c>footnotes.xml</c>.</summary>
     /// <remarks>
@@ -267,8 +283,18 @@ public sealed partial class DocxLayoutSource
         OpenTypeFace? face = Face(text);
         if (face is null) return null;
 
+        // A numbered paragraph's label is a prefix, like a footnote's citation and for the same reason: the
+        // walker emits it so that prefixing text does not shift the offsets of anything anchored in the
+        // paragraph. A note's own first paragraph carries a citation instead and is never in a list, so the
+        // two prefixes cannot collide.
+        DocxListLabel? label = citation is null
+            ? LabelOf(properties, Word.Value(properties, "pStyle"))
+            : null;
+
         RunWalker walker = new(CitationOf, _footnoteNumber, _endnoteNumber);
-        walker.Walk(element, citation);
+        walker.Walk(
+            element,
+            citation ?? (label is { Text.Length: > 0 } list ? list.Text + Separator(list.Suffix) : null));
 
         // Notes are numbered across the document, so the counters advance by however many this paragraph
         // referenced — and the bodies are read after the walk, since reading one recurses into this method
@@ -283,7 +309,8 @@ public sealed partial class DocxLayoutSource
             Face = face,
             Font = _references.GetValueOrDefault(text.FaceKey),
             Colour = text.Colour ?? Colour.Black,
-            Format = WordParagraphFormats.Resolve(_styles, properties, _defaultTabInterval),
+            Format = Listed(
+                WordParagraphFormats.Resolve(_styles, properties, _defaultTabInterval), label),
             EmSize = text.Size,
             Language = text.Language,
             Shaping = new ShapingOptions(Language: text.Language),
