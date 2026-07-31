@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<office:document
+    xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0"
+    xmlns:style="urn:oasis:names:tc:opendocument:xmlns:style:1.0"
+    xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0"
+    xmlns:fo="urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0"
+    xmlns:dc="http://purl.org/dc/elements/1.1/"
+    office:version="1.3" office:mimetype="application/vnd.oasis.opendocument.text">
+ <office:meta><dc:title>Paperless indented tab stop</dc:title>
+  <dc:subject>What a tab stop position is measured from, for layout comparison</dc:subject></office:meta>
+ <office:automatic-styles>
+  <style:page-layout style:name="PL">
+   <style:page-layout-properties fo:page-width="21cm" fo:page-height="29.7cm"
+       fo:margin-left="2cm" fo:margin-right="2cm" fo:margin-top="2cm" fo:margin-bottom="2cm"/>
+  </style:page-layout>
+ </office:automatic-styles>
+ <office:styles>
+  <style:style style:name="Indented" style:family="paragraph">
+   <style:paragraph-properties fo:text-align="start" fo:text-indent="0cm" fo:hyphenate="false"
+       fo:margin-left="2cm" fo:margin-top="0cm" fo:margin-bottom="0cm" fo:line-height="100%"
+       fo:orphans="0" fo:widows="0">
+    <style:tab-stops>
+     <style:tab-stop style:position="4cm" style:type="left"/>
+     <style:tab-stop style:position="8cm" style:type="left"/>
+    </style:tab-stops>
+   </style:paragraph-properties>
+   <style:text-properties style:font-name="Carlito" fo:font-family="Carlito" fo:font-size="11pt"
+       fo:language="en" fo:country="GB"/>
+  </style:style>
+ </office:styles>
+ <office:master-styles>
+  <style:master-page style:name="Standard" style:page-layout-name="PL"/>
+ </office:master-styles>
+ <office:body><office:text>
+   <text:p text:style-name="Indented">Aa<text:tab/>Bb<text:tab/>Cc</text:p>
+   <text:p text:style-name="Indented">Dd<text:tab/>Ee<text:tab/>Ff</text:p>
+   <text:p text:style-name="Indented">Gg<text:tab/>Hh<text:tab/>Ii</text:p>
+   <text:p text:style-name="Indented">Jj<text:tab/>Kk<text:tab/>Ll</text:p>
+   <text:p text:style-name="Indented">Mm<text:tab/>Nn<text:tab/>Oo</text:p>
+   <text:p text:style-name="Indented">Pp<text:tab/>Qq<text:tab/>Rr</text:p>
+   <text:p text:style-name="Indented">Ss<text:tab/>Tt<text:tab/>Uu</text:p>
+   <text:p text:style-name="Indented">Vv<text:tab/>Ww<text:tab/>Xx</text:p>
+   <text:p text:style-name="Indented">Yy<text:tab/>Zz<text:tab/>Ab</text:p>
+   <text:p text:style-name="Indented">Cd<text:tab/>Ef<text:tab/>Gh</text:p>
+   <text:p text:style-name="Indented">Ij<text:tab/>Kl<text:tab/>Mn</text:p>
+   <text:p text:style-name="Indented">Op<text:tab/>Qr<text:tab/>St</text:p>
+  </office:text></office:body>
+</office:document>

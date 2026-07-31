@@ -215,7 +215,14 @@ public enum TabAlignment
 /// <summary>
 /// One tab stop.
 /// </summary>
-/// <param name="Position">Its distance from the text area's start edge, not from the indent.</param>
+/// <param name="Position">
+/// Its distance from the <em>paragraph's</em> start edge — that is, from the text area's edge plus the
+/// paragraph's start indent, not from the text area's edge alone. Measured: a paragraph indented 2 cm with a
+/// stop at 4 cm puts the text after its tab at 226.9 pt on an A4 page with 2 cm margins, which is
+/// 56.7 + 56.7 + 113.4 and not 56.7 + 113.4. Worth stating because ODF uses the <em>other</em> origin for a
+/// list level's own stop, whose <c>text:list-tab-stop-position</c> is measured from the text area — so the
+/// two kinds of stop in one document are measured from two different places.
+/// </param>
 /// <param name="Alignment">What the text does at the stop.</param>
 /// <param name="Leader">
 /// The character filling the space before the stop, or <c>'\0'</c> for none — a dot leader in a table

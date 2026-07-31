@@ -313,3 +313,13 @@ Compared by *line starts* rather than by every word, in `ListComparisonTests` ra
 not a loosening: a list is checked by where each line begins, and comparing every word on a 120 pt line measures
 the recorded ~0.15% difference between LibreOffice's own width and HarfBuzz's, which exceeds the tab tolerance
 and has nothing to do with lists.
+
+`tab-indented.fodt` exists to answer one question that no other document here can: what a tab stop's position
+is measured *from*. Its paragraphs are indented 2 cm and its stops are at 4 cm and 8 cm, so the word after the
+first tab lands at 226.9 pt if the origin is the paragraph's own edge and at 170.2 if it is the text area's.
+LibreOffice puts it at 226.9. Every other tabbed document has a zero indent, where the two coincide — which is
+how a wrong comment on `TabStop.Position` survived until a list needed the answer.
+
+The pair of them is the point: an ordinary `style:tab-stop` is measured from the paragraph's edge and a list
+level's `text:list-tab-stop-position` from the text area's, so one document can hold two stops measured from
+two different places.

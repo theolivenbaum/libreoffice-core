@@ -80,11 +80,16 @@ indexes or resolvable style chains.
       Still open here: `text:display-levels`, so a level asking for `1.2.3` shows `3`; an image label, which
       needs a decoder; and the other three formats, whose labels the extraction path already computes.
 
-      And one **inconsistency this turned up and did not settle**: `TabStop.Position`'s own documentation says
-      it is measured "from the text area's start edge, not from the indent", while `TabRuler` measures it from
-      the line's start. Every tabbed corpus document has a zero indent, so none of them can tell the two
-      apart. One document with an indented paragraph and a stated stop would settle it — and if the comment is
-      the right one, every tab in an indented paragraph is currently placed wrongly.
+      This also turned up an inconsistency, since **settled by measurement**: `TabStop.Position`'s own
+      documentation said it was measured "from the text area's start edge, not from the indent", while
+      `TabRuler` measured it from the line's start. The implementation was right and the comment wrong — a
+      paragraph indented 2 cm with a stop at 4 cm puts the text after its tab at 226.9 pt on an A4 page with
+      2 cm margins, which is 56.7 + 56.7 + 113.4 and not 56.7 + 113.4. No corpus document could tell the two
+      apart because every tabbed one had a zero indent; `tab-indented.fodt` exists to be the one that can.
+
+      So ODF really does measure the two kinds of stop from **two different origins** — an ordinary
+      `style:tab-stop` from the paragraph's edge and a level's `text:list-tab-stop-position` from the text
+      area's — which is why the conversion above is a conversion and not a fudge.
 - [x] **Page geometry**, in `Model/PageGeometry.cs`, read from all four formats and verified against
       LibreOffice's own rendering. The interesting part is that the formats do not mean the same thing
       by "top margin": Word's `w:top` is the distance to the first line of *body* text with the header

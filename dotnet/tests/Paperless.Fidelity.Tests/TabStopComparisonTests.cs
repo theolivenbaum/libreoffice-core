@@ -68,6 +68,11 @@ public sealed class TabStopComparisonTests : IDisposable
     // full stops, and LibreOffice puts both at 462.20 pt — the same place as `9.125`, whose single stop follows
     // one digit. A last-separator rule moves both of them.
     [InlineData("tab-decimal.fodt")]
+    // The one document that can tell apart the two things a stop position might be measured from: its
+    // paragraph is indented 2 cm and its only stop is at 4 cm, so the text after the tab is at 226.9 pt if the
+    // origin is the paragraph's edge and 170.2 if it is the text area's. Every other tabbed document here has
+    // a zero indent, where the two coincide.
+    [InlineData("tab-indented.fodt")]
     public void EveryTabAdvancesToLibreOfficesStop(string fileName)
     {
         Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
