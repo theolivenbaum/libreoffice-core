@@ -172,11 +172,25 @@ public sealed class ParagraphLayouter
         (Length baseline, Length spaceAbove) =
             BaselineIn(height, natural, size, paragraph.LineSpacing.Mode);
 
-        // Every line of a single-face paragraph is the same height, so a line's top is exactly its index
-        // times that height — which is what makes the room for each line knowable *before* the lines exist,
-        // and this overload's wrap therefore exact rather than approximate.
+        // Every line of a single-face paragraph is the same height, so where a line sits follows from the
+        // line before it — which is what makes the room for each line knowable *before* the lines exist, and
+        // this overload's wrap therefore exact rather than approximate. Memoised, and asked for in order, so
+        // the recursion is a loop.
+        List<Length> tops = [];
+
+        Length TopAt(int index)
+        {
+            while (tops.Count <= index)
+            {
+                Length candidate = tops.Count == 0 ? Length.Zero : tops[^1] + height;
+                tops.Add(room is null ? candidate : PushedPast(room, candidate, height));
+            }
+
+            return tops[index];
+        }
+
         LineSpace SpaceAt(int index)
-            => room is null ? LineSpace.Of(areaWidth) : room(height * index, height);
+            => room is null ? LineSpace.Of(areaWidth) : room(TopAt(index), height);
 
         List<TextLine> lines = _filler.Fill(
             text,
@@ -189,7 +203,6 @@ public sealed class ParagraphLayouter
             room is null ? null : index => WidthIn(paragraph, SpaceAt(index), index == 0));
 
         List<LineBox> boxes = new(lines.Count);
-        Length top = Length.Zero;
 
         for (int i = 0; i < lines.Count; i++)
         {
@@ -201,15 +214,13 @@ public sealed class ParagraphLayouter
                 lines[i],
                 space.Left + paragraph.LineStart(isFirst) + AlignmentOffset(
                     paragraph.Alignment, lines[i], available, isLast: i == lines.Count - 1),
-                top,
+                TopAt(i),
                 height,
                 baseline,
                 spaceAbove,
                 Justification(
                     paragraph.Alignment, lines[i], text, available,
                     isLast: i == lines.Count - 1)));
-
-            top += height;
         }
 
         return new LaidOutParagraph(
@@ -275,6 +286,8 @@ public sealed class ParagraphLayouter
             return room(top, height);
         }
 
+        Length TopAt(int index) => index < tops.Count ? tops[index] : Length.Zero;
+
         Func<int, Length>? limits =
             room is null ? null : index => WidthIn(paragraph, SpaceAt(index), index == 0);
 
@@ -284,11 +297,11 @@ public sealed class ParagraphLayouter
 
         if (room is not null)
         {
-            tops = TopsOf(lines, measured, paragraph);
+            tops = TopsOf(lines, measured, paragraph, room);
             lines = _filler.Fill(
                 measured, paragraph.BodyWidth(areaWidth), paragraph.FirstLineWidth(areaWidth),
                 language, paragraph, limits);
-            tops = TopsOf(lines, measured, paragraph);
+            tops = TopsOf(lines, measured, paragraph, room);
         }
 
         List<LineBox> boxes = new(lines.Count);
@@ -299,6 +312,10 @@ public sealed class ParagraphLayouter
             bool isFirst = i == 0;
             LineSpace space = SpaceAt(i);
             Length available = WidthIn(paragraph, space, isFirst);
+
+            // The refined tops already carry whatever a frame pushed past; without a room callback they are
+            // empty and the running sum is the answer.
+            if (room is not null) top = Length.Max(top, TopAt(i));
 
             (Length natural, Length ascent) =
                 measured.HeightOf(lines[i].Start, lines[i].VisibleEnd);
@@ -494,20 +511,52 @@ public sealed class ParagraphLayouter
     /// last — can be read as the difference between consecutive entries.
     /// </remarks>
     private static List<Length> TopsOf(
-        List<TextLine> lines, MeasuredParagraph measured, ParagraphFormat paragraph)
+        List<TextLine> lines, MeasuredParagraph measured, ParagraphFormat paragraph, LineRoom? room)
     {
         List<Length> tops = new(lines.Count + 1);
         Length top = Length.Zero;
 
         foreach (TextLine line in lines)
         {
-            tops.Add(top);
             (Length natural, _) = measured.HeightOf(line.Start, line.VisibleEnd);
-            top += paragraph.LineSpacing.Apply(natural);
+            Length height = paragraph.LineSpacing.Apply(natural);
+
+            if (room is not null) top = PushedPast(room, top, height);
+
+            tops.Add(top);
+            top += height;
         }
 
         tops.Add(top);
         return tops;
+    }
+
+    /// <summary>
+    /// How many times a line may be pushed past an obstruction before the answer is taken as final.
+    /// </summary>
+    /// <remarks>
+    /// A guard, not a real limit: each push moves the line strictly downwards past one obstruction, so a page
+    /// with a handful of frames converges in a handful of steps. The bound is what stops a frame whose region
+    /// somehow contains its own bottom from looping.
+    /// </remarks>
+    private const int MaxPushes = 64;
+
+    /// <summary>
+    /// Where a line really goes, once anything that forbids text beside it has pushed it down.
+    /// </summary>
+    /// <remarks>
+    /// A loop rather than one step, because being pushed past one obstruction can land the line against
+    /// another — a page with two such frames one below the other moves the line past both.
+    /// </remarks>
+    private static Length PushedPast(LineRoom room, Length top, Length height)
+    {
+        for (int guard = 0; guard < MaxPushes; guard++)
+        {
+            if (room(top, height).MoveTo is not { } moved || moved <= top) break;
+            top = moved;
+        }
+
+        return top;
     }
 
     private static Length AlignmentOffset(

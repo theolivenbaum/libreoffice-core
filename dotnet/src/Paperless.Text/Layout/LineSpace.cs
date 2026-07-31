@@ -13,10 +13,29 @@ namespace Paperless.Text.Layout;
 /// </remarks>
 /// <param name="Left">How far into the text area the line may start.</param>
 /// <param name="Width">How much room it has from there.</param>
-public readonly record struct LineSpace(Length Left, Length Width)
+/// <param name="MoveTo">
+/// Where the line has to go instead, when it cannot be placed here at all — the obstruction's far edge. Null
+/// is the ordinary answer; a value means the line is <em>pushed past</em> the obstruction rather than
+/// narrowed by it, which is what happens when nothing may sit beside it.
+/// </param>
+public readonly record struct LineSpace(Length Left, Length Width, Length? MoveTo = null)
 {
     /// <summary>The whole of a text area: what every line gets when nothing is in the way.</summary>
     public static LineSpace Of(Length width) => new(Length.Zero, width);
+
+    /// <summary>
+    /// The same room with <see cref="MoveTo"/> restated relative to an origin.
+    /// </summary>
+    /// <remarks>
+    /// Needed because the two halves of the answer are in different spaces: the width is a width and cares
+    /// about no origin, while <see cref="MoveTo"/> is a <em>position</em> — and whoever knows where the
+    /// obstruction is works in page coordinates while the layouter measures a line's top from its paragraph.
+    /// Handing back a page coordinate as though it were a paragraph one pushes the line down by the whole
+    /// distance from the page's top a second time.
+    /// </remarks>
+    /// <param name="origin">Where the caller's own coordinates start, in the frame's space.</param>
+    public LineSpace RelativeTo(Length origin)
+        => MoveTo is { } moved ? this with { MoveTo = moved - origin } : this;
 }
 
 /// <summary>

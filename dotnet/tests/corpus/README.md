@@ -270,3 +270,10 @@ all**, relying on `style:default-style`, because **LibreOffice ignores a paragra
 `draw:text-box`**: a `text:p` there with `text:style-name="Body"` renders in the default font, and a round trip
 through LibreOffice drops the attribute outright. Measured on the word "the" — 14.92 pt wide in the body
 against 14.62 pt in the frame, at different line heights, so a different typeface rather than a different size.
+
+`wrap-none.fodt` is the same frame again with `style:wrap="none"`, whose name reads backwards: it means no text
+may sit *beside* the frame, not that the frame is ignored. The lines that would meet it are pushed below it and
+resume at the full width, exactly at the region's bottom. It is worth its own file because it is the only wrap
+mode that changes how many lines fit on a page, and because the horizontal check alone cannot tell a pushed
+line from one narrowed to nothing — the comparison of vertical gaps is what distinguishes them, and it caught
+a push of 197 pt where 126.9 was wanted.

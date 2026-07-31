@@ -489,7 +489,14 @@ public sealed class Paginator
                 }
             }
 
-            Length top = used + spaceAbove;
+            // The paragraph's base, held fixed: every line's position is measured from it, not from the
+            // line before. Advancing it per line would count each line's height once for itself and again
+            // for every line after it.
+            Length paragraphBase = used + spaceAbove;
+            Length top = paragraphBase;
+            Length origin = layout.Lines[lineIndex].Top;
+            Length dropped = columnIsEmpty ? layout.Lines[lineIndex].SpaceAbove : Length.Zero;
+
             for (int i = 0; i < allowed; i++)
             {
                 LineBox box = layout.Lines[lineIndex + i];
@@ -502,8 +509,12 @@ public sealed class Paginator
                 // spacing is the difference between twenty-five lines on a page and twenty-four.
                 if (columnIsEmpty && i == 0) box = box.WithoutSpaceAbove();
 
-                placed.Add(new PlacedLine(paragraphIndex, lineIndex + i, box, top, column));
-                top += box.Height;
+                // From the box's own top, for the same reason Fit measures that way: a line a frame pushed
+                // down carries the gap in its box, and re-deriving the position from the heights alone would
+                // put it back where the frame is.
+                Length at = paragraphBase + (box.Top - origin) - (i == 0 ? Length.Zero : dropped);
+                placed.Add(new PlacedLine(paragraphIndex, lineIndex + i, box, at, column));
+                top = at + box.Height;
             }
 
             notes.AddRange(NotesIn(paragraph, layout, lineIndex, allowed));
@@ -585,8 +596,13 @@ public sealed class Paginator
             reflowed.Remove(index);
             if (!frames.Exists(frame => frame.Frame.Obstructs)) return;
 
-            LineRoom room = (top, height) => FlowLayouter.FreeSpace(
-                frames, area, area.Y + paragraphTop + top, area.Y + paragraphTop + top + height);
+            // The frames are in page coordinates and the layouter measures a line's top from its paragraph,
+            // so the answer is translated back on the way out — see LineSpace.RelativeTo.
+            Length origin = area.Y + paragraphTop;
+
+            LineRoom room = (top, height) => FlowLayouter
+                .FreeSpace(frames, area, origin + top, origin + top + height)
+                .RelativeTo(origin);
 
             ParagraphLayouter layouter = new(paragraph.Face);
             ParagraphFormat? previous = PreviousFormat(blocks, index);
@@ -697,15 +713,27 @@ public sealed class Paginator
         Length room = available - used;
         int count = 0;
 
+        // Measured from the first line's own top rather than by adding heights up, because the two differ
+        // once a frame has pushed a line past itself: the gap belongs to the paragraph and has to be paid
+        // for out of the page's room like anything else.
+        Length origin = from < layout.Lines.Count ? layout.Lines[from].Top : Length.Zero;
+
+        // The leading the first line gives up at the top of a frame. It comes out of that line's height but
+        // not out of the tops of the lines below it, so every later reach has to have it taken off too — and
+        // forgetting that fits one line fewer per page, which shows up as a document one page too long.
+        Length dropped = atTopOfPage && from < layout.Lines.Count
+            ? layout.Lines[from].SpaceAbove
+            : Length.Zero;
+
         for (int i = from; i < layout.Lines.Count; i++)
         {
             LineBox box = atTopOfPage && count == 0
                 ? layout.Lines[i].WithoutSpaceAbove()
                 : layout.Lines[i];
 
-            if (box.Height > room) break;
+            Length reach = box.Top - origin + box.Height - (count == 0 ? Length.Zero : dropped);
+            if (reach > room) break;
 
-            room -= box.Height;
             count++;
         }
 

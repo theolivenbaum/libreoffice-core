@@ -58,6 +58,11 @@ public sealed class WrapComparisonTests : IDisposable
     // ignores the shorthand on a graphic style while honouring `fo:margin`, so the shorthand form would test
     // nothing.
     [InlineData("wrap-frame-text.fodt")]
+    // `style:wrap="none"`, whose name reads backwards: it means no text beside the frame, not that the frame
+    // is ignored. So the lines that would meet it are pushed *below* it and resume at the full width — which
+    // is a vertical answer rather than a narrowing, and the one wrap mode that changes how many lines fit on
+    // a page.
+    [InlineData("wrap-none.fodt")]
     public void TextGoesRoundAFrameWhereLibreOfficePutsIt(string fileName)
     {
         Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
@@ -92,6 +97,21 @@ public sealed class WrapComparisonTests : IDisposable
                 TolerancePoints,
                 $"{fileName}: line {i + 1} (\"{rendered[i].First}\") starts at {mine:F2} pt drawn, "
                 + $"{theirs:F2} pt rendered");
+        }
+
+        // And vertically, as gaps from the first line — which cancels the one thing a word box cannot say,
+        // the font's ascent. This is what checks the *distance* a frame pushes a line: a `wrap="none"` frame
+        // leaves a gap the height of the frame, and a reader that narrowed the line to nothing instead of
+        // moving it would pass the horizontal check above and fail here.
+        for (int i = 1; i < rendered.Count; i++)
+        {
+            double mine = drawn[i].At - drawn[0].At;
+            double theirs = rendered[i].At - rendered[0].At;
+
+            Math.Abs(mine - theirs).ShouldBeLessThanOrEqualTo(
+                TolerancePoints,
+                $"{fileName}: line {i + 1} (\"{rendered[i].First}\") sits {mine:F2} pt below the first "
+                + $"drawn, {theirs:F2} pt rendered");
         }
     }
 

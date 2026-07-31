@@ -629,13 +629,31 @@ is read and verified, so what remains is the filling of pages rather than the me
         drops the attribute outright. The document's `style:default-style` does apply, which is what the
         corpus document uses so that it says the same thing to both readers. Paperless honours the named
         style, so a document relying on one will differ from LibreOffice's render — correctly.
+- [x] **`TextWrap.None`, and the one-sided modes with no room** — the wrap answer that is vertical rather
+      than horizontal: the line is pushed *below* the frame rather than narrowed. Measured, and the same for
+      both: a `none` frame and a `left` frame flush against the left margin each push the lines past
+      themselves, resuming exactly at the region's bottom.
+
+      It needed a real change to the vertical machinery, and the change is an improvement on its own account:
+      **a line's position within its paragraph is now `LineBox.Top`, not the running sum of the heights above
+      it.** Those two agree for every ordinary paragraph and part company the moment a line is pushed, since
+      the gap belongs to the paragraph. Three places had to stop summing — `FlowLayouter`, the paginator's
+      placement loop, and `Fit`, which has to charge the page for the gap like anything else. Two traps in
+      doing it:
+      - The leading the first line gives up at the top of a frame comes out of that line's *height* but not
+        out of the tops below it, so it has to be taken off every later position by hand. Missing that fits
+        one line fewer per page.
+      - A line's position must be measured from the paragraph's fixed base, not from the line before it.
+        Advancing the base per line counts each height once for itself and again for every line after it,
+        which turned a two-page document into six.
+      - And the push distance is a *position*, so it has to be translated between page and paragraph
+        coordinates where the width does not — `LineSpace.RelativeTo`. Without it the line is pushed down by
+        the distance from the page's top a second time: 197 pt where 126.9 was wanted.
 - [ ] The rest of floating frames:
       - **A frame's picture.** An image needs a decoder, which is the rasteriser's business; the frame is
         placed and its text drawn, and only the picture is missing.
       - **A frame's own border and background**, which are on the graphic style beside the wrap and are read
         for neither.
-      - **`TextWrap.None`**, which is not a narrowing at all: it pushes a line *below* the frame, a vertical
-        decision that belongs where the tops are assigned rather than where the widths are.
       - **Contour wrap**, where the region is the image's outline rather than its box.
       - **`Dynamic`**'s threshold: Writer gives up and pushes the line down when the wider side is too narrow
         to be worth using. Treated as `Parallel` until the threshold is measured.

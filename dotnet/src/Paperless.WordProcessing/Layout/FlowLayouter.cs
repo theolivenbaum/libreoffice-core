@@ -146,6 +146,8 @@ public static class FlowLayouter
                     Shifted(room, area.Y + paragraphTop));
 
             top += layout.SpaceBefore;
+            Length paragraphBase = top;
+            Length dropped = Length.Zero;
 
             for (int line = 0; line < layout.Lines.Count; line++)
             {
@@ -153,11 +155,20 @@ public static class FlowLayouter
 
                 // The first line loses the leading above its text, exactly as the first line of a page's
                 // body does: the space belongs to the paragraph's upper margin and is dropped at the top
-                // of a frame, and each of these three is a frame.
-                if (placed.Count == 0 && tables.Count == 0) box = box.WithoutSpaceAbove();
+                // of a frame, and each of these three is a frame. The amount comes off every line below it
+                // as well, since their own tops were computed with the leading still there.
+                if (placed.Count == 0 && tables.Count == 0)
+                {
+                    dropped = box.SpaceAbove;
+                    box = box.WithoutSpaceAbove();
+                }
 
-                placed.Add(new PlacedLine(i, line, box, top));
-                top += box.Height;
+                // From the box's own top rather than by adding up heights, because the two differ once a
+                // frame has pushed a line past itself: the gap that push left belongs to the paragraph and
+                // summing heights would close it up again.
+                Length at = paragraphBase + box.Top - (line == 0 ? Length.Zero : dropped);
+                placed.Add(new PlacedLine(i, line, box, at));
+                top = at + box.Height;
             }
 
             top += layout.SpaceAfter;
@@ -222,7 +233,9 @@ public static class FlowLayouter
     /// know where on the page it is.
     /// </remarks>
     private static LineRoom? Shifted(LineRoom? room, Length paragraphTop)
-        => room is null ? null : (top, height) => room(paragraphTop + top, height);
+        => room is null
+            ? null
+            : (top, height) => room(paragraphTop + top, height).RelativeTo(paragraphTop);
 
     /// <summary>
     /// The widest run of a line's span that no frame obstructs.
@@ -254,6 +267,7 @@ public static class FlowLayouter
     {
         Length left = Length.Zero;
         Length right = area.Width;
+        Length? moveTo = null;
 
         foreach (PlacedFrame placed in frames)
         {
@@ -266,18 +280,35 @@ public static class FlowLayouter
             Length from = region.X - area.X;
             Length to = region.Right - area.X;
 
+            // Whichever side the mode allows. `None` allows neither, so the line goes below the frame; the
+            // one-sided modes allow one, and if that side has no room the line goes below it just the same —
+            // measured, since a left-wrapped frame flush against the margin pushes text down rather than
+            // squeezing it into nothing.
+            bool mayUseBefore = placed.Frame.Wrap is not (TextWrap.None or TextWrap.Right);
+            bool mayUseAfter = placed.Frame.Wrap is not (TextWrap.None or TextWrap.Left);
+
+            Length before = mayUseBefore ? from - left : Length.Zero;
+            Length after = mayUseAfter ? right - to : Length.Zero;
+
+            if (before <= Length.Zero && after <= Length.Zero)
+            {
+                // Nothing usable beside this frame. The line's top moves to the region's bottom, and the
+                // largest such push wins: two frames side by side each forbidding text push past both.
+                moveTo = moveTo is { } already
+                    ? Length.Max(already, region.Bottom)
+                    : region.Bottom;
+                continue;
+            }
+
             if (to <= left || from >= right) continue;
 
-            // Whichever side of this frame is wider survives; the other is given up. Two frames narrowing
-            // the same line therefore compose, because the survivor is cut again by the next.
-            Length before = from - left;
-            Length after = right - to;
-
+            // The wider allowed side survives and the other is given up. Two frames narrowing the same line
+            // therefore compose, because the survivor is cut again by the next.
             if (before >= after) right = Length.Max(left, from);
             else left = Length.Min(right, to);
         }
 
-        return new LineSpace(left, Length.Max(Length.Zero, right - left));
+        return new LineSpace(left, Length.Max(Length.Zero, right - left), moveTo);
     }
 
     /// <summary>
