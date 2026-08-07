@@ -6,6 +6,7 @@ using Paperless.Core.Documents;
 using Paperless.Core.Extraction;
 using Paperless.Core.Formats;
 using Paperless.Core.Graphics;
+using Paperless.Core.Units;
 using Paperless.MsBinary.PropertySets;
 using Paperless.Text.Fonts;
 using Paperless.WordProcessing.Layout;
@@ -90,7 +91,8 @@ public static class DocReader
             // that looks in the main stream regardless finds whatever happens to sit at that offset.
             byte[]? data = ReadStream(file, PictureStreamName);
 
-            Ww8DocumentReader reader = new(wordDocument, table, fib, diagnostics, data);
+            Ww8DocumentReader reader =
+                new(wordDocument, table, fib, diagnostics, data, source.FileName);
             ContentDocument content = reader.Read(OlePropertySetReader.Read(file));
 
             return new Ww8Document(
@@ -193,8 +195,14 @@ public sealed class Ww8Document : IWordProcessingDocument, IPaginatedDocument
     /// </remarks>
     public IPageSequence Layout(LayoutOptions? options = null)
     {
-        LayoutFonts fonts = new();
-        List<PageBlock> blocks = BlocksOf(fonts, _reader.ReadLayoutBlocks());
+        // A document asking for printer metrics is measured on the printer's pixel grid, which rounds every
+        // font metric and is worth up to 2.8% of a line's height. See Ww8DocumentProperties.UsesPrinterMetrics.
+        LayoutFonts fonts = new()
+        {
+            Metrics = _reader.DocumentProperties.UsesPrinterMetrics ? MetricGrid.Printer : null,
+        };
+
+        List<PageBlock> blocks = BlocksOf(fonts, _reader.ReadLayoutBlocks(), TextWidths());
 
         PaginationOptions pagination = PaginationOptions.Word with
         {
@@ -204,11 +212,17 @@ public sealed class Ww8Document : IWordProcessingDocument, IPaginatedDocument
 
         Paginator paginator = new(pagination);
 
+        List<PaginatedSection> sections = new(Sections.Count);
+        Dictionary<Model.PageFurnitureSlot, IReadOnlyList<PageBlock>> headers = [];
+        Dictionary<Model.PageFurnitureSlot, IReadOnlyList<PageBlock>> footers = [];
+
+        for (int i = 0; i < Sections.Count; i++)
+        {
+            sections.Add(new PaginatedSection(Sections[i], Furniture(fonts, i, headers, footers)));
+        }
+
         return new WordProcessingPages(
-            paginator.Paginate(
-                blocks,
-                [.. Sections.Select((section, index) =>
-                    new PaginatedSection(section, Furniture(fonts, index)))]),
+            paginator.Paginate(blocks, sections),
             paginator.Blocks ?? blocks);
     }
 
@@ -216,17 +230,38 @@ public sealed class Ww8Document : IWordProcessingDocument, IPaginatedDocument
     /// The document's headers and footers, ready for the page frames.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// The same conversion the body goes through, over the six stories the header subdocument holds for this
     /// section — see <c>Ww8DocumentReader.ReadLayoutFurniture</c> for why the order of those stories is the
     /// whole mapping. One font cache is shared with the body, so a header in the body's face resolves to the
     /// identical face object rather than an equal one.
+    /// </para>
+    /// <para>
+    /// A slot whose story is empty is <em>inherited</em> from the section before it, not dropped. That is
+    /// what "link to previous" is on the wire: Word writes a section's header story only when the section
+    /// unlinks it, so in a document where one running head covers twenty sections nineteen of the stories
+    /// are a bare paragraph mark. LibreOffice reaches the same place through
+    /// <c>SwWW8ImplReader::CopyPageDescHdFt</c>, reached from <c>Read_HdFt</c> whenever the story is
+    /// shorter than two characters (<c>ww8par.cxx</c>). Dropping the slot instead leaves every section
+    /// after the first with no running head at all, and a page with no header is a page that holds more
+    /// lines — so the document silently paginates short.
+    /// </para>
     /// </remarks>
-    private PageFurnitureSet? Furniture(LayoutFonts fonts, int section)
+    /// <param name="fonts">The font cache shared with the body.</param>
+    /// <param name="section">Which section's furniture to read.</param>
+    /// <param name="headers">
+    /// The headers in force, by slot, carried across the sections and updated in place: what this section
+    /// states replaces a slot, and what it leaves empty keeps whatever the section before it had.
+    /// </param>
+    /// <param name="footers">The footers in force, by the same rule.</param>
+    private PageFurnitureSet? Furniture(
+        LayoutFonts fonts,
+        int section,
+        Dictionary<Model.PageFurnitureSlot, IReadOnlyList<PageBlock>> headers,
+        Dictionary<Model.PageFurnitureSlot, IReadOnlyList<PageBlock>> footers)
     {
         Ww8LayoutFurniture stated = _reader.ReadLayoutFurniture(section);
-
-        Dictionary<Model.PageFurnitureSlot, IReadOnlyList<PageBlock>> headers = [];
-        Dictionary<Model.PageFurnitureSlot, IReadOnlyList<PageBlock>> footers = [];
+        IReadOnlyList<Length> widths = TextWidths();
 
         Fill(headers, stated.Headers);
         Fill(footers, stated.Footers);
@@ -240,10 +275,26 @@ public sealed class Ww8Document : IWordProcessingDocument, IPaginatedDocument
         {
             foreach ((Model.PageFurnitureSlot slot, List<Ww8LayoutBlock> stories) in from)
             {
-                List<PageBlock> converted = BlocksOf(fonts, stories);
+                List<PageBlock> converted = BlocksOf(fonts, stories, widths);
                 if (converted.Count > 0) into[slot] = converted;
             }
         }
+    }
+
+    /// <summary>
+    /// Each section's text width, which is the only thing an auto-width text frame has to go on.
+    /// </summary>
+    /// <remarks>
+    /// A frame whose <c>sprmPDxaWidth</c> is ten or less is as wide as the text it sits beside, and
+    /// <c>WW8SwFlyPara</c> takes that from <c>m_aSectionManager.GetTextAreaWidth()</c>
+    /// (<c>sw/source/filter/ww8/ww8par6.cxx:1953</c>). Indexed by section because a document can change
+    /// its margins part-way and the frames after the change follow the new ones.
+    /// </remarks>
+    private List<Length> TextWidths()
+    {
+        List<Length> widths = new(Sections.Count);
+        foreach (Model.WritingSection section in Sections) widths.Add(section.Page.ColumnWidth);
+        return widths;
     }
 
     /// <summary>
@@ -256,7 +307,16 @@ public sealed class Ww8Document : IWordProcessingDocument, IPaginatedDocument
     /// Recursive through a cell's own blocks, which is what makes a nested table convert by the same code as
     /// a table in the body: by this point the assembler has already put each in the right list.
     /// </remarks>
-    private static List<PageBlock> BlocksOf(LayoutFonts fonts, IReadOnlyList<Ww8LayoutBlock> stated)
+    /// <param name="fonts">The shared font cache.</param>
+    /// <param name="stated">The blocks as the reader recorded them.</param>
+    /// <param name="textWidths">
+    /// Each section's text width, for the one thing that needs it — an auto-width text frame. Empty
+    /// inside a cell, where a frame is not read in the first place.
+    /// </param>
+    private static List<PageBlock> BlocksOf(
+        LayoutFonts fonts,
+        IReadOnlyList<Ww8LayoutBlock> stated,
+        IReadOnlyList<Length>? textWidths = null)
     {
         List<PageBlock> blocks = new(stated.Count);
 
@@ -264,7 +324,7 @@ public sealed class Ww8Document : IWordProcessingDocument, IPaginatedDocument
         {
             if (block.Paragraph is { } paragraph)
             {
-                blocks.AddRange(Convert(fonts, [paragraph])
+                blocks.AddRange(Convert(fonts, [paragraph], textWidths)
                     .Select(converted => (PageBlock)(converted with
                     {
                         SectionIndex = paragraph.SectionIndex,
@@ -308,6 +368,7 @@ public sealed class Ww8Document : IWordProcessingDocument, IPaginatedDocument
                 IsHeader = row.IsHeader,
                 MinHeight = row.MinHeight,
                 HasExactHeight = row.HasExactHeight,
+                CanSplit = row.CanSplit,
             });
         }
 
@@ -335,7 +396,9 @@ public sealed class Ww8Document : IWordProcessingDocument, IPaginatedDocument
     /// block they belong to, so the body's list holds none and a cell's list holds nothing else.
     /// </remarks>
     private static List<PageParagraph> Convert(
-        LayoutFonts fonts, List<Ww8DocumentReader.Ww8LayoutParagraph> stated)
+        LayoutFonts fonts,
+        List<Ww8DocumentReader.Ww8LayoutParagraph> stated,
+        IReadOnlyList<Length>? textWidths = null)
     {
         List<PageParagraph> paragraphs = new(stated.Count);
 
@@ -348,9 +411,13 @@ public sealed class Ww8Document : IWordProcessingDocument, IPaginatedDocument
             FontReference? font = fonts.Reference(
                 paragraph.FamilyName, paragraph.Weight, paragraph.IsItalic);
 
+            // The runs first, then the text they map: `Apply` rewrites both together, and the offsets it
+            // preserves are the ones the notes and frames below were recorded against.
+            List<PageRun> runs = RunsOf(fonts, paragraph, face);
+
             paragraphs.Add(new PageParagraph
             {
-                Text = paragraph.Text,
+                Text = CaseMapping.Apply(paragraph.Text, runs),
                 Face = face,
                 Font = font,
                 Colour = paragraph.Colour ?? Colour.Black,
@@ -358,14 +425,25 @@ public sealed class Ww8Document : IWordProcessingDocument, IPaginatedDocument
                 Label = Label(paragraph, face, font),
                 EmSize = paragraph.Size,
                 Language = paragraph.Language,
-                Shaping = new Text.Shaping.ShapingOptions(Language: paragraph.Language),
-                Runs = RunsOf(fonts, paragraph, face),
+                Shaping = new Text.Shaping.ShapingOptions(
+                    Language: paragraph.Language, DisableKerning: !paragraph.AutoKerning),
+                Metrics = fonts.Metrics,
+
+                // #i3952#, which the WW8 importer turns on for every DOC without asking the file
+                // (`ww8par.cxx`:2041). See PageParagraph.BlanksAreTransparentToHeight.
+                BlanksAreTransparentToHeight = true,
+                Runs = runs,
                 Notes = NotesOf(fonts, paragraph.Notes),
-                Frames = FramesOf(fonts, paragraph.Frames),
+                Frames = FramesOf(fonts, paragraph.Frames, paragraph.TextFrames, WidthFor(paragraph)),
             });
         }
 
         return paragraphs;
+
+        Length WidthFor(Ww8DocumentReader.Ww8LayoutParagraph paragraph)
+            => textWidths is { Count: > 0 }
+                ? textWidths[Math.Clamp(paragraph.SectionIndex, 0, textWidths.Count - 1)]
+                : Length.Zero;
     }
 
     /// <summary>
@@ -373,15 +451,19 @@ public sealed class Ww8Document : IWordProcessingDocument, IPaginatedDocument
     /// </summary>
     /// <remarks>
     /// <para>
-    /// In the item's own face and size. WW8 does state a label's character formatting — the level's
-    /// <c>grpprlChpx</c> — and it is not read: the only thing it usually carries is a symbol font for a
-    /// bullet, whose code point <see cref="Ww8Numbering"/> has already normalised to U+2022, so keeping
-    /// the font would draw a real bullet through a face with no glyph for it.
+    /// In the item's own face, at the level's own size. WW8 states a label's character formatting in the
+    /// level's <c>grpprlChpx</c>, and the two halves of it are treated differently on purpose: the
+    /// <em>font</em> is not read, because the only thing it usually carries is a symbol face for a bullet
+    /// whose code point <see cref="Ww8Numbering"/> has already normalised to U+2022 — keeping it would
+    /// draw a real bullet through a face with no glyph for it — while the <em>size</em> is, because it
+    /// survives that normalisation and Word writes it constantly. A level a size larger than its items
+    /// makes their first lines taller; see <see cref="PageParagraph.LabelRaisesFirstLine"/>.
     /// </para>
     /// <para>
-    /// <see cref="LabelFollow.Nothing"/> because Word writes the level's geometry onto the paragraph as
-    /// well: <c>sprmPDxaLeft</c> and <c>sprmPDxaLeft1</c> give the same hanging indent the level does, and
-    /// <see cref="PageLabel.Advance"/> fills a hanging indent already.
+    /// The follower and its stop come from the level's <c>ixchFollow</c> and its <c>grpprlPapx</c>, which
+    /// is where Word states them. Assuming <see cref="LabelFollow.Nothing"/> instead worked only for the
+    /// documents that also repeat the level's geometry on every list paragraph — Word usually does, and
+    /// the ones that do not drew the label touching the item's first word.
     /// </para>
     /// <para>
     /// The paragraph's own reference travels with it, because the label is set in the paragraph's
@@ -396,12 +478,22 @@ public sealed class Ww8Document : IWordProcessingDocument, IPaginatedDocument
         Ww8DocumentReader.Ww8LayoutParagraph paragraph, OpenTypeFace face, FontReference? font)
         => paragraph.ListMarker is { Length: > 0 } marker
             ? PageLabel.Measured(
-                marker, face, paragraph.Size,
-                new Text.Shaping.ShapingOptions(Language: paragraph.Language)) with
+                marker, face,
+                paragraph.ListLabelSize > Core.Units.Length.Zero
+                    ? paragraph.ListLabelSize
+                    : paragraph.Size,
+                new Text.Shaping.ShapingOptions(
+                    Language: paragraph.Language, DisableKerning: !paragraph.AutoKerning)) with
             {
                 Font = font,
                 Colour = paragraph.Colour ?? Colour.Black,
-                Follow = LabelFollow.Nothing,
+                Follow = paragraph.ListFollow switch
+                {
+                    1 => LabelFollow.Space,
+                    2 => LabelFollow.Nothing,
+                    _ => LabelFollow.ListTab,
+                },
+                TabStop = Core.Units.Length.FromTwips(paragraph.ListTabStop),
             }
             : null;
 
@@ -414,14 +506,36 @@ public sealed class Ww8Document : IWordProcessingDocument, IPaginatedDocument
     /// that <see cref="Ww8Frames.Build"/> declines — one with no area, one deleted, one hidden — is
     /// dropped rather than placed empty, since an empty frame would still make a hole in the text.
     /// </remarks>
+    /// <param name="fonts">The shared font cache.</param>
+    /// <param name="stated">The drawings anchored in the paragraph, or null when it anchors none.</param>
+    /// <param name="textFrames">
+    /// The Word text frames it anchors, or null when it anchors none. A different mechanism entirely —
+    /// see <see cref="Ww8TextFramePosition"/> — and the two produce the same kind of frame, so they are
+    /// converted together and the layout engine sees one list.
+    /// </param>
+    /// <param name="textWidth">The section's text width, for an auto-width text frame.</param>
     private static List<PageFrame> FramesOf(
-        LayoutFonts fonts, IReadOnlyList<Ww8LayoutFrame>? stated)
+        LayoutFonts fonts,
+        IReadOnlyList<Ww8LayoutFrame>? stated,
+        IReadOnlyList<Ww8LayoutTextFrame>? textFrames = null,
+        Length textWidth = default)
     {
-        if (stated is null || stated.Count == 0) return [];
+        if ((stated is null || stated.Count == 0)
+            && (textFrames is null || textFrames.Count == 0))
+        {
+            return [];
+        }
 
-        List<PageFrame> frames = new(stated.Count);
+        List<PageFrame> frames = new((stated?.Count ?? 0) + (textFrames?.Count ?? 0));
 
-        foreach (Ww8LayoutFrame frame in stated)
+        foreach (Ww8LayoutTextFrame frame in textFrames ?? [])
+        {
+            List<PageBlock> blocks = BlocksOf(fonts, frame.Blocks);
+            if (blocks.Count == 0) continue;
+            if (Ww8TextFrames.Build(frame, blocks, textWidth) is { } placed) frames.Add(placed);
+        }
+
+        foreach (Ww8LayoutFrame frame in stated ?? [])
         {
             // An inline picture has no origin to be placed against and no wrap to obey: it hangs on
             // the line where its anchor character sits. So it skips Ww8Frames.Build entirely, whose
@@ -531,7 +645,22 @@ public sealed class Ww8Document : IWordProcessingDocument, IPaginatedDocument
                 || size != paragraph.Size
                 || run.Colour != paragraph.Colour
                 || run.Language != paragraph.Language
-                || rise != Core.Units.Length.Zero)
+                || rise != Core.Units.Length.Zero
+                // A case map has to survive the uniform-paragraph shortcut: it is the one property here
+                // that changes the *characters*, so dropping the runs would draw the text as stored.
+                || run.CaseMap != PageCaseMap.None
+                // So does a highlight, and for the same reason read the other way: the paragraph carries
+                // no highlight of its own, so a paragraph highlighted end to end is uniform by every other
+                // test and would lose its band entirely.
+                || run.Highlight is not null
+                // And so do the two rules, for the same reason: neither changes a width, so a paragraph
+                // underlined end to end is uniform by every measurement test and would be drawn plain.
+                || run.IsUnderlined
+                || run.IsStruckThrough
+                // Kerning, unlike the two rules, does change a measurement — so a run that kerns
+                // inside a paragraph that does not has to survive the shortcut or its width is the
+                // paragraph's answer rather than its own.
+                || run.AutoKerning != paragraph.AutoKerning)
             {
                 varies = true;
             }
@@ -543,8 +672,13 @@ public sealed class Ww8Document : IWordProcessingDocument, IPaginatedDocument
                 size,
                 fonts.Reference(run.FamilyName, run.Weight, run.IsItalic),
                 run.Colour ?? paragraph.Colour ?? Colour.Black,
-                new Text.Shaping.ShapingOptions(Language: run.Language),
-                rise));
+                new Text.Shaping.ShapingOptions(
+                    Language: run.Language, DisableKerning: !run.AutoKerning),
+                rise,
+                run.CaseMap,
+                Highlight: run.Highlight ?? default,
+                IsUnderlined: run.IsUnderlined,
+                IsStruckThrough: run.IsStruckThrough));
         }
 
         return varies ? runs : [];

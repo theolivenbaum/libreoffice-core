@@ -26,6 +26,22 @@ namespace Paperless.WordProcessing.Ww8;
 /// <param name="RestartLimit">
 /// The level whose advance restarts this one; deeper levels than this do not.
 /// </param>
+/// <param name="IndentAt">
+/// The level's own left indent in twips, from <c>sprmPDxaLeft</c> in its <c>grpprlPapx</c>.
+/// </param>
+/// <param name="FirstLineIndent">
+/// Its first-line indent in twips, negative for the hanging indent a list usually asks for.
+/// </param>
+/// <param name="TabPosition">
+/// Where the tab after the label lands, in twips, or nought when the level states none.
+/// </param>
+/// <param name="Follow">
+/// <c>ixchFollow</c>: 0 a tab to <paramref name="TabPosition"/>, 1 a space, 2 nothing at all.
+/// </param>
+/// <param name="HalfPointSize">
+/// The size the label is set at, in half-points, from <c>sprmCHps</c> in the level's
+/// <c>grpprlChpx</c>, or nought when the level states none.
+/// </param>
 public readonly record struct Ww8ListLevel(
     int StartAt,
     byte NumberFormat,
@@ -33,7 +49,12 @@ public readonly record struct Ww8ListLevel(
     ReadOnlyMemory<byte> PlaceholderOffsets,
     bool IsLegalNumbering,
     bool NeverRestarts,
-    byte RestartLimit)
+    byte RestartLimit,
+    int IndentAt = 0,
+    int FirstLineIndent = 0,
+    int TabPosition = 0,
+    byte Follow = 0,
+    int HalfPointSize = 0)
 {
     /// <summary>The <c>nfc</c> meaning "this level draws a bullet, not a number".</summary>
     public const byte BulletFormat = 23;
@@ -161,6 +182,18 @@ public sealed class Ww8Numbering
 
     /// <summary>Resets every counter, so a second flow does not continue the body's numbering.</summary>
     public void ResetCounters() => _counters.Clear();
+
+    /// <summary>
+    /// The level definition a paragraph's list reference names, or null when it names none.
+    /// </summary>
+    /// <remarks>
+    /// Advances nothing, unlike <see cref="Advance"/>: the caller wants the level's geometry rather than
+    /// its next label, and asking for the label twice would number every item twice over.
+    /// </remarks>
+    /// <param name="instance">The paragraph's <c>ilfo</c>.</param>
+    /// <param name="level">Its zero-based level.</param>
+    public Ww8ListLevel? FindLevel(int instance, int level)
+        => Resolve(instance, level, out _, out Ww8ListLevel definition) ? definition : null;
 
     /// <summary>
     /// The level definition in force for a list instance, or false when there is none.
@@ -343,9 +376,12 @@ public sealed class Ww8Numbering
     /// template.
     /// </summary>
     /// <remarks>
-    /// The two grpprls are skipped rather than kept: they hold the label's indent and its character
-    /// formatting, which extraction does not use but which must still be stepped over exactly, since
-    /// the template follows them.
+    /// The paragraph grpprl is read for the three sprms that decide where the label and its item's text
+    /// go — Word writes the level's geometry there rather than in the <c>LVLF</c>, and a document that
+    /// leaves its list paragraphs' own <c>sprmPDxaLeft</c> unset has nowhere else to say it. The
+    /// character grpprl is still only stepped over: all it usually carries is a symbol font for a bullet
+    /// whose code point is normalised away anyway. Both lengths must be honoured exactly either way,
+    /// since the label template follows them.
     /// </remarks>
     private static bool ReadLevel(ReadOnlySpan<byte> stream, ref int position, out Ww8ListLevel level)
     {
@@ -363,13 +399,23 @@ public sealed class Ww8Numbering
         bool neverRestarts = (flags & 0x08) != 0;
 
         byte[] placeholders = header[6..15].ToArray();
+        byte follow = header[15];
 
         byte characterPropertiesLength = header[24];
         byte paragraphPropertiesLength = header[25];
         byte restartLimit = header[26];
 
-        // PAPX first, then CHPX: the order matters only because the template comes after both.
-        position += paragraphPropertiesLength + characterPropertiesLength;
+        // PAPX first, then CHPX. Both lengths must be honoured exactly either way, since the label
+        // template follows them.
+        if (position + paragraphPropertiesLength > stream.Length) return false;
+        (int indentAt, int firstLine, int tabPosition) =
+            LevelIndents(stream.Slice(position, paragraphPropertiesLength));
+
+        position += paragraphPropertiesLength;
+        if (position < 0 || position + characterPropertiesLength > stream.Length) return false;
+        int halfPointSize = LevelSize(stream.Slice(position, characterPropertiesLength));
+
+        position += characterPropertiesLength;
         if (position < 0 || position + 2 > stream.Length) return false;
 
         int characters = BinaryPrimitives.ReadUInt16LittleEndian(stream[position..]);
@@ -382,9 +428,140 @@ public sealed class Ww8Numbering
         position += bytes;
 
         level = new Ww8ListLevel(
-            startAt, numberFormat, numberText, placeholders, isLegal, neverRestarts, restartLimit);
+            startAt, numberFormat, numberText, placeholders, isLegal, neverRestarts, restartLimit,
+            indentAt, firstLine, tabPosition, follow, halfPointSize);
         return true;
     }
+
+    /// <summary>
+    /// The size the level sets its label at, in half-points, or nought when it states none.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The one thing worth having out of the level's <c>grpprlChpx</c>. LibreOffice reads the whole
+    /// group into an item set and hangs it on the level as a character style
+    /// (<c>WW8ListManager::ReadLVL</c>, <c>sw/source/filter/ww8/ww8par3.cxx</c>:820, which runs the
+    /// group through <c>SubstituteBullet</c> and <c>maSprmParser</c> into <c>pLevel-&gt;maCharSet</c>);
+    /// its export writes the result back as a <c>WW8NumNzM</c> character style, which is where a
+    /// flat-ODF round trip shows it — <c>fo:font-size="12pt"</c> on the level of
+    /// <c>loi_format_letter_of_intent-a-320-214-a330.doc</c>, whose items are set in 11.
+    /// </para>
+    /// <para>
+    /// The face is deliberately still not taken: a bullet level names a symbol font and states its
+    /// bullet as a code point in that font's private use area, which <see cref="Ww8Numbering"/> has
+    /// already normalised to U+2022 — so keeping the font would draw a real bullet through a face with
+    /// no glyph for it. The <em>size</em> survives that normalisation intact, because it says how big
+    /// the mark is rather than which mark it is.
+    /// </para>
+    /// </remarks>
+    private static int LevelSize(ReadOnlySpan<byte> grpprl)
+    {
+        byte[] copy = grpprl.ToArray();
+
+        foreach (Ww8Sprm sprm in Ww8SprmReader.Read(copy))
+        {
+            if (sprm.Identifier is not (FontSizeSprm or FontSizeSprm97)) continue;
+            if (sprm.Operand.Length < 2) continue;
+
+            int halfPoints = BinaryPrimitives.ReadUInt16LittleEndian(sprm.Operand.Span);
+
+            // Word's own limits: 2 to 3276 half-points. Anything outside them is a misread group
+            // rather than a size, and a label measured at it would be absurd.
+            if (halfPoints is >= 2 and <= 3276) return halfPoints;
+        }
+
+        return 0;
+    }
+
+    /// <summary>
+    /// The three measurements a level's <c>grpprlPapx</c> carries: its indent, its first line's, and
+    /// where the tab after the label lands.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The port of <c>WW8ListManager::ReadLVL</c> (<c>sw/source/filter/ww8/ww8par3.cxx:700</c>), which
+    /// looks for the same three sprms and in the same order — each in both its Word 97 and its later
+    /// spelling, since a file saved by any version may carry either.
+    /// </para>
+    /// <para>
+    /// The left indent is taken as a magnitude, as LibreOffice takes it: a negative
+    /// <c>sprmPDxaLeft</c> here means the same distance on the other side of the margin rather than a
+    /// paragraph hanging off the page. The first-line indent keeps its sign, because that is the
+    /// hanging indent the label lives in.
+    /// </para>
+    /// <para>
+    /// The tab is <c>sprmPChgTabsPapx</c> in the one shape a level ever writes it: delete nothing,
+    /// insert one stop. Anything else is a document doing something a list level has no way to mean,
+    /// and is left alone rather than guessed at — which is the same judgement the C++ makes, where the
+    /// other shapes trip an assertion and are ignored.
+    /// </para>
+    /// </remarks>
+    private static (int IndentAt, int FirstLine, int TabPosition) LevelIndents(
+        ReadOnlySpan<byte> grpprl)
+    {
+        int indentAt = 0;
+        int firstLine = 0;
+        int tabPosition = 0;
+
+        byte[] copy = grpprl.ToArray();
+
+        foreach (Ww8Sprm sprm in Ww8SprmReader.Read(copy))
+        {
+            switch (sprm.Identifier)
+            {
+                case LeftIndentSprm or LeftIndentSprm97:
+                    indentAt = Math.Abs((int)sprm.SignedWord);
+                    break;
+
+                case FirstLineIndentSprm or FirstLineIndentSprm97:
+                    firstLine = sprm.SignedWord;
+                    break;
+
+                case TabsSprm:
+                {
+                    ReadOnlySpan<byte> operand = sprm.Operand.Span;
+                    if (operand.Length >= 5 && operand[0] == 0 && operand[1] == 1)
+                    {
+                        tabPosition = BinaryPrimitives.ReadInt16LittleEndian(operand[2..]);
+                    }
+
+                    break;
+                }
+
+                default:
+                    continue;
+            }
+        }
+
+        return (indentAt, firstLine, tabPosition);
+    }
+
+    /// <summary><c>sprmCHps</c>, a font size in half-points, as Word 97 wrote it.</summary>
+    private const ushort FontSizeSprm97 = 0x4A43;
+
+    /// <summary><c>sprmCHps</c> in its earlier spelling, which a Word 6/95 level may carry.</summary>
+    private const ushort FontSizeSprm = 0x0043;
+
+    /// <summary><c>sprmPDxaLeft</c> as Word 97 wrote it.</summary>
+    private const ushort LeftIndentSprm97 = 0x840F;
+
+    /// <summary><c>sprmPDxaLeft</c> in its later spelling.</summary>
+    private const ushort LeftIndentSprm = 0x845E;
+
+    /// <summary><c>sprmPDxaLeft1</c> as Word 97 wrote it.</summary>
+    private const ushort FirstLineIndentSprm97 = 0x8411;
+
+    /// <summary><c>sprmPDxaLeft1</c> in its later spelling.</summary>
+    private const ushort FirstLineIndentSprm = 0x8460;
+
+    /// <summary>
+    /// <c>sprmPChgTabs</c>, whose operand states its own length.
+    /// </summary>
+    /// <remarks>
+    /// This one and not <c>sprmPChgTabsPapx</c> beside it, which has a different operand layout — the
+    /// same choice <c>ReadLVL</c> makes.
+    /// </remarks>
+    private const ushort TabsSprm = 0xC615;
 
     /// <summary>
     /// Reads the <c>PlfLfo</c>: a count, that many fixed-size instances, then their override data.

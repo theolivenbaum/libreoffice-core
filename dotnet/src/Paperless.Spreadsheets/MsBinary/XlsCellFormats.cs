@@ -11,8 +11,11 @@ namespace Paperless.Spreadsheets.MsBinary;
 /// <param name="Weight">400 or 700 in every file, but the field is a full weight.</param>
 /// <param name="IsItalic">Whether the face is italic.</param>
 /// <param name="ColourIndex">An index into the workbook's palette, or 0x7FFF for automatic.</param>
+/// <param name="Underline">The line under the text, from the record's own underline byte.</param>
+/// <param name="IsStruckThrough">Whether a line is drawn through it.</param>
 internal readonly record struct BiffFont(
-    string Name, Length Height, int Weight, bool IsItalic, int ColourIndex);
+    string Name, Length Height, int Weight, bool IsItalic, int ColourIndex,
+    SheetUnderline Underline = SheetUnderline.None, bool IsStruckThrough = false);
 
 /// <summary>A cell format's alignment half, as an <c>XF</c> record states it.</summary>
 internal readonly record struct BiffAlignment(
@@ -73,6 +76,23 @@ internal sealed class XlsCellFormats
         _fonts.Add(font);
     }
 
+    /// <summary>
+    /// The workbook's "app font", which a column width is a count of digits of.
+    /// </summary>
+    /// <remarks>
+    /// <c>FONT</c> record zero, which <c>XclImpFontBuffer::UpdateAppFont</c> hands straight to
+    /// <c>XclRoot::SetCharWidth</c> (<c>sc/source/filter/excel/xistyle.cxx:632</c>). Null before
+    /// the workbook globals have been read, which leaves the width on Calc's own default face.
+    /// See <see cref="SheetColumnDigits"/>.
+    /// </remarks>
+    public SheetDefaultFont? DefaultFont => _fonts.Count > 0
+        ? new SheetDefaultFont(
+            _fonts[0].Name.Length == 0 ? null : _fonts[0].Name,
+            _fonts[0].Height,
+            _fonts[0].Weight,
+            _fonts[0].IsItalic)
+        : null;
+
     /// <summary>Replaces the palette from index eight upwards, which is what <c>PALETTE</c> sets.</summary>
     /// <param name="colours">The colours the record listed, in order.</param>
     public void SetPalette(IReadOnlyList<Colour> colours)
@@ -106,6 +126,8 @@ internal sealed class XlsCellFormats
             FontSize = font.Height,
             FontWeight = font.Weight,
             IsItalic = font.IsItalic,
+            Underline = font.Underline,
+            IsStruckThrough = font.IsStruckThrough,
             Colour = ColourAt(font.ColourIndex),
             Horizontal = alignment.Horizontal,
             Vertical = alignment.Vertical,
@@ -117,6 +139,7 @@ internal sealed class XlsCellFormats
             NumberFormatKind = format.IsGeneral || format.Sections.Count == 0
                 ? NumberFormatKind.General
                 : format.Sections[0].Kind,
+            NumberFormat = format,
         };
     }
 
@@ -146,6 +169,8 @@ internal sealed class XlsCellFormats
             FontSize = font.Height,
             FontWeight = font.Weight,
             IsItalic = font.IsItalic,
+            Underline = font.Underline,
+            IsStruckThrough = font.IsStruckThrough,
             Colour = ColourAt(font.ColourIndex),
         };
     }

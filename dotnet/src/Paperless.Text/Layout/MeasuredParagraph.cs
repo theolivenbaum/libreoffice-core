@@ -25,15 +25,56 @@ namespace Paperless.Text.Layout;
 /// <param name="Face">The face it is set in.</param>
 /// <param name="EmSize">The em size it is set at.</param>
 /// <param name="Shaping">How it is shaped.</param>
+/// <param name="MetricEmSize">
+/// The size the run's <em>line metrics</em> are taken at, or zero for <paramref name="EmSize"/> — which is
+/// every run but one kind.
+/// <para>
+/// Small capitals are the kind. A lowercase letter inside a small-capitals run is drawn uppercase at four
+/// fifths of the size (<c>SMALL_CAPS_PERCENTAGE</c>, <c>include/editeng/svxfont.hxx</c>) and yet does
+/// <em>not</em> shorten the line it sits on: Writer builds the shrunken font locally inside
+/// <c>SwSubFont::DoOnCapitals</c> and leaves <c>SwFont::GetHeight</c> — which is what
+/// <c>SwLineLayout::CalcLine</c> asks — reporting the unshrunken one. Without this separation a heading
+/// set entirely in lowercase small capitals would draw its line four fifths as tall as the reference and
+/// repaginate the document under it.
+/// </para>
+/// </param>
+/// <param name="Tracking">
+/// A fixed distance added between the run's characters, zero for none.
+/// <para>
+/// <c>SvxKerningItem</c> / <c>EE_CHAR_KERNING</c>, which DrawingML spells <c>a:rPr/@spc</c> in
+/// hundredths of a point and a word processor spells <c>w:spacing</c> in twentieths. It is
+/// <em>not</em> pair kerning — that is the face's own <c>kern</c> feature and is applied by the
+/// shaper — but a constant per character, commonly negative, that a designer uses to pull a
+/// heading in. Ignoring it makes a tracked line measure wider than the reference by the whole
+/// accumulated amount, which on a 50-character line at the corpus's commonest value of −0.2 pt is
+/// ten points: enough to move the last word of every line onto the next one.
+/// </para>
+/// <para>
+/// <strong>It is a distance between characters, so a run of <c>n</c> of them carries
+/// <c>n − 1</c>.</strong> That is what the reference measures
+/// (<c>SvxFont::QuickGetTextSize</c>, <c>editeng/source/items/svxfont.cxx:481-500</c>, which adds
+/// one per distinct advance and then takes the trailing one back off), and it is exactly what a
+/// prefix table can express for a whole paragraph and cannot express for an arbitrary range: the
+/// count of gaps inside a range depends on the range. So the table charges the gap
+/// <em>before</em> each character, which is right to the last unit for a paragraph measured whole
+/// and one tracking unit generous for a line that starts part-way in.
+/// </para>
+/// </param>
 public readonly record struct FormattedRun(
     int Start,
     int Length,
     OpenTypeFace Face,
     Length EmSize,
-    ShapingOptions Shaping = default)
+    ShapingOptions Shaping = default,
+    Length MetricEmSize = default,
+    Length Tracking = default)
 {
     /// <summary>One past the run's last character.</summary>
     public int End => Start + Length;
+
+    /// <summary>The size this run's line metrics are scaled by.</summary>
+    public Core.Units.Length LineEmSize
+        => MetricEmSize > Core.Units.Length.Zero ? MetricEmSize : EmSize;
 
     /// <summary>True when the run covers a character.</summary>
     public bool Covers(int index) => index >= Start && index < End;
@@ -130,13 +171,16 @@ public sealed class MeasuredParagraph
     private readonly TextItem[] _items;
     private readonly InlineObject[] _objects;
 
+    private readonly bool _blanksAreTransparentToHeight;
+
     private MeasuredParagraph(
         string text,
         MeasuredRun[] runs,
         long[] prefixEmu,
         TextItem[] items,
         byte paragraphLevel,
-        InlineObject[] objects)
+        InlineObject[] objects,
+        bool blanksAreTransparentToHeight)
     {
         Text = text;
         _runs = runs;
@@ -144,6 +188,7 @@ public sealed class MeasuredParagraph
         _items = items;
         ParagraphLevel = paragraphLevel;
         _objects = objects;
+        _blanksAreTransparentToHeight = blanksAreTransparentToHeight;
     }
 
     /// <summary>The paragraph's text.</summary>
@@ -196,12 +241,23 @@ public sealed class MeasuredParagraph
     /// The as-character pictures and frames set in the text, or null for a paragraph with none — which is
     /// nearly every paragraph, and the path every one of them took before inline objects existed.
     /// </param>
+    /// <param name="grid">
+    /// The device grid each run's vertical metrics are rounded through, or null to scale them exactly.
+    /// See <see cref="MetricGrid"/>.
+    /// </param>
+    /// <param name="blanksAreTransparentToHeight">
+    /// True to leave tabs and all-blank runs out of a line's height, which is what the Word formats ask
+    /// for; see <see cref="HeightOf"/>. False — the default — measures every run on the line, which is
+    /// what ODF and RTF want.
+    /// </param>
     public static MeasuredParagraph Measure(
         string text,
         IReadOnlyList<FormattedRun> runs,
         ITextShaper? shaper = null,
         ItemisationOptions? itemisation = null,
-        IReadOnlyList<InlineObject>? objects = null)
+        IReadOnlyList<InlineObject>? objects = null,
+        MetricGrid? grid = null,
+        bool blanksAreTransparentToHeight = false)
     {
         ArgumentNullException.ThrowIfNull(text);
         ArgumentNullException.ThrowIfNull(runs);
@@ -220,6 +276,8 @@ public sealed class MeasuredParagraph
 
         List<MeasuredRun> measured = [];
         long[] prefix = new long[text.Length + 1];
+        long[] tracking = new long[text.Length];
+        bool tracked = false;
         long running = 0;
 
         foreach (FormattedRun run in formatted)
@@ -229,7 +287,7 @@ public sealed class MeasuredParagraph
                 ShapedText shaped = engine.Shape(
                     part.Face, text.AsSpan(part.Start, part.Length), part.Shaping);
 
-                measured.Add(new MeasuredRun(part, shaped, LineSpacing.Resolve(part.Face)));
+                measured.Add(new MeasuredRun(part, shaped, LineSpacing.Resolve(part.Face, grid)));
 
                 // Each sub-run's own prefix widths, scaled from its own grid into EMUs and added to
                 // the running total. Summing in design units instead would add numbers from two
@@ -238,6 +296,12 @@ public sealed class MeasuredParagraph
                 for (int i = 1; i <= part.Length; i++)
                 {
                     prefix[part.Start + i] = running + shaped.WidthUpTo(i, part.EmSize).Emu;
+                }
+
+                if (part.Tracking != Length.Zero)
+                {
+                    tracked = true;
+                    for (int i = 0; i < part.Length; i++) tracking[part.Start + i] = part.Tracking.Emu;
                 }
 
                 running += shaped.Width(part.EmSize).Emu;
@@ -252,6 +316,24 @@ public sealed class MeasuredParagraph
             if (prefix[i] < prefix[i - 1]) prefix[i] = prefix[i - 1];
         }
 
+        // Tracking is charged for the gap *before* each character, so the first pays nothing and a
+        // paragraph of n characters carries n - 1 gaps, which is what the reference measures. See
+        // FormattedRun.Tracking for why a prefix table cannot do better than that.
+        if (tracked)
+        {
+            long carried = 0;
+
+            for (int i = 1; i <= text.Length; i++)
+            {
+                prefix[i] += carried;
+                carried += tracking[i - 1];
+
+                // A tracking value more negative than a character is wide would walk the table
+                // backwards, and every width read out of it is a difference of two entries.
+                if (prefix[i] < prefix[i - 1]) prefix[i] = prefix[i - 1];
+            }
+        }
+
         // Each object widens every prefix *past* the boundary it occupies and none at or before it, which
         // is what makes it sit between two characters rather than replace one. The consequence worth
         // stating: a line that ends at the boundary does not pay for the object and a line that starts
@@ -262,7 +344,8 @@ public sealed class MeasuredParagraph
         }
 
         return new MeasuredParagraph(
-            text, [.. measured], prefix, [.. items], bidi.ParagraphLevel, inline);
+            text, [.. measured], prefix, [.. items], bidi.ParagraphLevel, inline,
+            blanksAreTransparentToHeight);
     }
 
     /// <summary>
@@ -412,6 +495,23 @@ public sealed class MeasuredParagraph
     /// An empty range takes the run that would contain it, so an empty line is still as tall as the text
     /// that would go on it.
     /// </para>
+    /// <para>
+    /// <strong>Tabs and blanks are transparent when the paragraph was measured that way.</strong> Word
+    /// does not let a tab or a run of spaces make a line taller, and Writer follows it behind the
+    /// <c>IgnoreTabsAndBlanksForLineCalculation</c> setting, which its DOC and DOCX importers both turn on
+    /// and its RTF and ODF ones leave off (measured: a flat-ODF export of the same prose reads
+    /// <c>true</c> from <c>.doc</c> and <c>.docx</c>, <c>false</c> from <c>.rtf</c>, <c>.odt</c> and
+    /// <c>.fodt</c>). <c>SwLineLayout::CalcLine</c> skips such a portion outright while any other portion
+    /// is on the line (<c>porlay.cxx</c>:340) and falls back to it when none is (<c>porlay.cxx</c>:601),
+    /// which is the two passes below.
+    /// </para>
+    /// <para>
+    /// It matters far more than it sounds. A tab between two runs carries whatever size the character
+    /// formatting left it — usually the document default, not the size of the text either side of it — so
+    /// a tabbed table set in 8 pt with 12 pt tabs is laid out on 12 pt lines by anything that measures the
+    /// tabs. Measured on <c>prison-population-bulletin-june.doc</c>: 16.7 pt of row pitch against the
+    /// reference's 12.1, at identical glyph sizes, which cost that document two whole pages.
+    /// </para>
     /// </remarks>
     public (Length Height, Length Ascent) HeightOf(int start, int end)
     {
@@ -419,13 +519,13 @@ public sealed class MeasuredParagraph
         Length ascent = Length.Zero;
         Length descent = Length.Zero;
 
-        foreach (MeasuredRun run in _runs)
-        {
-            bool touches = run.Run.Start < end && start < run.Run.End;
-            bool contains = start == end && run.Run.Covers(start);
-            if (!touches && !contains) continue;
+        Fold(start, end, _blanksAreTransparentToHeight, ref height, ref ascent, ref descent);
 
-            Accumulate(run, ref height, ref ascent, ref descent);
+        // A line holding nothing but tabs and blanks is as tall as those tabs and blanks: they are skipped
+        // only while something else is there to be measured instead.
+        if (height == Length.Zero && _blanksAreTransparentToHeight)
+        {
+            Fold(start, end, skipBlankRuns: false, ref height, ref ascent, ref descent);
         }
 
         // No run at all, which happens for an empty paragraph. The first run's metrics are the
@@ -458,14 +558,77 @@ public sealed class MeasuredParagraph
         return (Length.Max(height, ascent + descent), ascent);
     }
 
+    /// <summary>Folds every run touching a range into the maxima a line's height is built from.</summary>
+    /// <param name="start">Where the line starts.</param>
+    /// <param name="end">Where the line's visible text ends.</param>
+    /// <param name="skipBlankRuns">
+    /// True to pass over a run whose share of the range is nothing but tabs and blanks, which is what
+    /// <see cref="HeightOf"/> documents.
+    /// </param>
+    /// <param name="height">The tallest run so far.</param>
+    /// <param name="ascent">The largest ascent so far.</param>
+    /// <param name="descent">The largest descent so far.</param>
+    private void Fold(
+        int start, int end, bool skipBlankRuns,
+        ref Length height, ref Length ascent, ref Length descent)
+    {
+        foreach (MeasuredRun run in _runs)
+        {
+            bool touches = run.Run.Start < end && start < run.Run.End;
+            bool contains = start == end && run.Run.Covers(start);
+            if (!touches && !contains) continue;
+
+            if (skipBlankRuns
+                && IsAllBlanks(Text, Math.Max(start, run.Run.Start), Math.Min(end, run.Run.End)))
+            {
+                continue;
+            }
+
+            Accumulate(run, ref height, ref ascent, ref descent);
+        }
+    }
+
+    /// <summary>
+    /// Whether a stretch of the text is nothing but the characters Word measures no line height from.
+    /// </summary>
+    /// <remarks>
+    /// The tab first, which Writer answers separately because a tab is its own portion type
+    /// (<c>SwLinePortion::InTabGrp</c>), then the four spaces <c>lcl_HasOnlyBlanks</c> lists
+    /// (<c>porlay.cxx</c>:231) plus the en space it accepts outside a fieldmark. An empty stretch is
+    /// <em>not</em> all blanks: that is the empty-line case, which takes its height from the run covering
+    /// it rather than losing it.
+    /// </remarks>
+    private static bool IsAllBlanks(string text, int start, int end)
+    {
+        if (end <= start) return false;
+
+        for (int i = start; i < end && i < text.Length; i++)
+        {
+            switch (text[i])
+            {
+                case '\t':
+                case ' ': // SPACE
+                case '\u2002': // EN SPACE
+                case '\u2003': // EM SPACE
+                case '\u2005': // FOUR-PER-EM SPACE
+                case '\u3000': // IDEOGRAPHIC SPACE
+                    continue;
+                default:
+                    return false;
+            }
+        }
+
+        return true;
+    }
+
     /// <summary>Folds one run into the running maxima a line's height is built from.</summary>
     private static void Accumulate(
         MeasuredRun run, ref Length height, ref Length ascent, ref Length descent)
     {
         // Twips throughout, because Writer lays out in whole twips and a fraction kept here would
         // eventually move a line onto a different page.
-        Length runHeight = Length.FromTwips(run.Metrics.ScaledLineHeight(run.Run.EmSize).Twips);
-        Length runAscent = Length.FromTwips(run.Metrics.ScaledAscent(run.Run.EmSize).Twips);
+        Length runHeight = Length.FromTwips(run.Metrics.ScaledLineHeight(run.Run.LineEmSize).Twips);
+        Length runAscent = Length.FromTwips(run.Metrics.ScaledAscent(run.Run.LineEmSize).Twips);
 
         height = Length.Max(height, runHeight);
         ascent = Length.Max(ascent, runAscent);

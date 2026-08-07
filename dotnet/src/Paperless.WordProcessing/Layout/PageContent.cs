@@ -133,8 +133,28 @@ public sealed record PageParagraph : PageBlock
 
     /// <summary>How far the label pushes the first line's text along, or zero when there is none.</summary>
     internal Length LabelAdvance
-        => Label?.Advance(-_format.FirstLineIndent, _format.StartIndent + _format.FirstLineIndent)
+        => Label?.Advance(
+               -_format.FirstLineIndent, _format.StartIndent + _format.FirstLineIndent, _format)
            ?? Length.Zero;
+
+    /// <summary>
+    /// The colour filled behind the whole paragraph, or null when it has none.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A paragraph's own background — <c>w:pPr/w:shd</c>, ODF's <c>fo:background-color</c>, RTF's
+    /// <c>\cbpat</c> — which is a different thing from a run's highlight and from a table cell's shade: it
+    /// covers the paragraph's <em>whole</em> text area rather than the width of its words, which is what
+    /// makes a shaded heading read as a bar across the page.
+    /// </para>
+    /// <para>
+    /// Kept beside <see cref="Colour"/> rather than inside <see cref="ParagraphFormat"/> because it is a
+    /// painting attribute and nothing about it changes a measurement: a shaded paragraph breaks its lines
+    /// exactly where an unshaded one would. See <see cref="PageDrawing"/> for the rectangle it fills, which
+    /// is the paragraph's print area and not its frame.
+    /// </para>
+    /// </remarks>
+    public Colour? Shading { get; init; }
 
     /// <summary>The em size the text is set at.</summary>
     public Length EmSize { get; init; } = Length.FromPoints(12);
@@ -144,6 +164,16 @@ public sealed record PageParagraph : PageBlock
 
     /// <summary>How the text is shaped; the default is what Writer does.</summary>
     public ShapingOptions Shaping { get; init; }
+
+    /// <summary>
+    /// The distance put between the paragraph's characters where its runs say nothing else.
+    /// </summary>
+    /// <remarks>
+    /// The paragraph mark's own tracking, which is what a paragraph set end to end in one tracked style
+    /// carries — and which nothing else would supply, because such a paragraph is uniform by every test
+    /// <see cref="Runs"/> makes and reaches <see cref="Measure"/> with no runs at all.
+    /// </remarks>
+    public Length Tracking { get; init; }
 
     /// <summary>
     /// The paragraph's runs, when its formatting is not uniform.
@@ -164,6 +194,37 @@ public sealed record PageParagraph : PageBlock
 
     /// <summary>True when the paragraph's formatting varies across its text.</summary>
     public bool HasRuns => Runs.Count > 0;
+
+    /// <summary>
+    /// The device grid the paragraph's fonts are measured through, or null to measure them exactly.
+    /// </summary>
+    /// <remarks>
+    /// Null for every document but the few that ask to be laid out against a printer rather than against a
+    /// virtual device — see <see cref="MetricGrid"/>. Carried on the paragraph rather than passed down the
+    /// layout call chain because a header, a table cell and a text box all need the same answer and all
+    /// reach the layouter by different routes; the reader that knows the document's answer sets it once.
+    /// </remarks>
+    public MetricGrid? Metrics { get; init; }
+
+    /// <summary>
+    /// True when a tab or a run of spaces must not make a line taller, which is what Word does.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Writer's <c>IgnoreTabsAndBlanksForLineCalculation</c> (#i3952). Its DOC importer sets it outright
+    /// (<c>sw/source/filter/ww8/ww8par.cxx</c>:2041) and its DOCX import ends up with it too, while RTF and
+    /// ODF leave it off unless the file says otherwise — measured by exporting the same prose from each
+    /// format to flat ODF and reading the setting back: <c>true</c> from <c>.doc</c> and <c>.docx</c>,
+    /// <c>false</c> from <c>.rtf</c>, <c>.odt</c> and <c>.fodt</c>.
+    /// </para>
+    /// <para>
+    /// It only ever matters on a paragraph whose formatting varies, since a tab takes the size of whatever
+    /// character formatting covers it and that is frequently the document's default rather than the size of
+    /// the text around it. Beside <see cref="Metrics"/> and for the same reason: the reader knows the
+    /// answer, and four different routes into the layouter need it.
+    /// </para>
+    /// </remarks>
+    public bool BlanksAreTransparentToHeight { get; init; }
 
     /// <summary>
     /// The direction its bidi resolution takes as its base.
@@ -244,6 +305,68 @@ public sealed record PageParagraph : PageBlock
         => Frames.Count > 0 && Frames.Any(frame => frame.Anchor == FrameAnchor.AsCharacter);
 
     /// <summary>
+    /// True when the label is taller than the paragraph's own text, so it raises the first line.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A list level states its own character formatting — <c>w:lvl/w:rPr</c> in OOXML, the level's
+    /// <c>grpprlChpx</c> in WW8 — and it is regularly a different size from the item's text. Writer's
+    /// label is a portion in the line (<c>SwNumberPortion</c>), so
+    /// <c>SwLineLayout::CalcLine</c> folds it into the line's maxima and a 12 pt label over 11 pt text
+    /// gives a 12 pt line. Measured on <c>loi_format_letter_of_intent-a-320-214-a330.doc</c>, whose
+    /// bulleted items are 11 pt under a 12 pt level: LibreOffice's own pitch through the list is
+    /// 13.80 pt where the item's text alone would give 12.65.
+    /// </para>
+    /// <para>
+    /// Asked as a predicate rather than always folded in, because it decides which of the two layout
+    /// paths the paragraph takes. A label no taller than its text changes nothing, and a paragraph that
+    /// changes nothing must keep measuring through exactly the path it measured through before.
+    /// </para>
+    /// </remarks>
+    public bool LabelRaisesFirstLine => LabelExtent is not null;
+
+    /// <summary>
+    /// The label's line box, when it is taller than the paragraph's own, and null otherwise.
+    /// </summary>
+    private (Length Height, Length Ascent)? LabelExtent
+    {
+        get
+        {
+            if (Label is not { Text.Length: > 0 } label) return null;
+
+            (Length height, Length ascent) = label.LineExtent(Metrics);
+            (Length own, Length ownAscent) = OwnExtent();
+
+            return height > own || ascent > ownAscent ? (height, ascent) : null;
+        }
+    }
+
+    /// <summary>The line box the paragraph's own face and size give, for the label to be compared against.</summary>
+    /// <remarks>
+    /// The paragraph's rather than the first line's runs', because this only has to decide whether the
+    /// label can matter; <see cref="MeasuredParagraph.HeightOf"/> takes the maximum over whatever is
+    /// really on the line, so a run taller than both still wins.
+    /// </remarks>
+    private (Length Height, Length Ascent) OwnExtent()
+    {
+        Length height = Length.Zero;
+        Length ascent = Length.Zero;
+
+        foreach (PageRun run in Runs)
+        {
+            LineMetrics metrics = LineSpacing.Resolve(run.Face, Metrics);
+            Length size = run.MetricEmSize > Length.Zero ? run.MetricEmSize : run.EmSize;
+            height = Length.Max(height, Length.FromTwips(metrics.ScaledLineHeight(size).Twips));
+            ascent = Length.Max(ascent, Length.FromTwips(metrics.ScaledAscent(size).Twips));
+        }
+
+        LineMetrics own = LineSpacing.Resolve(Face, Metrics);
+        return (
+            Length.Max(height, Length.FromTwips(own.ScaledLineHeight(EmSize).Twips)),
+            Length.Max(ascent, Length.FromTwips(own.ScaledAscent(EmSize).Twips)));
+    }
+
+    /// <summary>
     /// Shapes the paragraph's runs, ready for measuring across them.
     /// </summary>
     /// <remarks>
@@ -255,14 +378,91 @@ public sealed record PageParagraph : PageBlock
     /// </remarks>
     internal MeasuredParagraph Measure()
     {
-        List<FormattedRun> runs = [.. Runs.Select(run => run.ToFormattedRun())];
+        List<FormattedRun> runs = Coalesce(Runs);
 
         if (runs.Count == 0)
         {
-            runs.Add(new FormattedRun(0, Text.Length, Face, EmSize, Shaping));
+            runs.Add(new FormattedRun(0, Text.Length, Face, EmSize, Shaping, Tracking: Tracking));
         }
 
-        return MeasuredParagraph.Measure(Text, runs, shaper: null, Itemisation, InlineObjects);
+        return MeasuredParagraph.Measure(
+            Text, runs, shaper: null, Itemisation, MeasurementObjects(), Metrics,
+            BlanksAreTransparentToHeight);
+    }
+
+    /// <summary>
+    /// The inline objects the measurement sees, which is the drawn ones plus the list label.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>Not <see cref="InlineObjects"/>, and the difference is deliberate.</strong> That property
+    /// is what the drawing pass walks alongside the paragraph's as-character frames, one for one; a
+    /// phantom in it would hang the wrong frame on the wrong line. This list is measurement's alone.
+    /// </para>
+    /// <para>
+    /// The label enters as a zero-width object at offset nought — the room for it is already made by
+    /// <see cref="Format"/>'s widened first-line indent, so all that is left to say is how tall it is and
+    /// where its baseline sits. An object at nought touches the first line only, which is where the label
+    /// is drawn, and a zero-width one at the head of the text neither cuts a run nor moves a break: see
+    /// <c>MeasuredParagraph.Split</c>, which skips a boundary at a run's own start.
+    /// </para>
+    /// </remarks>
+    private List<InlineObject>? MeasurementObjects()
+    {
+        if (LabelExtent is not (Length height, Length ascent)) return HasInlineObjects ? [.. InlineObjects] : null;
+
+        List<InlineObject> objects = [new InlineObject(0, Length.Zero, height, ascent)];
+        objects.AddRange(InlineObjects);
+        return objects;
+    }
+
+    /// <summary>
+    /// The runs' measurement halves, with adjacent identical ones joined.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>What makes a drawing-only property free.</strong> A <see cref="PageRun"/> carries both
+    /// what changes a width and what only changes a mark — a colour, a highlight, an underline — and the
+    /// readers split a paragraph into runs whenever any of them varies, because a property dropped by
+    /// the uniform-paragraph shortcut is a property never drawn. Without this, that split reaches
+    /// measurement: a shaper called twice across a boundary loses the kern pair that straddles it, so
+    /// underlining a sentence would make it fractionally wider and could move a line break. Joining the
+    /// runs whose <see cref="FormattedRun"/>s are equal restores exactly the shaping the paragraph would
+    /// have had, which is the invariant worth stating outright — <em>a property that decides only what a
+    /// mark looks like cannot decide where it lands.</em>
+    /// </para>
+    /// <para>
+    /// Only <em>adjacent</em> and only <em>identical</em>: a run boundary that is a real change of face
+    /// or size still breaks the shaping context, and it should — those are different fonts, and there is
+    /// no kern pair across them to lose.
+    /// </para>
+    /// </remarks>
+    private static List<FormattedRun> Coalesce(IReadOnlyList<PageRun> runs)
+    {
+        List<FormattedRun> formatted = new(runs.Count);
+
+        foreach (PageRun run in runs)
+        {
+            FormattedRun next = run.ToFormattedRun();
+
+            // Equal in every field but the range, and butting up against the one before it. The record
+            // struct's own equality is what decides "identical", so a field added to the measurement
+            // half is accounted for here without this method being touched.
+            if (formatted.Count > 0
+                && formatted[^1].End == next.Start
+                && formatted[^1] with { Start = next.Start, Length = next.Length } == next)
+            {
+                formatted[^1] = formatted[^1] with
+                {
+                    Length = formatted[^1].Length + next.Length,
+                };
+                continue;
+            }
+
+            formatted.Add(next);
+        }
+
+        return formatted;
     }
 }
 
@@ -366,6 +566,39 @@ public sealed record PageNote
 /// the smaller <paramref name="EmSize"/> that goes with it — the two are independent, and a document can
 /// raise text without shrinking it.
 /// </param>
+/// <param name="CaseMap">
+/// The case the run's text is drawn in, which is not the case it is stored in — <c>w:caps</c>,
+/// <c>w:smallCaps</c> and their counterparts in the other three formats. Resolved away by
+/// <see cref="CaseMapping.Apply"/> before the paragraph is measured, so nothing downstream of a reader
+/// ever sees a value other than <see cref="PageCaseMap.None"/>.
+/// </param>
+/// <param name="MetricEmSize">
+/// The size the run's line metrics are taken at, or zero for <paramref name="EmSize"/>. Set only by the
+/// small-capitals split; see <see cref="FormattedRun.MetricEmSize"/> for why the two sizes differ.
+/// </param>
+/// <param name="Highlight">
+/// The band drawn behind the run — Word's highlighter and ODF's character background — or transparent
+/// when it has none. It changes no measurement: the band takes the room the glyphs already had, so a
+/// document gains and loses highlighting without a line moving.
+/// </param>
+/// <param name="IsUnderlined">
+/// True when a rule is drawn under the run — <c>w:u</c>, <c>sprmCKul</c>, <c>\ul</c> and
+/// <c>style:text-underline-style</c>. Like <paramref name="Highlight"/> it changes no measurement: the
+/// rule is drawn across the advance the glyphs already had, so nothing reflows when it appears.
+/// </param>
+/// <param name="IsStruckThrough">
+/// True when a rule is drawn through the run — <c>w:strike</c> and <c>w:dstrike</c>,
+/// <c>sprmCFStrike</c> and <c>sprmCFDStrike</c>, <c>\strike</c> and
+/// <c>style:text-line-through-style</c>. The doubled forms are folded onto the single one, which is
+/// what the extraction side does with the same four properties.
+/// </param>
+/// <param name="Tracking">
+/// A fixed distance put between the run's characters, zero for none — the <c>w:spacing</c> of a
+/// <c>w:rPr</c>, <c>sprmCDxaSpace</c>, <c>\expndtw</c> and <c>fo:letter-spacing</c>. Unlike the two rules
+/// above it <em>does</em> change a measurement, so a run carrying it must survive the uniform-paragraph
+/// shortcut or the paragraph is measured without it. See <see cref="FormattedRun.Tracking"/> for how the
+/// distance is charged.
+/// </param>
 public readonly record struct PageRun(
     int Start,
     int Length,
@@ -374,10 +607,19 @@ public readonly record struct PageRun(
     FontReference? Font = null,
     Colour Colour = default,
     ShapingOptions Shaping = default,
-    Length Rise = default)
+    Length Rise = default,
+    PageCaseMap CaseMap = PageCaseMap.None,
+    Length MetricEmSize = default,
+    Colour Highlight = default,
+    bool IsUnderlined = false,
+    bool IsStruckThrough = false,
+    Length Tracking = default)
 {
     /// <summary>One past the run's last character.</summary>
     public int End => Start + Length;
+
+    /// <summary>True when the run carries a rule under it, through it, or both.</summary>
+    public bool IsDecorated => IsUnderlined || IsStruckThrough;
 
     /// <summary>The colour to draw with, black when the run states none.</summary>
     /// <remarks>
@@ -386,8 +628,16 @@ public readonly record struct PageRun(
     /// </remarks>
     public Colour EffectiveColour => Colour.A == 0 ? Core.Graphics.Colour.Black : Colour;
 
+    /// <summary>True when the run is drawn on a coloured band rather than on the page.</summary>
+    /// <remarks>
+    /// Transparent means no band, as it does for <see cref="Colour"/>: a highlight is an addition to the
+    /// page rather than something every run has, and the struct's default has to mean its absence.
+    /// </remarks>
+    public bool IsHighlighted => Highlight.A != 0;
+
     /// <summary>The measurement half of this run.</summary>
-    public FormattedRun ToFormattedRun() => new(Start, Length, Face, EmSize, Shaping);
+    public FormattedRun ToFormattedRun()
+        => new(Start, Length, Face, EmSize, Shaping, MetricEmSize, Tracking);
 }
 
 /// <summary>
@@ -406,13 +656,35 @@ public readonly record struct PageRun(
 /// <em>which</em> rectangle <see cref="Top"/> is measured from, since a second column's lines start again
 /// at the top of the page.
 /// </param>
+/// <param name="UpperSpace">
+/// How much of the gap above this line is the paragraph's <em>own</em> upper spacing, as collapsing and
+/// the top-of-frame rule left it. Zero on every line but a paragraph's first.
+/// </param>
+/// <remarks>
+/// <see cref="UpperSpace"/> is carried because a frame anchored to the paragraph is positioned from a
+/// point above the line: Writer's <c>SwAnchoredObjectPosition::GetTopForObjPos</c>
+/// (<c>sw/source/core/objectpositioning/anchoredobjectposition.cxx:225</c>) takes the anchor frame's own
+/// top and adds back only <c>GetUpperSpaceAmountConsideredForPrevFrame</c> — the previous paragraph's
+/// lower space and line spacing — so the paragraph's own space-before is <em>not</em> in the origin. That
+/// difference is not recoverable from <see cref="Top"/> alone, because collapsing, contextual spacing and
+/// the top-of-page rule each change how much of the gap the paragraph contributed.
+/// </remarks>
 public readonly record struct PlacedLine(
     int ParagraphIndex,
     int LineIndex,
     LineBox Box,
     Length Top,
-    int Column = 0)
+    int Column = 0,
+    Length UpperSpace = default)
 {
+    /// <summary>Where a frame anchored to this line's paragraph measures its offset from.</summary>
+    /// <remarks>
+    /// The paragraph's top for object positioning — see <see cref="UpperSpace"/>. Equal to
+    /// <see cref="Top"/> for every line that is not a paragraph's first, and for a paragraph whose space
+    /// above was collapsed away or dropped at the top of a page.
+    /// </remarks>
+    public Length ParagraphTop => Top - UpperSpace;
+
     /// <summary>The baseline's distance from the top of the body area.</summary>
     public Length Baseline => Top + Box.Baseline;
 
@@ -457,6 +729,20 @@ public sealed record PlacedFlow
 
     /// <summary>Where the flow sits on the page.</summary>
     public required DocRect Area { get; init; }
+
+    /// <summary>
+    /// How far the flow advanced in all — the <em>last</em> block's own lower spacing included.
+    /// </summary>
+    /// <remarks>
+    /// Different from where the ink stops, which is what <see cref="FlowLayouter.Extent"/> reports, and
+    /// the difference is a table cell's whole point. Writer's
+    /// <c>SwFlowFrame::CalcAddLowerSpaceAsLastInTableCell</c> adds the last frame's lower spacing to the
+    /// cell under the <c>AddParaSpacingToTableCells</c> setting, which both the DOC and the DOCX
+    /// importers switch on — so in a Word document every cell is as tall as its content plus the space
+    /// after its final paragraph. Sizing rows from the ink instead makes each one short by that spacing,
+    /// which on a long table is many pages.
+    /// </remarks>
+    public Length Advance { get; init; }
 
     /// <summary>True when nothing was laid out.</summary>
     public bool IsEmpty => Lines.Count == 0 && Tables.Count == 0;

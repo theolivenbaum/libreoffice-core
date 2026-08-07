@@ -92,12 +92,17 @@ public sealed partial class OdtLayoutSource
     /// How to reach the bytes behind a <c>draw:image</c>, or null to lay the document out with its
     /// picture frames empty — which is what a caller who wants only measurements should pay for.
     /// </param>
+    /// <param name="settings">
+    /// The document's <c>office:settings</c>, or null for one that states none. Only the compatibility
+    /// flags are read from it; see <see cref="_blanksAreTransparentToHeight"/>.
+    /// </param>
     public OdtLayoutSource(
         OdfStyles styles,
         SystemFontResolver? fonts = null,
         IReadOnlyDictionary<string, int>? masterPages = null,
         XElement? stylesRoot = null,
-        OdfPictures? pictures = null)
+        OdfPictures? pictures = null,
+        XElement? settings = null)
     {
         ArgumentNullException.ThrowIfNull(styles);
         _styles = styles;
@@ -106,7 +111,97 @@ public sealed partial class OdtLayoutSource
         _masterPages = masterPages ?? new Dictionary<string, int>(StringComparer.Ordinal);
         _footnotes = NumberingIn(stylesRoot, "footnote", NoteNumbering.Footnotes);
         _endnotes = NumberingIn(stylesRoot, "endnote", NoteNumbering.Endnotes);
+        _blanksAreTransparentToHeight =
+            Setting(settings, "IgnoreTabsAndBlanksForLineCalculation") == "true";
     }
+
+    /// <summary>
+    /// Whether tabs and blanks are left out of a line's height, as the document's settings say.
+    /// </summary>
+    /// <remarks>
+    /// False unless the file asks for it, which is the ODF default — and the reason it can be asked for at
+    /// all is that LibreOffice writes the flag out. A document exported from a <c>.doc</c> or a <c>.docx</c>
+    /// carries <c>true</c>, so a flat-ODF round trip of a Word file lays out the way the Word file does
+    /// instead of quietly diverging from it. See <see cref="PageParagraph.BlanksAreTransparentToHeight"/>.
+    /// </remarks>
+    private readonly bool _blanksAreTransparentToHeight;
+
+    /// <summary>
+    /// Whether two consecutive paragraphs' spacings add rather than the larger one winning, as the
+    /// document's settings say.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Writer's <c>PARA_SPACE_MAX</c>, which ODF spells <c>AddParaTableSpacing</c>
+    /// (<c>SwXDocumentSettings.cxx</c> names the property at :189 and sets the flag at :449). Set, the two
+    /// spacings are summed; clear, the larger wins — the name says the opposite of what it does.
+    /// </para>
+    /// <para>
+    /// True when the file states nothing, because the setting then keeps the application's configured
+    /// <c>AddSpacing</c>, whose shipped default is <c>true</c>
+    /// (<c>officecfg/registry/schema/org/openoffice/Office/Compatibility.xcs</c>). That is the ODF
+    /// behaviour Paperless already had; what it did not have is the other branch, which a document
+    /// converted from a Word file always carries.
+    /// </para>
+    /// <para>
+    /// Measured on <c>paragraph-spacing-collapsed.odt</c> and its flat twin — eight paragraphs each with
+    /// 12 pt of space-before and 8 pt of space-after on 12 pt exact lines, saved by LibreOffice from the
+    /// collapsing DOCX: with <c>AddParaTableSpacing</c> false LibreOffice 24.2.7.2 puts every boundary at
+    /// 24.00 pt and with it true at 32.00 pt. Both containers honour it, so this is not a packaged-only
+    /// setting.
+    /// </para>
+    /// <para>
+    /// Like the DOCX case it reaches nothing on the corpus — the 200-file words track holds no ODF
+    /// document at all — so it is correctness rather than a measured win.
+    /// </para>
+    /// </remarks>
+    /// <param name="settings">The document's <c>office:settings</c>, or null.</param>
+    internal static bool AddsParagraphSpacing(XElement? settings)
+        => Setting(settings, "AddParaTableSpacing") != "false";
+
+    /// <summary>
+    /// Whether a paragraph keeps its space-before at the top of the first page and after a page break,
+    /// as the document's settings say.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Writer's <c>PARA_SPACE_MAX_AT_PAGES</c>, which ODF spells <c>AddParaTableSpacingAtStart</c>, and
+    /// the companion of <see cref="AddsParagraphSpacing"/> — <c>ww8par.cxx</c> sets the two on
+    /// consecutive lines (:1946 and :1947). It decides whether the question is asked at all;
+    /// <c>SwFlowFrame::HasParaSpaceAtPages</c> then decides where, granting the space on the first page
+    /// and after an explicit break and taking it away at every automatic one.
+    /// </para>
+    /// <para>
+    /// True when the file states nothing, because the application's shipped <c>AddSpacingAtPages</c>
+    /// default is <c>true</c>
+    /// (<c>officecfg/registry/schema/org/openoffice/Office/Compatibility.xcs</c>:47,
+    /// <c>DocumentSettingManager.cxx</c>:131). Paperless previously assumed the opposite for ODF, which
+    /// put the first line of a document whose first paragraph has space-before too high by exactly that
+    /// spacing.
+    /// </para>
+    /// <para>
+    /// Measured on the eight-paragraph fixture, whose paragraphs each carry 12 pt of space-before, in
+    /// points down an A4 page from LibreOffice 24.2.7.2: with the setting true the first baseline is at
+    /// 93.60, with it false at 81.60, and <b>with the item removed entirely at 93.60</b> — so absent
+    /// means true, which is the part that could not be inferred from the DOCX side.
+    /// </para>
+    /// </remarks>
+    /// <param name="settings">The document's <c>office:settings</c>, or null.</param>
+    internal static bool KeepsParagraphSpacingAtPages(XElement? settings)
+        => Setting(settings, "AddParaTableSpacingAtStart") != "false";
+
+    /// <summary>One <c>config:config-item</c>'s value from a document's settings, or null when absent.</summary>
+    /// <remarks>
+    /// The items are nested in <c>config:config-item-set</c> elements, so this searches by descendant name
+    /// rather than walking the sets: which set a flag lives in is a detail of how LibreOffice groups them,
+    /// and a reader that hard-codes the grouping breaks on the next version that regroups.
+    /// </remarks>
+    private static string? Setting(XElement? settings, string name)
+        => settings?
+            .Descendants(XName.Get("config-item", OdfNamespaces.Config))
+            .FirstOrDefault(item =>
+                item.Attribute(XName.Get("name", OdfNamespaces.Config))?.Value == name)?
+            .Value;
 
     /// <summary>How the document's footnotes are numbered.</summary>
     private readonly NoteNumbering _footnotes;
@@ -488,10 +583,14 @@ public sealed partial class OdtLayoutSource
         IReadOnlyList<PageFrame> frames = FramesOf(walker.Frames);
         (_listLevel, _listStyle) = outerList;
 
+        // The runs first, then the text they map: `Apply` rewrites both together, and the offsets it
+        // preserves are the ones the notes and frames above were recorded against.
+        List<PageRun> runs = RunsOf(walker.Ranges, text, face);
+
         return new PageParagraph
         {
             SectionIndex = _sectionIndex,
-            Text = walker.Text,
+            Text = CaseMapping.Apply(walker.Text, runs),
             Face = face,
             Font = _references.GetValueOrDefault(text.FaceKey),
             Colour = text.Colour ?? Colour.Black,
@@ -499,8 +598,10 @@ public sealed partial class OdtLayoutSource
             Label = label,
             EmSize = text.Size,
             Language = text.Language,
-            Shaping = new ShapingOptions(Language: text.Language),
-            Runs = RunsOf(walker.Ranges, text, face),
+            Shaping = new ShapingOptions(
+                Language: text.Language, DisableKerning: !text.AutoKerning),
+            BlanksAreTransparentToHeight = _blanksAreTransparentToHeight,
+            Runs = runs,
             Notes = notes,
             Frames = frames,
             Source = element,
@@ -640,7 +741,21 @@ public sealed partial class OdtLayoutSource
                 || size != paragraph.Size
                 || style.Colour != paragraph.Colour
                 || style.Language != paragraph.Language
-                || rise != Core.Units.Length.Zero)
+                || rise != Core.Units.Length.Zero
+                // A case map has to survive the uniform-paragraph shortcut: it is the one property here
+                // that changes the *characters*, so dropping the runs would draw the text as stored.
+                || style.CaseMap != PageCaseMap.None
+                // So does a highlight: the paragraph carries none of its own, so a paragraph highlighted
+                // end to end is uniform by every other test and would lose its band entirely.
+                || style.Highlight is { A: not 0 }
+                // And so do the two rules, for the same reason: neither changes a width, so a paragraph
+                // underlined end to end is uniform by every measurement test and would be drawn plain.
+                || style.IsUnderlined
+                || style.IsStruckThrough
+                // Kerning, unlike the two rules, does change a measurement — so a run that kerns
+                // inside a paragraph that does not has to survive the shortcut or its width is the
+                // paragraph's answer rather than its own.
+                || style.AutoKerning != paragraph.AutoKerning)
             {
                 varies = true;
             }
@@ -652,8 +767,12 @@ public sealed partial class OdtLayoutSource
                 size,
                 _references.GetValueOrDefault(style.FaceKey),
                 style.Colour ?? paragraph.Colour ?? Colour.Black,
-                new ShapingOptions(Language: style.Language),
-                rise));
+                new ShapingOptions(Language: style.Language, DisableKerning: !style.AutoKerning),
+                rise,
+                style.CaseMap,
+                Highlight: style.Highlight ?? default,
+                IsUnderlined: style.IsUnderlined,
+                IsStruckThrough: style.IsStruckThrough));
         }
 
         return varies ? runs : [];

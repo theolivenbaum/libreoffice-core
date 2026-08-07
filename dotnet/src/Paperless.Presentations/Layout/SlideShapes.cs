@@ -1,5 +1,6 @@
 using Paperless.Core.Geometry;
 using Paperless.Core.Graphics;
+using Paperless.Core.Units;
 using Paperless.Vector;
 
 namespace Paperless.Presentations.Layout;
@@ -125,6 +126,70 @@ public sealed record PlacedShape
 
     /// <summary>The text inside it, or null when it holds none.</summary>
     public PlacedText? Text { get; init; }
+
+    /// <summary>The drop shadow it casts, or null when it casts none.</summary>
+    public SlideShadow? Shadow { get; init; }
+}
+
+/// <summary>
+/// A shape's drop shadow: where the copy goes, what colour it is, and how far through it you
+/// can see.
+/// </summary>
+/// <remarks>
+/// <para>
+/// A shadow is not a property of a shape's outline — it is the <em>whole shape drawn again</em>,
+/// offset, with every colour replaced by one. That is literally what LibreOffice does:
+/// <c>createEmbeddedShadowPrimitive</c> (<c>svx/source/sdr/primitive2d/sdrdecompositiontools.cxx:860</c>)
+/// wraps the shape's entire decomposition — fill, outline, picture and text alike — in a
+/// <c>ShadowPrimitive2D</c>, which embeds it in a <c>BColorModifier_replace</c> and a translation
+/// (<c>drawinglayer/source/primitive2d/shadowprimitive2d.cxx:76-89</c>), and puts the result
+/// <em>behind</em> the shape rather than beside it.
+/// </para>
+/// <para>
+/// The transparency is carried apart from the colour rather than as its alpha, because that is
+/// what makes overlapping parts of one shadow composite once. LibreOffice wraps the whole shadow
+/// in a single <c>UnifiedTransparencePrimitive2D</c>, so a shape whose outline overlaps its own
+/// fill casts one 38%-black shadow and not a darker seam where the two meet.
+/// </para>
+/// </remarks>
+/// <param name="OffsetX">How far right the copy sits; negative is left.</param>
+/// <param name="OffsetY">How far down the copy sits; negative is up.</param>
+/// <param name="Colour">What every mark in the copy is drawn in.</param>
+/// <param name="Opacity">How opaque the whole copy is, from 0 to 1.</param>
+/// <param name="Blur">
+/// The blur radius the file states, or zero.
+/// </param>
+/// <remarks>
+/// <para>
+/// <see cref="Blur"/> is carried and only partly acted on, and the reason is worth stating
+/// because it decides what reaches the page. LibreOffice rasterises a blurred shadow: with a
+/// non-zero radius <c>ShadowPrimitive2D</c> renders its children to a bitmap and softens that
+/// (<c>shadowprimitive2d.cxx:91-140</c>), so the reference PDF holds a greyscale image with a
+/// soft mask and <strong>no text</strong> — verified on <c>passiv.pptx</c>, whose every page
+/// carries a 918 × 272 gray JPEG plus smask and whose words are not duplicated. With a zero
+/// radius it stays vector and the shadow's text is real, extractable text — which is how
+/// <c>pres_ioc_phuket.ppt</c> comes to draw "National" fourteen times, seven pairs 6.01 pt apart
+/// in both axes.
+/// </para>
+/// <para>
+/// So a blurred shadow is drawn here as a hard-edged one <em>without its text</em>, and an
+/// unblurred one with it. Suppressing the text under blur is not a nicety: drawing it would add
+/// words the reference does not have to every deck with a themed shadow, which is the largest
+/// avoidable regression this feature could cause.
+/// </para>
+/// </remarks>
+public readonly record struct SlideShadow(
+    Length OffsetX,
+    Length OffsetY,
+    Colour Colour,
+    double Opacity = 1.0,
+    Length Blur = default)
+{
+    /// <summary>True when the shadow would put no mark on the page.</summary>
+    public bool IsInvisible => Opacity <= 0 || Colour.A == 0;
+
+    /// <summary>True when the shadow's copy carries the shape's text, as an unblurred one does.</summary>
+    public bool CarriesText => Blur <= Length.Zero;
 }
 
 /// <summary>
@@ -160,6 +225,19 @@ public sealed record PlacedPicture(RasterImage? Image, DocRect Destination, doub
     /// </para>
     /// </remarks>
     public Lazy<VectorImage>? Vector { get; init; }
+
+    /// <summary>
+    /// True when the picture's bytes are carried inside the document's own markup or records
+    /// rather than as a package entry of their own.
+    /// </summary>
+    /// <remarks>
+    /// A `.ppt`'s Escher blip and a flat ODF's <c>office:binary-data</c> are inline; a
+    /// <c>ppt/media/…</c> relationship target and an ODP's <c>Pictures/…</c> entry are not. It is
+    /// a fact about storage and would be an odd thing to draw differently — see
+    /// <c>SlideDrawing.FillReachesThePage</c>, which is the one place that reads it, for the
+    /// measurement that made it necessary and for the competing explanation it could not rule out.
+    /// </remarks>
+    public bool IsInline { get; init; }
 }
 
 /// <summary>
@@ -181,4 +259,16 @@ public sealed record PlacedText(
 /// <summary>One glyph run and the colour it is drawn in.</summary>
 /// <param name="Run">The run.</param>
 /// <param name="Colour">Its colour.</param>
-public readonly record struct PlacedGlyphRun(GlyphRun Run, Colour Colour);
+/// <param name="Rules">
+/// The underline and strikethrough rectangles the run's own face asks for, in the same
+/// coordinates as the run, or empty when it carries neither.
+/// </param>
+/// <remarks>
+/// The rules travel with the run rather than being drawn by a backend from the font, because a
+/// decoration's offset and thickness come from the face's <c>post</c> and <c>OS/2</c> tables and
+/// the face is resolved here — a backend holds a <see cref="FontReference"/> and cannot read
+/// them. They are filled rectangles rather than strokes so their thickness is exact, which is
+/// what the spreadsheet layer does with the same metrics.
+/// </remarks>
+public readonly record struct PlacedGlyphRun(
+    GlyphRun Run, Colour Colour, IReadOnlyList<DocRect>? Rules = null);

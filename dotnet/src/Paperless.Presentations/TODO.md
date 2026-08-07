@@ -62,6 +62,38 @@ all four text boxes' baselines. And `ppt-features.ppt` now agrees with `slides-f
 every shape rectangle and every comparable text pen, which is the strongest check available here:
 the two files are the same deck in vocabularies that share nothing.
 
+**Done: the master's own shapes, which were the largest single loss on the binary path.** A PPT
+master page is drawn *whole* under every slide that follows it — Impress imports every shape of a
+`MainMaster` except the patriarch onto the master page and puts it on the background-objects layer
+(`sd/source/filter/ppt/pptin.cxx:838-848`), and the slide shows that layer unless bit 0 of its
+`SlideAtom` flags is clear. Two kinds are held back, and both rules live in
+`SdPage::checkVisibility` (`sd/source/core/sdpage.cxx:2949-2993`): a master's title, body,
+subtitle and notes prompts — placeholder ids 1 to 6 — are presentation objects and are never drawn
+while a slide is shown, and the date, header, footer and slide-number placeholders are drawn only
+where the page's own `HeadersFooters` record asks for them. Measured on the slides corpus this was
+worth ppt 17/51 → 30/51 on its own; a deck whose branding sits on the master was losing a fifth of
+its words with nothing in the slide's records to say where they had gone.
+
+**Still missing on this path:** notes and handout pages, an automatic date (LibreOffice renders a
+live one, so a stored reference of such a deck is a clock), and `NeedToImportInstance` — a slide
+that recolours itself re-imports the master's header and footer objects under its own scheme
+(`svdfppt.cxx:3125-3138`) where this draws them in the master's.
+
+**Done: the symbol recode a bullet's own face implies.** A bullet whose `FontEntityAtom` declares
+`lfCharSet == 2` is a glyph slot rather than a letter — Wingdings' filled circle is `0x6C`, the
+letter `l` everywhere else — so LibreOffice moves the low byte into the Private Use Area before
+doing anything with it (`svdfppt.cxx:3767-3771`) and then substitutes OpenSymbol for the missing
+face. `OutlineNumbers.NormaliseBullet` already answers the second half for every family, so only
+the move is done here. **The same recode is owed to `Ww8Numbering`**, whose `Symbol` and
+`Wingdings` bullets reach `NormaliseBullet` by exactly the same route; it was left alone because
+it belongs to the word-processing path.
+
+**Why it showed up as a word-count excess rather than as a wrong glyph.** `wc -w` in the POSIX
+locale counts a word only where it sees a printable byte, so a token made entirely of non-ASCII —
+LibreOffice's U+F06C bullet, or ours after this change — is invisible to it, while a literal `l`
+is a word. On `policy-pesentation.ppt` that was the whole of a 13.2% excess: 445 words against the
+reference's 393, exactly 52 bullets, now 393 against 393.
+
 ## Document model
 
 - [ ] Slides, layouts, masters, notes pages, handouts. **Slides are done**; a notes page and a
@@ -69,7 +101,10 @@ the two files are the same deck in vocabularies that share nothing.
 - [x] Shape tree: rectangles, paths, groups, placeholders and pictures, in document order, which
       is z-order in both vocabularies. Tables and connectors have their own entries below.
 - [x] Shape properties: transform (with flip **before** rotation), solid fill, line, text body.
-      Not effects: no shadow, glow, soft edge or reflection is drawn.
+      **Drop shadows** are drawn, in all three readers — `a:outerShdw` inline or through the
+      theme's `a:effectRef`, the Escher `fShadow` group, and ODF's `draw:shadow*`. Still not
+      drawn: glow, soft edge, reflection, and `a:innerShdw`, which LibreOffice also ignores
+      (`EffectProperties::pushToPropMap` acts on `outerShdw` alone).
 - [x] Text bodies via the shared text layout, with insets and anchoring, including
       **shrink-to-fit**: a body stating `a:normAutofit` has its size solved from scratch, because
       the reference reads the stated `fontScale` into a field it never reads again and searches
@@ -754,7 +789,8 @@ Two reference artefacts worth knowing before chasing them:
       through the same path builder. A name that is not a preset still falls back to its bounding
       rectangle. See below for what the evaluator had to get right that six hand-written shapes
       never showed.
-- [x] Solid fills, including themed ones, and lines with width, cap and join. Not shadows.
+- [x] Solid fills, including themed ones, and lines with width, cap and join. Drop shadows too,
+      as a hard-edged offset copy — see the shadow note below for what blur costs.
 - [x] **Gradient fills**, for both formats: `a:gradFill` and `draw:gradient`, linear, axial,
       radial, elliptical and rectangular. `Layout/SlideGradients.cs` holds the geometry, which is
       LibreOffice's rather than either format's — both importers converge on `basegfx::BGradient`
@@ -807,8 +843,9 @@ Two reference artefacts worth knowing before chasing them:
       than DrawingML's. `OpenDocument/OdfEnhancedGeometry.cs` reads the notation and
       `CustomShapeGeometry.Evaluate` draws it; see **The same shapes in ODF** below for exactly
       what was shared and what was not.
-- [x] Solid fills, including themed ones, and lines with width, cap and join. Not shadows, and
-      not gradients: nothing here emits a `GradientPaint`, deliberately.
+- [x] Solid fills, including themed ones, and lines with width, cap and join, and drop shadows
+      from the Escher shadow properties. Not gradients: nothing here emits a `GradientPaint`,
+      deliberately.
 - [x] Text bodies with anchoring, insets and the stated autofit scale.
 - [x] Groups with nested transforms, including a child coordinate space that scales.
 - [ ] Picture *effects*: `a:effectLst` (shadow, glow, reflection, soft edge), `a:duotone`,
@@ -1406,6 +1443,45 @@ against the reference PDF's own `rg` operators. The colour map comes from the sl
 - [ ] **Compound lines.** `cmpd="dbl"`, `"thickThin"`, `"tri"`. A double line is two strokes with
       a gap, and the widths are fractions of the stated one; nothing in the corpus carries one.
 
+### A drop shadow is the shape drawn again, and blur is what decides its text
+
+A shadow is not a property of an outline. `createEmbeddedShadowPrimitive`
+(`svx/source/sdr/primitive2d/sdrdecompositiontools.cxx:860`) wraps a shape's *whole
+decomposition* — fill, outline, picture and text — in a `ShadowPrimitive2D`, which embeds it in a
+`BColorModifier_replace` and a translation and puts the result behind the shape. That shape of
+the feature settles three things that a "draw a grey copy of the outline" reading gets wrong.
+
+**The colour is replaced and the transparency is not.** A `BColorModifier_replace` changes a
+primitive's colour and leaves its alpha, so the shadow of a fill is as translucent as the fill.
+Filling the outline flat instead is not a rounding difference: page 34 of
+`Intersil_Italy_CAN_Bus_Transceiver_Presentation_Final.pptx` is covered by a rectangle whose
+gradient runs from zero to 30% alpha and which states a shadow with no distance, so the copy sits
+exactly underneath it — cast opaque it tinted the whole slide and the page's unaccounted ink went
+from 0.18% to **13.52%**; cast with the fill's own alpha it is invisible, as the reference shows.
+
+**Blur decides whether the shadow's text is text.** With a non-zero radius `ShadowPrimitive2D`
+renders its children to a bitmap and softens that (`shadowprimitive2d.cxx:91-140`), so the
+reference PDF holds a greyscale image with a soft mask and **no words** — verified on
+`passiv.pptx`, whose every page carries a 918 × 272 gray JPEG plus smask and whose extractable
+count is unchanged at 1256. With a zero radius it stays vector and the shadow's text extracts,
+which is how `pres_ioc_phuket.ppt` comes to draw "National" fourteen times in seven pairs 6.01 pt
+apart. So a blurred shadow is drawn here as a hard-edged one *without* its text and an unblurred
+one *with* it. Drawing the text under blur would add words to every deck with a themed shadow,
+which is the largest avoidable regression this feature could cause.
+
+**Most shadows come from the theme.** 1120 slide shapes across the 112 corpus `pptx` decks reach
+one through `p:style/a:effectRef` against 352 that state one on their own `p:spPr`; a reader that
+looks only at `spPr` finds under a quarter of them. The `phClr` of an `effectRef` is *not*
+substituted, matching the reference's own unfinished note (`oox/source/drawingml/shape.cxx:1556`),
+and it costs nothing because Office's themes write their effect styles in literal black.
+
+Two things remain. The blur itself is not drawn — a soft shadow is approximated by a hard one,
+which needs offscreen rasterisation this layer has no access to. And a picture casts a shadow of
+its *frame* rather than of its silhouette, and only when its bytes are a JPEG: a JPEG has no
+alpha channel so the two coincide, and a PNG logo would otherwise gain a black rectangle behind
+it. The proper form of both is a colour-replacement the display list *names* rather than
+performs, which is the same missing record the picture-effects entry above wants.
+
 ### Two gradient conventions that are invisible except in colour
 
 A gradient's geometry is easy to check and tells you almost nothing: a red-to-blue ramp drawn
@@ -1936,6 +2012,37 @@ the change is `PptxTextBody.FirstCodePoint` and it is guarded only by the refere
 
 ### Small differences that are measured and not yet closed
 
+- [ ] **A chart's category-axis labels: we draw *fewer* than the reference, not more.** Recorded
+      the other way round for two rounds — "the reference draws none of those labels and we draw
+      every one" — and the rendered pages say the opposite. On page 4 of
+      `slides/batch-017/pptx/Demick_JetBlue.pptx` LibreOffice draws about twenty `2006-7`-style
+      labels rotated 45° along the axis and we draw **eleven** — the chart states 21 category
+      points, so the reference settles on a rhythm of 1 and we settle on 2. Both sides rotate to
+      45°, so the difference is one step of `ChartAxisLabels.Collides` and not the arrangement. What produced the wrong reading is the word gate's blind spot
+      working in both directions at once: the reference's rotated labels extract as **nothing at
+      all** under `pdftotext`, while ours extract as *fragments* — `2012-9` comes back as `12`,
+      `20`, `9` — so the page reads +29 words for us and the number has nothing to do with how
+      many labels either side drew. Two other differences on that page are real and easier:
+      the reference draws a secondary value axis with its own `Load Factor (%)` title on the
+      right and we draw neither, and our legend collides with the category-axis title
+      (`RPMYear ASM LF + ( 3rd Quarter)` on one line). Judge this one on the image, never on
+      `wc -w`.
+- [ ] **An ODF fill's `draw:opacity` is not read at all**, so a shape LibreOffice draws at 30%
+      comes out fully opaque. Found while building `slide-drop-shadow.odp`: the same shape that
+      carries `<a:alpha val="30000"/>` in the `pptx` carries `draw:opacity="30%"` on its
+      `style:graphic-properties` in LibreOffice's own ODF export of it, and nothing in
+      `OdpFills` looks for the attribute. Not a shadow defect — the shadow correctly matches a
+      fill it is told is opaque — but the same shape renders differently in the two formats,
+      which is the sharpest kind of evidence there is. The slides corpus holds no `.odp`, so
+      this cannot be measured there; the feature corpus can.
+- [ ] **`a:prstTxWarp` is not read, and it is narrower than it looks.** The attribute appears on
+      39 of the 112 corpus `pptx` decks, 722 times — which reads as a wide gap and is not one:
+      **709 of those are `textNoShape`**, the identity, and 3 more are `textPlain`. Only ten
+      occurrences bend anything, across two decks: `FAAAIandtheArtandScienceofV&Vfinal.pptx`
+      (eight, `textArchUp`/`textArchDown` round a dial, and the reason it scores 1201 words
+      against 1145 — the labels are laid straight, wrap, and collide) and
+      `redac-sas-201403-ppt-portfolio-rev-sim.pptx` (two). Worth doing for the shape of the
+      feature rather than for its reach; read the count before budgeting for it.
 - [ ] **A wrapped line is one glyph shorter here than in the reference.** LibreOffice draws the
       space a line broke at as part of that line's run; the shared layouter stops at the last
       *visible* character (`LineBox.VisibleEnd`). Nothing is visibly missing — it is a space at
@@ -2001,3 +2108,44 @@ the shape's own space and travel with `PlacedText.Transform`.
       exactly as the reference does. `slide-master-shapes.pptx` is the committed fixture and
       `SlideMasterShapeComparisonTests` the standing check; all 27 presentation rows of the render
       sweep are unchanged.
+
+### What `slides/batch-001` still cannot draw, and what was measured about it
+
+The batch is 9/9 on the word gate and seven of its nine documents now have no page with a major
+image difference. The two that remain were diagnosed rather than fixed, and each needs a feature
+whose reach is much wider than the one document.
+
+**`111006 COMSTAC STOWG Aero spaceports IFG.pptx`, page 1 — blip colour effects.** Its two logos
+carry `<a:lum bright="70000" contrast="-70000"/>` and `<a:grayscl/>` inside their `a:blip`, and
+neither is read: `DrawingFill.ReadBlip` takes `a:alphaModFix` and nothing else. So the reference
+washes a black GIF almost to white and desaturates a blue EMF, and we draw both as they were
+stored. Measured: the page's ink imbalance is 0.84% overall with two regions of 2.38% and 2.11% of
+the page, which is what makes it major; the deck's other seven pages are clean.
+
+The cost is not the reading — the six effects (`a:biLevel`, `a:grayscl`, `a:duotone`, `a:lum`,
+`a:clrChange`, `a:alphaModFix`) are a small element each — it is that the transform has to survive
+to a backend. `RasterImage` carries *either* decoded pixels *or* the file's own encoded bytes, and
+the PDF writer passes the encoded bytes through unmodified; applying an effect there means decoding
+and re-encoding a picture that writer currently never touches. That is a `Paperless.Core` field
+plus work in both backends, which is its own round.
+
+**`wells08_basic.ppt`, pages 2 and 26 — two separate things.**
+
+Page 2: **PPT auto-numbering is not implemented.** The reference numbers the two outline
+placeholders `I.` to `V.` and `VI.` to `X.` — one sequence continuing across two shapes — where we
+draw a bullet at every level. The PPTX side reads `a:buAutoNum` and carries the counters across a
+body (`PptxTextBody`); the binary side has no equivalent, and the scheme lives in a
+`TextAutoNumberSchemeAtom` beside the paragraph properties rather than in them. Ink 0.13%, one
+heavy region.
+
+Page 26: the right-hand column wraps a line earlier in the reference than in ours, so its five
+items each sit a line lower. Ink 0.62%. Not diagnosed — the two shapes are the same width in the
+file, so it is a measurement difference rather than a placement one, and the extraction comparison
+is a better instrument for it than more pixels.
+
+**Also seen and not chased:** the deck's level-1 bullets are a Wingdings private-use code point.
+LibreOffice keeps the code point and substitutes OpenSymbol for the missing face; we convert the
+code point to U+2022 and draw it in the paragraph's own face, which resolves to a visibly smaller
+glyph. The comment in `PptTextBody.Marker` says the two routes reach the same place. They do not:
+on `policy-pesentation.ppt` the drawn diameter differs by roughly a factor of two — below the image
+comparison's region threshold on every page of this batch, but wrong.

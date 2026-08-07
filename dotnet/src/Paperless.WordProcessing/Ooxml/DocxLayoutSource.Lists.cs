@@ -32,12 +32,13 @@ public sealed partial class DocxLayoutSource
     /// to see — the same reason the extraction reader advances them where it does.
     /// </para>
     /// <para>
-    /// The level's own <c>w:pPr/w:ind</c> applies only when nothing in the paragraph's own properties or
-    /// its style chain states an indent, which is Writer's
-    /// <c>SwTextNode::AreListLevelIndentsApplicable</c> (<c>sw/source/core/txtnode/ndtxt.cxx:3556</c>):
-    /// a hard-set indent beats the list. LibreOffice's own DOCX export writes the level's indent onto
-    /// every list paragraph as well as into <c>numbering.xml</c>, so on those documents the two agree
-    /// and this only matters for files that disagree.
+    /// Whether the level's own <c>w:pPr/w:ind</c> applies is Writer's
+    /// <c>SwTextNode::AreListLevelIndentsApplicable</c> — see
+    /// <see cref="WordParagraphFormats.ListLevelIndentsApplicable"/>, which ports it. LibreOffice's own
+    /// DOCX export writes the level's indent onto every list paragraph as well as into
+    /// <c>numbering.xml</c>, so on those documents the two agree and this only matters for files that
+    /// disagree — which Word's own output does, since <c>ListParagraph</c> carries a left indent and no
+    /// hanging one.
     /// </para>
     /// </remarks>
     /// <param name="properties">The paragraph's <c>w:pPr</c>, or null.</param>
@@ -58,15 +59,29 @@ public sealed partial class DocxLayoutSource
         XElement? indent = Word.Child(levelProperties, "ind");
         Length ownFirstLine = format.FirstLineIndent;
 
-        if (indent is not null && !WordParagraphFormats.DeclaresIndent(_styles, properties))
+        if (indent is not null)
         {
-            format = format with
+            ListLevelIndents applicable =
+                WordParagraphFormats.ListLevelIndentsApplicable(_styles, properties);
+
+            if (applicable.HasFlag(ListLevelIndents.LeftMargin))
             {
-                StartIndent = Twips(indent, "start") ?? Twips(indent, "left") ?? format.StartIndent,
-                FirstLineIndent = Twips(indent, "hanging") is { } hanging
-                    ? -hanging
-                    : Twips(indent, "firstLine") ?? format.FirstLineIndent,
-            };
+                format = format with
+                {
+                    StartIndent =
+                        Twips(indent, "start") ?? Twips(indent, "left") ?? format.StartIndent,
+                };
+            }
+
+            if (applicable.HasFlag(ListLevelIndents.FirstLine))
+            {
+                format = format with
+                {
+                    FirstLineIndent = Twips(indent, "hanging") is { } hanging
+                        ? -hanging
+                        : Twips(indent, "firstLine") ?? format.FirstLineIndent,
+                };
+            }
         }
 
         LabelFollow follow = definition.Suffix switch
@@ -92,7 +107,8 @@ public sealed partial class DocxLayoutSource
         (OpenTypeFace labelFace, FontReference? labelFont) = LabelFace(definition, text, face);
 
         PageLabel label = PageLabel.Measured(
-            drawn, labelFace, text.Size, new ShapingOptions(Language: text.Language));
+            drawn, labelFace, LabelSize(definition, text),
+            new ShapingOptions(Language: text.Language, DisableKerning: !text.AutoKerning));
 
         return (
             label with
@@ -170,7 +186,8 @@ public sealed partial class DocxLayoutSource
 
         if (definition.LevelText is [>= '\uE000' and <= '\uF8FF']) return (face, own);
 
-        string? family = Word.Attribute(Word.Child(definition.RunProperties, "rFonts"), "ascii");
+        string? family = WordParagraphFormats.SlotFamily(
+            Word.Child(definition.RunProperties, "rFonts"), _theme?.Fonts, "ascii", "asciiTheme");
         if (family is not { Length: > 0 }) return (face, own);
 
         WordTextStyle named = text with { FamilyName = family };
@@ -179,6 +196,34 @@ public sealed partial class DocxLayoutSource
             ? (resolved, _references.GetValueOrDefault(named.FaceKey))
             : (face, own);
     }
+
+    /// <summary>
+    /// The size the label is set at: the level's own when it states one, and the item's text otherwise.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A level's <c>w:lvl/w:rPr</c> is character formatting for the label alone, and <c>w:sz</c> in it is
+    /// regularly a different size from the item's text — which is why the level's <c>w:rFonts</c> is
+    /// already read here (see <see cref="LabelFace"/>) and why the size belongs beside it. LibreOffice
+    /// reads the whole of that <c>w:rPr</c> into the level's character style
+    /// (<c>writerfilter/source/dmapper/NumberingManager.cxx</c>, <c>ListLevel::GetCharStyle</c>) and its
+    /// export writes it back out as a <c>WW8NumNz</c> style, which is where a flat-ODF round trip shows
+    /// it.
+    /// </para>
+    /// <para>
+    /// A bigger label makes the item's first line taller — see
+    /// <see cref="PageParagraph.LabelRaisesFirstLine"/> — so this is not only a matter of how wide the
+    /// label is drawn.
+    /// </para>
+    /// </remarks>
+    private static Length LabelSize(WordNumberingLevel definition, WordTextStyle text)
+        => Word.Attribute(Word.Child(definition.RunProperties, "sz"), "val") is { } stated
+           && int.TryParse(
+               stated, System.Globalization.NumberStyles.Integer,
+               System.Globalization.CultureInfo.InvariantCulture, out int halfPoints)
+           && halfPoints > 0
+            ? Length.FromPoints(halfPoints / 2.0)
+            : text.Size;
 
     /// <summary>The position of a level's <c>w:tab w:val="num"</c>, or null when it states none.</summary>
     private static Length? NumberingTab(XElement? levelProperties)

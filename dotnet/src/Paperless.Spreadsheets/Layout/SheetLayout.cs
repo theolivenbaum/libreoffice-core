@@ -42,17 +42,104 @@ public sealed class SheetLayout
     /// Its column widths and row heights, exactly as the file states them.
     /// </summary>
     /// <remarks>
-    /// A row that asks for an optimal height is <em>not</em> recomputed here, although Calc
-    /// recomputes one on load and although the runs carry
-    /// <see cref="SheetSizeRun.IsOptimalSize"/> so that a reader can tell which rows those are.
-    /// The reason is measured and is recorded in the module's TODO: Calc's own measurement of a
-    /// cell for that purpose is coarser than the one it draws with, so reproducing the formula
-    /// with an accurate measurement disagrees with the height the file already holds.
+    /// <para>
+    /// A row that asks for an optimal height <em>is</em> recomputed here, because Calc recomputes
+    /// one on load and the height in the file is the writer's cache rather than a statement — see
+    /// <see cref="SheetOptimalRowHeights"/> for the formula and for which rows it declines to
+    /// touch. That is the second reason this is deferred rather than done while reading: the
+    /// recomputation needs the cells and their formats, which a reader is still assembling.
+    /// </para>
+    /// <para>
+    /// <strong>The column widths of an Excel file are not lengths until this property is read.</strong>
+    /// Both Excel formats state a column width in digits of the workbook's default font, so the
+    /// widths only become measurements once that face has been resolved — and resolving a face is
+    /// exactly what a reader must not do, because reading is the extraction path. So the reader
+    /// stores the digits (see <see cref="SheetColumnDigits"/>) and the first read of the geometry
+    /// measures the face and converts them, once per sheet. Nothing on the extraction path asks
+    /// for the geometry, so nothing on it pays for a font.
+    /// </para>
     /// </remarks>
-    public SheetGrid Grid { get; init; } = SheetGrid.Standard;
+    public SheetGrid Grid
+    {
+        get => _resolvedGrid ??= SheetOptimalRowHeights.Apply(
+            this,
+            _statedGrid.WithDigitWidth(SheetFonts.DigitWidthTwips(_statedGrid.ColumnDigits?.Font)));
+
+        init
+        {
+            _statedGrid = value;
+            _resolvedGrid = null;
+        }
+    }
+
+    private readonly SheetGrid _statedGrid = SheetGrid.Standard;
+    private SheetGrid? _resolvedGrid;
 
     /// <summary>The sheet's cells, or null when it holds none.</summary>
     public ContentTable? Cells { get; init; }
+
+    /// <summary>The merged blocks the file states, as it states them.</summary>
+    /// <remarks>
+    /// Beside the cells rather than derived from them. Every format states its merges once, as a
+    /// list of ranges — <c>mergeCells</c>, <c>MERGEDCELLS</c>, <c>table:number-columns-spanned</c>
+    /// — and a reader then puts the span on the anchor cell and drops the cells it covers. That is
+    /// enough to recover the merges of a block that holds something and not enough for one that
+    /// holds nothing: its anchor is an empty cell, and an empty cell past the last filled one in
+    /// its row is padding the content tree does not keep. An empty merge is exactly the one that
+    /// matters most, because it is the block a neighbour's long string would otherwise run
+    /// straight through — <c>ScOutputData::IsAvailable</c> stops at a merged or overlapped cell
+    /// whether or not it holds anything (<c>sc/source/ui/view/output2.cxx:1178-1191</c>).
+    /// A reader that leaves this empty falls back to the spans on the cells, which is what every
+    /// reader did before.
+    /// </remarks>
+    public IReadOnlyList<SheetRange> StatedMerges { get; init; } = [];
+
+    /// <summary>The blocks a hyperlink covers, as the file states them.</summary>
+    /// <remarks>
+    /// <para>
+    /// A hyperlink is not decoration on a cell: Calc replaces the cell's content with a single
+    /// <c>SvxURLField</c> whose representation is the string the cell held
+    /// (<c>WorksheetGlobals::insertHyperlink</c>,
+    /// <c>sc/source/filter/oox/worksheethelper.cxx:1062-1080</c>), which makes the cell an
+    /// <c>EditTextObject</c> holding one field. That has two consequences on paper, and the
+    /// second is the one that moves pages.
+    /// </para>
+    /// <para>
+    /// A field is not broken across lines — "Fields aren't wrapped, so clipping is enabled to
+    /// prevent a field from being drawn beyond the cell size", <c>readCellContent</c>
+    /// (<c>sc/source/ui/view/output2.cxx:2560-2567</c>) — so a wrapping cell holding nothing but
+    /// a URL stays on one line however narrow its column is, and the row it is in is measured at
+    /// one line rather than at the four or five a broken URL would need.
+    /// </para>
+    /// <para>
+    /// Only a cell whose content is text takes this route: <c>insertHyperlink</c> converts a
+    /// <c>CELLTYPE_STRING</c> or <c>CELLTYPE_EDIT</c> cell and leaves everything else as a plain
+    /// <c>ATTR_HYPERLINK</c> attribute, which changes nothing about how the cell is drawn.
+    /// </para>
+    /// </remarks>
+    public IReadOnlyList<SheetRange> HyperlinkRanges { get; init; } = [];
+
+    /// <summary>
+    /// Whether the cell's whole content is one field, so that it neither wraps nor shortens.
+    /// </summary>
+    /// <param name="row">The zero-based row.</param>
+    /// <param name="column">The zero-based column.</param>
+    public bool HoldsField(int row, int column)
+    {
+        if (HyperlinkRanges is not { Count: > 0 } links) return false;
+
+        foreach (SheetRange link in links)
+        {
+            if (row >= link.FirstRow && row <= link.LastRow
+                && column >= link.FirstColumn && column <= link.LastColumn)
+            {
+                // A hyperlink on a numeric cell stays an attribute; only text becomes a field.
+                return CellAt(row, column) is { Value: null or string };
+            }
+        }
+
+        return false;
+    }
 
     /// <summary>
     /// What is painted behind and around the cells: their fills and their borders.
@@ -106,6 +193,17 @@ public sealed class SheetLayout
     public SheetDrawings Drawings { get; init; } = SheetDrawings.Empty;
 
     /// <summary>
+    /// The cell notes the sheet holds, for the pages they are listed on.
+    /// </summary>
+    /// <remarks>
+    /// Beside the cells for the same reason a drawing is, and with a further one: a note is not
+    /// drawn where its cell is at all. It is listed on a page of its own after the sheet, and only
+    /// when the sheet asks — see <see cref="SheetNotes"/> and
+    /// <see cref="SheetPrintSetup.PrintsNotes"/>.
+    /// </remarks>
+    public SheetNotes Notes { get; init; } = SheetNotes.Empty;
+
+    /// <summary>
     /// The block of cells the sheet holds, from the sheet's origin.
     /// </summary>
     /// <remarks>
@@ -152,6 +250,57 @@ public sealed class SheetLayout
     private SheetRange? _usedRange;
 
     /// <summary>
+    /// The last row holding data in each column that holds any, keyed by zero-based column.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Calc's attribute scan is asked per column and answered per column:
+    /// <c>ScColumn::GetLastVisibleAttr</c> passes <em>that column's own</em>
+    /// <c>GetLastDataPos()</c> — "always including notes, 0 if none" — into
+    /// <c>ScAttrArray::GetLastVisibleAttr</c> (<c>sc/inc/column.hxx:892-897</c>). A column
+    /// holding no data therefore has its formatting scanned from the top of the sheet rather
+    /// than from wherever the sheet's data happens to end, and the run arithmetic that decides
+    /// whether the column prints is a different sum. See <see cref="SheetDecorationArea"/>.
+    /// </para>
+    /// <para>
+    /// A column with no data is absent from the map; the scan reads that as Calc's "0 if none".
+    /// </para>
+    /// </remarks>
+    public IReadOnlyDictionary<int, int> LastDataRowByColumn
+    {
+        get
+        {
+            if (_lastDataRowByColumn is { } cached) return cached;
+
+            Dictionary<int, int> byColumn = [];
+
+            foreach (ContentTableRow row in (Cells?.Children ?? []).OfType<ContentTableRow>())
+            {
+                foreach (ContentTableCell cell in row.Children.OfType<ContentTableCell>())
+                {
+                    // The same "is this content" test UsedRange makes, for the same reason.
+                    if (cell.Value is null && cell.GetText().Length == 0) continue;
+
+                    int rowEnd = cell.Row + Math.Max(1, cell.RowSpan) - 1;
+                    int columnEnd = cell.Column + Math.Max(1, cell.ColumnSpan) - 1;
+
+                    for (int column = cell.Column; column <= columnEnd; column++)
+                    {
+                        if (column < 0) continue;
+                        if (!byColumn.TryGetValue(column, out int last) || rowEnd > last)
+                            byColumn[column] = rowEnd;
+                    }
+                }
+            }
+
+            _lastDataRowByColumn = byColumn;
+            return byColumn;
+        }
+    }
+
+    private IReadOnlyDictionary<int, int>? _lastDataRowByColumn;
+
+    /// <summary>
     /// The block the sheet actually prints: its used range, widened for the drawings floating
     /// over it and then for overflowing text.
     /// </summary>
@@ -183,7 +332,13 @@ public sealed class SheetLayout
         {
             if (_printedRange is { } cached) return cached;
 
-            SheetRange used = SheetDrawingArea.Extend(UsedRange, Drawings, Grid);
+            // Attributes first, then drawings, then text: Calc's own order, and the attribute
+            // pass is part of GetPrintArea itself rather than a widening applied to its answer
+            // (`// Test attribute`, table1.cxx:710) — see SheetDecorationArea.
+            SheetRange used = SheetDrawingArea.Extend(
+                SheetDecorationArea.Extend(UsedRange, Formatting, LastDataRowByColumn),
+                Drawings,
+                Grid);
             SheetRange printed = used.IsValid && Setup.PrintAreas.Count == 0
                 ? used with { LastColumn = SheetTextOverflow.ExtendedLastColumn(this, used) }
                 : used;
@@ -228,6 +383,16 @@ public sealed class SheetLayout
     /// column, which is a million positions to record and one range to test. Sheets carry few
     /// merges, and the case of none — nearly every sheet — costs a count check.
     /// </para>
+    /// <para>
+    /// The ranges the reader states (<see cref="StatedMerges"/>) are answered as well as the spans
+    /// found on the cells, because the two are not the same set: an empty merged block's anchor is
+    /// an empty cell, and an empty cell at the end of a row is dropped as padding before it ever
+    /// reaches the tree. Deriving the merges from the cells alone therefore loses exactly the
+    /// merges that matter — measured on
+    /// <c>Bulletin-37-Appendix-2-immediate-detriment-data-request.xlsx</c>, whose A1 title runs
+    /// straight through the empty <c>B1:D1</c> merge and onto the next column band, where
+    /// LibreOffice clips it at column A.
+    /// </para>
     /// </remarks>
     /// <param name="row">The zero-based row.</param>
     /// <param name="column">The zero-based column.</param>
@@ -248,13 +413,36 @@ public sealed class SheetLayout
         return false;
     }
 
+    /// <summary>
+    /// Every merged block on the sheet: the ones the file states and the ones its cells' spans
+    /// imply.
+    /// </summary>
+    /// <remarks>
+    /// The same list <see cref="IsMerged"/> walks, exposed whole because a caller measuring rows
+    /// needs to tell a block one row tall from a taller one and a block's anchor from what it
+    /// covers — <see cref="IsMerged"/> answers none of the three.
+    /// </remarks>
+    internal IReadOnlyList<SheetRange> MergedRanges
+    {
+        get
+        {
+            _index ??= BuildIndex();
+            return _merges ?? [];
+        }
+    }
+
     private Dictionary<(int Row, int Column), ContentTableCell>? _index;
     private List<SheetRange>? _merges;
 
     private Dictionary<(int, int), ContentTableCell> BuildIndex()
     {
         Dictionary<(int, int), ContentTableCell> index = [];
-        List<SheetRange> merges = [];
+
+        // The two sources overlap almost entirely — a merge whose anchor survived is in both — and
+        // the list is walked linearly for every position asked about, so the duplicates would be
+        // paid for on every cell of every page rather than once here.
+        List<SheetRange> merges = [.. StatedMerges];
+        HashSet<SheetRange> seen = [.. merges];
 
         foreach (ContentTableRow row in (Cells?.Children ?? []).OfType<ContentTableRow>())
         {
@@ -266,8 +454,9 @@ public sealed class SheetLayout
                 int rows = Math.Max(1, cell.RowSpan);
                 if (columns > 1 || rows > 1)
                 {
-                    merges.Add(new SheetRange(
-                        cell.Column, cell.Row, cell.Column + columns - 1, cell.Row + rows - 1));
+                    SheetRange merge = new(
+                        cell.Column, cell.Row, cell.Column + columns - 1, cell.Row + rows - 1);
+                    if (seen.Add(merge)) merges.Add(merge);
                 }
             }
         }

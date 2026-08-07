@@ -45,7 +45,8 @@ public static class RtfReader
 
         return new RtfDocument(
             format, content, diagnostics, reader.Sections, reader.LayoutBlocks,
-            reader.HeaderLayout, reader.FooterLayout, reader.Marks);
+            reader.HeaderLayout, reader.FooterLayout, reader.Marks,
+            reader.AddsParagraphSpacing);
     }
 
     /// <summary>
@@ -110,8 +111,10 @@ public sealed class RtfDocument : IWordProcessingDocument, IPaginatedDocument
             headerLayout,
         IReadOnlyDictionary<(int Section, Model.PageFurnitureSlot Slot), IReadOnlyList<RtfLayoutBlock>>
             footerLayout,
-        Model.WritingMarks marks)
+        Model.WritingMarks marks,
+        bool addsParagraphSpacing = true)
     {
+        _addsParagraphSpacing = addsParagraphSpacing;
         Format = format;
         Marks = marks;
         Content = content;
@@ -121,6 +124,12 @@ public sealed class RtfDocument : IWordProcessingDocument, IPaginatedDocument
         _headerLayout = headerLayout;
         _footerLayout = footerLayout;
     }
+
+    /// <summary>
+    /// Whether two consecutive paragraphs' spacings add rather than the larger one winning; see
+    /// <see cref="RtfDocumentReader.AddsParagraphSpacing"/>.
+    /// </summary>
+    private readonly bool _addsParagraphSpacing;
 
     /// <inheritdoc/>
     public DocumentFormat Format { get; }
@@ -152,9 +161,12 @@ public sealed class RtfDocument : IWordProcessingDocument, IPaginatedDocument
     /// stream with nothing to revisit — see <see cref="RtfLayoutParagraph"/>.
     /// </para>
     /// <para>
-    /// The two spacings add rather than the larger winning. LibreOffice's RTF importer turns HTML
-    /// auto-spacing on by default — "opt-in for RTF, opt-out for OOXML", as its own comment in
-    /// <c>SettingsTable.cxx</c> puts it — which is the opposite of the DOCX path and the same as ODF's.
+    /// The two spacings add rather than the larger winning, unless the document says <c>\htmautsp</c>.
+    /// LibreOffice's RTF importer turns HTML auto-spacing <em>off</em> by default — "opt-in for RTF,
+    /// opt-out for OOXML", as its own comment in <c>SettingsTable.cxx</c> puts it, the opt-in being what
+    /// makes the spacings collapse — which is the opposite of the DOCX path and the same as ODF's. See
+    /// <see cref="RtfDocumentReader.AddsParagraphSpacing"/> for the control word, which reads backwards
+    /// from its name.
     /// </para>
     /// </remarks>
     public IPageSequence Layout(LayoutOptions? options = null)
@@ -169,7 +181,7 @@ public sealed class RtfDocument : IWordProcessingDocument, IPaginatedDocument
 
         PaginationOptions pagination = PaginationOptions.Word with
         {
-            CollapsesSpacing = false,
+            CollapsesSpacing = !_addsParagraphSpacing,
             MaxPages = options?.MaxPages is > 0 ? options.MaxPages : PaginationOptions.Word.MaxPages,
         };
 
@@ -220,6 +232,7 @@ public sealed class RtfDocument : IWordProcessingDocument, IPaginatedDocument
                 MinHeight = row.MinHeight,
                 HasExactHeight = row.HasExactHeight,
                 IsHeader = row.IsHeader,
+                CanSplit = row.CanSplit,
             });
         }
 
@@ -329,9 +342,13 @@ public sealed class RtfDocument : IWordProcessingDocument, IPaginatedDocument
             FontReference? font = fonts.Reference(
                 paragraph.FamilyName, paragraph.Weight, paragraph.IsItalic);
 
+            // The runs first, then the text they map: `Apply` rewrites both together, and the offsets it
+            // preserves are the ones the notes and frames below were recorded against.
+            List<PageRun> runs = RunsOf(fonts, paragraph, face);
+
             paragraphs.Add(new PageParagraph
             {
-                Text = paragraph.Text,
+                Text = CaseMapping.Apply(paragraph.Text, runs),
                 Face = face,
                 Font = font,
                 Colour = paragraph.Colour ?? Colour.Black,
@@ -339,8 +356,9 @@ public sealed class RtfDocument : IWordProcessingDocument, IPaginatedDocument
                 Label = Label(paragraph, face, font),
                 EmSize = paragraph.Size,
                 Language = paragraph.Language,
-                Shaping = new Text.Shaping.ShapingOptions(Language: paragraph.Language),
-                Runs = RunsOf(fonts, paragraph, face),
+                Shaping = new Text.Shaping.ShapingOptions(
+                    Language: paragraph.Language, DisableKerning: !paragraph.AutoKerning),
+                Runs = runs,
                 Notes = NotesOf(fonts, paragraph.Notes),
                 Frames = FramesOf(fonts, paragraph.Frames),
             });
@@ -376,7 +394,8 @@ public sealed class RtfDocument : IWordProcessingDocument, IPaginatedDocument
         => paragraph.ListMarker is { Length: > 0 } marker
             ? PageLabel.Measured(
                 marker, face, paragraph.Size,
-                new Text.Shaping.ShapingOptions(Language: paragraph.Language)) with
+                new Text.Shaping.ShapingOptions(
+                    Language: paragraph.Language, DisableKerning: !paragraph.AutoKerning)) with
             {
                 Font = font,
                 Colour = paragraph.Colour ?? Colour.Black,
@@ -584,7 +603,21 @@ public sealed class RtfDocument : IWordProcessingDocument, IPaginatedDocument
                 || size != paragraph.Size
                 || run.Colour != paragraph.Colour
                 || run.Language != paragraph.Language
-                || rise != Core.Units.Length.Zero)
+                || rise != Core.Units.Length.Zero
+                // A case map has to survive the uniform-paragraph shortcut: it is the one property here
+                // that changes the *characters*, so dropping the runs would draw the text as stored.
+                || run.CaseMap != PageCaseMap.None
+                // So does a highlight: the paragraph carries none of its own, so a paragraph highlighted
+                // end to end is uniform by every other test and would lose its band entirely.
+                || run.Highlight is not null
+                // And so do the two rules, for the same reason: neither changes a width, so a paragraph
+                // underlined end to end is uniform by every measurement test and would be drawn plain.
+                || run.IsUnderlined
+                || run.IsStruckThrough
+                // Kerning, unlike the two rules, does change a measurement — so a run that kerns
+                // inside a paragraph that does not has to survive the shortcut or its width is the
+                // paragraph's answer rather than its own.
+                || run.AutoKerning != paragraph.AutoKerning)
             {
                 varies = true;
             }
@@ -596,8 +629,13 @@ public sealed class RtfDocument : IWordProcessingDocument, IPaginatedDocument
                 size,
                 fonts.Reference(run.FamilyName, run.Weight, run.IsItalic),
                 run.Colour ?? paragraph.Colour ?? Colour.Black,
-                new Text.Shaping.ShapingOptions(Language: run.Language),
-                rise));
+                new Text.Shaping.ShapingOptions(
+                    Language: run.Language, DisableKerning: !run.AutoKerning),
+                rise,
+                run.CaseMap,
+                Highlight: run.Highlight ?? default,
+                IsUnderlined: run.IsUnderlined,
+                IsStruckThrough: run.IsStruckThrough));
         }
 
         return varies ? runs : [];

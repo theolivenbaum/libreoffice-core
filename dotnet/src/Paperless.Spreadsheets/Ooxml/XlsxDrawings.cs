@@ -58,8 +58,14 @@ internal static class XlsxDrawings
     /// <param name="theme">
     /// The workbook's theme, for resolving an <c>a:schemeClr</c> in a chart part.
     /// </param>
+    /// <param name="fonts">
+    /// The theme's font scheme, for resolving a shape run's <c>+mn-lt</c> into a real family.
+    /// </param>
     public static SheetDrawings Read(
-        IPackage package, string? sheetPartName, DrawingTheme? theme = null)
+        IPackage package,
+        string? sheetPartName,
+        DrawingTheme? theme = null,
+        DrawingFontScheme? fonts = null)
     {
         ArgumentNullException.ThrowIfNull(package);
         if (sheetPartName is null || package is not OpcPackage opc) return SheetDrawings.Empty;
@@ -101,7 +107,8 @@ internal static class XlsxDrawings
                 };
 
                 if (kind is not { } anchored) continue;
-                if (ReadAnchor(anchor, anchored, opc, images, theme) is { } drawing) drawings.Add(drawing);
+                if (ReadAnchor(anchor, anchored, opc, images, theme, fonts) is { } drawing)
+                    drawings.Add(drawing);
             }
         }
 
@@ -113,15 +120,15 @@ internal static class XlsxDrawings
         SheetAnchorKind kind,
         OpcPackage package,
         Dictionary<string, OpcXml.Relationship> images,
-        DrawingTheme? theme)
+        DrawingTheme? theme,
+        DrawingFontScheme? fonts)
     {
         XElement? picture = Child(anchor, DrawingNamespace, "pic");
         XElement? frame = Child(anchor, DrawingNamespace, "graphicFrame");
 
-        // A shape, a connector or a group. Nothing here draws one — the painter skips any drawing
-        // carrying neither picture nor chart — but the *anchor* still counts, because Calc's print
-        // area is the bounding box of every object on the drawing layer and a shape is an object
-        // like any other (`GroupShapeContext::createShapeContext` takes sp, cxnSp, grpSp,
+        // A shape, a connector or a group. Its *anchor* counts whatever it holds, because Calc's
+        // print area is the bounding box of every object on the drawing layer and a shape is an
+        // object like any other (`GroupShapeContext::createShapeContext` takes sp, cxnSp, grpSp,
         // graphicFrame and pic alike, `sc/source/filter/oox/drawingfragment.cxx:198`). Dropping
         // them meant a sheet whose only content was a shape had no printed block at all and
         // produced *no pages*: `paperless render` failed outright with "the page range selects
@@ -173,6 +180,16 @@ internal static class XlsxDrawings
             if (Attribute(data, "uri") != ChartUri) return drawing;
 
             return drawing with { IsChart = true, Chart = Plot(data, package, images, theme) };
+        }
+
+        // A shape's text box, which is the only content on a sheet that no walk of the cells can
+        // reach. `xdr:txBody` holds a DrawingML body — the same `a:bodyPr`/`a:p`/`a:r` a slide's
+        // does — so the element is looked up in the spreadsheet drawing namespace and everything
+        // inside it in the main one.
+        if (shape is not null && Child(shape, DrawingNamespace, "txBody") is { } body
+            && ShapeText(body, fonts) is { IsEmpty: false } shapeText)
+        {
+            drawing = drawing with { Text = shapeText };
         }
 
         // A shape carries no image and no chart, so it reaches the print area and stops there.
@@ -237,7 +254,9 @@ internal static class XlsxDrawings
         XElement? chartSpace;
         using (Stream content = chartPart.Open()) chartSpace = OoxmlXml.TryLoad(content, out _);
 
-        return chartSpace is null ? null : DrawingChartPlot.Read(chartSpace, theme);
+        return chartSpace is null
+            ? null
+            : DrawingChartPlot.Read(chartSpace, theme, OoxmlMetadata.IsOffice2007(package));
     }
 
     /// <summary>
@@ -287,6 +306,145 @@ internal static class XlsxDrawings
             Integer(element, "row"),
             Length.FromEmu(Integer(element, "rowOff")));
     }
+
+    /// <summary>Reads a shape's <c>xdr:txBody</c> into the text the painter draws.</summary>
+    /// <remarks>
+    /// <para>
+    /// The insets default to DrawingML's own — <c>91440</c> EMUs left and right and <c>45720</c>
+    /// top and bottom, which is a tenth and a twentieth of an inch
+    /// (<c>oox/source/drawingml/textbodyproperties.cxx</c>) — because a body that states none is
+    /// laid out with them and a text box relies on the left one to clear its own border.
+    /// </para>
+    /// <para>
+    /// A run's size is <c>sz</c> in hundredths of a point and its face is
+    /// <c>a:rPr/a:latin/@typeface</c>; a run stating neither inherits the paragraph's
+    /// <c>a:defRPr</c> before falling back to the body default. Weight, slant and colour are still
+    /// not read, because nothing downstream would use them.
+    /// </para>
+    /// <para>
+    /// <strong>The typeface is resolved before it is stored, never after.</strong>
+    /// <c>+mn-lt</c> means "the theme's minor Latin face" and is what most authoring tools write;
+    /// handing that string to a font resolver asks for a family that exists nowhere and gets
+    /// whatever fontconfig offers instead — which is how a Calibri text box came to be measured in
+    /// Liberation Sans. <see cref="DrawingFontScheme.Resolve"/> follows the six indirect names and
+    /// leaves every real one alone (<c>Theme::resolveFont</c>,
+    /// <c>oox/source/drawingml/theme.cxx:71</c>).
+    /// </para>
+    /// </remarks>
+    private static SheetShapeText ShapeText(XElement body, DrawingFontScheme? fonts)
+    {
+        XElement? properties = Child(body, MainNamespace, "bodyPr");
+
+        List<SheetShapeParagraph> paragraphs = [];
+        foreach (XElement paragraph in body.Elements(XName.Get("p", MainNamespace)))
+        {
+            XElement? paragraphProperties = Child(paragraph, MainNamespace, "pPr");
+            XElement? defaults = Child(paragraphProperties, MainNamespace, "defRPr");
+            Length inherited = Points(defaults) ?? SheetShapeText.DefaultSize;
+            string? inheritedFamily = Family(defaults, fonts);
+
+            List<SheetShapeRun> runs = [];
+            foreach (XElement run in paragraph.Elements(XName.Get("r", MainNamespace)))
+            {
+                string text = Child(run, MainNamespace, "t")?.Value ?? string.Empty;
+                if (text.Length == 0) continue;
+
+                XElement? runProperties = Child(run, MainNamespace, "rPr");
+                runs.Add(new SheetShapeRun(
+                    text,
+                    Points(runProperties) ?? inherited,
+                    Family(runProperties, fonts) ?? inheritedFamily));
+            }
+
+            // A paragraph with nothing in it still occupies a line, and `a:endParaRPr` is what
+            // says how tall: the properties the next character typed would take. LibreOffice's own
+            // flat-ODS export of a blank paragraph carries them as an empty span, so they are kept
+            // here as an empty run rather than dropped — without them the gap between two blocks
+            // of a text box is reserved at the body default instead of at the body's own size.
+            if (runs.Count == 0)
+            {
+                XElement? ending = Child(paragraph, MainNamespace, "endParaRPr");
+                runs.Add(new SheetShapeRun(
+                    string.Empty,
+                    Points(ending) ?? inherited,
+                    Family(ending, fonts) ?? inheritedFamily));
+            }
+
+            // `a:br` is a line break inside a paragraph. Splitting the paragraph at one gives the
+            // same lines, since a break and a paragraph end both start a new line here.
+            paragraphs.Add(new SheetShapeParagraph
+            {
+                Runs = runs,
+                Alignment = Attribute(paragraphProperties, "algn") switch
+                {
+                    "ctr" => SheetShapeAlignment.Centre,
+                    "r" => SheetShapeAlignment.Right,
+                    _ => SheetShapeAlignment.Left,
+                },
+            });
+        }
+
+        return new SheetShapeText
+        {
+            Paragraphs = paragraphs,
+            LeftInset = Inset(properties, "lIns", 91440),
+            RightInset = Inset(properties, "rIns", 91440),
+            TopInset = Inset(properties, "tIns", 45720),
+            BottomInset = Inset(properties, "bIns", 45720),
+            Wraps = !string.Equals(Attribute(properties, "wrap"), "none", StringComparison.Ordinal),
+            Anchor = Attribute(properties, "anchor") switch
+            {
+                "ctr" => SheetShapeAnchor.Middle,
+                "b" => SheetShapeAnchor.Bottom,
+                _ => SheetShapeAnchor.Top,
+            },
+
+            // Both values that are not "overflow" clip, which is what `oox` does with the
+            // attribute (textbodypropertiescontext.cxx:85-97) — an ellipsis is a clip that
+            // marks itself.
+            ClipsVerticalOverflow = Attribute(properties, "vertOverflow") is "clip" or "ellipsis",
+        };
+    }
+
+    /// <summary>
+    /// A run's Latin typeface with the theme followed, or null where it states none.
+    /// </summary>
+    /// <remarks>
+    /// Only <c>a:latin</c>. <c>a:ea</c> and <c>a:cs</c> are the East Asian and complex-script
+    /// members of the same triple, and choosing between the three is script itemisation, which
+    /// this path does not do — picking one arbitrarily would set a Latin body in a CJK face on
+    /// every file that states all three.
+    /// </remarks>
+    private static string? Family(XElement? properties, DrawingFontScheme? fonts)
+    {
+        if (Child(properties, MainNamespace, "latin")?.Attribute("typeface")?.Value is not
+            { Length: > 0 } stated)
+        {
+            return null;
+        }
+
+        // Without a scheme an indirect name resolves to nothing rather than to itself, which is
+        // the same choice `DrawingCharacterStyle` makes and for the same reason: falling through
+        // to the default face is a substitution, and asking for "+mn-lt" is a wrong answer.
+        return fonts is { } scheme ? scheme.Resolve(stated) : (stated[0] == '+' ? null : stated);
+    }
+
+    /// <summary>A run's <c>sz</c>, in hundredths of a point, or null where it states none.</summary>
+    private static Length? Points(XElement? properties)
+        => properties?.Attribute("sz")?.Value is { } text
+           && int.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out int value)
+           && value > 0
+            ? Length.FromPoints(value / 100.0)
+            : null;
+
+    /// <summary>A body inset in EMUs, falling back to DrawingML's default.</summary>
+    private static Length Inset(XElement? properties, string name, long fallback)
+        => Length.FromEmu(
+            properties?.Attribute(name)?.Value is { } text
+            && long.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out long value)
+            && value >= 0
+                ? value
+                : fallback);
 
     private static DocSize Size(XElement? element)
         => element is null

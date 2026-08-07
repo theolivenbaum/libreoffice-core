@@ -298,6 +298,30 @@ public sealed record ParagraphFormat
     /// </remarks>
     public bool HasContextualSpacing { get; init; }
 
+    /// <summary>
+    /// Which paragraph style the paragraph is set in, or null when its reader does not say.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Carried for one purpose: <see cref="HasContextualSpacing"/> suppresses the gap only between
+    /// paragraphs of the <em>same style</em>, and Writer decides that by comparing the two nodes'
+    /// <c>SwTextFormatColl</c> pointers (<c>lcl_IdenticalStyles</c>,
+    /// <c>sw/source/core/layout/flowfrm.cxx:1503</c>) rather than by comparing what the styles say.
+    /// The difference is not academic: a heading based on the body style inherits its indents, its
+    /// alignment and its line spacing, so any comparison of resolved properties calls the two
+    /// identical and swallows the space above every heading in the document.
+    /// </para>
+    /// <para>
+    /// An opaque key rather than a name — a WW8 <c>istd</c> and an RTF <c>\s</c> are numbers — and the
+    /// <em>named</em> style rather than the automatic one, since ODF's automatic styles are direct
+    /// formatting and LibreOffice gives the node its parent as a format collection. Null means the
+    /// reader cannot say, and two nulls are not a match: the readers that know say so, and one that
+    /// does not falls back to the older comparison rather than claiming an identity it has not
+    /// established.
+    /// </para>
+    /// </remarks>
+    public string? StyleKey { get; init; }
+
     /// <summary>How far apart the baselines sit.</summary>
     public LineSpacingRule LineSpacing { get; init; } = LineSpacingRule.SingleSpaced;
 
@@ -315,6 +339,46 @@ public sealed record ParagraphFormat
     public Length DefaultTabInterval { get; init; } = Length.FromTwips(720);
 
     /// <summary>
+    /// Whether the tab stops are measured from the paragraph's own indent rather than from the text area.
+    /// </summary>
+    /// <remarks>
+    /// Writer's <c>TABS_RELATIVE_TO_INDENT</c>, and another compatibility flag rather than a property: the
+    /// same stop at 12 cm means twelve centimetres into an indented paragraph in an ODF document and twelve
+    /// centimetres into the <em>page</em> in a Word one. Both importers say so outright — <c>ww8par.cxx</c>
+    /// and <c>writerfilter</c>'s <c>DomainMapper</c> each set it to false, and the registry default for a
+    /// native document is true — so it defaults to Writer's answer and every Word-family reader turns it
+    /// off. Getting it wrong shifts a tabbed column by the indent, which on a dotted table of contents is
+    /// the difference between one line and three.
+    /// </remarks>
+    public bool TabsRelativeToIndent { get; init; } = true;
+
+    /// <summary>
+    /// Whether a justified line may squeeze its blanks below their natural width to fit another word.
+    /// </summary>
+    /// <remarks>
+    /// A document-wide compatibility flag rather than a paragraph property, carried here for the same
+    /// reason <see cref="TabsRelativeToIndent"/> is: the layout engine has to know it and a paragraph is
+    /// the only thing that reaches it. LibreOffice spells it <c>JustifyLinesWithShrinking</c> and
+    /// writerfilter sets it for every file declaring <c>compatibilityMode</c> 15 or more
+    /// (<c>sw/source/writerfilter/dmapper/DomainMapper_Impl.cxx:10172</c>). See
+    /// <see cref="JustificationShrink"/> for what it does and how far it goes.
+    /// </remarks>
+    public bool ShrinksJustifiedBlanks { get; init; }
+
+    /// <summary>
+    /// Where the paragraph's tab stops are measured from, relative to the text area's start edge.
+    /// </summary>
+    public Length TabOrigin => TabsRelativeToIndent ? StartIndent : Length.Zero;
+
+    /// <summary>
+    /// Where a line's start edge sits relative to <see cref="TabOrigin"/>, which is negative inside a
+    /// hanging indent.
+    /// </summary>
+    /// <param name="isFirstLine">True for the paragraph's first line, which is the only one that hangs.</param>
+    public Length TabLineOffset(bool isFirstLine)
+        => LineStart(isFirstLine) - TabOrigin;
+
+    /// <summary>
     /// The stop a tab at a position advances to.
     /// </summary>
     /// <remarks>
@@ -327,14 +391,32 @@ public sealed record ParagraphFormat
     /// The multiple is counted from the paragraph's text start, not from the last explicit stop, which is
     /// what makes the default stops of an untabbed paragraph fall on a regular grid.
     /// </para>
+    /// <para>
+    /// A tab still inside a hanging indent is the exception, and it is not a small one: it advances to the
+    /// paragraph's own indent whatever stops the paragraph declares, which is what makes
+    /// "<c>1.1</c> ⇥ <c>Purpose</c>" in a table of contents set the title against the indent instead of
+    /// throwing it at a right-aligned leader stop by the margin and wrapping the line. Writer states the
+    /// rule in as many words in <c>SwTextFormatter::NewTabPortion</c>
+    /// (<c>sw/source/core/text/txttab.cxx</c>): "the new tab portion is inside the hanging indent … a tab
+    /// stop at the left margin is allowed … the determined next tab stop is beyond the left margin".
+    /// </para>
     /// </remarks>
-    /// <param name="position">Where the tab is, measured from where the paragraph's text starts.</param>
+    /// <param name="position">Where the tab is, measured from <see cref="TabOrigin"/>.</param>
     public TabStop NextTabStop(Length position)
     {
+        // The paragraph's own indent, in the same coordinates as the stops. A tab before it is inside the
+        // hanging indent, and only the first line of a paragraph with a negative first-line indent has
+        // anything before it at all.
+        Length indent = TabsRelativeToIndent ? Length.Zero : StartIndent;
+
         foreach (TabStop stop in TabStops)
         {
-            if (stop.Position > position) return stop;
+            if (stop.Position <= position) continue;
+
+            return position < indent && stop.Position > indent ? new TabStop(indent) : stop;
         }
+
+        if (position < indent) return new TabStop(indent);
 
         Length interval = DefaultTabInterval > Length.Zero
             ? DefaultTabInterval

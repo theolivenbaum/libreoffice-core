@@ -136,6 +136,7 @@ had them overwrite each other's output.
 | `slide-shape-features.pptx` | Preset geometry beyond a rectangle, dashes, arrowheads and automatic numbering — four things LibreOffice's own PPTX export keeps rather than resolves, which is why the file is hand-written and then checked against what the export did with it. Slide 1 is six presets whose edges are all straight (`hexagon`, `pentagon`, `chevron`, `parallelogram`, `trapezoid`, `plus`), so every vertex is comparable; slide 2 is five built out of arcs plus `star5`, including a `pie` with a 240° sweep on a 3:2 box, which is the only shape in the corpus that tells an ellipse's *parameter* apart from its *direction*. Slide 3 is a connector with a medium `triangle` head and a large `stealth` tail, and three dashed lines — `dash`, `sysDashDot` and `lgDashDot` — at three different widths, since a preset dash's lengths are multiples of the pen. Slide 4 is a two-level `a:buAutoNum` list, `arabicPeriod` over `alphaLcParenR`, whose inner numbering restarts when the outer level advances |
 | `slide-diagram-baked.pptx` | A SmartArt diagram, and specifically the *fifth* part of one: the `diagramDrawing` that PowerPoint bakes beside the four a `dgm:relIds` names, holding the diagram already laid out as a `dsp:spTree`. Nothing can generate this — LibreOffice cannot author SmartArt at all, only preserve what it imported through the interop grab bag — so the parts are written by hand on `slide-table-grid.pptx`'s skeleton. One slide, one frame at 1 by 1.5 inch and 7.5 by 3 inch, five `dsp:sp` inside it: an `ellipse` and a `rect` with solid fills, a `roundRect` with a linear gradient, a filled `rightArrow` connector with no text at all, and a `line` connector with no fill, which is the only shape in the corpus a PDF stroke reader can compare as a *line*. The `rect`'s `dsp:txXfrm` is deliberately **off-centre** — the right three quarters of the top half — because a text rectangle that happens to be centred cannot tell a reader that honours it from one that ignores it. The data model carries the same three labels, so extraction and rendering can be checked against each other |
 | `slide-diagram-evaluated.pptx` | The same diagram with the fifth part *taken away*, which is the state 37 of the 66 diagram-bearing decks in `sd/qa/unit/data/pptx` are in — Office 2007 wrote no `diagramDrawing` because the vocabulary's namespace is dated 2008, and LibreOffice's own fixtures had theirs stripped so the layout-atom evaluator is what gets tested. Built on `slide-diagram-baked.pptx`'s skeleton with `drawing1.xml` and its relationship removed and a layout definition that exercises the four commonest algorithms at once: `lin` divides the 540 by 216 pt frame into thirds, `composite` places a box and a label inside each third from `w`/`h`/`ctrX`/`t` constraints, `sp` draws the box and `tx` sets the label. Every number is round — three 180 by 108 pt boxes at 72, 252 and 432 pt, sitting 54 pt down because the composite centres what its constraints did not fill — so a disagreement is arithmetic rather than rounding. The colour transform cycles accents 1, 2 and 3 by `presStyleIdx`, which is the only way to tell a reader that indexes the colour list from one that repeats its first entry. The runs state their own 14 pt so the comparison measures placement rather than LibreOffice's shrink-to-fit |
+| `slide-diagram-text-turned.pptx` | The one thing a `dsp:txXfrm` states that `slide-diagram-baked.pptx` does not: a `rot`. A diagram lays shapes on their sides with an ordinary `<a:xfrm rot="5400000"/>` and does not mean the writing to go with them, so the same shape's text area states `rot="-5400000"` — an angle *against* the shape's rather than a copy of it, which the two add (`oox/source/drawingml/transform2dcontext.cxx:53-58`). Built on `slide-diagram-baked.pptx`'s skeleton with the drawing and data parts replaced by two `rect` shapes carrying the same 14 pt "Turn": one upright at 2 by 1 inch, and one reaching the same footprint by laying a 1 by 2 inch box on its side. Both rotations are about the same centre, so a reader that honours the turn draws the second **exactly 180 pt to the right of the first** and one that ignores it draws it on its side — and one that *transposed* the box rather than turning it misses by 36 pt each way, which is the second thing this pins. LibreOffice supports `rect` in `ConstructPresetTextRectangle`, so it honours the same rectangle and the two renderings agree on every pixel |
 | `slide-master-shapes.pptx` | What a slide inherits from its master and its layout that is *not* a placeholder — a logo or a strapline. Built on `slides-pptx.pptx`'s skeleton by adding one text box to `slideMaster1` and one to `slideLayout2`, and `showMasterSp="0"` to the second slide. Slide 1 uses layout 2 and so draws both straplines; slide 2 suppresses them. It is the only file in the corpus that can tell the rule apart: an Impress master page is a PPTX master and a PPTX layout merged into one (`presentationfragmenthandler.cxx:246-296`), so both parts' non-placeholder shapes are drawn on every slide using that layout, and none of the six decks in `sd/qa/unit/data/pptx` whose master carries such a shape states `showMasterSp` at all — the one that looks like a counter-example, `slide-sections.pptx`, simply parks its master's text boxes off the page |
 
 ### ODP files for rendering
@@ -189,6 +190,51 @@ combination that tells the two transform orders apart.
 | `theme-colours.docx` | The Office 2007 colour scheme in a real `theme1.xml`, an identity `w:clrSchemeMapping`, five runs stating a themed colour three different ways (a cached `w:val`, `w:val="auto"`, and no `w:val` at all), and twelve inline shapes whose `a:solidFill` carries a different DrawingML transform chain each — including the same two transforms in both orders, which come out different colours. LibreOffice's own DOCX export writes the "LibreOffice" scheme and resolves every run colour to a literal, so a converted file exercises none of this |
 | `compat-shift-expand.docx`, `compat-shift-return.docx` | The same justified paragraph split by a `w:br`, differing only in whether `settings.xml` carries `w:doNotExpandShiftReturn`. The pair is the point: each file is measured against LibreOffice on its own, and the difference between them is what shows the flag did anything |
 | `alt-chunk.docx` | Three `w:altChunk` placeholders at once — a DOCX chunk declared by `Override`, an RTF chunk declared by a loose `Default` extension mapping, and an HTML chunk that no word-processing reader claims — so that splicing, content-type-independent sniffing and the surviving diagnostic are all covered by one file |
+| `contextual-spacing-styles.docx` | A `Normal` style carrying `w:contextualSpacing`, and two heading styles **based on it** — so both inherit the flag, the line spacing, the indents and the alignment, and differ from it in nothing a resolved-property comparison can see except the space above. That is what makes it a test: "contextual" means the same *style*, which Writer decides by comparing the paragraphs' format collections (`lcl_IdenticalStyles`, `sw/source/core/layout/flowfrm.cxx:1503`), so LibreOffice suppresses the gap between two `Normal` paragraphs and keeps the 12 pt and 18 pt above the headings. Every `w:after` in the file is zero on purpose — see below |
+| `paragraph-spacing-no-settings.docx`, `paragraph-spacing-settings.docx` | Whether two paragraphs' spacings add or the larger wins — Writer's `PARA_SPACE_MAX`. The same eight paragraphs in both, each carrying 12 pt of space-before and 8 pt of space-after on 12 pt exact lines, so a boundary is 24 pt collapsed and 32 pt added and the error accumulates down the page. They differ in **one thing**: whether the package has a `word/settings.xml` at all. LibreOffice puts the first at 32 pt and the second at 24, and the second's settings part is *empty* — so the pair is what separates "the document asked to add" from "nothing decided the question". Hand-written, because no exporter can be persuaded to omit the part |
+| `paragraph-spacing-collapsed.odt`, `paragraph-spacing-collapsed.fodt` | The same eight paragraphs saved by LibreOffice from the collapsing DOCX, so `office:settings` carries `AddParaTableSpacing=false` and the document takes the larger — against ODF's own default, which is to add. Both containers, because the setting had to be shown to survive packaging |
+| `paragraph-spacing-collapsed.rtf` | And again in the format that defaults the other way round from the rest of the Word family. `\htmautsp` is the opt-in and reads backwards from its name: it asks for HTML auto-spacing, which is the *collapsing* behaviour. Hand-written, because LibreOffice's RTF export writes the control word only when the document collapses and the interesting cases are both sides of it |
+| `paragraph-shading.docx` | Paragraph backgrounds, hand-written so every edge is a round number of twips. Thirteen paragraphs: one shaded directly with indents *and* spacing on both sides, so the fill can be shown to span the indents and to stop at the lines; a pair shaded the same colour with spacing between them, which LibreOffice paints as **one** band; a pair shaded different colours with the same spacing, which it paints as two with the gap left white; a paragraph shaded only by its style; and one whose style overrides its parent's fill with `w:fill="auto"`, which paints nothing. It is hand-written because LibreOffice's own DOCX export moves a paragraph fill into a `w:pPr/w:shd` on every paragraph of the style, which would lose the direct-versus-style distinction |
+
+#### Why `contextual-spacing-styles` is hand-written, and why every `w:after` in it is zero
+
+Two separate traps, and each one silently turned an earlier version of this document into a file that
+proved nothing.
+
+**LibreOffice's own export does not preserve a derived style's contextual flag.** The first version was
+a flat-ODF source with a `Head` style whose `style:parent-style-name` was a contextual `Body`.
+LibreOffice renders it correctly, and then writes `style:contextual-spacing="false"` and
+`fo:margin-bottom="0in"` onto `Head` in every format it exports — so all four conversions rendered
+identically whether the bug was present or not. A converted file is normally what this corpus wants; here
+it is exactly what destroys the case.
+
+**A `w:after` anywhere in the file measures a different bug.** With `w:after="160"` on the document
+defaults, LibreOffice's gap above a heading was the previous paragraph's after **plus** the heading's
+before — 8 + 12 pt — where we produced the larger of the two. That is `PARA_SPACE_MAX`, and setting
+every `w:after` to zero takes it out of the measurement so the two questions do not have to be answered
+in one commit.
+
+**The explanation that stood here was wrong, and it is worth leaving the correction rather than the
+sentence.** It said that for DOCX `writerfilter` never sets `PARA_SPACE_MAX` and keeps the
+application's configured default, so every Word document adds. It does set it —
+`DomainMapper_Impl::ApplySettingsTable` writes `AddParaTableSpacing` from
+`w:doNotUseHTMLParagraphAutoSpacing` unconditionally (`DomainMapper_Impl.cxx`:10179) — but that method
+returns at its first line when there is no settings table (:10124), and **this document has no
+`word/settings.xml`**. It is hand-written, and nothing here needed one. So the observation was real and
+particular to this file: measured on eight paragraphs carrying 12 pt before and 8 pt after, LibreOffice
+puts the boundaries at 32 pt with no settings part and at 24 pt with one, *even an empty one*. See
+`WordCompatibility.AddsParagraphSpacing`, which now reads exactly that distinction, and
+`ParagraphSpacingAccumulationTests`, whose `paragraph-spacing-settings.docx` is the counter-example.
+
+The general lesson is the one `PaginationOptions.KeepsSpacingAtTopOfPage` already records and this
+paragraph is the second casualty of: **a hand-written DOCX with no settings part lays out under
+Writer's own compatibility defaults rather than Word's**, so a synthetic fixture missing a part it does
+not appear to need answers the wrong question convincingly. Give a hand-written DOCX an empty
+`w:settings` unless the absence is the thing under test.
+
+The `.doc` and `.rtf` beside the `.docx` are LibreOffice's own
+conversions of it and keep the case, since `sprmPFContextualSpacing` and `\contextualspace` survive the
+round trip where ODF's spelling does not.
 
 ### SVG picture documents
 
@@ -223,6 +269,9 @@ a difference between two readers and nothing else.
 | `vector-picture-sheet.ods` | The same three anchored to three cells, so the anchor arithmetic and the picture path are exercised together |
 | `vector-picture-sheet.xlsx` | Its export. Same two lessons — `xl/media/image2.wmf` holds the EMF, and the `svgBlip` extension reaches spreadsheets too, which was not obvious |
 | `vector-picture-text.rtf` | **Hand-written**, because LibreOffice's RTF export rasterises: converting the same source to `.rtf` writes `\pngblip` for both metafiles. This one states `\wmetafile8` and `\emfblip` with the two metafiles as hex — and both control words are then ignored, since the sniff is what decides |
+| `slide-inherited-fill-deck.pptx` | **Hand-written**, eleven parts, because neither behaviour in it survives a round trip: LibreOffice's PPTX export writes `p:sp/@useBgFill` only for a shape whose fill is already the page's, and it resolves a placeholder's inherited properties on import so an export states them outright. Three shapes on a `#FFFFCC` background — a title placeholder that states its own `a:xfrm` and takes the layout's `#C00000` plate anyway, a `useBgFill="1"` shape whose `a:fillRef` names `accent1` and which is drawn in the background colour, and the same shape without the attribute drawn in `accent1` |
+| `picture-frame-fill-deck.odp` | A picture frame's *own fill*, over the same 892-byte EMF. Three shapes on a pale yellow slide, all stating `draw:fill-color="#ff0000"`: over the EMF, over a 120 × 120 PNG whose right half is fully clear, and over nothing. LibreOffice 24.2.7.2 draws the plate for the last two and **not** for the metafile — `svx/source/sdr/primitive2d/sdrgrafprimitive2d.cxx:41-42` adds a picture frame's fill only when the graphic is transparent, and a metafile read from a package entry does not count |
+| `picture-frame-fill-deck.pptx` | Its export, **with the two `p:pic` fills put back by hand** — Impress writes no `a:solidFill` into a `p:spPr` it wrote a picture into, so its own export drops exactly the property under test. The element restored is PowerPoint's, and the one `2014BSA_Sunday_Killion.pptx` carries on its picture frames. The reference renders the two files identically. Note `ppt/media/image1.wmf` is the EMF, mislabelled by the exporter, so the sniff is what decides here too |
 | `vector-picture-text.doc` | LibreOffice's own DOC export, and the only coverage of the Escher blip route. A metafile blip is a 34-byte `OfficeArtMetafileHeader` followed by a **deflate stream** where a raster blip has one tag byte, so the 892-byte EMF arrives as 262 bytes of compressed data. DOC has no blip type for SVG, so the third picture comes back a PNG. **Known defect:** its three as-character pictures come back floating and reserve no room on their lines — the row still matches on pages and words, which is exactly why it is recorded here |
 
 ### EMF and EMF+ metafiles
@@ -312,6 +361,30 @@ a cell's width is not a column's.
 `table-pages` is sixty rows and a `table:table-header-rows`, long enough to cross a page break. It is what
 proves the heading row is placed again on the continuation and that the split falls between rows rather
 than through one.
+
+`table-row-spacing.*` is the opposite case, and the page is short (10 cm) so the whole document is two
+pages. A middle row holds four paragraphs each with a 1 cm space below, so its *lines* fit in the room left
+on page one and the row does not — the difference being the space after its last paragraph, which counts
+towards a Word row's height (`AddParaSpacingToTableCells`) and is not ink. LibreOffice leaves three of the
+four paragraphs on page one. A renderer measuring a row's *part* from its ink instead judges the last cut
+free, declines the split as gaining nothing, and moves the whole row: **none** of the four stay, and 154 pt
+of the page goes blank. The margin either side of the band is a whole 28 pt space, so the fixture is not
+delicately balanced — but it does depend on the trailing space being charged to the row, which is why all
+five formats are exported from the one flat-ODF source rather than hand-written per format.
+
+`table-row-min-height.*` pins a **negative** result, which is why it is here rather than in a test file
+alone. Its middle row states an at-least height of 5.2 cm — `style:min-row-height` in the source,
+`w:trHeight w:hRule="atLeast"` after export — and holds twelve one-line paragraphs, with about 3.5 cm left
+on page one of a 10 cm page. LibreOffice 24.2.7.2 **breaks that row anyway**, keeping the seven paragraphs
+that fit, and the declared height changes nothing: rendered at 0, 5.2, 6 and 7 cm the output is the same,
+and so it is on two further sweeps of the same shape at A4 with the head row varied.
+
+That matters because the opposite is plausible and is spelled out in Writer's own source — *"the remaining
+size is less than the minimum row height, then don't even try to split the row, just move it forward"*,
+`SwTabFrame::Split`, `sw/source/core/layout/tabfrm.cxx:1188-1196`. That branch is reached only for a table
+inside a splittable fly. Implementing it for body text moved twelve pages of one corpus document into exact
+agreement with the reference and still cost the track a match, and this fixture is what tells the next
+agent so before they spend the round finding out.
 
 Two things about writing these by hand, both learned the hard way:
 
@@ -477,6 +550,28 @@ reason is the table's *origin* rather than its borders: each export writes the t
 relative to the border, so the whole grid shifts. Measured on the first vertical — 56.70 pt in ODF, 56.70 in the
 DOCX render against 56.45 laid out, and 57.00 in the RTF render against 56.70. Their borders are otherwise
 right: the same nine strokes, the same extents, widths and colours. `table-borders.doc` is not read at all yet.
+
+### List documents
+
+`list-label-overrun.*` is two numbered lists on one page and the contrast between them is the document.
+The first level's label is `Paragraph 1)` and its `text:list-tab-stop-position` is a quarter inch, so the
+label runs past its own stop; the second's is `1.` against a half-inch stop, so it does not. The tab that
+follows a list label is a real tab — Writer's number portion expands to the number plus
+`SvxNumberFormat::GetLabelFollowedByAsString`'s `"\t"` — and a stop already behind the pen does not mean
+"no gap": the search carries on through the paragraph's own stops and then along the default interval. So
+the overrunning item's text lands at a stop and not against its label, and the fitting item's lands
+exactly where it always did.
+
+Worth knowing before reading the numbers: **the two families disagree about where a tab stop's zero is,
+and both are right.** LibreOffice's `TABS_RELATIVE_TO_INDENT` is on for ODF and off for every Word file,
+so the same document puts the overrunning item's text at 145.7 pt through `.fodt`/`.odt` and at 127.7 pt
+through `.docx`/`.doc`. A fixture that existed in only one family would look like it had pinned a number
+that is really a convention.
+
+There is no `.rtf`, and that is a recorded gap rather than an oversight: the RTF reader takes its label
+from the `{\listtext}` group and reads no level definition at all, so it cannot know the stop and marks
+every label `LabelFollow.Nothing`. On this document LibreOffice puts the overrunning item's text 35 pt
+further along than we do.
 
 ### Mark documents
 

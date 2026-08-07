@@ -56,6 +56,18 @@ internal sealed record XlsxCellFormatTable(
     /// <param name="font">What the run states.</param>
     public SheetCellFormat Apply(SheetCellFormat cellFormat, XlsxRunFont font)
         => XlsxCellFormats.Apply(cellFormat, DefaultFont, font, Palette);
+
+    /// <summary>
+    /// The same default font, in the shape a column width needs it.
+    /// </summary>
+    /// <remarks>
+    /// A column width is a count of digits of this face, so pagination cannot happen until it
+    /// has been measured — see <see cref="SheetColumnDigits"/>. It is the same
+    /// <see cref="DefaultFont"/> a rich-text run falls back to because LibreOffice reads it from
+    /// the same place for both (<c>StylesBuffer::getDefaultFont</c>).
+    /// </remarks>
+    public SheetDefaultFont DefaultColumnFont { get; } = new(
+        DefaultFont.FontFamily, DefaultFont.FontSize, DefaultFont.FontWeight, DefaultFont.IsItalic);
 }
 
 /// <summary>
@@ -210,7 +222,8 @@ internal static class XlsxCellFormats
         bool Stacked);
 
     private readonly record struct Font(
-        string? Family, Length Size, int Weight, bool Italic, Colour Colour, bool HasColour);
+        string? Family, Length Size, int Weight, bool Italic, Colour Colour, bool HasColour,
+        SheetUnderline Underline, bool Strike);
 
     private static Record ReadRecord(XElement xf)
     {
@@ -284,8 +297,29 @@ internal static class XlsxCellFormats
             Toggle(Xlsx.Child(font, "b")) ? 700 : 400,
             Toggle(Xlsx.Child(font, "i")),
             colour,
-            stated);
+            stated,
+            UnderlineOf(Xlsx.Child(font, "u")),
+            Toggle(Xlsx.Child(font, "strike")));
     }
+
+    /// <summary>
+    /// The line under a font, whose <c>val</c> is optional and whose default is not "none".
+    /// </summary>
+    /// <remarks>
+    /// A bare <c>&lt;u/&gt;</c> means single, which is what makes this a different question from
+    /// <see cref="Toggle"/>'s: the attribute names a <em>style</em>, so its absence names the
+    /// commonest one rather than the off state, and <c>val="none"</c> is how a font that inherits
+    /// an underline turns it off. The two accounting styles differ from the plain ones only in how
+    /// wide the line is drawn, which is not reproduced — see <see cref="SheetUnderline"/>.
+    /// </remarks>
+    private static SheetUnderline UnderlineOf(XElement? element) => element is null
+        ? SheetUnderline.None
+        : Xlsx.Attribute(element, "val") switch
+        {
+            null or "single" or "singleAccounting" => SheetUnderline.SingleLine,
+            "double" or "doubleAccounting" => SheetUnderline.DoubleLine,
+            _ => SheetUnderline.None,
+        };
 
     /// <summary>
     /// A toggle element such as <c>&lt;b/&gt;</c>, whose absence and whose <c>val="0"</c> differ.
@@ -469,7 +503,8 @@ internal static class XlsxCellFormats
         int fontId = record.FontUsed || parent is null ? record.FontId : parent.Value.FontId;
         Font font = fontId >= 0 && fontId < fonts.Count
             ? fonts[fontId]
-            : new Font(null, Length.FromPoints(10), 400, false, Colour.Black, false);
+            : new Font(null, Length.FromPoints(10), 400, false, Colour.Black, false,
+                SheetUnderline.None, false);
 
         Alignment alignment = record.AlignmentUsed || parent is null
             ? record.Alignment
@@ -483,6 +518,8 @@ internal static class XlsxCellFormats
             FontSize = font.Size,
             FontWeight = font.Weight,
             IsItalic = font.Italic,
+            Underline = font.Underline,
+            IsStruckThrough = font.Strike,
             Colour = font.HasColour ? font.Colour : Colour.Black,
             Horizontal = alignment.Horizontal,
             Vertical = alignment.Vertical,
@@ -494,6 +531,7 @@ internal static class XlsxCellFormats
             NumberFormatKind = code.IsGeneral || code.Sections.Count == 0
                 ? Core.Numbers.NumberFormatKind.General
                 : code.Sections[0].Kind,
+            NumberFormat = code,
         };
     }
 

@@ -2,7 +2,9 @@ using System.Collections.Concurrent;
 using Paperless.Core.Extraction;
 using Paperless.Core.Geometry;
 using Paperless.Core.Graphics;
+using Paperless.Core.Numbers;
 using Paperless.Core.Units;
+using Paperless.Text.Fonts;
 using Paperless.Text.Layout;
 
 namespace Paperless.Spreadsheets.Layout;
@@ -15,10 +17,16 @@ namespace Paperless.Spreadsheets.Layout;
 /// <c>sc/source/ui/view/output2.cxx:1178</c>.
 /// </param>
 /// <param name="ColumnWidth">The printed width of a column, already scaled.</param>
+/// <param name="BlockLeft">
+/// The left edge of the block of columns being printed, scaled — Calc's <c>mnScrX</c>.
+/// </param>
+/// <param name="BlockRight">Its right edge, Calc's <c>mnScrX + mnScrW</c>.</param>
 internal readonly record struct SheetTextContext(
     double Scale,
     Func<int, int, bool> IsAvailable,
-    Func<int, Length> ColumnWidth);
+    Func<int, Length> ColumnWidth,
+    Length BlockLeft = default,
+    Length BlockRight = default);
 
 /// <summary>One cell as it is about to be drawn.</summary>
 /// <param name="Text">The text the number format produced.</param>
@@ -31,6 +39,11 @@ internal readonly record struct SheetTextContext(
 /// The stretches its text is split into when they are not all in the cell's own format, or null
 /// when they are. See <see cref="SheetRichText"/>.
 /// </param>
+/// <param name="IsField">
+/// Whether the cell's whole content is one EditEngine field — a hyperlink. A field is drawn as one
+/// indivisible portion, so it neither breaks across lines nor loses its tail to a narrow column.
+/// See <see cref="SheetLayout.HoldsField"/>.
+/// </param>
 internal readonly record struct SheetCellText(
     string Text,
     object? Value,
@@ -38,7 +51,8 @@ internal readonly record struct SheetCellText(
     int Row,
     int Column,
     DocRect Box,
-    IReadOnlyList<SheetTextPortion>? Portions = null);
+    IReadOnlyList<SheetTextPortion>? Portions = null,
+    bool IsField = false);
 
 /// <summary>
 /// Places and draws one cell's text.
@@ -109,6 +123,7 @@ internal static class SheetTextLayout
 
         Placement placement = Place(context, cell, face);
         if (placement.Lines.Count == 0) return;
+        if (IsOutside(context, placement)) return;
 
         // The cell's own colour is the fallback rather than the answer: a rich cell's portions
         // carry theirs, and a plain one's segment carries none so that the two paths emit the
@@ -144,14 +159,113 @@ internal static class SheetTextLayout
                 foreach ((GlyphRun run, Colour? colour) in
                          line.Run.At(new DocPoint(line.X, line.Baseline)))
                 {
+                    // An empty paragraph's line carries a segment for its metrics and no glyphs;
+                    // it has taken its height already and there is nothing to draw or underline.
+                    if (run.Glyphs.Count == 0) continue;
+
                     sink.DrawGlyphRun(run, Paint.Solid(colour ?? fallback));
                 }
+
+                Decorate(sink, cell.Format, face, line, fallback);
             }
         }
         finally
         {
             if (clipped) sink.Restore();
         }
+    }
+
+    /// <summary>
+    /// Whether the room the cell was given falls entirely outside the block being printed.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>bOutside</c> (<c>output2.cxx:2037</c>), and it is the whole reason a page does not
+    /// carry every neighbour of its own first column. Calc's string loop starts one column
+    /// <em>before</em> the block so that a long string reaching in from the left is drawn — but
+    /// it then asks of every cell whether what it occupies overlaps the block at all, and draws
+    /// nothing when it does not. A short string in that column is therefore skipped and a long
+    /// one is not, because only the long one's output area, widened through its empty
+    /// neighbours, reaches the paper.
+    /// </para>
+    /// <para>
+    /// Measured: <c>ExampleWhiteListData.xlsx</c> drew twenty part numbers off the left edge of
+    /// its last two pages — <strong>838 words against the reference's 821</strong> — because
+    /// every one of them was the nearest cell left of a band and none of them spilled into it.
+    /// </para>
+    /// <para>
+    /// Calc's rectangle is inclusive at the right, so a cell ending exactly where the block
+    /// begins is outside it; hence the <c>&lt;=</c>.
+    /// </para>
+    /// </remarks>
+    private static bool IsOutside(in SheetTextContext context, in Placement placement)
+        => context.BlockRight > context.BlockLeft
+           && (placement.Right <= context.BlockLeft || placement.Left >= context.BlockRight);
+
+    /// <summary>
+    /// Draws the rules a font asks for under and through one line of a cell.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A cell's underline is a font property in all three formats and is drawn by the output
+    /// device rather than shaped, so it is a filled rectangle under the run and not a glyph. The
+    /// offset and the thickness come from the face's own <c>post</c> and <c>OS/2</c> tables
+    /// through <see cref="LineSpacing.ResolveDecorations(OpenTypeFace, LineMetrics)"/>, which is the same resolution and the
+    /// same fallbacks the rest of the project uses — a font that declares neither would otherwise
+    /// draw a zero-thickness line, which is to say none.
+    /// </para>
+    /// <para>
+    /// Excel's two accounting underline styles run the full width of the <em>cell</em> rather
+    /// than of the text; both are folded onto their plain counterparts here, so an accounting
+    /// underline is as wide as its number. See <see cref="SheetUnderline"/>.
+    /// </para>
+    /// <para>
+    /// Per line and per cell rather than per portion: a rich cell mixing an underlined run with a
+    /// plain one underlines the whole line. The portions carry the format that would answer
+    /// properly, and the run geometry to place a partial rule with does not exist yet.
+    /// </para>
+    /// </remarks>
+    private static void Decorate(
+        IDrawingSink sink, SheetCellFormat format, SheetFace face, PlacedLine line, Colour colour)
+    {
+        if (format.Underline == SheetUnderline.None && !format.IsStruckThrough) return;
+
+        Length size = line.Run.Size;
+        Length width = line.Run.Width;
+        if (size <= Length.Zero || width <= Length.Zero) return;
+
+        int unitsPerEm = face.Face.UnitsPerEm > 0 ? face.Face.UnitsPerEm : 1000;
+        FontVerticalMetrics metrics = LineSpacing.ResolveDecorations(face.Face, face.Metrics);
+
+        Length Scaled(int designUnits) => size * ((double)designUnits / unitsPerEm);
+
+        if (format.Underline != SheetUnderline.None)
+        {
+            Length thickness = Scaled(metrics.UnderlineThickness);
+
+            // The font records the underline's offset as negative below the baseline.
+            Length top = line.Baseline - Scaled(metrics.UnderlinePosition);
+            Rule(sink, line.X, top, width, thickness, colour);
+
+            if (format.Underline == SheetUnderline.DoubleLine)
+                Rule(sink, line.X, top + (thickness * 2), width, thickness, colour);
+        }
+
+        if (format.IsStruckThrough)
+        {
+            Length thickness = Scaled(metrics.StrikeoutThickness);
+            Rule(sink, line.X, line.Baseline - Scaled(metrics.StrikeoutPosition),
+                 width, thickness, colour);
+        }
+    }
+
+    /// <summary>One horizontal rule, filled rather than stroked so its thickness is exact.</summary>
+    private static void Rule(
+        IDrawingSink sink, Length x, Length top, Length width, Length thickness, Colour colour)
+    {
+        if (thickness <= Length.Zero) return;
+
+        sink.FillPath(Rectangle(new DocRect(x, top, width, thickness)), Paint.Solid(colour));
     }
 
     private static GraphicsPath Rectangle(DocRect rect)
@@ -202,14 +316,17 @@ internal static class SheetTextLayout
         bool isValue = cell.Value is not null and not string;
         SheetHorizontalAlignment horizontal = Resolve(format.Horizontal, isValue);
 
-        bool breaks = Breaks(format, isValue);
+        // A field is one indivisible portion, so a cell that is nothing but a hyperlink does not
+        // break however narrow its column is — and the clip `bWrapFields` turns on is what keeps
+        // it from being drawn across its neighbour instead (output2.cxx:2560-2567, :3239).
+        bool breaks = Breaks(format, isValue) && !cell.IsField;
         bool fills = format.Horizontal == SheetHorizontalAlignment.Fill && !breaks;
         bool shrinks = format.ShrinksToFit && !breaks && !fills;
 
         Length leftTotal = margin + indent;
         Length totalMargin = leftTotal + margin;
 
-        string text = cell.Text;
+        (string text, int fillAt, char fillChar) = Fill(cell);
 
         // A value is never rich: SpreadsheetML's formatting runs and ODF's spans belong to a
         // string, and a number that showed several fonts would have nowhere to put them once it
@@ -259,6 +376,17 @@ internal static class SheetTextLayout
 
         Length available = cell.Box.Width - totalMargin;
 
+        // Between the output area and the shrink, which is where Calc does it
+        // (output2.cxx:1853): the fill is measured against the cell's own column and not
+        // against the room a neighbour lent, so it must not see the widened area — and
+        // everything after it re-measures the text it produced.
+        if (fillAt >= 0 && portions is null
+            && RepeatToFill(text, fillAt, fillChar, face, size, available, run.Width) is { } filled)
+        {
+            text = filled;
+            run = ShapeRange(0, text.Length, percent) ?? run;
+        }
+
         if (shrinks && area.IsClipped && available > Length.Zero && run.Width > Length.Zero)
         {
             (run, percent) = Shrink(ShapeRange, text.Length, run, available);
@@ -271,10 +399,17 @@ internal static class SheetTextLayout
             if (run.Width + totalMargin <= area.Width) area = area.Unclipped();
         }
 
-        Length shift = Length.Zero;
-        if (!isValue && !breaks && area.IsClipped)
+        // A cell holding a no-break space or one of the six other characters of
+        // HasEditCharacters is drawn by DrawEditStandard rather than by DrawStrings, and that
+        // path clips the string to the cell without dropping a character from it. Everything
+        // else about the two agrees — the same GetOutputArea with the same lending from empty
+        // neighbours, the same ### for a value that will not fit — so the only thing to skip is
+        // the shortening. A cell whose whole content is a hyperlink field is on the same path,
+        // for the same reason: it is an EditTextObject rather than a string.
+        if (!isValue && !breaks && area.IsClipped
+            && !cell.IsField && !HasEditCharacters(text, fillAt))
         {
-            (run, shift) = Shorten(run, text, ShapeRange, percent, horizontal, area);
+            run = Shorten(run, text, ShapeRange, percent, horizontal, area);
         }
 
         List<SheetTextRun> lines = breaks
@@ -296,7 +431,7 @@ internal static class SheetTextLayout
         {
             placed.Add(new PlacedLine(
                 line,
-                Horizontal(horizontal, cell.Box, line.Width, leftTotal, margin + indent, margin) + shift,
+                Horizontal(horizontal, cell.Box, line.Width, leftTotal, margin + indent, margin),
                 y + line.Ascent));
             y += line.LineHeight;
         }
@@ -345,7 +480,7 @@ internal static class SheetTextLayout
     /// which is why a wide number in a wrapping column shows <c>###</c> rather than folding onto a
     /// second line. A date or a time is not a plain number format and does wrap.
     /// </remarks>
-    private static bool Breaks(SheetCellFormat format, bool isValue)
+    internal static bool Breaks(SheetCellFormat format, bool isValue)
     {
         bool breaks = format.Wraps
                       || format.Horizontal is SheetHorizontalAlignment.Justify
@@ -354,6 +489,203 @@ internal static class SheetTextLayout
                           or SheetVerticalAlignment.Distributed;
 
         return breaks && isValue ? !format.HasPlainNumberFormat : breaks;
+    }
+
+    /// <summary>
+    /// Whether the cell's text holds a character that sends Calc to the EditEngine.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>ScDrawStringsVars::HasEditCharacters</c> (<c>output2.cxx:823-847</c>), consulted at
+    /// <c>output2.cxx:1812</c> before anything about the output area has been decided. Seven code
+    /// points force it — a no-break space, a soft hyphen, a zero-width space, the two bidi marks,
+    /// a non-breaking hyphen and a word joiner — and the consequence is not cosmetic:
+    /// <c>DrawStrings</c> skips the cell entirely and <c>DrawEditStandard</c> draws it, which
+    /// clips the string to the cell and never shortens it. The plain path drops the characters it
+    /// cannot show; the EditEngine path leaves them in the text layer behind a clip.
+    /// </para>
+    /// <para>
+    /// The no-break space is excluded when the cell has a repeat directive, which is tdf#122676:
+    /// "Ignore CHAR_NBSP (this is thousand separator in any number) if repeat character is set".
+    /// The string tested is the cell's <em>display</em> text, so a number whose format groups with
+    /// a no-break space reaches this the same way a piece of typed text does.
+    /// </para>
+    /// </remarks>
+    /// <param name="text">The cell's display text.</param>
+    /// <param name="fillAt">Where the repeat directive expands, or −1 when there is none.</param>
+    internal static bool HasEditCharacters(string text, int fillAt = -1)
+    {
+        foreach (char c in text)
+        {
+            switch (c)
+            {
+                case '\u00A0' when fillAt < 0:  // CHAR_NBSP
+                case '\u00AD':                  // CHAR_SHY
+                case '\u200B':                  // CHAR_ZWSP
+                case '\u200E':                  // CHAR_LRM
+                case '\u200F':                  // CHAR_RLM
+                case '\u2011':                  // CHAR_NBHY
+                case '\u2060':                  // CHAR_WJ
+                    return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// How many lines a cell's text breaks into at a width.
+    /// </summary>
+    /// <remarks>
+    /// For <see cref="SheetOptimalRowHeights"/>, which needs the count and none of the rest of the
+    /// placement — the height it is deriving is what decides where the lines go, so it cannot ask
+    /// for them. A hard break starts a line of its own whatever the width is, which is why the
+    /// text is split before it is wrapped rather than handed to the layouter whole.
+    /// </remarks>
+    /// <param name="text">The cell's text.</param>
+    /// <param name="face">The face it is set in.</param>
+    /// <param name="size">The em size.</param>
+    /// <param name="available">The room its lines have, margins already taken off.</param>
+    internal static int LineCount(string text, SheetFace face, Length size, Length available)
+    {
+        if (text.Length == 0) return 0;
+
+        ParagraphLayouter? layouter = null;
+        int lines = 0;
+
+        foreach (string paragraph in
+                 text.Replace("\r\n", "\n", StringComparison.Ordinal).Split(['\n', '\r']))
+        {
+            if (paragraph.Length == 0 || available <= Length.Zero)
+            {
+                lines++;
+                continue;
+            }
+
+            layouter ??= Layouters.GetOrAdd(
+                face.Reference.FaceKey, _ => new ParagraphLayouter(face.Face));
+
+            LaidOutParagraph laid = layouter.Layout(
+                paragraph, emSize: size, textAreaWidth: available, options: SheetText.NoKerning);
+
+            lines += Math.Max(1, laid.Lines.Count);
+        }
+
+        return lines;
+    }
+
+    /// <summary>
+    /// The character ranges a cell in several formats breaks into at a width.
+    /// </summary>
+    /// <remarks>
+    /// The ranges rather than the count, because a rich cell's lines are not all the same height:
+    /// EditEngine makes a line as tall as the tallest portion on it
+    /// (<c>ImpEditEngine::CreateLines</c>, <c>editeng/source/editeng/impedit3.cxx:1516-1519</c>,
+    /// over the per-portion maxima <c>RecalcFormatterFontMetrics</c> accumulates at <c>:3160</c>),
+    /// so <see cref="SheetOptimalRowHeights"/> has to know which portions sit on which line. The
+    /// breaking itself is the same run-aware path <see cref="Wrap"/> takes, so a row is measured
+    /// against exactly the lines the cell will be drawn with.
+    /// </remarks>
+    /// <param name="text">The cell's text.</param>
+    /// <param name="portions">The stretches it is split into.</param>
+    /// <param name="face">The cell's own face, which names the layouter to break with.</param>
+    /// <param name="available">The room its lines have, margins already taken off.</param>
+    /// <param name="device">
+    /// The grid every portion's em size is rounded onto before it is measured, or null to measure
+    /// at the size the file states. Non-null only when a row is being measured rather than drawn:
+    /// Calc decides a row's height against a 96 dpi virtual device, which can only set a font at a
+    /// whole number of pixels. See <see cref="MetricGrid.ToEmSize"/>.
+    /// </param>
+    internal static IReadOnlyList<(int Start, int End)> RichLineRanges(
+        string text,
+        IReadOnlyList<SheetTextPortion> portions,
+        SheetFace face,
+        Length available,
+        MetricGrid? device = null)
+    {
+        if (text.Length == 0) return [];
+
+        ParagraphLayouter layouter = Layouters.GetOrAdd(
+            face.Reference.FaceKey, _ => new ParagraphLayouter(face.Face));
+
+        LaidOutParagraph laid = layouter.Layout(
+            Measured(text, portions, scale: 1.0, device), textAreaWidth: available);
+
+        List<(int Start, int End)> ranges = new(laid.Lines.Count);
+        foreach (LineBox box in laid.Lines)
+            ranges.Add((box.Line.Start, Math.Min(box.Line.End, text.Length)));
+
+        return ranges;
+    }
+
+    // --------------------------------------------------------------------------------- fill
+
+    /// <summary>
+    /// Where a <c>*c</c> fill directive expands in this cell's text, and with which character.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The reader already produced the cell's text with the directive dropped, because
+    /// extraction has no column to fill. Finding the position again means putting the value
+    /// through the code a second time with <c>NumberFormatter.FillMarker</c> left in — which is
+    /// only done for the formats that carry one, and those are the accounting formats.
+    /// </para>
+    /// <para>
+    /// The re-render is trusted only when it reproduces the text the reader produced. The two
+    /// calls resolve the workbook's epoch separately and layout does not carry it, so a date
+    /// format with a fill would come back different — and a disagreement must change nothing
+    /// rather than replace a correct string with a plausible one.
+    /// </para>
+    /// </remarks>
+    private static (string Text, int At, char Fill) Fill(in SheetCellText cell)
+    {
+        if (cell.Format.NumberFormat is not { HasFillDirective: true } code) return (cell.Text, -1, '\0');
+        if (cell.Value is not double value) return (cell.Text, -1, '\0');
+
+        string marked = NumberFormatter.Format(code, value, keepFillMarkers: true);
+        int at = marked.IndexOf(NumberFormatter.FillMarker, StringComparison.Ordinal);
+        if (at < 0 || at + 1 >= marked.Length) return (cell.Text, -1, '\0');
+
+        char fill = marked[at + 1];
+        string plain = marked.Remove(at, 2);
+        return plain == cell.Text ? (plain, at, fill) : (cell.Text, -1, '\0');
+    }
+
+    /// <summary>
+    /// Pads the fill point with as many copies of the fill character as the column has room for.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>ScDrawStringsVars::RepeatToFill</c> (<c>output2.cxx:572</c>), including the two
+    /// deliberate truncations it marks in its own comments. The character's width is taken from
+    /// a twenty-character sample rather than from one copy — "measuring a string containing a
+    /// single copy of the repeat char is inaccurate" — and both the width and the count are
+    /// truncated towards zero, so the fill can never overrun the column by a rounding.
+    /// </para>
+    /// <para>
+    /// Nothing is added when the space left is no wider than one character: an accounting cell
+    /// in a column that only just fits its number shows its symbol against its digits, which is
+    /// what Calc draws.
+    /// </para>
+    /// </remarks>
+    /// <returns>The padded text, or null when nothing fits.</returns>
+    private static string? RepeatToFill(
+        string text, int at, char fill, SheetFace face, Length size, Length available, Length width)
+    {
+        const int SampleSize = 20;
+
+        if (at > text.Length || available <= Length.Zero) return null;
+        if (SheetText.Shape(new string(fill, SampleSize), face, size) is not { } sample) return null;
+
+        double averageWidth = (double)sample.Width.Emu / SampleSize;
+        long characterWidth = (long)averageWidth;
+        if (characterWidth < 1) return null;
+
+        long spaceToFill = (available - width).Emu;
+        if (spaceToFill <= characterWidth) return null;
+
+        int count = (int)(spaceToFill / averageWidth);
+        return count <= 0 ? null : text.Insert(at, new string(fill, count));
     }
 
     // -------------------------------------------------------------------------- output area
@@ -534,11 +866,14 @@ internal static class SheetTextLayout
     /// <para>
     /// The estimate is deliberately crude on both sides — the ratio of visible width to total
     /// width, times the character count, plus one — so it over-keeps rather than under-keeps and
-    /// the clip does the rest. Right-aligned text keeps its <em>end</em> and is shifted right by
-    /// the width it lost, since its pen was placed for the whole string.
+    /// the clip does the rest. Right-aligned text keeps its <em>end</em>, and keeping it needs no
+    /// compensating shift: dropping the head of a string leaves every remaining glyph where it
+    /// already was, and <see cref="Horizontal"/> is handed the shortened run's own width, so
+    /// <c>right − margin − shortened</c> is exactly where the tail was standing. Shifting it right
+    /// by the width dropped carried the whole run over the cell's right edge by that much.
     /// </para>
     /// </remarks>
-    private static (SheetTextRun Run, Length Shift) Shorten(
+    private static SheetTextRun Shorten(
         SheetTextRun run,
         string text,
         Func<int, int, long, SheetTextRun?> shape,
@@ -546,28 +881,27 @@ internal static class SheetTextLayout
         SheetHorizontalAlignment horizontal,
         Area area)
     {
-        if (run.Width <= Length.Zero || text.Length == 0) return (run, Length.Zero);
+        if (run.Width <= Length.Zero || text.Length == 0) return run;
 
         if (horizontal == SheetHorizontalAlignment.Left && area.RightClip)
         {
             double ratio = (double)(run.Width - area.RightMissing).Emu / run.Width.Emu;
-            if (ratio is <= 0.0 or >= 1.0) return (run, Length.Zero);
+            if (ratio is <= 0.0 or >= 1.0) return run;
 
             int keep = Math.Clamp((int)(ratio * text.Length) + 1, 1, text.Length);
-            return (shape(0, keep, percent) ?? run, Length.Zero);
+            return shape(0, keep, percent) ?? run;
         }
 
         if (horizontal == SheetHorizontalAlignment.Right && area.LeftClip)
         {
             double ratio = (double)(run.Width - area.LeftMissing).Emu / run.Width.Emu;
-            if (ratio is <= 0.0 or >= 1.0) return (run, Length.Zero);
+            if (ratio is <= 0.0 or >= 1.0) return run;
 
             int keep = Math.Clamp((int)(ratio * text.Length) + 1, 1, text.Length);
-            SheetTextRun? shorter = shape(text.Length - keep, text.Length, percent);
-            return shorter is null ? (run, Length.Zero) : (shorter, run.Width - shorter.Width);
+            return shape(text.Length - keep, text.Length, percent) ?? run;
         }
 
-        return (run, Length.Zero);
+        return run;
     }
 
     // --------------------------------------------------------------------------------- wrap
@@ -594,7 +928,14 @@ internal static class SheetTextLayout
     {
         SheetTextRun? whole = shape(0, text.Length, percent);
         if (whole is null) return [];
-        if (available <= Length.Zero || whole.Width <= available) return [whole];
+
+        // A hard break is not a suggestion, so the "it all fits" shortcut cannot take it: the
+        // text has to reach the layouter, which breaks at one whatever the width says. Only the
+        // shortcut is conditional — a cell with no break in it measures and draws exactly as it
+        // did. `LineCount` beside this has always split on the break first, so before this the
+        // reserved row height and the drawn lines were computed by two rules that disagreed.
+        if (available <= Length.Zero || (whole.Width <= available && !HoldsHardBreak(text)))
+            return [whole];
 
         ParagraphLayouter layouter = Layouters.GetOrAdd(
             face.Reference.FaceKey, _ => new ParagraphLayouter(face.Face));
@@ -614,29 +955,94 @@ internal static class SheetTextLayout
         {
             // To End rather than to VisibleEnd: Calc's own output shows a line's trailing spaces,
             // so a reference PDF's first wrapped line of "Wrapped text that needs …" holds
-            // eighteen glyphs, not the seventeen the visible text has.
-            if (shape(box.Line.Start, Math.Min(box.Line.End, text.Length), percent) is { } shaped)
-                lines.Add(shaped);
+            // eighteen glyphs, not the seventeen the visible text has. The break character
+            // itself is the one thing dropped — it is Writer's break portion, "zero width, and
+            // no glyph", and a cell whose lines carry it would both measure the character's
+            // advance into a centred line's width and put it in the PDF's text layer.
+            int start = box.Line.Start;
+            int full = Math.Min(box.Line.End, text.Length);
+            int end = full;
+            while (end > start && IsHardBreak(text[end - 1])) end--;
+
+            // A break on its own is an empty paragraph, and an empty paragraph is still a line
+            // with a height. It is shaped from the break — a run's ascent and descent come from
+            // its face and size rather than from its glyphs — and then emptied, so that the line
+            // occupies its pitch without putting a .notdef box on the page or a U+000A in the
+            // text layer.
+            if (end == start)
+            {
+                if (shape(start, full, percent) is { } blank) lines.Add(Blank(blank));
+                continue;
+            }
+
+            if (shape(start, end, percent) is { } shaped) lines.Add(shaped);
         }
 
         return lines.Count == 0 ? [whole] : lines;
     }
 
+    /// <summary>
+    /// The same line with nothing on it: one segment, kept for its metrics, holding no glyphs.
+    /// </summary>
+    /// <remarks>
+    /// The first segment only. A line's height is the tallest thing on it and there is nothing on
+    /// this one, so the face and size the paragraph would have been set in is the whole of what
+    /// an empty paragraph contributes.
+    /// </remarks>
+    private static SheetTextRun Blank(SheetTextRun run)
+    {
+        SheetTextSegment first = run.Segments[0];
+
+        return new SheetTextRun(
+            [first with
+            {
+                Glyphs = [],
+                Clusters = [],
+                Text = string.Empty,
+                Offset = Length.Zero,
+                Width = Length.Zero,
+            }],
+            Length.Zero);
+    }
+
+    /// <summary>Whether a cell's text holds a break that starts a line whatever the width is.</summary>
+    /// <remarks>
+    /// The same two characters <see cref="LineCount"/> splits on, and deliberately no more: the
+    /// row height it derives and the lines <see cref="Wrap"/> draws have to be computed from one
+    /// rule. Every reader that can put a break inside a cell produces one of these — BIFF's own
+    /// U+000A survives <c>ReadRawUnicodeString</c> unchanged, SpreadsheetML writes
+    /// <c>&amp;#10;</c>, and ODF's <c>text:line-break</c> is read as <c>'\n'</c>.
+    /// </remarks>
+    private static bool IsHardBreak(char character) => character is '\n' or '\r';
+
+    /// <inheritdoc cref="IsHardBreak"/>
+    private static bool HoldsHardBreak(string text)
+    {
+        foreach (char c in text)
+        {
+            if (IsHardBreak(c)) return true;
+        }
+
+        return false;
+    }
+
     /// <summary>A rich cell's text, shaped run by run so that it can be broken into lines.</summary>
     private static MeasuredParagraph Measured(
-        string text, IReadOnlyList<SheetTextPortion> portions, double scale)
+        string text,
+        IReadOnlyList<SheetTextPortion> portions,
+        double scale,
+        MetricGrid? device = null)
     {
         List<FormattedRun> runs = [];
         foreach (SheetTextPortion portion in portions)
         {
             if (SheetFonts.For(portion.Format) is not { } face) continue;
 
+            Length size = SheetText.SizeOf(portion.Format.FontSize, scale, 100);
+            if (device is { } grid) size = grid.ToEmSize(size);
+
             runs.Add(new FormattedRun(
-                portion.Start,
-                portion.Length,
-                face.Face,
-                SheetText.SizeOf(portion.Format.FontSize, scale, 100),
-                SheetText.NoKerning));
+                portion.Start, portion.Length, face.Face, size, SheetText.NoKerning));
         }
 
         return MeasuredParagraph.Measure(text, runs);

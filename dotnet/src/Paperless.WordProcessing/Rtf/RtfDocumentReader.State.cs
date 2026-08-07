@@ -121,9 +121,48 @@ public sealed partial class RtfDocumentReader
         /// malformed file and because the table is a document-level thing while this is group state.
         /// </remarks>
         public int? ForegroundColourIndex { get; set; }
+
+        /// <summary>
+        /// The <c>\highlight</c> index into the colour table, or null when the text has no band.
+        /// </summary>
+        /// <remarks>
+        /// An index for the same reason <see cref="ForegroundColourIndex"/> is one. Nought is stored as
+        /// null rather than looked up: <c>\highlight0</c> is Word's "no colour" on the highlighter pen,
+        /// not the colour table's first entry.
+        /// </remarks>
+        public int? HighlightColourIndex { get; set; }
         public bool Underline { get; set; }
         public bool Strike { get; set; }
         public bool Hidden { get; set; }
+
+        /// <summary>
+        /// True inside a nonzero <c>\kerning</c>: the run's pairs are kerned.
+        /// </summary>
+        /// <remarks>
+        /// <c>\kerningN</c> states the size in half-points at or above which Word kerns, and the RTF
+        /// importer routes it to the very sprm the DOCX one uses for <c>w:kern</c> —
+        /// <c>nSprm = NS_ooxml::LN_EG_RPrBase_kern</c>
+        /// (<c>sw/source/writerfilter/rtftok/rtfdispatchvalue.cxx:190</c>) — so the threshold is
+        /// discarded there in exactly the same place and for exactly the same reason. Off unless
+        /// stated, which is what <c>\kerning0</c> also says.
+        /// </remarks>
+        public bool AutoKerning { get; set; }
+
+        /// <summary>True inside <c>\caps</c>: drawn in capitals whatever the text says.</summary>
+        public bool Capitals { get; set; }
+
+        /// <summary>True inside <c>\scaps</c>: drawn in small capitals.</summary>
+        public bool SmallCapitals { get; set; }
+
+        /// <summary>The case the text is drawn in, from the two toggles above.</summary>
+        /// <remarks>
+        /// <c>\caps</c> wins where a file sets both, matching the single-valued item every consumer of
+        /// this ends up holding.
+        /// </remarks>
+        public Layout.PageCaseMap CaseMap
+            => Capitals ? Layout.PageCaseMap.Uppercase
+                : SmallCapitals ? Layout.PageCaseMap.SmallCaps
+                : Layout.PageCaseMap.None;
 
         /// <summary>True inside <c>\revised</c>: text a tracked change added.</summary>
         public bool Revised { get; set; }
@@ -223,6 +262,7 @@ public sealed partial class RtfDocumentReader
             Bold = Bold,
             Italic = Italic,
             ForegroundColourIndex = ForegroundColourIndex,
+            HighlightColourIndex = HighlightColourIndex,
 
             // A copy, not the same list: a stop set inside a group belongs to that group.
             TabStops = [.. TabStops],
@@ -231,6 +271,9 @@ public sealed partial class RtfDocumentReader
             Underline = Underline,
             Strike = Strike,
             Hidden = Hidden,
+            Capitals = Capitals,
+            SmallCapitals = SmallCapitals,
+            AutoKerning = AutoKerning,
             Revised = Revised,
             RevisionAuthor = RevisionAuthor,
             RevisionDate = RevisionDate,
@@ -272,12 +315,16 @@ public sealed partial class RtfDocumentReader
             Bold = false;
             Italic = false;
             ForegroundColourIndex = null;
+            HighlightColourIndex = null;
             TabStops = [];
             PendingTabAlignment = TabAlignment.Left;
             PendingTabLeader = '\0';
             Underline = false;
             Strike = false;
             Hidden = false;
+            Capitals = false;
+            SmallCapitals = false;
+            AutoKerning = false;
             Revised = false;
             VerticalPosition = 0;
             CharacterStyleId = 0;
@@ -532,6 +579,14 @@ public sealed partial class RtfDocumentReader
 
         /// <summary><c>\trhdr</c>: the row repeats as a header at the top of every page.</summary>
         public bool RowIsHeader { get; set; }
+
+        /// <summary><c>\trkeep</c>: the row's content may not be broken across a page.</summary>
+        /// <remarks>
+        /// Named for keeping rather than for splitting because that is what the control word says, and
+        /// LibreOffice's tokeniser turns it straight into OOXML's opposite spelling —
+        /// <c>LN_CT_TrPrBase_cantSplit</c> (<c>rtftok/rtfdispatchflag.cxx</c>).
+        /// </remarks>
+        public bool RowIsKeptTogether { get; set; }
     }
 
     /// <summary>A cell's declaration from <c>\cellx</c> and the merge flags before it.</summary>
@@ -612,6 +667,9 @@ public sealed partial class RtfDocumentReader
 
         /// <summary>True when the row repeats as a header on every page the table spans.</summary>
         public bool IsHeader { get; init; }
+
+        /// <summary>True when <c>\trkeep</c> forbade breaking the row across a page.</summary>
+        public bool IsKeptTogether { get; init; }
 
         /// <summary>
         /// The row's left edge in twips, from <c>\trleft</c>. The first cell starts here, so a row
@@ -977,7 +1035,12 @@ public sealed partial class RtfDocumentReader
                 ? WindowsLanguages.TagOf((ushort)state.LanguageId)
                 : null,
             ColourAt(state.ForegroundColourIndex),
-            EscapementOf(state));
+            EscapementOf(state),
+            state.CaseMap,
+            ColourAt(state.HighlightColourIndex),
+            state.Underline,
+            state.Strike,
+            state.AutoKerning);
 
         flow.LayoutLength += length;
 
@@ -1077,11 +1140,20 @@ public sealed partial class RtfDocumentReader
                 StartsNewPage = state.StartsNewPage,
                 HasWidowControl = state.HasWidowControl,
                 HasContextualSpacing = state.HasContextualSpacing,
+
+                // `\sN`, for the "same style" half of contextual spacing — see
+                // `ParagraphFormat.StyleKey`. Zero is the default style rather than "no style", so it
+                // is a key like any other and two unstyled paragraphs match.
+                StyleIndex = (ushort)Math.Clamp(state.ParagraphStyleId, 0, ushort.MaxValue),
             }.ToParagraphFormat(SizeOf(state)) with
             {
                 Alignment = AlignmentOf(state),
                 TabStops = [.. state.TabStops.OrderBy(stop => stop.Position.Emu)],
                 DefaultTabInterval = _defaultTabInterval,
+
+                // As for DOCX: writerfilter's DomainMapper clears TABS_RELATIVE_TO_INDENT for every
+                // document it maps, and RTF goes through the same mapper.
+                TabsRelativeToIndent = false,
             },
             _fontFamilies.GetValueOrDefault(state.FontIndex),
             SizeOf(state),
@@ -1096,7 +1168,8 @@ public sealed partial class RtfDocumentReader
             // Trimmed, because the group holds the tab that follows the label as well as the label —
             // and an outline level that shows no number writes the group with nothing but that tab,
             // which trims to nothing rather than to a label made of whitespace.
-            flow.ListMarker.ToString().Trim() is { Length: > 0 } marker ? marker : null);
+            flow.ListMarker.ToString().Trim() is { Length: > 0 } marker ? marker : null,
+            state.AutoKerning);
 
         if (cell is not null) cell.Add(new RtfLayoutBlock(recorded));
         else into!.Add(recorded);
@@ -1142,7 +1215,12 @@ public sealed partial class RtfDocumentReader
                 ? WindowsLanguages.TagOf((ushort)state.LanguageId)
                 : null,
             ColourAt(state.ForegroundColourIndex),
-            Layout.Escapement.Superscript);
+            Layout.Escapement.Superscript,
+            Layout.PageCaseMap.None,
+            ColourAt(state.HighlightColourIndex),
+            state.Underline,
+            state.Strike,
+            state.AutoKerning);
 
     /// <summary>The escapement <c>\super</c> or <c>\sub</c> put in force, if either did.</summary>
     /// <remarks>

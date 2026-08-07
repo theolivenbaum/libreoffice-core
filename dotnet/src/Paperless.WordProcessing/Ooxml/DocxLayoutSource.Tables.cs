@@ -73,6 +73,14 @@ public sealed partial class DocxLayoutSource
         // Counted around the rows rather than around this table's own properties, because a cell's blocks
         // are read while the rows are, and a table inside one of them is what makes this table an enclosing
         // level. See LeftEdge for the one thing the count decides.
+        // The table style's paragraph formatting applies to every paragraph in the table's cells, and it
+        // is the layer that makes table text compact: `Table Grid`, which Word puts on nearly every table,
+        // sets `w:spacing w:after="0" w:line="240"`. Saved and restored so a nested table's style applies
+        // only inside it.
+        IReadOnlyList<XElement>? enclosing = _tableStyle;
+        _tableStyle = _styles.TableStyleParagraphProperties(
+            Word.Attribute(Word.Child(properties, "tblStyle"), "val"));
+
         _tableDepth++;
         try
         {
@@ -81,6 +89,7 @@ public sealed partial class DocxLayoutSource
         finally
         {
             _tableDepth--;
+            _tableStyle = enclosing;
         }
 
         if (rows.Count == 0) return null;
@@ -93,7 +102,71 @@ public sealed partial class DocxLayoutSource
             Rows = Resolved(rows),
             HeaderRowCount = HeadingRows(rows),
             LeftIndent = LeftEdge(properties, rows, isNested: _tableDepth > 0),
+            HorizontalPosition = HorizontalPositionOf(properties),
             JoinsBordersLikeWord = true,
+        };
+    }
+
+    /// <summary>
+    /// How the table is aligned across the area it sits in, or null when it is placed by its indent.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>w:tblpXSpec</c> maps onto Writer's horizontal orientations exactly as
+    /// <c>TablePositionHandler::getTablePosition</c> maps it
+    /// (<c>sw/source/writerfilter/dmapper/TablePositionHandler.cxx:98</c>): centre, inside, left, outside
+    /// and right, with anything else — including a table stating only <c>w:tblpX</c> — left as a plain
+    /// distance, which <see cref="PageTable.LeftIndent"/> already is.
+    /// </para>
+    /// <para>
+    /// Only the two anchors that resolve against the text area are honoured: <c>margin</c>, which is
+    /// <c>PAGE_PRINT_AREA</c>, and <c>text</c>, which is <c>FRAME</c> — the paragraph's own column, the
+    /// same rectangle for a body that has one column. <c>w:horzAnchor="page"</c> would need the page's
+    /// own edges, which nothing on the way to <see cref="PageTable"/> carries, so a table anchored to the
+    /// page keeps the placement it had rather than being centred against the wrong rectangle. Three of
+    /// the corpus's eighteen anchored tables say <c>page</c>.
+    /// </para>
+    /// <para>
+    /// The vertical half — <c>w:tblpY</c>, <c>w:tblpYSpec</c>, <c>w:vertAnchor</c> — is not read. Writer
+    /// makes a positioned table into a frame holding a table, and a frame here lays its content out with
+    /// <c>FlowLayouter</c>, which has no grid. Honouring the horizontal half alone is what stops an
+    /// over-wide table's right-hand columns falling off the paper, and that is the failure this was found
+    /// on.
+    /// </para>
+    /// <para>
+    /// The commoner mechanism by far is the plain <c>w:jc</c> beside it, which was not read either: 31 of
+    /// the words track's 134 DOCX files state one and 315 of their 320 occurrences say <c>center</c>. Not
+    /// read from a <em>table style</em> yet, which <c>StyleSheetTable</c> also honours
+    /// (<c>StyleSheetTable.cxx:683</c>).
+    /// </para>
+    /// </remarks>
+    private static FrameHorizontalAlignment? HorizontalPositionOf(XElement? tableProperties)
+    {
+        if (Word.Child(tableProperties, "tblpPr") is { } position)
+        {
+            if (Word.Attribute(position, "horzAnchor") is "page") return null;
+
+            switch (Word.Attribute(position, "tblpXSpec"))
+            {
+                case "center": return FrameHorizontalAlignment.Centre;
+                case "left": return FrameHorizontalAlignment.Left;
+                case "right": return FrameHorizontalAlignment.Right;
+                case "inside": return FrameHorizontalAlignment.Inside;
+                case "outside": return FrameHorizontalAlignment.Outside;
+                default: break;
+            }
+        }
+
+        // A table's own `w:jc`, which is a different thing from the paragraph alignment of the same
+        // name and reached only as a direct child of `w:tblPr`. `convertTableJustification`
+        // (<c>sw/source/writerfilter/dmapper/ConversionHelper.cxx:473</c>) maps `center` and
+        // `right`/`end` onto orientations and everything else — `left`, `start`, absent — onto
+        // `LEFT_AND_WIDTH`, which is the stated indent and so already what this reader does.
+        return Word.Attribute(Word.Child(tableProperties, "jc"), "val") switch
+        {
+            "center" => FrameHorizontalAlignment.Centre,
+            "right" or "end" => FrameHorizontalAlignment.Right,
+            _ => null,
         };
     }
 
@@ -256,9 +329,9 @@ public sealed partial class DocxLayoutSource
     {
         XElement? properties = Word.Child(element, "trPr");
         List<PendingCell> cells = [];
-        int column = 0;
+        int column = SkippedBefore(properties);
 
-        foreach (XElement child in Word.Children(element, "tc"))
+        foreach (XElement child in Cells(element, 0))
         {
             if (column >= PageTable.MaxColumns) break;
 
@@ -286,7 +359,75 @@ public sealed partial class DocxLayoutSource
             cells,
             IsHeading: Word.IsOn(Word.Child(properties, "tblHeader"))
                        || Word.Child(properties, "tblHeader") is not null,
-            RowHeight(properties));
+            RowHeight(properties),
+            // `w:cantSplit` is on when it is present without a `w:val`, which is how Word writes it, and
+            // LibreOffice reads the same element the same way — "row can't break across pages if
+            // nIntValue == 1" (`dmapper/TablePropertiesHandler.cxx`).
+            CanSplit: !Word.IsOn(Word.Child(properties, "cantSplit")));
+    }
+
+    /// <summary>
+    /// How many grid columns a row leaves empty before its first cell — <c>w:gridBefore</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A row need not start at the grid's first column. <c>w:gridBefore</c> says how many it skips, and
+    /// like <c>w:gridSpan</c> there is <em>no placeholder cell</em> for the columns skipped — so a reader
+    /// that starts every row at column zero puts the row's first cell in the wrong column and gives it the
+    /// wrong width, and every cell after it too. On a title block whose narrow first column is skipped by
+    /// the rows that carry the title, that means the title is measured against a column a fifth of its
+    /// width and wraps to one word a line, which is enough to push the block onto a page of its own.
+    /// </para>
+    /// <para>
+    /// LibreOffice reaches the same layout by *materialising* the skipped columns:
+    /// <c>TableManager::endRow</c> (<c>sw/source/writerfilter/dmapper/TableManager.cxx</c>:667–702) adds
+    /// <c>w:gridBefore</c> borderless empty cells to the front of the row. An absent cell and a borderless
+    /// empty one draw the same nothing, so shifting the column index is the same answer with no cell to
+    /// lay out.
+    /// </para>
+    /// <para>
+    /// <c>w:wBefore</c> is deliberately not read. It is the width of the skipped span and is advisory in
+    /// exactly the way <c>w:tcW</c> is — the grid decides, and a document whose <c>w:wBefore</c> disagrees
+    /// with the columns it covers would otherwise put one row's cells at a different edge from the rest.
+    /// <c>w:gridAfter</c> needs nothing at all: a row simply stops early, which it already does.
+    /// </para>
+    /// </remarks>
+    private static int SkippedBefore(XElement? rowProperties)
+    {
+        int before = Number(Word.Child(rowProperties, "gridBefore")) ?? 0;
+        return Math.Clamp(before, 0, PageTable.MaxColumns);
+    }
+
+    /// <summary>
+    /// A row's cells, following the wrappers a cell can sit inside.
+    /// </summary>
+    /// <remarks>
+    /// The same wrappers a row can sit inside, and for the same reason — but one level further down, which
+    /// is where a form puts them: a content control over a single table cell is written as a
+    /// <c>w:sdt</c> between the <c>w:tr</c> and its <c>w:tc</c>, and it is how Word marks up every
+    /// fill-in box of a printed form. Taking only the row's direct <c>w:tc</c> children dropped the whole
+    /// cell — the corpus's own proposal form lost thirty-six of them, a quarter of its text.
+    /// </remarks>
+    private static IEnumerable<XElement> Cells(XElement row, int depth)
+    {
+        if (depth > 8) yield break;
+
+        foreach (XElement child in row.Elements())
+        {
+            if (Word.Is(child, "tc"))
+            {
+                yield return child;
+                continue;
+            }
+
+            if (!Word.Is(child, "sdt") && !Word.Is(child, "sdtContent")
+                && !Word.Is(child, "customXml") && !Word.Is(child, "ins"))
+            {
+                continue;
+            }
+
+            foreach (XElement nested in Cells(child, depth + 1)) yield return nested;
+        }
     }
 
     /// <summary>
@@ -381,9 +522,16 @@ public sealed partial class DocxLayoutSource
     /// any table whose shading also states a pattern.
     /// </para>
     /// </remarks>
-    private Colour? Shading(XElement? properties)
+    private Colour? Shading(XElement? properties) => ShadeColour(Word.Child(properties, "shd"));
+
+    /// <summary>The colour a <c>w:shd</c> fills with, or null when it fills with nothing.</summary>
+    /// <remarks>
+    /// Separate from <see cref="Shading"/> because a paragraph's shading is not simply the child of its own
+    /// <c>w:pPr</c>: it can come from any layer of the style chain, and only the resolver knows which layer
+    /// won. Both reach the same reading of the element once it has been found.
+    /// </remarks>
+    private Colour? ShadeColour(XElement? shade)
     {
-        XElement? shade = Word.Child(properties, "shd");
         if (shade is null) return null;
 
         if (Word.Attribute(shade, "val") is "nil") return null;
@@ -520,6 +668,7 @@ public sealed partial class DocxLayoutSource
                 IsHeader = rows[row].IsHeading,
                 MinHeight = rows[row].Height.Height,
                 HasExactHeight = rows[row].Height.IsExact,
+                CanSplit = rows[row].CanSplit,
             });
         }
 
@@ -607,5 +756,8 @@ public sealed partial class DocxLayoutSource
 
     /// <summary>A row before its cells' row spans are known.</summary>
     private readonly record struct PendingRow(
-        List<PendingCell> Cells, bool IsHeading, (Length Height, bool IsExact) Height);
+        List<PendingCell> Cells,
+        bool IsHeading,
+        (Length Height, bool IsExact) Height,
+        bool CanSplit = true);
 }

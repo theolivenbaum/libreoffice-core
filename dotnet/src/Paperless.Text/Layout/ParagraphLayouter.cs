@@ -131,12 +131,16 @@ public sealed class ParagraphLayouter
     /// <summary>Creates a layouter over a face.</summary>
     /// <param name="face">The face the paragraph is set in.</param>
     /// <param name="breaker">The break iterator, or null for the default.</param>
-    public ParagraphLayouter(OpenTypeFace face, ILineBreaker? breaker = null)
+    /// <param name="grid">
+    /// The device grid the face's vertical metrics are rounded through, or null to scale them exactly.
+    /// See <see cref="MetricGrid"/>.
+    /// </param>
+    public ParagraphLayouter(OpenTypeFace face, ILineBreaker? breaker = null, MetricGrid? grid = null)
     {
         ArgumentNullException.ThrowIfNull(face);
         _measurer = new TextMeasurer(face);
         _filler = new LineFiller(_measurer, breaker);
-        _metrics = LineSpacing.Resolve(face);
+        _metrics = LineSpacing.Resolve(face, grid);
     }
 
     /// <summary>The line metrics the face resolved to, and which set they came from.</summary>
@@ -218,7 +222,7 @@ public sealed class ParagraphLayouter
             bool shares = i + 1 < lines.Count && (wrapped?.SharesLineWithNext(i) ?? false);
 
             Length spaceAdd = Justification(
-                paragraph.Alignment, lines[i], text, space.Width, isLast: i == lines.Count - 1);
+                paragraph, lines[i], text, space.Width, isLast: i == lines.Count - 1);
 
             boxes.Add(new LineBox(
                 lines[i],
@@ -306,7 +310,7 @@ public sealed class ParagraphLayouter
                 BaselineFrom(height, natural, ascent, paragraph.LineSpacing.Mode);
 
             Length spaceAdd = Justification(
-                paragraph.Alignment, lines[i], measured.Text, space.Width,
+                paragraph, lines[i], measured.Text, space.Width,
                 isLast: i == lines.Count - 1);
 
             boxes.Add(new LineBox(
@@ -396,17 +400,65 @@ public sealed class ParagraphLayouter
     /// </para>
     /// </remarks>
     private static Length SpaceBetween(ParagraphFormat? previous, ParagraphFormat current)
+        => SharesContextualSpacing(previous, current) ? Length.Zero : current.SpaceBefore;
+
+    /// <summary>
+    /// True when contextual spacing suppresses the gap between two consecutive paragraphs.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The whole gap, not half of it: Writer zeroes the upper space outright
+    /// (<c>nUpper = bContextualSpacing ? 0 : …</c> in <c>SwFlowFrame::CalcUpperSpace</c>, both branches),
+    /// and that upper space is what the previous paragraph's space-after and this one's space-before both
+    /// feed into. Suppressing only the space-before leaves the space-after standing, which is the whole
+    /// gap on a list whose style states an after and no before — the common shape, since Word's own
+    /// <c>List Paragraph</c> style is exactly that.
+    /// </para>
+    /// <para>
+    /// So the caller that materialises the gap has to ask this too, and take the previous paragraph's
+    /// space-after back off again. This is exposed rather than folded into the layout because a
+    /// paragraph is laid out once and the gap above it is decided per page, by whatever is stacking them.
+    /// </para>
+    /// </remarks>
+    /// <param name="previous">The paragraph above, or null when there is none in this frame.</param>
+    /// <param name="current">The paragraph whose upper space is being decided.</param>
+    public static bool SharesContextualSpacing(ParagraphFormat? previous, ParagraphFormat current)
     {
-        if (previous is null) return current.SpaceBefore;
+        ArgumentNullException.ThrowIfNull(current);
 
-        bool contextual = current.HasContextualSpacing
-                          && previous.HasContextualSpacing
-                          && previous.LineSpacing == current.LineSpacing
-                          && previous.StartIndent == current.StartIndent
-                          && previous.Alignment == current.Alignment;
-
-        return contextual ? Length.Zero : current.SpaceBefore;
+        // Both sides have to ask for it: a paragraph with contextual spacing after one without still gets
+        // its space.
+        return previous is not null
+               && current.HasContextualSpacing
+               && previous.HasContextualSpacing
+               && IdenticalStyles(previous, current);
     }
+
+    /// <summary>
+    /// Whether two paragraphs are set in the same style, which is what "contextual" means.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Writer compares the two nodes' format collections outright — <c>lcl_IdenticalStyles</c>,
+    /// <c>sw/source/core/layout/flowfrm.cxx:1503</c>, which is a pointer comparison — so
+    /// <see cref="ParagraphFormat.StyleKey"/> is what answers this when a reader supplies it.
+    /// </para>
+    /// <para>
+    /// The fallback compares the properties a style carries, and it is a fallback rather than the
+    /// rule because it gets a common case badly wrong: a heading style based on the body style
+    /// inherits its indents, its alignment and its line spacing, so the two look identical and the
+    /// space above every heading disappears. Measured on <c>technical report template.docx</c>
+    /// (words/batch-010), whose <c>Normal</c> carries the <c>w:contextualSpacing</c> that all three
+    /// heading styles inherit: the reference leaves 12 pt above each <c>Heading 1</c> and 8 pt above
+    /// each <c>Heading 2</c>, and we left nothing — which is a page over nine.
+    /// </para>
+    /// </remarks>
+    private static bool IdenticalStyles(ParagraphFormat previous, ParagraphFormat current)
+        => previous.StyleKey is not null && current.StyleKey is not null
+            ? string.Equals(previous.StyleKey, current.StyleKey, StringComparison.Ordinal)
+            : previous.LineSpacing == current.LineSpacing
+              && previous.StartIndent == current.StartIndent
+              && previous.Alignment == current.Alignment;
 
     /// <summary>
     /// Where the baseline sits inside a line box, and how much of the box is empty above the text.
@@ -482,28 +534,63 @@ public sealed class ParagraphLayouter
     /// — <c>IsOneBlock</c> — but only when the paragraph asks for distributed alignment, and a single
     /// unbroken word filling a line is rare enough that leaving it short is the better error.
     /// </para>
+    /// <para>
+    /// <strong>The amount can be negative.</strong> A line the filler admitted on a
+    /// <see cref="TextLine.ShrinkAllowance"/> holds more text than fits at natural widths, and the same
+    /// division run over a negative slack is what squeezes its blanks back inside the margin — see
+    /// <see cref="JustificationShrink"/>. Unlike stretching, it applies to the paragraph's <em>last</em>
+    /// line too: Writer refuses to skip block formatting for a last line whose natural width exceeds the
+    /// paragraph's ("if the last line is longer than the paragraph width, it contains shrinking spaces:
+    /// don't skip block format here", <c>SwTextAdjuster::FormatBlock</c>,
+    /// <c>sw/source/core/text/itradj.cxx</c>), and it has to, because a squeezed line can be the one the
+    /// paragraph ends on.
+    /// </para>
+    /// <para>
+    /// <strong>A tab does not stop a line being justified, but it does decide which blanks carry the
+    /// slack.</strong> Writer spans a line "between two RandPortions or FixPortions (Tabs and Flys)"
+    /// (<c>sw/source/core/text/itradj.cxx:255</c>) and gives each span its own space-add. A tab is a
+    /// <c>SwFixPortion</c> whose fix width is its whole width (<c>SetFixWidth(PrtWidth())</c>,
+    /// <c>sw/source/core/text/txttab.cxx:569</c>), so its <c>GetPrtGlue()</c> is nought — the span closed
+    /// by a tab is stretched by nothing, and only the last span, closed by the right margin's glue,
+    /// receives the line's slack. Hence the count starts after the line's <em>last</em> tab.
+    /// </para>
     /// </remarks>
     private static Length Justification(
-        TextAlignment alignment, TextLine line, string text, Length available, bool isLast)
+        ParagraphFormat format, TextLine line, string text, Length available, bool isLast)
     {
-        // The last line of a justified paragraph is not stretched; under distributed alignment it is,
-        // which is the only difference between the two modes.
-        bool justified = alignment == TextAlignment.Distribute
-                         || (alignment == TextAlignment.Justify && !isLast);
-        if (!justified) return Length.Zero;
+        TextAlignment alignment = format.Alignment;
+        bool justifiable = alignment is TextAlignment.Justify or TextAlignment.Distribute;
+        if (!justifiable) return Length.Zero;
 
         Length slack = available - line.Width;
-        if (slack <= Length.Zero) return Length.Zero;
 
-        // A tabbed line is left alone. Writer stops justifying the rest of a line at a centre, right or
-        // decimal tab (`bDoNotJustifyTab` in `SwTextAdjuster::CalcNewBlock`) and gives each stretch between
-        // tabs its own space-add, which is a per-stretch answer where this returns one per line. Stretching
-        // the blanks anyway would move the text out of the columns the tabs put it in — a visibly worse
-        // error than leaving a tabbed line ragged, which is what this does instead. Recorded in the TODO.
-        if (TabRuler.HasTab(text, line.Start, line.VisibleEnd)) return Length.Zero;
+        if (slack > Length.Zero)
+        {
+            // The last line of a justified paragraph is not stretched; under distributed alignment it is,
+            // which is the only difference between the two modes.
+            if (alignment == TextAlignment.Justify && isLast) return Length.Zero;
+        }
+        else if (slack < Length.Zero)
+        {
+            // Only as far as the filler allowed for, and no further: an overrun this does not account for
+            // is a line that overflowed for some other reason — an over-long word, an inline object — and
+            // squeezing its blanks would not bring it inside the margin anyway.
+            if (line.ShrinkAllowance <= Length.Zero) return Length.Zero;
+            if (Length.Zero - slack > line.ShrinkAllowance) return Length.Zero;
+        }
+        else
+        {
+            return Length.Zero;
+        }
+
+        if (StopsAtAlignedTabBeforeBreak(format, line, text)) return Length.Zero;
+
+        // Only the blanks after the line's last tab share the slack — see the remarks. A line without a
+        // tab starts at its own start, which is every line in nearly every paragraph.
+        int from = Math.Max(LastTabOn(text, line) + 1, line.Start);
 
         int blanks = 0;
-        for (int at = line.Start; at < Math.Min(line.VisibleEnd, text.Length); at++)
+        for (int at = from; at < Math.Min(line.VisibleEnd, text.Length); at++)
         {
             if (text[at] == ' ') blanks++;
         }
@@ -513,6 +600,82 @@ public sealed class ParagraphLayouter
         long hundredths = slack.Twips * 100 / blanks;
         return Length.FromEmu(hundredths * Length.EmuPerTwip / 100);
     }
+
+    /// <summary>
+    /// The one case a tab does stop a line being justified: a manual break reached with a centre, right
+    /// or decimal stop in force.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>bDoNotJustifyTab</c> in <c>SwTextAdjuster::CalcNewBlock</c>
+    /// (<c>sw/source/core/text/itradj.cxx:292</c>). A <c>TabCenter</c>, <c>TabRight</c> or
+    /// <c>TabDecimal</c> portion sets it and a <c>TabLeft</c> clears it again, and it is consulted only
+    /// where the loop meets a break portion — at which point <c>FinishSpaceAdd</c> zeroes what is left
+    /// and the line is abandoned ragged. So the same text split by a manual break is justified after a
+    /// left tab and ragged after a right one. Measured on a probe paragraph of two justified lines split
+    /// by a <c>w:br</c>, right margin 538.58 pt: with a left stop LibreOffice 24.2.7.2 ends the broken
+    /// line at 538.50, with a right stop at 262.22.
+    /// </para>
+    /// <para>
+    /// <strong>Approximated in one direction, deliberately.</strong> Which stop a tab lands on depends on
+    /// how far along the line it falls, which is not knowable from the line alone — resolving it here
+    /// would mean measuring the line's text a second time, in this layer, for every justified paragraph.
+    /// So the test is whether the paragraph <em>declares</em> a stop that is not left-aligned: a
+    /// paragraph declaring none — nearly all of them, since the default interval's stops are all left —
+    /// can never have one in force, and a paragraph declaring only aligned stops always does. A
+    /// paragraph mixing the two, whose line ends in a manual break, and whose last tab lands on the left
+    /// stop, is left ragged where Writer would justify it. That needs all three at once.
+    /// </para>
+    /// </remarks>
+    private static bool StopsAtAlignedTabBeforeBreak(
+        ParagraphFormat format, TextLine line, string text)
+    {
+        if (!TabRuler.HasTab(text, line.Start, line.VisibleEnd)) return false;
+
+        bool aligned = false;
+        foreach (TabStop stop in format.TabStops)
+        {
+            if (stop.Alignment == TabAlignment.Left) continue;
+            aligned = true;
+            break;
+        }
+
+        if (!aligned) return false;
+
+        // The break itself, which the filler trims off the visible end rather than leaving on it — so the
+        // question is whether anything between the visible end and the line's end ends a line. The
+        // character before the visible end is included because U+2028 is not one of the blanks the filler
+        // trims, so a line ending on it can carry it inside its visible range.
+        int at = Math.Max(line.Start, Math.Min(line.VisibleEnd, text.Length) - 1);
+        for (; at < Math.Min(line.End, text.Length); at++)
+        {
+            if (EndsLine(text[at])) return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>The last tab on a line, or one before its start when it holds none.</summary>
+    /// <remarks>
+    /// Where a justified line's stretch begins. Searched from the visible end backwards because that is
+    /// the only tab that matters: every earlier stretch was closed by a tab of its own and given that
+    /// tab's glue, which is nought.
+    /// </remarks>
+    private static int LastTabOn(string text, TextLine line)
+    {
+        int at = Math.Min(line.VisibleEnd, text.Length) - 1;
+        while (at >= line.Start && text[at] != '\t') at--;
+        return at;
+    }
+
+    /// <summary>True for a character UAX #14 gives a mandatory break.</summary>
+    /// <remarks>
+    /// The same set <see cref="TextMeasurer"/> trims from a line's visible end, and for the same reason:
+    /// the readers do not agree on which to use — OOXML's and ODF's manual breaks arrive as U+2028 and
+    /// RTF's as a newline, and every one of them is Writer's break portion.
+    /// </remarks>
+    private static bool EndsLine(char character)
+        => character is '\u2028' or '\u2029' or '\n' or '\r' or '\u000B' or '\u000C' or '\u0085';
 
     /// <summary>
     /// The stretch each line of an obstructed paragraph gets, resolved once and remembered.

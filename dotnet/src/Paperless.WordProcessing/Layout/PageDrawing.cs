@@ -1,6 +1,7 @@
 using Paperless.Core.Geometry;
 using Paperless.Core.Graphics;
 using Paperless.Core.Units;
+using Paperless.Text.Fonts;
 using Paperless.Text.Itemisation;
 using Paperless.Text.Layout;
 using Paperless.Text.Shaping;
@@ -176,6 +177,19 @@ public static class PageDrawing
 
         Stroke stroke = new(Paint.Solid(colour), frame.Frame.BorderWidth);
         DocRect area = frame.Area;
+
+        // A line shape's outline is its diagonal rather than its rectangle: corner to opposite corner,
+        // which is the two-point path `ImportShape` builds for it, with the mirror flags choosing which
+        // pair of corners. Drawing the box instead puts three sides on the page that are not in the file.
+        if (frame.Frame.IsLine)
+        {
+            sink.StrokePath(
+                new GraphicsPath()
+                    .MoveTo(new DocPoint(area.X, frame.Frame.IsLineMirrored ? area.Bottom : area.Y))
+                    .LineTo(new DocPoint(area.Right, frame.Frame.IsLineMirrored ? area.Y : area.Bottom)),
+                stroke);
+            return;
+        }
 
         sink.StrokePath(
             new GraphicsPath()
@@ -438,16 +452,149 @@ public static class PageDrawing
         IReadOnlyList<PageBlock> blocks,
         IDrawingSink sink)
     {
+        DrawParagraphShading(area, lines, blocks, sink);
+
         foreach (PlacedLine line in lines)
         {
             if (line.ParagraphIndex < 0 || line.ParagraphIndex >= blocks.Count) continue;
             if (blocks[line.ParagraphIndex] is not PageParagraph paragraph) continue;
 
-            foreach ((GlyphRun run, Colour colour) in RunsIn(area, line, paragraph))
+            List<(DocRect Area, Colour Colour)> highlights = [];
+            List<(DocRect Area, Colour Colour)> rules = [];
+            List<(GlyphRun Run, Colour Colour)> runs =
+                RunsIn(area, line, paragraph, highlights, rules);
+
+            // Every band on the line before any of its glyphs, not band-then-glyphs run by run: two
+            // adjacent highlighted runs overlap by a fraction of a point where one's advance ends and the
+            // next begins, and painting a band after its neighbour's text has been drawn clips the text.
+            foreach ((DocRect band, Colour colour) in highlights) Fill(band, colour, sink);
+
+            foreach ((GlyphRun run, Colour colour) in runs)
             {
                 sink.DrawGlyphRun(run, Paint.Solid(colour));
             }
+
+            // After the glyphs, which is the order every other layer here draws a decoration in and the
+            // order Writer paints one: a strikethrough belongs over the letters it crosses out, and an
+            // underline that a descender interrupts is what a font's own offset already expresses.
+            foreach ((DocRect rule, Colour colour) in rules) Fill(rule, colour, sink);
         }
+    }
+
+    /// <summary>
+    /// Fills the background behind each shaded paragraph, before any of the text is drawn.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Every shade before any glyph, for the reason a table's cells are drawn that way: a fill is opaque,
+    /// and a shaded paragraph drawn after its neighbour would paint over the descenders hanging into it.
+    /// </para>
+    /// <para>
+    /// <strong>The rectangle is the paragraph's print area, not its frame.</strong> Writer paints a text
+    /// frame's background over <c>lcl_CalcBorderRect</c>'s rectangle —
+    /// <c>getFramePrintArea() + getFrameArea().Pos()</c>, <c>sw/source/core/layout/paintfrm.cxx:1265</c> —
+    /// so the fill spans the indents rather than the whole column, and it stops at the first and last
+    /// line rather than covering the space before and after the paragraph. Measured on a shaded
+    /// paragraph indented 720 twips with 400 twips of spacing either side, LibreOffice fills exactly the
+    /// indented line stack and leaves both spacings white.
+    /// </para>
+    /// <para>
+    /// The one exception is the join, and it is why a run of same-coloured headings reads as one bar
+    /// rather than as stripes: when the previous frame carries the same background, the rectangle's top
+    /// is pulled up to the frame's top — <c>aRect.Top( getFrameArea().Top() )</c>,
+    /// <c>paintfrm.cxx:7033</c> — which is where the paragraph before it stopped filling. So the space
+    /// between two identically shaded paragraphs is filled and the space between two differently shaded
+    /// ones is not, both of which are measurable and neither of which follows from the other.
+    /// </para>
+    /// </remarks>
+    private static void DrawParagraphShading(
+        DocRect area,
+        IReadOnlyList<PlacedLine> lines,
+        IReadOnlyList<PageBlock> blocks,
+        IDrawingSink sink)
+    {
+        // The run being accumulated: one or more consecutive paragraphs that agree about their colour and
+        // their edges, and so become a single rectangle. Emitting one per paragraph would be the same
+        // coverage and not the same picture — two abutting fills leave a blended seam a rasteriser cannot
+        // avoid, which reads as a pale rule across a shaded heading.
+        Colour? colour = null;
+        DocRect run = default;
+        int last = -2;
+
+        int index = -1;
+        Length top = Length.Zero;
+        Length bottom = Length.Zero;
+
+        void Emit()
+        {
+            if (colour is { } fill) Fill(run, fill, sink);
+            colour = null;
+        }
+
+        void Flush()
+        {
+            if (index < 0 || blocks[index] is not PageParagraph paragraph) return;
+            if (paragraph.Shading is not { } fill)
+            {
+                Emit();
+                last = -2;
+                return;
+            }
+
+            DocRect next = ShadeArea(area, paragraph, top, bottom);
+
+            // Joined when the paragraph immediately before was filled the same way: the rectangle grows
+            // downwards over whatever sat between the two, which is the space one's spacing-after and the
+            // other's spacing-before left blank.
+            if (colour == fill && last == index - 1 && next.X == run.X && next.Width == run.Width)
+            {
+                run = new DocRect(run.X, run.Y, run.Width, next.Bottom - run.Y);
+            }
+            else
+            {
+                Emit();
+                colour = fill;
+                run = next;
+            }
+
+            last = index;
+        }
+
+        foreach (PlacedLine line in lines)
+        {
+            if (line.ParagraphIndex < 0 || line.ParagraphIndex >= blocks.Count) continue;
+
+            if (line.ParagraphIndex != index)
+            {
+                Flush();
+                index = line.ParagraphIndex;
+                top = line.Top;
+            }
+
+            bottom = line.Top + line.Box.Height;
+        }
+
+        Flush();
+        Emit();
+    }
+
+    /// <summary>The rectangle a paragraph's shading fills, in the coordinates of the area holding it.</summary>
+    /// <remarks>
+    /// The indents narrow it from both sides, and which side each one is on depends on the paragraph's
+    /// direction — a right-to-left paragraph's start indent is its right edge. The first-line indent
+    /// deliberately does not narrow it: it moves one line's text, not the paragraph's print area.
+    /// </remarks>
+    private static DocRect ShadeArea(
+        DocRect area, PageParagraph paragraph, Length top, Length bottom)
+    {
+        ParagraphFormat format = paragraph.DeclaredFormat;
+        Length before = format.IsRightToLeft ? format.EndIndent : format.StartIndent;
+        Length after = format.IsRightToLeft ? format.StartIndent : format.EndIndent;
+
+        Length left = area.X + Length.Max(before, Length.Zero);
+        Length right = area.Right - Length.Max(after, Length.Zero);
+
+        return new DocRect(left, area.Y + top, right - left, bottom - top);
     }
 
     /// <summary>
@@ -478,8 +625,23 @@ public static class PageDrawing
     /// <param name="area">The rectangle the line's coordinates are relative to.</param>
     /// <param name="line">The line.</param>
     /// <param name="paragraph">Its paragraph.</param>
+    /// <param name="highlights">
+    /// Collects the coloured band behind each highlighted run, or null when the caller wants only the
+    /// glyphs. Out of this walk rather than a second one, because the band's left edge and width are the
+    /// pen positions the tab stops and the justification decided here — recomputing them elsewhere would
+    /// be a second place for that arithmetic to be got right.
+    /// </param>
+    /// <param name="rules">
+    /// Collects the underline and strikethrough rectangles each decorated run asks for, or null when the
+    /// caller wants only the glyphs. Out of this walk for the same reason the bands are: a rule spans the
+    /// advance the pen just measured, and its offset and thickness come from the face this walk resolved.
+    /// </param>
     public static List<(GlyphRun Run, Colour Colour)> RunsIn(
-        DocRect area, PlacedLine line, PageParagraph paragraph)
+        DocRect area,
+        PlacedLine line,
+        PageParagraph paragraph,
+        List<(DocRect Area, Colour Colour)>? highlights = null,
+        List<(DocRect Area, Colour Colour)>? rules = null)
     {
         ArgumentNullException.ThrowIfNull(paragraph);
 
@@ -513,9 +675,22 @@ public static class PageDrawing
 
         if (end <= start) return runs;
 
-        foreach (TabbedSegment segment in Stretches(paragraph, start, end))
+        List<TabbedSegment> stretches = Stretches(paragraph, start, end, line.StartsParagraph);
+
+        for (int index = 0; index < stretches.Count; index++)
         {
+            TabbedSegment segment = stretches[index];
+
+            // Before the emptiness test: a tab followed by nothing still draws its leader, which is what
+            // a table-of-contents line whose page number sits on the next line looks like.
+            if (Leader(paragraph, segment, lineLeft, baseline) is { } filled) runs.Add(filled);
+
             if (segment.IsEmpty) continue;
+
+            // The justification belongs to the last stretch alone. A tab is a fixed portion whose glue is
+            // nought, so the stretch it closes is stretched by nothing and only the last one reaches the
+            // right margin's glue — see `ParagraphLayouter.Justification`, which counts the same blanks.
+            Length spaceAdd = index == stretches.Count - 1 ? line.Box.SpaceAdd : Length.Zero;
 
             Length pen = lineLeft + segment.Left;
 
@@ -550,17 +725,223 @@ public static class PageDrawing
                     run.EmSize,
                     run.Font ?? Reference(run.Face),
                     new DocPoint(pen, baseline - run.Rise),
-                    line.Box.SpaceAdd);
+                    spaceAdd,
+                    run.Tracking);
 
                 runs.Add((glyphRun, run.EffectiveColour));
 
                 // The pen carries the justification with it, or the second run on a stretched line would
                 // start where the first would have ended unjustified and overlap the words before it.
-                pen += Extent(glyphRun);
+                Length extent = Extent(glyphRun);
+
+                if (highlights is not null && run.IsHighlighted)
+                {
+                    highlights.Add((Band(paragraph, run, pen, extent, baseline), run.Highlight));
+                }
+
+                if (rules is not null && run.IsDecorated)
+                {
+                    Rules(run, pen, extent, baseline, rules);
+                }
+
+                pen += extent;
             }
         }
 
         return runs;
+    }
+
+    /// <summary>
+    /// The coloured band behind one highlighted run.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Writer paints a character background over the <em>portion's</em> box rather than the line's:
+    /// <c>SwTextPaintInfo::CalcRect</c> (<c>sw/source/core/text/inftxt.cxx</c>) takes the rectangle from
+    /// the baseline less the portion's ascent, with the portion's own height. So the band follows the
+    /// run's face and size, not the tallest thing on the line — which is what stops a highlighted word in
+    /// a footnote-sized face from being given a band as tall as the heading beside it, and what stops a
+    /// double-spaced paragraph from being highlighted across the whole of its leading.
+    /// </para>
+    /// <para>
+    /// The metrics are resolved through the same <see cref="LineSpacing"/> call and the same device grid
+    /// the measurement used, so the band's height is the height layout gave the run rather than a second
+    /// opinion about it.
+    /// </para>
+    /// </remarks>
+    private static DocRect Band(
+        PageParagraph paragraph, PageRun run, Length pen, Length extent, Length baseline)
+    {
+        LineMetrics metrics = LineSpacing.Resolve(run.Face, paragraph.Metrics);
+        Length size = run.MetricEmSize > Length.Zero ? run.MetricEmSize : run.EmSize;
+
+        Length ascent = metrics.ScaledAscent(size);
+        Length height = metrics.ScaledLineHeight(size);
+        if (height <= Length.Zero) return default;
+
+        // The rise moves the band with the text: a highlighted superscript is banded where it is drawn.
+        return new DocRect(pen, baseline - run.Rise - ascent, extent, height);
+    }
+
+    /// <summary>
+    /// The rules drawn under and through one decorated run.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A decoration is not shaped. It is a rectangle the output device fills across the run's advance,
+    /// which is why it can be added here without any measurement changing: the glyphs had that advance
+    /// already. The offset and the thickness are the face's own <c>post</c> and <c>OS/2</c> numbers
+    /// through <see cref="LineSpacing.ResolveDecorations(OpenTypeFace, LineMetrics)"/> — the same call
+    /// the slide and the cell layers make, including its refusal to believe the three Liberation faces'
+    /// <c>post</c> tables, which is LibreOffice's own shipped <c>FontsDontUseUnderlineMetrics</c> and
+    /// matters here more than anywhere: those three are what a corpus set in Arial, Times New Roman and
+    /// Courier New actually resolves to.
+    /// </para>
+    /// <para>
+    /// No <see cref="MetricGrid"/> is passed, unlike <see cref="Band"/>, and deliberately: a grid
+    /// quantises the <em>scaling</em> of a metric onto device pixels and this resolution reads design
+    /// units, so a printer-metrics document would get an identical answer from a grid it had to be
+    /// threaded here to supply.
+    /// </para>
+    /// <para>
+    /// Per run rather than per line, which is what makes an underlined phrase inside a plain sentence
+    /// underline only itself. Two adjacent underlined runs abut, since each spans exactly the advance
+    /// the pen charged it — there is no gap to bridge and no overlap to double-darken.
+    /// </para>
+    /// </remarks>
+    private static void Rules(
+        PageRun run,
+        Length pen,
+        Length extent,
+        Length baseline,
+        List<(DocRect Area, Colour Colour)> rules)
+    {
+        if (run.EmSize <= Length.Zero || extent <= Length.Zero) return;
+
+        int unitsPerEm = run.Face.UnitsPerEm > 0 ? run.Face.UnitsPerEm : 1000;
+        FontVerticalMetrics metrics =
+            LineSpacing.ResolveDecorations(run.Face, LineSpacing.Resolve(run.Face));
+
+        Length Scaled(int designUnits) => run.EmSize * ((double)designUnits / unitsPerEm);
+
+        // The rise carries the rules with the text, exactly as it carries the band: a struck-through
+        // superscript is struck where it is drawn rather than where it would have sat unraised.
+        Length baselineOfRun = baseline - run.Rise;
+
+        if (run.IsUnderlined)
+        {
+            // The face records the underline's offset as negative below the baseline.
+            Length thickness = Scaled(metrics.UnderlineThickness);
+            if (thickness > Length.Zero)
+            {
+                rules.Add((
+                    new DocRect(
+                        pen, baselineOfRun - Scaled(metrics.UnderlinePosition), extent, thickness),
+                    run.EffectiveColour));
+            }
+        }
+
+        if (run.IsStruckThrough)
+        {
+            Length thickness = Scaled(metrics.StrikeoutThickness);
+            if (thickness > Length.Zero)
+            {
+                rules.Add((
+                    new DocRect(
+                        pen, baselineOfRun - Scaled(metrics.StrikeoutPosition), extent, thickness),
+                    run.EffectiveColour));
+            }
+        }
+    }
+
+    /// <summary>
+    /// How many fill characters one tab may draw, however small the face and however wide the blank.
+    /// </summary>
+    /// <remarks>
+    /// A guard on untrusted input, in the same spirit as <see cref="TabRuler.MaxSegments"/>. A page-wide
+    /// blank filled at a plausible size holds a few hundred dots; a document declaring a one-EMU face
+    /// would ask for billions, and each one costs a glyph.
+    /// </remarks>
+    private const int MaxLeaderCharacters = 4096;
+
+    /// <summary>
+    /// The run of fill characters a tab draws across the blank it advanced over, if it has one.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The dot leader of a table of contents, and the port of <c>SwTabPortion::Paint</c>
+    /// (<c>sw/source/core/text/txttab.cxx:648-659</c>): the blank's width divided by one fill character's,
+    /// truncated, so the fill never runs past the stop it stops at. Underscore takes one extra, because
+    /// its glyph spans its whole advance and a truncated run of them shows the rounding as visible gaps —
+    /// Writer makes the same exception and for the same reason.
+    /// </para>
+    /// <para>
+    /// Drawn in the face in effect <em>at the tab</em> rather than the one after it, which is what
+    /// <c>rInf.GetFont()</c> means at that point in Writer. A contents line whose title is bold and whose
+    /// page number is not would otherwise draw bold dots between them.
+    /// </para>
+    /// <para>
+    /// This paints inside space the tab had already reserved, so it moves no line break and no page
+    /// break: a paragraph measures exactly as it did before the leader existed.
+    /// </para>
+    /// </remarks>
+    private static (GlyphRun Run, Colour Colour)? Leader(
+        PageParagraph paragraph, TabbedSegment segment, Length lineLeft, Length baseline)
+    {
+        if (!segment.HasLeader) return null;
+
+        PageRun at = RunAt(paragraph, segment.Start - 1);
+
+        Length unit = TextShaper.Default
+            .Shape(at.Face, segment.Leader.ToString(), at.Shaping)
+            .Width(at.EmSize);
+        if (unit <= Length.Zero) return null;
+
+        long count = segment.GapWidth.Emu / unit.Emu;
+        if (segment.Leader == '_') count++;
+        if (count <= 0) return null;
+
+        string fill = new(segment.Leader, (int)Math.Min(count, MaxLeaderCharacters));
+        ShapedText shaped = TextShaper.Default.Shape(at.Face, fill, at.Shaping);
+        if (shaped.Glyphs.Count == 0) return null;
+
+        return (
+            Build(
+                shaped,
+                fill,
+                at.EmSize,
+                at.Font ?? Reference(at.Face),
+                new DocPoint(lineLeft + segment.GapLeft, baseline - at.Rise),
+                Length.Zero),
+            at.EffectiveColour);
+    }
+
+    /// <summary>
+    /// The formatting run covering a character, or the paragraph's own formatting where none does.
+    /// </summary>
+    /// <remarks>
+    /// Asked for the tab character itself, which sits at the end of the stretch before the one the stop
+    /// placed — so a position before the paragraph's first character, or past its last, falls back rather
+    /// than failing.
+    /// </remarks>
+    private static PageRun RunAt(PageParagraph paragraph, int at)
+    {
+        if (paragraph.HasRuns)
+        {
+            foreach (PageRun run in paragraph.Runs)
+            {
+                if (at >= run.Start && at < run.End) return run;
+            }
+        }
+
+        return new PageRun(
+            Math.Max(at, 0),
+            0,
+            paragraph.Face,
+            paragraph.EmSize,
+            paragraph.Font,
+            paragraph.Colour,
+            paragraph.Shaping);
     }
 
     /// <summary>
@@ -572,7 +953,8 @@ public static class PageDrawing
     /// measurement handed to the ruler is the same one the layout used, so the stops land in the same
     /// places here as they did when the line's width was decided.
     /// </remarks>
-    private static List<TabbedSegment> Stretches(PageParagraph paragraph, int start, int end)
+    private static List<TabbedSegment> Stretches(
+        PageParagraph paragraph, int start, int end, bool isFirstLine)
     {
         if (!TabRuler.HasTab(paragraph.Text, start, end))
         {
@@ -584,7 +966,8 @@ public static class PageDrawing
             start,
             end,
             paragraph.Format,
-            (from, to) => WidthBetween(paragraph, from, to));
+            (from, to) => WidthBetween(paragraph, from, to),
+            isFirstLine);
     }
 
     /// <summary>
@@ -609,7 +992,8 @@ public static class PageDrawing
                         paragraph.EmSize,
                         paragraph.Font,
                         paragraph.Colour,
-                        paragraph.Shaping),
+                        paragraph.Shaping,
+                        Tracking: paragraph.Tracking),
                 ]);
         }
 
@@ -765,7 +1149,7 @@ public static class PageDrawing
         int end = Math.Min(line.Box.Line.End, paragraph.Text.Length);
         int position = Math.Clamp(at, start, end);
 
-        foreach (TabbedSegment segment in Stretches(paragraph, start, end))
+        foreach (TabbedSegment segment in Stretches(paragraph, start, end, line.StartsParagraph))
         {
             if (position > segment.End) continue;
 
@@ -808,6 +1192,11 @@ public static class PageDrawing
         {
             string text = paragraph.Text[run.Start..run.End];
             total += TextShaper.Default.Shape(run.Face, text, run.Shaping).Width(run.EmSize);
+
+            // One tracking unit per character, which is exactly what the prefix table charges across a
+            // range: it puts the gap *before* each character, so a range of n of them carries n. Any other
+            // count here would put a tab stop somewhere the layout did not measure.
+            if (run.Tracking != Length.Zero) total += run.Tracking * run.Length;
         }
 
         return total;
@@ -836,15 +1225,24 @@ public static class PageDrawing
         Length emSize,
         FontReference font,
         DocPoint origin,
-        Length spaceAdd)
+        Length spaceAdd,
+        Length tracking = default)
     {
         List<PositionedGlyph> glyphs = new(shaped.Glyphs.Count);
         List<int> clusters = new(shaped.Glyphs.Count);
 
         Length pen = Length.Zero;
+        int remaining = shaped.Glyphs.Count;
+
         foreach (ShapedGlyph glyph in shaped.Glyphs)
         {
             Length advance = shaped.Scale(glyph.Advance, emSize);
+
+            // Tracking is the gap *between* characters, so the run's last glyph does not carry one —
+            // which is what the reference draws (`SvxFont::QuickGetTextSize` adds one per advance and
+            // then takes the trailing one back off) and what keeps the drawn pen within one tracking
+            // unit of the width the measurement charged.
+            if (tracking != Length.Zero && --remaining > 0) advance += tracking;
 
             // A blank on a justified line is wider than the font says. Tested on the character the
             // cluster names rather than on the glyph id, because a glyph id means nothing without the

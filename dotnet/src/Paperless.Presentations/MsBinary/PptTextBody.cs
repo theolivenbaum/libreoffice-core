@@ -4,6 +4,7 @@ using Paperless.Core.Graphics;
 using Paperless.Core.Numbering;
 using Paperless.Core.Units;
 using Paperless.Presentations.Layout;
+using Paperless.Text.Fonts;
 using Paperless.Text.Layout;
 
 namespace Paperless.Presentations.MsBinary;
@@ -53,6 +54,9 @@ internal static class PptTextBody
     private const uint StatesFontHeight = 0x0002_0000;
     private const uint StatesColour = 0x0004_0000;
 
+    /// <summary>The mask bit for a raised or lowered baseline, <c>PPT_CharAttr_Escapement</c>.</summary>
+    private const uint StatesEscapement = 0x0008_0000;
+
     /// <summary>
     /// Builds a body, or returns null when the run holds nothing to draw.
     /// </summary>
@@ -63,6 +67,10 @@ internal static class PptTextBody
     /// <param name="insets">The shape's text insets.</param>
     /// <param name="anchor">Where the block sits vertically.</param>
     /// <param name="wraps">Whether lines break at the shape's width.</param>
+    /// <param name="autofits">
+    /// Whether the text shrinks until it fits the shape. Decided by the shape rather than by the
+    /// text — see <c>PptSlideLayout.Autofits</c> for what the binary format makes that mean.
+    /// </param>
     public static SlideTextBody? Build(
         PptTextRun run,
         PptStyleSheet? styles,
@@ -70,7 +78,8 @@ internal static class PptTextBody
         PptFontTable fonts,
         Margins insets,
         TextAnchor anchor,
-        bool wraps)
+        bool wraps,
+        bool autofits = false)
     {
         ArgumentNullException.ThrowIfNull(run);
 
@@ -115,6 +124,7 @@ internal static class PptTextBody
             Insets = insets,
             Anchor = anchor,
             Wraps = wraps,
+            AutoFit = autofits,
         };
     }
 
@@ -134,8 +144,14 @@ internal static class PptTextBody
         PptCharacterLevel characters = styles?.Character(run.Kind, depth)
                                        ?? new PptCharacterLevel(0, 0, 0xFFFF, 18, 0x08000001, 0);
 
+        // U+2028, which is what the PPTX and ODF readers already produce for a manual break, so
+        // one layout rule serves all three. A newline breaks the same way — the break set accepts
+        // both — but it is also what a reader may leave on the end of a paragraph's text to mean
+        // the paragraph ends there, and the rule that gives a trailing break its own empty line
+        // has to be able to tell those apart. Reading `\n` here left this deck's bullets a line
+        // short each: `2015-Civil-Rights-Website-training.ppt` ends every paragraph in a `\x0B`.
         string text = run.Text.Substring(start, length).Replace(
-            PptTextReader.LineBreak, '\n');
+            PptTextReader.LineBreak, '\u2028');
 
         List<SlideTextRun> runs = Runs(run, scheme, fonts, characters, start, length, text.Length);
 
@@ -160,7 +176,15 @@ internal static class PptTextBody
             MasterUnits(textOffset),
             MasterUnits(bulletOffset) - MasterUnits(textOffset),
             Language: null,
-            Marker: Marker(properties, level, scheme, fonts, runs));
+            Marker: Marker(properties, level, scheme, fonts, runs))
+        {
+            // The master's own value, which PowerPoint writes as 0x240 — one inch — and which the
+            // record's default already is. Reading it matters for the deck that states something
+            // else, and stating nothing must not fall back to a word processor's half inch.
+            DefaultTabInterval = level.DefaultTab > 0
+                ? MasterUnits(level.DefaultTab)
+                : SlideParagraph.DefaultTabDistance,
+        };
     }
 
     /// <summary>
@@ -193,12 +217,26 @@ internal static class PptTextBody
             ? properties.BulletColour
             : level.BulletColour;
 
-        string text = OutlineNumbers.NormaliseBullet(character.ToString());
+        char symbol = PptTextReader.Symbolised(character, fonts, font);
+        string? face = fonts[font];
+
+        // A face whose slots LibreOffice has a recode table for keeps both its code point and its
+        // own name, because the two only mean anything together: `SlideTextLayout` turns the slot
+        // into the OpenSymbol glyph holding the same picture, and it needs the face to know which
+        // table to use. Anything else keeps the old answer — U+2022, drawn in the paragraph's own
+        // face, since a symbol face's name with a non-symbol code point resolves to nothing.
+        bool recodeable = fonts.IsSymbol(font) && SymbolFontRecode.IsRecodeable(face);
+
+        string text = recodeable
+            ? symbol.ToString()
+            : OutlineNumbers.NormaliseBullet(symbol.ToString());
         if (text.Length == 0) return null;
+
+        string? typeface = recodeable ? face : fonts.IsSymbol(font) ? null : face;
 
         return new SlideMarker(
             text,
-            fonts[font],
+            typeface,
             height is > 0 and <= 400 ? height / 100.0 : 1.0,
             PptColour.ResolveText(colour, scheme));
     }
@@ -220,12 +258,19 @@ internal static class PptTextBody
         int end = start + length;
         int position = 0;
 
+        // The properties in force at the paragraph's first character, kept for the empty-paragraph
+        // case below: an empty paragraph covers no characters, so the loop places nothing from it,
+        // and the run it sits inside is the only thing that says how tall its blank line is.
+        PptCharacterRun atStart = default;
+        bool found = false;
+
         foreach (PptCharacterRun character in run.Characters)
         {
             int runEnd = position + character.Length;
             int from = Math.Max(position, start);
             int to = Math.Min(runEnd, end);
 
+            if (!found && start >= position && start < runEnd) { atStart = character; found = true; }
             if (to > from) runs.Add(Run(character, scheme, fonts, level, from - start, to - from));
 
             position = runEnd;
@@ -241,6 +286,20 @@ internal static class PptTextBody
         if (covered < textLength)
         {
             runs.Add(Run(default, scheme, fonts, level, covered, textLength - covered));
+        }
+
+        // An empty paragraph still gets one run, of no characters, carrying the level's size.
+        //
+        // It is a blank *line*, not nothing: layout drops a paragraph that resolves no face at
+        // all, so without this an empty paragraph contributes no height and everything below it
+        // moves up by a line. PowerPoint decks use them as spacing constantly — the fourth page of
+        // WC_Update-Aug03.ppt separates all eleven of its bullets that way, and LibreOffice's own
+        // flat-ODF export of it writes each as a list header holding one empty paragraph.
+        //
+        // The PPTX reader has always done this; the comment on SlideParagraph.Runs says why.
+        if (runs.Count == 0)
+        {
+            runs.Add(Run(atStart, scheme, fonts, level, 0, 0));
         }
 
         return runs;
@@ -261,6 +320,12 @@ internal static class PptTextBody
         RunEmphasis emphasis = (level.Emphasis & ~character.Stated)
                                | (character.Emphasis & character.Stated);
 
+        // Already a percentage in the file, so it goes straight through; the size that goes with
+        // it does not, and LibreOffice supplies DFLT_ESC_PROP whenever the value is non-zero
+        // (filter/source/msfilter/svdfppt.cxx:5764-5775).
+        short escapement =
+            character.States(StatesEscapement) ? character.Escapement : level.Escapement;
+
         return new SlideTextRun(
             start,
             length,
@@ -268,7 +333,12 @@ internal static class PptTextBody
             Length.FromPoints(height > 0 ? height : level.FontHeight),
             emphasis.HasFlag(RunEmphasis.Bold) ? 700 : 400,
             emphasis.HasFlag(RunEmphasis.Italic),
-            PptColour.ResolveText(colour, scheme) ?? Colour.Black);
+            PptColour.ResolveText(colour, scheme) ?? Colour.Black,
+            IsUnderlined: emphasis.HasFlag(RunEmphasis.Underline),
+            IsStruckThrough: emphasis.HasFlag(RunEmphasis.Strikethrough),
+            Escapement: escapement == 0
+                ? SlideEscapement.None
+                : new SlideEscapement(escapement, SlideEscapement.AutomaticProportion));
     }
 
     /// <summary>

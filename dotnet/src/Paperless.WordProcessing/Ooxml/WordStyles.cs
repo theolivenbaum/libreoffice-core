@@ -149,10 +149,20 @@ public sealed class WordStyle
     public bool IsDefault { get; }
 
     /// <summary>The style's <c>w:pPr</c>, or null.</summary>
-    public XElement? ParagraphProperties { get; }
+    public XElement? ParagraphProperties { get; private set; }
 
     /// <summary>The style's <c>w:rPr</c>, or null.</summary>
     public XElement? RunProperties { get; }
+
+    /// <summary>
+    /// Replaces the style's <c>w:pPr</c> with an equivalent that states one more attribute, for
+    /// <see cref="WordStyles.CompleteOneSidedSpacing"/>.
+    /// </summary>
+    /// <remarks>
+    /// A detached copy rather than an edit in place: the element belongs to the loaded part, and
+    /// several readers walk that tree for their own purposes.
+    /// </remarks>
+    internal void ReplaceParagraphProperties(XElement replacement) => ParagraphProperties = replacement;
 }
 
 /// <summary>
@@ -224,6 +234,8 @@ public sealed class WordStyles
             DefaultParagraphProperties = Word.Child(Word.Child(docDefaults, "pPrDefault"), "pPr");
         }
 
+        List<WordStyle> declared = [];
+
         foreach (XElement element in Word.Children(root, "style"))
         {
             WordStyle style = new(element);
@@ -237,6 +249,84 @@ public sealed class WordStyles
 
             _styles[(style.Type, style.StyleId)] = style;
             if (style.IsDefault) _defaults[style.Type] = style.StyleId;
+            if (style.Type == WordStyleType.Paragraph) declared.Add(style);
+        }
+
+        CompleteOneSidedSpacing(declared);
+    }
+
+    /// <summary>
+    /// Gives a paragraph style that states one of <c>w:spacing/@w:before</c> and
+    /// <c>@w:after</c> a value for the other, when its parent has not been read yet.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// LibreOffice keeps a paragraph's two vertical margins in <em>one</em> item,
+    /// <c>SvxULSpaceItem</c>, while writerfilter sets them through two separate UNO properties.
+    /// Setting one is therefore a read-modify-write of the pair: the importer takes whatever the
+    /// style resolves to at that moment, replaces the half the file states, and writes both back
+    /// as <em>direct</em> values. So the unstated half stops being inherited and freezes at
+    /// whatever the parent chain happened to hold — and styles are applied in the order
+    /// <c>styles.xml</c> declares them, so "at that moment" means <em>before</em> a parent
+    /// declared further down has had its own definition applied. What the parent still holds
+    /// there is Writer's pool default for the built-in style its <c>w:name</c> maps onto.
+    /// </para>
+    /// <para>
+    /// Measured on LibreOffice 24.2.7.2 rather than inferred, with the parent stating
+    /// <c>w:before="480"</c> as a control: a child stating only <c>w:after</c> and based on a
+    /// <c>heading 2</c> declared <em>after</em> it gets 12 pt above and never sees the 480; the
+    /// same file with the parent declared <em>first</em> gets the 480. A custom parent gives
+    /// zero, which is a suppression rather than a no-op for exactly the same reason.
+    /// </para>
+    /// <para>
+    /// This is what puts a 12 pt space above every <c>Heading1</c> of
+    /// <c>final-technical-report-template.docx</c>, whose style states only <c>w:after="240"</c>
+    /// and is based on its own <c>Heading2</c> — five headings' worth of page, and the sixth page
+    /// the reference has and we did not.
+    /// </para>
+    /// </remarks>
+    /// <param name="declared">The paragraph styles of one <c>w:styles</c>, in declaration order.</param>
+    private static void CompleteOneSidedSpacing(List<WordStyle> declared)
+    {
+        Dictionary<string, int> position = new(StringComparer.Ordinal);
+        Dictionary<string, WordStyle> byId = new(StringComparer.Ordinal);
+        for (int i = 0; i < declared.Count; i++)
+        {
+            position.TryAdd(declared[i].StyleId, i);
+            byId.TryAdd(declared[i].StyleId, declared[i]);
+        }
+
+        for (int i = 0; i < declared.Count; i++)
+        {
+            WordStyle style = declared[i];
+            if (style.BasedOn is not { Length: > 0 } parentId) continue;
+            if (Word.Child(style.ParagraphProperties, "spacing") is not { } spacing) continue;
+
+            bool before = Word.Attribute(spacing, "before") is not null
+                          || Word.Attribute(spacing, "beforeAutospacing") is not null;
+            bool after = Word.Attribute(spacing, "after") is not null
+                         || Word.Attribute(spacing, "afterAutospacing") is not null;
+            if (before == after) continue;
+
+            // A parent already read is an ordinary inheritance and needs nothing done to it: the
+            // read-modify-write picks up the same value the layering would.
+            if (position.TryGetValue(parentId, out int parentAt) && parentAt < i) continue;
+
+            // An undeclared parent is a different case again — writerfilter never rewrites the
+            // parent link at all, so the style keeps Writer's own parent for *its* built-in name.
+            // Not handled here; no corpus document takes that path.
+            if (!byId.TryGetValue(parentId, out WordStyle? parent)) continue;
+
+            (int above, int below) = WriterPoolSpacing.For(parent.Name);
+
+            XElement replacementSpacing = new(spacing);
+            replacementSpacing.SetAttributeValue(
+                Word.Name(before ? "after" : "before"),
+                (before ? below : above).ToString(System.Globalization.CultureInfo.InvariantCulture));
+
+            XElement replacement = new(style.ParagraphProperties!);
+            replacement.Element(Word.Name("spacing"))?.ReplaceWith(replacementSpacing);
+            style.ReplaceParagraphProperties(replacement);
         }
     }
 
@@ -294,6 +384,152 @@ public sealed class WordStyles
             current = Find(current.BasedOn, type);
         }
         return WordProperty.Unset;
+    }
+
+    /// <summary>
+    /// Every layer that states one <c>w:pPr</c> child, innermost first: the paragraph's own, then its
+    /// style chain, then the document defaults.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// For the property elements that are <em>bags of attributes</em> rather than single values —
+    /// <c>w:spacing</c> and <c>w:ind</c> — the whole element is not the unit of inheritance. Word, and
+    /// LibreOffice's importer with it, maps each attribute to its own property (<c>w:before</c> to
+    /// <c>PARA_TOP_MARGIN</c>, <c>w:left</c> to <c>PARA_LEFT_MARGIN</c>, and so on), so a paragraph that
+    /// states only <c>w:line</c> still inherits its style's <c>w:before</c>.
+    /// </para>
+    /// <para>
+    /// Taking the innermost element whole instead silently zeroes every attribute that element omits,
+    /// which loses paragraph spacing wherever a paragraph overrides one attribute of its style's
+    /// <c>w:spacing</c> — the ordinary case, and one that shortens every page it appears on.
+    /// </para>
+    /// </remarks>
+    /// <param name="localName">The property element's local name, e.g. <c>spacing</c>.</param>
+    /// <param name="directParagraphProperties">The paragraph's own <c>w:pPr</c>, or null.</param>
+    /// <param name="paragraphStyleId">The paragraph style in force, or null.</param>
+    /// <param name="tableStyle">
+    /// The <c>w:pPr</c> chain of the table style the paragraph sits inside, innermost first, or null for
+    /// a paragraph that is not in a table. §17.7.2's hierarchy puts the table style <em>below</em> the
+    /// paragraph styles and above the document defaults, which is where it goes here.
+    /// </param>
+    public List<XElement> ParagraphPropertyLayers(
+        string localName,
+        XElement? directParagraphProperties,
+        string? paragraphStyleId,
+        IReadOnlyList<XElement>? tableStyle = null)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(localName);
+
+        List<XElement> layers = [];
+
+        if (Word.Child(directParagraphProperties, localName) is { } direct) layers.Add(direct);
+
+        WordStyle? current = Find(paragraphStyleId, WordStyleType.Paragraph);
+        HashSet<string> visited = new(StringComparer.Ordinal);
+
+        for (int depth = 0; current is not null && depth < MaxBasedOnDepth; depth++)
+        {
+            if (Word.Child(current.ParagraphProperties, localName) is { } found) layers.Add(found);
+            if (!visited.Add(current.StyleId)) break;
+            current = Find(current.BasedOn, WordStyleType.Paragraph);
+        }
+
+        if (tableStyle is not null)
+        {
+            foreach (XElement properties in tableStyle)
+            {
+                if (Word.Child(properties, localName) is { } fromTable) layers.Add(fromTable);
+            }
+        }
+
+        if (Word.Child(DefaultParagraphProperties, localName) is { } fallback) layers.Add(fallback);
+
+        return layers;
+    }
+
+    /// <summary>
+    /// Every layer that states one <c>w:rPr</c> child, innermost first: the run's own, then the
+    /// character style chain, then the paragraph style chain, then the document defaults.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The run-property counterpart of <see cref="ParagraphPropertyLayers"/>, and it exists for one
+    /// element: <c>w:rFonts</c>, which names up to four families in four attributes and is inherited
+    /// attribute by attribute rather than whole. A run carrying <c>&lt;w:rFonts w:cs="Arial"/&gt;</c> —
+    /// which Word writes constantly, beside a <c>w:szCs</c>, to set only the complex-script face —
+    /// still takes its Latin family from its style. Taking the innermost element whole instead loses
+    /// that family and falls back to the complex-script one, so ordinary Latin text is laid out in the
+    /// wrong face and every line it sets is the wrong height.
+    /// </para>
+    /// <para>
+    /// The order is <see cref="ResolveRunProperty"/>'s: character style before paragraph style, since
+    /// the character style is the inner of the two. No toggle rule applies — <c>w:rFonts</c> is not a
+    /// toggle, and the elements this is used for never are.
+    /// </para>
+    /// </remarks>
+    /// <param name="localName">The property element's local name, e.g. <c>rFonts</c>.</param>
+    /// <param name="directRunProperties">The run's own <c>w:rPr</c>, or null.</param>
+    /// <param name="paragraphStyleId">The paragraph style in force, or null.</param>
+    /// <param name="characterStyleId">The character style the run names, or null.</param>
+    public List<XElement> RunPropertyLayers(
+        string localName,
+        XElement? directRunProperties,
+        string? paragraphStyleId,
+        string? characterStyleId)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(localName);
+
+        List<XElement> layers = [];
+
+        if (Word.Child(directRunProperties, localName) is { } direct) layers.Add(direct);
+
+        AddChain(characterStyleId, WordStyleType.Character);
+        AddChain(paragraphStyleId, WordStyleType.Paragraph);
+
+        if (Word.Child(DefaultRunProperties, localName) is { } fallback) layers.Add(fallback);
+
+        return layers;
+
+        void AddChain(string? styleId, WordStyleType type)
+        {
+            WordStyle? current = Find(styleId, type);
+            HashSet<string> visited = new(StringComparer.Ordinal);
+
+            for (int depth = 0; current is not null && depth < MaxBasedOnDepth; depth++)
+            {
+                if (Word.Child(current.RunProperties, localName) is { } found) layers.Add(found);
+                if (!visited.Add(current.StyleId)) break;
+                current = Find(current.BasedOn, type);
+            }
+        }
+    }
+
+    /// <summary>
+    /// A table style's <c>w:pPr</c> elements, its own first and then its <c>w:basedOn</c> chain.
+    /// </summary>
+    /// <remarks>
+    /// A table style carries paragraph formatting for the paragraphs in its cells, and the one Word
+    /// writes for nearly every table — <c>Table Grid</c> — sets <c>w:spacing w:after="0"
+    /// w:line="240"</c>. That is what makes table text compact, so ignoring it leaves every cell
+    /// paragraph carrying the document default's space-after and 1.08 line spacing instead, which makes
+    /// each row a few points too tall and a long table pages too long.
+    /// </remarks>
+    /// <param name="tableStyleId">The <c>w:tblStyle</c> the table names, or null.</param>
+    public List<XElement> TableStyleParagraphProperties(string? tableStyleId)
+    {
+        List<XElement> chain = [];
+
+        WordStyle? current = Find(tableStyleId, WordStyleType.Table);
+        HashSet<string> visited = new(StringComparer.Ordinal);
+
+        for (int depth = 0; current is not null && depth < MaxBasedOnDepth; depth++)
+        {
+            if (current.ParagraphProperties is { } properties) chain.Add(properties);
+            if (!visited.Add(current.StyleId)) break;
+            current = Find(current.BasedOn, WordStyleType.Table);
+        }
+
+        return chain;
     }
 
     /// <summary>Resolves a property from <c>w:docDefaults</c> alone.</summary>

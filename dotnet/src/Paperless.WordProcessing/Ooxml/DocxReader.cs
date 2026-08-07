@@ -266,8 +266,10 @@ public sealed class OoxmlWordDocument : IWordProcessingDocument, IPaginatedDocum
             // wins, which is Word's behaviour. Its OOXML exporter writes
             // w:doNotUseHTMLParagraphAutoSpacing exactly when the flag is on (docxexport.cxx), so
             // the element's absence is what makes a DOCX collapse — and a document carrying it
-            // adds, like an ODF one.
-            CollapsesSpacing = !compatibility.DoNotUseHtmlParagraphAutoSpacing,
+            // adds, like an ODF one. A package with no settings part at all is the exception,
+            // because the write that decides this never runs; WordCompatibility.AddsParagraphSpacing
+            // says why, and measures it.
+            CollapsesSpacing = !compatibility.AddsParagraphSpacing,
             JustifiesLinesEndedByBreak = !compatibility.DoNotExpandShiftReturn,
             MaxPages = options?.MaxPages is > 0
                 ? options.MaxPages
@@ -295,11 +297,21 @@ public sealed class OoxmlWordDocument : IWordProcessingDocument, IPaginatedDocum
         List<XElement> properties = [.. DocxContentReader.SectionProperties(body)];
         List<PaginatedSection> sections = new(Sections.Count);
 
+        // Carried across the sections: a slot a section names nothing for keeps whatever the section
+        // before it had. That is §17.10.1's rule — "if no headerReference is specified, the header is
+        // inherited from the previous section" — and it is what "link to previous" writes, so a document
+        // with one running head over several sections states it once. Losing it leaves every section
+        // after the first with no running head, and a page with no header holds more lines than it should.
+        Dictionary<PageFurnitureSlot, IReadOnlyList<PageBlock>> headers = [];
+        Dictionary<PageFurnitureSlot, IReadOnlyList<PageBlock>> footers = [];
+
         for (int i = 0; i < Sections.Count; i++)
         {
             sections.Add(new PaginatedSection(
                 Sections[i],
-                i < properties.Count ? Furniture(source, properties[i]) : null));
+                i < properties.Count
+                    ? Furniture(source, properties[i], headers, footers)
+                    : null));
         }
 
         return sections;
@@ -321,11 +333,19 @@ public sealed class OoxmlWordDocument : IWordProcessingDocument, IPaginatedDocum
     /// three variants; a reference without one is the default.
     /// </para>
     /// </remarks>
-    private PageFurnitureSet? Furniture(DocxLayoutSource source, XElement sectionProperties)
+    /// <param name="source">The walk the header's paragraphs are read through.</param>
+    /// <param name="sectionProperties">The section's <c>w:sectPr</c>.</param>
+    /// <param name="headers">
+    /// The headers in force, by slot, carried across the sections and updated in place: a slot this
+    /// section names replaces what was there, and one it does not name is inherited.
+    /// </param>
+    /// <param name="footers">The footers in force, by the same rule.</param>
+    private PageFurnitureSet? Furniture(
+        DocxLayoutSource source,
+        XElement sectionProperties,
+        Dictionary<PageFurnitureSlot, IReadOnlyList<PageBlock>> headers,
+        Dictionary<PageFurnitureSlot, IReadOnlyList<PageBlock>> footers)
     {
-        Dictionary<PageFurnitureSlot, IReadOnlyList<PageBlock>> headers = [];
-        Dictionary<PageFurnitureSlot, IReadOnlyList<PageBlock>> footers = [];
-
         foreach (XElement reference in sectionProperties.Elements())
         {
             bool isHeader = Word.Is(reference, "headerReference");
@@ -354,9 +374,12 @@ public sealed class OoxmlWordDocument : IWordProcessingDocument, IPaginatedDocum
                 if (source.Pictures is { } restore && scope is not null) restore.Scope = scope;
             }
 
-            if (blocks.Count == 0) continue;
-
-            (isHeader ? headers : footers)[slot] = blocks;
+            // A reference settles the slot even when the part it names is empty: "link to previous" is
+            // the *absence* of a reference, so a section pointing at an empty header is saying it has
+            // none rather than asking for the one above.
+            Dictionary<PageFurnitureSlot, IReadOnlyList<PageBlock>> into = isHeader ? headers : footers;
+            if (blocks.Count == 0) into.Remove(slot);
+            else into[slot] = blocks;
         }
 
         PageFurnitureSet set = new(headers, footers);

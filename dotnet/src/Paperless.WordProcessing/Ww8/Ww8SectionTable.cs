@@ -77,8 +77,97 @@ internal static class Ww8SectionTable
             sections.Add(ReadProperties(PropertiesAt(wordDocument, at)));
         }
 
+        ResolveContinuousBreaks(sections);
         return sections;
     }
+
+    /// <summary>
+    /// Settles what a continuous section break does to the page, which is much less than it says.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A DOC section descriptor always restates the whole page setup, whatever kind of break it opens with,
+    /// so a continuous section carries a full set of margins that Word never applies: a break that does not
+    /// start a fresh sheet cannot re-cut the sheet it lands on. Reading the restated values as the page's is
+    /// what makes a document paginate against a page it never has.
+    /// </para>
+    /// <para>
+    /// LibreOffice draws the line in <c>wwSectionManager::InsertSegments</c>
+    /// (<c>sw/source/filter/ww8/ww8par.cxx</c>:4422). A section that is continuous <em>and</em> agrees with
+    /// the one before it about the sheet — width, height and orientation — becomes a Writer
+    /// <em>text</em> section rather than a page descriptor, and a text section carries only columns and a
+    /// left/right indent (<c>InsertSection</c>, <c>ww8par6.cxx</c>:717). Everything the page descriptor
+    /// holds — the sheet, the head and foot bands, the vertical margins — stays as the last section that
+    /// made one left it, which is what this copies forward.
+    /// </para>
+    /// <para>
+    /// The other half of the same rule is the sentence that comment opens with: <em>"If two following
+    /// sections are different in following properties, Word will interpret a continuous section break
+    /// between them as if it was a section break next page."</em> An incompatible continuous section does
+    /// get its own page descriptor, and giving a node a page descriptor in Writer starts a page — so the
+    /// break is promoted rather than honoured.
+    /// </para>
+    /// <para>
+    /// Measured on <c>foca_form_1.doc</c>, whose second section is continuous, begins inside the opening
+    /// table, and states a top margin of 1135 twips against the first section's 567. Taking it at its word
+    /// started the body an inch down every page and pushed the paragraph after the table onto a sheet of
+    /// its own: four pages against the reference's three.
+    /// </para>
+    /// </remarks>
+    private static void ResolveContinuousBreaks(List<WritingSection> sections)
+    {
+        for (int i = 1; i < sections.Count; i++)
+        {
+            WritingSection section = sections[i];
+            if (section.Break != SectionBreak.Continuous) continue;
+
+            // The section before it as this pass has already settled it, so a run of continuous sections
+            // all inherit from the last one that cut a page rather than from each other's restatements.
+            PageGeometry carried = sections[i - 1].Page;
+
+            if (!SameSheet(section.Page, carried))
+            {
+                sections[i] = section with { Break = SectionBreak.NextPage };
+                continue;
+            }
+
+            sections[i] = section with
+            {
+                Page = section.Page with
+                {
+                    Size = carried.Size,
+                    IsLandscape = carried.IsLandscape,
+                    HasMirroredMargins = carried.HasMirroredMargins,
+                    HeaderDistance = carried.HeaderDistance,
+                    FooterDistance = carried.FooterDistance,
+                    HeaderHeight = carried.HeaderHeight,
+                    FooterHeight = carried.FooterHeight,
+
+                    // The left and right margins are the exception, and they are an exception in
+                    // LibreOffice too: a text section takes them as an indent relative to the page's own,
+                    // which narrows the text area by exactly the difference.
+                    Margins = section.Page.Margins with
+                    {
+                        Top = carried.Margins.Top,
+                        Bottom = carried.Margins.Bottom,
+                    },
+                },
+            };
+        }
+    }
+
+    /// <summary>
+    /// True when two sections would print on the same sheet, which is what decides whether a continuous
+    /// break can be honoured at all.
+    /// </summary>
+    /// <remarks>
+    /// The three properties LibreOffice compares, and only those: a section may change its margins, its
+    /// columns and its running heads across a continuous break, but not its paper.
+    /// </remarks>
+    private static bool SameSheet(PageGeometry section, PageGeometry previous)
+        => section.Size.Width == previous.Size.Width
+            && section.Size.Height == previous.Size.Height
+            && section.IsLandscape == previous.IsLandscape;
 
     /// <summary>
     /// The grpprl a descriptor's offset names, or empty when there is none.
@@ -104,19 +193,29 @@ internal static class Ww8SectionTable
     /// What a <c>sprmSBkc</c> value means.
     /// </summary>
     /// <remarks>
-    /// Word's own <c>bkc</c> numbering, which is not the order the concepts are usually listed in: 0 is a
-    /// column break, 1 is continuous, 2 a new page, 3 even and 4 odd. A column break in a single-column
-    /// section lands where the next column would, which is the same page — so it reads as continuous here,
-    /// and modelling it properly needs columns, which layout does not do yet.
+    /// <para>
+    /// Word's own <c>bkc</c> numbering, from [MS-DOC] 2.9.4: 0 continuous, 1 new column, 2 new page,
+    /// 3 even page, 4 odd page. LibreOffice reads it the same way — <c>wwSection::IsContinuous()</c> in
+    /// <c>sw/source/filter/ww8/ww8par.hxx</c> is <c>maSep.bkc == 0</c>, and <c>InsertSegments()</c> takes
+    /// the column-break branch only for <c>bkc == 1</c>.
+    /// </para>
+    /// <para>
+    /// The two easily swap, and swapping them is expensive rather than cosmetic: a continuous break is by
+    /// far the commonest kind — it is what a document uses to change column count or margins mid-page —
+    /// and reading it as a column break puts a page break in the middle of every one of them, which then
+    /// shifts every page after it.
+    /// </para>
     /// </remarks>
     private static SectionBreak BreakOf(int bkc) => bkc switch
     {
-        // Word's own numbering, and zero is not continuous: it is "start in the next column", which for a
-        // single-column section lands on the same page and so behaves as continuous without being it.
-        0 => SectionBreak.NewColumn,
-        1 => SectionBreak.Continuous,
+        0 => SectionBreak.Continuous,
+        1 => SectionBreak.NewColumn,
         3 => SectionBreak.EvenPage,
         4 => SectionBreak.OddPage,
+
+        // Two means a new page, and so does anything a file states that Word does not define: the
+        // default a section descriptor with no sprmSBkc at all takes is 2 (`ww8scan.cxx`, WW8_SEP's
+        // constructor).
         _ => SectionBreak.NextPage,
     };
 

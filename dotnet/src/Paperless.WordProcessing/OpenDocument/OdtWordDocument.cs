@@ -106,12 +106,20 @@ public sealed class OdtWordDocument : IWordProcessingDocument, IPaginatedDocumen
                 .Where(pair => pair.Name is not null)
                 .ToDictionary(pair => pair.Name!, pair => pair.index, StringComparer.Ordinal),
             stylesRoot: _inner.File.StylesRoot,
-            pictures: new OdfPictures(_inner.File, _laidOut));
+            pictures: new OdfPictures(_inner.File, _laidOut),
+            settings: _inner.File.Settings);
 
         List<PageBlock> blocks = source.Read(body);
 
         PaginationOptions pagination = PaginationOptions.Default with
         {
+            // Adding is the ODF default and what the preset already says, but a document converted from
+            // a Word file carries AddParaTableSpacing=false and collapses instead — see
+            // OdtLayoutSource.AddsParagraphSpacing.
+            CollapsesSpacing = !OdtLayoutSource.AddsParagraphSpacing(_inner.File.Settings),
+            // Keeping it is the ODF default too, and the preset had the opposite — see
+            // OdtLayoutSource.KeepsParagraphSpacingAtPages, which measures what an absent item means.
+            KeepsSpacingAtTopOfPage = OdtLayoutSource.KeepsParagraphSpacingAtPages(_inner.File.Settings),
             MaxPages = options?.MaxPages is > 0 ? options.MaxPages : PaginationOptions.Default.MaxPages,
         };
 

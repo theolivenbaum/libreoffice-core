@@ -27,6 +27,42 @@ namespace Paperless.WordProcessing.OpenDocument;
 /// <em>height</em>, which is not known until the face has been loaded — see
 /// <see cref="Layout.Escapement"/>.
 /// </param>
+/// <param name="CaseMap">
+/// The case the text is drawn in, from <c>fo:text-transform</c> and <c>fo:font-variant</c>.
+/// </param>
+/// <param name="Highlight">
+/// The band <c>fo:background-color</c> draws behind the text, or null when nothing sets one. This is
+/// where a Word highlighter lands after a round trip: LibreOffice exports both its character highlight
+/// and its character shading to the one ODF attribute.
+/// </param>
+/// <param name="IsUnderlined">
+/// True when <c>style:text-underline-style</c> names a style other than <c>none</c>.
+/// </param>
+/// <param name="IsStruckThrough">
+/// True when <c>style:text-line-through-style</c> names a style other than <c>none</c>.
+/// </param>
+/// <param name="AutoKerning">
+/// True when pair kerning applies, which for ODF is <em>unless</em> <c>style:letter-kerning</c> says
+/// <c>false</c> — the opposite way round from the three Microsoft formats.
+/// <para>
+/// ODF is the one of the four that states this as the boolean it really is: <c>xmloff</c> maps the
+/// attribute straight onto <c>CharAutoKerning</c> with <c>XML_TYPE_BOOL</c>
+/// (<c>xmloff/source/text/txtprmap.cxx:193</c>), so there is no threshold to discard. What differs is
+/// what a silent document gets. <c>SwDocShell::InitNew</c> sets the document default to <em>true</em>
+/// — "#i16874# AutoKerning as default for new documents",
+/// <c>sw/source/uibase/app/docshini.cxx:304</c> — and the ODF import leaves it alone, while the three
+/// Microsoft importers each state <c>false</c> for themselves.
+/// </para>
+/// <para>
+/// Measured rather than inferred, because the source alone reads the other way: <c>SwDocShell::Load</c>
+/// calls <c>RemoveAllFormatLanguageDependencies</c>, which resets that same default back to the pool's
+/// <c>false</c> (<c>sw/source/core/doc/poolfmt.cxx:322</c>). Rendering one flat-ODF document three
+/// times through the installed <c>soffice</c> settles it: with no attribute the output is
+/// byte-identical to <c>style:letter-kerning="true"</c> and differs from <c>"false"</c> — every word
+/// on the page 0.6 pt further along. Reading the source and stopping there costs fourteen fidelity
+/// comparisons, all of them <c>.fodt</c>.
+/// </para>
+/// </param>
 public readonly record struct OdfTextStyle(
     string? FamilyName,
     Length Size,
@@ -34,7 +70,12 @@ public readonly record struct OdfTextStyle(
     bool IsItalic,
     string? Language,
     Colour? Colour = null,
-    Layout.Escapement Escapement = default)
+    Layout.Escapement Escapement = default,
+    Layout.PageCaseMap CaseMap = Layout.PageCaseMap.None,
+    Colour? Highlight = null,
+    bool IsUnderlined = false,
+    bool IsStruckThrough = false,
+    bool AutoKerning = true)
 {
     /// <summary>The key a face cache is keyed on: what actually decides which font file is loaded.</summary>
     public (string? Family, int Weight, bool Italic) FaceKey => (FamilyName, Weight, IsItalic);
@@ -97,6 +138,7 @@ internal static class OdfParagraphFormats
             HasContextualSpacing =
                 Paragraph(styles, styleName, OdfNamespaces.Style, "contextual-spacing")
                     .AsBoolean() == true,
+            StyleKey = NamedAncestorOf(styles, styleName),
             LineSpacing = Spacing(styles, styleName),
 
             // "always" against "auto", not a boolean — ODF spells both out, and treating a missing
@@ -112,6 +154,32 @@ internal static class OdfParagraphFormats
             TabStops = Tabs(styles, styleName),
             DefaultTabInterval = TabInterval(styles),
         };
+    }
+
+    /// <summary>
+    /// The named style a paragraph is really set in, which its automatic style hangs off.
+    /// </summary>
+    /// <remarks>
+    /// An automatic style is direct formatting rather than a style — LibreOffice hands the text node its
+    /// <c>style:parent-style-name</c> as the format collection and keeps the automatic style's own
+    /// properties as hard attributes — so it is the parent that decides whether two paragraphs are "of
+    /// the same style" for contextual spacing. Walking rather than taking one step, because a document
+    /// may chain automatic styles; the walk is bounded because a cycle in a malformed file otherwise is
+    /// not.
+    /// </remarks>
+    private static string? NamedAncestorOf(OdfStyles styles, string? styleName)
+    {
+        string? name = styleName;
+
+        for (int step = 0; name is not null && step < 16; step++)
+        {
+            if (styles.FindNamed(name, OdfStyleFamily.Paragraph) is not null) return name;
+            if (styles.Find(name, OdfStyleFamily.Paragraph) is not { } automatic) return null;
+
+            name = automatic.ParentStyleName;
+        }
+
+        return name;
     }
 
     /// <summary>
@@ -161,7 +229,46 @@ internal static class OdfParagraphFormats
                 Cascaded(styles, cascade, OdfNamespaces.FoCompatible, "language").Value,
                 Cascaded(styles, cascade, OdfNamespaces.FoCompatible, "country").Value),
             Cascaded(styles, cascade, OdfNamespaces.FoCompatible, "color").AsColour(),
-            EscapementIn(styles, cascade));
+            EscapementIn(styles, cascade),
+            CaseMapIn(styles, cascade),
+            Cascaded(styles, cascade, OdfNamespaces.FoCompatible, "background-color").AsColour(),
+            // ODF names the *pattern* rather than switching a flag, so "any value but none" is the
+            // reading — the same one `OdfTextFormat` takes of the same two attributes. The width and
+            // colour attributes beside them are not read: nothing below this can draw a rule other than
+            // one text-coloured line, so honouring them would be a promise the model cannot keep.
+            IsLineOn(Cascaded(styles, cascade, OdfNamespaces.Style, "text-underline-style").Value),
+            IsLineOn(Cascaded(styles, cascade, OdfNamespaces.Style, "text-line-through-style").Value),
+            Cascaded(styles, cascade, OdfNamespaces.Style, "letter-kerning").Value is not "false");
+    }
+
+    /// <summary>Whether one of ODF's two line-style attributes asks for a line.</summary>
+    private static bool IsLineOn(string? value) => value is not (null or "none");
+
+    /// <summary>
+    /// The case the cascade draws the text in.
+    /// </summary>
+    /// <remarks>
+    /// ODF splits across two attributes what OOXML and WW8 each state as two toggles of one item.
+    /// <c>fo:text-transform="uppercase"</c> is full capitals and <c>fo:font-variant="small-caps"</c> is
+    /// small ones, and LibreOffice folds both into the single <c>SvxCaseMapItem</c>
+    /// (<c>xmloff/source/style/cdouthdl.cxx</c> and its neighbours), so a document setting both gets one
+    /// answer. <c>lowercase</c> and <c>capitalize</c> are the other two <c>fo:text-transform</c> values and
+    /// are deliberately not mapped: no reader in this tree produces them, so honouring them here would be a
+    /// path only ODF could reach and only ODF could test.
+    /// </remarks>
+    private static Layout.PageCaseMap CaseMapIn(
+        OdfStyles styles, IReadOnlyList<OdfStyleReference> cascade)
+    {
+        if (Cascaded(styles, cascade, OdfNamespaces.FoCompatible, "text-transform").Value
+            is "uppercase")
+        {
+            return Layout.PageCaseMap.Uppercase;
+        }
+
+        return Cascaded(styles, cascade, OdfNamespaces.FoCompatible, "font-variant").Value
+            is "small-caps"
+            ? Layout.PageCaseMap.SmallCaps
+            : Layout.PageCaseMap.None;
     }
 
     /// <summary>
@@ -288,6 +395,31 @@ internal static class OdfParagraphFormats
         return OdfWriterUnits.ToCore(
             Defaulted(styles, cascade, OdfNamespaces.FoCompatible, "font-size").AsLength()
             ?? DefaultSize);
+    }
+
+    /// <summary>
+    /// The absolute size a named character style states, or null when it states none.
+    /// </summary>
+    /// <remarks>
+    /// Distinct from <see cref="ResolveText(OdfStyles, string?)"/>'s size, which always answers — it
+    /// falls back to the family defaults and then to <see cref="DefaultSize"/>, so a style silent about
+    /// size comes back as 12 pt. A caller asking "does this style change the size" needs the silence
+    /// itself, and getting 12 pt instead would resize everything the style is applied to. A percentage
+    /// is not answered either: it is relative to a context this method is not given.
+    /// </remarks>
+    /// <param name="styles">The document's styles.</param>
+    /// <param name="styleName">The character style's name.</param>
+    internal static Length? StatedTextSize(OdfStyles styles, string? styleName)
+    {
+        ArgumentNullException.ThrowIfNull(styles);
+
+        OdfProperty stated = styles.ResolveWithoutDefaults(
+            styleName, OdfStyleFamily.Text, OdfPropertyKind.Text,
+            OdfNamespaces.FoCompatible, "font-size");
+
+        return stated.HasValue && stated.AsLength() is { } absolute
+            ? OdfWriterUnits.ToCore(absolute)
+            : null;
     }
 
     private static OdfProperty Paragraph(

@@ -70,6 +70,12 @@ public static class XlsxReader
             // spreadsheet's drawing path asked for a theme until a chart did.
             DrawingTheme? theme = DrawingTheme.Read(file.ThemeRoot);
 
+            // The same theme part, read for its other half. A text box's runs name their face
+            // indirectly far more often than directly, and the six names that indirection uses
+            // live here rather than in the colour scheme.
+            DrawingFontScheme? themeFonts = DrawingFontScheme.Read(
+                Drawing.Child(Drawing.Child(file.ThemeRoot, "themeElements"), "fontScheme"));
+
             foreach (XlsxSheetEntry entry in file.Sheets)
             {
                 ContentSection section = new()
@@ -93,7 +99,8 @@ public static class XlsxReader
                 // workbook and doing it twice is also a second chance to disagree with itself.
                 XlsxSheetPrintNames print = names.GetValueOrDefault(entry.Index, XlsxSheetPrintNames.None);
                 (SheetPrintSetup setup, SheetGrid grid) = XlsxPrintSetup.Read(
-                    worksheet, print.PrintAreas, print.RepeatColumns, print.RepeatRows);
+                    worksheet, print.PrintAreas, print.RepeatColumns, print.RepeatRows,
+                    cellFormats.DefaultColumnFont);
 
                 (SheetCellFormats formats, SheetRichText rich) =
                     XlsxSheetFormats.Read(worksheet, cellFormats, file);
@@ -106,10 +113,14 @@ public static class XlsxReader
                     Setup = setup,
                     Grid = grid,
                     Cells = table,
+                    StatedMerges = XlsxSheetReader.ReadMerges(worksheet),
+                    HyperlinkRanges = XlsxSheetReader.ReadHyperlinks(worksheet),
                     Formatting = XlsxCellDecoration.Read(file.StyleSheet, file.ThemeRoot, worksheet),
                     Formats = formats,
                     RichText = rich,
-                    Drawings = XlsxDrawings.Read(file.Package, entry.PartName, theme),
+                    Drawings = XlsxDrawings.Read(
+                        file.Package, entry.PartName, theme, themeFonts),
+                    Notes = setup.PrintsNotes ? reader.ReadNotes(entry) : SheetNotes.Empty,
                     FileName = source.FileName ?? string.Empty,
                 });
 

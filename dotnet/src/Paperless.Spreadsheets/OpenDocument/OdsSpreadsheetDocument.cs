@@ -98,6 +98,8 @@ public sealed class OdsSpreadsheetDocument : IPaginatedDocument
                 Setup = setup,
                 Grid = grid,
                 Cells = section?.Children.OfType<ContentTable>().FirstOrDefault(),
+                StatedMerges = OdsMerges.Read(table),
+                HyperlinkRanges = OdsMerges.ReadHyperlinks(table),
                 Formatting = OdsCellDecoration.Read(document.File.Styles, table),
                 Formats = formats,
                 RichText = rich,

@@ -1,6 +1,7 @@
 using Paperless.Core.Diagnostics;
 using Paperless.Core.Extraction;
 using Paperless.Core.Numbers;
+using Paperless.Spreadsheets.Layout;
 using Paperless.Spreadsheets.MsBinary;
 
 namespace Paperless.Spreadsheets.Xlsb;
@@ -46,13 +47,34 @@ internal sealed class XlsbSheetReader(XlsbFile file, List<Diagnostic> diagnostic
     private readonly List<Diagnostic> _diagnostics = diagnostics;
     private bool _reportedTruncation;
 
+    /// <summary>
+    /// The merged ranges the last <see cref="ReadSheet"/> found, for
+    /// <see cref="SheetLayout.StatedMerges"/>.
+    /// </summary>
+    /// <remarks>
+    /// Handed back rather than re-read, because finding them is a full pass over the part's
+    /// records and the caller wants exactly the ones the cells were built from. Sheets are read
+    /// one at a time and the layout is assembled immediately after, so there is one live answer.
+    /// </remarks>
+    public IReadOnlyList<SheetRange> SheetMerges { get; private set; } = [];
+
+    /// <summary>
+    /// The hyperlinked ranges the last <see cref="ReadSheet"/> found, for
+    /// <see cref="SheetLayout.HyperlinkRanges"/>.
+    /// </summary>
+    public IReadOnlyList<SheetRange> SheetHyperlinks { get; private set; } = [];
+
     /// <summary>Reads a worksheet part's cells.</summary>
     /// <param name="part">The part's bytes, or null when it did not load.</param>
     public ContentTable ReadSheet(byte[]? part)
     {
+        SheetMerges = [];
+        SheetHyperlinks = [];
         if (part is null) return new ContentTable();
 
         XlsbMerges merges = XlsbMerges.Read(part);
+        SheetMerges = merges.Ranges;
+        SheetHyperlinks = ReadHyperlinks(part);
 
         List<ContentTableRow> rows = [];
         List<ContentTableCell> cells = [];
@@ -361,6 +383,38 @@ internal sealed class XlsbSheetReader(XlsbFile file, List<Diagnostic> diagnostic
 
         _ => CellShape.NotACell,
     };
+
+    /// <summary>
+    /// The blocks a <c>BrtHLink</c> covers, in a pass of its own.
+    /// </summary>
+    /// <remarks>
+    /// The record is a <c>BinRange</c> followed by the relationship id, the location, the tooltip
+    /// and the display text (<c>WorksheetFragment::importHyperlink</c>,
+    /// <c>sc/source/filter/oox/worksheetfragment.cxx:846-857</c>). Only the first two decide
+    /// whether a URL results, which is what makes the cell a field — see
+    /// <see cref="SheetLayout.HyperlinkRanges"/>.
+    /// </remarks>
+    private static List<SheetRange> ReadHyperlinks(byte[] part)
+    {
+        List<SheetRange> links = [];
+        foreach (Biff12Record record in Biff12Stream.Records(part))
+        {
+            if (record.Id != Biff12.HLink) continue;
+
+            Biff12Cursor cursor = new(record.Data.Span);
+            (int firstRow, int lastRow, int firstColumn, int lastColumn) = cursor.ReadRange();
+            if (lastColumn < firstColumn || lastRow < firstRow) continue;
+            if (firstRow < 0 || firstColumn < 0) continue;
+
+            string relationship = cursor.ReadString();
+            string location = cursor.ReadString();
+            if (relationship.Length == 0 && location.Length == 0) continue;
+
+            links.Add(new SheetRange(firstColumn, firstRow, lastColumn, lastRow));
+        }
+
+        return links;
+    }
 }
 
 /// <summary>
@@ -376,6 +430,10 @@ internal sealed class XlsbMerges
 {
     private readonly Dictionary<(int Row, int Column), (int Columns, int Rows)> _anchors = [];
     private readonly HashSet<(int Row, int Column)> _covered = [];
+    private readonly List<SheetRange> _ranges = [];
+
+    /// <summary>Every merged block, as the sheet states it.</summary>
+    public IReadOnlyList<SheetRange> Ranges => _ranges;
 
     public static XlsbMerges Read(byte[] part)
     {
@@ -397,6 +455,7 @@ internal sealed class XlsbMerges
             if ((long)columns * rows > 1_000_000) continue;
 
             map._anchors[(firstRow, firstColumn)] = (columns, rows);
+            map._ranges.Add(new SheetRange(firstColumn, firstRow, lastColumn, lastRow));
             for (int row = firstRow; row <= lastRow; row++)
             {
                 for (int column = firstColumn; column <= lastColumn; column++)

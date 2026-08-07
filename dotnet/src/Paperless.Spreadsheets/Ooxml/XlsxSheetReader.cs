@@ -3,6 +3,7 @@ using System.Xml.Linq;
 using Paperless.Core.Diagnostics;
 using Paperless.Core.Extraction;
 using Paperless.Core.Numbers;
+using Paperless.Spreadsheets.Layout;
 
 namespace Paperless.Spreadsheets.Ooxml;
 
@@ -95,6 +96,56 @@ internal sealed class XlsxSheetReader(XlsxFile file, List<Diagnostic> diagnostic
     }
 
     /// <summary>
+    /// The merged blocks a worksheet part states.
+    /// </summary>
+    /// <remarks>
+    /// Read separately from the cells because layout needs the merges the cells cannot carry: an
+    /// empty merged block's anchor is an empty cell, and an empty cell past the last filled one in
+    /// its row is padding the content tree drops. It costs one walk of <c>mergeCells</c>, which is
+    /// a single small element, against re-deriving something the file already states outright.
+    /// </remarks>
+    /// <param name="worksheet">The worksheet part's root element, or null when it did not load.</param>
+    public static IReadOnlyList<SheetRange> ReadMerges(XElement? worksheet)
+        => worksheet is null ? [] : MergeMap.Read(worksheet).Ranges;
+
+    /// <summary>
+    /// The blocks a worksheet part's <c>hyperlinks</c> element covers.
+    /// </summary>
+    /// <remarks>
+    /// A link with neither a relationship nor a location resolves to an empty URL and is skipped
+    /// before it reaches a cell — <c>getHyperlinkUrl</c> builds the string from exactly those two
+    /// and <c>finalizeHyperlinkRanges</c> tests it for emptiness
+    /// (<c>sc/source/filter/oox/worksheethelper.cxx:1011-1032</c>). What the URL <em>is</em> does
+    /// not matter here; that a cell holds one does, because it turns the cell into a field.
+    /// </remarks>
+    /// <param name="worksheet">The worksheet part's root element, or null when it did not load.</param>
+    public static IReadOnlyList<SheetRange> ReadHyperlinks(XElement? worksheet)
+    {
+        if (worksheet is null) return [];
+
+        List<SheetRange> links = [];
+        foreach (XElement link in Xlsx.Children(Xlsx.Child(worksheet, "hyperlinks"), "hyperlink"))
+        {
+            bool stated =
+                Xlsx.Attribute(link, "location") is { Length: > 0 }
+                || link.Attributes().Any(
+                    a => a.Name.LocalName == "id" && a.Value.Length > 0);
+            if (!stated) continue;
+
+            if (!Xlsx.TryParseRange(Xlsx.Attribute(link, "ref"),
+                                    out int firstColumn, out int firstRow,
+                                    out int lastColumn, out int lastRow))
+                continue;
+
+            if (lastColumn < firstColumn || lastRow < firstRow) continue;
+
+            links.Add(new SheetRange(firstColumn, firstRow, lastColumn, lastRow));
+        }
+
+        return links;
+    }
+
+    /// <summary>
     /// Reads the sheet's cell comments, each as its own section.
     /// </summary>
     /// <remarks>
@@ -127,6 +178,37 @@ internal sealed class XlsxSheetReader(XlsxFile file, List<Diagnostic> diagnostic
             AddText(section, text);
             yield return section;
         }
+    }
+
+    /// <summary>
+    /// Reads a sheet's comments for the pages they may be listed on.
+    /// </summary>
+    /// <remarks>
+    /// The same part <see cref="ReadComments"/> reads, and read again rather than shared, because
+    /// the two want different things: extraction wants the author and the text as a section, and
+    /// layout wants the cell and the text as one string. Splicing the address into the extraction
+    /// path to serve both would change what a caller indexing a workbook sees.
+    /// </remarks>
+    /// <param name="sheet">The sheet.</param>
+    public SheetNotes ReadNotes(XlsxSheetEntry sheet)
+    {
+        XElement? root = _file.LoadComments(sheet);
+        if (root is null) return SheetNotes.Empty;
+
+        List<SheetNote> notes = [];
+        foreach (XElement comment in Xlsx.Children(Xlsx.Child(root, "commentList"), "comment"))
+        {
+            string text = XlsxSharedStrings.ReadRichString(Xlsx.Child(comment, "text"));
+            if (text.Length == 0) continue;
+
+            if (!SheetAddress.TryParseCell(Xlsx.Attribute(comment, "ref"), out int column, out int row))
+                continue;
+            if (column < 0 || row < 0) continue;
+
+            notes.Add(new SheetNote(column, row, text));
+        }
+
+        return notes.Count == 0 ? SheetNotes.Empty : new SheetNotes { Items = notes };
     }
 
     private void FlushEmptyRows(List<ContentTableRow> rows, int beforeRow, ref int pending)
@@ -467,6 +549,10 @@ internal sealed class XlsxSheetReader(XlsxFile file, List<Diagnostic> diagnostic
     {
         private readonly Dictionary<(int Row, int Column), (int Columns, int Rows)> _anchors = [];
         private readonly HashSet<(int Row, int Column)> _covered = [];
+        private readonly List<SheetRange> _ranges = [];
+
+        /// <summary>Every merged block, as the sheet states it.</summary>
+        public IReadOnlyList<SheetRange> Ranges => _ranges;
 
         public static MergeMap Read(XElement worksheet)
         {
@@ -488,6 +574,7 @@ internal sealed class XlsxSheetReader(XlsxFile file, List<Diagnostic> diagnostic
                 if ((long)columns * rows > 1_000_000) continue;
 
                 map._anchors[(firstRow, firstColumn)] = (columns, rows);
+                map._ranges.Add(new SheetRange(firstColumn, firstRow, lastColumn, lastRow));
                 for (int row = firstRow; row <= lastRow; row++)
                 {
                     for (int column = firstColumn; column <= lastColumn; column++)

@@ -50,10 +50,32 @@ public static class BiffRecords
     /// </summary>
     public const ushort Palette = 0x0092;
 
+    // The drawing layer. MSODRAWINGGROUP is workbook-level and holds the picture store; the
+    // other three arrive inside a sheet or chart substream, one Escher fragment per record.
+    public const ushort MsoDrawingGroup = 0x00EB;
+    public const ushort MsoDrawing = 0x00EC;
+    public const ushort MsoDrawingSelection = 0x00ED;
+    public const ushort Obj = 0x005D;
+    public const ushort Txo = 0x01B6;
+
+    /// <summary>
+    /// A <c>NOTE</c> record: which cell a comment hangs off, and which object holds its text.
+    /// </summary>
+    /// <remarks>
+    /// The text is not here. From BIFF8 the record carries the cell, a flags word, the object's
+    /// identifier and the author's name, and the comment itself is the <c>TXO</c> of the object
+    /// with that identifier (<c>XclImpNote::XclImpNote</c>,
+    /// <c>sc/source/filter/excel/xicontent.cxx</c>).
+    /// </remarks>
+    public const ushort Note = 0x001C;
+
     // Sheet structure.
     public const ushort Dimensions2 = 0x0000;
     public const ushort Dimensions = 0x0200;
     public const ushort MergedCells = 0x00E5;
+
+    /// <summary>A hyperlink over a range of cells, BIFF8 only.</summary>
+    public const ushort HLink = 0x01B8;
     public const ushort Window2 = 0x023E;
 
     // Cells.

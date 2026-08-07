@@ -29,6 +29,12 @@ namespace Paperless.Spreadsheets.Ooxml;
 /// twips, which is 20.76 × 111 rounded — 111 twips being the advance of a digit of
 /// 10-point Liberation Sans.
 /// </para>
+/// <para>
+/// That multiplication does not happen here. Measuring the face is layout's job and reading is
+/// the extraction path, so what this reader produces is the digits and the font's <em>name</em>,
+/// both free, and <see cref="SheetLayout.Grid"/> converts them. See
+/// <see cref="SheetColumnDigits"/>.
+/// </para>
 /// </remarks>
 internal static class XlsxPrintSetup
 {
@@ -47,16 +53,15 @@ internal static class XlsxPrintSetup
     private const double DefaultBandMarginInches = 0.512;
 
     /// <summary>
-    /// The advance of the widest digit in the default font, in twips.
+    /// Half a twip, which turns <see cref="SheetDigitWidth"/>'s truncation into rounding.
     /// </summary>
     /// <remarks>
-    /// 10-point Liberation Sans, which is what LibreOffice puts in a new spreadsheet and
-    /// therefore what its rendering of a workbook naming no font measures in. A workbook whose
-    /// default font is something else has proportionally wrong column widths, which is a real
-    /// limitation and is recorded in the module's TODO: resolving it properly means reading
-    /// <c>styles.xml</c>'s font table and measuring the face, which the reader does not do yet.
+    /// SpreadsheetML's conversion is a plain multiplication by the digit width and LibreOffice
+    /// rounds it (<c>std::round</c>, <c>WorksheetGlobals::convertColumns</c>,
+    /// <c>sc/source/filter/oox/worksheethelper.cxx:1211</c>), where BIFF's subtracts half a twip
+    /// and truncates. One truncation serves both once this is carried as the bias.
     /// </remarks>
-    private const double DigitWidthTwips = 111;
+    private const double RoundingBiasTwips = 0.5;
 
     /// <summary>
     /// The padding <c>baseColWidth</c> carries that <c>defaultColWidth</c> does not.
@@ -67,7 +72,8 @@ internal static class XlsxPrintSetup
     /// (<c>sc/source/filter/oox/worksheethelper.cxx:745-752</c>). It is added in
     /// <em>digits</em> there — <c>scaleValue(5, Unit::ScreenX, Unit::Digit)</c> — and multiplied
     /// back by the digit width afterwards, so in twips it is just the five pixels: a screen pixel
-    /// is a ninety-sixth of an inch and therefore fifteen twips exactly.
+    /// is a ninety-sixth of an inch and therefore fifteen twips exactly. It does not scale with
+    /// the font, which is why it is a bias rather than a count of digits.
     /// </remarks>
     private const double BasePaddingTwips = 75;
 
@@ -80,11 +86,16 @@ internal static class XlsxPrintSetup
     /// <param name="printAreas">The print areas the workbook's defined names gave this sheet.</param>
     /// <param name="repeatColumns">The repeated columns, from <c>_xlnm.Print_Titles</c>.</param>
     /// <param name="repeatRows">The repeated rows, from the same name.</param>
+    /// <param name="defaultFont">
+    /// The workbook's default font, which a column width is stated in digits of. Null falls back
+    /// to Calc's own — see <see cref="SheetColumnDigits"/>.
+    /// </param>
     public static (SheetPrintSetup Setup, SheetGrid Grid) Read(
         XElement? worksheet,
         IReadOnlyList<SheetRange> printAreas,
         SheetRange? repeatColumns,
-        SheetRange? repeatRows)
+        SheetRange? repeatRows,
+        SheetDefaultFont? defaultFont = null)
     {
         if (worksheet is null)
             return (SheetPrintSetup.Default with { PrintAreas = printAreas }, SheetGrid.Standard);
@@ -153,6 +164,20 @@ internal static class XlsxPrintSetup
             RepeatRows = repeatRows,
             PrintsGrid = Xlsx.Flag(options, "gridLines"),
             PrintsHeadings = Xlsx.Flag(options, "headings"),
+
+            // `asDisplayed`, not `atEnd`, and that is not a slip. Calc has one mode — the notes
+            // are listed after the sheet — so its OOXML filter has to pick which of the two
+            // SpreadsheetML values turns it on, and it picks the other one:
+            // `PROP_PrintAnnotations` is set from `mnCellComments == XML_asDisplayed`
+            // (`sc/source/filter/oox/pagesettings.cxx:968`), where the BIFF filter sets the same
+            // property from `EXC_SETUP_PRINTNOTES` and the BIFF12 path maps *both* non-`none`
+            // values onto it (`:270`). Reading `atEnd` here instead would print pages the
+            // reference does not. Neither value appears in the corpus, so this follows the
+            // binary rather than a measurement.
+            PrintsNotes = string.Equals(
+                Xlsx.Attribute(setupElement, "cellComments"),
+                "asDisplayed",
+                StringComparison.Ordinal),
             CentresHorizontally = Xlsx.Flag(options, "horizontalCentered"),
             CentresVertically = Xlsx.Flag(options, "verticalCentered"),
 
@@ -165,7 +190,7 @@ internal static class XlsxPrintSetup
             ManualRowBreaks = Breaks(Xlsx.Child(worksheet, "rowBreaks")),
         };
 
-        return (setup, ReadGrid(worksheet));
+        return (setup, ReadGrid(worksheet, defaultFont));
     }
 
     /// <summary>
@@ -255,7 +280,7 @@ internal static class XlsxPrintSetup
     /// for a row that holds something, and the rest take <c>defaultRowHeight</c>. So neither
     /// axis needs expanding and the empty remainder of the sheet costs nothing.
     /// </remarks>
-    private static SheetGrid ReadGrid(XElement worksheet)
+    private static SheetGrid ReadGrid(XElement worksheet, SheetDefaultFont? defaultFont)
     {
         XElement? format = Xlsx.Child(worksheet, "sheetFormatPr");
 
@@ -267,12 +292,12 @@ internal static class XlsxPrintSetup
         // anything round-tripped through it and decides the page count of anything Excel wrote:
         // `chart2/qa/extras/data/xlsx/bubble_chart_simple.xlsx` fits ten columns to a Letter page
         // at 963 and seven at 1280, which is two pages against three.
-        Length defaultWidth = Digits(Xlsx.Attribute(format, "defaultColWidth"))
-                              ?? BaseWidth(Xlsx.Integer(format, "baseColWidth"));
-        Length defaultHeight = Points(Xlsx.Attribute(format, "defaultRowHeight"))
-                               ?? SheetGrid.StandardRowHeight;
+        SheetDigitWidth defaultWidth = Digits(Xlsx.Attribute(format, "defaultColWidth"))
+                                       ?? BaseWidth(Xlsx.Integer(format, "baseColWidth"));
+        Length? statedHeight = Points(Xlsx.Attribute(format, "defaultRowHeight"));
+        Length defaultHeight = statedHeight ?? SheetGrid.StandardRowHeight;
 
-        List<SheetSizeRun> columns = [];
+        List<SheetDigitRun> columns = [];
         foreach (XElement column in Xlsx.Children(Xlsx.Child(worksheet, "cols"), "col"))
         {
             int min = Xlsx.Integer(column, "min") ?? 1;
@@ -281,8 +306,8 @@ internal static class XlsxPrintSetup
 
             // A column that states no width takes the sheet default; one that is only hidden
             // still needs a run, so that the hidden flag survives.
-            Length width = Digits(Xlsx.Attribute(column, "width")) ?? defaultWidth;
-            columns.Add(new SheetSizeRun(min - 1, max - 1, width, Xlsx.Flag(column, "hidden")));
+            SheetDigitWidth width = Digits(Xlsx.Attribute(column, "width")) ?? defaultWidth;
+            columns.Add(new SheetDigitRun(min - 1, max - 1, width, Xlsx.Flag(column, "hidden")));
         }
 
         List<SheetSizeRun> rows = [];
@@ -303,8 +328,24 @@ internal static class XlsxPrintSetup
                 !Xlsx.Flag(row, "customHeight")));
         }
 
+        SheetColumnDigits digits = new(defaultFont ?? SheetDefaultFont.Calc, defaultWidth, columns);
+
+        // Materialised at the fallback so that the grid is complete the moment it is built, and
+        // remeasured by `SheetLayout.Grid` once a face can be resolved.
         return new SheetGrid(
-            new SheetAxis(defaultWidth, columns), new SheetAxis(defaultHeight, rows));
+            digits.Resolve(SheetColumnDigits.FallbackDigitWidthTwips),
+            new SheetAxis(defaultHeight, rows))
+        {
+            ColumnDigits = digits,
+
+            // Only the OOXML filter tells the sheet what its recomputed rows may not go below,
+            // and it tells it the sheet's own default row height —
+            // `pTable->SetOptimalMinRowHeight(maDefRowModel.mfHeight * 20)`,
+            // `sc/source/filter/oox/worksheethelper.cxx:965`. A sheet stating none leaves
+            // `mfHeight` at 0, which `ScTable::GetOptimalMinRowHeight` reads as "not set" and
+            // answers with Calc's own 256 twips.
+            OptimalMinimumRowHeight = statedHeight ?? SheetGrid.StandardRowHeight,
+        };
     }
 
     /// <summary>A <c>rowBreaks</c> or <c>colBreaks</c> element's manual breaks.</summary>
@@ -327,19 +368,19 @@ internal static class XlsxPrintSetup
     }
 
     /// <summary>A column width stated in digits of the default font.</summary>
-    private static Length? Digits(string? value)
+    private static SheetDigitWidth? Digits(string? value)
     {
         double? digits = Xlsx.Double(value);
         return digits is { } count && count > 0
-            ? Length.FromTwips((long)Math.Round(count * DigitWidthTwips))
+            ? new SheetDigitWidth(count, RoundingBiasTwips)
             : null;
     }
 
     /// <summary>A column width stated as a <c>baseColWidth</c>, which carries padding.</summary>
-    private static Length BaseWidth(int? baseColumnWidth)
+    private static SheetDigitWidth BaseWidth(int? baseColumnWidth)
     {
         int digits = baseColumnWidth is { } stated && stated > 0 ? stated : DefaultBaseColumnWidth;
-        return Length.FromTwips((long)Math.Round((digits * DigitWidthTwips) + BasePaddingTwips));
+        return new SheetDigitWidth(digits, BasePaddingTwips + RoundingBiasTwips);
     }
 
     private static Length? Points(string? value)

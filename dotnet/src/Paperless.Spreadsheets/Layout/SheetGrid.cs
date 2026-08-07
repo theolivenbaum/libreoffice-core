@@ -62,6 +62,30 @@ public sealed class SheetAxis
         _runs = Normalise(runs);
     }
 
+    // Reversed parameters so that this can never be reached by overload resolution from the
+    // public constructor's call shape, which normalises and must stay the only way in from
+    // outside.
+    private SheetAxis(List<SheetSizeRun> runs, Length defaultSize)
+    {
+        DefaultSize = defaultSize;
+        _runs = runs;
+    }
+
+    /// <summary>
+    /// An axis from runs already known to be sorted, non-overlapping and neighbour-merged.
+    /// </summary>
+    /// <remarks>
+    /// The public constructor normalises, and normalising is quadratic in the number of runs
+    /// because a later run may cut a hole in any earlier one. A sheet that states a height for
+    /// every one of its rows already has thousands of runs, so a caller that rebuilds the axis
+    /// row by row — recomputing hinted heights is the one that does — must not pay that again for
+    /// a list it has just built in order.
+    /// </remarks>
+    /// <param name="defaultSize">The size of anything no run covers.</param>
+    /// <param name="runs">The runs, in index order, taken as given.</param>
+    internal static SheetAxis FromOrdered(Length defaultSize, List<SheetSizeRun> runs)
+        => new(runs, defaultSize);
+
     /// <summary>The size of a column or row no run covers.</summary>
     public Length DefaultSize { get; }
 
@@ -268,6 +292,75 @@ public sealed class SheetAxis
 /// <param name="Rows">The row heights.</param>
 public sealed record SheetGrid(SheetAxis Columns, SheetAxis Rows)
 {
+    /// <summary>
+    /// The column widths as the file still states them, when it states them in digits.
+    /// </summary>
+    /// <remarks>
+    /// Null for ODF, which states a real length on every <c>table:table-column</c> and needs no
+    /// font to become a measurement, and set by the three Excel readers, which do. See
+    /// <see cref="SheetColumnDigits"/> for why the resolution is deferred rather than done while
+    /// reading, and <see cref="WithDigitWidth"/> for where it lands.
+    /// </remarks>
+    public SheetColumnDigits? ColumnDigits { get; init; }
+
+    /// <summary>
+    /// The floor a recomputed row height is held to.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Calc keeps this per sheet — <c>ScTable::GetOptimalMinRowHeight</c>
+    /// (<c>sc/inc/table.hxx:882-887</c>) — and falls back to <c>ScGlobal::nStdRowHeight</c>, which
+    /// is 256 twips, when nothing set it. **Only the OOXML filter sets it**, from the sheet's own
+    /// <c>defaultRowHeight</c>: <c>pTable-&gt;SetOptimalMinRowHeight(maDefRowModel.mfHeight * 20)</c>
+    /// (<c>sc/source/filter/oox/worksheethelper.cxx:965</c>). The BIFF and ODF filters do not, so
+    /// a sheet from either is floored at 256 whatever its file says its default row is — which is
+    /// why this is a property of its own rather than <see cref="SheetAxis.DefaultSize"/>, whose
+    /// value the two happen to share for SpreadsheetML and do not for the other two.
+    /// </para>
+    /// <para>
+    /// Excel's own default row height is exactly the height its default font asks for, so on a
+    /// SpreadsheetML sheet the floor usually binds on nothing; it is what stops a sheet whose rows
+    /// state a large <c>defaultRowHeight</c> from collapsing to a small font's measure.
+    /// </para>
+    /// </remarks>
+    public Length OptimalMinimumRowHeight { get; init; } = StandardRowHeight;
+
+    /// <summary>
+    /// True when every row of the sheet is a user's choice, whatever its own flag says.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Only BIFF states this, and it states it in a place that is easy to read as being about
+    /// something else. <c>DEFAULTROWHEIGHT</c> carries its own <c>fUnsynced</c> —
+    /// <c>EXC_DEFROW_UNSYNCED</c>, <c>sc/source/filter/inc/xltable.hxx:114</c> — and
+    /// <c>XclImpColRowSettings::Convert</c> answers it by marking <em>every row of the sheet</em>
+    /// manual before it reads a single <c>ROW</c> record, with the comment "first access to row
+    /// flags, do not ask for old flags" (<c>sc/source/filter/excel/colrowst.cxx:212-215</c>).
+    /// Nothing later clears the bit — the per-row loop only ever sets it — so the sheet has no row
+    /// Calc will re-measure, however its <c>ROW</c> records are flagged.
+    /// </para>
+    /// <para>
+    /// Measured: recomputing without this cost eight <c>.xls</c> documents their page count across
+    /// the sheets track and gained none, which is what led to the record being re-read. BIFF2's
+    /// two-byte <c>DEFAULTROWHEIGHT</c> has no flags field and Calc passes the bit unconditionally
+    /// (<c>ImportExcel::Defrowheight2</c>, <c>impop.cxx:598-604</c>).
+    /// </para>
+    /// </remarks>
+    public bool RowHeightsAreManual { get; init; }
+
+    /// <summary>
+    /// The same grid with its columns measured in a font whose digit is worth so many twips.
+    /// </summary>
+    /// <remarks>
+    /// A no-op when the widths were already lengths, so a caller need not ask which format the
+    /// sheet came from.
+    /// </remarks>
+    /// <param name="digitWidthTwips">The advance of the default font's widest digit.</param>
+    public SheetGrid WithDigitWidth(double digitWidthTwips)
+        => ColumnDigits is { } digits
+            ? this with { Columns = digits.Resolve(digitWidthTwips) }
+            : this;
+
     /// <summary>Calc's own standard column width: 64 points.</summary>
     /// <remarks><c>STD_COL_WIDTH</c>, <c>sc/inc/global.hxx:107</c>.</remarks>
     public static Length StandardColumnWidth { get; } = Length.FromTwips(1280);

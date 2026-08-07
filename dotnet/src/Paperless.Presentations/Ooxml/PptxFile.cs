@@ -52,8 +52,18 @@ internal sealed class PptxFile : IDisposable
 
         SlideSize = ReadSlideSize(Ppt.Child(presentation, "sldSz"));
         DefaultTextStyle = Ppt.Child(presentation, "defaultTextStyle");
+        IsOffice2007 = OoxmlMetadata.IsOffice2007(package);
         Slides = [.. ReadSlideList()];
     }
+
+    /// <summary>
+    /// Whether Office 2007 wrote the deck, which inverts several unstated chart defaults.
+    /// </summary>
+    /// <remarks>
+    /// See <see cref="OoxmlMetadata.IsOffice2007(OpcPackage)"/>. Read once at open: it costs a
+    /// part load, and the chart reader asks for it on every graphic frame.
+    /// </remarks>
+    public bool IsOffice2007 { get; }
 
     /// <summary>The presentation part's name, for diagnostics and relationship resolution.</summary>
     public string MainPartName { get; }
@@ -77,6 +87,16 @@ internal sealed class PptxFile : IDisposable
 
     /// <summary>The deck's slides, in presentation order.</summary>
     public IReadOnlyList<PptxSlide> Slides { get; }
+
+    /// <summary>
+    /// The <c>a:tblStyleLst</c> of the deck's <c>tableStyles.xml</c>, or null when it has none.
+    /// </summary>
+    /// <remarks>
+    /// One part for the whole deck, hung off the presentation rather than off a slide — a table
+    /// on slide seven and one on slide nine name the same style by GUID. Loaded through the
+    /// part cache, so asking once per table costs a dictionary lookup.
+    /// </remarks>
+    public XElement? TableStyles => Load(TargetOfType(MainPartName, "tableStyles"));
 
     /// <summary>
     /// The deck's comment authors, by the id a comment refers to them with.
@@ -276,7 +296,7 @@ internal sealed class PptxFile : IDisposable
             notesPart,
             Load(notesPart))
         {
-            Theme = ThemeOf(masterPart, master),
+            Theme = ThemeOf(masterPart, master, layout),
         };
     }
 
@@ -295,19 +315,31 @@ internal sealed class PptxFile : IDisposable
     /// The master's <c>p:clrMap</c> is applied here rather than left to the caller, because a
     /// theme without its map answers the wrong question: the map is what makes <c>bg1</c>
     /// something other than the theme's first light colour, and a dark master is precisely the
-    /// case where the difference shows. A layout or slide may override it with
-    /// <c>p:clrMapOvr/a:overrideClrMapping</c>; nothing measured carries one, so that is left
-    /// unread rather than guessed at.
+    /// case where the difference shows. A layout or a slide amends it with
+    /// <c>p:clrMapOvr/a:overrideClrMapping</c>, which patches the inherited map rather than
+    /// replacing it — 9 corpus decks carry one on a layout across 20 layouts, and 7 of those
+    /// change something. A slide may carry one too; see <c>PptxSlideLayout.ThemeFor</c> for
+    /// why that level is deliberately not applied.
     /// </para>
     /// </remarks>
-    private DrawingTheme? ThemeOf(string? masterPartName, XElement? master)
+    private DrawingTheme? ThemeOf(
+        string? masterPartName, XElement? master, XElement? layout)
     {
         if (masterPartName is null) return null;
 
         return DrawingTheme
             .Read(Load(TargetOfType(masterPartName, "theme")))
-            ?.WithMap(DrawingColourMap.Read(Ppt.Child(master, "clrMap")));
+            ?.WithMap(DrawingColourMap.ReadLayered(
+                Ppt.Child(master, "clrMap"),
+                ColourMapOverride(layout)));
     }
+
+    /// <summary>
+    /// A layout's <c>p:clrMapOvr/a:overrideClrMapping</c>, or null when it states none or
+    /// inherits with <c>a:masterClrMapping</c>.
+    /// </summary>
+    private static XElement? ColourMapOverride(XElement? root)
+        => Drawing.Child(Ppt.Child(root, "clrMapOvr"), "overrideClrMapping");
 }
 
 /// <summary>

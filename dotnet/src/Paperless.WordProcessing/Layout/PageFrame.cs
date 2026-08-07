@@ -158,6 +158,29 @@ public sealed record PageFrame
     /// <summary>How big the frame is.</summary>
     public required DocSize Size { get; init; }
 
+    /// <summary>
+    /// The whole shape group this frame is one member of, or null for a frame that stands alone.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A group is one anchored object holding many shapes, and the members are placed <em>relative to
+    /// it</em>: the anchor's position and alignment decide where the group's rectangle goes, and each
+    /// member sits at a fixed offset inside that rectangle. Carrying the group's size here is what lets a
+    /// centred or right-aligned group still be resolved once and its members follow — aligning each
+    /// member by its own width would spread a letterhead across the page.
+    /// </para>
+    /// <para>
+    /// The members are flattened into siblings rather than nested, because that is what the layout engine
+    /// can place: <see cref="FrameLayout"/> resolves one rectangle per frame and a group's member is a
+    /// rectangle like any other. What the flattening must not do is punch a hole in the text per member,
+    /// so a member takes <see cref="TextWrap.Through"/> and the group's own envelope keeps the wrap.
+    /// </para>
+    /// </remarks>
+    public DocSize? GroupSize { get; init; }
+
+    /// <summary>Where this frame sits inside <see cref="GroupSize"/>, from the group's top-left.</summary>
+    public DocPoint GroupOffset { get; init; }
+
     /// <summary>What the frame is fixed to.</summary>
     public FrameAnchor Anchor { get; init; } = FrameAnchor.Paragraph;
 
@@ -234,6 +257,36 @@ public sealed record PageFrame
 
     /// <summary>How thick that border is.</summary>
     public Length BorderWidth { get; init; }
+
+    /// <summary>
+    /// True when the frame is a straight line across its own rectangle rather than a box.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The one preset shape whose outline is not the rectangle it is anchored by, and the commonest
+    /// drawing in a form: a rule, a strike across a block, the cross over an unused half of a
+    /// certificate. It has no area, so it has neither a fill nor a rectangular border — it is stroked
+    /// corner to corner in <see cref="BorderColour"/> at <see cref="BorderWidth"/>.
+    /// </para>
+    /// <para>
+    /// A flag rather than a shape-geometry model, because that is the shape of the answer here: every
+    /// other preset really is drawn inside its rectangle, and the general evaluator that would draw the
+    /// rest of them is a separate piece of work. Drawing this one as a box is not a small error —
+    /// its fill defaults to opaque white, so it hides the text it was drawn over.
+    /// </para>
+    /// </remarks>
+    public bool IsLine { get; init; }
+
+    /// <summary>
+    /// True when a line frame runs from its bottom-left corner to its top-right rather than from its
+    /// top-left to its bottom-right.
+    /// </summary>
+    /// <remarks>
+    /// Mirroring once turns one diagonal into the other and mirroring twice turns it back, so this is
+    /// the <em>exclusive or</em> of the shape's two flip flags rather than either of them. A cross is
+    /// two of these shapes over one rectangle, distinguished by nothing else.
+    /// </remarks>
+    public bool IsLineMirrored { get; init; }
 
     /// <summary>True when the frame holds a picture rather than text.</summary>
     /// <remarks>

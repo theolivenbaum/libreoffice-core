@@ -60,6 +60,10 @@ public static class XlsbReader
             // ever asks for it, and a chart part is XML in an XLSB too.
             DrawingTheme? theme = DrawingTheme.Read(file.ThemeRoot);
 
+            // And its other half, for a text box whose runs name their face through the theme.
+            DrawingFontScheme? themeFonts = DrawingFontScheme.Read(
+                Drawing.Child(Drawing.Child(file.ThemeRoot, "themeElements"), "fontScheme"));
+
             foreach (XlsxSheetEntry entry in file.Sheets)
             {
                 ContentSection section = new()
@@ -77,7 +81,7 @@ public static class XlsbReader
                 section.Children.Add(reader.ReadSheet(part));
                 content.Children.Add(section);
 
-                (SheetPrintSetup setup, SheetGrid grid) = XlsbPrintSetup.Read(part);
+                (SheetPrintSetup setup, SheetGrid grid) = XlsbPrintSetup.Read(part, file.DefaultFont);
                 layouts.Add(new SheetLayout
                 {
                     Name = entry.Name,
@@ -86,6 +90,8 @@ public static class XlsbReader
                     Setup = setup,
                     Grid = grid,
                     Cells = (ContentTable)section.Children[0],
+                    StatedMerges = reader.SheetMerges,
+                    HyperlinkRanges = reader.SheetHyperlinks,
 
                     // The XML readers, unchanged and deliberately so. A drawing hangs off the
                     // worksheet part by a relationship, and everything on the far side of that
@@ -95,7 +101,8 @@ public static class XlsbReader
                     // *name*, which the workbook already gave. Leaving this unwired was worth
                     // 8 words and a page on `sc/qa/unit/data/xlsb/tdf108017_calcProtection.xlsb`:
                     // its chart read into nothing and its second page never existed.
-                    Drawings = XlsxDrawings.Read(file.PackageHandle, entry.PartName, theme),
+                    Drawings = XlsxDrawings.Read(
+                        file.PackageHandle, entry.PartName, theme, themeFonts),
                     FileName = source.FileName ?? string.Empty,
                 });
 

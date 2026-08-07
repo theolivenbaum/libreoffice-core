@@ -109,6 +109,9 @@ public sealed partial class RtfDocumentReader
     /// </remarks>
     private Core.Units.Length _defaultTabInterval = Core.Units.Length.FromTwips(720);
 
+    /// <summary>The document's <c>\htmautsp</c>; see <see cref="AddsParagraphSpacing"/>.</summary>
+    private bool _htmlAutoSpacing;
+
     private int _colourRed;
     private int _colourGreen;
     private int _colourBlue;
@@ -179,6 +182,32 @@ public sealed partial class RtfDocumentReader
 
     /// <summary>The sections' page geometry, valid once <see cref="Read"/> has run.</summary>
     public IReadOnlyList<Model.WritingSection> Sections => _geometry.Sections;
+
+    /// <summary>
+    /// True when two consecutive paragraphs' spacings add rather than the larger one winning.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Writer's <c>PARA_SPACE_MAX</c>, and RTF is the format that defaults it the other way from the
+    /// rest of the Word family: <c>SettingsTable</c>'s constructor sets
+    /// <c>doNotUseHTMLParagraphAutoSpacing</c> for an RTF import and leaves it clear for OOXML
+    /// (<c>sw/source/writerfilter/dmapper/SettingsTable.cxx</c>:119, "HTML paragraph auto-spacing is
+    /// opt-in for RTF, opt-out for OOXML"). So an RTF adds unless it opts in.
+    /// </para>
+    /// <para>
+    /// <c>\htmautsp</c> is that opt-in, and it reads backwards from its name: it asks for HTML
+    /// auto-spacing, which is the collapsing behaviour, so LibreOffice answers it by clearing the flag
+    /// (<c>rtftok/rtfdispatchflag.cxx</c>:1354). Measured on eight paragraphs carrying <c>\sb240</c> and
+    /// <c>\sa160</c> on <c>\sl-240</c> exact lines: without <c>\htmautsp</c> LibreOffice 24.2.7.2 puts
+    /// every boundary at 32.00 pt — the 12 pt line plus the 8 pt and 12 pt summed — and with it at
+    /// 24.00 pt, the line plus the larger of the two alone.
+    /// </para>
+    /// <para>
+    /// No RTF on the words corpus states it, so like the DOCX and ODF halves of this rule the change
+    /// is correctness rather than a measured win.
+    /// </para>
+    /// </remarks>
+    public bool AddsParagraphSpacing => !_htmlAutoSpacing;
 
     /// <summary>
     /// The body's blocks — its paragraphs and its tables — with the formatting layout needs, valid once
@@ -627,6 +656,14 @@ public sealed partial class RtfDocumentReader
                     _defaultTabInterval = Core.Units.Length.FromTwips(interval);
                 return;
 
+            // Deliberately ignoring the parameter: LibreOffice declares \htmautsp a
+            // RTFControlType::FLAG (rtftokenizer.cxx:701), so \htmautsp0 asks for HTML auto-spacing
+            // exactly as \htmautsp does. Measured — both put the reference's paragraph boundaries at
+            // 24.00 pt where their absence gives 32.00 pt — which is why this is not `Parameter != 0`.
+            case "htmautsp":
+                _htmlAutoSpacing = true;
+                return;
+
             case "li":
                 state.LeftIndent = token.Parameter;
                 return;
@@ -764,6 +801,19 @@ public sealed partial class RtfDocumentReader
             case "strike" or "striked":
                 state.Strike = token.Parameter != 0;
                 return;
+            case "kerning":
+                // A size threshold rather than a switch, and read as a switch because that is all
+                // Writer's item can hold — see RtfState.AutoKerning. A bare `\kerning` with no
+                // parameter is `\kerning0` by RTF's own default-of-zero rule, so it turns kerning
+                // *off*, which is the opposite of what a toggle's default would do.
+                state.AutoKerning = (token.Parameter ?? 0) != 0;
+                return;
+            case "caps":
+                state.Capitals = token.Parameter != 0;
+                return;
+            case "scaps":
+                state.SmallCapitals = token.Parameter != 0;
+                return;
             case "super":
                 state.VerticalPosition = token.Parameter == 0 ? 0 : 1;
                 return;
@@ -799,6 +849,12 @@ public sealed partial class RtfDocumentReader
             case "cf":
                 state.ForegroundColourIndex = token.Parameter is { } index and >= 0 ? index : null;
                 return;
+            case "highlight":
+                // Index nought is the automatic colour, which for a highlighter means none —
+                // `RTFDocumentImpl` writes COL_AUTO for it rather than looking the table up
+                // (`sw/source/writerfilter/rtftok/rtfdispatchvalue.cxx`:937).
+                state.HighlightColourIndex = token.Parameter is { } band and > 0 ? band : null;
+                return;
 
             // ---- tables
             case "trowd":
@@ -816,6 +872,12 @@ public sealed partial class RtfDocumentReader
                 return;
             case "trhdr":
                 DefinitionTarget(CurrentFlow).RowIsHeader = true;
+                return;
+            case "trkeep":
+                // "Keep the row intact", which is the negation of what the layout asks — see
+                // `PageTableRow.CanSplit`. Not `\trkeepfollow`, which is keep-with-next and a different
+                // question.
+                DefinitionTarget(CurrentFlow).RowIsKeptTogether = true;
                 return;
             case "cellx":
                 AddCellDefinition(CurrentFlow, token.Parameter);

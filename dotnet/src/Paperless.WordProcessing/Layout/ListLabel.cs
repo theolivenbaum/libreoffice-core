@@ -156,7 +156,12 @@ public sealed record PageLabel
     /// <see cref="LabelFollow.ListTab"/> stop stated in the same frame of reference can be compared
     /// against it.
     /// </param>
-    public Length Advance(Length hangingIndent, Length lineStart)
+    /// <param name="format">
+    /// The paragraph's own stops and default interval, for the case where the label overruns both its
+    /// level's stop and the hanging indent — see the remarks. Null keeps the label butted against the
+    /// text, which is what a caller with no paragraph to consult can honestly say.
+    /// </param>
+    public Length Advance(Length hangingIndent, Length lineStart, ParagraphFormat? format = null)
     {
         // The label plus whatever the level insists on: the portion is never narrower than this, so a
         // long label pushes the text rather than colliding with it.
@@ -164,10 +169,7 @@ public sealed record PageLabel
 
         Length wanted = Follow switch
         {
-            // A tab stop before the label's end has already been passed, and Writer's tab code then falls
-            // through to the paragraph's left margin — which for a hanging indent is exactly the hanging
-            // distance. Taking the larger of the two says both at once.
-            LabelFollow.ListTab => Max(TabStop - lineStart, hangingIndent),
+            LabelFollow.ListTab => ListTabAdvance(floor, hangingIndent, lineStart, format),
 
             // No stop to aim at, so the space is the paragraph's own: the hanging indent is the room the
             // document set aside for the label, and Writer fills it.
@@ -181,6 +183,85 @@ public sealed record PageLabel
         if (Follow == LabelFollow.Space) floor += SpaceWidth();
 
         return Max(Max(wanted, floor), Length.Zero);
+    }
+
+    /// <summary>
+    /// Where the tab after a <see cref="LabelFollow.ListTab"/> label carries the text.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The follower is a real tab: Writer's number portion expands to the number <em>plus</em>
+    /// <c>SvxNumberFormat::GetLabelFollowedByAsString</c>'s <c>"\t"</c>
+    /// (<c>editeng/source/items/numitem.cxx:504</c>), and the tab that comes out of it goes through
+    /// <c>SwTextFormatter::GetTabStop</c> like any other. That matters at exactly one point: when the
+    /// label is wider than its level left room for. The level's own stop is then behind the pen and a
+    /// stop behind the pen is not "no gap" — the search carries on through the paragraph's own stops
+    /// and then along the default interval (<c>sw/source/core/text/txttab.cxx:189</c>). Stopping there
+    /// instead is what put <c>1.0Executive Summary</c> on the page.
+    /// </para>
+    /// <para>
+    /// Measured on <c>final-technical-report-template.docx</c> (words/batch-007): a level with
+    /// <c>w:ind w:left="360" w:hanging="360"</c> puts its stop 18 pt along, the 18 pt label <c>2.0</c>
+    /// is 23.0 pt wide, and LibreOffice starts the heading's text at 36.0 pt — the document's
+    /// <c>w:defaultTabStop</c> — where we started it at 23.0.
+    /// </para>
+    /// <para>
+    /// The order is the search's own. The level's stop first, when it is still ahead; then the
+    /// paragraph's left margin, which is where Writer sends a tab that is still inside the hanging
+    /// indent (<c>bNewTabPortionInsideHangingIndent</c>, <c>txttab.cxx:257</c>); and only then the
+    /// ordinary stops.
+    /// </para>
+    /// </remarks>
+    /// <param name="labelEnd">Where the label ends, measured from its own pen.</param>
+    /// <param name="hangingIndent">Where the paragraph's left margin sits, from the same pen.</param>
+    /// <param name="lineStart">The pen, from the text area's start edge.</param>
+    /// <param name="format">The paragraph, or null when the caller has none.</param>
+    private Length ListTabAdvance(
+        Length labelEnd, Length hangingIndent, Length lineStart, ParagraphFormat? format)
+    {
+        Length listStop = TabStop - lineStart;
+
+        if (listStop > labelEnd) return Max(listStop, hangingIndent);
+        if (hangingIndent > labelEnd || format is null) return hangingIndent;
+
+        // The stops are stated from the paragraph's own tab origin rather than from the text area, so the
+        // pen has to be moved into their frame of reference and the answer moved back out of it.
+        Length pen = lineStart + labelEnd - format.TabOrigin;
+        Length next = format.NextTabStop(pen).Position + format.TabOrigin - lineStart;
+
+        return Max(next, hangingIndent);
+    }
+
+    /// <summary>
+    /// The line box the label alone would need: how tall, and how much of it is above the baseline.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>A label can be bigger than the paragraph it labels, and then it raises the line.</strong>
+    /// Writer's label is an ordinary portion — <c>SwNumberPortion</c>, built by
+    /// <c>SwTextFormatter::NewNumberPortion</c> (<c>sw/source/core/text/txtfld.cxx</c>:506) — so
+    /// <c>SwLineLayout::CalcLine</c> (<c>sw/source/core/text/porlay.cxx</c>:340) folds its ascent and
+    /// height into the line's maxima exactly as it does for a run of text. A level stating a size the
+    /// item's own text does not use is ordinary rather than exotic: Word writes the level's character
+    /// formatting into <c>w:lvl/w:rPr</c> and into the WW8 level's <c>grpprlChpx</c>, and both frequently
+    /// name a size of their own.
+    /// </para>
+    /// <para>
+    /// Measured through the same <see cref="LineSpacing"/> the runs use, and on the same device grid, so
+    /// that a label and a run of the same face and size give the same box — otherwise a label equal to its
+    /// text would still move the line.
+    /// </para>
+    /// </remarks>
+    /// <param name="grid">The device grid the paragraph's metrics are rounded through, or null.</param>
+    public (Length Height, Length Ascent) LineExtent(MetricGrid? grid = null)
+    {
+        LineMetrics metrics = LineSpacing.Resolve(Face, grid);
+
+        // Whole twips, as MeasuredParagraph.Accumulate takes them: a fraction kept here would eventually
+        // put a line on a different page from the one the runs beside it were measured onto.
+        return (
+            Length.FromTwips(metrics.ScaledLineHeight(EmSize).Twips),
+            Length.FromTwips(metrics.ScaledAscent(EmSize).Twips));
     }
 
     /// <summary>The width of one space in the label's own face, for <see cref="LabelFollow.Space"/>.</summary>

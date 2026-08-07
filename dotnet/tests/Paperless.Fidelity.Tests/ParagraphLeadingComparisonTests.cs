@@ -68,6 +68,27 @@ public sealed class ParagraphLeadingComparisonTests : IDisposable
     [InlineData("paginated.docx")]
     [InlineData("paginated.doc")]
     [InlineData("paginated.rtf")]
+    // Contextual spacing between two *different* styles that resolve to the same properties. Writer
+    // compares the paragraphs' format collections (`lcl_IdenticalStyles`,
+    // sw/source/core/layout/flowfrm.cxx:1503), so a heading style based on a contextual body style
+    // keeps its space above; comparing resolved properties instead says the two are identical and
+    // swallows it. The Word formats only — see tests/corpus/README.md for why the document is
+    // hand-written and why there is no ODF member of the set.
+    [InlineData("contextual-spacing-styles.docx")]
+    [InlineData("contextual-spacing-styles.doc")]
+    [InlineData("contextual-spacing-styles.rtf")]
+    // Whether two paragraphs' spacings add or the larger wins — Writer's PARA_SPACE_MAX, which the four
+    // formats answer differently and none of them by the same default. Each fixture is eight paragraphs
+    // each carrying 12 pt of space-before and 8 pt of space-after on 12 pt exact lines, so every one of
+    // the seven boundaries is 8 pt apart between the two answers and the error accumulates down the page.
+    // paragraph-spacing-settings.docx is the counter-example rather than a defect: same paragraphs, but
+    // in a package that has a settings part, and it must keep collapsing. See
+    // ParagraphSpacingAccumulationTests for which rule each format follows and why.
+    [InlineData("paragraph-spacing-no-settings.docx")]
+    [InlineData("paragraph-spacing-settings.docx")]
+    [InlineData("paragraph-spacing-collapsed.rtf")]
+    [InlineData("paragraph-spacing-collapsed.odt")]
+    [InlineData("paragraph-spacing-collapsed.fodt")]
     public void EveryBaselineIsWhereLibreOfficePutsIt(string fileName)
     {
         Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");

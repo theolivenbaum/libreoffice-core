@@ -1,7 +1,10 @@
+using Paperless.Core.Charts;
 using Paperless.Core.Diagnostics;
 using Paperless.Core.Extraction;
+using Paperless.Core.Geometry;
 using Paperless.Core.Graphics;
 using Paperless.Core.Units;
+using Paperless.MsBinary.Escher;
 using Paperless.Spreadsheets.Layout;
 using Paperless.Core.Numbers;
 using Paperless.Text.Encodings;
@@ -72,6 +75,12 @@ internal sealed class XlsWorkbookReader
     private readonly XlsDecorationTable _decoration = new();
     private XlsSheetDecoration _sheetDecoration = new();
     private XlsSheetPrintState _page = new();
+    private XlsDrawingCollector _drawings = new([]);
+
+    /// <summary>The sheet's <c>NOTE</c> records, joined to their objects once it is read.</summary>
+    private readonly List<(int Column, int Row, ushort Object)> _notes = [];
+    private readonly List<byte> _drawingGroup = [];
+    private Dictionary<int, EscherBlip>? _blips;
     private bool _reportedFormat;
     private bool _reportedSstIndex;
 
@@ -115,16 +124,13 @@ internal sealed class XlsWorkbookReader
         int index = 0;
         foreach (SheetEntry sheet in _sheets)
         {
-            // Chart, macro and Visual Basic substreams carry no cells. They keep their place
-            // in the sheet order — a workbook's third sheet is still its third — but produce
-            // no section, exactly as LibreOffice's SkipSubStream does.
-            if (sheet.Kind != SheetKind.Worksheet)
-            {
-                index++;
-                continue;
-            }
+            // A chart sheet is a sheet: it has its own page setup, it prints, and losing it
+            // costs a page of the workbook. Macro and Visual Basic substreams carry nothing a
+            // reader wants and keep their place in the numbering without producing a section,
+            // exactly as LibreOffice's SkipSubStream does.
+            if (sheet.Kind == SheetKind.Chart) sections.AddRange(ReadChartSheet(sheet, index));
+            else if (sheet.Kind == SheetKind.Worksheet) sections.Add(ReadSheet(sheet, index));
 
-            sections.Add(ReadSheet(sheet, index));
             index++;
         }
 
@@ -186,6 +192,13 @@ internal sealed class XlsWorkbookReader
                     ReadPalette();
                     break;
 
+                // The workbook's picture store. It is stated once, in the globals, and every
+                // sheet's shapes index into it — so it has to be collected before any sheet is
+                // read, which is what makes it a globals record rather than a sheet one.
+                case BiffRecords.MsoDrawingGroup:
+                    _drawingGroup.AddRange(_stream.ReadBytes(_stream.RecordLeft));
+                    break;
+
                 case BiffPageRecords.Name:
                     ReadName();
                     break;
@@ -195,6 +208,29 @@ internal sealed class XlsWorkbookReader
             }
         }
     }
+
+    /// <summary>
+    /// The workbook's picture store, read once from the globals and shared by every sheet.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Excel keeps the <c>OfficeArtDggContainer</c> inline, in <c>MSODRAWINGGROUP</c> records at the
+    /// head of the workbook, where Word puts it in the table stream and PowerPoint in a
+    /// <c>PPDrawingGroup</c>. The bytes are the same structure in all three, so the store is read by
+    /// <see cref="EscherBlips"/> rather than here — with no delay stream, because a workbook's
+    /// blips are inline in the <c>msofbtBSE</c> and there is no second stream for a <c>foDelay</c>
+    /// to point into (<c>XclImpObjectManager::ReadMsoDrawingGroup</c>,
+    /// <c>sc/source/filter/excel/xiescher.cxx</c>, hands <c>maDffStrm</c> alone to
+    /// <c>SvxMSDffManager</c>).
+    /// </para>
+    /// <para>
+    /// Read lazily and kept, because most workbooks have no drawing group at all: eight of the
+    /// corpus's sixty-one <c>.xls</c> carry one, and the other fifty-three would pay a walk of an
+    /// empty buffer per sheet.
+    /// </para>
+    /// </remarks>
+    private Dictionary<int, EscherBlip> Blips =>
+        _blips ??= _drawingGroup.Count > 0 ? EscherBlips.Read([.. _drawingGroup], [], []) : [];
 
     private void ReadBof()
     {
@@ -462,15 +498,23 @@ internal sealed class XlsWorkbookReader
         ushort flags = _stream.ReadUInt16();
         bool italic = (flags & 0x0002) != 0;
 
+        // fStrikeOut is in the flags beside fItalic and is there in every BIFF; the underline
+        // is a byte of its own and only from BIFF5 on (XclFontData::FillFromMsoFont,
+        // sc/source/filter/excel/xlstyle.cxx). BIFF2's fUnderline lives in the flags instead,
+        // which is the one case the short form below still misses.
+        bool strike = (flags & 0x0008) != 0;
+
         int weight = (flags & 0x0001) != 0 ? BoldWeight : NormalWeight;
         int colour = AutomaticColourIndex;
+        SheetUnderline underline = SheetUnderline.None;
 
         if (_stream.RecordLeft >= 10)
         {
             colour = _stream.ReadUInt16();
             weight = _stream.ReadUInt16();
             _stream.Skip(2);                    // escapement
-            _stream.Skip(4);                    // underline, family, character set, reserved
+            underline = Underline(_stream.ReadByte());
+            _stream.Skip(3);                    // family, character set, reserved
         }
 
         string name = _stream.RecordLeft > 0
@@ -484,8 +528,26 @@ internal sealed class XlsWorkbookReader
             Length.FromTwips(height),
             weight is >= 100 and <= 1000 ? weight : NormalWeight,
             italic,
-            colour));
+            colour,
+            underline,
+            strike));
     }
+
+    /// <summary>
+    /// The <c>FONT</c> record's underline byte.
+    /// </summary>
+    /// <remarks>
+    /// <c>EXC_FONTUNDERL_*</c> (<c>sc/source/filter/inc/xlstyle.hxx</c>): 0 none, 1 single,
+    /// 2 double, 0x21 single accounting, 0x22 double accounting. The two accounting forms differ
+    /// only in how wide Calc draws the line, which is not reproduced — see
+    /// <see cref="SheetUnderline"/> — so each folds onto its plain counterpart.
+    /// </remarks>
+    private static SheetUnderline Underline(int stated) => stated switch
+    {
+        0x01 or 0x21 => SheetUnderline.SingleLine,
+        0x02 or 0x22 => SheetUnderline.DoubleLine,
+        _ => SheetUnderline.None,
+    };
 
     /// <summary>BIFF's own weights, which are the only two any writer emits.</summary>
     private const int NormalWeight = 400;
@@ -657,15 +719,233 @@ internal sealed class XlsWorkbookReader
         return 0;
     }
 
+    /// <summary>
+    /// Reads a chart sheet: a sheet whose whole content is one chart.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// It is a substream of its own, headed by a <c>BOF</c> of type <c>0x0020</c>, and it holds
+    /// the page setup a worksheet's does — margins, <c>SETUP</c>, header and footer — plus the
+    /// chart records and any drawing objects laid over the chart.
+    /// </para>
+    /// <para>
+    /// <strong>The chart's printed rectangle is computed from the paper, not read.</strong>
+    /// <c>XclImpChartObj::FinalizeTabChart</c> (<c>sc/source/filter/excel/xiescher.cxx</c>)
+    /// derives it: the paper less the margins, less two centimetres of width and one of height
+    /// "to give some more extra space", less another two and one when the sheet prints its row
+    /// and column headings, offset a centimetre from the left of the sheet and half a centimetre
+    /// from the top. The <c>CHCHART</c> record does state a rectangle, and it is the one Excel
+    /// showed the chart at on screen rather than the one it prints at — using it puts the chart
+    /// off the paper.
+    /// </para>
+    /// <para>
+    /// The chart lands as an absolutely anchored drawing rather than as cells, which is what
+    /// makes the rest of the pipeline work unchanged: <c>SheetDrawingArea</c> widens the printed
+    /// range to cover it, <c>SheetEmptyPages</c> keeps the page it overlaps, and
+    /// <c>SheetPageGraphics</c> paints it through the same <c>SheetChart</c> a worksheet's chart
+    /// goes through.
+    /// </para>
+    /// </remarks>
+    private List<ContentSection> ReadChartSheet(SheetEntry sheet, int index)
+    {
+        _page = new XlsSheetPrintState
+        {
+            DefaultFont = _cellFormats.DefaultFont,
+
+            // BIFF8 keeps every height its file states. `ImportExcel::Read` calls
+            // `AdjustRowHeight()` (sc/source/filter/excel/read.cxx:780) and
+            // `ImportExcel8::Read` has the same call `#if 0`-ed out, with the reason beside
+            // it: "Excel documents look much better without this call; better in the sense
+            // that the row heights are identical to the original heights in Excel"
+            // (read.cxx:1282-1288). So a `.xls` written this century is never re-measured.
+            RowHeightsAreManual = _stream.Version == BiffVersion.Biff8,
+        };
+        _sheetDecoration = new XlsSheetDecoration();
+        _drawings = new XlsDrawingCollector(_diagnostics, Blips);
+        XlsChartBuilder chart = new();
+
+        if (!StartSubstream(sheet))
+        {
+            _diagnostics.Add(new Diagnostic(
+                DiagnosticSeverity.Warning, "PL2327",
+                $"No chart substream could be found for \"{sheet.Name}\"; the sheet is empty.",
+                new DiagnosticLocation(PartName: "Workbook", Context: sheet.Name)));
+            return [];
+        }
+
+        ReadChartRecords(chart);
+
+        ChartPlot? plot = chart.Build();
+        SheetPrintSetup setup = _page.ToSetup();
+        DocRect frame = ChartSheetFrame(setup);
+
+        List<SheetDrawing> drawings =
+        [
+            new SheetDrawing
+            {
+                Anchor = SheetAnchorKind.Absolute,
+                Position = new DocPoint(frame.X, frame.Y),
+                Extent = new DocSize(frame.Width, frame.Height),
+                Name = sheet.Name,
+                IsChart = true,
+                Chart = plot,
+            },
+            .. _drawings.BuildForChart(
+                new DocPoint(frame.X, frame.Y), new DocSize(frame.Width, frame.Height)),
+        ];
+
+        _layouts.Add(new SheetLayout
+        {
+            Name = sheet.Name,
+            Index = index,
+            IsHidden = sheet.IsHidden,
+            Setup = setup,
+            Grid = _page.ToGrid(),
+            Cells = new ContentTable(),
+            Drawings = new SheetDrawings(drawings),
+            FileName = FileName,
+        });
+
+        ContentSection section = new()
+        {
+            Kind = SectionKind.Sheet,
+            Index = index,
+            Name = sheet.Name,
+            IsHidden = sheet.IsHidden,
+        };
+        section.Children.Add(new ContentTable());
+
+        List<ContentSection> sections = [section];
+
+        // The chart follows its sheet as a sibling rather than sitting inside it, which is where
+        // `XlsxCharts` and `OdfChart` already put one — see the module's TODO.
+        if (ChartSection(plot, index) is { } frameSection) sections.Add(frameSection);
+
+        return sections;
+    }
+
+    /// <summary>The chart's titles as a frame section, or null when it names none.</summary>
+    private static ContentSection? ChartSection(ChartPlot? plot, int index)
+    {
+        if (plot is null) return null;
+
+        string?[] lines = [plot.Title, plot.CategoryAxisTitle, plot.ValueAxisTitle];
+        if (Array.TrueForAll(lines, line => line is not { Length: > 0 })) return null;
+
+        ContentSection section = new() { Kind = SectionKind.Frame, Index = index, Name = plot.Title };
+        foreach (string? line in lines)
+        {
+            if (line is not { Length: > 0 }) continue;
+
+            ContentParagraph paragraph = new();
+            paragraph.Children.Add(new ContentRun { Text = line });
+            section.Children.Add(paragraph);
+        }
+
+        return section;
+    }
+
+    /// <summary>
+    /// Where a chart sheet's chart is drawn on the sheet, in the sheet's own coordinates.
+    /// </summary>
+    /// <remarks>
+    /// <c>XclImpChartObj::FinalizeTabChart</c>, in hundredths of a millimetre throughout. The
+    /// two extra subtractions and the offsets are the C++'s own constants and are reproduced as
+    /// written; three of them are unexplained there too.
+    /// </remarks>
+    private static DocRect ChartSheetFrame(SheetPrintSetup setup)
+    {
+        Length left = Length.FromMm100(ChartSheetOffsetX);
+        Length top = Length.FromMm100(ChartSheetOffsetY);
+
+        Length right = setup.PageSize.Width - setup.LeftMargin - setup.RightMargin
+                       - Length.FromMm100(ChartSheetSlackX);
+        Length bottom = setup.PageSize.Height - setup.TopMargin - setup.BottomMargin
+                        - Length.FromMm100(ChartSheetSlackY);
+
+        if (setup.PrintsHeadings)
+        {
+            right -= Length.FromMm100(ChartSheetSlackX);
+            bottom -= Length.FromMm100(ChartSheetSlackY);
+        }
+
+        return new DocRect(
+            left, top,
+            Length.Max(right - left, Length.FromMm100(1000)),
+            Length.Max(bottom - top, Length.FromMm100(1000)));
+    }
+
+    private const int ChartSheetOffsetX = 1000;
+    private const int ChartSheetOffsetY = 500;
+    private const int ChartSheetSlackX = 2000;
+    private const int ChartSheetSlackY = 1000;
+
+    /// <summary>
+    /// Walks a chart substream, routing its records to the page setup, the drawing layer or the
+    /// chart.
+    /// </summary>
+    private void ReadChartRecords(XlsChartBuilder chart)
+    {
+        int depth = 0;
+
+        while (_stream.MoveNext())
+        {
+            ushort id = _stream.RecordId;
+
+            if (BiffRecords.IsBof(id)) { depth++; continue; }
+            if (id == BiffRecords.Eof)
+            {
+                if (depth == 0) return;
+                depth--;
+                continue;
+            }
+
+            if (depth > 0) continue;
+
+            switch (id)
+            {
+                case BiffRecords.MsoDrawing or BiffRecords.MsoDrawingSelection:
+                    _drawings.AddDrawing(_stream.ReadBytes(_stream.RecordLeft));
+                    break;
+
+                case BiffRecords.Obj:
+                    _drawings.ReadObject(_stream);
+                    break;
+
+                case BiffRecords.Txo:
+                    _drawings.ReadText(_stream);
+                    break;
+
+                default:
+                    if (BiffChartRecords.IsChartRecord(id)) chart.Read(id, _stream);
+                    else ReadPageRecord(id);
+                    break;
+            }
+        }
+    }
+
     /// <summary>Reads one sheet substream into a section.</summary>
     private ContentSection ReadSheet(SheetEntry sheet, int index)
     {
         SheetBuilder builder = new(this, sheet.Name);
-        _page = new XlsSheetPrintState();
+        _page = new XlsSheetPrintState
+        {
+            DefaultFont = _cellFormats.DefaultFont,
+
+            // BIFF8 keeps every height its file states. `ImportExcel::Read` calls
+            // `AdjustRowHeight()` (sc/source/filter/excel/read.cxx:780) and
+            // `ImportExcel8::Read` has the same call `#if 0`-ed out, with the reason beside
+            // it: "Excel documents look much better without this call; better in the sense
+            // that the row heights are identical to the original heights in Excel"
+            // (read.cxx:1282-1288). So a `.xls` written this century is never re-measured.
+            RowHeightsAreManual = _stream.Version == BiffVersion.Biff8,
+        };
         _sheetDecoration = new XlsSheetDecoration();
+        _drawings = new XlsDrawingCollector(_diagnostics, Blips);
         _rowFormats.Clear();
         _columnFormats.Clear();
         _richCells.Clear();
+        _notes.Clear();
 
         if (StartSubstream(sheet))
         {
@@ -703,17 +983,27 @@ internal sealed class XlsWorkbookReader
         if (_repeatRows.TryGetValue(index, out SheetRange rows))
             _page.RepeatRows = rows;
 
+        // After ToGrid, and it has to be: a client anchor states its offsets as fractions of the
+        // column and row it names, so a drawing cannot be placed until their sizes are known.
+        SheetGrid grid = _page.ToGrid();
+
         _layouts.Add(new SheetLayout
         {
             Name = sheet.Name,
             Index = index,
             IsHidden = sheet.IsHidden,
             Setup = _page.ToSetup(),
-            Grid = _page.ToGrid(),
+            Grid = grid,
             Cells = table,
+            StatedMerges = builder.StatedMerges,
+            HyperlinkRanges = builder.HyperlinkRanges,
             Formatting = _sheetDecoration.Resolve(_decoration),
             Formats = BuildFormats(builder),
             RichText = BuildRichText(),
+            Drawings = _drawings.IsEmpty
+                ? SheetDrawings.Empty
+                : new SheetDrawings(_drawings.BuildForSheet(grid)),
+            Notes = BuildNotes(),
             FileName = FileName,
         });
 
@@ -822,8 +1112,34 @@ internal sealed class XlsWorkbookReader
                     ReadFormulaString(builder);
                     break;
 
+                case BiffRecords.HLink:
+                    ReadHyperlink(builder);
+                    break;
+
                 case BiffRecords.MergedCells:
                     ReadMergedCells(builder);
+                    break;
+
+                // The drawing layer, which is three record kinds and one assembly step; see
+                // XlsDrawingCollector. Kept in the sheet loop rather than skipped, because a
+                // text box is the only content on a sheet that no walk of the cells can find.
+                // The drawing layer, which is three record kinds and one assembly step; see
+                // XlsDrawingCollector. Kept in the sheet loop rather than skipped, because a
+                // text box is the only content on a sheet that no walk of the cells can find.
+                case BiffRecords.MsoDrawing or BiffRecords.MsoDrawingSelection:
+                    _drawings.AddDrawing(_stream.ReadBytes(_stream.RecordLeft));
+                    break;
+
+                case BiffRecords.Obj:
+                    _drawings.ReadObject(_stream);
+                    break;
+
+                case BiffRecords.Txo:
+                    _drawings.ReadText(_stream);
+                    break;
+
+                case BiffRecords.Note:
+                    ReadNote();
                     break;
 
                 case BiffRecords.Dimensions or BiffRecords.Dimensions2:
@@ -835,6 +1151,54 @@ internal sealed class XlsWorkbookReader
                     break;
             }
         }
+    }
+
+    /// <summary>Joins the sheet's <c>NOTE</c> records to the comment objects they name.</summary>
+    private SheetNotes BuildNotes()
+    {
+        if (_notes.Count == 0) return SheetNotes.Empty;
+
+        Dictionary<ushort, string> texts = _drawings.NoteTexts();
+        if (texts.Count == 0) return SheetNotes.Empty;
+
+        List<SheetNote> notes = [];
+        foreach ((int column, int row, ushort identifier) in _notes)
+        {
+            if (texts.TryGetValue(identifier, out string? text))
+                notes.Add(new SheetNote(column, row, text));
+        }
+
+        return notes.Count == 0 ? SheetNotes.Empty : new SheetNotes { Items = notes };
+    }
+
+    /// <summary>
+    /// Reads one <c>NOTE</c> record: which cell a comment hangs off and which object holds it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// BIFF8 only. The pre-BIFF8 layout put the comment's characters in the record itself and
+    /// continued them in further NOTEs with a row of <c>0xFFFF</c>; from BIFF8 the record names an
+    /// object instead and the text is that object's <c>TXO</c>
+    /// (<c>XclImpNote</c>, <c>sc/source/filter/excel/xicontent.cxx</c>). Only the newer form is
+    /// read, because it is the only one that appears in the corpus and because the older one is a
+    /// separate continuation scheme rather than a shorter record.
+    /// </para>
+    /// <para>
+    /// The join is deferred: a NOTE may arrive before its OBJ, so the identifier is kept and
+    /// resolved against <see cref="XlsDrawingCollector.NoteTexts"/> once the sheet has been read.
+    /// </para>
+    /// </remarks>
+    private void ReadNote()
+    {
+        if (_stream.Version != BiffVersion.Biff8) return;
+        if (_stream.RecordLeft < 8) return;
+
+        int row = _stream.ReadUInt16();
+        int column = _stream.ReadUInt16();
+        _stream.Skip(2);
+        ushort identifier = _stream.ReadUInt16();
+
+        _notes.Add((column, row, identifier));
     }
 
     private void ReadDimensions(SheetBuilder builder)
@@ -1025,6 +1389,49 @@ internal sealed class XlsWorkbookReader
         builder.SetExpectedString(_stream.ReadString(eightBitLength));
     }
 
+    /// <summary>
+    /// Records which cells an <c>HLINK</c> covers, without decoding the link itself.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The record opens with a <c>XclRange</c> — first and last row, then first and last column —
+    /// followed by the embedded <c>StdLink</c> structure (<c>XclImpHyperlink::ReadHlink</c>,
+    /// <c>sc/source/filter/excel/xicontent.cxx:221-231</c>). Excel writes rubbish in the high
+    /// byte of the column indices and the importer masks it off, which is reproduced here.
+    /// </para>
+    /// <para>
+    /// Only whether a URL results matters to layout, not what it is: a link that resolves to an
+    /// empty string is dropped before it reaches a cell (<c>ReadHlink</c>'s
+    /// <c>if (!aString.isEmpty())</c>), and the string is non-empty exactly when the flags name a
+    /// UNC path, a file or URL moniker, or a text mark
+    /// (<c>ReadEmbeddedData</c>, <c>xicontent.cxx:233-330</c>). Testing the flags rather than
+    /// walking the monikers keeps this to a dozen lines and cannot disagree with itself about a
+    /// path it never has to resolve.
+    /// </para>
+    /// </remarks>
+    private void ReadHyperlink(SheetBuilder builder)
+    {
+        // BIFF8 only; earlier generations have no HLINK record at all.
+        if (_stream.RecordLeft < 8 + 16 + 8) return;
+
+        int firstRow = _stream.ReadUInt16();
+        int lastRow = _stream.ReadUInt16();
+        int firstColumn = _stream.ReadUInt16() & 0xFF;
+        int lastColumn = _stream.ReadUInt16() & 0xFF;
+
+        _stream.Skip(16);                     // the StdLink GUID
+        _stream.Skip(4);                      // the stream version
+        uint flags = _stream.ReadUInt32();
+
+        const uint Body = 0x00000001;         // EXC_HLINK_BODY
+        const uint Mark = 0x00000008;         // EXC_HLINK_MARK
+        const uint Unc = 0x00000100;          // EXC_HLINK_UNC
+
+        if ((flags & (Body | Mark | Unc)) == 0) return;
+
+        builder.AddHyperlinkRange(firstRow, lastRow, firstColumn, lastColumn);
+    }
+
     private void ReadMergedCells(SheetBuilder builder)
     {
         int count = _stream.ReadUInt16();
@@ -1106,8 +1513,14 @@ internal sealed class XlsWorkbookReader
             case BiffPageRecords.DefaultRowHeight:
                 if (_stream.RecordLeft >= 4)
                 {
-                    _stream.ReadUInt16();
-                    _page.SetDefaultRowHeight(_stream.ReadUInt16());
+                    // Bit 0 is the sheet's own fUnsynced — EXC_DEFROW_UNSYNCED,
+                    // sc/source/filter/inc/xltable.hxx:114 — and it is not about the default
+                    // height alone. `XclImpColRowSettings::Convert` answers it by marking every
+                    // row of the sheet manual before it looks at a single ROW record
+                    // (sc/source/filter/excel/colrowst.cxx:212-215), so a sheet that sets it has
+                    // no row Calc will re-measure, whatever the ROW records say.
+                    bool manual = (_stream.ReadUInt16() & 0x0001) != 0;
+                    _page.SetDefaultRowHeight(_stream.ReadUInt16(), manual);
                 }
                 break;
 
@@ -1447,6 +1860,34 @@ internal sealed class XlsWorkbookReader
         {
             if (lastRow < firstRow || lastColumn < firstColumn) return;
             _merged.Add((firstRow, lastRow, firstColumn, lastColumn));
+        }
+
+        public void AddHyperlinkRange(int firstRow, int lastRow, int firstColumn, int lastColumn)
+        {
+            if (lastRow < firstRow || lastColumn < firstColumn) return;
+            _links.Add(new SheetRange(firstColumn, firstRow, lastColumn, lastRow));
+        }
+
+        /// <summary>The <c>HLINK</c> ranges, for <see cref="SheetLayout.HyperlinkRanges"/>.</summary>
+        public IReadOnlyList<SheetRange> HyperlinkRanges => _links;
+
+        private readonly List<SheetRange> _links = [];
+
+        /// <summary>The <c>MERGEDCELLS</c> ranges, for <see cref="SheetLayout.StatedMerges"/>.</summary>
+        /// <remarks>
+        /// The ranges rather than the spans the cells end up carrying: a merge whose whole block is
+        /// blank has an anchor that <see cref="BuildRow"/> drops as trailing padding, and it is
+        /// precisely that block a neighbour's long string must not run through.
+        /// </remarks>
+        public IReadOnlyList<SheetRange> StatedMerges
+        {
+            get
+            {
+                List<SheetRange> ranges = new(_merged.Count);
+                foreach ((int firstRow, int lastRow, int firstColumn, int lastColumn) in _merged)
+                    ranges.Add(new SheetRange(firstColumn, firstRow, lastColumn, lastRow));
+                return ranges;
+            }
         }
 
         private void Put(int row, int column, Cell cell)

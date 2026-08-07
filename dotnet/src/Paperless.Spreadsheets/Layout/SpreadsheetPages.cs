@@ -11,7 +11,8 @@ namespace Paperless.Spreadsheets.Layout;
 /// </summary>
 public sealed class SheetPage : IPage
 {
-    private readonly SheetPageDrawing _drawing;
+    private readonly SheetPageDrawing? _drawing;
+    private readonly SheetNotePageDrawing? _notes;
 
     internal SheetPage(int index, int number, SheetLayout sheet, SheetPagePlacement placement)
     {
@@ -21,6 +22,25 @@ public sealed class SheetPage : IPage
         Placement = placement;
         _drawing = new SheetPageDrawing(sheet, placement);
     }
+
+    /// <summary>A page listing the sheet's notes rather than its cells.</summary>
+    /// <remarks>
+    /// A separate constructor rather than a flag on <see cref="SheetPagePlacement"/>, because a
+    /// note page holds no block of cells and no scale: <c>ScPrintFunc::PrintNotes</c> shares only
+    /// the paper, the margins and the furniture with <c>PrintPage</c> and draws everything else
+    /// itself (<c>sc/source/ui/view/printfun.cxx:2004-2066</c>).
+    /// </remarks>
+    internal SheetPage(int index, int number, SheetLayout sheet, IReadOnlyList<PlacedNote> notes)
+    {
+        Index = index;
+        Number = number;
+        Sheet = sheet;
+        Placement = default;
+        _notes = new SheetNotePageDrawing(sheet, notes);
+    }
+
+    /// <summary>True when the page lists the sheet's notes rather than its cells.</summary>
+    public bool IsNotePage => _notes is not null;
 
     /// <inheritdoc/>
     public int Index { get; }
@@ -58,7 +78,11 @@ public sealed class SheetPage : IPage
     public int PageCount { get; internal set; } = 1;
 
     /// <inheritdoc/>
-    public void Draw(IDrawingSink sink) => _drawing.Draw(sink, HeaderContext());
+    public void Draw(IDrawingSink sink)
+    {
+        if (_notes is { } notes) notes.Draw(sink, HeaderContext());
+        else _drawing?.Draw(sink, HeaderContext());
+    }
 
     /// <summary>
     /// What this page's header and footer fields stand for.
@@ -175,6 +199,17 @@ public sealed class SpreadsheetPages : IPageSequence
                 pages.Add(new SheetPage(pages.Count, number, sheet, placement));
                 number++;
             }
+
+            // The sheet's notes are listed after its cells and before the next sheet, which is
+            // where `ScPrintFunc::CountNotePages` puts them: the note pages are counted onto the
+            // end of the table's own page count (`printfun.cxx:2557`) and numbered with them.
+            foreach (IReadOnlyList<PlacedNote> notes in SheetNotePages.Paginate(sheet))
+            {
+                if (options.MaxPages > 0 && pages.Count >= options.MaxPages) return pages;
+
+                pages.Add(new SheetPage(pages.Count, number, sheet, notes));
+                number++;
+            }
         }
 
         return pages;
@@ -189,7 +224,36 @@ public sealed class SpreadsheetPages : IPageSequence
 /// </remarks>
 /// <param name="First">The band's first column, hidden or not.</param>
 /// <param name="Left">Where the band starts, scaled.</param>
-internal readonly record struct ColumnBand(int First, Length Left);
+/// <param name="Right">
+/// Where it ends, scaled — Calc's <c>mnScrX + mnScrW</c> for the block it prints. A cell whose
+/// output area falls entirely outside those two edges is not drawn at all, which is the whole of
+/// what the pair is for; see <see cref="SheetTextContext"/>.
+/// </param>
+/// <param name="FirstVisible">
+/// The band's first column that is actually placed — Calc's <c>mnVisX1</c>, which is
+/// <c>mnX1</c> after <c>ScDocument::StripHidden</c> has walked it past any leading hidden
+/// columns (<c>sc/source/ui/view/output.cxx:198-202</c>). It is not the same question as
+/// <see cref="First"/>, and one rule turns on it: a covered cell may reach back to a merge's
+/// origin outside the band only when it is this column. Minus one when the band places nothing.
+/// </param>
+internal readonly record struct ColumnBand(
+    int First, Length Left, Length Right, int FirstVisible);
+
+/// <summary>One run of rows placed together, and where it starts.</summary>
+/// <remarks>
+/// The other axis of <see cref="ColumnBand"/>, and it exists for the same reason: a page's
+/// repeated rows and its own rows are two separate <c>ScPrintFunc::PrintArea</c> calls
+/// (<c>printfun.cxx:2321</c> and <c>:2331</c>), so each is its own <c>ScOutputData</c> with its own
+/// <c>mnVisY1</c>, and only a band's own first placed row may reach back to a merge's origin above
+/// it. It carries no right-hand edge because the page clips vertically on its own; the pair on
+/// <see cref="ColumnBand"/> exists for the horizontal overflow rules, which have no vertical twin.
+/// </remarks>
+/// <param name="Top">Where the band starts, scaled.</param>
+/// <param name="FirstVisible">
+/// The band's first row that is actually placed — Calc's <c>mnVisY1</c>, which is <c>mnY1</c>
+/// after the leading hidden rows have been walked past. Minus one when the band places nothing.
+/// </param>
+internal readonly record struct RowBand(Length Top, int FirstVisible);
 
 /// <summary>
 /// Places and draws the cells of one page.
@@ -242,7 +306,7 @@ internal sealed class SheetPageDrawing(SheetLayout sheet, SheetPagePlacement pla
         {
             DocPoint origin = BodyOrigin;
             List<PlacedColumn> columns = Columns(origin.X, out List<ColumnBand> bands);
-            List<PlacedRow> rows = Rows(origin.Y);
+            List<PlacedRow> rows = Rows(origin.Y, out List<RowBand> rowBands);
 
             _decoration.DrawBackgrounds(columns, rows, sink);
             _decoration.DrawBorders(columns, rows, sink);
@@ -251,15 +315,21 @@ internal sealed class SheetPageDrawing(SheetLayout sheet, SheetPagePlacement pla
             {
                 foreach (ColumnBand band in bands) DrawLeadIn(band, row, sink);
 
+                RowBand rowBand = BandOf(rowBands, row);
+
                 foreach (PlacedColumn column in columns)
                 {
                     ContentTableCell? cell = sheet.CellAt(row.Row, column.Column);
-                    if (cell is null) continue;
+                    if (cell is null)
+                    {
+                        DrawCoveredMerge(column, row, sink, BandOf(bands, column), rowBand);
+                        continue;
+                    }
 
                     string text = cell.GetText();
                     if (text.Length == 0) continue;
 
-                    DrawCell(text, cell, column, row, sink);
+                    DrawCell(text, cell, column, row, sink, BandOf(bands, column));
                 }
             }
 
@@ -394,41 +464,61 @@ internal sealed class SheetPageDrawing(SheetLayout sheet, SheetPagePlacement pla
 
         void Append(int first, int last)
         {
-            starts.Add(new ColumnBand(first, left + (offset * _scale)));
+            Length start = left + (offset * _scale);
+            int visible = -1;
 
             for (int column = first; column <= last; column++)
             {
                 if (sheet.Grid.Columns.IsHidden(column)) continue;
+                if (visible < 0) visible = column;
 
                 Length width = SheetDeviceUnits.Snap(sheet.Grid.Columns.SizeAt(column));
                 placed.Add(new PlacedColumn(column, left + (offset * _scale), width * _scale));
                 offset += width;
             }
+
+            starts.Add(new ColumnBand(first, start, left + (offset * _scale), visible));
         }
     }
 
     /// <summary>The rows on the page, repeated band first.</summary>
-    private List<PlacedRow> Rows(Length top)
+    private List<PlacedRow> Rows(Length top) => Rows(top, out _);
+
+    /// <inheritdoc cref="Rows(Length)"/>
+    /// <param name="top">Where the block starts.</param>
+    /// <param name="bands">
+    /// Receives where each band of rows begins and which row it really starts at, which is what a
+    /// merge reaching back above the page needs: only a band's own first placed row may do so.
+    /// </param>
+    private List<PlacedRow> Rows(Length top, out List<RowBand> bands)
     {
         List<PlacedRow> placed = [];
+        List<RowBand> starts = [];
         Length offset = Length.Zero;
 
         if (placement.RepeatRows is { IsValid: true } repeat)
             Append(repeat.FirstRow, repeat.LastRow);
 
         Append(placement.Cells.FirstRow, placement.Cells.LastRow);
+        bands = starts;
         return placed;
 
         void Append(int first, int last)
         {
+            Length start = top + (offset * _scale);
+            int visible = -1;
+
             for (int row = first; row <= last; row++)
             {
                 if (sheet.Grid.Rows.IsHidden(row)) continue;
+                if (visible < 0) visible = row;
 
                 Length height = SheetDeviceUnits.Snap(sheet.Grid.Rows.SizeAt(row));
                 placed.Add(new PlacedRow(row, top + (offset * _scale), height * _scale));
                 offset += height;
             }
+
+            starts.Add(new RowBand(start, visible));
         }
     }
 
@@ -453,11 +543,40 @@ internal sealed class SheetPageDrawing(SheetLayout sheet, SheetPagePlacement pla
     /// two-row merge beside it and Paperless drew all of it.
     /// </para>
     /// </remarks>
-    private SheetTextContext Context => new(
+    private SheetTextContext ContextFor(ColumnBand band) => new(
         _scale,
         (row, column) => SheetTextLayout.IsAvailable(sheet.CellAt(row, column))
                          && !sheet.IsMerged(row, column),
-        column => SheetDeviceUnits.Snap(sheet.Grid.Columns.PrintedSizeAt(column)) * _scale);
+        column => SheetDeviceUnits.Snap(sheet.Grid.Columns.PrintedSizeAt(column)) * _scale,
+        band.Left,
+        band.Right);
+
+    /// <summary>Which band a placed column belongs to, by where it sits on the paper.</summary>
+    /// <remarks>
+    /// The bands do not overlap and are appended left to right, so the last one starting at or
+    /// left of the column is the one that placed it. Asking by column <em>number</em> would be
+    /// ambiguous: a repeated column is in both ranges and drawn twice, in two different places.
+    /// </remarks>
+    private static ColumnBand BandOf(List<ColumnBand> bands, PlacedColumn column)
+    {
+        ColumnBand found = bands[0];
+        foreach (ColumnBand band in bands)
+        {
+            if (band.Left <= column.X) found = band;
+        }
+        return found;
+    }
+
+    /// <inheritdoc cref="BandOf(List{ColumnBand}, PlacedColumn)"/>
+    private static RowBand BandOf(List<RowBand> bands, PlacedRow row)
+    {
+        RowBand found = bands[0];
+        foreach (RowBand band in bands)
+        {
+            if (band.Top <= row.Y) found = band;
+        }
+        return found;
+    }
 
     /// <summary>
     /// Draws the cell left of a band whose text reaches into it, at the place it really is.
@@ -475,7 +594,7 @@ internal sealed class SheetPageDrawing(SheetLayout sheet, SheetPagePlacement pla
     /// </para>
     /// <para>
     /// The cell is placed at its true position, which is off the left of the block, and the text
-    /// then overflows rightwards under the ordinary rules — <see cref="Context"/> already measures
+    /// then overflows rightwards under the ordinary rules — <see cref="ContextFor"/> already measures
     /// that against the document grid rather than against the page, which is what makes the two
     /// halves of one string line up across the break.
     /// </para>
@@ -510,11 +629,7 @@ internal sealed class SheetPageDrawing(SheetLayout sheet, SheetPagePlacement pla
         // merged block's own origin is what draws its text and it may be neither of these cells.
         for (int between = at; between <= band.First; between++)
         {
-            if (sheet.CellAt(row.Row, between) is { } spanning
-                && (spanning.ColumnSpan > 1 || spanning.RowSpan > 1))
-            {
-                return;
-            }
+            if (sheet.IsMerged(row.Row, between)) return;
         }
 
         Length back = Length.Zero;
@@ -529,20 +644,153 @@ internal sealed class SheetPageDrawing(SheetLayout sheet, SheetPagePlacement pla
                 band.Left - (back * _scale),
                 SheetDeviceUnits.Snap(sheet.Grid.Columns.PrintedSizeAt(at)) * _scale),
             row,
-            sink);
+            sink,
+            band);
+    }
+
+    /// <summary>
+    /// Draws a merged block from a covered cell, when the cell that anchors it is not on the
+    /// page to draw it itself.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Four situations put a merge's origin out of reach and they are one rule, because a block is
+    /// covered on two axes and both behave the same way. A hidden column or a hidden row is not
+    /// placed on the page at all, so a merge anchored inside one is never reached; and a merge
+    /// straddling a page break — across the paper or down it — has its origin on the *previous*
+    /// page, so the page carrying its tail holds nothing but covered cells. Either way the whole
+    /// block vanishes, however much of the page it goes on to cover.
+    /// </para>
+    /// <para>
+    /// Calc reaches it from the other end: every covered cell asks
+    /// <c>ScOutputData::GetMergeOrigin</c> (<c>output2.cxx:953</c>) for the block's origin, and the
+    /// two walks — left while <c>bHOverlapped</c> (<c>:989</c>), then up while <c>bVOverlapped</c>
+    /// (<c>:1008</c>) — are governed by one flag. <c>bDoMerge</c> is <c>bIsLeft = (nX == mnVisX1)</c>
+    /// for a horizontally overlapped cell, <c>bIsTop = (nY == mnVisY1)</c> for a vertically
+    /// overlapped one, and both together for a cell covered on both axes (<c>:958-983</c>): the
+    /// block's first <em>visible</em> column and row on the page. When it is set the walk runs back
+    /// to the origin through anything; when it is not, the walk gives up the moment it steps onto a
+    /// column or row that is not hidden —
+    /// <c>if (!bDoMerge &amp;&amp; !bHidden) return false;</c> (<c>:993</c>, <c>:1012</c>) — because
+    /// that position is either the origin itself or a nearer covered cell, and one of them will draw
+    /// the block instead.
+    /// </para>
+    /// <para>
+    /// So exactly one cell of a block ever draws it on a given page: the block's first visible
+    /// column and row when the origin is off the page above or to the left, and otherwise the
+    /// nearest cell whose path back to the origin is entirely hidden. Every page a straddling merge
+    /// touches draws it, each from the origin's true position, and each shows the part that lands on
+    /// the paper — which is Calc's behaviour and the reason a long merged heading reads continuously
+    /// across a column break and a tall merged description carries on down the next sheet of paper.
+    /// </para>
+    /// <para>
+    /// The origin is placed at its true position, reached by subtracting the printed size of every
+    /// column and row between — which is <c>GetOutputArea</c>'s own two walks back from
+    /// <c>nX</c>/<c>nArrY</c> to <c>nCellX</c>/<c>nCellY</c> (<c>output2.cxx:1216-1254</c>), and puts
+    /// the origin above the top of the paper when that is where it is. A hidden column or row
+    /// contributes nothing, so a merge anchored in one still starts exactly where the first column
+    /// or row it can be seen in starts.
+    /// </para>
+    /// <para>
+    /// Measured on <c>RPD 155 REDAC SCHEDULE 2014-04-02.xls</c>, whose <c>Funds ($000)</c>
+    /// heading is a four-column merge anchored in a collapsed column; on <c>P1636e.xls</c>, whose
+    /// title and eight footnotes are each merged across all six columns while the page break falls
+    /// after the third; and on <c>RegChangeReport.xlsx</c>, whose regulatory descriptions are merges
+    /// up to thirty-five rows tall, so four of its twelve pages hold nothing but the continuation of
+    /// a block anchored on the page before.
+    /// </para>
+    /// </remarks>
+    private void DrawCoveredMerge(
+        PlacedColumn column, PlacedRow row, IDrawingSink sink, ColumnBand band, RowBand rows)
+    {
+        // Only a covered position reaches back at all. An ordinary empty cell has no origin to
+        // find, and walking back from one would drag an unrelated neighbour onto the page.
+        if (MergeOver(row.Row, column.Column) is not { } merge) return;
+
+        bool horizontal = column.Column > merge.FirstColumn;
+        bool vertical = row.Row > merge.FirstRow;
+
+        // The block's own anchor, which holds a cell this never sees: there is nowhere to walk to.
+        if (!horizontal && !vertical) return;
+
+        bool left = column.Column == band.FirstVisible;
+        bool top = row.Row == rows.FirstVisible;
+        bool doMerge = horizontal && vertical ? left && top : horizontal ? left : top;
+
+        Length back = Length.Zero;
+        for (int at = column.Column - 1; at >= merge.FirstColumn; at--)
+        {
+            if (!doMerge && !sheet.Grid.Columns.IsHidden(at)) return;
+            back += SheetDeviceUnits.Snap(sheet.Grid.Columns.PrintedSizeAt(at)) * _scale;
+        }
+
+        Length up = Length.Zero;
+        for (int at = row.Row - 1; at >= merge.FirstRow; at--)
+        {
+            if (!doMerge && !sheet.Grid.Rows.IsHidden(at)) return;
+            up += SheetDeviceUnits.Snap(sheet.Grid.Rows.PrintedSizeAt(at)) * _scale;
+        }
+
+        // A merge the file states whose anchor holds nothing — an empty block, or one whose anchor
+        // was dropped as trailing padding — has no text to draw and no cell to draw it as.
+        if (sheet.CellAt(merge.FirstRow, merge.FirstColumn) is not { } origin) return;
+
+        string text = origin.GetText();
+        if (text.Length == 0) return;
+
+        DrawCell(
+            text,
+            origin,
+            new PlacedColumn(
+                merge.FirstColumn,
+                column.X - back,
+                SheetDeviceUnits.Snap(
+                    sheet.Grid.Columns.PrintedSizeAt(merge.FirstColumn)) * _scale),
+            new PlacedRow(
+                merge.FirstRow,
+                row.Y - up,
+                SheetDeviceUnits.Snap(sheet.Grid.Rows.PrintedSizeAt(merge.FirstRow)) * _scale),
+            sink,
+            band);
+    }
+
+    /// <summary>The merged block covering a position, or null when nothing does.</summary>
+    /// <remarks>
+    /// The block itself rather than <see cref="SheetLayout.IsMerged"/>'s yes-or-no, because both
+    /// walks back need to know where to stop and which axes are covered at all — Calc reads the
+    /// same two facts off <c>ATTR_MERGE_FLAG</c>'s <c>ScMF::Hor</c> and <c>ScMF::Ver</c> bits.
+    /// </remarks>
+    private SheetRange? MergeOver(int row, int column)
+    {
+        foreach (SheetRange merge in sheet.MergedRanges)
+        {
+            if (row >= merge.FirstRow && row <= merge.LastRow
+                && column >= merge.FirstColumn && column <= merge.LastColumn)
+            {
+                return merge;
+            }
+        }
+
+        return null;
     }
 
     private void DrawCell(
-        string text, ContentTableCell cell, PlacedColumn column, PlacedRow row, IDrawingSink sink)
+        string text,
+        ContentTableCell cell,
+        PlacedColumn column,
+        PlacedRow row,
+        IDrawingSink sink,
+        ColumnBand band)
     {
-        SheetTextLayout.Draw(sink, Context, new SheetCellText(
+        SheetTextLayout.Draw(sink, ContextFor(band), new SheetCellText(
             text,
             cell.Value,
             sheet.Formats.At(row.Row, column.Column),
             row.Row,
             column.Column,
             new DocRect(column.X, row.Y, SpanWidth(cell, column), SpanHeight(cell, row)),
-            sheet.RichText.At(row.Row, column.Column, text)));
+            sheet.RichText.At(row.Row, column.Column, text),
+            sheet.HoldsField(row.Row, column.Column)));
     }
 
     /// <summary>How wide a cell is, a merge's further columns included.</summary>

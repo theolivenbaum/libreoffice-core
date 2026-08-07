@@ -1,3 +1,4 @@
+using System.Globalization;
 using Paperless.Core.Graphics;
 using Paperless.Core.Units;
 using Paperless.Text.Layout;
@@ -66,6 +67,40 @@ public readonly record struct Ww8LayoutFormat
     public int? SpaceAfter { get; init; }
 
     /// <summary>
+    /// The twips <c>sprmPFDyaBeforeAuto</c> and <c>sprmPFDyaAfterAuto</c> stand for.
+    /// </summary>
+    /// <remarks>
+    /// Fourteen points, and not a property of the paragraph: WW8 states auto-spacing as a flag and
+    /// LibreOffice substitutes a constant for it in <c>GetParagraphAutoSpace</c>
+    /// (<c>sw/source/filter/ww8/ww8par6.cxx:4609</c>) with the comment "Seems to be always 14points in
+    /// this case". It is the same number the DOCX path uses for <c>w:beforeAutospacing</c>, because it
+    /// is the same rule reached through a different spelling.
+    /// </remarks>
+    public const int HtmlAutoSpacingTwips = 280;
+
+    /// <summary>
+    /// What the same two sprms stand for once <c>fDontUseHTMLAutoSpacing</c> is set.
+    /// </summary>
+    /// <remarks>
+    /// Five points. The flag does not mean "no spacing" — it means the pre-HTML value, which is what
+    /// the other branch of <c>GetParagraphAutoSpace</c> returns.
+    /// </remarks>
+    public const int WordAutoSpacingTwips = 100;
+
+    /// <summary>
+    /// True when the space above came from <c>sprmPFDyaBeforeAuto</c> rather than being stated.
+    /// </summary>
+    /// <remarks>
+    /// Kept apart from <see cref="SpaceBefore"/> because the suppression rules ask how the margin was
+    /// arrived at, not what it is: LibreOffice zeroes an <em>auto</em> margin at a cell's top edge and on
+    /// the document's first paragraph, and leaves a stated one of the same size alone.
+    /// </remarks>
+    public bool? HasAutoSpaceBefore { get; init; }
+
+    /// <inheritdoc cref="HasAutoSpaceBefore"/>
+    public bool? HasAutoSpaceAfter { get; init; }
+
+    /// <summary>
     /// <c>sprmPDyaLine</c>'s <c>dyaLine</c>: the spacing, whose sign is its mode.
     /// </summary>
     /// <remarks>
@@ -105,6 +140,15 @@ public readonly record struct Ww8LayoutFormat
     /// <summary>True when the space between two paragraphs of the same style is suppressed.</summary>
     public bool? HasContextualSpacing { get; init; }
 
+    /// <summary>
+    /// The paragraph style's <c>istd</c>, for the "same style" half of contextual spacing.
+    /// </summary>
+    /// <remarks>
+    /// Not a layout sprm but the index the sprms were resolved through, so it is set by the resolver
+    /// rather than by <c>ApplyLayoutSprms</c>. See <see cref="ParagraphFormat.StyleKey"/>.
+    /// </remarks>
+    public ushort? StyleIndex { get; init; }
+
     /// <summary>The font size in half-points, from <c>sprmCHps</c>.</summary>
     public int? FontSizeHalfPoints { get; init; }
 
@@ -116,6 +160,60 @@ public readonly record struct Ww8LayoutFormat
 
     /// <summary>True when it is italic.</summary>
     public bool? IsItalic { get; init; }
+
+    /// <summary>True when <c>sprmCFCaps</c> draws the run in capitals.</summary>
+    public bool? IsCapitalised { get; init; }
+
+    /// <summary>True when <c>sprmCFSmallCaps</c> draws it in small capitals.</summary>
+    public bool? IsSmallCapitalised { get; init; }
+
+    /// <summary>
+    /// The case the run is drawn in, from the two toggles above.
+    /// </summary>
+    /// <remarks>
+    /// Full capitals win where a document sets both, because <c>SvxCaseMapItem</c> holds one value and
+    /// LibreOffice's <c>SwWW8ImplReader</c> applies <c>sprmCFCaps</c> after <c>sprmCFSmallCaps</c> in
+    /// sprm order — which is the order they appear in a CHPX.
+    /// </remarks>
+    public Layout.PageCaseMap CaseMap
+        => IsCapitalised == true ? Layout.PageCaseMap.Uppercase
+            : IsSmallCapitalised == true ? Layout.PageCaseMap.SmallCaps
+            : Layout.PageCaseMap.None;
+
+    /// <summary>
+    /// True when <c>sprmCKul</c> asks for a rule under the run.
+    /// </summary>
+    /// <remarks>
+    /// Not a toggle and not a boolean: the operand is a <c>kul</c> naming the line's <em>style</em>, of
+    /// which nought is "none" and 255 is "none, and cancel whatever the style said". Every other value
+    /// is some kind of line, and all of them are drawn as one — <c>SwWW8ImplReader::Read_Underline</c>
+    /// (<c>sw/source/filter/ww8/ww8par6.cxx</c>) maps eleven <c>kul</c> values onto seven
+    /// <c>FontLineStyle</c>s, and nothing below this models more than one.
+    /// </remarks>
+    public bool? IsUnderlined { get; init; }
+
+    /// <summary>
+    /// True when <c>sprmCFStrike</c> or <c>sprmCFDStrike</c> draws a rule through the run.
+    /// </summary>
+    /// <remarks>
+    /// Two sprms and one flag, matching what the extraction half of this reader already does with them:
+    /// the doubled form is a second line rather than a different decoration, and the page model carries
+    /// one rule.
+    /// </remarks>
+    public bool? IsStruckThrough { get; init; }
+
+    /// <summary>
+    /// True when the run asks for pair kerning, from <c>sprmCHpsKern</c>.
+    /// </summary>
+    /// <remarks>
+    /// The operand is a font size in half-points — the size at or above which Word kerns — and
+    /// LibreOffice keeps only whether it is nonzero:
+    /// <c>NewAttr(SvxAutoKernItem(static_cast&lt;bool&gt;(nAutoKern), RES_CHRATR_AUTOKERN))</c>
+    /// (<c>SwWW8ImplReader::Read_FontKern</c>, <c>sw/source/filter/ww8/ww8par6.cxx:4184</c>). RTF's
+    /// <c>\kerning</c> is the same statement and lands here too, which is why this is on the shared
+    /// format rather than in either reader.
+    /// </remarks>
+    public bool? AutoKerning { get; init; }
 
     /// <summary>The Windows language id, from <c>sprmCRgLid0</c>.</summary>
     public int? LanguageId { get; init; }
@@ -130,6 +228,17 @@ public readonly record struct Ww8LayoutFormat
     /// red word blue.
     /// </remarks>
     public Colour? Colour { get; init; }
+
+    /// <summary>
+    /// The band drawn behind the run, or null when it has none.
+    /// </summary>
+    /// <remarks>
+    /// Word's highlighter, <c>sprmCHighlight</c> — an index into the same seventeen-colour palette
+    /// <c>sprmCIco</c> uses, whose nought entry is "automatic" and means <em>no</em> band here rather
+    /// than the document's default colour. Distinct from cell or paragraph shading, which is a property
+    /// of the box rather than of the characters.
+    /// </remarks>
+    public Colour? Highlight { get; init; }
 
     /// <summary>
     /// The superscript or subscript <c>sprmCIss</c> asks for, or null when the run states neither.
@@ -150,7 +259,19 @@ public readonly record struct Ww8LayoutFormat
     /// </param>
     public ParagraphFormat ToParagraphFormat(Length emSize)
     {
-        bool widows = HasWidowControl ?? false;
+        // On unless the document turns it off, which is Word's default and not the struct's. A DOC
+        // states widow control with sprmPFWidowControl and most never state it at all: the flag lives
+        // on the root paragraph style, and Word writes a style's properties only where they differ
+        // from the built-in defaults. LibreOffice restores the same default explicitly —
+        // WW8RStyle::Set1StyleDefaults (sw/source/filter/ww8/ww8par2.cxx:3751) puts SvxWidowsItem(2)
+        // and SvxOrphansItem(2) on every paragraph style with no parent that did not set the sprm,
+        // and its flat-ODF export of a document whose Normal style carries no sprms at all shows
+        // fo:widows="2" on Standard.
+        //
+        // Reading the absence as "off" is not a small difference: it lets a paragraph's last line
+        // stand alone at the top of a page, and a page that keeps two lines it should have pushed
+        // shifts every paragraph after it.
+        bool widows = HasWidowControl ?? true;
 
         bool rightToLeft = IsRightToLeft ?? false;
 
@@ -165,6 +286,7 @@ public readonly record struct Ww8LayoutFormat
             SpaceBefore = Twips(SpaceBefore),
             SpaceAfter = Twips(SpaceAfter),
             HasContextualSpacing = HasContextualSpacing ?? false,
+            StyleKey = StyleIndex?.ToString(CultureInfo.InvariantCulture),
             LineSpacing = Spacing(),
             KeepWithNext = KeepWithNext ?? false,
             KeepTogether = KeepTogether ?? false,

@@ -78,8 +78,13 @@ namespace Paperless.WordProcessing.Ooxml;
 ///   <item>
 ///     <term><c>w:usePrinterMetrics</c></term>
 ///     <description>
-///     <b>Identified and inert.</b> It disables printer-independent layout, which has no meaning
-///     without a printer; headless LibreOffice ignores it and so does this.
+///     <b>Read and applied.</b> It was recorded here as inert on the grounds that headless
+///     LibreOffice ignores it, and that is refuted by the importer:
+///     <c>DomainMapper_Impl::ApplySettingsTable</c>
+///     (<c>sw/source/writerfilter/dmapper/DomainMapper_Impl.cxx</c>:10173) sets
+///     <c>PrinterIndependentLayout::DISABLED</c> from it, which is the same state
+///     <c>WW8Dop::fUsePrinterMetrics</c> puts a DOC into. So the metrics are rounded onto a
+///     300 dpi grid, exactly as <c>DocReader</c> already does for the binary format.
 ///     </description>
 ///   </item>
 ///   <item>
@@ -116,14 +121,65 @@ namespace Paperless.WordProcessing.Ooxml;
 /// True when external leading is suppressed. Read and reported; see the remarks for why nothing
 /// consumes it.
 /// </param>
+/// <param name="UsesPrinterMetrics">
+/// True when the document asks to be measured on a printer's pixel grid rather than
+/// printer-independently, so every font metric is rounded to a 300 dpi step.
+/// </param>
+/// <param name="HasSettingsPart">
+/// True when the package actually carried a <c>word/settings.xml</c>. Distinct from every flag
+/// being off; <see cref="AddsParagraphSpacing"/> is the one place the difference shows.
+/// </param>
 public sealed record WordCompatibility(
     int CompatibilityMode,
     bool DoNotUseHtmlParagraphAutoSpacing,
     bool DoNotExpandShiftReturn,
-    bool NoLeading)
+    bool NoLeading,
+    bool UsesPrinterMetrics,
+    bool HasSettingsPart)
 {
     /// <summary>What a package with no settings part gets: every flag off.</summary>
-    public static WordCompatibility None { get; } = new(-1, false, false, false);
+    public static WordCompatibility None { get; } = new(-1, false, false, false, false, false);
+
+    /// <summary>
+    /// True when two consecutive paragraphs' spacings add rather than the larger one winning.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Writer's <c>PARA_SPACE_MAX</c>, whose name says the opposite of what it does: set, the two
+    /// spacings are summed (<c>SwFlowFrame::CalcUpperSpace</c>,
+    /// <c>sw/source/core/layout/flowfrm.cxx</c>:1652); clear, the larger wins.
+    /// </para>
+    /// <para>
+    /// The DOCX import writes it from <c>w:doNotUseHTMLParagraphAutoSpacing</c> — as
+    /// <c>AddParaTableSpacing</c>, which <c>SwXDocumentSettings.cxx</c>:449 turns back into
+    /// <c>PARA_SPACE_MAX</c> — so an ordinary Word document takes the larger, since Word's own
+    /// exporter writes that element only when the flag is on.
+    /// </para>
+    /// <para>
+    /// <b>Unless there is no settings part at all.</b> That write lives in
+    /// <c>DomainMapper_Impl::ApplySettingsTable</c>, which returns at its first line when the
+    /// document has no settings table (<c>DomainMapper_Impl.cxx</c>:10124), leaving the setting at
+    /// the <em>application's</em> configured <c>AddSpacing</c>, whose shipped default is
+    /// <c>true</c> (<c>officecfg/registry/schema/org/openoffice/Office/Compatibility.xcs</c>). So a
+    /// package with no <c>word/settings.xml</c> adds where every other DOCX collapses.
+    /// </para>
+    /// <para>
+    /// Measured on eight paragraphs each carrying 12 pt of space-before and 8 pt of space-after on
+    /// 12 pt exact lines, so a boundary is 24 pt collapsed and 32 pt added. With a settings part —
+    /// present but empty, or naming only <c>compatibilityMode</c> — LibreOffice 24.2.7.2 puts every
+    /// boundary at 24.00 pt; with the part removed entirely, at 32.00 pt; and with the flag added
+    /// back to a document that has the part, at 32.00 pt again. Those are
+    /// <c>paragraph-spacing-settings.docx</c> and <c>paragraph-spacing-no-settings.docx</c>.
+    /// </para>
+    /// <para>
+    /// Narrow, and worth saying so: <b>no document on the 200-file words corpus lacks a settings
+    /// part</b>, so this changes nothing there. It is here because the case is cheap to get right
+    /// and expensive to rediscover — a synthetic fixture written without the part is the standard
+    /// way to measure this rule backwards, and doing so is what produced the claim that DOCX adds
+    /// in general.
+    /// </para>
+    /// </remarks>
+    public bool AddsParagraphSpacing => !HasSettingsPart || DoNotUseHtmlParagraphAutoSpacing;
 
     /// <summary>Reads the compatibility block out of a <c>w:settings</c> root.</summary>
     /// <param name="settings">The <c>w:settings</c> element, or null.</param>
@@ -137,7 +193,9 @@ public sealed record WordCompatibility(
             Mode(compat),
             Word.IsOn(Word.Child(compat, "doNotUseHTMLParagraphAutoSpacing")),
             Word.IsOn(Word.Child(compat, "doNotExpandShiftReturn")),
-            Word.IsOn(Word.Child(compat, "noLeading")));
+            Word.IsOn(Word.Child(compat, "noLeading")),
+            Word.IsOn(Word.Child(compat, "usePrinterMetrics")),
+            HasSettingsPart: true);
     }
 
     /// <summary>

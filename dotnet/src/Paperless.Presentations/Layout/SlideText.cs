@@ -82,13 +82,23 @@ public sealed record SlideTextBody
     /// </summary>
     /// <remarks>
     /// <para>
-    /// When this is set the layouter solves the fit itself and <see cref="FontScale"/> and
-    /// <see cref="LineSpaceReduction"/> are <em>ignored</em>, because that is what the reference
-    /// does: LibreOffice 24.2 reads <c>a:normAutofit/@fontScale</c> into a field
-    /// (<c>oox/source/drawingml/textbodypropertiescontext.cxx:240</c>) and never reads that field
+    /// When this is set the layouter solves the fit itself and <see cref="FontScale"/> is
+    /// <em>ignored</em>, because that is what the reference does: LibreOffice 24.2 reads
+    /// <c>a:normAutofit/@fontScale</c> into a field
+    /// (<c>oox/source/drawingml/textbodypropertiescontext.cxx:236</c>) and never reads that field
     /// again, so the authoring application's stated answer is discarded and
     /// <c>SdrTextObj::autoFitTextForCompatibility</c> searches for its own. See
     /// <see cref="SlideTextLayout"/> for the search and for what it is measured against.
+    /// </para>
+    /// <para>
+    /// <c>a:normAutofit/@lnSpcReduction</c> is modelled nowhere at all, which is deliberate: the
+    /// same handler does not read it either — the <c>normAutofit</c> case reads
+    /// <c>XML_fontScale</c> and nothing else — so a body carrying one must lay out exactly as a
+    /// body that does not. Paperless did apply it, and it was worth 20 per cent of a line on the
+    /// one shape in <c>slides/batch-001</c> that states it: the subtitle of
+    /// <c>BMFE-06-03 (Gerflor) Smoke Density and Toxicity.pptx</c> shrank its lines, so the
+    /// fit search thought the text nearly fitted unshrunk and drew it at 20 pt where the
+    /// reference draws 15.
     /// </para>
     /// <para>
     /// This is a text-only fit. <c>a:spAutoFit</c> is the other direction — the shape grows to its
@@ -107,8 +117,6 @@ public sealed record SlideTextBody
     /// </remarks>
     public double FontScale { get; init; } = 1.0;
 
-    /// <summary>The fraction <c>a:normAutofit/@lnSpcReduction</c> takes off the line spacing.</summary>
-    public double LineSpaceReduction { get; init; }
 
     /// <summary>
     /// Whether the text wraps at the shape's width.
@@ -166,7 +174,24 @@ public sealed record SlideParagraph(
     Length StartIndent = default,
     Length FirstLineIndent = default,
     string? Language = null,
-    SlideMarker? Marker = null);
+    SlideMarker? Marker = null)
+{
+    /// <summary>The slide formats' own default tab distance: one inch.</summary>
+    public static Length DefaultTabDistance { get; } = Length.FromEmu(Length.EmuPerInch);
+
+    /// <summary>
+    /// How far apart the stops a tab advances to are, when the paragraph states none of its own.
+    /// </summary>
+    /// <remarks>
+    /// <strong>A slide's is an inch, not the half inch a word processor uses.</strong> PowerPoint
+    /// stores it as 0x240 master units and DrawingML as <c>a:defTabSz</c> defaulting to 914400
+    /// EMU, and both are one inch; <see cref="ParagraphFormat.DefaultTabInterval"/> defaults to
+    /// Word's 720 twips because that is what a document is. The difference compounds: a paragraph
+    /// positioned by three tabs lands an inch and a half to the left of where it belongs, which on
+    /// a ten-inch slide is fifteen per cent of the page.
+    /// </remarks>
+    public Length DefaultTabInterval { get; init; } = DefaultTabDistance;
+}
 
 /// <summary>
 /// The bullet or number a paragraph is labelled with.
@@ -208,6 +233,64 @@ public readonly record struct SlideMarker(
     Colour? Colour = null,
     bool IsSymbol = true);
 
+/// <summary>
+/// A run raised or lowered off its baseline, and shrunk while it is up there.
+/// </summary>
+/// <remarks>
+/// <para>
+/// Two numbers rather than one because a slide's formats state two: DrawingML's
+/// <c>a:rPr/@baseline</c> gives the offset alone and the importer supplies the size
+/// (<c>oox/source/drawingml/textcharacterproperties.cxx:196-199</c>), and a binary PowerPoint's
+/// <c>PPT_CharAttr_Escapement</c> does the same
+/// (<c>filter/source/msfilter/svdfppt.cxx:5764-5775</c>). Both end as one
+/// <c>SvxEscapementItem(nEsc, nProp)</c>, which is this pair.
+/// </para>
+/// <para>
+/// <strong>The percentage is of the em size here, not of the font's height.</strong> That is
+/// where a slide differs from a word processor: EditEngine draws the run at
+/// <c>GetFontSize().Height() × nEsc / 100</c> above the pen
+/// (<c>editeng/source/items/svxfont.cxx:549-558</c>), where Writer's <c>swfont.cxx</c> takes the
+/// same percentage of the unshrunk font's ascent-plus-descent. Using the wrong one of the two
+/// misplaces a superscript by about a fifth of its rise.
+/// </para>
+/// <para>
+/// The size matters more than the offset does, because it moves line breaks: a 12 pt run set at
+/// 58% is 42% narrower, so a line that fits with the shrink wraps without it. Measured on
+/// <c>slides/batch-003/pptx/NCW-2024-Guide-.pptx</c>, whose dates are written
+/// <c>5<sup>th</sup> March</c>: drawing the ordinals full size wraps one line of a text box that
+/// already overflows the slide, which pushes its last paragraph off the bottom edge.
+/// </para>
+/// </remarks>
+/// <param name="Percent">
+/// How far the run moves, as a percentage of its em size; positive raises it and negative lowers
+/// it.
+/// </param>
+/// <param name="Proportion">
+/// The size the run is set at, as a percentage of the size it would otherwise take. Zero and 100
+/// both mean no change, so a default-constructed value is "no escapement at all".
+/// </param>
+public readonly record struct SlideEscapement(int Percent, int Proportion)
+{
+    /// <summary>The size an escaped run is set at when the file states only an offset.</summary>
+    /// <remarks><c>DFLT_ESC_PROP</c>, <c>include/editeng/escapementitem.hxx:30</c>.</remarks>
+    public const int AutomaticProportion = 58;
+
+    /// <summary>Neither moved nor resized.</summary>
+    public static SlideEscapement None => default;
+
+    /// <summary>True when the run sits on its baseline at its own size.</summary>
+    public bool IsNone => Percent == 0 && Proportion is 0 or 100;
+
+    /// <summary>The size the run is actually set at, given the size it would otherwise take.</summary>
+    public Length SizeOf(Length emSize)
+        => Proportion is 0 or 100 ? emSize : emSize * (Proportion / 100.0);
+
+    /// <summary>How far the run sits above its baseline, negative for a subscript.</summary>
+    /// <param name="emSize">The size the run would take were it not escaped.</param>
+    public Length RiseOf(Length emSize)
+        => Percent == 0 ? Length.Zero : emSize * (Percent / 100.0);
+}
+
 /// <summary>One run of a paragraph: a range of its text with its own face, size and colour.</summary>
 /// <param name="Start">The run's first character.</param>
 /// <param name="Length">How many characters it covers.</param>
@@ -216,6 +299,22 @@ public readonly record struct SlideMarker(
 /// <param name="Weight">The weight on the OpenType 1–1000 scale.</param>
 /// <param name="IsItalic">Whether it is italic.</param>
 /// <param name="Colour">The colour it is drawn in.</param>
+/// <param name="Tracking">
+/// A fixed distance added between the run's characters — <c>a:rPr/@spc</c>, stated in hundredths
+/// of a point and commonly negative. See <see cref="Paperless.Text.Layout.FormattedRun.Tracking"/>
+/// for how it is charged.
+/// </param>
+/// <param name="IsUnderlined">
+/// Whether a rule is drawn under it. A decoration rather than a glyph in every format here —
+/// <c>a:rPr/@u</c> in DrawingML, bit 2 of a PPT character-property mask — so it moves no line
+/// break and is drawn from the face's own <c>post</c> metrics after the text is placed.
+/// </param>
+/// <param name="IsStruckThrough">Whether a rule is drawn through it.</param>
+/// <param name="Escapement">
+/// How far off its baseline the run sits and how much it shrinks to sit there — a superscript or
+/// a subscript. Unlike the decorations above, this <em>does</em> move line breaks, because the
+/// shrink is what makes the run narrower.
+/// </param>
 public readonly record struct SlideTextRun(
     int Start,
     int Length,
@@ -223,7 +322,11 @@ public readonly record struct SlideTextRun(
     Length Size,
     int Weight,
     bool IsItalic,
-    Colour Colour)
+    Colour Colour,
+    Length Tracking = default,
+    bool IsUnderlined = false,
+    bool IsStruckThrough = false,
+    SlideEscapement Escapement = default)
 {
     /// <summary>One past the run's last character.</summary>
     public int End => Start + Length;
