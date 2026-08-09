@@ -1181,6 +1181,24 @@ internal sealed class EmfReader
     /// (<c>mtftools.cxx:1948-1954</c>) because there is no way to tell which of the trailing
     /// points is the odd one out.
     /// </remarks>
+    /// <remarks>
+    /// <para>
+    /// <strong>A <c>…BezierTo</c> record inside a recorded path must not start a subpath.</strong>
+    /// <c>EMR_POLYBEZIERTO</c> continues the figure the path already has open — that is the whole
+    /// difference between it and <c>EMR_POLYBEZIER</c> — so emitting a <c>MoveTo</c> for it cuts
+    /// one glyph outline into one open fragment per record. Filling the result with the even-odd
+    /// rule then draws a blot rather than a letter, which is what a whole class of metafile text
+    /// looked like: an EMF that renders its Calibri as outlines wrote a <c>ti</c> ligature as
+    /// nine <c>PolyBezierTo16</c> records inside one <c>BeginPath</c>/<c>EndPath</c> pair, and we
+    /// drew a solid box in the middle of every word containing one.
+    /// </para>
+    /// <para>
+    /// <see cref="Polyline"/> above already made this distinction and this did not, which is why
+    /// a metafile drawing straight-edged outlines came out right and a curved one did not. The
+    /// spurious start point is also visibly *not* the current point — it arrives through
+    /// <see cref="Unmap"/>'s numeric inversion — so the fragments do not even abut.
+    /// </para>
+    /// </remarks>
     private void Bezier(List<DocPoint>? points, bool continueFrom)
     {
         if (points is not { Count: > 0 }) return;
@@ -1197,7 +1215,10 @@ internal sealed class EmfReader
 
         if (_context.Path.IsRecording)
         {
-            _context.Path.MoveTo(whole[0]);
+            // CubicTo opens a subpath at `from` when none is open, so a leading BezierTo with no
+            // MoveTo before it still starts one — at the current position, which is right.
+            if (!continueFrom) _context.Path.MoveTo(whole[0]);
+
             for (int i = 1; i + 2 < whole.Count; i += 3)
             {
                 _context.Path.CubicTo(whole[i - 1], whole[i], whole[i + 1], whole[i + 2]);

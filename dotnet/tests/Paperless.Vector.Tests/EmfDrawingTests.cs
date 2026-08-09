@@ -124,6 +124,52 @@ public class EmfDrawingTests
     }
 
     [Fact]
+    public void ABezierToInsideARecordedPathContinuesTheFigureRatherThanStartingOne()
+    {
+        // EMR_POLYBEZIERTO continues the open figure — that is the whole difference between it
+        // and EMR_POLYBEZIER. Emitting a MoveTo for each one cuts a single outline into one open
+        // fragment per record, which an even-odd fill then draws as a blot. A real EMF writes a
+        // Calibri "ti" ligature as nine of these inside one BeginPath/EndPath pair.
+        Recorder recorder = Draw(Page()
+            .SolidBrush(1, 0, 0, 0)
+            .Select(1)
+            .Record(EmfFunction.BeginPath)
+            .Record(EmfFunction.MoveToEx, 0, 0)
+            .Poly16(EmfFunction.PolyBezierTo16, (0, 2 * Mm), (2 * Mm, 4 * Mm), (4 * Mm, 4 * Mm))
+            .Poly16(EmfFunction.PolyBezierTo16, (6 * Mm, 4 * Mm), (8 * Mm, 2 * Mm), (8 * Mm, 0))
+            .Record(EmfFunction.CloseFigure)
+            .Record(EmfFunction.EndPath)
+            .Record(EmfFunction.FillPath));
+
+        IReadOnlyList<PathCommand> path = recorder.FilledPaths.ShouldHaveSingleItem();
+
+        // One figure: the leading MoveTo and nothing else. With the defect there are three.
+        path.Count(c => c.Verb == PathVerb.MoveTo).ShouldBe(1);
+        path.Count(c => c.Verb == PathVerb.CubicTo).ShouldBe(2);
+    }
+
+    [Fact]
+    public void ABezierNotEndingInToStillStartsItsOwnFigure()
+    {
+        // The other half of the same rule, so that removing the distinction fails a test in both
+        // directions: EMR_POLYBEZIER16 states its own start point and begins a subpath.
+        Recorder recorder = Draw(Page()
+            .SolidBrush(1, 0, 0, 0)
+            .Select(1)
+            .Record(EmfFunction.BeginPath)
+            .Record(EmfFunction.MoveToEx, 0, 0)
+            .Record(EmfFunction.LineTo, 1 * Mm, 0)
+            .Poly16(
+                EmfFunction.PolyBezier16,
+                (4 * Mm, 0), (4 * Mm, 2 * Mm), (6 * Mm, 4 * Mm), (8 * Mm, 4 * Mm))
+            .Record(EmfFunction.EndPath)
+            .Record(EmfFunction.FillPath));
+
+        IReadOnlyList<PathCommand> path = recorder.FilledPaths.ShouldHaveSingleItem();
+        path.Count(c => c.Verb == PathVerb.MoveTo).ShouldBe(2);
+    }
+
+    [Fact]
     public void APathIsDiscardedOnceItIsDrawn()
     {
         // GDI clears the path when it draws it, so a second FillPath with nothing in between
