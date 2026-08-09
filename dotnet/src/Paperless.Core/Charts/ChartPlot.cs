@@ -496,6 +496,22 @@ public sealed partial record ChartPlot
     public Colour? Background { get; init; }
 
     /// <summary>
+    /// The frame the chart draws around its whole area, or null when it draws none.
+    /// </summary>
+    /// <remarks>
+    /// <c>c:chartSpace/c:spPr/a:ln</c>. Only a stated one: a PPTX chart's <em>automatic</em>
+    /// chart-space line is <c>spNoFormats</c> — an invisible entry for every style — and the grey
+    /// <c>D9D9D9</c> default <c>LineFormatter</c> otherwise supplies is explicitly skipped for
+    /// the Impress filter (<c>oox/source/drawingml/chart/objectformatter.cxx:837-847</c>,
+    /// tdf#150176). So a chart with no <c>a:ln</c> has no frame and one with an <c>a:ln</c> has
+    /// exactly what it says.
+    /// </remarks>
+    public Colour? Border { get; init; }
+
+    /// <summary>How wide <see cref="Border"/> is; zero is a hairline.</summary>
+    public Length BorderWidth { get; init; }
+
+    /// <summary>
     /// The table of numbers drawn under the plot, or null when the chart has none.
     /// </summary>
     /// <remarks>

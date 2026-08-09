@@ -54,8 +54,16 @@ public static class DrawingChartPlot
     /// It inverts the default of every unstated data-label and trendline flag; see
     /// <see cref="LabelOf"/>.
     /// </param>
+    /// <param name="styles">
+    /// The theme's <c>a:fmtScheme</c>, for the width of the line an automatically-formatted
+    /// series draws. Null when the caller has none, which leaves such a line at the hairline the
+    /// reader would otherwise give it.
+    /// </param>
     public static ChartPlot? Read(
-        XElement chartSpace, DrawingTheme? theme = null, bool office2007 = false)
+        XElement chartSpace,
+        DrawingTheme? theme = null,
+        bool office2007 = false,
+        DrawingStyleMatrix? styles = null)
     {
         ArgumentNullException.ThrowIfNull(chartSpace);
 
@@ -89,10 +97,21 @@ public static class DrawingChartPlot
         List<ChartSeries> series = [];
         string?[] categories = [];
 
+        // The automatic-format context, which is a property of the whole chart space rather than
+        // of any one group: the style index, and the largest c:ser/c:idx anywhere in the plot
+        // area — which is what the accent cycle's shade/tint step divides by
+        // (plotareaconverter.cxx:452-457).
+        ChartAutoContext automatic = new(
+            DrawingChartAutoFormat.StyleOf(chartSpace),
+            MaximumSeriesIndex(groups),
+            styles,
+            groups.Count == 1 ? Flag(groups[0], "varyColors") : false,
+            groups.Count == 1);
+
         for (int at = 0; at < groups.Count; at++)
         {
-            (List<ChartSeries> read, string?[] labels) =
-                ReadSeries(groups[at], kinds[at], theme, axes.IndexOf(groups[at]), office2007);
+            (List<ChartSeries> read, string?[] labels) = ReadSeries(
+                groups[at], kinds[at], theme, axes.IndexOf(groups[at]), office2007, automatic);
 
             if (categories.Length == 0 && labels.Length > 0) categories = labels;
             series.AddRange(read);
@@ -182,6 +201,8 @@ public static class DrawingChartPlot
             CategoryLabelsVisible = Labelled(axes.Domain ?? axes.Category),
             Legend = LegendOf(Child(chart, "legend")),
             Background = FillOf(Child(chartSpace, "spPr"), theme),
+            Border = LineOf(Child(chartSpace, "spPr"), theme),
+            BorderWidth = LineWidthOf(Child(chartSpace, "spPr")),
             PlotBackground = FillOf(Child(plotArea, "spPr"), theme),
             ValueGrid = GridOf(axes.Value, theme),
             CategoryGrid = GridOf(axes.Category, theme) ?? GridOf(axes.Domain, theme),
@@ -630,8 +651,54 @@ public static class DrawingChartPlot
                 _ => ChartLegendPosition.Right,
             };
 
+    /// <summary>
+    /// What a series takes from the chart's automatic formatting when it states nothing.
+    /// </summary>
+    /// <param name="Style">The chart space's <c>c:style/@val</c>.</param>
+    /// <param name="MaxSeriesIndex">The largest <c>c:ser/c:idx</c> in the whole plot area.</param>
+    /// <param name="Styles">
+    /// The theme's format matrix, for the width of the line an automatic series draws. Null when
+    /// the caller has none, which leaves the width at the reader's hairline default rather than
+    /// inventing one.
+    /// </param>
+    /// <param name="VaryColours">
+    /// <c>c:varyColors</c> on the plot area's only group, which makes a frame series colour its
+    /// points from the cycle instead of taking one colour for the whole series. Null when the
+    /// group states none, whose default is true on anything but a file Office 2007 wrote —
+    /// <c>TypeGroupModel</c>'s <c>mbVaryColors( !bMSO2007Doc )</c>.
+    /// </param>
+    /// <param name="SingleGroup">
+    /// Whether the plot area holds exactly one group, which is <c>bSupportsVaryColorsByPoint</c>.
+    /// </param>
+    private readonly record struct ChartAutoContext(
+        int Style, int MaxSeriesIndex, DrawingStyleMatrix? Styles, bool? VaryColours, bool SingleGroup);
+
+    /// <summary>
+    /// The largest <c>c:ser/c:idx</c> over every plot group, or −1 when none states one.
+    /// </summary>
+    /// <remarks>
+    /// Taken across the groups rather than within one, because the accent cycle is numbered over
+    /// the whole plot area: a combination chart's line group carries <c>c:idx val="2"</c> and
+    /// takes accent 3 even though it is the only series in its group.
+    /// </remarks>
+    private static int MaximumSeriesIndex(List<XElement> groups)
+    {
+        int maximum = -1;
+
+        foreach (XElement group in groups)
+            foreach (XElement element in Children(group, "ser"))
+                maximum = Math.Max(maximum, Drawing.Number(Child(element, "idx"), "val") ?? -1);
+
+        return maximum;
+    }
+
     private static (List<ChartSeries> Series, string?[] Categories) ReadSeries(
-        XElement group, ChartPlotKind kind, DrawingTheme? theme, int axisIndex, bool office2007)
+        XElement group,
+        ChartPlotKind kind,
+        DrawingTheme? theme,
+        int axisIndex,
+        bool office2007,
+        ChartAutoContext automatic = default)
     {
         List<ChartSeries> series = [];
         string?[] categories = [];
@@ -657,9 +724,11 @@ public static class DrawingChartPlot
             ChartStockRole.Open, ChartStockRole.High, ChartStockRole.Low, ChartStockRole.Close,
         ];
 
+        int seriesInGroup = Children(group, "ser").Count();
+
         int stockRole = kind != ChartPlotKind.Stock
             ? -1
-            : Children(group, "ser").Count() == 3 ? 1 : 0;
+            : seriesInGroup == 3 ? 1 : 0;
 
         foreach (XElement element in Children(group, "ser"))
         {
@@ -696,17 +765,39 @@ public static class DrawingChartPlot
             XElement? properties = Child(element, "spPr");
             XElement? seriesLabels = Child(element, "dLbls");
 
+            // The automatic colours the chart's style gives this series, which its own c:spPr
+            // then overrides. Both halves matter: without the automatic one a series stating
+            // nothing is drawn black and its legend key blank, and without the override a series
+            // stating a colour loses it.
+            int seriesIndex = Drawing.Number(Child(element, "idx"), "val") ?? -1;
+            ChartAutoObject frame = IsFrameSeries(kind)
+                ? ChartAutoObject.FilledSeries
+                : ChartAutoObject.LinearSeries;
+
+            Colour? autoFill = DrawingChartAutoFormat.ColourOf(
+                automatic.Style, frame, stroke: false, seriesIndex, automatic.MaxSeriesIndex, theme);
+            Colour? autoLine = DrawingChartAutoFormat.ColourOf(
+                automatic.Style, frame, stroke: true, seriesIndex, automatic.MaxSeriesIndex, theme);
+
             series.Add(new ChartSeries(
                 DrawingChartText.Label(Child(element, "tx")),
                 numbers,
-                FillOf(properties, theme),
-                LineOf(properties, theme),
-                LineWidthOf(properties),
-                PointFills(element, numbers.Length, theme),
+                FillOf(properties, theme) ?? autoFill,
+                LineOf(properties, theme) ?? autoLine,
+                StatedLineWidth(properties) ?? AutoLineWidth(automatic, frame, theme, seriesIndex),
+                PointFills(
+                    element,
+                    numbers.Length,
+                    theme,
+                    kind,
+                    automatic,
+                    seriesIndex,
+                    seriesInGroup,
+                    office2007),
                 kind)
             {
                 XValues = domain,
-                Marker = MarkerOf(Child(element, "marker"), kind, scatterStyle, radarStyle),
+                Marker = MarkerOf(element, kind, scatterStyle, radarStyle, seriesIndex),
                 HasLine = scatterLine
                           && Drawing.Child(Drawing.Child(properties, "ln"), "noFill") is null,
                 Label = WithSource(LabelOf(seriesLabels, groupLabel, kind, office2007), sourceFormat),
@@ -805,25 +896,47 @@ public static class DrawingChartPlot
     /// What marker a series draws, or none.
     /// </summary>
     /// <remarks>
-    /// <c>c:marker/c:symbol</c>. Absent means <c>auto</c> for a scatter chart — which draws one —
-    /// and none for a line chart, which is the asymmetry that makes a scatter chart look empty if
-    /// it is treated like a line chart with no markers stated. <c>c:scatterStyle val="line"</c> or
-    /// <c>"smooth"</c> turns them off again, and <c>c:radarStyle val="marker"</c> turns them on
-    /// for a radar chart the same way — which is the whole difference between that style and
-    /// <c>standard</c>, both of which draw a stroked polygon.
+    /// <para>
+    /// <c>c:marker/c:symbol</c>. <c>c:scatterStyle val="line"</c> or <c>"smooth"</c> turns
+    /// markers off, and <c>c:radarStyle val="marker"</c> turns them on — which is the whole
+    /// difference between that style and <c>standard</c>, both of which draw a stroked polygon.
+    /// </para>
+    /// <para>
+    /// <strong>A series of a non-frame type that states no <c>c:marker</c> at all draws an
+    /// automatic marker, and the shape cycles with the series index.</strong>
+    /// <c>SeriesModel</c>'s constructor is <c>mnMarkerSymbol( XML_auto )</c>
+    /// (<c>seriesmodel.cxx:119</c>) and <c>TypeGroupConverter::convertMarker</c> maps that to
+    /// <c>SymbolStyle_AUTO</c>, which <c>VDataSeries::getSymbolProperties</c> then resolves to
+    /// <c>StandardSymbol = m_nGlobalSeriesIndex</c> (<c>VDataSeries.cxx:875-883</c>) — square,
+    /// diamond, arrow-down, arrow-up and so on. It is <c>c:marker/c:symbol</c> that turns them
+    /// off, because that context reads <c>getToken( XML_val, XML_none )</c>
+    /// (<c>seriescontext.cxx:445</c>), and Excel writes exactly that on a plain line chart.
+    /// </para>
+    /// <para>
+    /// The group's own <c>&lt;c:marker val="0"/&gt;</c> does <em>not</em> turn them off:
+    /// <c>TypeGroupModel::mbShowMarker</c> is parsed at <c>typegroupcontext.cxx:216-218</c> and
+    /// read by nothing in the whole of <c>oox</c> and <c>chart2</c> — the reference's own
+    /// property-read-and-never-used. Honouring it here would draw fewer markers than the
+    /// reference on every file that states it.
+    /// </para>
     /// </remarks>
     private static ChartMarker MarkerOf(
-        XElement? marker, ChartPlotKind kind, string? scatterStyle, string? radarStyle)
+        XElement? series,
+        ChartPlotKind kind,
+        string? scatterStyle,
+        string? radarStyle,
+        int seriesIndex)
     {
-        string? symbol = Value(Child(marker, "symbol"));
+        string? symbol = Value(Child(Child(series, "marker"), "symbol"));
 
         if (symbol is null)
         {
-            bool automatic =
-                (kind == ChartPlotKind.Scatter && scatterStyle is not ("line" or "smooth"))
-                || (kind == ChartPlotKind.Radar && radarStyle == "marker");
+            bool suppressed =
+                (kind == ChartPlotKind.Scatter && scatterStyle is "line" or "smooth")
+                || (kind == ChartPlotKind.Radar && radarStyle != "marker")
+                || IsFrameSeries(kind);
 
-            return automatic ? ChartMarker.Square : ChartMarker.None;
+            return suppressed ? ChartMarker.None : AutomaticMarker(seriesIndex);
         }
 
         return symbol switch
@@ -837,6 +950,34 @@ public static class DrawingChartPlot
             "star" => ChartMarker.Star,
             _ => ChartMarker.Square,
         };
+    }
+
+    /// <summary>
+    /// The shape an automatic marker takes at a series index.
+    /// </summary>
+    /// <remarks>
+    /// <c>ShapeFactory</c>'s standard symbol list in the order
+    /// <c>TypeGroupConverter::convertMarker</c> names it (<c>typegroupconverter.cxx:637-650</c>):
+    /// 0 square, 1 diamond, 2 arrow down, 3 arrow up. Only the shapes
+    /// <see cref="ChartMarker"/> can draw are distinguished; the rest of the list cycles back
+    /// through them rather than through nothing, on the same reasoning that puts
+    /// <c>dot</c> and <c>dash</c> on a square.
+    /// </remarks>
+    private static ChartMarker AutomaticMarker(int seriesIndex)
+    {
+        ChartMarker[] cycle =
+        [
+            ChartMarker.Square,
+            ChartMarker.Diamond,
+            ChartMarker.Triangle,
+            ChartMarker.Triangle,
+            ChartMarker.Circle,
+            ChartMarker.Cross,
+            ChartMarker.Star,
+            ChartMarker.Square,
+        ];
+
+        return cycle[Math.Max(seriesIndex, 0) % cycle.Length];
     }
 
     /// <summary>
@@ -1103,9 +1244,50 @@ public static class DrawingChartPlot
     /// has them, and without them every wedge is the series' one colour — which reads as a broken
     /// renderer rather than as an unread element.
     /// </remarks>
-    private static Colour?[]? PointFills(XElement series, int count, DrawingTheme? theme)
+    private static Colour?[]? PointFills(
+        XElement series,
+        int count,
+        DrawingTheme? theme,
+        ChartPlotKind kind = ChartPlotKind.Bar,
+        ChartAutoContext automatic = default,
+        int seriesIndex = -1,
+        int seriesCount = 1,
+        bool office2007 = false)
     {
         Colour?[]? fills = null;
+
+        bool frame = IsFrameSeries(kind);
+        bool byPoint = frame
+                       && automatic.SingleGroup
+                       && (automatic.VaryColours ?? !office2007)
+                       && (IsPie(kind) || seriesCount == 1);
+        bool varies = frame && (IsPie(kind) || byPoint);
+
+        // A pie always colours its points from the cycle, and any other frame series does when
+        // the chart says c:varyColors and holds one group with one series
+        // (typegroupconverter.cxx:496-501, seriesconverter.cxx:940-962). Where the colours vary
+        // it is the *point* index that walks the accents and the point count that sizes the
+        // shade/tint cycle; where they do not, every point takes the series' own colour, which
+        // is what a pie with c:varyColors val="0" draws. Without any of this a pie with no c:dPt
+        // is one flat disc.
+        if (varies && count > 0)
+        {
+            for (int index = 0; index < count; index++)
+            {
+                Colour? cycled = DrawingChartAutoFormat.ColourOf(
+                    automatic.Style,
+                    ChartAutoObject.FilledSeries,
+                    stroke: false,
+                    byPoint ? index : seriesIndex,
+                    byPoint ? count - 1 : automatic.MaxSeriesIndex,
+                    theme);
+
+                if (cycled is null) continue;
+
+                fills ??= new Colour?[count];
+                fills[index] = cycled;
+            }
+        }
 
         foreach (XElement point in Children(series, "dPt"))
         {
@@ -1121,21 +1303,108 @@ public static class DrawingChartPlot
         return fills;
     }
 
+    /// <summary>
+    /// Whether a plot kind's series is drawn as an area rather than as a line.
+    /// </summary>
+    /// <remarks>
+    /// <c>TypeGroupInfo::mbSeriesIsFrame2d</c>
+    /// (<c>oox/source/drawingml/chart/typegroupconverter.cxx:92-117</c>), which is what
+    /// <c>getSeriesObjectType</c> switches on to pick between the filled and linear automatic
+    /// format tables. A radar chart is in both columns depending on its <c>c:radarStyle</c>, and
+    /// a stock chart is linear despite drawing boxes.
+    /// </remarks>
+    private static bool IsFrameSeries(ChartPlotKind kind) => kind is
+        ChartPlotKind.Bar or ChartPlotKind.Area or ChartPlotKind.Pie
+        or ChartPlotKind.OfPie or ChartPlotKind.Bubble;
+
+    /// <summary>Whether a plot kind is one of the three <c>TYPECATEGORY_PIE</c> types.</summary>
+    private static bool IsPie(ChartPlotKind kind)
+        => kind is ChartPlotKind.Pie or ChartPlotKind.OfPie;
+
+    /// <summary>
+    /// A chart's own <c>a:ln/@w</c>, or null when it states none.
+    /// </summary>
+    /// <remarks>
+    /// Distinguished from a stated zero, which is a hairline the file asked for and must not be
+    /// replaced by the theme's width. <see cref="LineWidthOf"/> cannot tell the two apart because
+    /// it answers with a <c>Length</c>.
+    /// </remarks>
+    private static Length? StatedLineWidth(XElement? properties)
+        => Drawing.Number(Drawing.Child(properties, "ln"), "w") is { } emu
+            ? Length.FromEmu(Math.Max(emu, 0))
+            : null;
+
+    /// <summary>
+    /// How wide a series' automatic line is: the theme's subtle line style scaled by the chart
+    /// style's relative width.
+    /// </summary>
+    /// <remarks>
+    /// <c>LineFormatter</c> takes <c>Theme::getLineStyle(THEMED_STYLE_SUBTLE)</c> and multiplies
+    /// its width by <c>mnRelLineWidth / 100</c> (<c>objectformatter.cxx:826-853</c>). Every theme
+    /// Office ships states 9525 EMU there, so a chart at the default style draws its lines at
+    /// 2.25 pt — which against a hairline is the difference between a chart and a wireframe.
+    /// Null when there is no format matrix to ask, so nothing is invented.
+    /// </remarks>
+    private static Length AutoLineWidth(
+        ChartAutoContext automatic, ChartAutoObject frame, DrawingTheme? theme, int seriesIndex)
+    {
+        if (automatic.Styles is not { } styles) return Length.Zero;
+        if (seriesIndex < 0) return Length.Zero;
+
+        int relative = DrawingChartAutoFormat.RelativeLineWidth(automatic.Style, frame);
+        if (relative <= 0) return Length.Zero;
+
+        XElement? line = styles.LineStyle(DrawingChartAutoFormat.SubtleStyleIndex);
+        if (Drawing.Number(line, "w") is not { } emu || emu <= 0) return Length.Zero;
+
+        _ = theme;
+        return Length.FromEmu(emu * relative / 100);
+    }
+
     /// <summary>A shape property bag's solid fill, or null when it has none.</summary>
     /// <remarks>
-    /// Only <c>a:solidFill</c>. A gradient or picture fill on a bar is legal and rare; drawing
-    /// nothing for one leaves the bar's outline, which reads as "something is here and it is not
-    /// coloured in" rather than as a missing bar.
+    /// <para>
+    /// <c>a:solidFill</c>, and failing that the middle stop of an <c>a:gradFill</c>. A chart's
+    /// model carries one colour per series rather than a paint, so a gradient cannot be drawn as
+    /// one here — but reading it as "no fill" draws no bar at all, and a bar in one of its own
+    /// colours is much nearer the reference than an empty row. Measured on
+    /// <c>N2_E_Maestroni_Swarm_COP.pptx</c>, a stacked Gantt whose first series is a
+    /// three-stop gradient with an <c>a:alpha</c> on every stop: the reference draws 111 pale
+    /// bars and we drew none, so the chart read as having one bar per row instead of two.
+    /// </para>
+    /// <para>
+    /// The stop nearest the middle rather than the first, because a DrawingML gradient's end
+    /// stops are routinely its extremes — a <c>tint</c> at one end and a <c>shade</c> at the
+    /// other — and the middle is what the shape reads as at a glance. Alpha survives, so a
+    /// gradient the file made translucent stays translucent.
+    /// </para>
     /// </remarks>
     private static Colour? FillOf(XElement? properties, DrawingTheme? theme)
     {
-        XElement? fill = Drawing.Child(properties, "solidFill");
-        if (fill is null) return null;
+        if (Drawing.Child(properties, "solidFill") is { } fill)
+        {
+            foreach (XElement child in fill.Elements())
+                if (DrawingColour.Read(child) is { } colour) return colour.Resolve(theme);
 
-        foreach (XElement child in fill.Elements())
-            if (DrawingColour.Read(child) is { } colour) return colour.Resolve(theme);
+            return null;
+        }
 
-        return null;
+        if (DrawingFill.ReadGradient(Drawing.Child(properties, "gradFill")) is not { } gradient)
+            return null;
+
+        DrawingGradientStop? middle = null;
+        double best = double.MaxValue;
+
+        foreach (DrawingGradientStop stop in gradient.Stops)
+        {
+            double distance = Math.Abs(stop.Position - 0.5);
+            if (distance >= best) continue;
+
+            best = distance;
+            middle = stop;
+        }
+
+        return middle?.Colour.Resolve(theme);
     }
 
     private static Colour? LineOf(XElement? properties, DrawingTheme? theme)
