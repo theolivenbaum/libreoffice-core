@@ -295,9 +295,7 @@ public sealed class SheetFormatting
     /// </summary>
     /// <remarks>
     /// For <see cref="SheetDecorationArea"/>, which has to know where a border or a fill is
-    /// before it can say how far the sheet prints. Only the per-cell entries: a run of columns
-    /// or a sheet default reaches the end of the sheet, and Calc stops the same scan at the
-    /// first long run of equally-formatted rows for exactly that reason.
+    /// before it can say how far the sheet prints.
     /// </remarks>
     internal IEnumerable<(int Row, int Column, SheetCellDecoration Format)> Cells
     {
@@ -317,6 +315,43 @@ public sealed class SheetFormatting
             foreach (KeyValuePair<int, int> entry in _rows)
                 yield return (entry.Key, _palette[entry.Value]);
         }
+    }
+
+    /// <summary>
+    /// The runs of whole columns that state a format, as the file wrote them.
+    /// </summary>
+    /// <remarks>
+    /// The <em>last</em> column of a run is load-bearing and not merely informative. Calc's
+    /// <c>ScTable::ApplyPatternArea</c> materialises a column only when the range being formatted
+    /// stops short of the sheet's last column; a run that reaches it is written to the
+    /// unallocated-column default instead and allocates nothing
+    /// (<c>sc/source/core/data/table2.cxx:2988-2998</c>). Since the print-area scan iterates
+    /// <c>aCol</c>, that is what decides how far right it can look — see
+    /// <see cref="SheetDecorationArea"/>.
+    /// </remarks>
+    internal IEnumerable<(int First, int Last, SheetCellDecoration Format)> ColumnRuns
+    {
+        get
+        {
+            foreach ((int first, int last, int format) in _columns)
+                yield return (first, last, _palette[format]);
+        }
+    }
+
+    /// <summary>
+    /// What a cell in a column takes when neither it nor its row states anything.
+    /// </summary>
+    /// <param name="column">The zero-based column.</param>
+    internal SheetCellDecoration ColumnDefault(int column)
+    {
+        // Walked backwards for the same reason At does: a later run wins an overlap.
+        for (int at = _columns.Count - 1; at >= 0; at--)
+        {
+            (int first, int last, int format) = _columns[at];
+            if (column >= first && column <= last) return _palette[format];
+        }
+
+        return _palette[_default];
     }
 
     /// <summary>What is painted behind and around one cell.</summary>
