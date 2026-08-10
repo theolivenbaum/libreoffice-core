@@ -743,6 +743,48 @@ status` compares the tree to HEAD, so it cannot see a bad HEAD.** Any workflow t
 bisect — must restore it before anything stages, and must be checked against the *base*
 rather than against the tree.
 
+### The shell's working directory is not where the last `cd` put it
+
+A merge session ran `cd <primary> && git merge …` and then issued the next two merges with no
+`cd`, on the understanding that the directory persists between calls. It did not. Both landed
+on the **agent worktree's** branch. `git log` in the primary showed a clean fast-forward of the
+first round only, and the build and full test suite that followed measured **the worktree, not
+the tree being merged into** — reporting test counts that were correct numbers for the wrong
+checkout.
+
+What makes it worth recording is that **every check passed**: the merges reported success, the
+counts matched what the rounds predicted, and the tree was clean. This is the same family as
+"`git status` cannot see a bad HEAD" — a measurement of the wrong tree announces nothing, and
+the numbers being right is not evidence you measured the right thing.
+
+```sh
+git -C "$PRIMARY" rev-parse --abbrev-ref HEAD    # before merging
+git -C "$PRIMARY" merge --no-edit <branch>
+git -C "$PRIMARY" log --oneline --graph -3       # must show the merge commit
+```
+
+Pass `-C <path>` to every `git` invocation that matters. After a merge, the target's graph must
+show the merge commit; a fast-forward of something else means it went somewhere else.
+
+### An agent that dies leaves three kinds of uncommitted work, and they are not the same
+
+Three agents were lost mid-round to a worker restart. All three had committed as they went —
+which is the only reason anything survived — and all three had uncommitted working trees. Merging
+the branches as found would have been wrong in two of the three cases:
+
+- **A finished round with a stray probe script.** Merge as found.
+- **A broken mid-edit.** One removed a `MoveTo` from an arm its committed fix did not touch, and
+  **failed the round's own test**. Discarded. Running the round's own tests against the
+  uncommitted tree settles this in seconds and is the first thing to try.
+- **A refutation of the round's own last commit**, with the counter-measurement already written
+  into the comment. Merging the branch as found would have landed a change its author had
+  measured and rejected. The revert was committed from the working tree, and the round's result
+  is the refutation.
+
+So: **never merge a dead agent's branch on the strength of its commit log.** Read the
+uncommitted diff first and decide which of the three it is. The commit log of the second and
+third cases reads like a finished fix in both.
+
 ### A prediction that is low for the wrong reason still comes true
 
 The standing warning is that a grep over what a file *declares* overstates what it *draws*.
