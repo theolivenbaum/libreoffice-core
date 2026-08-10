@@ -336,7 +336,11 @@ public sealed class SheetLayout
             // pass is part of GetPrintArea itself rather than a widening applied to its answer
             // (`// Test attribute`, table1.cxx:710) — see SheetDecorationArea.
             SheetRange used = SheetDrawingArea.Extend(
-                SheetDecorationArea.Extend(UsedRange, Formatting, LastDataRowByColumn),
+                SheetDecorationArea.Extend(
+                    UsedRange,
+                    Formatting,
+                    LastDataRowByColumn,
+                    SheetDecorationArea.AllocatedLastColumn(Grid.ColumnDigits?.Runs)),
                 Drawings,
                 Grid);
             SheetRange printed = used.IsValid && Setup.PrintAreas.Count == 0
