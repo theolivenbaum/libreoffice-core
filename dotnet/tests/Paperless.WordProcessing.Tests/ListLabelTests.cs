@@ -393,6 +393,46 @@ public sealed class ListLabelTests
         Wrapping(labelPoints: 22).LabelRaisesFirstLine.ShouldBeTrue();
     }
 
+    /// <summary>
+    /// A taller label takes its share of proportional line spacing, where an inline picture does not.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The wiring half of <c>Paperless.Text.Tests.ListLabelLineSpacingTests</c>: the label enters
+    /// measurement as an <see cref="InlineObject"/> and that object has to be the flagged kind, or the
+    /// rule is right in the layer below and never reaches a document.
+    /// </para>
+    /// <para>
+    /// Measured on the installed 24.2.7.2 by <c>dotnet/probes/words-r47/list-label-line-height.py</c>:
+    /// a 28 pt level over 12 pt text at 200% grows the gap by the label's own 32.20 pt line box, not
+    /// by the item's 13.80. Here the level is 22 pt over 11 pt text, so the first line's extension is
+    /// the label's 25.30 pt box rather than the text's 12.65.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void ATallerLabelTakesTheProportionalShareRatherThanTheItemsText()
+    {
+        PageParagraph item = Wrapping(labelPoints: 22) with
+        {
+            Format = new ParagraphFormat
+            {
+                StartIndent = Length.FromPoints(36),
+                FirstLineIndent = Length.FromPoints(-36),
+                LineSpacing = LineSpacingRule.Multiple(2.0),
+            },
+        };
+
+        (Length natural, _, Length text) =
+            item.Measure().MeasureLine(0, Lines(item)[0].Line.VisibleEnd);
+
+        // The label's box, not the item's text: 25.30 pt at 22 pt in Liberation Serif.
+        Math.Abs(text.Twips - Length.FromPoints(25.30).Twips).ShouldBeLessThanOrEqualTo(1);
+        text.ShouldBe(natural);
+
+        Length doubled = Lines(item)[0].Height;
+        Math.Abs(doubled.Twips - (2 * natural.Twips)).ShouldBeLessThanOrEqualTo(1);
+    }
+
     /// <summary>An item long enough to wrap, whose label is set at a size of its own.</summary>
     private static PageParagraph Wrapping(double labelPoints)
         => new()
