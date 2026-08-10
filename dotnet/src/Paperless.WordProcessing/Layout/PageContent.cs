@@ -474,7 +474,8 @@ public sealed record PageParagraph : PageBlock
     {
         if (LabelExtent is not (Length height, Length ascent)) return HasInlineObjects ? [.. InlineObjects] : null;
 
-        List<InlineObject> objects = [new InlineObject(0, Length.Zero, height, ascent)];
+        List<InlineObject> objects =
+            [new InlineObject(0, Length.Zero, height, ascent, RaisesTextHeight: true)];
         objects.AddRange(InlineObjects);
         return objects;
     }

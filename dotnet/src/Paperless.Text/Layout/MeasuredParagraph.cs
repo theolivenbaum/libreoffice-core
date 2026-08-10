@@ -126,8 +126,31 @@ public readonly record struct FormattedRun(
 /// and the reason this is the default rather than a value every caller has to state. The rest hangs below
 /// and grows the line's descent, so a line box is always tall enough to hold the whole object either way.
 /// </param>
+/// <param name="RaisesTextHeight">
+/// <para>
+/// Whether this object takes part in the height proportional line spacing multiplies. False for a real
+/// as-character object, which is the whole point of round 45's rule; <strong>true for a list label</strong>,
+/// which is not an object at all in Writer but a <c>SwNumberPortion</c> standing in the line.
+/// </para>
+/// <para>
+/// Writer draws the line exactly here. <c>SwTextFrame::CalcHeightOfLastLine</c>
+/// (<c>sw/source/core/text/txtfrm.cxx</c>:3952-3957) asks the line for
+/// <c>MaxAscentDescent(…, bNoFlyCnt = true)</c> — <em>"i#47162 — suppress consideration of fly content
+/// portions and the line portion"</em> — and <c>SwTextFrame::GetLineSpace</c> takes
+/// <c>(prop − 100)%</c> of that. A fly-in-content is suppressed; a number portion is not.
+/// </para>
+/// <para>
+/// Measured, because the citation is only the hypothesis:
+/// <c>dotnet/probes/words-r47/list-label-line-height.py</c> puts a 14, 20 and 28 pt level over 12 pt
+/// text at 100, 150 and 200% and LibreOffice's extension is <c>(prop − 100)%</c> of the <em>label's</em>
+/// box every time, against the item's text height before this flag existed.
+/// <c>label-and-picture.py</c> then puts a 100 pt picture on the same line and the extension stays at
+/// the label's 32.20 pt rather than the line's 114 — so the base is the tallest portion that is not a
+/// fly, and the two rules are one rule.
+/// </para>
+/// </param>
 public readonly record struct InlineObject(
-    int Offset, Length Width, Length Height, Length? Ascent = null)
+    int Offset, Length Width, Length Height, Length? Ascent = null, bool RaisesTextHeight = false)
 {
     /// <summary>How much of the object sits above the baseline, with the default resolved.</summary>
     public Length AboveBaseline => Ascent ?? Height;
@@ -632,6 +655,13 @@ public sealed class MeasuredParagraph
 
             ascent = Length.Max(ascent, one.AboveBaseline);
             descent = Length.Max(descent, one.BelowBaseline);
+
+            // A list label is a portion rather than an object, so it counts towards the height
+            // proportional line spacing takes its percentage of — see <see cref="InlineObject"/>.
+            if (one.RaisesTextHeight)
+            {
+                textHeight = Length.Max(textHeight, one.AboveBaseline + one.BelowBaseline);
+            }
         }
 
         return (Length.Max(height, ascent + descent), ascent, textHeight);
