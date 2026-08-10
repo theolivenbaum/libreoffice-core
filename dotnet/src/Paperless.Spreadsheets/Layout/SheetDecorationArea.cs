@@ -170,12 +170,14 @@ internal static class SheetDecorationArea
             lastRow = byRow;
         }
 
-        // A materialised column is inside the block whatever it paints — the five-variant
-        // measurement in AllocatedLastColumn says the band's right edge follows the last closed
-        // column run and not the formatting. The equal-column cut below is what keeps that from
-        // widening a sheet whose closed run covers a hundred identical empty columns.
-        if (allocated > lastColumn) lastColumn = allocated;
-
+        // Deliberately *not* `lastColumn = max(lastColumn, allocated)`. Being materialised is
+        // what lets a column be looked at; it is not what puts it in the block — `bFound` in
+        // `ScTable::GetPrintArea` is set by the data loop and by `GetLastVisibleAttr`, and by
+        // nothing else. Extending to the allocated column outright was measured over the whole
+        // track and is refuted: it fixes `CSJU` and breaks `fy20-may20-sep20.xlsx` (a sheet with
+        // no data at all, allocated to column E, which then prints a page it should not) and
+        // `fm-provider-service-measures.xlsx` (a sheet whose data stops at column C and whose
+        // closed run reaches T, which then fits to a smaller zoom and loses two pages).
         lastColumn = StopAtEqualColumns(lastColumn, lastDataColumn, whole, formatting, Scan);
 
         if (lastRow <= lastData && lastColumn <= lastDataColumn) return used;
