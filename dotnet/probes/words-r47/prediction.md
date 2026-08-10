@@ -95,3 +95,54 @@ it is `PageParagraph.MeasurementObjects` in `Paperless.WordProcessing`, so no sl
 sheet can move. That is an argument, and the routine asks for a measurement: slides and
 sheets will be rendered whole at base and at this tree with `SOURCE_DATE_EPOCH` pinned and
 `/CreationDate` normalised, and the result reported whichever way it comes out.
+
+---
+
+# Second change, predicted before its own sweep: a `w:style` with no `w:name` is dropped
+
+`WordStyles.Add` now ignores any `w:style` whose `w:name` is absent or empty, so nothing
+can reference it — not `w:pStyle`, `w:rStyle`, `w:tblStyle` or `w:basedOn`.
+
+Evidence: `unnamed-style.py`, six authored variants over three style families, each pair
+varying only whether `<w:name>` is present. LibreOffice draws the style's 10 pt with the
+name and the document default's 12 pt without it, in **all three families**; we drew 10 pt
+either way for paragraph and character styles. Plus three causal mutations of
+`template---tpr-technical-progress-report-with-guidance.docx`, whose four table styles are
+among the sixteen of its fifty-three that have no `w:name`: changing that style's own
+`w:spacing` moves nothing in the reference, changing `w:docDefaults` moves everything, and
+*adding* a `w:name` changes the drawn size. Mechanism, as the hypothesis:
+`StyleSheetTable.cxx`:774.
+
+## The census, and what it cannot see
+
+Over `words/batch-*`: **2 of 134 DOCX** carry a `w:style` with a `w:styleId` and no
+`w:name` that is referenced anywhere — 16 unnamed of 53 in the `tpr` template with 4 of
+them referenced, and 13 unnamed of 40 with 12 referenced in
+`1603642410-MoM-CASCOM-06-2020-draft04.docx`. Both are exporter artefacts (Google Docs and
+a localised Word), which is why the population is small and lumpy rather than spread.
+
+This census is **not** a ceiling in the usual way — it reads exactly the condition the code
+tests, over the whole of the format that has the concept. What it cannot see:
+
+- **`w:basedOn` chains through a dropped style.** A named style based on an unnamed one now
+  loses that parent's properties too, so a document can move without referencing an unnamed
+  style directly. Neither of the two named documents needs this to move, but a third might.
+- **The 66 `.doc`**, which have no such concept: a WW8 `STD` carries its name in the same
+  record, so nothing there can be nameless. This change cannot reach them, and that is a
+  fact rather than a blind spot.
+- **Whether the drop moves a page.** `1603642410-MoM-CASCOM-06-2020-draft04.docx` currently
+  **matches at 9/9**, so it is a regression risk rather than a gain, and it holds twelve
+  referenced unnamed styles against the `tpr` template's four.
+
+## The bands
+
+| | before this change | predicted after |
+|---|---:|---|
+| documents matching | 158 | **157–160** |
+| absolute page error | 70 | **68–72** |
+| exactly-correct page counts | 168 | **167–170** |
+| absolute word error | 6666 | **6500–6800** |
+| renderings changed | — | **2–4 of 200** |
+
+Narrow bands on purpose: the census reads the code's own condition over the only format
+that can express it, so this is one of the few cases where a prediction should be tight.

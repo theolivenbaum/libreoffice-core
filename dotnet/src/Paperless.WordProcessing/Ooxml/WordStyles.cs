@@ -291,6 +291,33 @@ public sealed class WordStyles
                 continue;
             }
 
+            // A style with no w:name is dropped outright on a DOCX import, so nothing can reference
+            // it — not by w:pStyle, w:rStyle, w:tblStyle or w:basedOn. StyleSheetTable::sprm
+            // (sw/source/writerfilter/dmapper/StyleSheetTable.cxx:774) appends the finished entry to
+            // neither the style table nor its identifier map unless
+            // `!IsOOXMLImport() || !m_sStyleName.isEmpty()`, and this class reads OOXML only.
+            //
+            // The citation is the hypothesis; `dotnet/probes/words-r47/unnamed-style.py` is the
+            // evidence. It authors a table, paragraph and character style stating w:sz 20 and
+            // applies each one, with and without a w:name: LibreOffice draws 10 pt with the name and
+            // 12 pt — the document default — without it, in all three families. The corpus half is a
+            // causal mutation of `template---tpr-technical-progress-report-with-guidance.docx`,
+            // sixteen of whose fifty-three styles carry a w:styleId and no w:name: adding
+            // `<w:name w:val="Table1"/>` to the one its tables name changes the reference's own
+            // output, and changing that style's own w:spacing changes nothing at all.
+            //
+            // Not a leniency question. A file stating a style it cannot name is malformed, and both
+            // readings are defensible — this one is what the reference does, and matching it is the
+            // whole point.
+            if (style.Name is not { Length: > 0 })
+            {
+                diagnostics?.Add(new Diagnostic(
+                    DiagnosticSeverity.Warning, "PL2102",
+                    $"w:style '{style.StyleId}' has no w:name; Word processors drop such a style "
+                    + "entirely, so it is ignored here too."));
+                continue;
+            }
+
             _styles[(style.Type, style.StyleId)] = style;
             if (style.IsDefault) _defaults[style.Type] = style.StyleId;
             if (style.Type == WordStyleType.Paragraph) declared.Add(style);

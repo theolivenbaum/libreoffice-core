@@ -121,7 +121,7 @@ public sealed class DocxWidowControlTests
         string styles = $"""
             <w:styles xmlns:w="{W}">
               <w:docDefaults><w:pPrDefault/></w:docDefaults>
-              <w:style w:type="paragraph" w:styleId="Quiet">
+              <w:style w:type="paragraph" w:styleId="Quiet"><w:name w:val="Quiet"/>
                 <w:pPr><w:widowControl w:val="0"/></w:pPr>
               </w:style>
             </w:styles>
