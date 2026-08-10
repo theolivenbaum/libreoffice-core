@@ -159,6 +159,21 @@ internal static class WordParagraphFormats
 
         Length auto = autoSpacing ?? HtmlAutoSpacing;
 
+        // Widow and orphan control, which is *on* for a paragraph that states nothing whenever the
+        // package declared a `w:docDefaults/w:pPrDefault`. See
+        // WordStyles.HasDefaultParagraphPropertiesElement for the mechanism, the citation and the
+        // probes; the short form is that LibreOffice puts ParaWidows and ParaOrphans at 2 on the
+        // built-in default style from that element's presence alone, and Word writes it empty.
+        //
+        // The layer walk still decides wherever anything states the flag, and it already includes the
+        // docDefaults' own `w:pPr` as its outermost layer — which is what makes a
+        // `<w:pPrDefault><w:pPr><w:widowControl w:val="0"/></w:pPr></w:pPrDefault>` turn it back off,
+        // matching writerfilter's bOverwrite=false and the authored probe.
+        bool widowControl =
+            Layer(styles, paragraphProperties, styleId, "widowControl", tableStyle) is { } stated
+                ? Word.IsOn(stated)
+                : styles.HasDefaultParagraphPropertiesElement;
+
         return new ParagraphFormat
         {
             Alignment = Alignment(Word.Attribute(
@@ -199,8 +214,8 @@ internal static class WordParagraphFormats
 
             // Word states widow control as one flag rather than two counts, and it means two of each —
             // which is why a document with it on sometimes has a visibly short page.
-            OrphanLines = IsOn(styles, paragraphProperties, styleId, "widowControl", tableStyle) ? 2 : 0,
-            WidowLines = IsOn(styles, paragraphProperties, styleId, "widowControl", tableStyle) ? 2 : 0,
+            OrphanLines = widowControl ? 2 : 0,
+            WidowLines = widowControl ? 2 : 0,
 
             StartsNewPage = StartsNewPage(styles, paragraphProperties, styleId, tableStyle),
             TabStops = Tabs(

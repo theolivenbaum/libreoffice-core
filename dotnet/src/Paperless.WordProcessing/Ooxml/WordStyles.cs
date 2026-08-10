@@ -233,6 +233,34 @@ public sealed class WordStyles
     /// <summary>The <c>w:pPr</c> from <c>w:docDefaults</c>, or null.</summary>
     public XElement? DefaultParagraphProperties { get; private set; }
 
+    /// <summary>
+    /// True when <c>w:docDefaults</c> declared a <c>w:pPrDefault</c> at all, however empty.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Distinct from <see cref="DefaultParagraphProperties"/> being non-null, and the difference is
+    /// load-bearing: Word writes a bare <c>&lt;w:pPrDefault/&gt;</c> constantly, which carries no
+    /// <c>w:pPr</c> and so leaves that property null while still being *present*.
+    /// </para>
+    /// <para>
+    /// LibreOffice hangs a document-wide default on exactly that presence. <c>applyDefaults(true)</c>
+    /// runs only from the <c>w:pPrDefault</c> arm of <c>StyleSheetTable::sprm</c>
+    /// (<c>sw/source/writerfilter/dmapper/StyleSheetTable.cxx</c>:653-670), and it puts
+    /// <c>ParaWidows</c> and <c>ParaOrphans</c> at 2 on the built-in style every other style
+    /// inherits from — <em>"WARNING: these defaults only take effect IF there is a DocDefaults style
+    /// section. Normally there is, but not always."</em> A package with no <c>w:pPrDefault</c> keeps
+    /// Writer's own default of nought and gets no widow or orphan control whatever.
+    /// </para>
+    /// <para>
+    /// The citation is a hypothesis and the probes are the evidence:
+    /// <c>dotnet/probes/words-r46/widow-orphan-default.py</c> authors nine variants at five straddle
+    /// positions and measures the installed 24.2.7.2, with a control variant that states
+    /// <c>w:widowControl w:val="0"</c> on the straddling paragraph so the room at the foot of the
+    /// page is measured rather than assumed.
+    /// </para>
+    /// </remarks>
+    public bool HasDefaultParagraphPropertiesElement { get; private set; }
+
     /// <summary>Reads a <c>styles.xml</c> root element.</summary>
     /// <param name="root">The <c>w:styles</c> element.</param>
     /// <param name="diagnostics">Receives malformed declarations, if given.</param>
@@ -243,7 +271,11 @@ public sealed class WordStyles
         if (Word.Child(root, "docDefaults") is { } docDefaults)
         {
             DefaultRunProperties = Word.Child(Word.Child(docDefaults, "rPrDefault"), "rPr");
-            DefaultParagraphProperties = Word.Child(Word.Child(docDefaults, "pPrDefault"), "pPr");
+            if (Word.Child(docDefaults, "pPrDefault") is { } paragraphDefault)
+            {
+                HasDefaultParagraphPropertiesElement = true;
+                DefaultParagraphProperties = Word.Child(paragraphDefault, "pPr");
+            }
         }
 
         List<WordStyle> declared = [];
