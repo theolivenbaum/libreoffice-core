@@ -12162,3 +12162,18 @@ defect, because with nothing raising the ascent the run's height dominates eithe
 Test counts on the final tree: Core 284, Containers 109, Text **282**, Vector 293, Rendering 121,
 Markup 259, OpenDocument 125, WordProcessing **753**, Spreadsheets 621, Presentations 576,
 Fidelity 550 — **0 skipped, 0 warnings**.
+
+### Merge note, words round 46
+
+Text **282**, WordProcessing **753**, everything else at its known-good count, Fidelity 550, 0
+skipped, 0 warnings. **Words 157 → 158 of 200**, page error 75 → **70**, exact pages 167 → 168.
+`git diff ee87a6d0e..HEAD --stat -- dotnet/src` shows the three source files, so the round did not
+lose its own code — that check is now part of the merge routine.
+
+**80 of 200 renderings changed**, the widest reach any words round has had, and the page error fell
+by five. `Paperless.Text` reaches slides, so a cross-track measurement was owed and the round made
+one: slides and sheets, **334 of 334 byte-identical**.
+
+The verdict round 45 gave up came back. `gpp-pr-top-7-office-markets-4q-2023.docx` went 3/4 → **4/4
+match**, and the causal test was a mutation of the real file rather than an argument — the right
+way to close a document a previous round left open with a stated cost.
