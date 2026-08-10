@@ -149,7 +149,7 @@ def main() -> int:
     work.mkdir(parents=True)
     profile = work / "prof"
 
-    lines = 4
+    lines = int(sys.argv[2]) if len(sys.argv) > 2 else 4
     print(f"target paragraph: {lines} lines, one 28-character token each")
     print(f"{'fillers':>7}  {'variant':<22} {'target lines on page 1':>22}  which")
     rows = {}
