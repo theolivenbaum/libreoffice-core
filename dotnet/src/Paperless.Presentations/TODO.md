@@ -177,10 +177,20 @@ resolved **per text level** for list styles (`lvlXpPr`).
       with `for (int i = 0; i < 4; i++)` over a switch whose `case 4` *is* the standard style that
       `p:otherStyle` parses into (`oox/source/ppt/slidepersist.cxx`:315). The loop stops one short,
       so the style is read, stored and never used; `case 5`, the subtitle style, is unreachable for
-      the same reason. Paperless does apply it — the deck's sixth shape resolves to the magenta the
-      master states where LibreOffice draws black — and that divergence is not new: the same
-      fallback has always decided the bullet of every non-placeholder shape. It had simply never
-      been measured, and it now is.
+      the same reason. Paperless did apply it — the deck's sixth shape resolved to the magenta the
+      master states where LibreOffice draws black — and that divergence was recorded here as
+      deliberate, on the grounds that the file says magenta and PowerPoint shows it.
+      **Round eighteen retired that: it was a defect, and `deck-text-style.pptx` could not show
+      it.** A second citation settles what a plain text box gets *instead* —
+      `PPTShape::createAndInsert` reaches `getOtherTextStyle()` only under
+      `isOther = !getTextBody() && sServiceName != "…GroupShape"`
+      (`oox/source/ppt/pptshape.cxx`:424-429, byte-identical at tag `libreoffice-24.2.7.2`), so a
+      shape carrying text cannot arrive there and takes `getDefaultTextStyle()`, the
+      presentation's `p:defaultTextStyle`. The old fixture cannot separate the readings because
+      its `otherStyle` states 18 pt and LibreOffice's own fallback is also 18 pt;
+      `slide-other-style.pptx` states 12 pt magenta against 24 pt green and the reference draws
+      `0 0.5019607843 0 rg … 24.009 Tf`. **The lesson is the fixture, not the citation** — the
+      mechanism had been cited correctly for two rounds beside a document that could not test it.
 - [ ] Theme default shape/line/text properties (`a:objectDefaults`)
 - [ ] Background inheritance, including `showMasterSp`
 
@@ -848,12 +858,31 @@ Two reference artefacts worth knowing before chasing them:
       deliberately.
 - [x] Text bodies with anchoring, insets and the stated autofit scale.
 - [x] Groups with nested transforms, including a child coordinate space that scales.
-- [ ] Picture *effects*: `a:effectLst` (shadow, glow, reflection, soft edge), `a:duotone`,
-      `a:grayscl`, `a:biLevel` and the brightness/contrast pair. All are per-pixel work on a
-      decoded bitmap, which is the one thing this library must not do — they belong beside the
-      decoder in `Paperless.Rendering`, as a transform the display list names rather than
-      performs. `a:alphaModFix` is the exception and is honoured, because a uniform opacity is
-      already a parameter of `DrawImage`.
+- [ ] Picture *effects*: `a:effectLst` (shadow, glow, reflection, soft edge), `a:grayscl` and
+      `a:biLevel`. All are per-pixel work on a decoded bitmap, which is the one thing this
+      library must not do — they belong beside the decoder in `Paperless.Rendering`, as a
+      transform the display list names rather than performs. `a:alphaModFix` is the exception
+      and is honoured, because a uniform opacity is already a parameter of `DrawImage`.
+
+      **Done on that pattern**: `a:duotone` (`DuotoneRecolour`) and the brightness/contrast pair
+      (`LuminanceRecolour`), both named by the reader and carried out by `RasterImageDecoder`.
+      The second is worth reading before adding a third: **the pair a file states is not always
+      the pair that is applied.** `bright="70000" contrast="-70000"` is PowerPoint's washout and
+      the reference maps it to its own `ColorMode_WATERMARK`, applying **+50 and −70**
+      (`oox/source/drawingml/fillproperties.cxx`:826-831 with
+      `vcl/source/graphic/GraphicObject.cxx`:53-54); both-stated is baked with MSO's own
+      formula and one-alone goes through the colour modifier, which are two different
+      arithmetics. Measured against the binary's pixels, not just cited — see
+      `research/probes/slides-r19/NOTES.md`.
+
+      Two traps that will catch the next one of these. `RasterImageDecoder.Ensure` copies named
+      fields across the decode, so a new pending transform reaches the page only if it is added
+      to that list — and forgetting it is silent on *every* picture, since a decoded one never
+      takes that branch. And `.ppt` states the same thing as Escher properties, with the same
+      washout rule: `DFF_Prop_pictureBrightness`/`DFF_Prop_pictureContrast` and
+      `GraphicDrawMode::Watermark` at `filter/source/msfilter/msdffimp.cxx`:3906-3960, the
+      contrast on a non-linear scale about `0x10000`. Not implemented, and not counted in the
+      corpus either.
 - [ ] **A rotated picture.** `IDrawingSink.DrawImage` takes a rectangle and not a matrix, so a
       `p:pic` with a non-zero `rot` is drawn upright inside its rotated clip. The clip is right
       and the pixels are not turned. Fixing it means either a matrix on `DrawImage` or a
@@ -2010,7 +2039,394 @@ a 40 pt line. LibreOffice keeps the whole string through its import
 point rather than a UTF-16 unit, so an astral bullet survives. No corpus document exercises it;
 the change is `PptxTextBody.FirstCodePoint` and it is guarded only by the reference file above.
 
+### From the first human review of this track's residue
+
+A person read all twelve non-matching slides documents against the reference page by page, which
+no gate in the harness can do. Three of the eight defects it found are chart work; the first is
+diagnosed here to a citation and the other two are recorded as *received and not investigated*,
+which is the honest state of them.
+
+- [ ] **An OOXML chart series that states no `c:spPr` gets no colour at all from us, and
+      LibreOffice gives it an automatic one.** The largest of the three and much the widest.
+      `Demick_JetBlue.pptx`'s five chart parts are all `c:lineChart` and **not one of their
+      sixteen series carries a `c:spPr`**, so `FillOf`/`LineOf` return null and
+      `ChartLayout.AddLines`' last resort — `series.Line ?? series.Fill ?? Colour.Black` — draws
+      every line black. Page 4 measured: we stroke three black polylines where the reference
+      strokes three in `#B45D03`, `#761D26` and `#12415C`.
+
+      **Those three are derived, not stated, and the derivation is in the tree.** The deck's
+      theme states `accent1 F07F09`, `accent2 9F2936`, `accent3 1B587C`, and its
+      `a:lnStyleLst`'s *first* entry — `THEMED_STYLE_SUBTLE` — is
+      `<a:schemeClr val="phClr"><a:shade val="50000"/><a:satMod val="103000"/>`. Accent *n* under
+      that transform is exactly what the reference draws. The machinery is
+      `oox/source/drawingml/chart/objectformatter.cxx`: `spLinearSeriesLines` picks a colour
+      pattern from the chart's `c:style` (`spAutoFormatPattern2` — accent1…accent6 — for style 2,
+      which is the default), `DetailFormatterBase::getPhColor` (`:766-813`) cycles it per series
+      and applies a shade/tint of `(cycle+1)/(maxCycle+2) × 1.4 − 0.7` **per colour cycle** — zero
+      here, since three series fit in one cycle of six — and `LineFormatter` (`:826-838`) then
+      lays the theme's line style over the result. `spFilledSeries2dFills` is the same table for a
+      bar or area series' fill.
+
+      Three things this also explains, and all three were separately in the review: the legend
+      key for such a series is drawn in the same absent colour, so it disappears; the markers go
+      with it; and a chart's *automatic* look is wrong on every deck that leaves its series
+      unstyled, which is the normal case for a chart pasted from Excel.
+
+      **Not started.** It needs the chart style index, the accent cycle with the shade/tint, and
+      the theme's `a:lnStyleLst`/`a:fillStyleLst` applied to a placeholder colour — the last of
+      which `DrawingTheme` does not expose today. That is a piece of work, not a patch, and
+      half-doing it would recolour every unstyled series to something else wrong.
+
+- [ ] **`Demick_JetBlue.pptx` also draws no minor gridlines, and its major ones are the wrong
+      grey.** Same page 4, counted by stroke orientation: the reference draws 28 horizontal and 21
+      vertical `#8B8B8B` strokes — the minor grid, on both axes — and 23 vertical plus 12
+      horizontal `#666666` ones; we draw 21 vertical `#B3B3B3` and 8 horizontal `#F07F09` and
+      nothing else. So `c:minorGridlines` is unread (it appears nowhere in `Core/Charts` or in
+      `DrawingChartPlot`), the category axis' major gridlines are not drawn at all, and the value
+      axis' are drawn in the `0xB3B3B3` chart2 default where this file's reference uses `#666666`.
+      The grey is likely the same automatic-formatting table as the item above and is not
+      separately measured.
+
+- [ ] **`N2_E_Maestroni_Swarm_COP.pptx` draws one rectangle per row where the reference draws
+      two**, the missing one apparently carrying a semi-transparent gradient. Received from the
+      review; **not investigated** beyond confirming the gap is large — 539 fill records against
+      the reference's 738 over the deck. Do not assume the gradient is the cause: that is the
+      reviewer's plausible reading, not a measurement.
+
+- [ ] **`16 - UTM - (NASA).pptx` shows missing-glyph boxes in chart text in several places.**
+      Received from the review; **not reproduced here**. What was checked and does *not* explain
+      it: both PDFs embed the same ten faces under the same names, and `pdftotext` over our output
+      finds no replacement character, so the text layer is clean and whatever is wrong is in which
+      glyph is selected rather than in which font is resolved. The word gate scores this document
+      as agreeing, which is why only a human found it.
+
 ### Small differences that are measured and not yet closed
+
+- [ ] **The largest unexplained group on the track is not a chart at all: it is a `.ppt` outline
+      placeholder we do not shrink and the reference does.** Written down as a *measurement with
+      no diagnosis attached*, because it was found while choosing what to work and nothing has
+      instrumented our own autofit against it.
+
+      The size census leaves **303 pages over 91 documents** whose dominant text size differs
+      with no explanation, and its worst two documents are
+      `slides/batch-015/ppt/2015-Civil-Rights-Website-training.ppt` at 17 pages and
+      `slides/batch-006/ppt/ITE106-Chapter 4.ppt` at 16. On page 2 of the first, the reference
+      draws the body's five bullets at **31.01 pt with an 18.59 pt OpenSymbol bullet** and we draw
+      **32.00 and 19.20** — the stated size, unshrunk. Both sides put the bullet at 0.60 of the
+      text, so it is one scale of 0.9691 applied to the whole body and not two separate sizes.
+      The consequence is a wrap: one paragraph fits on a line for the reference and breaks into
+      27 + 4 glyphs for us, and the four bullets after it then sit at 287/179/103/33 against the
+      reference's even 278/195/112/37.
+
+      The census's commonest `(ours, ref)` pairs are the same shape and go **both ways** — 13
+      pages at 18.99 against 20.01 and 10 at 18.00 against 18.99, but also 9 at 24.01 against
+      22.99 and 5 at 20.01 against 18.99 — so "we never shrink" is already refuted and the honest
+      statement is that our autofit lands on a different answer, sometimes above and sometimes
+      below. `PptSlideLayout.Autofits` decides *whether* to shrink and `SlideAutofit` decides by
+      how much; which of the two is wrong here is unmeasured, and the first move is to print our
+      own scale for that shape beside the reference's 0.9691 rather than to theorise about
+      either.
+
+- [x] **An OOXML chart's automatic text is 18 pt bold for the main title and 10 pt bold for an
+      axis title; we drew 13 pt and 9 pt with no weight at all.** `ChartPlot.TitleSize`'s 13 pt
+      default cited `chart2/source/model/main/Title.cxx`, which is the chart2 *model* default and
+      so the right answer for an ODF chart — but an OOXML chart never reaches it. The import
+      applies `objectformatter.cxx`'s auto-text table first
+      (`oox/source/drawingml/chart/objectformatter.cxx`:415-434, `TextFormatter::TextFormatter`
+      :906-929 setting `moHeight` and `moBold` from it): the chart title is `1800` and **bold**,
+      an axis title `1000` and **bold**, and everything else — axis labels, legend entries, data
+      labels — `1000` and not bold. `mnRelFontSize` — 120% for the title, 100% for the rest —
+      bites only when the chart space's own `c:txPr` states a height, which six of the corpus's
+      61 chart parts do; without it the absolute default is simply wrong for those six.
+
+      **Settled against LibreOffice's own model, not only against its ink.**
+      `slides/batch-017/pptx/Demick_JetBlue.pptx` states no `sz` and no `b` anywhere in any of
+      its five chart parts, and `soffice --convert-to odp` writes its chart title as
+      `fo:font-size="18pt" fo:font-weight="bold"`, its two axis titles as `10pt`/`bold`, and its
+      axes and its legend as `10pt` with no weight at all. That is the table, read back out of
+      the importer rather than inferred from a rendering.
+
+      Closed by `DrawingChartPlot`'s `AutoText`, `BoldOf` and `AxisTitleBoldOf`, by
+      `ChartPlot.IsTitleBold`/`IsAxisTitleBold`, and by `ChartLabel.IsBold` reaching all three
+      consumers. `SheetChart` and `FrameChart` take the weight and document in code that they
+      drop it, the shape `ChartPlot.TextFamily` set — so neither the sheets nor the words track
+      moves. Swept reach on the slides track: see the scoreboard.
+
+- [x] **A *stated* weight on a chart's axis labels, legend or data labels.** Round twenty-four
+      read `@b` on the two titles only, because the auto-text table's *default* is title-only; a
+      file that states `b="1"` on `c:valAx/c:txPr` states it about the labels, and **36 of the 61
+      chart parts across 7 documents state one somewhere**. Seen directly on page 35 of
+      `171128IPAP.pptx`, whose `chart4.xml` states `<a:defRPr sz="900" b="1"/>` on both axes: the
+      reference draws those labels 8.99 pt Carlito-**Bold** and we drew 9.01 pt Carlito-Regular.
+
+      Closed in round thirty exactly as the design here said: `ChartPlot.IsLabelBold` and
+      `IsLegendBold`, `ChartLabel.IsBold` as `bool?`, and an `InWeight` stamping pass beside
+      `InFamily`. The data label takes the axis' weight rather than its series' own
+      `c:dLbls/c:txPr` — the same approximation `LabelSize` already makes, and no corpus document
+      contradicts it. The weight reaches the *measurement* too, which is what moves the plot
+      rectangle: `ChartAxisLabels.Resolve` takes it because a bold label collides at a different
+      width.
+
+      Swept reach: 3 of 163 documents changed, `|ink|%` +2.62 — the faces move to the
+      reference's and the metric moves against us, because on southern-classic the reference
+      draws that page at three sizes where we draw one and the heavier face puts more ink into
+      the mismatch. See the scoreboard.
+
+- [x] **A *data label's* own text size, which `ChartPlot` collapsed into `LabelSize`.** Named by
+      the weight work above rather than guessed at, and it was two things rather than one.
+
+      Closed by `ChartPlot.DataLabelSize`/`IsDataLabelBold`, `DataLabelFont`/`DataLabelBold`, and
+      `DrawingChartPlot.DataLabelSizeOf`/`DataLabelBoldOf` reading the series' `c:dLbls/c:txPr`.
+      Read from that element's *direct* `c:txPr` child: a `c:dLbl` for one point precedes it in
+      `CT_DLbls`' order, so a descendant search sizes every label by one point's override — the
+      same trap the legend's reader already documents. Both fields are nullable so the ODF and PPT
+      readers keep taking `LabelSize` and neither of the other two tracks can move.
+
+      **Verified by glyph count rather than by the pixel metric, which is nearly silent here.** On
+      `southern-classic` page 12 the reference draws 119 glyphs at 18.00 pt; we drew 84 before and
+      draw 119 after, on a page whose two size groups had been laid down *swapped*. On page 11 the
+      reference draws 22 glyphs at its larger size and exactly 22 moved out of the 14.00 pt group
+      into it. Swept reach: 6 of 163 documents, `|ink|%` 1591.86 → 1591.43.
+
+      **What is left on those pages is not a size.** See the anisotropic-stretch item below: the
+      reference draws page 11's 14 pt labels as `13.589 Tf` under a horizontal scale of `1.030454`,
+      so they are 14.003 pt wide and 13.589 pt tall, and ours are 15.99 in both directions with the
+      width within 0.03 pt.
+
+- [ ] **The per-*axis* size, which is the half of that collapse still standing.** `LabelSize` is
+      still one answer for the category axis and the value axis together — `AxisLabelSizeOf` takes
+      the first axis that states one. `171128IPAP.pptx`'s `chart8.xml` states `sz="1100"` on its
+      category axis and `sz="1000"` on its value axis, and `chart6.xml` 1200 and 1100. Census over
+      the OOXML half of the slides track, which is 112 of its 163 documents: **2 of 61 chart parts,
+      1 document** — much the smaller half, and the reason it was not done with the data labels is
+      that it needs threading through the value-label and category-label measurement sites
+      separately, where the data label had five construction sites and one meaning.
+      `research/probes/slides-r31/chart-size-census.py` produces both numbers.
+
+- [x] **A chart's face is its chart space's statement, not whichever element states one first.**
+      `DrawingChartPlot.FamilyOf` took the first literal `a:latin/@typeface` anywhere in the part.
+      `c:chart` precedes `c:txPr` under `c:chartSpace`, so a part whose *title* names one face and
+      whose chart space names another had every axis label, legend entry and data label measured
+      and drawn in the title's — document order read as a precedence rule.
+
+      `171128IPAP.pptx`'s `chart7.xml` states `Arial` on `c:title/c:txPr` and `Calibri` on
+      `c:chartSpace/c:txPr`. On page 38 the reference draws 31 records Carlito-Bold, 13
+      Carlito-Regular and 2 LiberationSans — its title, correctly in Arial — and we drew 34
+      LiberationSans-Bold. Now 35 Carlito-Bold and 9 Carlito-Regular. Census: 2 of 61 chart parts,
+      1 document. Swept: that document's `|ink|%` 16.36 → 15.90, which is the whole of the 0.41
+      round thirty localised there and said was a different residue from the size work. It was.
+
+- [x] **The chart *title's* own face, which the model could not carry.** `ChartPlot.TextFamily`
+      is one family for the whole chart, so the fix above took `171128IPAP` page 38 from 44 wrong
+      records to 2 — the title's.
+
+      Closed in round thirty-three exactly as this said: a nullable `ChartPlot.TitleFamily` beside
+      `TextFamily`, read from `c:title` alone, plus `ChartText.For` — the rebinding point that
+      type's own remarks anticipated — at the three sites that reserve room above the plot. Both
+      halves were needed and neither implies the other: a family that reaches only the label names
+      a face nothing was measured in, so the band above the plot is reserved for one face and
+      filled with another. Page 38 goes from 35 Carlito-Bold + 9 Carlito-Regular to 34 + 9 + 1
+      LiberationSans-Bold, against the reference's 31 + 13 + 1 LiberationSans-Bold.
+
+      Census over the corpus's OOXML half — 112 of the slides track's 163 documents, and the
+      binary half states a chart's faces where no zip-level census can see them:
+      **2 of 61 chart parts over 1 document on slides, 0 of 11 on sheets and 0 of 1 on words**, so
+      neither other track can move on it over this corpus.
+      `research/probes/slides-r33/chart-title-face-census.py` produces those numbers, and note
+      what it had to get right to produce them: `c:txPr` is a *child* of `c:chartSpace` and
+      **follows** `c:chart`, so a census that looks for it before `<c:chart>` finds the title's
+      own and reports zero disagreements. The first run of it did exactly that.
+
+- [ ] **A chart part's `c:userShapes` — its own little drawing — is not read at all.** Found by
+      finishing the title above rather than by looking for it: with the face right, `171128IPAP`
+      page 38's one remaining one-sided record is a source note the reference draws at
+      `(102.86, 71.10)` in `LiberationSans-BoldItalic` at 9.90 pt reading
+      `Source: StatsSA, BER forecast`. It is in the file, in
+      `ppt/drawings/drawing6.xml`, related from `chart7.xml` — a `c:userShapes` root holding a
+      `cdr:relSizeAnchor` around a `cdr:sp` text box.
+
+      A chart part may relate a *drawing* of its own, anchored in fractions of the chart's
+      rectangle (`cdr:relSizeAnchor`, `cdr:from`/`cdr:to`) or in EMUs from its top-left
+      (`cdr:absSizeAnchor`, `cdr:from` + `cdr:ext`); inside the anchor is ordinary DrawingML —
+      `cdr:sp`, `cdr:pic`, `cdr:graphicFrame`, `cdr:grpSp`, `cdr:cxnSp` — with `a:`-namespaced
+      bodies the shared reader already understands. LibreOffice imports it in
+      `oox/source/drawingml/chart/chartdrawingfragment.cxx` (`ShapeAnchor::calcAnchorRectEmu` at
+      `:77-110` is the whole of the anchor arithmetic) and hands the shapes to chart2 as the
+      model's `AdditionalShapes`, which is why `ChartModel::setVisualAreaSize` has an
+      `impl_adjustAdditionalShapesPositionAndSize` beside it.
+
+      Census over the corpus's OOXML half: **11 of 61 chart parts over 4 documents on slides,
+      20 shapes; 0 of 11 chart parts on sheets and 1 of 1 on words** — the words one carries the
+      relationship with no shape in it. `bitesize-writing-a-report.pptx`,
+      `8_P-Pavese_AIRBUS-ATB-journee-CRATB.pptx`, `RPA P4 - Advanced Material.pptx` and
+      `171128IPAP.pptx` (8 of its 9 parts) are the four.
+
+      The work is a reader, not a measurement: the anchor is two lines of arithmetic and the
+      shapes are the shared DrawingML ones, but they have to reach a sink from inside a chart,
+      which nothing in `ChartDrawing` currently allows — `ChartLayout` produces labels, fills,
+      strokes and markers and has no idea of an arbitrary shape.
+
+      Worth noting what the same page says about the item below it: the reference draws that note
+      and the title as `9.90ptx10.03w` and `13.79ptx13.97w`, so this chart carries the
+      content-overflow compression too, at `a ≈ 1.013`. It is not confined to
+      `southern-classic`.
+
+- [ ] **The category axis' wrap limit: two rules fit every measurement and this corpus cannot
+      separate them, which is the finding.** `ChartAxisLabels.Wraps` gives a label the tick
+      spacing itself, and the three rotation boundaries in
+      `research/probes/slides-r30/make-rot-probe.py` bracket the limit at `[0.990, 1.056]`,
+      `[0.880, 1.100]` and `[0.990, 1.100]` of the spacing — one being the only round number in
+      the intersection. **`0.95 × spacing + 2 × inset` fits all three equally**: the two differ by
+      at most 0.36 em and no reachable category count lands between them, so no document in the
+      corpus can prefer one. Separating them wants an authored deck whose category width falls in
+      that 0.36 em band at a size where both rules are still in range — and it is worth saying
+      that such a deck buys a boundary case and nothing else, which is why the honest entry is
+      this one rather than a choice. The rule in the code is stated as measured and the
+      alternative is named beside it; do not quietly replace one with the other on a hunch.
+
+- [ ] **The chart text residual has *two* components, and every round that has chased it has been
+      reading one number where there are two.** A PDF show carries a font height in `Tf` and an
+      independent horizontal scale in the text matrix's `a`; `pdf-ops.py` reports their product, so
+      a stretched run reads there as a run at some other size.
+      `research/probes/slides-r31/text-stretch-census.py` reads both.
+
+      Over the 163 kept reference PDFs, **7078 shows are written in the `Tm`+`Tf` form it reads and
+      4881 of them carry an `a` more than 0.002 from unity, across 21 documents.** Most are `.ppt`
+      metafile text and are already attributed by the size census's `metafile text` bucket; three
+      PPTX decks with charts are not — `Demick_JetBlue` (142 of 142 shows at a uniform
+      `a = 1.002932`), `southern-classic` and `171128IPAP`.
+
+      On `southern-classic` page 11 the whole of one chart is drawn at `a = 1.030454` with its
+      heights divided by it — `13.589 Tf` for a 14 pt label and `15.486 Tf` for a 16 pt one — while
+      the page's other three charts sit at `a = 1.000102`. So it is per chart, not per deck.
+
+      Reading the second column changes what round twenty-three's table says. `Demick_JetBlue`'s
+      drawn heights against the stated sizes are 6.987/7, 9.889/10, 13.889/14, 17.890/18,
+      29.807/30, 39.808/40 — **absolute** shortfalls of 0.013, 0.111, 0.111, 0.110, 0.193, 0.192,
+      piecewise constant in three bands. Folding the horizontal scale back in does not make it
+      uniform either: the width-equivalents are 9.918 and 17.942 against 10 and 18. Measured,
+      characterised, **not fitted**.
+
+      `ChartLabel.Stretch` and `ChartLayout.Stretch` already model this exact shape — a chart
+      composed at its own size, the em following the vertical factor, the residual `sx/sy` carried
+      onto the label — and the path never fires for an OOXML chart because `ChartPlot.Space` is
+      null for one by construction. So the question is what gives an OOXML chart a natural size
+      different from its frame. Two candidates are already dead: the OLE replacement metafile's
+      `VCLMTF` preferred size is the frame's to the unit on all four of `southern-classic` page
+      11's charts, and LibreOffice's own `odp` writes each `chart:chart`'s `svg:width`/`svg:height`
+      equal to its frame's.
+
+      **Round thirty-three settled it, and it is the chart's own content overflowing its page.**
+      `research/probes/slides-r33/chart-overflow-probe.py` mutates one attribute of that corpus
+      deck at a time and reads `(a, Tf)` back out of `soffice`'s PDF.
+
+      *The overhang correlation is refuted.* Moving that chart wholly onto the slide
+      (`x = -17268` → `+17268`), moving it eight times further off (`-200000`), and pushing
+      either of the page's two well-behaved charts off the same edge each leave **every `a` on
+      the page unchanged to six decimals**, while the chart's drawn `x` moves by exactly the
+      2.72 pt the edit asks for. The record above stated that correlation as untested; it is now
+      tested and dead.
+
+      *It is the frame's height and not its width.* Sweeping the frame height over sixteen values
+      gives `a` = 1.9878 at 40 pt, 1.1797 at 85, 1.0811 at 130, 1.0330 at 175, 1.0047 at 220 and
+      1.0000 from 235 pt up — and sweeping the frame *width* over a factor of three moves `a` in
+      the **fifth** decimal (1.030393 / 1.030454 / 1.030474). So one axis is compressed and the
+      other is not, which already rules out any scale derived from the frame's own rectangle.
+
+      *It is the data labels.* Holding the frame at its own size and editing the chart part:
+      dropping `c:dLbls` from `sz="1600"` to `sz="1000"` removes the compression outright
+      (`a` 1.030454 → 1.000100, the labels drawing 10.005 and the axes 14.001); raising them to
+      2400 deepens it to 1.085123. Deleting the whole `c:legend` changes `a` by nothing and
+      shrinking the legend's font to 800 moves it to 1.026799. Raising the *legend* to 4000 while
+      the data labels fit gives **`a = 0.863091` with `Tf` at the stated 39.991** — the mirror
+      case, a horizontal compression with the vertical untouched.
+
+      *And the whole chart is scaled, not only its type.* The legend key square in the same
+      chart measures `8.39 × 8.39` pt where nothing overflows and `8.39 × 8.11`, `8.39 × 7.76`,
+      `8.39 × 7.11` at frame heights of 175, 130 and 85 pt — the width fixed and the height
+      tracking the font's vertical scale to three decimals. So this reaches the plot rectangle,
+      the bars and the gridlines, not just the glyphs.
+
+      Read together: **LibreOffice composes a chart at its frame's size, and when the chart's own
+      content overflows that page along an axis it hands the frame a picture bigger than the
+      frame along that axis and scales it back in.** The comment at
+      `svx/source/svdraw/svdoole2.cxx`:1710 — `#i83860# resizing charts in impress distorts
+      fonts` — names the same effect from the other side.
+
+      **And the reach is larger than "three PPTX decks with charts".** Counting stretched shows
+      over the reference PDFs of the 15 slides documents that hold chart parts: **8 of the 15
+      carry at least one, 698 shows of 1808.** Four of those hold *no* `.emf` or `.wmf` at all
+      and so have no metafile explanation available — `Demick_JetBlue` (142 of 142 shows, 5
+      charts), `171128IPAP` (108 of 224, 9 charts), `N2_E_Maestroni_Swarm_COP` (27 of 27, 1
+      chart) — and `southern-classic` carries one metafile against 21 charts and 189 of 383. The
+      remaining four each hold several metafiles and are not attributed either way here.
+
+      **Not implemented, deliberately.** Reproducing it means composing the chart, taking the
+      union of the frame with the ink it actually produced, and scaling by the ratio — which is
+      a faithful transcription only if our own data-label placement overflows by the same amount
+      as chart2's. It does not: our plot rectangle already differs from the reference's by up to
+      5 pt on a rotated axis, so the overflow would be a difference of differences and a wrong
+      squash is worse than none. What is now known is the *shape* of the rule and the observable
+      that decides it, which is what the next round needs; the unmeasured quantity is our own
+      overflow against LibreOffice's, and that is the thing to measure before writing any code.
+
+      **The model's sizes are right and it is the device that moves**, which is worth stating
+      because it closes the cheapest wrong theory: `soffice --convert-to odp` writes those four
+      charts' styles at exactly `10pt`, `14pt` and `16pt` — and writes each `chart:chart`'s own
+      `svg:width`/`svg:height` equal to its frame's at every one of the swept heights, so the
+      chart *model* never learns about the compression either.
+
+      Round twenty-three's own reading of it as "the chart's text scale, from the OLE object's
+      stored visual area against the size of the frame it sits in" is refuted on both halves.
+
+      The factor first: 10 × 0.9889 = 9.889 and the reference draws 9.889, but 18 × 0.9889 =
+      17.80 and it draws 17.89. One pair fits. Restating the same deck's title at six sizes and
+      asking `soffice` what it draws (`research/probes/slides-r24/make-title-size-probe.py`):
+
+      | stated | 7 | 10 | 14 | 18 | 30 | 40 |
+      |---|---|---|---|---|---|---|
+      | drawn | 6.987 | 9.889 | 13.889 | 17.890 | 29.807 | 39.808 |
+      | ratio | 0.9981 | 0.9889 | 0.9921 | 0.9939 | 0.9936 | 0.9952 |
+
+      The mechanism next: that deck's chart frames state `a:ext cx="8046720" cy="4206240"` —
+      exactly 22352 × 11684 in 1/100 mm — and LibreOffice's own `odp` of it writes
+      `chart:chart svg:width="22.352cm" svg:height="11.684cm"`. The visual area and the frame are
+      equal to the unit, so there is no visual-area-to-frame scale to be the cause of anything.
+
+      It is not confined to the title: the axes and the legend draw 9.889 pt in every variant
+      while the slide's own text draws exactly 18 and 28.006 on the same page, so it is chart
+      text specifically and it is worth 0.3–1.1%. Our own side quantises a font height to the
+      whole 1/100 mm and the reference plainly does too for a *slide* — 28 pt is 987.78 and both
+      draw 28.006 — so the residual is something the chart's own device does on top of that.
+      Unchased beyond bounding it.
+
+- [ ] **A legend's row height is quantised to a 96 dpi pixel and the term beside it is exactly
+      one millimetre.** Round twenty-three found the row height was not a constant multiple of
+      the font — 7.55, 11.28 and 16.50 pt at 7, 10 and 14 — named a quantisation as the suspect
+      and named the probe that would separate the candidates. Round twenty-four ran it
+      (`research/probes/slides-r24/make-legend-step-probe.py`, eleven decks a point apart) and
+      the suspect is right:
+
+      | legend font | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 |
+      |---|---|---|---|---|---|---|---|---|---|
+      | row pitch | 9.58 | 10.34 | 11.85 | 13.35 | 14.09 | 15.59 | 16.33 | 17.09 | 19.33 |
+      | less 1 mm | 6.745 | 7.505 | 9.015 | 10.515 | 11.255 | 12.755 | 13.495 | 14.255 | 16.495 |
+      | ÷ 0.75 pt | 9.01 | 10.02 | 12.04 | 14.04 | 15.02 | 17.02 | 18.01 | 19.02 | 22.01 |
+
+      Every one is a whole number of 0.75 pt — **one pixel at 96 dpi** — to within 0.028 pt, and
+      the eight steps between consecutive sizes are 1.013, 2.013, 2.000, 0.987, 2.000, 0.987,
+      1.013 and 2.987 pixels. The 1 mm subtracted is not fitted: it is the same floor the
+      padding and the key gap already have — `pad` is `max(1 mm, 0.33 × font)` and reads 2.84 at
+      6, 7 and 8 pt before following the font, and the key gap is `max(1 mm, 0.22 × font)` and
+      reads 2.83 up to 13 pt then 3.07, 3.29 and 3.52 at 14, 15 and 16. Three quantities, one
+      floor — and the floor is *not* quantised while the row height is.
+
+      Two things are left. The rate feeding the grid is not settled: Liberation Mono's 1.1328 em
+      line height predicts six of the nine pixel counts and misses at 7, 13 and 14, so "a line
+      height, quantised" is close and unproven. And 15 and 16 pt leave the regime entirely —
+      0.168 and 0.368 pt off the grid, with the pitch barely growing (20.24, 20.44) while the
+      border's height flattens too — which is a second effect and should not be fitted with the
+      first.
 
 - [ ] **A chart's category-axis labels: we draw *fewer* than the reference, not more.** Recorded
       the other way round for two rounds — "the reference draws none of those labels and we draw
@@ -2027,6 +2443,72 @@ the change is `PptxTextBody.FirstCodePoint` and it is guarded only by the refere
       right and we draw neither, and our legend collides with the category-axis title
       (`RPMYear ASM LF + ( 3rd Quarter)` on one line). Judge this one on the image, never on
       `wc -w`.
+- [x] **A secondary value axis' title has room reserved for it and is never drawn.**
+      `ChartLayout.PlotAreaOf` took `Shape(measurer, second, plot.AxisTitleSize).Height` off the
+      right edge for `plot.SecondaryValueAxisTitle` and `AddTitles` added two titles and stopped,
+      so the plot area was narrowed by a title that is not there — the one failure shape that
+      looks like nothing is wrong, because the picture is still the right size.
+
+      Censused over all three tracks at **9 chart parts over 6 documents** declaring two
+      `c:valAx` and a `c:title` on both. Closed in round twenty-nine: `SECONDARY_Y_AXIS_TITLE` is
+      `TitleAlignment::ALIGN_RIGHT` on a chart that is not vertical (`ChartView.cxx:2081-2082`)
+      and is positioned at `X + Width - titleWidth/2 - nXDistance` (`:1152-1153`), so it goes
+      against the frame's right edge and turns the same quarter turn. On `Demick_JetBlue.pptx`
+      page 4 we now draw `Load Factor (%)` 3.7 pt right of where the reference draws it.
+
+- [x] **Every rotated piece of chart text was turned clockwise where LibreOffice turns it
+      anticlockwise.** Found in round twenty-nine while reading the title code — the same reading
+      that produced the item above, and much the larger of the two. `ChartLabel.Rotation` is
+      anticlockwise, which is how both formats state one and how chart2's own shapes carry it,
+      and the drawing space has y growing downwards; handing the angle straight to
+      `AffineTransform.Rotation` reverses it. Measured two ways: a probe whose value axis title
+      reads `Alpha Omega` came out top-to-bottom against the reference's bottom-to-top, and
+      `Demick_JetBlue.pptx`'s 45° category labels descended to the right against the reference's
+      ascending. Fixed at all three consumers — `SlideChart`, `SheetChart`, `FrameChart` — because
+      the sign is wrong where the model's convention meets the drawing space's, not in the model.
+      The box does not move, being symmetric about the same centre for either sign, so this is ink
+      and not layout.
+
+- [x] **A chart's category axis title was drawn on top of a bottom legend.** `AddTitles` measured
+      from the frame's own bottom edge, but `lcl_createTitle` places an `ALIGN_BOTTOM` title
+      inside `rRemainingSpace` (`ChartView.cxx:1147-1149`), and the legend has already come out of
+      that rectangle by then (`lcl_createLegend` at `:1966`, the axis titles at `:2054`). On the
+      band probes our title's top went from 30.30 pt below the reference's to 6.53 pt above with a
+      bottom legend, and from 8.13 below to 6.47 above without one. **The 6.5 pt residual is
+      unexplained and open**: it is the same with and without a legend, within 0.35 pt of the
+      chart's own two per cent bottom margin — which is the obvious suspect and does not survive
+      reading `createShapes2D:941-944`, since the margin is plainly applied there and the *plot
+      area's* bottom band on the same probes matches the reference to 0.17 pt with it included.
+
+- [x] **`c:tickLblPos val="none"` was unread**, so an axis whose labels the file switches off drew
+      them and reserved a line for them. It is not `c:delete`: the importer maps it to chart2's
+      `DisplayLabels` (`axisconverter.cxx:221`), which suppresses the labels and leaves the axis
+      line and its ticks. ODF states the same property as `chart:display-label`. On a probe the
+      reference stops drawing `Q1 Q2 Q3 Q4` and its plot area's bottom edge drops 12.70 pt,
+      keeping the 4.25 pt tick.
+
+      **Swept reach on the slides track: zero of 163.** Seven chart parts over three decks state
+      it and in every one of them the axis is *also* `c:delete val="1"`, or is a second `b` axis
+      the reader does not pair. The distinction is real and the corpus does not exercise it; the
+      fix is worth having and moved nothing, and this is the honest headline for it.
+
+- [ ] **The plot area's bottom edge is right to about 5 pt on an upright axis and up to 39 pt out
+      on a rotated one**, and the remaining error is `VDiagram::adjustInnerSize`. LibreOffice does
+      not predict what the axis labels will take: it lays the diagram out at full size, measures
+      the bounding box of everything the axes drew, and shrinks the inner rectangle by the
+      *overflow* (`chart2/source/view/diagram/VDiagram.cxx:653-700`), twice, with a floor of a
+      third of the available rectangle. We compute a reservation per edge instead.
+
+      Where that shows: on `Demick_JetBlue.pptx`'s five chart pages the bottom edge is 12.73,
+      38.72, 4.88, 12.73 and 4.87 pt too high, and the two 4.87s are the pages with upright
+      labels while the others are rotated. The 26-category band probe puts the rotated excess at
+      7.94 pt on its own. LibreOffice's *own* answer is readable without inferring anything —
+      `chart:coordinate-region` in its `odp` export carries the computed plot rectangle excluding
+      axes (`SchXMLExport.cxx:2274`), and it agrees with its drawn gridlines to 2 pt — so the next
+      round has a model-level instrument for this and does not need to read ink.
+
+      Read it as: reproducing the feedback loop is the fix, and it is a rewrite of `PlotAreaOf`
+      rather than another term.
 - [ ] **An ODF fill's `draw:opacity` is not read at all**, so a shape LibreOffice draws at 30%
       comes out fully opaque. Found while building `slide-drop-shadow.odp`: the same shape that
       carries `<a:alpha val="30000"/>` in the `pptx` carries `draw:opacity="30%"` on its

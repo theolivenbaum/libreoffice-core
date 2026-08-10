@@ -33,6 +33,7 @@ public sealed record PaginationOptions
     {
         KeepsSpacingAtTopOfPage = true,
         CollapsesSpacing = true,
+        AddsCellLineSpacing = true,
     };
 
     /// <summary>
@@ -63,6 +64,43 @@ public sealed record PaginationOptions
     public bool KeepsSpacingAtTopOfPage { get; init; }
 
     /// <summary>
+    /// Whether a paragraph at the top of a page that is not the first drops its space-before
+    /// <em>whatever</em> broke the page, explicit break included.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Writer's <c>SwFrame::IsCollapseUpper</c> (<c>sw/source/core/layout/calcmove.cxx</c>:1120), whose
+    /// own comment calls it "Word &gt;= 2013 style: when we're at the top of the page's body, but not on
+    /// the first page, then ignore the upper margin for paragraphs". It runs <em>after</em>
+    /// <see cref="KeepsSpacingAtTopOfPage"/> has decided the space is due and zeroes it, so it is a
+    /// second rule rather than a different setting of the first.
+    /// </para>
+    /// <para>
+    /// The gate is <c>TAB_OVER_SPACING &amp;&amp; !TAB_OVER_MARGIN</c>, which is
+    /// <c>compatibilityMode</c> 15 or more: <c>SettingsTable.cxx</c>:685 sets <c>TabOverMargin</c> for a
+    /// mode of 14 or less, and an absent <c>compatibilityMode</c> defaults to 12
+    /// (<c>SettingsTable.cxx</c>:637). A DOC always sets <c>TabOverMargin</c>
+    /// (<c>ww8par.cxx</c>:2047) and a native ODF document sets neither, so both keep the older rule.
+    /// </para>
+    /// <para>
+    /// Measured on eleven synthetics carrying 20 pt of space-before, reading the first word of page two
+    /// with a 72 pt top margin. At mode 15 the reference puts it at 72.35 for an automatic break, a
+    /// <c>w:pageBreakBefore</c>, a leading <c>w:br w:type="page"</c> and a <c>nextPage</c> section break
+    /// alike, and at 92.35 for the document's own first paragraph. At modes 14, 12 and none the two
+    /// explicit breaks come back to 92.35 while the automatic one stays at 72.35. So the discriminator
+    /// is the mode and not the kind of break — which is the opposite of what reading
+    /// <c>HasParaSpaceAtPages</c> alone suggests, since that grants the space to every explicit break.
+    /// </para>
+    /// <para>
+    /// One carve-out of Writer's is not implemented: <c>IsCollapseUpper</c> declines when the paragraph
+    /// carries a <c>RES_PAGEDESC</c>, "after applying a new page style (but do it after page breaks)".
+    /// A plain <c>nextPage</c> section break does not set one — measured above, and it collapses like
+    /// any other break — so this bites only where a section also changes the page's geometry.
+    /// </para>
+    /// </remarks>
+    public bool CollapsesUpperAtPageTop { get; init; }
+
+    /// <summary>
     /// Whether the space between two paragraphs is the larger of the two rather than their sum.
     /// </summary>
     /// <remarks>
@@ -73,6 +111,20 @@ public sealed record PaginationOptions
     /// source document, exported both ways. On a five-page document that is one page break.
     /// </remarks>
     public bool CollapsesSpacing { get; init; }
+
+    /// <summary>
+    /// Whether a table cell grows by the proportional line spacing on its last paragraph.
+    /// </summary>
+    /// <remarks>
+    /// Writer's <c>ADD_PARA_LINE_SPACING_TO_TABLE_CELLS</c>, the companion of the
+    /// <c>ADD_PARA_SPACING_TO_TABLE_CELLS</c> rule that already charges a cell for its last paragraph's
+    /// space-after. It is not read from the document at all: <c>WriterFilter.cxx</c>:314 sets it on every
+    /// file the DOCX, DOC and RTF importers open, and a native ODF document leaves it at its off default —
+    /// which is exactly the split between the two presets here. See <see cref="TableLayouter"/>'s
+    /// <c>CellLineSpacing</c> for the amount, which is a function of the font size rather than of the
+    /// measured line height.
+    /// </remarks>
+    public bool AddsCellLineSpacing { get; init; }
 
     /// <summary>
     /// Whether a justified line ended by a manual break is stretched to the margin.
@@ -279,6 +331,21 @@ public sealed class Paginator
 
         List<LaidOutPage> pages = Fill(blocks, withFrames, startingNumber);
 
+        // `NUMPAGES` is the one field whose value the layout itself decides, so it takes a second pass:
+        // the first tells us how many pages there are, the furniture is told, and the document is filled
+        // again with the head that now prints the right total. Guarded on the field being present at all,
+        // so the overwhelming majority of documents pay one scan of their running heads and nothing else.
+        //
+        // Not iterated to a fixed point. The total is drawn at a different width from the producer's
+        // cached one, so in principle it could re-break a header line, change the head's height and move
+        // a page break — and then the total would be wrong again. Writer damps the same circularity
+        // rather than chasing it, and a running head tall enough for a two-character difference to change
+        // its line count is not a shape this corpus contains.
+        if (TellFurnitureTheTotal(withFrames, pages.Count))
+        {
+            pages = Fill(blocks, withFrames, startingNumber);
+        }
+
         // A per-page note restart, which is the one numbering rule that cannot be settled before the pages
         // exist — and Writer damps it rather than iterating, so this renumbers over the finished pages, lays
         // them out once more and stops. See `NoteRenumbering` for the citations and for why stopping is the
@@ -311,7 +378,7 @@ public sealed class Paginator
         // reached through the flow it landed in, which exists only once a page has been filled. Scanning
         // the blocks instead returned early on exactly those documents and left their frames unplaced.
         FrameResolution resolution = FrameResolution.Of(
-            blocks, withFrames, pages, _options.CollapsesSpacing);
+            blocks, withFrames, pages, _options.CollapsesSpacing, _options.AddsCellLineSpacing);
         if (resolution.IsEmpty) return pages;
 
         for (int pass = 0; pass < MaxFramePasses; pass++)
@@ -328,7 +395,7 @@ public sealed class Paginator
             }
 
             FrameResolution settled = FrameResolution.Of(
-                blocks, withFrames, next, _options.CollapsesSpacing);
+                blocks, withFrames, next, _options.CollapsesSpacing, _options.AddsCellLineSpacing);
             pages = next;
 
             bool converged = settled.SameAs(resolution);
@@ -349,6 +416,31 @@ public sealed class Paginator
     /// reason — a frame can chase its anchor indefinitely.
     /// </remarks>
     private const int MaxFramePasses = 4;
+
+    /// <summary>
+    /// Hands every section's furniture the document's page count, and says whether any of it wanted one.
+    /// </summary>
+    /// <remarks>
+    /// Every section is told, not only the ones that ask, because a set that already holds the right total
+    /// ignores the assignment — and a set told a *different* total discards its laid-out cache, which is
+    /// what makes the second pass draw the new number rather than the cached flow.
+    /// </remarks>
+    /// <param name="sections">The sections, with their furniture.</param>
+    /// <param name="total">How many pages the measuring pass produced.</param>
+    private static bool TellFurnitureTheTotal(List<PaginatedSection> sections, int total)
+    {
+        bool any = false;
+
+        foreach (PaginatedSection section in sections)
+        {
+            if (section.Furniture is not { } furniture || !furniture.CarriesPageCount) continue;
+
+            furniture.TotalPages = total;
+            any = true;
+        }
+
+        return any;
+    }
 
     /// <summary>The pagination loop itself, with whatever frames the current pass believes in.</summary>
     private List<LaidOutPage> Fill(
@@ -409,14 +501,16 @@ public sealed class Paginator
                         new DocPoint(Length.Zero, Length.Zero),
                         0,
                         width,
-                        _options.CollapsesSpacing);
+                        _options.CollapsesSpacing,
+                        _options.AddsCellLineSpacing);
 
                 laid.Add(new LaidBlock(null, cells, rowHeights));
                 continue;
             }
 
             PageParagraph paragraph = (PageParagraph)blocks[i];
-            ParagraphLayouter layouter = new(paragraph.Face, breaker: null, paragraph.Metrics);
+            ParagraphLayouter layouter = new(
+                paragraph.Face, breaker: null, paragraph.Metrics, WriterLineBox.LeadingAboveText);
             ParagraphFormat? previous = PreviousFormat(blocks, i);
 
             // A paragraph with runs is measured across them, so each line is as tall as its own tallest
@@ -436,7 +530,8 @@ public sealed class Paginator
                     width,
                     paragraph.Language,
                     previous,
-                    obstacles)
+                    obstacles,
+                    paragraph.EmSize)
                 : layouter.Layout(
                     paragraph.Text,
                     paragraph.Format,
@@ -454,6 +549,17 @@ public sealed class Paginator
         }
 
         int pageNumber = geometry.RestartPageNumberAt ?? startingNumber;
+
+        // Blank pages an even- or odd-page section break made Writer insert and PDF export then dropped.
+        // They are not in `pages` and never drawn, but they are real pages of the layout: they take a
+        // page number with them, and the physical parity the next such break tests counts them.
+        int skippedBlanks = 0;
+
+        // Whether page one of the layout carries an odd number, which is what Writer means by a right-hand
+        // sheet: `sw::IsRightPageByNumber` compares a wanted number's parity against this and nothing else
+        // (`sw/source/core/layout/frmtool.cxx`:3146-3153). A document whose first page is numbered two has
+        // its right-hand sheets on even numbers.
+        bool firstPageIsOdd = pageNumber % 2 == 1;
         int sectionFirstPage = 0;
         int column = 0;
 
@@ -491,14 +597,14 @@ public sealed class Paginator
                 page,
                 pageFurniture?.Header(
                     pageFurnitureSection, pageFurnitureGeometry, pageNumber, pageIsSectionFirst,
-                    _options.CollapsesSpacing));
+                    _options.CollapsesSpacing, _options.AddsCellLineSpacing));
 
             body = PulledUpBy(
                 body,
                 page,
                 pageFurniture?.Footer(
                     pageFurnitureSection, pageFurnitureGeometry, pageNumber, pageIsSectionFirst,
-                    _options.CollapsesSpacing));
+                    _options.CollapsesSpacing, _options.AddsCellLineSpacing));
 
             bodyHeight = body.TextHeight;
         }
@@ -512,10 +618,35 @@ public sealed class Paginator
         int paragraphIndex = 0;
         int lineIndex = 0;
 
+        // The band the current section's columns run between, as offsets from the body's top. Normally the
+        // whole body — a page laid out in columns fills each of them to the bottom — but a *balanced*
+        // section is a box of its own inside the page: every one of its columns starts where the section
+        // starts and ends where the shortest height that holds its content ends. See BeginBalance.
+        Length columnTop = Length.Zero;
+        Length columnBottom = bodyHeight;
+
+        // The balancing search in flight, or null when the section being filled is not balanced.
+        BalanceSearch? balance = null;
+
+        // How far down the deepest column of the trial in flight actually reached, which is *not* the
+        // height it was given: the fitting rules count line boxes, and a paragraph's space-after is added
+        // to the running height afterwards without ever being checked against the bottom. Writer counts it
+        // — a text frame's area includes its lower margin, and the section frame sums those areas — so a
+        // band chosen from the lines alone ends a paragraph gap too high and lifts everything below the
+        // section by exactly that gap. Measured at 10 pt on `150_5300_13_chg8.doc`.
+        Length balanceReach = Length.Zero;
+
+        // Set by EmitPage when a balanced trial's content will not fit the candidate height. Read at the
+        // top of the loop, because EmitPage is called from a dozen places and each of them expects to
+        // continue; the loop is where the trial can be restarted.
+        bool balanceOverflowed = false;
+
         // How far into the row at `lineIndex` an earlier page already reached, for a table row that broke
         // across the break. Nought for every row of every table that did not — which, since a row only
         // splits when it has to, is nearly all of them.
         Length rowDrawn = Length.Zero;
+
+        BeginBalance();
 
         while (paragraphIndex < blocks.Count)
         {
@@ -523,6 +654,27 @@ public sealed class Paginator
             {
                 WasTruncated = true;
                 break;
+            }
+
+            // A balanced section's trial ran out of columns. Either the candidate height was too short and
+            // the search narrows, or this is the first trial at the section's whole remaining band — which
+            // means the section genuinely overflows the page and is filled unbalanced, its remainder
+            // balanced again at the top of the next one, exactly as a section frame with a follow behaves.
+            if (balanceOverflowed)
+            {
+                balanceOverflowed = false;
+
+                if (balance!.Fitted)
+                {
+                    balance.TooShort(columnBottom - columnTop);
+                    RestoreBalanceStart();
+                    continue;
+                }
+
+                balance = null;
+                EmitPage();
+                BeginBalance();
+                continue;
             }
 
             // "Nothing here yet", which is what the top-of-frame rules are about — and a frame is a column
@@ -540,6 +692,17 @@ public sealed class Paginator
             // started on, because its lines were measured at that width and re-breaking them mid-flight
             // would leave the two halves disagreeing about where the words go.
             int blockSection = SectionOf(blocks[paragraphIndex], resolved.Count);
+
+            // The balanced section ended here, so the candidate height held all of it. Either the search
+            // has narrowed far enough to keep this placement, or it tries a shorter one — and both answers
+            // restart the loop rather than falling through, because accepting moves the pen to the bottom
+            // of the section box and the emptiness tests above were computed before that.
+            if (balance is not null && blockSection != sectionIndex && lineIndex == 0)
+            {
+                SettleBalance();
+                continue;
+            }
+
             if (blockSection != sectionIndex && lineIndex == 0)
             {
                 SectionBreak kind = resolved[blockSection].Section.Break;
@@ -574,14 +737,30 @@ public sealed class Paginator
                         FinishPage();
                     }
 
-                    // An even- or odd-page break leaves a blank page when the parity is already wrong. The
-                    // filler belongs to the section that ended, so it is emitted before the geometry
-                    // changes — which is also what puts the old section's header on it.
+                    // An even- or odd-page break leaves a blank page when the parity is already wrong —
+                    // and that page is never drawn. Writer expresses the break as a page style whose
+                    // `UseOn` names one side only (`ww8par.cxx`:4470-4479 for DOC, `PropertyMap.cxx`:1568
+                    // for `w:type="oddPage"`), so `SwFrame::InsertPage` takes `rDoc.GetEmptyPageFormat()`
+                    // when the wished side and the natural next side disagree (`pagechg.cxx`:1613-1616).
+                    // An *automatically inserted* empty page of that kind is skipped by PDF export:
+                    // `SwPrintUIOptions::IsPrintEmptyPages` reads `IsSkipEmptyPages`, whose default is
+                    // true (`printdata.cxx`:391-399). Measured on a two-section probe whose second
+                    // section carries `w:type="oddPage"` and prints its own `PAGE` field: LibreOffice's
+                    // PDF holds **two** pages and the second one reads **3**. The blank exists in the
+                    // layout and consumes a page number; it is not part of the output.
+                    //
+                    // Which side is "wished" is decided physically, not by the printed number. The style
+                    // states one of `GetRightFormat`/`GetLeftFormat` and the other is null, so
+                    // `InsertPage`'s flip forces the side regardless of any `SetNumOffset` read a few
+                    // lines above it, and `OnRightPage()` is `GetPhyPageNum() % 2` (`frame.hxx`:757).
+                    // So the parity to test is the *physical* page about to be laid out — which counts
+                    // the skipped blanks — and not `pageNumber`, which a section restart moves.
                     while (kind is SectionBreak.EvenPage or SectionBreak.OddPage
-                           && pageNumber % 2 == 0 != (kind == SectionBreak.EvenPage)
-                           && pages.Count < _options.MaxPages)
+                           && (pages.Count + skippedBlanks + 1) % 2 == 0 != (kind == SectionBreak.EvenPage)
+                           && pages.Count + skippedBlanks < _options.MaxPages)
                     {
-                        FinishPage();
+                        skippedBlanks++;
+                        pageNumber++;
                     }
                 }
 
@@ -612,12 +791,48 @@ public sealed class Paginator
 
                 deferredPage = kind == SectionBreak.Continuous && !pageIsEmpty ? geometry.Page : null;
                 sectionFirstPage = pages.Count;
+
+                // A restart of the page numbering also decides which side of the sheet the section wants,
+                // and leaves the same undrawn blank when the sides disagree. `SwFrame::InsertPage` takes
+                // the wished side from the restart value through `sw::IsRightPageByNumber`
+                // (`pagechg.cxx`:1590-1596), which asks only whether the restart's parity agrees with the
+                // *first* page of the layout's own number (`frmtool.cxx`:3146-3153). An even- or odd-page
+                // break does not come through here: its page style states one side only, so the flip below
+                // that reading overrides the restart entirely — which is why this arm excludes them rather
+                // than running beside the loop above.
+                //
+                // Measured on LibreOffice 24.2, three probes differing only in the restart value, each a
+                // three-section document whose last section breaks to an odd page and whose paragraphs
+                // print their own `PAGE`: no restart gives 1, 2, 3; a restart to 19 gives 1, 19, **21**;
+                // a restart to 20 gives 1, 20, 21. All three export three pages. The 21 in the second is
+                // two skipped blanks — one to put the odd restart on an odd sheet, one for the odd-page
+                // break that then lands on an even one.
+                // NewColumn is excluded beside Continuous for the same reason: by the time control reaches
+                // here it means the columns did line up, so the break stayed inside the sheet and no page
+                // was inserted to have a side.
+                if (kind is not (SectionBreak.Continuous or SectionBreak.NewColumn
+                                 or SectionBreak.EvenPage or SectionBreak.OddPage)
+                    && geometry.RestartPageNumberAt is { } restartAt
+                    && pages.Count + skippedBlanks < _options.MaxPages)
+                {
+                    // "Right" is the side page one of the layout is on, so the restart wants a right-hand
+                    // sheet exactly when its parity matches page one's number. A right-hand sheet is an
+                    // odd physical one, and the next physical sheet is pages.Count + skippedBlanks + 1.
+                    bool wantsRight = restartAt % 2 == 1 == firstPageIsOdd;
+                    bool nextIsRight = (pages.Count + skippedBlanks) % 2 == 0;
+
+                    if (wantsRight != nextIsRight) skippedBlanks++;
+                }
+
                 pageNumber = geometry.RestartPageNumberAt ?? pageNumber;
 
                 // A page with nothing on it yet belongs to the section starting here; one that already
                 // carries lines keeps the head of the section it started in.
                 if (placed.Count == 0 && tables.Count == 0) AdoptSection();
                 MeasureBody();
+                columnTop = Length.Zero;
+                columnBottom = bodyHeight;
+                BeginBalance();
                 continue;
             }
 
@@ -629,7 +844,7 @@ public sealed class Paginator
 
                 TablePart part = PlaceTablePart(
                     table, laid[paragraphIndex], lineIndex, rowDrawn, body.ColumnArea(column),
-                    used + before, column, bodyHeight - (used + before), columnIsEmpty);
+                    used + before, column, columnBottom - (used + before), columnIsEmpty);
 
                 // Nothing of the table may go here, and the column already holds something — so the page
                 // ends and the table starts again at the top of the next one.
@@ -672,8 +887,14 @@ public sealed class Paginator
             // at all: the document's first page keeps a paragraph's space-before, an explicit page break
             // keeps it, and an automatic break in the body drops it. Only asked where the rule can bite —
             // at the top of a column, where `SpaceAbove` would otherwise take the option's word for it.
+            //
+            // `CollapsesUpperAtPageTop` is the second rule on top of it — `SwFrame::IsCollapseUpper`,
+            // which takes the space back on every page but the first from Word 2013 onwards, so at
+            // `compatibilityMode` 15 an explicit break keeps nothing either.
             bool keepsSpaceHere =
-                column == 0 && (pages.Count == 0 || paragraph.Format.StartsNewPage);
+                column == 0
+                && (pages.Count == 0
+                    || (paragraph.Format.StartsNewPage && !_options.CollapsesUpperAtPageTop));
 
             Length ownSpaceAbove = Length.Zero;
             Length spaceAbove = lineIndex == 0
@@ -687,12 +908,12 @@ public sealed class Paginator
             // by trying the unconstrained answer and shortening until it holds, which terminates because
             // each step removes a line and so can only remove notes.
             int fitted = Fit(
-                layout, lineIndex, used + spaceAbove, bodyHeight - NoteHeight(notes),
+                layout, lineIndex, used + spaceAbove, columnBottom - NoteHeight(notes),
                 atTopOfPage: columnIsEmpty);
 
             while (fitted > 0)
             {
-                Length room = bodyHeight - NoteHeight(
+                Length room = columnBottom - NoteHeight(
                     notes, NotesIn(paragraph, layout, lineIndex, fitted));
 
                 if (Fit(layout, lineIndex, used + spaceAbove, room, columnIsEmpty) >= fitted) break;
@@ -748,7 +969,13 @@ public sealed class Paginator
                     // The paragraph's own upper space, and only on the line the gap sits above — what a
                     // frame anchored to the paragraph measures its offset from is that line's top less
                     // this. See `PlacedLine.ParagraphTop`.
-                    lineIndex + i == 0 ? ownSpaceAbove : Length.Zero));
+                    lineIndex + i == 0 ? ownSpaceAbove : Length.Zero,
+
+                    // The columns in force *here*, because the page may end up carrying another section's
+                    // — a two-column stretch between two continuous breaks leaves the page single-column
+                    // again below it, and the page is written with whatever is current when it is emitted.
+                    Math.Max(1, page.Columns),
+                    page.ColumnGap));
 
                 // A stretch that shares its line with the next one leaves the pen where it is: the box
                 // after it is more of the same line, at the same top.
@@ -772,7 +999,11 @@ public sealed class Paginator
                 continue;
             }
 
-            used += layout.SpaceAfter;
+            // The bottom border's own room, kept out of `SpaceAfter` because it is not spacing: it does
+            // not collapse against the next paragraph's space-before and it is not dropped at the top of
+            // a page. Measured on twelve probes: a bordered paragraph's gap to the one below is its
+            // space-after *plus* w:sz/8 + w:space.
+            used += layout.SpaceAfter + paragraph.BorderBelow;
             paragraphIndex++;
             lineIndex = 0;
 
@@ -781,7 +1012,7 @@ public sealed class Paginator
             if (paragraph.Format.KeepWithNext
                 && paragraphIndex < blocks.Count
                 && laid[paragraphIndex].Paragraph is { } next
-                && !FirstLineFits(next, used, bodyHeight))
+                && !FirstLineFits(next, (PageParagraph)blocks[paragraphIndex], used, columnBottom))
             {
                 MoveTrailingGroupToNextPage(
                     blocks, placed, out List<PlacedLine> moved, out int movedFrom);
@@ -794,6 +1025,15 @@ public sealed class Paginator
                 }
             }
         }
+
+        // A balanced section that reaches the end of the document keeps whatever the trial in flight had
+        // placed: there is no following section to make room for, so the search has nothing left to buy.
+        // Only reachable when a document's *last* section is balanced, which by the rule in BalancesColumns
+        // means its successor exists but holds no blocks.
+        balanceOverflowed = false;
+        balance = null;
+        columnTop = Length.Zero;
+        columnBottom = bodyHeight;
 
         // FinishPage rather than EmitPage, because the last page has to be *emitted*: in a multi-column
         // section EmitPage moves to the next column when there is one, so a document ending part way through
@@ -827,9 +1067,22 @@ public sealed class Paginator
             if (column + 1 < Math.Max(1, page.Columns))
             {
                 // The page is not finished, only this column of it. The lines already placed stay where
-                // they are — each carries its own column — and the running height starts again at the top.
+                // they are — each carries its own column — and the running height starts again at the top
+                // of the band, which is the page's top for ordinary columns and the section's own top for a
+                // balanced one.
+                if (balance is not null && used > balanceReach) balanceReach = used;
+
                 column++;
-                used = Length.Zero;
+                used = columnTop;
+                return;
+            }
+
+            // A balanced trial has no more columns, so the candidate height was too short — or, on the
+            // first trial, the section really does overflow the page. Either way the page must not be
+            // written yet: the loop reads this flag and decides which.
+            if (balance is not null)
+            {
+                balanceOverflowed = true;
                 return;
             }
 
@@ -863,6 +1116,110 @@ public sealed class Paginator
             notes = [];
             used = Length.Zero;
             MeasureBody();
+            columnTop = Length.Zero;
+            columnBottom = bodyHeight;
+        }
+
+        // Starts a balancing search if the section now current asks for one and there is room for it.
+        //
+        // Writer does this in `SwLayoutFrame::FormatWidthCols` (`sw/source/core/layout/wsfrm.cxx`:3912),
+        // which formats the columns, measures how far the content juts out of them or falls short, and
+        // grows or shrinks the *section frame* until neither — "nMaximum starts with LONG_MAX and is then
+        // maintained as the minimum height on which the content fit into the columns". The search here is a
+        // plain bisection over the same quantity, because our fill is deterministic and can simply be run
+        // again at a different height.
+        void BeginBalance()
+        {
+            balance = null;
+
+            // Only from the first column. A balanced section beginning half way through *another* section's
+            // columns would need a second column index — Writer gives it a section frame of its own — and
+            // no corpus document does it, so it is left filling in order rather than modelled wrongly.
+            if (!geometry.BalancesColumns || page.Columns <= 1 || column != 0) return;
+
+            Length band = bodyHeight - used;
+            if (band <= Length.Zero) return;
+
+            balance = new BalanceSearch(
+                used, band, paragraphIndex, lineIndex, rowDrawn, column, placed, tables, notes);
+
+            balanceReach = used;
+            columnTop = used;
+            columnBottom = used + band;
+        }
+
+        // Puts the fill back where the section started, so the same content can be laid out again at a
+        // different column height.
+        void RestoreBalanceStart()
+        {
+            BalanceSearch state = balance!;
+            paragraphIndex = state.ParagraphIndex;
+            lineIndex = state.LineIndex;
+            rowDrawn = state.RowDrawn;
+            column = state.Column;
+            used = state.Top;
+            placed = [.. state.Placed];
+            tables = [.. state.Tables];
+            notes = [.. state.Notes];
+            balanceReach = state.Top;
+            columnTop = state.Top;
+            columnBottom = state.Top + state.Candidate;
+        }
+
+        // The section fitted at the candidate height. Accept it when the search has narrowed to less than
+        // its granularity, otherwise try a shorter one.
+        void SettleBalance()
+        {
+            BalanceSearch state = balance!;
+
+            // What the trial actually needed, spacing included, against what it was given. A band that
+            // holds every line can still be shorter than the content, because the last paragraph's
+            // space-after is added to the running height after the last fitting test rather than before.
+            Length reach = (used > balanceReach ? used : balanceReach) - state.Top;
+            Length band = columnBottom - columnTop;
+
+            if (reach > band)
+            {
+                // Every line of the section went into the columns and the content still reaches past the
+                // band it was given. When that band is the tallest there is — the section's whole
+                // remaining height, which is what `High` holds until some trial fits — there is nothing
+                // shorter to try and nothing taller to be had, so the overhang is kept and the search
+                // ends.
+                //
+                // Without this the search cannot end at all, and it is not a slow path but a hung one:
+                // `TooShort` has no `Settled` to set, so once it has raised `Low` to `High` it hands back
+                // the same candidate for ever, and the fill is restored to the section's first block each
+                // time round. No page is emitted while that happens, so `MaxPages` never bites. Measured
+                // on `150_5300_13_chg10.doc`, which reaches this state at its twenty-fifth page as soon as
+                // anything shortens the body — a running head, for instance — and then never returns.
+                if (!state.Fitted && band >= state.High)
+                {
+                    used = state.Top + band;
+                    column = 0;
+                    balance = null;
+                    columnTop = Length.Zero;
+                    columnBottom = bodyHeight;
+                    return;
+                }
+
+                state.TooShort(band);
+                RestoreBalanceStart();
+                return;
+            }
+
+            state.Fits(band);
+
+            if (state.Settled)
+            {
+                used = state.Top + state.Candidate;
+                column = 0;
+                balance = null;
+                columnTop = Length.Zero;
+                columnBottom = bodyHeight;
+                return;
+            }
+
+            RestoreBalanceStart();
         }
     }
 
@@ -1007,9 +1364,11 @@ public sealed class Paginator
         return fitted;
     }
 
-    private static bool FirstLineFits(LaidOutParagraph layout, Length used, Length available)
+    private static bool FirstLineFits(
+        LaidOutParagraph layout, PageParagraph paragraph, Length used, Length available)
         => layout.Lines.Count == 0
-           || used + layout.SpaceBefore + layout.Lines[0].WithoutSpaceAbove().Height <= available;
+           || used + layout.SpaceBefore + paragraph.BorderAbove
+              + layout.Lines[0].WithoutSpaceAbove().Height <= available;
 
     /// <summary>
     /// The space above a paragraph, once collapsing and the top-of-page rule have applied.
@@ -1067,6 +1426,13 @@ public sealed class Paginator
         out Length own)
     {
         Length total = Gap(blocks, laid, index, atTopOfPage, keepsSpacingAtTop, out Length leading);
+
+        // The top border's room, outside every rule above it. It does not collapse against the paragraph
+        // above's space-after, because it is a distance from a rule to the text rather than spacing
+        // between two paragraphs; and it is not dropped at the top of a page, because the rule is drawn
+        // there and the text cannot sit on it.
+        if (blocks[index] is PageParagraph bordered) total += bordered.BorderAbove;
+
         own = total - leading;
         return total;
     }
@@ -1234,8 +1600,12 @@ public sealed class Paginator
         bool first)
         => furniture is null
             ? (null, null)
-            : (furniture.Header(section, geometry, pageNumber, first, _options.CollapsesSpacing),
-               furniture.Footer(section, geometry, pageNumber, first, _options.CollapsesSpacing));
+            : (furniture.Header(
+                   section, geometry, pageNumber, first,
+                   _options.CollapsesSpacing, _options.AddsCellLineSpacing),
+               furniture.Footer(
+                   section, geometry, pageNumber, first,
+                   _options.CollapsesSpacing, _options.AddsCellLineSpacing));
 
     /// <summary>
     /// A page's geometry with the body moved down to clear a running head that outgrew its margin.
@@ -1470,7 +1840,10 @@ public sealed class Paginator
         if (_noteHeights.TryGetValue(note, out Length cached)) return cached;
 
         Length height = FlowLayouter.HeightOf(
-            note.Blocks, _noteWidth, collapsesSpacing: _options.CollapsesSpacing);
+            note.Blocks,
+            _noteWidth,
+            collapsesSpacing: _options.CollapsesSpacing,
+            addsCellLineSpacing: _options.AddsCellLineSpacing);
         _noteHeights[note] = height;
         return height;
     }
@@ -1493,7 +1866,8 @@ public sealed class Paginator
 
         return FlowLayouter.LayOut(
             blocks, page.TextArea, offsetFromTop: null,
-            collapsesSpacing: _options.CollapsesSpacing);
+            collapsesSpacing: _options.CollapsesSpacing,
+            addsCellLineSpacing: _options.AddsCellLineSpacing);
     }
 
     /// <summary>
@@ -1778,5 +2152,137 @@ public sealed class Paginator
     {
         /// <summary>Creates the paragraph case.</summary>
         public LaidBlock(LaidOutParagraph paragraph) : this(paragraph, [], []) { }
+    }
+
+    /// <summary>
+    /// The bisection that finds a balanced section's height, and the fill state to restart it from.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A section whose columns balance is a box inside the page rather than the page itself: all of its
+    /// columns start where the section starts, and the height they share is the shortest one that holds
+    /// the section's content. Writer arrives at that height by formatting the columns, measuring the
+    /// overhang or the slack, and growing or shrinking until neither
+    /// (<c>SwLayoutFrame::FormatWidthCols</c>, <c>sw/source/core/layout/wsfrm.cxx</c>:3912 — "nMaximum …
+    /// is then maintained as the minimum height on which the content fit into the columns").
+    /// </para>
+    /// <para>
+    /// This bisects instead, which is available to us and not to Writer: our fill is a pure function of
+    /// the band it is given, so the same content can simply be laid out again at a different height.
+    /// <see cref="Low"/> is the tallest height known *not* to hold the section and <see cref="High"/> the
+    /// shortest known to hold it, so the answer is always <see cref="High"/> and the loop ends when they
+    /// are within <see cref="Granularity"/>.
+    /// </para>
+    /// </remarks>
+    private sealed class BalanceSearch
+    {
+        /// <summary>
+        /// How close the two bounds must come before the search stops.
+        /// </summary>
+        /// <remarks>
+        /// One twip, which is finer than Writer's own step — <c>lcl_CalcMinColDiff</c> returns roughly the
+        /// smallest first line height, so Writer stops within a line of the true minimum. A finer bound
+        /// costs four or five more trials of a section that is usually a paragraph or two, and removes a
+        /// source of disagreement rather than adding one: the height decides where the content *after* the
+        /// section starts, and a line's worth of slack there moves everything below it.
+        /// </remarks>
+        private static readonly Length Granularity = Length.FromTwips(1);
+
+        /// <summary>
+        /// A hard bound on the trials, in case fitting is not monotonic in the height.
+        /// </summary>
+        /// <remarks>
+        /// The bisection cannot itself run away — each step halves the interval — but a taller band that
+        /// holds *less* content is theoretically possible (Writer's own comment says so: "Theoretically
+        /// situations are possible in which the content fits in a lower height but not in a higher").
+        /// This turns that into one extra trial at a height known to fit rather than a hung layout.
+        /// </remarks>
+        private const int MaxTrials = 40;
+
+        private int _trials;
+
+        public BalanceSearch(
+            Length top,
+            Length band,
+            int paragraphIndex,
+            int lineIndex,
+            Length rowDrawn,
+            int column,
+            List<PlacedLine> placed,
+            List<PlacedTable> tables,
+            List<PageNote> notes)
+        {
+            Top = top;
+            Candidate = band;
+            High = band;
+            ParagraphIndex = paragraphIndex;
+            LineIndex = lineIndex;
+            RowDrawn = rowDrawn;
+            Column = column;
+            Placed = [.. placed];
+            Tables = [.. tables];
+            Notes = [.. notes];
+        }
+
+        /// <summary>Where the section's columns start, as an offset from the body's top.</summary>
+        public Length Top { get; }
+
+        /// <summary>The height being tried.</summary>
+        public Length Candidate { get; private set; }
+
+        /// <summary>The tallest band measured *not* to hold the section.</summary>
+        public Length Low { get; private set; }
+
+        /// <summary>The shortest band measured to hold it, or the section's whole band until one is.</summary>
+        public Length High { get; private set; }
+
+        /// <summary>True once a trial has held the whole section, so <see cref="High"/> is measured.</summary>
+        public bool Fitted { get; private set; }
+
+        /// <summary>True when the bounds have met and <see cref="Candidate"/> is the answer.</summary>
+        public bool Settled { get; private set; }
+
+        /// <summary>The fill state at the section's first block, to restart each trial from.</summary>
+        public int ParagraphIndex { get; }
+
+        /// <inheritdoc cref="ParagraphIndex"/>
+        public int LineIndex { get; }
+
+        /// <inheritdoc cref="ParagraphIndex"/>
+        public Length RowDrawn { get; }
+
+        /// <inheritdoc cref="ParagraphIndex"/>
+        public int Column { get; }
+
+        /// <inheritdoc cref="ParagraphIndex"/>
+        public List<PlacedLine> Placed { get; }
+
+        /// <inheritdoc cref="ParagraphIndex"/>
+        public List<PlacedTable> Tables { get; }
+
+        /// <inheritdoc cref="ParagraphIndex"/>
+        public List<PageNote> Notes { get; }
+
+        /// <summary>Records that the section's whole content fitted in columns this tall.</summary>
+        public void Fits(Length height)
+        {
+            High = height;
+            Fitted = true;
+            _trials++;
+
+            if (High - Low <= Granularity || _trials >= MaxTrials) Settled = true;
+            else Candidate = Low + ((High - Low) / 2);
+        }
+
+        /// <summary>Records that the section ran out of columns at this height.</summary>
+        public void TooShort(Length height)
+        {
+            Low = height;
+            _trials++;
+
+            Candidate = High - Low <= Granularity || _trials >= MaxTrials
+                ? High
+                : Low + ((High - Low) / 2);
+        }
     }
 }

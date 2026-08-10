@@ -1,3 +1,4 @@
+using System.Text;
 using Paperless.Containers;
 using Paperless.Containers.Ole2;
 using Paperless.Core;
@@ -213,12 +214,11 @@ public sealed class Ww8Document : IWordProcessingDocument, IPaginatedDocument
         Paginator paginator = new(pagination);
 
         List<PaginatedSection> sections = new(Sections.Count);
-        Dictionary<Model.PageFurnitureSlot, IReadOnlyList<PageBlock>> headers = [];
-        Dictionary<Model.PageFurnitureSlot, IReadOnlyList<PageBlock>> footers = [];
+        FurnitureCarry carry = new();
 
         for (int i = 0; i < Sections.Count; i++)
         {
-            sections.Add(new PaginatedSection(Sections[i], Furniture(fonts, i, headers, footers)));
+            sections.Add(new PaginatedSection(Sections[i], Furniture(fonts, i, carry)));
         }
 
         return new WordProcessingPages(
@@ -246,39 +246,238 @@ public sealed class Ww8Document : IWordProcessingDocument, IPaginatedDocument
     /// after the first with no running head at all, and a page with no header is a page that holds more
     /// lines — so the document silently paginates short.
     /// </para>
+    /// <para>
+    /// <em>Inherited from the section before it</em> is the whole of the rule and not a paraphrase of it.
+    /// <c>CopyPageDescHdFt(pPrev, …)</c> copies out of <c>pPrevious-&gt;mpPage</c>, the immediately
+    /// preceding <em>segment's page descriptor</em> — and a continuous section never gets one, because
+    /// <c>InsertSegments</c> turns it into a Writer text section instead (<c>ww8par.cxx</c>:4422). So when
+    /// the section before this one is continuous the copy source is null, the <c>else if (pPrev)</c> arm
+    /// never runs, and the slot keeps the empty format <c>SwFormatHeader(true)</c> left there: the running
+    /// head <em>stops</em>, rather than reaching back past the continuous section to the last one that had
+    /// a page of its own. Carrying it further is how the FAA advisory circulars grew a running head on
+    /// every page that should have had none.
+    /// </para>
+    /// <para>
+    /// A slot also stops being inherited at all once <c>grpfIhdt</c> loses its bit, which
+    /// <c>InsertSegments</c> clears for an empty story whose predecessor's bit was already clear
+    /// (<c>ww8par6.cxx</c>:1237-1258). That is why this works off the six story lengths rather than off
+    /// what the dictionaries happen to hold: a slot missing from them may have had no story, or a story
+    /// whose blocks all came out empty, and only the first of those two ends the inheritance.
+    /// </para>
     /// </remarks>
     /// <param name="fonts">The font cache shared with the body.</param>
     /// <param name="section">Which section's furniture to read.</param>
-    /// <param name="headers">
-    /// The headers in force, by slot, carried across the sections and updated in place: what this section
-    /// states replaces a slot, and what it leaves empty keeps whatever the section before it had.
+    /// <param name="carry">
+    /// What the section before this one left in force, updated in place: the furniture of the last section
+    /// that had a page descriptor, its <c>grpfIhdt</c>, and whether it was the immediately preceding
+    /// section — which is what decides whether this one may copy from it at all.
     /// </param>
-    /// <param name="footers">The footers in force, by the same rule.</param>
-    private PageFurnitureSet? Furniture(
-        LayoutFonts fonts,
-        int section,
-        Dictionary<Model.PageFurnitureSlot, IReadOnlyList<PageBlock>> headers,
-        Dictionary<Model.PageFurnitureSlot, IReadOnlyList<PageBlock>> footers)
+    private PageFurnitureSet? Furniture(LayoutFonts fonts, int section, FurnitureCarry carry)
     {
         Ww8LayoutFurniture stated = _reader.ReadLayoutFurniture(section);
         IReadOnlyList<Length> widths = TextWidths();
 
-        Fill(headers, stated.Headers);
-        Fill(footers, stated.Footers);
+        // `grpfIhdt` as `wwSectionManager::InsertSegments` synthesises it for Word 8 and later: every
+        // section states an odd and a first pair, and an even pair as well under `fFacingPages`; a bit
+        // whose story is empty survives only where the section before it had that bit on.
+        int on = HeaderOddBit | FooterOddBit | HeaderFirstBit | FooterFirstBit;
+        if (_reader.DocumentProperties.HasFacingPages) on |= HeaderEvenBit | FooterEvenBit;
+
+        for (int slot = 0; slot < FurnitureStoryCount; slot++)
+        {
+            int bit = 1 << slot;
+            if ((on & bit) == 0) continue;
+            if (StoryLength(stated, slot) > 0) continue;
+            if (section > 0 && (carry.Enabled & bit) != 0) continue;
+            on &= ~bit;
+        }
+
+        // A continuous section becomes a Writer *text* section rather than a page descriptor, so the one
+        // in force stays in force and its own stories are never read — Word writes a full set into every
+        // section descriptor whether or not the section can use them. The exception `InsertSegments`
+        // makes for itself is `HasOwnHeaderFooter`: a continuous section that states a running head of
+        // its own does get a descriptor built, on the not-first slots alone (`ww8par.cxx`:4528).
+        bool continuous = section > 0 && Sections[section].Break == Model.SectionBreak.Continuous;
+        bool ownFurniture =
+            StoryLength(stated, 0) >= 2 || StoryLength(stated, 1) >= 2
+            || StoryLength(stated, 2) >= 2 || StoryLength(stated, 3) >= 2;
+
+        if (continuous && !ownFurniture)
+        {
+            carry.Enabled = on;
+            carry.IsImmediate = false;
+            return carry.Set;
+        }
+
+        Dictionary<Model.PageFurnitureSlot, IReadOnlyList<PageBlock>> headers = [];
+        Dictionary<Model.PageFurnitureSlot, IReadOnlyList<PageBlock>> footers = [];
+
+        bool titlePage = Sections[section].HasDifferentFirstPage;
+
+        for (int slot = 0; slot < FurnitureStoryCount; slot++)
+        {
+            if ((on & (1 << slot)) == 0) continue;
+
+            (bool isHeader, Model.PageFurnitureSlot which) = FurnitureSlotOf(slot);
+            Dictionary<Model.PageFurnitureSlot, IReadOnlyList<PageBlock>> into = isHeader ? headers : footers;
+
+            IReadOnlyDictionary<Model.PageFurnitureSlot, List<Ww8LayoutBlock>> from =
+                isHeader ? stated.Headers : stated.Footers;
+
+            if (StoryLength(stated, slot) > 0 && from.TryGetValue(which, out List<Ww8LayoutBlock>? own))
+            {
+                List<PageBlock> converted = BlocksOf(fonts, own, widths);
+                if (converted.Count > 0)
+                {
+                    into[which] = converted;
+                    continue;
+                }
+            }
+
+            // `else if (pPrev) CopyPageDescHdFt(pPrev, pPD, nI)` — one slot, out of the immediately
+            // preceding section's page descriptor, and nothing at all when it has none.
+            if (!carry.IsImmediate) continue;
+
+            IReadOnlyDictionary<Model.PageFurnitureSlot, IReadOnlyList<PageBlock>> source =
+                isHeader ? carry.Headers : carry.Footers;
+
+            if (source.TryGetValue(which, out IReadOnlyList<PageBlock>? inherited)) into[which] = inherited;
+        }
+
+        Complete(headers, isHeader: true);
+        Complete(footers, isHeader: false);
 
         PageFurnitureSet set = new(headers, footers);
-        return set.IsEmpty ? null : set;
+        PageFurnitureSet? result = set.IsEmpty ? null : set;
 
-        void Fill(
-            Dictionary<Model.PageFurnitureSlot, IReadOnlyList<PageBlock>> into,
-            IReadOnlyDictionary<Model.PageFurnitureSlot, List<Ww8LayoutBlock>> from)
+        carry.Headers = headers;
+        carry.Footers = footers;
+        carry.Set = result;
+        carry.Enabled = on;
+
+        // A continuous section's descriptor is built and then thrown away again unless the section holds
+        // a hard page break to hang it on (`#i40766#`, `ww8par.cxx`:4540-4560) — so the *next* section
+        // still finds `mpPage` null and inherits nothing. Its own pages keep what it built, which is why
+        // it is computed at all.
+        carry.IsImmediate = !continuous;
+
+        return result;
+
+        // The two rules `Read_HdFt` applies to every slot it turns on (ww8par.cxx:2519-2545), which
+        // between them decide what the master page and the title page carry when only one page kind has
+        // a story of its own.
+        void Complete(Dictionary<Model.PageFurnitureSlot, IReadOnlyList<PageBlock>> into, bool isHeader)
         {
-            foreach ((Model.PageFurnitureSlot slot, List<Ww8LayoutBlock> stories) in from)
+            // Which of this kind's slots the section has turned on, read off the synthesised `grpfIhdt`
+            // rather than off what landed in the dictionary: a slot whose bit is on and whose story is
+            // both empty and uninheritable turns the master page's on while putting nothing in it.
+            int odd = isHeader ? HeaderOddBit : FooterOddBit;
+            int even = isHeader ? HeaderEvenBit : FooterEvenBit;
+            int first = isHeader ? HeaderFirstBit : FooterFirstBit;
+
+            bool enabled = (on & odd) != 0
+                || (on & even) != 0
+                || (titlePage && (on & first) != 0);
+
+            if (!enabled) return;
+
+            // "Cannot have left without right", as `Read_HdFt` labels it (#i17196#): every slot the
+            // section turns on gives the *master* page one too, and the master's is what the Default
+            // slot holds. So a section stating an even-page header alone still has one on its odd pages
+            // — an empty one, which draws nothing and occupies the band.
+            //
+            // Only where Default is otherwise unfilled: a slot inherited from an earlier section is what
+            // LibreOffice's own CopyPageDescHdFt puts there, and an inherited head beats a blank.
+            if (!into.ContainsKey(Model.PageFurnitureSlot.Default))
             {
-                List<PageBlock> converted = BlocksOf(fonts, stories, widths);
-                if (converted.Count > 0) into[slot] = converted;
+                into[Model.PageFurnitureSlot.Default] =
+                    BlocksOf(fonts, _reader.BlankFurniture(section), widths);
+            }
+
+            // The left page by the same rule and a narrower condition: `if (bUseLeft)` sets the frame on
+            // `pPD->GetLeft()` on the even iteration alone, so an even slot whose bit is on but whose
+            // story is empty and uninheritable is a blank rather than a fall-back to the master's. Where
+            // the bit is *off* the left page has no header at all, which this dictionary still cannot
+            // say — an absent slot means "fall back to Default". That case reaches five sections of
+            // three .doc in this corpus, measured over the header PLC of all 66; it is not this one.
+            if ((on & even) != 0 && !into.ContainsKey(Model.PageFurnitureSlot.Even))
+            {
+                into[Model.PageFurnitureSlot.Even] =
+                    BlocksOf(fonts, _reader.BlankFurniture(section), widths);
+            }
+
+            // And a title page never borrows the master's. `Read_HdFt` fills the first-page format from
+            // the first-page story or not at all — only the `bUseFirst` iteration puts text in one — so
+            // a section with a title page and no first-page story of this kind gets a blank one.
+            //
+            // Measured against LibreOffice's own flat-ODF export of the `title-page-no-head.doc`
+            // fixture: `<style:header-first><text:p/></style:header-first>` beside a populated
+            // `<style:header>`. The corpus case is `150_5300_13_chg12.doc`, whose first section states a
+            // first-page footer and no first-page header — LibreOffice's page one carries no running
+            // head, and falling back to the master's put "9/29/06 AC 150/5300-13 CHG 10" across the top
+            // of its title page.
+            if (titlePage && !into.ContainsKey(Model.PageFurnitureSlot.First))
+            {
+                into[Model.PageFurnitureSlot.First] =
+                    BlocksOf(fonts, _reader.BlankFurniture(section), widths);
             }
         }
+
+    }
+
+    /// <summary>How many header stories a DOC section descriptor writes, whatever the section uses.</summary>
+    private const int FurnitureStoryCount = 6;
+
+    // The `grpfIhdt` bits, in the order the stories are written — `nsHdFtFlags` in `ww8scan.hxx`.
+    private const int HeaderEvenBit = 0x01;
+    private const int HeaderOddBit = 0x02;
+    private const int FooterEvenBit = 0x04;
+    private const int FooterOddBit = 0x08;
+    private const int HeaderFirstBit = 0x10;
+    private const int FooterFirstBit = 0x20;
+
+    /// <summary>What the story at <paramref name="slot"/> is, as a kind and a slot.</summary>
+    private static (bool IsHeader, Model.PageFurnitureSlot Slot) FurnitureSlotOf(int slot) => slot switch
+    {
+        0 => (true, Model.PageFurnitureSlot.Even),
+        1 => (true, Model.PageFurnitureSlot.Default),
+        2 => (false, Model.PageFurnitureSlot.Even),
+        3 => (false, Model.PageFurnitureSlot.Default),
+        4 => (true, Model.PageFurnitureSlot.First),
+        _ => (false, Model.PageFurnitureSlot.First),
+    };
+
+    /// <summary>How long a section's story is, nought where the subdocument ends before it.</summary>
+    private static int StoryLength(Ww8LayoutFurniture furniture, int slot)
+        => slot < furniture.StoryLengths.Count ? furniture.StoryLengths[slot] : 0;
+
+    /// <summary>
+    /// What the section before this one left in force, threaded through the whole document.
+    /// </summary>
+    /// <remarks>
+    /// Three things rather than one, because <c>Read_HdFt</c> asks three separate questions of the
+    /// predecessor: what its page descriptor holds, which of the six slots its <c>grpfIhdt</c> had on, and
+    /// whether the <em>immediately</em> preceding section had a page descriptor at all — a continuous one
+    /// has none, and the copy is then never made.
+    /// </remarks>
+    private sealed class FurnitureCarry
+    {
+        /// <summary>The last page descriptor's headers, by slot.</summary>
+        public IReadOnlyDictionary<Model.PageFurnitureSlot, IReadOnlyList<PageBlock>> Headers { get; set; } =
+            new Dictionary<Model.PageFurnitureSlot, IReadOnlyList<PageBlock>>();
+
+        /// <summary>The last page descriptor's footers, by slot.</summary>
+        public IReadOnlyDictionary<Model.PageFurnitureSlot, IReadOnlyList<PageBlock>> Footers { get; set; } =
+            new Dictionary<Model.PageFurnitureSlot, IReadOnlyList<PageBlock>>();
+
+        /// <summary>The whole set, which a continuous section hands straight on.</summary>
+        public PageFurnitureSet? Set { get; set; }
+
+        /// <summary>The previous section's <c>grpfIhdt</c>, which decides what a bit may inherit.</summary>
+        public int Enabled { get; set; }
+
+        /// <summary>True when the section immediately before this one had a page descriptor.</summary>
+        public bool IsImmediate { get; set; }
     }
 
     /// <summary>
@@ -334,6 +533,11 @@ public sealed class Ww8Document : IWordProcessingDocument, IPaginatedDocument
 
             if (block.Table is { } table && Grid(fonts, table) is { } grid) blocks.Add(grid);
         }
+
+        // Every flow a DOC has passes through here — the body, each header and footer, each note, each
+        // text frame, and each cell by way of `Grid` — so one call covers all of them, and a cell's run
+        // of bordered paragraphs is joined without seeing the paragraphs on either side of its table.
+        ParagraphBorderJoin.Apply(blocks);
 
         return blocks;
     }
@@ -417,22 +621,25 @@ public sealed class Ww8Document : IWordProcessingDocument, IPaginatedDocument
 
             paragraphs.Add(new PageParagraph
             {
-                Text = CaseMapping.Apply(paragraph.Text, runs),
+                Text = CaseMapping.Apply(WithSymbols(fonts, paragraph), runs),
                 Face = face,
                 Font = font,
                 Colour = paragraph.Colour ?? Colour.Black,
                 Format = paragraph.Format,
-                Label = Label(paragraph, face, font),
+                Label = Label(fonts, paragraph, face, font),
+                Borders = paragraph.Borders,
                 EmSize = paragraph.Size,
                 Language = paragraph.Language,
                 Shaping = new Text.Shaping.ShapingOptions(
                     Language: paragraph.Language, DisableKerning: !paragraph.AutoKerning),
                 Metrics = fonts.Metrics,
+                Fallback = fonts.Fallback,
 
                 // #i3952#, which the WW8 importer turns on for every DOC without asking the file
                 // (`ww8par.cxx`:2041). See PageParagraph.BlanksAreTransparentToHeight.
                 BlanksAreTransparentToHeight = true,
                 Runs = runs,
+                Fields = paragraph.Fields ?? [],
                 Notes = NotesOf(fonts, paragraph.Notes),
                 Frames = FramesOf(fonts, paragraph.Frames, paragraph.TextFrames, WidthFor(paragraph)),
             });
@@ -451,13 +658,12 @@ public sealed class Ww8Document : IWordProcessingDocument, IPaginatedDocument
     /// </summary>
     /// <remarks>
     /// <para>
-    /// In the item's own face, at the level's own size. WW8 states a label's character formatting in the
-    /// level's <c>grpprlChpx</c>, and the two halves of it are treated differently on purpose: the
-    /// <em>font</em> is not read, because the only thing it usually carries is a symbol face for a bullet
-    /// whose code point <see cref="Ww8Numbering"/> has already normalised to U+2022 — keeping it would
-    /// draw a real bullet through a face with no glyph for it — while the <em>size</em> is, because it
-    /// survives that normalisation and Word writes it constantly. A level a size larger than its items
-    /// makes their first lines taller; see <see cref="PageParagraph.LabelRaisesFirstLine"/>.
+    /// At the level's own size, and — for a bullet whose level names a symbol face — in the face
+    /// LibreOffice would substitute for it. Both halves come out of the level's <c>grpprlChpx</c>:
+    /// <c>sprmCHps</c> for the size, which Word writes constantly and which makes an item's first line
+    /// taller when it exceeds the item's own (see <see cref="PageParagraph.LabelRaisesFirstLine"/>),
+    /// and <c>sprmCRgFtc0</c> for the face, which is what <see cref="SymbolLabel"/> needs in order to
+    /// tell a symbol slot from the character it collides with.
     /// </para>
     /// <para>
     /// The follower and its stop come from the level's <c>ixchFollow</c> and its <c>grpprlPapx</c>, which
@@ -475,27 +681,139 @@ public sealed class Ww8Document : IWordProcessingDocument, IPaginatedDocument
     /// </para>
     /// </remarks>
     private static PageLabel? Label(
-        Ww8DocumentReader.Ww8LayoutParagraph paragraph, OpenTypeFace face, FontReference? font)
-        => paragraph.ListMarker is { Length: > 0 } marker
-            ? PageLabel.Measured(
-                marker, face,
-                paragraph.ListLabelSize > Core.Units.Length.Zero
-                    ? paragraph.ListLabelSize
-                    : paragraph.Size,
-                new Text.Shaping.ShapingOptions(
-                    Language: paragraph.Language, DisableKerning: !paragraph.AutoKerning)) with
+        LayoutFonts fonts,
+        Ww8DocumentReader.Ww8LayoutParagraph paragraph,
+        OpenTypeFace face,
+        FontReference? font)
+    {
+        if (paragraph.ListMarker is not { Length: > 0 } marker) return null;
+
+        (string text, OpenTypeFace labelFace, FontReference? labelFont) =
+            SymbolLabel(fonts, paragraph.ListLabelFamily, paragraph.ListLabelSlot)
+            ?? (marker, face, font);
+
+        return PageLabel.Measured(
+            text, labelFace,
+            paragraph.ListLabelSize > Core.Units.Length.Zero
+                ? paragraph.ListLabelSize
+                : paragraph.Size,
+            new Text.Shaping.ShapingOptions(
+                Language: paragraph.Language, DisableKerning: !paragraph.AutoKerning)) with
+        {
+            Font = labelFont,
+            Colour = paragraph.Colour ?? Colour.Black,
+            Follow = paragraph.ListFollow switch
             {
-                Font = font,
-                Colour = paragraph.Colour ?? Colour.Black,
-                Follow = paragraph.ListFollow switch
-                {
-                    1 => LabelFollow.Space,
-                    2 => LabelFollow.Nothing,
-                    _ => LabelFollow.ListTab,
-                },
-                TabStop = Core.Units.Length.FromTwips(paragraph.ListTabStop),
+                1 => LabelFollow.Space,
+                2 => LabelFollow.Nothing,
+                _ => LabelFollow.ListTab,
+            },
+            TabStop = Core.Units.Length.FromTwips(paragraph.ListTabStop),
+        };
+    }
+
+    /// <summary>
+    /// The paragraph's text with every <c>sprmCSymbol</c> run's placeholder replaced by its slot.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A WW8 symbol is not stored where it is drawn. The piece table holds a placeholder — U+0028 on
+    /// every corpus document carrying one — and the slot lives in the CHPX beside it, so a reader that
+    /// takes the stream at its word draws <c>(</c> where the document asks for <c>×</c>. Measured on
+    /// <c>RMI_…GettingOffOil.doc</c>, whose reference reads <c>3.6×-more-efficient</c> against our
+    /// <c>3.6(-more-efficient</c>.
+    /// </para>
+    /// <para>
+    /// The replacement is one character per character the run covers, which is what
+    /// <c>SwWW8ImplReader::ReadChars</c> does — it inserts <c>m_cSymbol</c> once for every character
+    /// position the sprm is in force over (<c>ww8par.cxx</c>:3410-3413). Preserving the length is not
+    /// incidental: every note, frame and field offset in the paragraph was recorded against this
+    /// string, and a substitution that changed its length would move all of them.
+    /// </para>
+    /// <para>
+    /// Unconditional, unlike the face beside it. LibreOffice replaces the placeholder whether or not
+    /// the face it names can be loaded, so a slot with no recode table still draws its own code point
+    /// rather than the placeholder.
+    /// </para>
+    /// </remarks>
+    private static string WithSymbols(
+        LayoutFonts fonts, Ww8DocumentReader.Ww8LayoutParagraph paragraph)
+    {
+        IReadOnlyList<Ww8DocumentReader.Ww8LayoutRun> runs = paragraph.Runs ?? [];
+
+        StringBuilder? text = null;
+
+        foreach (Ww8DocumentReader.Ww8LayoutRun run in runs)
+        {
+            if (run.SymbolSlot is not { } slot || slot == '\0') continue;
+
+            char drawn = SymbolLabel(fonts, run.FamilyName, slot) is { Text: [char recoded] }
+                ? recoded
+                : slot;
+
+            text ??= new StringBuilder(paragraph.Text);
+
+            for (int index = run.Start; index < run.End && index < text.Length; index++)
+            {
+                text[index] = drawn;
             }
+        }
+
+        return text?.ToString() ?? paragraph.Text;
+    }
+
+    /// <summary>
+    /// A symbol level's slot, drawn from the face that can actually show it, or null when none can.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The WW8 half of <c>DocxLayoutSource.Symbol</c>, and the same three cases: the face is installed
+    /// and its slots are drawn as they stand; the face is absent and <see cref="SymbolFontRecode"/>
+    /// holds a table for it, so the slot is recoded into OpenSymbol exactly as LibreOffice's
+    /// <c>ConvertChar::RecodeChar</c> does; or neither, and the caller's own text and face stand.
+    /// </para>
+    /// <para>
+    /// <strong>WW8 needs the face more than DOCX does.</strong> A DOCX bullet arrives already aliased
+    /// into the private use area, so a fallback can at least tell it is a symbol. WW8 states the slot
+    /// raw — <c>0xB7</c> in <c>Symbol</c> — so without <c>sprmCRgFtc0</c> the character is
+    /// indistinguishable from MIDDLE DOT and was drawn as one.
+    /// </para>
+    /// </remarks>
+    private static (string Text, OpenTypeFace Face, FontReference? Font)? SymbolLabel(
+        LayoutFonts fonts, string? family, char slot)
+    {
+        if (family is not { Length: > 0 }) return null;
+        if (slot == '\0') return null;
+        if (!SymbolFontRecode.IsRecodeable(family)) return null;
+
+        if (fonts.Face(family, 400, false) is not { } statedFace) return null;
+        FontReference? reference = fonts.Reference(family, 400, false);
+
+        // The face's own file is present, so its slots are drawable as they stand.
+        if (reference is not null
+            && !reference.IsSubstituted
+            && !SymbolFontRecode.IsSubstituteFamily(reference.FamilyName))
+        {
+            return (slot.ToString(), statedFace, reference);
+        }
+
+        if (!SymbolFontRecode.TryRecode(family, slot, out char recoded)) return null;
+
+        // The recode and the face go together: the code point means nothing anywhere but OpenSymbol,
+        // so a resolution that landed elsewhere leaves the caller's fallback in place.
+        if (fonts.Face(SymbolFontRecode.SubstituteFamily, 400, false) is not { } symbolFace)
+        {
+            return null;
+        }
+
+        FontReference? symbolReference =
+            fonts.Reference(SymbolFontRecode.SubstituteFamily, 400, false);
+
+        return symbolReference is not null
+               && SymbolFontRecode.IsSubstituteFamily(symbolReference.FamilyName)
+            ? (recoded.ToString(), symbolFace, symbolReference)
             : null;
+    }
 
     /// <summary>
     /// The floating shapes anchored in a paragraph, as frames the layout engine can place.
@@ -561,9 +879,25 @@ public sealed class Ww8Document : IWordProcessingDocument, IPaginatedDocument
             PageFrame? built = Ww8Frames.Build(
                 frame.Anchor, frame.Shape, frame.Offset, BlocksOf(fonts, frame.Blocks),
                 frame.IsSetInLine);
-            if (built is not null)
+            if (built is null) continue;
+
+            PageFrame envelope = built with
             {
-                frames.Add(built with { Image = frame.Picture.Raster, Vector = frame.Picture.Vector });
+                Image = frame.Picture.Raster,
+                Vector = frame.Picture.Vector,
+            };
+            frames.Add(envelope);
+
+            // A group is flattened into its envelope and one sibling frame per leaf shape. The
+            // envelope keeps the wrap and is what the text avoids; the members are drawn inside it.
+            foreach (Ww8LayoutFrameMember member in frame.Members)
+            {
+                PageFrame? placed = Ww8Frames.Member(
+                    envelope, member.Shape,
+                    (member.Left, member.Top, member.Width, member.Height),
+                    BlocksOf(fonts, member.Blocks), member.Picture);
+
+                if (placed is not null) frames.Add(placed);
             }
         }
 
@@ -633,8 +967,18 @@ public sealed class Ww8Document : IWordProcessingDocument, IPaginatedDocument
 
         foreach (Ww8DocumentReader.Ww8LayoutRun run in stated)
         {
-            OpenTypeFace face =
-                fonts.Face(run.FamilyName, run.Weight, run.IsItalic) ?? paragraphFace;
+            // A `sprmCSymbol` run's face is decided together with the character it draws — see
+            // WithSymbols — so the same resolution answers both, and a slot recoded into OpenSymbol
+            // has to be drawn from OpenSymbol or it is .notdef.
+            (OpenTypeFace Face, FontReference? Font)? symbol = run.SymbolSlot is { } slot
+                ? SymbolLabel(fonts, run.FamilyName, slot) is { } resolved
+                    ? (resolved.Face, resolved.Font)
+                    : null
+                : null;
+
+            OpenTypeFace face = symbol?.Face
+                ?? fonts.Face(run.FamilyName, run.Weight, run.IsItalic)
+                ?? paragraphFace;
 
             // The escapement is resolved here rather than where it was read, because its rise is a
             // fraction of the face's height and the face is only known now.
@@ -660,7 +1004,10 @@ public sealed class Ww8Document : IWordProcessingDocument, IPaginatedDocument
                 // Kerning, unlike the two rules, does change a measurement — so a run that kerns
                 // inside a paragraph that does not has to survive the shortcut or its width is the
                 // paragraph's answer rather than its own.
-                || run.AutoKerning != paragraph.AutoKerning)
+                || run.AutoKerning != paragraph.AutoKerning
+                // A symbol's face is its own even when it happens to equal the paragraph's: losing the
+                // runs here would draw its slot out of whatever the paragraph is set in.
+                || run.SymbolSlot is not null)
             {
                 varies = true;
             }
@@ -670,7 +1017,9 @@ public sealed class Ww8Document : IWordProcessingDocument, IPaginatedDocument
                 run.Length,
                 face,
                 size,
-                fonts.Reference(run.FamilyName, run.Weight, run.IsItalic),
+                symbol is { } named
+                    ? named.Font
+                    : fonts.Reference(run.FamilyName, run.Weight, run.IsItalic),
                 run.Colour ?? paragraph.Colour ?? Colour.Black,
                 new Text.Shaping.ShapingOptions(
                     Language: run.Language, DisableKerning: !run.AutoKerning),

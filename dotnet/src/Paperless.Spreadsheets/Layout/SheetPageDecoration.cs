@@ -77,9 +77,19 @@ internal sealed class SheetPageDecoration(SheetLayout sheet, SheetPagePlacement 
 
     /// <summary>Paints the cells' fills.</summary>
     /// <remarks>
+    /// <para>
     /// Every fill before any border and any text, rather than each cell's fill before its own
     /// border: a fill is opaque and a border runs through the centre of a shared edge, so half of
     /// every border would be painted over by the neighbour drawn after it.
+    /// </para>
+    /// <para>
+    /// A merged block takes its fill from its origin cell and covers the whole block, which is why
+    /// this asks <see cref="DecorationAt"/> rather than the formatting directly.
+    /// <c>ScOutputData::DrawBackground</c> extends one run across <c>ATTR_MERGE</c>'s column count
+    /// (<c>sc/source/ui/view/output.cxx:1155-1170</c>); painting the origin's colour into each
+    /// covered cell's own rectangle covers the same area with the same ink, and survives a block
+    /// split across two pages, which one extended rectangle would not.
+    /// </para>
     /// </remarks>
     /// <param name="columns">The columns on the page.</param>
     /// <param name="rows">The rows on the page.</param>
@@ -94,11 +104,29 @@ internal sealed class SheetPageDecoration(SheetLayout sheet, SheetPagePlacement 
         {
             foreach (PlacedColumn column in columns)
             {
-                if (formatting.At(row.Row, column.Column).Background is not { } colour) continue;
+                if (DecorationAt(row.Row, column.Column).Background is not { } colour) continue;
 
                 Fill(new DocRect(column.X, row.Y, column.Width, row.Height), colour, sink);
             }
         }
+    }
+
+    /// <summary>
+    /// The decoration a position draws with: its own, or its merged block's origin's.
+    /// </summary>
+    /// <remarks>
+    /// A covered cell's own fill and borders are never drawn — measured on
+    /// <c>probes/sheets-r37/merge-decor.fods</c>, whose covered cells state a green fill and a
+    /// magenta box and whose reference PDF holds neither colour anywhere. See
+    /// <see cref="SheetMerges.OriginOf"/> for the mechanism.
+    /// </remarks>
+    private SheetCellDecoration DecorationAt(int row, int column)
+    {
+        SheetMerges merges = sheet.Merges;
+        if (merges.IsEmpty) return sheet.Formatting.At(row, column);
+
+        (int originRow, int originColumn) = merges.OriginOf(row, column);
+        return sheet.Formatting.At(originRow, originColumn);
     }
 
     /// <summary>
@@ -122,6 +150,19 @@ internal sealed class SheetPageDecoration(SheetLayout sheet, SheetPagePlacement 
     /// side (<c>ScDocument::FillInfo</c> loops <c>nCol1-1</c> to <c>nCol2+1</c>,
     /// <c>sc/source/core/data/fillinfo.cxx:1019</c>) and sets no clipping range when printing.
     /// </para>
+    /// <para>
+    /// A merged block contributes its <em>origin's</em> four edges and nothing else: every style
+    /// read here goes through <see cref="DecorationAt"/>, and an edge interior to a block is not
+    /// drawn at all. <c>Array::GetCellStyleTop</c> and its three siblings return
+    /// <c>OBJ_STYLE_NONE</c> when <c>IsMergedOverlapped*</c> and otherwise read from
+    /// <c>GetMergedStyleSourceCell</c> (<c>svx/source/dialog/framelinkarray.cxx:782-856</c>).
+    /// Note which edges that suppresses and which it does not: a block three rows tall still emits
+    /// its left edge <em>per row</em>, all three carrying the origin's style, because only
+    /// <c>mbOverlapX</c> suppresses a left edge. The reference then merges the three into one line
+    /// (<c>tryMergeBorderLinePrimitive2D</c>, which merges collinear lines only when their
+    /// <c>LineAttribute</c> matches); three abutting butt-capped segments of the same colour and
+    /// width put down the same ink, so they are left as segments here.
+    /// </para>
     /// </remarks>
     /// <param name="columns">The columns on the page.</param>
     /// <param name="rows">The rows on the page.</param>
@@ -132,7 +173,7 @@ internal sealed class SheetPageDecoration(SheetLayout sheet, SheetPagePlacement 
         SheetFormatting formatting = sheet.Formatting;
         if (formatting.IsEmpty || columns.Count == 0 || rows.Count == 0) return;
 
-        Edges edges = Edges.Build(formatting, columns, rows);
+        Edges edges = Edges.Build(DecorationAt, sheet.Merges, columns, rows);
 
         foreach (Edge edge in edges.All) Stroke(edge, edges, sink);
     }
@@ -141,6 +182,7 @@ internal sealed class SheetPageDecoration(SheetLayout sheet, SheetPagePlacement 
     /// Draws the faint rules between cells, when the sheet prints them.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// At the <em>far</em> edge of each column and row rather than the near one, which is what
     /// <c>ScOutputData::DrawGrid</c> does: it advances the pen by the column's width and then
     /// draws (<c>sc/source/ui/view/output.cxx:420-424</c>), so there is no line down the left of
@@ -148,6 +190,14 @@ internal sealed class SheetPageDecoration(SheetLayout sheet, SheetPagePlacement 
     /// <c>sheet-decor-ods.ods</c>, whose three columns start at 85.039 pt: the verticals are at
     /// 148.904, 212.882 and 276.86 and there is none at 85.039. The block's own left and top
     /// edges come from the outer frame instead, which is why the two are drawn together.
+    /// </para>
+    /// <para>
+    /// The grid stops at a merged block, in both directions: <c>ScOutputData::DrawGrid</c> skips a
+    /// vertical wherever the cell to its right is <c>bHOverlapped</c> and a horizontal wherever the
+    /// cell below is <c>bVOverlapped</c>. Measured on <c>probes/sheets-r37/merge-grid.fods</c>,
+    /// whose interior vertical is drawn above and below its 2 × 3 block and not through it, and
+    /// whose interior horizontals run to the block's left and right only.
+    /// </para>
     /// </remarks>
     /// <param name="columns">The columns on the page.</param>
     /// <param name="rows">The rows on the page.</param>
@@ -157,13 +207,55 @@ internal sealed class SheetPageDecoration(SheetLayout sheet, SheetPagePlacement 
     {
         if (!sheet.Setup.PrintsGrid || columns.Count == 0 || rows.Count == 0) return;
 
-        Length left = columns[0].X;
-        Length right = columns[^1].Right;
-        Length top = rows[0].Y;
-        Length bottom = rows[^1].Bottom;
+        SheetMerges merges = sheet.Merges;
 
-        foreach (PlacedColumn column in columns) Rule(column.Right, top, column.Right, bottom, sink);
-        foreach (PlacedRow row in rows) Rule(left, row.Bottom, right, row.Bottom, sink);
+        // Runs rather than one line per column, because a merged block interrupts a rule and the
+        // two ends of it are one stroke each. With no merge on the sheet — nearly every sheet —
+        // the run is the whole block and this is the single line the unmerged case always drew.
+        foreach (PlacedColumn column in columns)
+        {
+            Run(
+                rows.Count,
+                i => merges.IsOverlappedLeft(rows[i].Row, column.Column + 1),
+                i => rows[i].Y,
+                i => rows[i].Bottom,
+                (from, to) => Rule(column.Right, from, column.Right, to, sink));
+        }
+
+        foreach (PlacedRow row in rows)
+        {
+            Run(
+                columns.Count,
+                i => merges.IsOverlappedTop(row.Row + 1, columns[i].Column),
+                i => columns[i].X,
+                i => columns[i].Right,
+                (from, to) => Rule(from, row.Bottom, to, row.Bottom, sink));
+        }
+    }
+
+    /// <summary>Emits one line per maximal run of positions the grid is not suppressed at.</summary>
+    private static void Run(
+        int count,
+        Func<int, bool> suppressed,
+        Func<int, Length> start,
+        Func<int, Length> end,
+        Action<Length, Length> emit)
+    {
+        int from = -1;
+
+        for (int i = 0; i < count; i++)
+        {
+            if (suppressed(i))
+            {
+                if (from >= 0) emit(start(from), end(i - 1));
+                from = -1;
+                continue;
+            }
+
+            if (from < 0) from = i;
+        }
+
+        if (from >= 0) emit(start(from), end(count - 1));
     }
 
     /// <summary>
@@ -253,7 +345,17 @@ internal sealed class SheetPageDecoration(SheetLayout sheet, SheetPagePlacement 
         SheetPrintSetup setup = sheet.Setup;
         DocSize page = setup.PageSize;
 
-        if (setup.Header is { IsEmpty: false } header && setup.HeaderHeight > Length.Zero)
+        // A band of no height at all is still drawn, and that is not an edge case worth
+        // suppressing: three of this track's workbooks state a footer margin equal to the page
+        // margin, so Calc pins their band at nothing and draws the text starting *at* the margin
+        // and running down into it. `PrintHF` clips to `tools::Rectangle(aStart, aPaperSize)`,
+        // and a VCL rectangle built from a zero-height Size has no bottom edge at all — it is
+        // unbounded rather than empty — so a zero band suppresses the *space* and not the ink
+        // (`sc/source/ui/view/printfun.cxx:1870`). Measured on
+        // `2012-GA-Survey-Chapter-6-Tables-16Dec2013-V2.xls`, whose sheet has a 0.5 in bottom
+        // margin and a 0.5 in footer margin: LibreOffice draws `Page 6 - 2` at y 575.95 on a
+        // 612 pt page, which is the bottom margin line to a twentieth of a point.
+        if (setup.Header is { IsEmpty: false } header)
         {
             DrawBand(
                 header,
@@ -262,10 +364,12 @@ internal sealed class SheetPageDecoration(SheetLayout sheet, SheetPagePlacement 
                 page.Width - setup.RightMargin - setup.HeaderRightMargin,
                 setup.TopMargin,
                 setup.HeaderHeight - setup.HeaderGap,
+                setup.HeaderIsDynamic,
+                false,
                 sink);
         }
 
-        if (setup.Footer is { IsEmpty: false } footer && setup.FooterHeight > Length.Zero)
+        if (setup.Footer is { IsEmpty: false } footer)
         {
             // The footer's gap sits at the *top* of its band, between the last row and the text,
             // so the text starts that far below the band's top rather than at it.
@@ -276,26 +380,47 @@ internal sealed class SheetPageDecoration(SheetLayout sheet, SheetPagePlacement 
                 page.Width - setup.RightMargin - setup.FooterRightMargin,
                 page.Height - setup.BottomMargin - setup.FooterHeight + setup.FooterGap,
                 setup.FooterHeight - setup.FooterGap,
+                setup.FooterIsDynamic,
+                true,
                 sink);
         }
     }
 
-    private static void DrawBand(
+    private void DrawBand(
         SheetHeaderFooter band,
         SheetHeaderContext context,
         Length left,
         Length right,
         Length top,
         Length height,
+        bool dynamic,
+        bool fromBottom,
         IDrawingSink sink)
     {
-        if (right <= left || height <= Length.Zero) return;
+        if (right <= left || height < Length.Zero) return;
 
-        Length size = SheetBandText.DefaultSize;
-        Length line = SheetBandText.LineHeightAt(size);
-        Length spare = height - line;
-        Length baseline = top + (spare > Length.Zero ? spare / 2 : Length.Zero)
-                          + SheetBandText.AscentAt(size);
+        // The band is drawn at the page's own zoom. `ScPrintFunc::PrintHF` switches the device to
+        // `aTwipMode`, which carries the zoom as its scale fraction
+        // (`InitModes`, sc/source/ui/view/printfun.cxx:2645), so a header on a sheet printed at
+        // 33% is drawn at a third of its stated size along with everything else.
+        double zoom = Math.Max(1, placement.ZoomPercentage) / 100.0;
+
+        // The three parts share one band and are each centred in it, which is why the band's own
+        // height is the tallest of the three rather than each part's own: `PrintHF` gives the
+        // EditEngine one `aPaperSize` and computes `nDif` per area against it
+        // (sc/source/ui/view/printfun.cxx:1876-1912), and `UpdateHFHeight` has set that height to
+        // the greatest of the three (`:820-834`). Measured on `sheet-outline-collapse.xlsx`,
+        // whose footer holds two 8 pt lines on the left and one on the right: LibreOffice puts
+        // the left part's last line hard against the footer margin and the right part's single
+        // line 3.35 pt above it, which is half the difference between the two.
+        Length bandText = Length.Zero;
+        foreach (SheetHeaderPart part in (SheetHeaderPart[])[band.Left, band.Centre, band.Right])
+            bandText = Length.Max(bandText, TextHeight(part, context, zoom));
+
+        if (bandText <= Length.Zero) return;
+
+        Length drawn = dynamic ? bandText : height;
+        Length bandTop = dynamic && fromBottom ? top + height - bandText : top;
 
         Place(band.Left, _ => left);
         Place(band.Centre, width => left + ((right - left - width) / 2));
@@ -305,18 +430,85 @@ internal sealed class SheetPageDecoration(SheetLayout sheet, SheetPagePlacement 
         {
             if (part.IsEmpty) return;
 
-            // Only the first line is drawn. A header may hold several — every format can write a
-            // line break into one — and laying the rest out needs the band to grow, which is a
-            // pagination question rather than a drawing one. Recorded in the module's TODO.
-            string text = part.Resolve(context).Split('\n')[0];
-            if (text.Length == 0) return;
+            IReadOnlyList<IReadOnlyList<SheetHeaderPiece>> lines = part.Lines(context);
+            if (lines.Count == 0) return;
 
-            BandRun? run = SheetBandText.Shape(text, size);
-            if (run is null) return;
+            Length text = Length.Zero;
+            foreach (IReadOnlyList<SheetHeaderPiece> line in lines) text += LineHeight(line, zoom);
 
-            sink.DrawGlyphRun(
-                run.At(new DocPoint(position(run.Width), baseline)), Paint.Solid(Colour.Black));
+            Length spare = drawn - text;
+            Length pen = bandTop + (spare > Length.Zero ? spare / 2 : Length.Zero);
+
+            foreach (IReadOnlyList<SheetHeaderPiece> line in lines)
+            {
+                Length lineHeight = LineHeight(line, zoom);
+                if (line.Count == 0)
+                {
+                    pen += lineHeight;
+                    continue;
+                }
+
+                Length width = Length.Zero;
+                List<(BandRun Run, Length Size)> runs = [];
+                foreach (SheetHeaderPiece piece in line)
+                {
+                    Length size = SizeOf(piece, zoom);
+                    if (SheetBandText.Shape(piece.Text, size) is not { } run) continue;
+                    runs.Add((run, size));
+                    width += run.Width;
+                }
+
+                if (runs.Count > 0)
+                {
+                    Length ascent = Length.Zero;
+                    foreach ((_, Length size) in runs)
+                        ascent = Length.Max(ascent, SheetBandText.AscentAt(size));
+
+                    Length x = position(width);
+                    foreach ((BandRun run, _) in runs)
+                    {
+                        sink.DrawGlyphRun(
+                            run.At(new DocPoint(x, pen + ascent)), Paint.Solid(Colour.Black));
+                        x += run.Width;
+                    }
+                }
+
+                pen += lineHeight;
+            }
         }
+    }
+
+    /// <summary>How tall one part of a band is: the sum of its lines.</summary>
+    private static Length TextHeight(
+        SheetHeaderPart part, SheetHeaderContext context, double zoom)
+    {
+        if (part.IsEmpty) return Length.Zero;
+
+        Length height = Length.Zero;
+        foreach (IReadOnlyList<SheetHeaderPiece> line in part.Lines(context))
+            height += LineHeight(line, zoom);
+
+        return height;
+    }
+
+    /// <summary>The em size one piece of a band is drawn at, the page's zoom applied.</summary>
+    private static Length SizeOf(SheetHeaderPiece piece, double zoom)
+        => (piece.Size ?? SheetBandText.DefaultSize) * zoom;
+
+    /// <summary>How tall one line of a band is: the tallest of the pieces on it.</summary>
+    /// <remarks>
+    /// An empty line — a bare break, which a footer written as <c>&amp;RPage &amp;P\n\nrest</c>
+    /// contains — still takes a line, at the sheet's default height.
+    /// </remarks>
+    private static Length LineHeight(IReadOnlyList<SheetHeaderPiece> line, double zoom)
+    {
+        Length height = Length.Zero;
+        foreach (SheetHeaderPiece piece in line)
+            height = Length.Max(height, SheetBandText.LineHeightAt(SizeOf(piece, zoom)));
+
+        return height > Length.Zero
+            ? height
+            : SheetBandText.LineHeightAt(SheetBandText.DefaultSize * zoom);
     }
 
     /// <summary>One stroke of a border, with its ends extended to meet what it crosses.</summary>
@@ -497,7 +689,8 @@ internal sealed class SheetPageDecoration(SheetLayout sheet, SheetPagePlacement 
         public IReadOnlyList<Edge> All => _edges;
 
         public static Edges Build(
-            SheetFormatting formatting,
+            Func<int, int, SheetCellDecoration> decoration,
+            SheetMerges merges,
             IReadOnlyList<PlacedColumn> columns,
             IReadOnlyList<PlacedRow> rows)
         {
@@ -510,13 +703,19 @@ internal sealed class SheetPageDecoration(SheetLayout sheet, SheetPagePlacement 
                 for (int c = 0; c < columns.Count; c++)
                 {
                     PlacedColumn column = columns[c];
-                    SheetCellBorders own = formatting.At(row.Row, column.Column).Borders;
+                    SheetCellBorders own = decoration(row.Row, column.Column).Borders;
 
-                    edges.Add(true, row.Y, column.X, column.Right, SheetCellBorders.Resolve(
-                        own.Top, formatting.At(row.Row - 1, column.Column).Borders.Bottom));
+                    if (!merges.IsOverlappedTop(row.Row, column.Column))
+                    {
+                        edges.Add(true, row.Y, column.X, column.Right, SheetCellBorders.Resolve(
+                            own.Top, decoration(row.Row - 1, column.Column).Borders.Bottom));
+                    }
 
-                    edges.Add(false, column.X, row.Y, row.Bottom, SheetCellBorders.Resolve(
-                        own.Left, formatting.At(row.Row, column.Column - 1).Borders.Right));
+                    if (!merges.IsOverlappedLeft(row.Row, column.Column))
+                    {
+                        edges.Add(false, column.X, row.Y, row.Bottom, SheetCellBorders.Resolve(
+                            own.Left, decoration(row.Row, column.Column - 1).Borders.Right));
+                    }
 
                     // The far edges only where nothing follows to cover them, because every
                     // other one is already the next cell's near edge — which is what keeps two
@@ -526,16 +725,18 @@ internal sealed class SheetPageDecoration(SheetLayout sheet, SheetPagePlacement 
                     // same gap, so the test is whether the next placed row really is this row's
                     // successor in the sheet. Calc reaches the same answer by drawing each band
                     // through its own ScOutputData (ScPrintFunc::PrintPage, printfun.cxx:2300).
-                    if (r == rows.Count - 1 || rows[r + 1].Row != row.Row + 1)
+                    if ((r == rows.Count - 1 || rows[r + 1].Row != row.Row + 1)
+                        && !merges.IsOverlappedBottom(row.Row, column.Column))
                     {
                         edges.Add(true, row.Bottom, column.X, column.Right, SheetCellBorders.Resolve(
-                            own.Bottom, formatting.At(row.Row + 1, column.Column).Borders.Top));
+                            own.Bottom, decoration(row.Row + 1, column.Column).Borders.Top));
                     }
 
-                    if (c == columns.Count - 1 || columns[c + 1].Column != column.Column + 1)
+                    if ((c == columns.Count - 1 || columns[c + 1].Column != column.Column + 1)
+                        && !merges.IsOverlappedRight(row.Row, column.Column))
                     {
                         edges.Add(false, column.Right, row.Y, row.Bottom, SheetCellBorders.Resolve(
-                            own.Right, formatting.At(row.Row, column.Column + 1).Borders.Left));
+                            own.Right, decoration(row.Row, column.Column + 1).Borders.Left));
                     }
                 }
             }

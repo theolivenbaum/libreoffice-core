@@ -120,21 +120,120 @@ public static partial class SlideTextLayout
         /// </remarks>
         public Length Scaled(Length size)
         {
-            if (Font is <= 0 or 1.0) return size;
+            if (Font is <= 0 or 1.0) return Quantised(size);
 
             if (!RoundToPoints)
             {
-                return Length.FromEmu((long)Math.Round(size.Emu * Font));
+                return Quantised(Length.FromEmu((long)Math.Round(size.Emu * Font)));
             }
 
-            double points = Rounded((double)size.Mm100 / Mm100PerPoint);
+            double points = Rounded((double)Quantised(size).Mm100 / Mm100PerPoint);
 
             return Length.FromMm100((long)Rounded(Rounded(points * Font) * Mm100PerPoint));
         }
     }
 
+    /// <summary>
+    /// A character height on the grid the draw layer can actually hold it on.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>A slide's em size is never an exact number of points, and ours was.</strong> The
+    /// height lives in an <c>SvxFontHeightItem</c> in the model's own map unit, which for a draw
+    /// object is a hundredth of a millimetre — so a 20 pt run is drawn at
+    /// <strong>706 units, 20.0126 pt</strong>, and every advance width, line break and autofit
+    /// measurement in the reference is taken at that size rather than at 20.
+    /// </para>
+    /// <para>
+    /// Measured on the round-seventeen baseline sweep with
+    /// <c>research/probes/slides-r17/mm100-grid.py</c>: of the reference's show operators over
+    /// forty documents, <strong>82.27% sit on the 1/100 mm grid against our 45.81%</strong>, and
+    /// every one of the fifteen commonest sizes we wrote that it cannot hold is a whole number of
+    /// points — 24, 16, 20, 12, 28, 17, 10, 9, 15, 44. The residual 18% on the reference's side is
+    /// text it rasterises or plays out of a metafile, which is not on any grid by construction.
+    /// </para>
+    /// <para>
+    /// The conversion is the one the property setter performs, not a direct ratio:
+    /// <c>SvxFontHeightItem::PutValue</c> takes <c>nHeight = (long)(fPoint * 20.0 + 0.5)</c> —
+    /// points to twips — and then <c>convertTwipToMm100</c>, which is
+    /// <c>(n * 127 + 36) / 72</c> (<c>editeng/source/items/textitem.cxx:774-776</c>, 24.2.7.2).
+    /// For a whole number of points the twip step is exact and the pair reduces to
+    /// <c>o3tl::convert(pt, pt, mm100)</c>, which is what the PPT filter calls directly — so one
+    /// implementation is faithful to all three readers. For a DrawingML <c>sz</c> of 1333 it is
+    /// not: 13.33 pt is 267 twips and therefore <strong>471</strong> units, where the direct ratio
+    /// gives 470.
+    /// </para>
+    /// <para>
+    /// Applied here rather than in the three readers because this is the one place every measured
+    /// and drawn em passes through — <c>LargestSize</c> reads it back off <c>RunStyle.Size</c>,
+    /// the shaper takes it as <c>FormattedRun.EmSize</c>, and the sink writes it as <c>/Tf</c>.
+    /// </para>
+    /// </remarks>
+    private static Length Quantised(Length size)
+    {
+        if (size.Emu <= 0) return size;
+
+        long twips = (long)((size.Points * 20.0) + 0.5);
+
+        return Length.FromMm100(((twips * 127) + 36) / 72);
+    }
+
     /// <summary>Hundredths of a millimetre in a point, which is where the fit's rounding happens.</summary>
     private const double Mm100PerPoint = 2540.0 / 72.0;
+
+    /// <summary>The draw layer's reference device resolution, which is what quantises an em.</summary>
+    private const double ReferenceDeviceDpi = 600.0;
+
+    /// <summary>
+    /// The em an autofitted body's lines are measured at: the reference device's realisation of
+    /// the character height, which is a whole number of its pixels.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>An autofitted shape does not measure its lines at the size it states, and a plain
+    /// one does.</strong> <c>ImpEditEngine::SeekCursor</c> takes a different branch whenever
+    /// <c>maStatus.DoStretch()</c> — which <c>SdrTextObj::ImpSetupDrawOutlinerForPaint</c> sets for
+    /// <c>IsFitToSize() || IsAutoFit()</c> and for nothing else. That branch pushes the font at the
+    /// device, <em>reads the size back out of the device's own metric</em> and puts it on the font:
+    /// <c>rFont.SetPhysFont(*pDev); Size aRealSz(aMetric.GetFontSize()); … rFont.SetFontSize(aRealSz)</c>
+    /// (<c>editeng/source/editeng/impedit3.cxx</c>:2985-3062, 24.2.7). During formatting <c>pDev</c>
+    /// is the reference device, so the height the line spacing is computed from is the item height
+    /// rounded to whole device pixels and back.
+    /// </para>
+    /// <para>
+    /// Measured rather than inferred, on <c>research/probes/slides-r21/make-pitch-probe.py</c> —
+    /// one slide per size, the same three paragraphs in an <c>a:noAutofit</c> box and in an
+    /// <c>a:normAutofit</c> box far too tall to shrink. Over 53 sizes from 6 to 58 pt the plain box
+    /// is <c>fround(em × 1.2)</c> every time and the autofitted box differs on <strong>34 of the
+    /// 53</strong>, by −3, −1, +1 or +3 hundredths of a millimetre and never more. Fitting a pixel
+    /// round trip over 30 to 4000 dpi reproduces all 53 at <strong>600 dpi and at no other
+    /// resolution</strong>; eight further fractional sizes, four of them with the two boxes
+    /// disagreeing, come back 8 of 8; and Carlito reproduces Liberation Sans row for row, which is
+    /// what "font-independent" line spacing should do.
+    /// </para>
+    /// <para>
+    /// <strong>It reaches only the unscaled case, and that is the reference's own condition rather
+    /// than a simplification.</strong> When <c>fFontY != 1.0</c> the same branch immediately puts
+    /// the height through <c>roundToNearestPt</c> twice (<c>impedit3.cxx</c>:3007-3012), which
+    /// rounds to a whole point and discards the device grid entirely — so <see cref="Scaling.Scaled"/>
+    /// is already faithful for every shrunken body and must not be touched.
+    /// </para>
+    /// <para>
+    /// <strong>Do not read the em off a reference PDF's <c>/Tf</c>.</strong> There is a second,
+    /// unrelated round trip at paint time through the PDF export device at 720 dpi, and it applies
+    /// to plain and autofitted shapes alike: a 13.33 pt run is held as 471 units, measured at 470
+    /// and drawn as <strong>473</strong>. Three different numbers for one size is what makes this
+    /// term look like noise from the content stream alone.
+    /// </para>
+    /// </remarks>
+    private static Length DeviceRealised(Length em)
+    {
+        if (em.Mm100 <= 0) return em;
+
+        double pixels = Rounded(em.Mm100 * ReferenceDeviceDpi / 2540.0);
+
+        return Length.FromMm100((long)Rounded(pixels * 2540.0 / ReferenceDeviceDpi));
+    }
 
     /// <summary>
     /// <c>basegfx::fround</c>: half away from zero, which is not what <c>Math.Round</c> does.
@@ -170,7 +269,7 @@ public static partial class SlideTextLayout
         if (!body.AutoFit) return Scaling.Stated(body);
         if (area.Height <= Length.Zero) return Scaling.None;
 
-        const double fontHeightPoints = GridFontHeightPoints;
+        double fontHeightPoints = GridFontHeightPoints(body);
 
         Dictionary<(double, double), double> measured = [];
 
@@ -237,32 +336,75 @@ public static partial class SlideTextLayout
     }
 
     /// <summary>
+    /// The pool default the reference falls back on: 24 pt, held as 847 hundredths of a
+    /// millimetre.
+    /// </summary>
+    /// <remarks>
+    /// <c>SdrEngineDefaults::GetFontHeight()</c> is <c>o3tl::convert(24, pt, mm100)</c>
+    /// (<c>include/svx/svdetc.hxx:69</c>) and <c>SdrModel</c> makes it the pool's
+    /// <c>EE_CHAR_FONTHEIGHT</c> (<c>svdmodel.cxx:133</c>, <c>SetTextDefaults</c>). 24 pt is
+    /// 846.67 hundredths of a millimetre, which that conversion rounds to <strong>847</strong> —
+    /// and the rounding is the point, not a detail. See <see cref="GridFontHeightPoints"/>.
+    /// </remarks>
+    private const long DefaultFontHeightMm100 = 847;
+
+    /// <summary>
     /// The font height the search snaps its candidates to, in points.
     /// </summary>
     /// <remarks>
     /// <para>
-    /// The reference reads <c>EE_CHAR_FONTHEIGHT</c> off the <em>object's</em> item set — the
-    /// shape's default character height, not any run's — and uses it for one purpose: each
-    /// candidate scale is floored to a tenth of a point <em>of that height</em> before it is
-    /// tried, so the search walks a grid of <c>0.1 / height</c> rather than a continuum.
-    /// Paperless models no such default, so this is EditEngine's own: 240 twips, twelve points
-    /// (<c>editeng/source/editeng/eerdll.cxx:130</c>).
+    /// The reference reads <c>EE_CHAR_FONTHEIGHT</c> off the <em>object's</em> item set and uses
+    /// it for one purpose: each candidate scale is floored to a tenth of a point <em>of that
+    /// height</em> before it is tried, so the search walks a grid of <c>0.1 / height</c> rather
+    /// than a continuum.
     /// </para>
     /// <para>
-    /// <strong>The largest run's size is the wrong answer, and it is the tempting one.</strong>
-    /// Measured over 227 probe boxes — a text box per box height from 8 to 100 pt at 25, 32 and
-    /// 40 pt, one line and two, in four faces — taking the grid from the run's own size agrees
-    /// with the reference on 210 and the fixed twelve agrees on 225. The failures are not near
-    /// misses: a 40 pt line in a 20 pt box comes out at 17 pt against the reference's 19,
-    /// because the grid decides which candidates the bisection ever visits and a grid derived
-    /// from the run steps straight past the answer.
+    /// <strong>It is a length in hundredths of a millimetre, and it is therefore never a whole
+    /// number of points.</strong> That is the whole of this method, and getting it wrong was
+    /// worth six of thirty-three probe boxes. <c>autoFitTextForCompatibility</c> converts the
+    /// item's height from hundredths of a millimetre
+    /// (<c>svx/source/svdraw/svdotext.cxx</c>, 24.2.7), so a 20 pt default is 706 units and comes
+    /// back as <strong>20.0126 pt</strong>, not 20. The difference decides which candidates the
+    /// bisection ever visits: at the 87.5 per cent candidate a grid of exactly 12 puts the scaled
+    /// size on precisely 17.5 pt, which rounds <em>up</em> to 18, overshoots the box, and drops
+    /// the search's ceiling below every larger candidate; the reference's 11.99055 lands the same
+    /// candidate on 17.489, rounds <em>down</em> to 17, and the search keeps climbing. Every
+    /// disagreement measured was that shape — we settled for a looser fit than the reference.
     /// </para>
     /// <para>
-    /// Twelve is not the only value that works — 18 and 20 also agree on 225 of the 227, while
-    /// 16 and 24 agree on 208. So the grid is load-bearing and its exact value, within a band,
-    /// is not; twelve is chosen because it is the one the reference would actually hold for a
-    /// shape that states no default of its own.
+    /// Measured on two probe decks of 33 autofit boxes each, one stating 20 pt and one 40 pt,
+    /// simulating 24.2.7's search against its own rendering
+    /// (<c>research/probes/slides-r15/sim-autofit.py</c>). A round twelve agrees on
+    /// <strong>27 of 33 and 33 of 33</strong>; the body's own character height through hundredths
+    /// of a millimetre agrees on <strong>33 and 33</strong>. The pool default alone — 847 units,
+    /// 24.00945 pt — manages 33 and 30, which is what refutes reading a fixed default here.
+    /// </para>
+    /// <para>
+    /// <strong>Which run's height, when a body states several, is not separated by any probe
+    /// here.</strong> A deck putting a 20 pt paragraph in front of three 40 pt ones comes back
+    /// 33 of 33 under either reading, so first-run and largest-run are indistinguishable on the
+    /// evidence; the largest is taken because it is the more stable of the two — a body's leading
+    /// run is as often a stray label as its dominant size. Treat that half as inferred.
+    /// </para>
+    /// <para>
+    /// The predecessor of this note recorded the opposite conclusion — that a fixed twelve beat
+    /// the run's own size, 225 probe boxes to 210. It was measured with the run's size in
+    /// <em>points</em>, which for the 25, 32 and 40 pt boxes it used is a whole number every
+    /// time, so what that experiment actually compared was two whole-point grids.
     /// </para>
     /// </remarks>
-    private const double GridFontHeightPoints = 12.0;
+    private static double GridFontHeightPoints(SlideTextBody body)
+    {
+        long mm100 = 0;
+
+        foreach (SlideParagraph paragraph in body.Paragraphs)
+        {
+            foreach (SlideTextRun run in paragraph.Runs)
+            {
+                if (run.Size.Mm100 > mm100) mm100 = run.Size.Mm100;
+            }
+        }
+
+        return (mm100 > 0 ? mm100 : DefaultFontHeightMm100) / Mm100PerPoint;
+    }
 }

@@ -159,11 +159,16 @@ internal sealed class FrameResolution
     /// Whether the paragraphs inside a frame collapse their spacing against one another rather than adding
     /// it — see <see cref="FlowLayouter.LayOut"/>. A frame's own text is a frame's text like a cell's.
     /// </param>
+    /// <param name="addsCellLineSpacing">
+    /// Whether a table inside a frame grows its cells by their last paragraph's proportional line
+    /// spacing — see <see cref="PaginationOptions.AddsCellLineSpacing"/>.
+    /// </param>
     public static FrameResolution Of(
         IReadOnlyList<PageBlock> blocks,
         IReadOnlyList<PaginatedSection> sections,
         IReadOnlyList<LaidOutPage> pages,
-        bool collapsesSpacing = false)
+        bool collapsesSpacing = false,
+        bool addsCellLineSpacing = false)
     {
         Dictionary<int, Placement> placements = [];
 
@@ -181,7 +186,7 @@ internal sealed class FrameResolution
                 placements[line.ParagraphIndex] = new Placement(
                     index,
                     page,
-                    page.ColumnArea(line.Column),
+                    page.ColumnArea(line),
                     page.BodyArea.Y + line.Top,
                     page.BodyArea.Y + line.ParagraphTop);
             }
@@ -232,7 +237,8 @@ internal sealed class FrameResolution
                     byPage[pageIndex] = placed = [];
                 }
 
-                placed.Add(new PlacedFrame(frame, area, Content(frame, area, collapsesSpacing)));
+                placed.Add(new PlacedFrame(
+                    frame, area, Content(frame, area, collapsesSpacing, addsCellLineSpacing)));
 
                 // A run-through frame is not an obstacle at all: it neither narrows a line nor pushes one
                 // down, which is exactly what `SwTextFly::ForEach` skips it for.
@@ -293,7 +299,8 @@ internal sealed class FrameResolution
                 // Never an obstacle, whatever the document says its wrap is. An as-character frame is
                 // part of the text rather than something the text flows around, which is why Writer
                 // gives it a portion and not an entry in `SwTextFly`'s object list.
-                placed.Add(new PlacedFrame(frame, placedAt, Content(frame, placedAt, collapsesSpacing)));
+                placed.Add(new PlacedFrame(
+                    frame, placedAt, Content(frame, placedAt, collapsesSpacing, addsCellLineSpacing)));
             }
         }
 
@@ -322,7 +329,7 @@ internal sealed class FrameResolution
                 if (own[line.ParagraphIndex] is not PageParagraph paragraph) continue;
                 if (paragraph.Frames.Count == 0) continue;
 
-                HangInline(paragraph, index, page.ColumnArea(line.Column), line);
+                HangInline(paragraph, index, page.ColumnArea(line), line);
             }
         }
 
@@ -428,14 +435,35 @@ internal sealed class FrameResolution
     /// </remarks>
     private static IEnumerable<PlacedFlow> FlowsOn(LaidOutPage page)
     {
-        if (page.Header is { } header) yield return header;
-        if (page.Footer is { } footer) yield return footer;
-        if (page.Notes is { } notes) yield return notes;
+        // A running head is very often a *table* — a logo in the first cell and the document's title
+        // and revision in the next — so a flow's own tables have to be walked as well as the body's.
+        // Walking only `page.Tables` reached every body cell and no furniture cell, which loses the
+        // logo of any document that lays its header out that way. Measured on
+        // `UG.CAO.00133 … Language.docx`, whose `word/header1.xml` is one two-column table holding a
+        // 542925 EMU `wp:inline` picture: the reference draws it on page 1 and on the three landscape
+        // pages that use `header6.xml`, and we drew it nowhere.
+        foreach (PlacedFlow furniture in Furniture(page))
+        {
+            yield return furniture;
+
+            foreach (PlacedTable table in furniture.Tables)
+            {
+                foreach (PlacedFlow flow in CellFlows(table, 0)) yield return flow;
+            }
+        }
 
         foreach (PlacedTable table in page.Tables)
         {
             foreach (PlacedFlow flow in CellFlows(table, 0)) yield return flow;
         }
+    }
+
+    /// <summary>The page's furniture flows: the header, the footer and the notes area.</summary>
+    private static IEnumerable<PlacedFlow> Furniture(LaidOutPage page)
+    {
+        if (page.Header is { } header) yield return header;
+        if (page.Footer is { } footer) yield return footer;
+        if (page.Notes is { } notes) yield return notes;
     }
 
     /// <summary>The flows of a table's cells, and of any table inside one of them.</summary>
@@ -479,14 +507,16 @@ internal sealed class FrameResolution
     /// does. An image frame has no blocks and gets null, since the raster is decoded elsewhere and the
     /// rectangle is all the wrap ever needed.
     /// </remarks>
-    private static PlacedFlow? Content(PageFrame frame, DocRect area, bool collapsesSpacing)
+    private static PlacedFlow? Content(
+        PageFrame frame, DocRect area, bool collapsesSpacing, bool addsCellLineSpacing)
         => frame.Blocks.Count == 0
             ? null
             : FlowLayouter.LayOut(
                 frame.Blocks,
                 area.Deflate(frame.Padding),
                 Length.Zero,
-                collapsesSpacing: collapsesSpacing);
+                collapsesSpacing: collapsesSpacing,
+                addsCellLineSpacing: addsCellLineSpacing);
 
     /// <param name="Index">Which page the block starts on.</param>
     /// <param name="Page">That page.</param>

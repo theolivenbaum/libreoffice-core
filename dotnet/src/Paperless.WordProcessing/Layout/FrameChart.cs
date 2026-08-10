@@ -114,7 +114,14 @@ internal static class FrameChart
             sink.Save();
 
             sink.Transform(AffineTransform.Concat(
-                AffineTransform.Rotation(label.Rotation),
+                // Negated: `ChartLabel.Rotation` is anticlockwise, which is how both formats
+                // state one and how chart2's own shapes carry it, and the drawing space here has
+                // y growing downwards — so a positive angle handed straight to `Rotation` turns
+                // the text the other way. Measured: a two-word value axis title comes out reading
+                // top-to-bottom against the reference's bottom-to-top, and 45 degree category
+                // labels descend to the right against the reference's ascending. The box does not
+                // move, being symmetric about the same centre for either sign.
+                AffineTransform.Rotation(-label.Rotation),
                 AffineTransform.Translation(label.At.X.Emu, label.At.Y.Emu)));
 
             sink.DrawGlyphRun(
@@ -213,8 +220,28 @@ internal sealed class ChartFace : IChartTextMeasurer
     public Length LineHeightAt(Length size)
         => _metrics is { } metrics ? metrics.ScaledLineHeight(size) : size * 1.15;
 
-    /// <inheritdoc/>
-    public DocSize Measure(string text, Length size)
+    /// <summary>
+    /// <paramref name="family"/> is ignored because this instance is already bound to one, and
+    /// <paramref name="bold"/> because this instance holds no bold face.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The words track resolves the chart's family in its own reader and hands it to
+    /// <see cref="ChartFace.For"/>, so a <see cref="ChartFace"/> <em>is</em> a family and the
+    /// argument would only be a second, later opportunity to disagree with it. When that reader's
+    /// rule and <c>DrawingChartPlot.FamilyOf</c>'s are shown to be the same rule — they are the
+    /// same rule today, in two places — this can take the argument and the duplicate can go.
+    /// </para>
+    /// <para>
+    /// <strong><paramref name="bold"/> is the slides track's <see cref="ChartPlot.IsTitleBold"/>
+    /// reaching a consumer that cannot yet act on it.</strong> A <see cref="ChartFace"/> resolves
+    /// one face and shapes every label through it, so drawing a title bold means resolving a
+    /// second face here and threading it through <see cref="Shape"/> — a change that moves every
+    /// DOCX whose chart has a title, on a words sweep this round did not run. Taking the argument
+    /// and dropping it keeps the words track byte-identical while the model gets the value right.
+    /// </para>
+    /// </remarks>
+    public DocSize Measure(string text, Length size, string? family, bool bold)
     {
         ArgumentNullException.ThrowIfNull(text);
 

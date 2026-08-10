@@ -1,6 +1,7 @@
 using System.Buffers.Binary;
 using Paperless.Core.Geometry;
 using Paperless.Core.Units;
+using Paperless.WordProcessing.Layout;
 using Paperless.WordProcessing.Model;
 
 namespace Paperless.WordProcessing.Ww8;
@@ -219,7 +220,49 @@ internal static class Ww8SectionTable
         _ => SectionBreak.NextPage,
     };
 
-    private static WritingSection ReadProperties(ReadOnlyMemory<byte> grpprl)
+    /// <summary>
+    /// Where a header sits when the section states no <c>sprmSDyaHdrTop</c>: half an inch down.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Half an inch, not nothing. WW8's <c>SEP</c> is a structure with defaults rather than a set of
+    /// statements, and Word writes a sprm only where the section differs from them — so a document that
+    /// never mentions the header distance is asking for 720 twips, and reading the silence as zero puts
+    /// every header 36 pt above where it belongs and every footer 36 pt below.
+    /// </para>
+    /// <para>
+    /// The same 720 appears twice in LibreOffice's own reader: in <c>WW8_SEP</c>'s constructor
+    /// (<c>ww8scan.cxx</c>, <c>dyaHdrTop(720), dyaHdrBottom(720)</c>) and again as the fallback passed to
+    /// <c>ReadUSprm</c> when the section table is walked (<c>ww8par6.cxx:1183</c>).
+    /// </para>
+    /// <para>
+    /// It reaches the body as well as the furniture, because <see cref="PageGeometry.HeaderHeight"/> is
+    /// the gap between this and the top margin: a wrong distance makes the header's band the wrong height
+    /// too, so a header of more than one line overflows into the text rather than pushing it down.
+    /// </para>
+    /// </remarks>
+    private static readonly Length DefaultHeaderDistance = Length.FromTwips(720);
+
+    /// <summary>
+    /// What a section that never states <c>sprmSDxaColumns</c> means by it: 1.25 cm.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Not zero. <c>WW8_SEP</c>'s own constructor and the fallback passed to <c>ReadUSprm</c> when the
+    /// section table is walked both say 708 twips — <c>aNewSection.maSep.dxaColumns = ReadUSprm(pSep,
+    /// pIds[4], 708)</c> (<c>ww8par6.cxx</c>:987), commented "default distance 1.25 cm". The same figure
+    /// reaches DOCX through <c>SectionPropertyMap</c>'s <c>m_nColumnDistance(1249)</c>, 12.49 mm.
+    /// </para>
+    /// <para>
+    /// It is not only the gutter between columns that a zero gets wrong: the column *width* is the text
+    /// width less the gaps, divided by the count, so a two-column section on a 504 pt measure comes out
+    /// 252 pt wide instead of 234 pt — 8% too wide, so every line of it breaks late and the section is
+    /// short of the lines the reference gives it.
+    /// </para>
+    /// </remarks>
+    private static readonly Length DefaultColumnGap = Length.FromTwips(708);
+
+    internal static WritingSection ReadProperties(ReadOnlyMemory<byte> grpprl)
     {
         PageGeometry page = PageGeometry.Default;
         PageMargins margins = PageMargins.Default;
@@ -227,15 +270,16 @@ internal static class Ww8SectionTable
 
         SectionBreak sectionBreak = SectionBreak.NextPage;
         Length gutter = Length.Zero;
-        Length headerDistance = Length.Zero;
-        Length footerDistance = Length.Zero;
-        Length columnGap = Length.Zero;
+        Length headerDistance = DefaultHeaderDistance;
+        Length footerDistance = DefaultHeaderDistance;
+        Length columnGap = DefaultColumnGap;
         int columns = 1;
         bool landscape = false;
         bool rightToLeft = false;
         bool titlePage = false;
         int? restartAt = null;
         bool restartsNumbering = false;
+        NoteNumberFormat pageNumberFormat = NoteNumberFormat.Arabic;
 
         foreach (Ww8Sprm sprm in Ww8SprmReader.Read(grpprl))
         {
@@ -309,6 +353,21 @@ internal static class Ww8SectionTable
                     restartAt = sprm.DoubleWord;
                     break;
 
+                case Sprms.PageNumberFormat:
+                    // sep.nfcPgn: 0 arabic, 1 I II III, 2 i ii iii, 3 A B C, 4 a b c. LibreOffice's
+                    // own table (`wwSectionManager::SetNumberingType`, ww8par6.cxx:841) is exactly this,
+                    // and it clamps anything above 4 to arabic rather than rejecting the section.
+                    pageNumberFormat = sprm.Byte switch
+                    {
+                        1 => NoteNumberFormat.UpperRoman,
+                        2 => NoteNumberFormat.LowerRoman,
+                        3 => NoteNumberFormat.UpperLetter,
+                        4 => NoteNumberFormat.LowerLetter,
+                        _ => NoteNumberFormat.Arabic,
+                    };
+
+                    break;
+
                 default:
                     break;
             }
@@ -340,6 +399,7 @@ internal static class Ww8SectionTable
             // a stale start value from an earlier edit is common, and honouring it renumbers pages
             // that Word numbers continuously.
             RestartPageNumberAt = restartsNumbering ? restartAt ?? 1 : null,
+            PageNumberFormat = pageNumberFormat,
             HasDifferentFirstPage = titlePage,
         };
     }
@@ -387,6 +447,9 @@ internal static class Ww8SectionTable
         internal const ushort ColumnCount = 0x500B;
         internal const ushort ColumnGap = 0x900C;
         internal const ushort RestartsPageNumbering = 0x3011;
+
+        /// <summary><c>sprmSNfcPgn</c>, the sequence the section's page numbers are written in.</summary>
+        internal const ushort PageNumberFormat = 0x300E;
         internal const ushort HeaderDistance = 0xB017;
         internal const ushort FooterDistance = 0xB018;
         internal const ushort PageNumberStart97 = 0x501C;

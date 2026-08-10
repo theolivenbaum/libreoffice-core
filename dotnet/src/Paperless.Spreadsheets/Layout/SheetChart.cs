@@ -91,6 +91,11 @@ internal static class SheetChart
                 TitleSize = plot.TitleSize * scale,
                 AxisTitleSize = plot.AxisTitleSize * scale,
                 LabelSize = plot.LabelSize * scale,
+                // The two sizes that are null when the file states none: scaling them has to
+                // preserve the null, or a chart that stated neither would come out of the zoom
+                // with both pinned to the axis labels' unzoomed size.
+                LegendSize = plot.LegendSize is { } legend ? legend * scale : null,
+                DataLabelSize = plot.DataLabelSize is { } data ? data * scale : null,
             };
 
     /// <summary>
@@ -119,17 +124,24 @@ internal static class SheetChart
     private static void Text(IDrawingSink sink, ChartLabel label)
     {
         if (label.Text.Length == 0) return;
-        if (SheetBandText.Shape(label.Text, label.Size) is not { } run) return;
+        if (SheetBandText.Shape(label.Text, label.Size, label.Family) is not { } run) return;
 
-        Length line = SheetBandText.ChartLineHeightAt(label.Size);
-        Length ascent = SheetBandText.AscentAt(label.Size);
+        Length line = SheetBandText.ChartLineHeightAt(label.Size, label.Family);
+        Length ascent = SheetBandText.AscentAt(label.Size, label.Family);
 
         if (label.Rotation != 0.0)
         {
             sink.Save();
 
             sink.Transform(AffineTransform.Concat(
-                AffineTransform.Rotation(label.Rotation),
+                // Negated: `ChartLabel.Rotation` is anticlockwise, which is how both formats
+                // state one and how chart2's own shapes carry it, and the drawing space here has
+                // y growing downwards — so a positive angle handed straight to `Rotation` turns
+                // the text the other way. Measured: a two-word value axis title comes out reading
+                // top-to-bottom against the reference's bottom-to-top, and 45 degree category
+                // labels descend to the right against the reference's ascending. The box does not
+                // move, being symmetric about the same centre for either sign.
+                AffineTransform.Rotation(-label.Rotation),
                 AffineTransform.Translation(label.At.X.Emu, label.At.Y.Emu)));
 
             sink.DrawGlyphRun(
@@ -191,14 +203,43 @@ internal static class SheetChart
     {
         public static Measurer Instance { get; } = new();
 
-        public DocSize Measure(string text, Length size)
+        /// <summary>
+        /// Measures in the face the chart states; <paramref name="bold"/> is deliberately not
+        /// honoured yet.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// <see cref="ChartPlot.TextFamily"/> was added on the slides track, which measured it
+        /// there and left this consumer unwired on purpose: turning it on changes every workbook's
+        /// chart layout, so it wanted the round that sweeps the sheets track. That is this round,
+        /// and the sweep is in <c>probes/sheets-r26</c>.
+        /// </para>
+        /// <para>
+        /// Measuring and drawing must take the same family or the two come apart — a label
+        /// measured in Liberation Sans and drawn in Carlito is centred on the wrong width. So the
+        /// family goes through <see cref="SheetBandText"/>'s family-taking overloads on both
+        /// paths, and a chart that names nothing still resolves to
+        /// <c>SheetBandText</c>'s default.
+        /// </para>
+        /// <para>
+        /// <strong><paramref name="bold"/> arrived the same way and is still ignored, one round
+        /// behind the family.</strong> <see cref="ChartPlot.IsTitleBold"/> was added on the slides
+        /// track, where an OOXML chart's title and axis titles were measured bold against
+        /// LibreOffice's own model; the reader a workbook's chart reaches is the same one, so it
+        /// now hands a weight to this measurer and to <see cref="SheetChart"/>'s drawing, and both
+        /// drop it. Honouring it needs <c>SheetBandText</c> to hold a bold face beside its regular
+        /// one, and it would move every workbook whose chart has a title — measured against
+        /// nothing. That belongs to a round that sweeps this track, exactly as the family did.
+        /// </para>
+        /// </remarks>
+        public DocSize Measure(string text, Length size, string? family, bool bold)
         {
             ArgumentNullException.ThrowIfNull(text);
 
-            Length height = SheetBandText.ChartLineHeightAt(size);
+            Length height = SheetBandText.ChartLineHeightAt(size, family);
             return text.Length == 0
                 ? new DocSize(Length.Zero, height)
-                : new DocSize(SheetBandText.Shape(text, size)?.Width ?? Length.Zero, height);
+                : new DocSize(SheetBandText.Shape(text, size, family)?.Width ?? Length.Zero, height);
         }
     }
 }

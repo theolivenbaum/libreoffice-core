@@ -200,6 +200,12 @@ public static class OdfChartPlot
             // its scale and its grid survive a round trip, and drawn as nothing.
             ValueAxisVisible = Visible(valueAxis, styles),
             CategoryAxisVisible = Visible(categoryAxis, styles),
+
+            // chart:display-label="false" is ODF's c:tickLblPos="none" — the same
+            // DisplayLabels property, mapped at xmloff/source/chart/PropertyMaps.cxx:163. It
+            // hides the labels and leaves the axis line and its ticks alone.
+            ValueLabelsVisible = Labelled(valueAxis, styles),
+            CategoryLabelsVisible = Labelled(categoryAxis, styles),
             Legend = LegendOf(Child(chart, OdfNamespaces.Chart, "legend")),
             Background = styles.Fill(Attribute(chart, OdfNamespaces.Chart, "style-name")),
             PlotBackground = styles.Fill(
@@ -212,8 +218,30 @@ public static class OdfChartPlot
             AxisTitleSize = styles.FontSize(
                 Attribute(Child(categoryAxis, OdfNamespaces.Chart, "title"), OdfNamespaces.Chart, "style-name"))
                 ?? Length.FromPoints(9),
+
+            // ODF states the weight on the title's own style and LibreOffice writes it on every
+            // title it exports, so an unstated weight means regular here — unlike OOXML, whose
+            // import makes both titles bold before the file is consulted. See ChartPlot.IsTitleBold.
+            IsTitleBold = styles.IsBold(
+                Attribute(Child(chart, OdfNamespaces.Chart, "title"), OdfNamespaces.Chart, "style-name"))
+                ?? false,
+            IsAxisTitleBold = styles.IsBold(
+                Attribute(Child(categoryAxis, OdfNamespaces.Chart, "title"), OdfNamespaces.Chart, "style-name"))
+                ?? false,
             LabelSize = styles.FontSize(Attribute(valueAxis, OdfNamespaces.Chart, "style-name"))
                 ?? Length.FromPoints(10),
+
+            // The axis' own style states the weight of its labels. Regular when nothing states
+            // one, which is the same answer chart2's model gives and — unlike the titles — the
+            // same answer OOXML's auto-text table gives. See ChartPlot.IsLabelBold.
+            IsLabelBold = styles.IsBold(Attribute(valueAxis, OdfNamespaces.Chart, "style-name"))
+                ?? false,
+
+            // The legend's own style, not the value axis'. See ChartPlot.LegendSize.
+            LegendSize = styles.FontSize(Attribute(
+                Child(chart, OdfNamespaces.Chart, "legend"), OdfNamespaces.Chart, "style-name")),
+            IsLegendBold = styles.IsBold(Attribute(
+                Child(chart, OdfNamespaces.Chart, "legend"), OdfNamespaces.Chart, "style-name")),
             PlotArea = Region(plotArea),
             Space = SpaceOf(chart),
 
@@ -325,6 +353,12 @@ public static class OdfChartPlot
     private static bool Visible(XElement? axis, OdfChartStyles styles)
         => axis is null
            || styles.Flag(Attribute(axis, OdfNamespaces.Chart, "style-name"), "visible") != false;
+
+    /// <summary>Whether an axis draws its tick labels — <c>chart:display-label</c>.</summary>
+    private static bool Labelled(XElement? axis, OdfChartStyles styles)
+        => axis is null
+           || styles.Flag(Attribute(axis, OdfNamespaces.Chart, "style-name"), "display-label")
+              != false;
 
     /// <summary>
     /// What a series' style says its data labels show, or null for none.

@@ -452,6 +452,53 @@ public sealed record WritingSection
     /// </remarks>
     public int? RestartPageNumberAt { get; init; }
 
+    /// <summary>
+    /// The sequence the section's page numbers are written in: <c>w:pgNumType/@w:fmt</c>,
+    /// <c>sprmSNfcPgn</c>, ODF's <c>style:num-format</c> on the page layout.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// On the section rather than on the field, because that is where all four formats state it and
+    /// because a running head is inherited across sections while its numbering is not: a document whose
+    /// front matter is <c>lowerRoman</c> and whose body is <c>decimal</c> states one header once and
+    /// changes the format at the section break. 21 of this corpus's 134 DOCX declare a
+    /// <c>lowerRoman</c> section.
+    /// </para>
+    /// <para>
+    /// Typed as <see cref="Layout.NoteNumberFormat"/> because a page number and a note citation are
+    /// written in the same five sequences under four different attribute names, and two enums naming one
+    /// set is how the two spellings drift apart.
+    /// </para>
+    /// </remarks>
+    public Layout.NoteNumberFormat PageNumberFormat { get; init; } = Layout.NoteNumberFormat.Arabic;
+
+    /// <summary>
+    /// True when the section's columns are balanced — its content shared evenly between them rather than
+    /// filling each in turn down to the bottom of the page.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Meaningless when <see cref="PageGeometry.Columns"/> is one. It is the section that decides, not the
+    /// page: Writer models a balanced stretch as a <c>SwSectionFrame</c> whose height is searched for
+    /// (<c>SwLayoutFrame::FormatWidthCols</c>) and an unbalanced one as a page style, which fills.
+    /// </para>
+    /// <para>
+    /// Both Word readers decide it the same way and it is a property of the <em>next</em> section rather
+    /// than of this one: a multi-column section balances when the section after it starts with a
+    /// continuous break, and does not when a page break follows it or when it is the last. That is the
+    /// literal shape of both importers — <c>if (aNext == aEnd || !aNext-&gt;IsContinuous())
+    /// pRet-&gt;SetFormatAttr(SwFormatNoBalancedColumns(true))</c> (<c>ww8par.cxx</c>:4576), and
+    /// <c>pPrevSection-&gt;DontBalanceTextColumns()</c> reached from the page-break branch of
+    /// <c>SectionPropertyMap::CloseSectionGroup</c> (<c>dmapper/PropertyMap.cxx</c>:1919) with the
+    /// last-section case handled in <c>ApplyColumnProperties</c>. Both are also switched off wholesale by
+    /// the compatibility flag Word writes as <c>w:noColumnBalance</c> and <c>fNoColumnBalance</c>.
+    /// </para>
+    /// <para>
+    /// Default false, so a reader that says nothing gets the filling behaviour that was here before.
+    /// </para>
+    /// </remarks>
+    public bool BalancesColumns { get; init; }
+
     /// <summary>True when the section's first page uses the <c>First</c> furniture slot.</summary>
     public bool HasDifferentFirstPage { get; init; }
 

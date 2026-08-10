@@ -52,6 +52,11 @@ public static class FlowLayouter
     /// knows nothing about whether it sits in a page, a cell or a running head. Defaults to adding, which
     /// is what an ODF document asks for.
     /// </param>
+    /// <param name="addsCellLineSpacing">
+    /// Whether a table cell inside this flow grows by its last paragraph's proportional line spacing —
+    /// Writer's <c>AddParaLineSpacingToTableCells</c>, forwarded to <see cref="TableLayouter.LayOut"/>
+    /// so that a table nested in a cell, a header or a text frame follows the same rule the body's does.
+    /// </param>
     /// <remarks>
     /// Nothing is clipped and nothing overflows into a second rectangle: content taller than the area is
     /// placed anyway and runs past its bottom, which is what Writer does with a fixed-height header whose
@@ -63,7 +68,8 @@ public static class FlowLayouter
         DocRect area,
         Length? offsetFromTop,
         int nesting = 0,
-        bool collapsesSpacing = false)
+        bool collapsesSpacing = false,
+        bool addsCellLineSpacing = false)
     {
         ArgumentNullException.ThrowIfNull(blocks);
 
@@ -99,7 +105,8 @@ public static class FlowLayouter
                     new DocPoint(area.X, area.Y + top),
                     nesting + 1,
                     area.Width,
-                    collapsesSpacing);
+                    collapsesSpacing,
+                    addsCellLineSpacing);
 
                 Length height = Length.Zero;
                 foreach (Length row in rowHeights) height += row;
@@ -128,7 +135,8 @@ public static class FlowLayouter
             }
 
             PageParagraph paragraph = (PageParagraph)blocks[i];
-            ParagraphLayouter layouter = new(paragraph.Face, breaker: null, paragraph.Metrics);
+            ParagraphLayouter layouter = new(
+                paragraph.Face, breaker: null, paragraph.Metrics, WriterLineBox.LeadingAboveText);
             ParagraphFormat? previous = i > 0 && blocks[i - 1] is PageParagraph before
                 ? before.Format
                 : null;
@@ -140,7 +148,9 @@ public static class FlowLayouter
                     paragraph.Format,
                     area.Width,
                     paragraph.Language,
-                    previous)
+                    previous,
+                    obstacles: null,
+                    emSize: paragraph.EmSize)
                 : layouter.Layout(
                     paragraph.Text,
                     paragraph.Format,
@@ -162,7 +172,9 @@ public static class FlowLayouter
                         ? Length.Max(Length.Zero, layout.SpaceBefore - after)
                         : layout.SpaceBefore;
 
-            top += above + leading;
+            // The top border's room, outside the collapse: a rule's distance from its own text is not
+            // spacing between two paragraphs, and nothing above can pay for it.
+            top += above + leading + paragraph.BorderAbove;
 
             for (int line = 0; line < layout.Lines.Count; line++)
             {
@@ -188,7 +200,7 @@ public static class FlowLayouter
                 if (!box.SharesLineWithNext) top += box.Height;
             }
 
-            top += layout.SpaceAfter;
+            top += layout.SpaceAfter + paragraph.BorderBelow;
             leading = ParagraphLeading.Below(layout);
             previousSpaceAfter = layout.SpaceAfter;
         }
@@ -244,14 +256,19 @@ public static class FlowLayouter
     /// summing estimated line heights instead would drift from the real result exactly where it matters.
     /// </remarks>
     public static Length HeightOf(
-        IReadOnlyList<PageBlock> blocks, Length width, int nesting = 0, bool collapsesSpacing = false)
+        IReadOnlyList<PageBlock> blocks,
+        Length width,
+        int nesting = 0,
+        bool collapsesSpacing = false,
+        bool addsCellLineSpacing = false)
     {
         PlacedFlow? flow = LayOut(
             blocks,
             new DocRect(Length.Zero, Length.Zero, width, Length.Zero),
             Length.Zero,
             nesting,
-            collapsesSpacing);
+            collapsesSpacing,
+            addsCellLineSpacing);
 
         return flow is null ? Length.Zero : Extent(flow);
     }

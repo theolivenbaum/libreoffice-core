@@ -60,6 +60,21 @@ internal sealed class XlsCellFormats
     /// <summary>One indent level, in twips.</summary>
     private const int TwipsPerIndentLevel = 200;
 
+    /// <summary>
+    /// The cell margin every BIFF format carries, on all four sides, in twips.
+    /// </summary>
+    /// <remarks>
+    /// <c>XclImpXF::CreatePattern</c> ends by putting
+    /// <c>SvxMarginItem(40, 40, 40, 40, ATTR_MARGIN)</c> on every pattern it builds, under the
+    /// comment "Excel's cell margins are different from Calc's default margins"
+    /// (<c>sc/source/filter/excel/xistyle.cxx:1349-1351</c>). It is unconditional — cell XFs and
+    /// style XFs alike — and it is the only place in <c>sc/source/filter</c> that touches
+    /// <c>ATTR_MARGIN</c> at all, so the other formats keep the pool's 20. Twice the margin is
+    /// two points off the room a cell's text has across and two points down, which decides where
+    /// a string starts, how much of a clipped one survives, and how tall an auto-height row is.
+    /// </remarks>
+    public static readonly Length CellMargin = Length.FromTwips(40);
+
     /// <summary>The <c>FONT</c> index that is never used.</summary>
     private const int SkippedFontIndex = 4;
 
@@ -92,6 +107,23 @@ internal sealed class XlsCellFormats
             _fonts[0].Weight,
             _fonts[0].IsItalic)
         : null;
+
+    /// <summary>
+    /// The family one <c>FONT</c> index names, or null when it names none.
+    /// </summary>
+    /// <remarks>
+    /// A chart substream states its text's face as a bare index into this same buffer — that is
+    /// all a <c>CHFONT</c> record holds (<c>XclImpChFont::ReadChFont</c>,
+    /// <c>sc/source/filter/excel/xichart.cxx:941</c>) — so the chart reader has to come back
+    /// here to turn it into a name. Null both for an index the workbook never wrote and for a
+    /// <c>FONT</c> whose name is empty, because neither states a family and the caller's
+    /// fallback is the right answer for both.
+    /// </remarks>
+    /// <param name="index">The <c>FONT</c> index, as the file states it — the hole at four included.</param>
+    public string? FontFamilyAt(int index)
+        => index >= 0 && index < _fonts.Count && _fonts[index].Name.Length > 0
+            ? _fonts[index].Name
+            : null;
 
     /// <summary>Replaces the palette from index eight upwards, which is what <c>PALETTE</c> sets.</summary>
     /// <param name="colours">The colours the record listed, in order.</param>
@@ -134,6 +166,7 @@ internal sealed class XlsCellFormats
             Wraps = alignment.Wraps,
             ShrinksToFit = alignment.Shrinks,
             Indent = Length.FromTwips((long)alignment.IndentLevels * TwipsPerIndentLevel),
+            Margin = CellMargin,
             RotationDegrees = alignment.Rotation,
             IsStacked = alignment.Stacked,
             NumberFormatKind = format.IsGeneral || format.Sections.Count == 0
@@ -180,6 +213,20 @@ internal sealed class XlsCellFormats
 
     private Colour ColourAt(int index)
         => index >= 0 && index < _palette.Count ? _palette[index] : Colour.Black;
+
+    /// <summary>
+    /// The colour one palette index names, or null when the index names none.
+    /// </summary>
+    /// <remarks>
+    /// A chart's <c>CHLINEFORMAT</c> and <c>CHAREAFORMAT</c> state their colours as palette
+    /// indices in BIFF8 and as literal RGB in BIFF5, and both go through the same buffer a cell's
+    /// does (<c>XclImpChLineFormat::ReadChLineFormat</c>, <c>xichart.cxx:453-465</c>). Null rather
+    /// than black for an index outside the palette, because a chart with an unreadable colour
+    /// should fall back to whatever its layout would have chosen and not to a black bar.
+    /// </remarks>
+    /// <param name="index">The palette index.</param>
+    public Colour? PaletteColour(int index)
+        => index >= 0 && index < _palette.Count ? _palette[index] : null;
 
     /// <summary>
     /// The alignment fields of a BIFF5 <c>XF</c>.

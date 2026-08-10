@@ -45,6 +45,34 @@ public enum ChartLabelAnchor
 /// <param name="Stretch">
 /// An extra horizontal scale applied to the glyphs, 1 for text drawn at its natural width.
 /// </param>
+/// <param name="Family">
+/// The family the text is set in, or null when the chart states none and the consumer's own
+/// default is wanted. Carried per label rather than only on the drawing because a consumer
+/// draws label by label, and because the element-level overrides OOXML allows —
+/// <c>c:title/c:txPr</c> against <c>c:valAx/c:txPr</c> — have somewhere to go when a later
+/// round reads them. Today every label of one chart takes the same family, which is what
+/// LibreOffice's chart import does: all three of its automatic text entries name the theme's
+/// <em>minor</em> font (<c>oox/source/drawingml/chart/objectformatter.cxx</c>:415-434).
+/// </param>
+/// <param name="IsBold">
+/// Whether it is drawn in the family's bold face, or null for "whatever the chart's axis labels
+/// are set in".
+/// <para>
+/// The auto-text table makes the main title and the axis titles bold and leaves everything else
+/// regular — <c>mbBold</c> on <c>spChartTitleTexts</c> and <c>spAxisTitleTexts</c>, clear on
+/// <c>spOtherTexts</c> (<c>objectformatter.cxx</c>:415-434) — so those three sites state their
+/// weight outright. But a file that puts <c>b="1"</c> on <c>c:valAx/c:txPr</c> is stating one
+/// about its *labels*, and that reaches twenty-odd construction sites in this file.
+/// </para>
+/// <para>
+/// <strong>Null is what makes that a stamping pass rather than twenty arguments</strong>, for
+/// exactly the reason <paramref name="Family"/> gives: the invariant wanted is "every label of
+/// one chart that did not say otherwise carries the chart's label weight", and
+/// <see cref="ChartLayout.InWeight"/> states it in one place where twenty arguments would only
+/// happen to satisfy it. A site that knows its own answer — a title, a legend entry — sets it
+/// and the pass leaves it alone.
+/// </para>
+/// </param>
 /// <remarks>
 /// <strong><paramref name="Stretch"/> exists because a glyph run carries one em and a
 /// non-square stretch has two.</strong> An embedded chart is composed at its own size and scaled
@@ -62,7 +90,9 @@ public readonly record struct ChartLabel(
     Length Size,
     Colour Colour,
     double Rotation = 0.0,
-    double Stretch = 1.0);
+    double Stretch = 1.0,
+    string? Family = null,
+    bool? IsBold = null);
 
 /// <summary>One filled rectangle — a bar, a legend key, the plot area's wall.</summary>
 /// <param name="Bounds">Where it goes.</param>
@@ -151,7 +181,57 @@ public interface IChartTextMeasurer
     /// <summary>The advance width and line height of a single line of text.</summary>
     /// <param name="text">The characters.</param>
     /// <param name="size">The em size.</param>
-    DocSize Measure(string text, Length size);
+    /// <param name="family">
+    /// The family the text is set in, or null when the chart states none and the consumer's own
+    /// default is wanted. See <see cref="ChartPlot.TextFamily"/> for why a chart carries one at
+    /// all and why a hardcoded face is not a substitute for it.
+    /// </param>
+    /// <param name="bold">
+    /// Whether the text is set in the family's bold face. It is passed to the <em>measurement</em>
+    /// and not only to the drawing because a bold face is wider, and a chart's titles are placed
+    /// by their measured width: the main title is centred on the frame and an axis title on the
+    /// plot area, so measuring a bold title as regular offsets it by half the difference. See
+    /// <see cref="ChartLabel.IsBold"/> for which text is ever bold.
+    /// </param>
+    DocSize Measure(string text, Length size, string? family, bool bold);
+}
+
+/// <summary>
+/// A measurer bound to the family one chart's text is set in.
+/// </summary>
+/// <remarks>
+/// <strong>Bound once, at the composition's entry point, rather than threaded.</strong> The
+/// family is a property of the chart and not of any one measurement, so passing it beside every
+/// size through twenty private signatures would be twenty chances to pass the wrong one — and
+/// the family that is easy to reach at a call site deep in the legend code is whichever one
+/// happens to be in scope. Binding it in <see cref="ChartLayout.Place"/> makes "every label of
+/// one chart is measured in one face" true by construction instead of by inspection, and it is
+/// where a later round that reads OOXML's per-element <c>c:txPr</c> overrides would rebind.
+/// </remarks>
+/// <param name="Measurer">The consumer's own measurer.</param>
+/// <param name="Family">
+/// The family to measure in, or null for the consumer's own default.
+/// </param>
+public readonly record struct ChartText(IChartTextMeasurer Measurer, string? Family)
+{
+    /// <summary>The advance width and line height of a single line, in the bound family.</summary>
+    /// <param name="text">The characters.</param>
+    /// <param name="size">The em size.</param>
+    /// <param name="bold">Whether it is set bold; only a chart's titles ever are.</param>
+    public DocSize Measure(string text, Length size, bool bold = false)
+        => Measurer.Measure(text, size, Family, bold);
+
+    /// <summary>The same measurer bound to another family, or this one when none is named.</summary>
+    /// <remarks>
+    /// The rebinding point the type's own remarks anticipated. One element of a chart — its main
+    /// title — may name a face the chart space does not, so the *measurement* has to move with
+    /// the drawing or the room reserved above the plot is the wrong height for the type that
+    /// lands in it. A null family means "nothing stated here", which is not the same as "no
+    /// family": it takes what the chart already bound.
+    /// </remarks>
+    /// <param name="family">The family to rebind to, or null to keep the chart's own.</param>
+    public ChartText For(string? family)
+        => family is null ? this : this with { Family = family };
 }
 
 /// <summary>
@@ -289,13 +369,42 @@ public static partial class ChartLayout
     /// side at once, which moves the plot area up and left and leaves the labels crowding the
     /// frame's edges.
     /// </remarks>
-    private static DocSize Shape(IChartTextMeasurer measurer, string text, Length size)
+    private static DocSize Shape(
+        ChartText measurer, string text, Length size, bool bold = false, Length maxWidth = default)
     {
-        DocSize measured = MeasureLines(measurer, text, size);
+        DocSize measured = MeasureLines(measurer, text, size, bold, maxWidth);
         return new DocSize(
             measured.Width + size * (TextShapeInsetX * 2),
             measured.Height + size * (TextShapeInsetY * 2));
     }
+
+    /// <summary>
+    /// The share of the chart's own width a main title's text is allowed before it wraps.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>ChartView.cxx:1084-1085</c>, verbatim: a <c>MAIN_TITLE</c> or <c>SUB_TITLE</c> is
+    /// created with <c>aTextMaxWidth.Width = rPageSize.Width * 0.8</c>, and
+    /// <c>VTitle::createShapes</c> hands that to <c>ShapeFactory::createText</c> as
+    /// <c>nTextMaxWidth</c>, which is the width EditEngine wraps at.
+    /// </para>
+    /// <para>
+    /// <strong>Not wrapping at all was invisible while the title was drawn too small.</strong>
+    /// <c>Demick_JetBlue.pptx</c> page 5 is the demonstration: its title states no size, so it
+    /// was drawn at the old 13 pt default and fitted on one line, and the reference — which sets
+    /// it at 18 pt — breaks it after "and". Correcting the size to 18 pt exposed the missing wrap
+    /// as a 659 pt line inside a 634 pt frame, overhanging both edges. Two errors that cancelled;
+    /// with both corrected the plot area's top edge lands 0.64 pt from the reference's, against
+    /// 30.79 pt before either.
+    /// </para>
+    /// <para>
+    /// The axis titles take the same 0.8 across (<c>:1090</c>; <c>:1096</c> gives a rotated Y
+    /// title 0.8 <em>down</em> instead) and are not wrapped here: an axis title's reserved band
+    /// is its height, so wrapping one moves the plot area rather than only the words, and the
+    /// corpus's axis titles are short. Do it with its own measurement.
+    /// </para>
+    /// </remarks>
+    private const double TitleWidthFraction = 0.8;
 
     /// <summary>
     /// The lines a title breaks into, which is more than one when the file says so.
@@ -312,17 +421,65 @@ public static partial class ChartLayout
             ? [text]
             : text.Split(['\n', '\r'], StringSplitOptions.RemoveEmptyEntries);
 
-    /// <summary>How much room a possibly multi-line label needs: the widest line, all the heights.</summary>
-    private static DocSize MeasureLines(IChartTextMeasurer measurer, string text, Length size)
+    /// <summary>
+    /// The lines a title occupies: its own breaks first, then wrapping at
+    /// <paramref name="maxWidth"/>.
+    /// </summary>
+    /// <remarks>
+    /// Greedy, at spaces, and a word wider than the whole allowance is left whole rather than
+    /// broken — EditEngine would break it, and a chart title with one word longer than 80% of the
+    /// chart is not a case the corpus holds. A zero <paramref name="maxWidth"/> means "do not
+    /// wrap", which is what every caller but the main title's passes.
+    /// </remarks>
+    private static string[] LinesOf(
+        ChartText measurer, string text, Length size, bool bold, Length maxWidth)
     {
-        string[] lines = LinesOf(text);
-        if (lines.Length <= 1) return measurer.Measure(text, size);
+        string[] stated = LinesOf(text);
+        if (maxWidth <= Length.Zero) return stated;
+
+        List<string> wrapped = [];
+        foreach (string line in stated)
+        {
+            string[] words = line.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            if (words.Length == 0)
+            {
+                wrapped.Add(line);
+                continue;
+            }
+
+            string current = words[0];
+            for (int i = 1; i < words.Length; i++)
+            {
+                string candidate = current + ' ' + words[i];
+                if (measurer.Measure(candidate, size, bold).Width <= maxWidth)
+                {
+                    current = candidate;
+                    continue;
+                }
+
+                wrapped.Add(current);
+                current = words[i];
+            }
+
+            wrapped.Add(current);
+        }
+
+        return wrapped.Count == stated.Length ? stated : [.. wrapped];
+    }
+
+    /// <summary>How much room a possibly multi-line label needs: the widest line, all the heights.</summary>
+    private static DocSize MeasureLines(
+        ChartText measurer, string text, Length size, bool bold = false, Length maxWidth = default)
+    {
+        string[] lines = LinesOf(measurer, text, size, bold, maxWidth);
+        if (lines.Length <= 1)
+            return measurer.Measure(lines.Length == 1 ? lines[0] : text, size, bold);
 
         Length width = Length.Zero;
         Length height = Length.Zero;
         foreach (string line in lines)
         {
-            DocSize measured = measurer.Measure(line, size);
+            DocSize measured = measurer.Measure(line, size, bold);
             width = Length.Max(width, measured.Width);
             height += measured.Height;
         }
@@ -342,6 +499,11 @@ public static partial class ChartLayout
         if (frame.Width <= Length.Zero || frame.Height <= Length.Zero)
             return new ChartDrawing(DocRect.Empty, [], [], [], []);
 
+        // The family the chart's own text is set in is bound to the measurer here and to every
+        // label the composition produces — one place, so the face a label is measured in and the
+        // face it is drawn in cannot come apart. See ChartPlot.TextFamily.
+        ChartText text = new(measurer, plot.TextFamily);
+
         // A chart with a coordinate space of its own is composed at its own size and the whole
         // picture is then stretched into the frame. See Stretch.
         if (plot.Space is not { } space
@@ -349,11 +511,57 @@ public static partial class ChartLayout
             || space.Height <= Length.Zero
             || (space.Width == frame.Width && space.Height == frame.Height))
         {
-            return Compose(plot, frame, measurer);
+            return InWeight(InFamily(Compose(plot, frame, text), plot.TextFamily), plot.IsLabelBold);
         }
 
         DocRect own = new(Length.Zero, Length.Zero, space.Width, space.Height);
-        return Stretch(Compose(plot, own, measurer), own, frame);
+        return InWeight(
+            InFamily(Stretch(Compose(plot, own, text), own, frame), plot.TextFamily),
+            plot.IsLabelBold);
+    }
+
+    /// <summary>Stamps the chart's label weight onto every label that did not state one.</summary>
+    /// <remarks>
+    /// The counterpart of <see cref="InFamily"/> and there for the same reason. The sites that
+    /// know their own weight — the main title, the axis titles, a legend entry, and a data label
+    /// whose series states one — set <see cref="ChartLabel.IsBold"/>; every other construction
+    /// site leaves it null and gets the chart's axis-label weight here.
+    /// <para>
+    /// A data label that states <em>nothing</em> still lands here and takes the axis labels'
+    /// weight, which is round thirty's measured approximation and is deliberately kept: what
+    /// <see cref="ChartPlot.IsDataLabelBold"/> adds is only the case where the file answers the
+    /// question directly.
+    /// </para>
+    /// </remarks>
+    private static ChartDrawing InWeight(ChartDrawing drawing, bool bold)
+    {
+        if (drawing.Labels.Count == 0) return drawing;
+
+        List<ChartLabel> labels = new(drawing.Labels.Count);
+        foreach (ChartLabel label in drawing.Labels)
+            labels.Add(label.IsBold is null ? label with { IsBold = bold } : label);
+
+        return drawing with { Labels = labels };
+    }
+
+    /// <summary>Stamps the chart's family onto every label the composition produced.</summary>
+    /// <remarks>
+    /// One pass at the end rather than an argument at twenty-two construction sites, for the
+    /// reason <see cref="ChartText"/> gives: the invariant wanted is "every label of one chart
+    /// carries one family", and a stamping pass states it where twenty-two arguments would only
+    /// happen to satisfy it. A label that already names a family keeps it, so a later round
+    /// reading OOXML's per-element <c>c:txPr</c> overrides sets them at their own site and this
+    /// fills in the rest.
+    /// </remarks>
+    private static ChartDrawing InFamily(ChartDrawing drawing, string? family)
+    {
+        if (family is null || drawing.Labels.Count == 0) return drawing;
+
+        List<ChartLabel> labels = new(drawing.Labels.Count);
+        foreach (ChartLabel label in drawing.Labels)
+            labels.Add(label.Family is null ? label with { Family = family } : label);
+
+        return drawing with { Labels = labels };
     }
 
     /// <summary>
@@ -466,7 +674,7 @@ public static partial class ChartLayout
     ];
 
     /// <summary>Composes a chart in the coordinates it is measured in.</summary>
-    private static ChartDrawing Compose(ChartPlot plot, DocRect frame, IChartTextMeasurer measurer)
+    private static ChartDrawing Compose(ChartPlot plot, DocRect frame, ChartText measurer)
     {
         List<ChartBox> boxes = [];
         List<ChartLine> lines = [];
@@ -520,7 +728,7 @@ public static partial class ChartLayout
         // depth, and a third pass has never changed it on the corpus.
         ChartAxisLabelLayout? arranged = null;
 
-        if (plot.HasAxes && columns && plot.CategoryAxisVisible
+        if (plot.HasAxes && columns && plot.CategoryAxisVisible && plot.CategoryLabelsVisible
             && domain is null && plot.DataTable is null)
         {
             arranged = ArrangeCategories(plot, area, categories, measurer);
@@ -666,7 +874,7 @@ public static partial class ChartLayout
                 labels);
         }
 
-        AddTitles(plot, frame, area, measurer, labels);
+        AddTitles(plot, frame, area, DiagramAreaOf(plot, frame, measurer), measurer, labels);
         AddLegend(plot, frame, area, measurer, boxes, labels);
 
         return new ChartDrawing(
@@ -936,7 +1144,7 @@ public static partial class ChartLayout
         DocRect area,
         bool columns,
         ChartScaleResult scale,
-        IChartTextMeasurer measurer)
+        ChartText measurer)
     {
         // A stated interval is honoured whatever fits; only the automatic one is re-derived.
         if (plot.ValueScale.MajorUnit is { } stated && stated > 0.0)
@@ -948,7 +1156,7 @@ public static partial class ChartLayout
         if (columns)
         {
             available = area.Height;
-            needed = measurer.Measure("0", plot.LabelSize).Height;
+            needed = measurer.Measure("0", plot.LabelSize, plot.IsLabelBold).Height;
         }
         else
         {
@@ -958,7 +1166,8 @@ public static partial class ChartLayout
             foreach (double tick in scale.MajorTicks())
             {
                 Length width = measurer.Measure(
-                    ChartDataLabel.Write(tick, plot.ValueFormat), plot.LabelSize).Width;
+                    ChartDataLabel.Write(tick, plot.ValueFormat), plot.LabelSize,
+                    plot.IsLabelBold).Width;
                 if (width > needed) needed = width;
             }
         }
@@ -1007,7 +1216,7 @@ public static partial class ChartLayout
     /// proportional margin.
     /// </para>
     /// </remarks>
-    private static DocRect DiagramAreaOf(ChartPlot plot, DocRect frame, IChartTextMeasurer measurer)
+    private static DocRect DiagramAreaOf(ChartPlot plot, DocRect frame, ChartText measurer)
     {
         Length marginX = plot.Kind is ChartPlotKind.Pie or ChartPlotKind.OfPie && !plot.Rings
             ? PieMargin
@@ -1027,7 +1236,8 @@ public static partial class ChartLayout
         // pie's margin twice puts a titled pie 8 pt low on a 12 cm chart.
         if (plot.Title is { Length: > 0 } title)
         {
-            top += Shape(measurer, title, plot.TitleSize).Height
+            top += Shape(measurer.For(plot.TitleFamily), title, plot.TitleSize, plot.IsTitleBold,
+                         frame.Width * TitleWidthFraction).Height
                    + (frame.Height * PageMargin) + TitleGap;
         }
 
@@ -1058,12 +1268,15 @@ public static partial class ChartLayout
             string? below = columns ? plot.CategoryAxisTitle : plot.ValueAxisTitle;
 
             if (below is { Length: > 0 } under)
-                bottom -= Shape(measurer, under, plot.AxisTitleSize).Height + CategoryTitleGap;
+                bottom -= Shape(measurer, under, plot.AxisTitleSize, plot.IsAxisTitleBold).Height
+                          + CategoryTitleGap;
             if (beside is { Length: > 0 } side)
-                left += Shape(measurer, side, plot.AxisTitleSize).Height + ValueTitleGap;
+                left += Shape(measurer, side, plot.AxisTitleSize, plot.IsAxisTitleBold).Height
+                        + ValueTitleGap;
 
             if (plot.SecondaryValueAxisTitle is { Length: > 0 } second && plot.SecondaryAxisVisible)
-                right -= Shape(measurer, second, plot.AxisTitleSize).Height + ValueTitleGap;
+                right -= Shape(measurer, second, plot.AxisTitleSize, plot.IsAxisTitleBold).Height
+                         + ValueTitleGap;
         }
 
         return right <= left || bottom <= top
@@ -1088,7 +1301,7 @@ public static partial class ChartLayout
         ChartScaleResult? secondary,
         ChartScaleResult? domain,
         int categories,
-        IChartTextMeasurer measurer,
+        ChartText measurer,
         ChartAxisLabelLayout? arranged)
     {
         // Absolute, in the chart's own coordinates — ODF's chart:coordinate-region, which is
@@ -1131,7 +1344,7 @@ public static partial class ChartLayout
             if (plot.Kind is ChartPlotKind.Radar && plot.CategoryAxisVisible)
             {
                 Length wide = WidestCategoryLabel(plot, categories, measurer);
-                Length tall = Shape(measurer, "0", plot.LabelSize).Height;
+                Length tall = Shape(measurer, "0", plot.LabelSize, plot.IsLabelBold).Height;
 
                 left += wide;
                 right -= wide;
@@ -1150,24 +1363,36 @@ public static partial class ChartLayout
         // line tall. Both sit a tick length plus a label spacing away from the axis.
         // A deleted axis reserves nothing, which is the whole of what makes the plot area grow
         // into the room its labels would have taken.
-        Length valueLabel = plot.ValueAxisVisible
-            ? WidestValueLabel(scale, plot.ValueFormat, plot.LabelSize, measurer)
+        // Labels are a property of their own: a *deleted* axis draws no line, no ticks and no
+        // labels, and one whose tick labels are turned off keeps the first two. So the two flags
+        // multiply — the tick's length is reserved for a visible axis whatever its labels do, and
+        // the label's own depth only when it is drawn.
+        bool valueLabels = plot.ValueAxisVisible && plot.ValueLabelsVisible;
+        bool categoryLabels = plot.CategoryAxisVisible && plot.CategoryLabelsVisible;
+
+        Length valueLabel = valueLabels
+            ? WidestValueLabel(scale, plot.ValueFormat, plot.LabelSize, measurer, plot.IsLabelBold)
             : Length.Zero;
 
-        Length labelHeight = measurer.Measure("0", plot.LabelSize).Height;
+        Length labelHeight = measurer.Measure("0", plot.LabelSize, plot.IsLabelBold).Height;
 
         // A scatter chart's horizontal axis is numeric, so what sits under it is the widest of its
         // own ticks rather than the widest category name — and the last of them overhangs the
         // right edge by half its width exactly as a horizontal value axis' does.
-        Length categoryLabel = !plot.CategoryAxisVisible
+        Length categoryLabel = !categoryLabels
             ? Length.Zero
             : domain is { } across
-                ? WidestValueLabel(across, plot.DomainFormat, plot.LabelSize, measurer)
+                ? WidestValueLabel(
+                      across, plot.DomainFormat, plot.LabelSize, measurer, plot.IsLabelBold)
                 : WidestCategoryLabel(plot, categories, measurer);
 
-        Length valueSpace = plot.ValueAxisVisible ? TickLength + LabelSpacing : Length.Zero;
-        Length categorySpace = plot.CategoryAxisVisible ? TickLength + LabelSpacing : Length.Zero;
-        Length valueHeight = plot.ValueAxisVisible ? labelHeight : Length.Zero;
+        Length valueSpace = plot.ValueAxisVisible
+            ? TickLength + (valueLabels ? LabelSpacing : Length.Zero)
+            : Length.Zero;
+        Length categorySpace = plot.CategoryAxisVisible
+            ? TickLength + (categoryLabels ? LabelSpacing : Length.Zero)
+            : Length.Zero;
+        Length valueHeight = valueLabels ? labelHeight : Length.Zero;
 
         // Upright labels reserve one line of *text*, which is what every measurement in this file
         // was fitted against and what the six corpus charts still agree with. Rotated, thinned or
@@ -1176,7 +1401,7 @@ public static partial class ChartLayout
         // on an axis of long names turned 45°.
         Length categoryHeight = plot.DataTable is not null
             ? DataTableHeight(plot, measurer)
-            : !plot.CategoryAxisVisible
+            : !categoryLabels
                 ? Length.Zero
                 : arranged is { } layout && !IsPlain(layout)
                     ? layout.Reserved
@@ -1185,16 +1410,29 @@ public static partial class ChartLayout
         if (columns)
         {
             left += valueLabel + valueSpace;
-            bottom -= categoryHeight + categorySpace;
+
+            // The bottommost value label is centred on the plot area's bottom-left corner and
+            // hangs half of itself below it, exactly as the topmost one hangs above. Whichever of
+            // that and the category band is the deeper is what the bottom edge gives up: they
+            // occupy the same strip, and LibreOffice reserves the *bounding box* of everything
+            // its axes drew rather than a sum of their parts (`VDiagram::adjustInnerSize`,
+            // `chart2/source/view/diagram/VDiagram.cxx:661-669`, shrinks the inner rectangle by
+            // how far the drawn labels overflow the available one). Measured on a probe whose
+            // category labels are turned off: the reference's bottom edge sits 5.65 pt below the
+            // plot against half a label's 5.67, and adding the two instead puts it 4.25 pt low.
+            bottom -= Length.Max(categoryHeight + categorySpace, valueHeight / 2);
 
             // A secondary value axis is drawn on the far side of the plot area and reserves its
             // own labels there, which is the whole of what makes room for it. Its *title* was
             // taken off in DiagramAreaOf, with the other three.
             if (secondary is { } second && plot.SecondaryAxisVisible)
             {
-                right -= WidestValueLabel(
-                             second, plot.SecondaryValueFormat, plot.LabelSize, measurer)
-                         + TickLength + LabelSpacing;
+                right -= plot.SecondaryLabelsVisible
+                    ? WidestValueLabel(
+                          second, plot.SecondaryValueFormat, plot.LabelSize, measurer,
+                      plot.IsLabelBold)
+                      + TickLength + LabelSpacing
+                    : TickLength;
             }
 
             // On an unshifted axis the first and the last label are centred on the plot area's own
@@ -1255,8 +1493,11 @@ public static partial class ChartLayout
         int outward = secondary ? 1 : -1;
 
         // A deleted axis keeps its gridlines and loses everything else, so the line, the ticks and
-        // the labels are all gated and the grid inside the loop is not.
+        // the labels are all gated and the grid inside the loop is not. Turning the *labels* off
+        // is a second, weaker statement — c:tickLblPos="none" — which keeps the line and ticks.
         bool visible = secondary ? plot.SecondaryAxisVisible : plot.ValueAxisVisible;
+        bool labelled = visible
+                        && (secondary ? plot.SecondaryLabelsVisible : plot.ValueLabelsVisible);
 
         if (visible)
         {
@@ -1290,6 +1531,8 @@ public static partial class ChartLayout
                     new DocPoint(axisX, y),
                     AxisColour));
 
+                if (!labelled) continue;
+
                 labels.Add(new ChartLabel(
                     ChartDataLabel.Write(tick, format),
                     new DocPoint(axisX + (TickLength + LabelSpacing) * outward, y),
@@ -1313,6 +1556,8 @@ public static partial class ChartLayout
                     new DocPoint(x, axisY),
                     new DocPoint(x, axisY - TickLength * outward),
                     AxisColour));
+
+                if (!labelled) continue;
 
                 labels.Add(new ChartLabel(
                     ChartDataLabel.Write(tick, format),
@@ -1374,6 +1619,9 @@ public static partial class ChartLayout
 
                 lines.Add(new ChartLine(
                     new DocPoint(x, area.Bottom), new DocPoint(x, area.Bottom + TickLength), AxisColour));
+
+                if (!plot.CategoryLabelsVisible) continue;
+
                 labels.Add(new ChartLabel(
                     text,
                     new DocPoint(x, area.Bottom + TickLength + LabelSpacing),
@@ -1388,6 +1636,9 @@ public static partial class ChartLayout
 
                 lines.Add(new ChartLine(
                     new DocPoint(area.Left - TickLength, y), new DocPoint(area.Left, y), AxisColour));
+
+                if (!plot.CategoryLabelsVisible) continue;
+
                 labels.Add(new ChartLabel(
                     text,
                     new DocPoint(area.Left - TickLength - LabelSpacing, y),
@@ -1415,7 +1666,7 @@ public static partial class ChartLayout
         int categories,
         bool columns,
         ChartAxisLabelLayout? arranged,
-        IChartTextMeasurer measurer,
+        ChartText measurer,
         List<ChartLine> lines,
         List<ChartLabel> labels)
     {
@@ -1483,7 +1734,11 @@ public static partial class ChartLayout
         // A data table's header row *is* the category labels, so the axis draws none of its own —
         // VAxisProperties.cxx:336-343 turns DisplayLabels off outright. Drawing both is what puts
         // every category name on the page twice.
-        if (!plot.CategoryAxisVisible || plot.DataTable is not null) return;
+        if (!plot.CategoryAxisVisible || !plot.CategoryLabelsVisible
+            || plot.DataTable is not null)
+        {
+            return;
+        }
 
         ChartAxisLabelLayout layout =
             arranged ?? new ChartAxisLabelLayout(0.0, 1, false, Length.Zero);
@@ -1543,7 +1798,7 @@ public static partial class ChartLayout
             // can be positioned by after the fact. Measured against LibreOffice's own PDF for
             // bnc889755.pptx: its rotated labels' boxes are centred on the tick horizontally and
             // start at the tick-to-text distance below the axis, which is exactly this.
-            DocSize box = Shape(measurer, text, plot.LabelSize);
+            DocSize box = Shape(measurer, text, plot.LabelSize, plot.IsLabelBold);
             Length depth = box.Width * sine + box.Height * cosine;
 
             labels.Add(new ChartLabel(
@@ -1563,8 +1818,8 @@ public static partial class ChartLayout
     /// with the identical two constants (<c>DataTableView.cxx:171-180</c>) — so a row is exactly
     /// one <see cref="Shape"/> tall and nothing new needs measuring.
     /// </remarks>
-    private static Length DataTableHeight(ChartPlot plot, IChartTextMeasurer measurer)
-        => Shape(measurer, "0", plot.LabelSize).Height * (plot.Series.Count + 1);
+    private static Length DataTableHeight(ChartPlot plot, ChartText measurer)
+        => Shape(measurer, "0", plot.LabelSize, plot.IsLabelBold).Height * (plot.Series.Count + 1);
 
     /// <summary>
     /// The table of numbers under the plot: its grid, its header row and one row per series.
@@ -1589,14 +1844,14 @@ public static partial class ChartLayout
         DocRect area,
         int categories,
         bool columns,
-        IChartTextMeasurer measurer,
+        ChartText measurer,
         List<ChartLine> lines,
         List<ChartLabel> labels)
     {
         if (plot.DataTable is not { } table) return;
         if (!columns || categories <= 0 || plot.Series.Count == 0) return;
 
-        Length row = Shape(measurer, "0", plot.LabelSize).Height;
+        Length row = Shape(measurer, "0", plot.LabelSize, plot.IsLabelBold).Height;
         Length top = area.Bottom;
         Length column = area.Width / categories;
 
@@ -1720,7 +1975,7 @@ public static partial class ChartLayout
     /// How the category labels come out on the axis the plot rectangle gives them.
     /// </summary>
     private static ChartAxisLabelLayout ArrangeCategories(
-        ChartPlot plot, DocRect area, int categories, IChartTextMeasurer measurer)
+        ChartPlot plot, DocRect area, int categories, ChartText measurer)
     {
         string?[] texts = new string?[categories];
         Length[] centres = new Length[categories];
@@ -1735,7 +1990,7 @@ public static partial class ChartLayout
         }
 
         return ChartAxisLabels.Resolve(
-            texts, centres, plot.CategoryAxisText, plot.LabelSize, measurer);
+            texts, centres, plot.CategoryAxisText, plot.LabelSize, measurer, plot.IsLabelBold);
     }
 
 
@@ -1881,7 +2136,7 @@ public static partial class ChartLayout
         if (points.Count == 0) return;
 
         double total = series.Total();
-        Length gap = plot.LabelSize / 5;
+        Length gap = plot.DataLabelFont / 5;
 
         foreach ((DocPoint at, int index, double value) in points)
         {
@@ -1914,7 +2169,9 @@ public static partial class ChartLayout
             if (where.X < area.Left) where = new DocPoint(area.Left, where.Y);
             if (where.X > area.Right) where = new DocPoint(area.Right, where.Y);
 
-            labels.Add(new ChartLabel(text, where, anchor, plot.LabelSize, AxisColour));
+            labels.Add(new ChartLabel(
+                text, where, anchor, plot.DataLabelFont, AxisColour,
+                IsBold: plot.IsDataLabelBold));
         }
     }
 
@@ -2191,8 +2448,9 @@ public static partial class ChartLayout
                             centre.X + along * Math.Cos(middle),
                             centre.Y - along * Math.Sin(middle)),
                         ChartLabelAnchor.Centre,
-                        plot.LabelSize,
-                        AxisColour));
+                        plot.DataLabelFont,
+                        AxisColour,
+                        IsBold: plot.IsDataLabelBold));
                 }
             }
 
@@ -2437,7 +2695,7 @@ public static partial class ChartLayout
         if (text is not { Length: > 0 }) return;
 
         ChartLabelPlacement placement = label.Placement ?? ChartLabelPlacement.Outside;
-        Length gap = plot.LabelSize / 5;
+        Length gap = plot.DataLabelFont / 5;
 
         DocPoint at;
         ChartLabelAnchor anchor;
@@ -2485,7 +2743,9 @@ public static partial class ChartLayout
             };
         }
 
-        labels.Add(new ChartLabel(text, at, anchor, plot.LabelSize, AxisColour));
+        labels.Add(new ChartLabel(
+            text, at, anchor, plot.DataLabelFont, AxisColour,
+            IsBold: plot.IsDataLabelBold));
     }
 
     /// <summary>The chart's title and its two axis titles.</summary>
@@ -2500,23 +2760,32 @@ public static partial class ChartLayout
         ChartPlot plot,
         DocRect frame,
         DocRect area,
-        IChartTextMeasurer measurer,
+        DocRect diagram,
+        ChartText measurer,
         List<ChartLabel> labels)
     {
         if (plot.Title is { Length: > 0 } title)
         {
+            // Measured and drawn in the title's own face where it names one — the one place a
+            // chart's text is not all one family. See ChartPlot.TitleFamily.
+            ChartText titles = measurer.For(plot.TitleFamily);
+
             // Line by line, top down, from the same origin the reservation above measured from,
             // so a two-line title fills exactly the band that was kept for it.
             Length pen = frame.Y + (frame.Height * PageMargin);
-            foreach (string line in LinesOf(title))
+            foreach (string line in LinesOf(
+                         titles, title, plot.TitleSize, plot.IsTitleBold,
+                         frame.Width * TitleWidthFraction))
             {
-                Length height = measurer.Measure(line, plot.TitleSize).Height;
+                Length height = titles.Measure(line, plot.TitleSize, plot.IsTitleBold).Height;
                 labels.Add(new ChartLabel(
                     line,
                     new DocPoint(frame.X + frame.Width / 2, pen + height / 2),
                     ChartLabelAnchor.Centre,
                     plot.TitleSize,
-                    AxisColour));
+                    AxisColour,
+                    IsBold: plot.IsTitleBold,
+                    Family: plot.TitleFamily));
                 pen += height;
             }
         }
@@ -2532,20 +2801,29 @@ public static partial class ChartLayout
 
         if (below is { Length: > 0 } under)
         {
-            Length height = measurer.Measure(under, plot.AxisTitleSize).Height;
+            // Against the band `DiagramAreaOf` kept for it, and not against the frame's own
+            // bottom edge. `lcl_createTitle` places an `ALIGN_BOTTOM` title at
+            // `rRemainingSpace.Y + rRemainingSpace.Height - h/2 - nYDistance`
+            // (`ChartView.cxx:1147-1149`), and by then the *legend* has already been taken out of
+            // that rectangle — `lcl_createLegend` runs at `:1966` and the axis titles at `:2054`.
+            // Measuring from the frame instead put the title exactly where a bottom legend is:
+            // on a probe with one, ours came out 30.3 pt below the reference's and did not move
+            // at all when the legend was added.
+            Length height =
+                Shape(measurer, under, plot.AxisTitleSize, plot.IsAxisTitleBold).Height;
             labels.Add(new ChartLabel(
                 under,
-                new DocPoint(
-                    area.X + area.Width / 2,
-                    frame.Bottom - (frame.Height * PageMargin) - height / 2),
+                new DocPoint(area.X + area.Width / 2, diagram.Bottom + height / 2),
                 ChartLabelAnchor.Centre,
                 plot.AxisTitleSize,
-                AxisColour));
+                AxisColour,
+                IsBold: plot.IsAxisTitleBold));
         }
 
         if (beside is { Length: > 0 } side)
         {
-            Length height = measurer.Measure(side, plot.AxisTitleSize).Height;
+            Length height =
+                measurer.Measure(side, plot.AxisTitleSize, plot.IsAxisTitleBold).Height;
             labels.Add(new ChartLabel(
                 side,
                 new DocPoint(
@@ -2554,7 +2832,31 @@ public static partial class ChartLayout
                 ChartLabelAnchor.Centre,
                 plot.AxisTitleSize,
                 AxisColour,
-                Math.PI / 2));
+                Math.PI / 2,
+                IsBold: plot.IsAxisTitleBold));
+        }
+
+        // The secondary value axis' title, against the frame's right edge and turned the same
+        // quarter turn — `SECONDARY_Y_AXIS_TITLE` is created with `TitleAlignment::ALIGN_RIGHT`
+        // on a chart that is not vertical (`ChartView.cxx:2081-2082`), which positions it at
+        // `rRemainingSpace.X + rRemainingSpace.Width - aTitleSize.Width/2 - nXDistance`
+        // (`:1152-1153`). `PlotAreaOf` has taken its band off the right edge since the secondary
+        // axis was implemented and nothing ever drew into it, so the plot area was narrowed by a
+        // title that is not on the page — the failure that looks like nothing being wrong.
+        if (plot.SecondaryValueAxisTitle is { Length: > 0 } second && plot.SecondaryAxisVisible)
+        {
+            Length height =
+                measurer.Measure(second, plot.AxisTitleSize, plot.IsAxisTitleBold).Height;
+            labels.Add(new ChartLabel(
+                second,
+                new DocPoint(
+                    frame.Right - (frame.Width * PageMargin) - height / 2,
+                    area.Y + area.Height / 2),
+                ChartLabelAnchor.Centre,
+                plot.AxisTitleSize,
+                AxisColour,
+                Math.PI / 2,
+                IsBold: plot.IsAxisTitleBold));
         }
     }
 
@@ -2573,7 +2875,7 @@ public static partial class ChartLayout
         ChartPlot plot,
         DocRect frame,
         DocRect area,
-        IChartTextMeasurer measurer,
+        ChartText measurer,
         List<ChartBox> boxes,
         List<ChartLabel> labels)
     {
@@ -2618,7 +2920,13 @@ public static partial class ChartLayout
                 if (at >= named.Count) break;
 
                 (string name, Colour? fill, Colour? outline, Length width) = named[at];
-                Length rowY = originY + box.PaddingY + (box.RowHeight * row);
+
+                // A row is its own height and then the gap, which is exactly what the height
+                // reserved for the whole box is a sum of. Stepping by the height alone left the
+                // reservation and the placement disagreeing by one gap per row — the entries
+                // crowded into the top of a box sized for them spaced out, which on a two-entry
+                // legend is the difference between the box being centred and its content being.
+                Length rowY = originY + box.PaddingY + ((box.RowHeight + box.RowGap) * row);
 
                 boxes.Add(new ChartBox(
                     Rectangle(
@@ -2630,21 +2938,25 @@ public static partial class ChartLayout
                     outline,
                     width));
 
+                // No TextShapeInsetX: a legend entry's name is the one chart text that is not
+                // drawn in a shape carrying one. See Legend.
                 labels.Add(new ChartLabel(
                     name,
                     new DocPoint(
-                        columnX + box.Key.Width + box.KeyGap + (plot.LabelSize * TextShapeInsetX),
+                        columnX + box.Key.Width + box.KeyGap,
                         rowY + (box.RowHeight / 2)),
                     ChartLabelAnchor.LeftMiddle,
-                    plot.LabelSize,
-                    AxisColour));
+                    plot.LegendFont,
+                    AxisColour,
+                    IsBold: plot.LegendBold));
 
-                Length shape = Shape(measurer, name, plot.LabelSize).Width;
-                if (shape > widest) widest = shape;
+                Length text =
+                    MeasureLines(measurer, name, plot.LegendFont, plot.LegendBold).Width;
+                if (text > widest) widest = text;
             }
 
             columnX += box.Key.Width + box.KeyGap + widest
-                       + Larger(Millimetre, plot.LabelSize * 0.66);
+                       + Larger(Millimetre, plot.LegendFont * 0.66);
         }
     }
 
@@ -2724,7 +3036,8 @@ public static partial class ChartLayout
     /// <param name="KeyGap">The gap between a symbol and the name beside it.</param>
     /// <param name="PaddingX">The margin inside the legend's left and right edges.</param>
     /// <param name="PaddingY">The margin inside its top and bottom edges.</param>
-    /// <param name="RowHeight">One entry's height, insets included.</param>
+    /// <param name="RowHeight">One entry's own height.</param>
+    /// <param name="RowGap">The space between one row and the next.</param>
     private readonly record struct LegendBox(
         Length Width,
         Length Height,
@@ -2734,7 +3047,8 @@ public static partial class ChartLayout
         Length KeyGap,
         Length PaddingX,
         Length PaddingY,
-        Length RowHeight);
+        Length RowHeight,
+        Length RowGap);
 
     /// <summary>
     /// How much room the legend takes, ported from <c>lcl_placeLegendEntries</c>.
@@ -2745,8 +3059,24 @@ public static partial class ChartLayout
     /// the legend's own font height with a one-millimetre floor — padding <c>0.33</c>, the gap
     /// between columns <c>0.66</c>, the gap between a key and its name <c>0.22</c>, and the key
     /// itself <c>0.6</c> square — all under the comment "#i109336# Improve auto positioning in
-    /// chart". The name's width is the text <em>shape's</em>, so it carries
-    /// <see cref="TextShapeInsetX"/> twice like every other chart text.
+    /// chart".
+    /// </para>
+    /// <para>
+    /// <strong>An entry's name is measured as the plain text, not as a chart text shape.</strong>
+    /// It is the one piece of chart text that carries neither <see cref="TextShapeInsetX"/> nor
+    /// <see cref="TextShapeInsetY"/>: <c>lcl_createTextShapes</c> calls the <c>OUString</c>
+    /// overload of <c>ShapeFactory::createText</c> (<c>ShapeFactory.cxx:2042</c>), which sets no
+    /// text distances at all, while the overload that sets them (<c>:2168</c>) takes a size, a
+    /// position and an <c>XFormattedString</c> and is reached only from <c>VTitle</c>.
+    /// </para>
+    /// <para>
+    /// Measured on <c>research/probes/slides-r23</c>'s decks rather than taken from the source,
+    /// because the source is a development branch and the binary made the references. The gap
+    /// between a key's right edge and the name's pen is <strong>2.83, 2.83 and 3.07 pt at a 7, 10
+    /// and 14 pt legend font</strong> — <c>max(1 mm, 0.22 × font)</c> exactly, three times over,
+    /// with no <c>0.18 × font</c> added anywhere. Adding the inset would put it at 4.10, 4.64 and
+    /// 5.60. The row pitch says the same vertically: 10.34, 14.09 and 19.33 pt, which is a plain
+    /// line height plus one <c>0.20</c> offset and not a line height plus <c>0.60 × font</c>.
     /// </para>
     /// <para>
     /// <strong>This is the largest single term in the plot rectangle, and it is not the label
@@ -2774,14 +3104,14 @@ public static partial class ChartLayout
     /// it as one column put the plot rectangle's right edge 120 pt out.
     /// </para>
     /// </remarks>
-    private static LegendBox Legend(ChartPlot plot, DocRect available, IChartTextMeasurer measurer)
+    private static LegendBox Legend(ChartPlot plot, DocRect available, ChartText measurer)
     {
         if (plot.Legend == ChartLegendPosition.None) return default;
 
         List<(string Name, Colour? Fill, Colour? Line, Length Width)> named = Entries(plot);
         if (named.Count == 0) return default;
 
-        Length font = plot.LabelSize;
+        Length font = plot.LegendFont;
         Length paddingX = Larger(Millimetre, font * 0.33);
         Length offsetX = Larger(Millimetre, font * 0.66);
         Length paddingY = Larger(Millimetre, font * 0.20);
@@ -2797,10 +3127,10 @@ public static partial class ChartLayout
 
         foreach ((string name, _, _, _) in named)
         {
-            DocSize shape = Shape(measurer, name, font);
-            widths.Add(shape.Width);
-            if (shape.Width > widest) widest = shape.Width;
-            if (shape.Height > tallest) tallest = shape.Height;
+            DocSize text = MeasureLines(measurer, name, font, plot.LegendBold);
+            widths.Add(text.Width);
+            if (text.Width > widest) widest = text.Width;
+            if (text.Height > tallest) tallest = text.Height;
         }
 
         Length entryWidth = offsetX + keyWidth + keyGap + widest;
@@ -2856,7 +3186,8 @@ public static partial class ChartLayout
             keyGap,
             paddingX,
             paddingY,
-            tallest);
+            tallest,
+            offsetY);
     }
 
     /// <summary>
@@ -2869,13 +3200,14 @@ public static partial class ChartLayout
     /// its entries into. It decides only how many rows fit before a second column starts, so it
     /// changes nothing on a legend of a handful of entries and everything on one of fourteen.
     /// </remarks>
-    private static DocRect LegendSpace(ChartPlot plot, DocRect frame, IChartTextMeasurer measurer)
+    private static DocRect LegendSpace(ChartPlot plot, DocRect frame, ChartText measurer)
     {
         Length top = frame.Y;
 
         if (plot.Title is { Length: > 0 } title)
         {
-            top += Shape(measurer, title, plot.TitleSize).Height
+            top += Shape(measurer.For(plot.TitleFamily), title, plot.TitleSize, plot.IsTitleBold,
+                         frame.Width * TitleWidthFraction).Height
                    + (frame.Height * PageMargin) + TitleGap;
         }
 
@@ -2916,12 +3248,13 @@ public static partial class ChartLayout
         ChartScaleResult scale,
         NumberFormatCode? format,
         Length size,
-        IChartTextMeasurer measurer)
+        ChartText measurer,
+        bool bold = false)
     {
         Length widest = Length.Zero;
         foreach (double tick in scale.MajorTicks())
         {
-            Length width = measurer.Measure(ChartDataLabel.Write(tick, format), size).Width;
+            Length width = measurer.Measure(ChartDataLabel.Write(tick, format), size, bold).Width;
             if (width > widest) widest = width;
         }
 
@@ -2930,7 +3263,7 @@ public static partial class ChartLayout
 
     /// <summary>The width of the widest category label.</summary>
     private static Length WidestCategoryLabel(
-        ChartPlot plot, int categories, IChartTextMeasurer measurer)
+        ChartPlot plot, int categories, ChartText measurer)
     {
         Length widest = Length.Zero;
         for (int at = 0; at < categories && at < plot.Categories.Count; at++)
@@ -2941,7 +3274,7 @@ public static partial class ChartLayout
                 continue;
             }
 
-            Length width = measurer.Measure(text, plot.LabelSize).Width;
+            Length width = measurer.Measure(text, plot.LabelSize, plot.IsLabelBold).Width;
             if (width > widest) widest = width;
         }
 
@@ -2974,7 +3307,7 @@ public static partial class ChartLayout
         ChartPlot plot,
         ChartScaleResult? domain,
         int categories,
-        IChartTextMeasurer measurer)
+        ChartText measurer)
     {
         if (!plot.CategoryAxisVisible || plot.ShiftedCategories || categories <= 0)
             return (Length.Zero, Length.Zero);
@@ -2996,8 +3329,8 @@ public static partial class ChartLayout
             last = ChartDataLabel.WriteCategory(plot.Categories[end], plot.CategoryFormat) ?? "";
         }
 
-        return (measurer.Measure(first, plot.LabelSize).Width / 2,
-                measurer.Measure(last, plot.LabelSize).Width / 2);
+        return (measurer.Measure(first, plot.LabelSize, plot.IsLabelBold).Width / 2,
+                measurer.Measure(last, plot.LabelSize, plot.IsLabelBold).Width / 2);
     }
 
     /// <summary>

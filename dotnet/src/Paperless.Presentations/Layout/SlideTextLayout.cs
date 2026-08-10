@@ -66,7 +66,7 @@ public static partial class SlideTextLayout
         ArgumentNullException.ThrowIfNull(body);
         ArgumentNullException.ThrowIfNull(fonts);
 
-        DocRect area = textRectangle.Deflate(body.Insets);
+        DocRect area = OnGrid(textRectangle).Deflate(OnGrid(body.Insets));
         List<PlacedGlyphRun> placed = [];
         if (body.Paragraphs.Count == 0) return placed;
 
@@ -115,6 +115,62 @@ public static partial class SlideTextLayout
 
         return placed;
     }
+
+    /// <summary>
+    /// A text rectangle on the grid the draw layer can actually hold it on.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The companion of <see cref="Quantised(Length)"/>, which put the em on that grid, and the
+    /// other half of the same defect: <strong>a shape's rectangle is an integer number of
+    /// hundredths of a millimetre in the reference and carried the file's full EMU precision
+    /// here.</strong> oox builds a shape's matrix in EMUs and scales it into hundredths of a
+    /// millimetre at the end (<c>oox/source/drawingml/shape.cxx</c>:1226-1230, 24.2.7.2), and
+    /// <c>SvxShape</c> then hands the result to <c>SdrObject::SetSnapRect</c>, whose
+    /// <c>tools::Rectangle</c> holds four <c>sal_Int32</c> in the model's map unit. A
+    /// <c>SdrTextObj</c>'s text rectangle is that rectangle less four
+    /// <c>SdrMetricItem</c> text distances, which are integers of the same unit.
+    /// </para>
+    /// <para>
+    /// <strong>Both edges are rounded, not the extent</strong>, which is why this cannot be
+    /// written as a rounding of the width and height: the reference's height is
+    /// <c>round(bottom) − round(top)</c>, so a box of a given extent is one unit taller or
+    /// shorter depending on <em>where on the slide it sits</em>. Rounding the extent alone
+    /// reproduces neither.
+    /// </para>
+    /// <para>
+    /// The absolute error this removes is at most half a unit an edge — 0.014 pt, an order of
+    /// magnitude below the em fix. What makes it worth having anyway is that the shrink-to-fit
+    /// search is a <em>threshold</em> comparison rather than a proportional one: the answer is
+    /// decided by whether the measured text clears <c>available</c>, and round seventeen pinned
+    /// one such decision to a window 16 units wide. A quantity that is only ever one or two units
+    /// out still lands on the wrong side of a boundary that close.
+    /// </para>
+    /// <para>
+    /// Applied in <see cref="Place"/> and deliberately not in <see cref="Height"/>, whose caller
+    /// is a table's row sizing and hands over a width it has already computed from column edges
+    /// rather than a rectangle. Quantising a width on its own is not this rule — the rule is
+    /// about two edges — and a table's own grid is a separate measurement.
+    /// </para>
+    /// </remarks>
+    private static DocRect OnGrid(DocRect rectangle)
+    {
+        long left = rectangle.Left.Mm100;
+        long top = rectangle.Top.Mm100;
+
+        return new DocRect(
+            Length.FromMm100(left),
+            Length.FromMm100(top),
+            Length.FromMm100(rectangle.Right.Mm100 - left),
+            Length.FromMm100(rectangle.Bottom.Mm100 - top));
+    }
+
+    /// <summary>The four text distances, each an integer of the model's own unit.</summary>
+    private static Margins OnGrid(Margins insets) => new(
+        Length.FromMm100(insets.Left.Mm100),
+        Length.FromMm100(insets.Top.Mm100),
+        Length.FromMm100(insets.Right.Mm100),
+        Length.FromMm100(insets.Bottom.Mm100));
 
     /// <summary>
     /// How tall a body's text is once broken to a width, insets excluded.
@@ -641,6 +697,10 @@ public static partial class SlideTextLayout
 
             Length em = LargestSize(runs, styles, box.Line.Start, box.Line.VisibleEnd);
 
+            // An autofitted body that is not being scaled measures its lines at the *device's*
+            // realisation of the em rather than at the em. See DeviceRealised.
+            if (body.AutoFit && scaling.Font is <= 0 or 1.0) em = DeviceRealised(em);
+
             // The rule itself: one em of ascent, 1.2 em of box, then whatever the paragraph's own
             // spacing does to it. A paragraph stating 150% gets 1.5 x 1.2 em, which is what
             // EditEngine's proportional spacing applies to the height it just computed.
@@ -650,14 +710,31 @@ public static partial class SlideTextLayout
             // height the reference cannot represent, and the error accumulates down the block.
             Length natural = Length.FromMm100(
                 (long)Math.Floor((em.Mm100 * LineHeightFactor) + 0.5));
-            Length height = Spacing(paragraph.LineSpacing, natural);
 
-            lines.Add(Spaced(
-                new PlacedLine(
+            // EditEngine takes one of two branches here, and they are not the same arithmetic.
+            // A paragraph that states a proportional line spacing takes
+            // SvxInterLineSpaceRule::Prop, which multiplies the stated proportion and the fit
+            // search's spacing scale together and rounds the *product* once; a paragraph that
+            // states none takes the ::Off branch, which has only the fit's scale to apply and
+            // no four-fifths on the ascent (impedit3.cxx:1553-1602, 24.2.7). Applying the two
+            // factors in sequence rounds twice and lands a hundredth of a millimetre out — see
+            // Spacing and Proportioned.
+            if (Proportion(paragraph.LineSpacing) is { } proportion)
+            {
+                Length height = Proportioned(natural, proportion * scaling.Spacing);
+
+                lines.Add(new PlacedLine(
                     box,
-                    Ascent(em, natural, height, paragraph.LineSpacing),
+                    ProportionedAscent(em, natural, height, proportion * scaling.Spacing),
                     height,
-                    natural),
+                    natural));
+                continue;
+            }
+
+            // Nothing here states a proportion, so the ascent is one em: the ::Off branch is the
+            // only one left to touch it, and Spaced is what transcribes that.
+            lines.Add(Spaced(
+                new PlacedLine(box, em, Spacing(paragraph.LineSpacing, natural), natural),
                 scaling));
         }
 
@@ -666,8 +743,47 @@ public static partial class SlideTextLayout
 
         return new Block(
             paragraph, measured, styles, lines,
-            total + paragraph.SpaceBefore + paragraph.SpaceAfter, scaling, format);
+            total + ScaledSpace(paragraph.SpaceBefore, scaling)
+                  + ScaledSpace(paragraph.SpaceAfter, scaling),
+            scaling, format);
     }
+
+    /// <summary>
+    /// A paragraph's own space above or below, after the fit's line-spacing scale.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>The fit's spacing scale reaches a paragraph's space, not only its lines.</strong>
+    /// EditEngine puts every <c>SvxULSpaceItem</c> through <c>scaleYSpacingValue</c>
+    /// (<c>editeng/source/editeng/impedit2.cxx</c>, <c>ImpEditEngine::CalcHeight</c>), and that
+    /// helper is a no-op only when <c>maStatus.DoStretch()</c> is clear or the scale is one
+    /// (<c>impedit.hxx</c>:797-801). <c>DoStretch()</c> is <em>set</em> on exactly this path:
+    /// <c>SdrTextObj::ImpSetupDrawOutlinerForPaint</c> turns
+    /// <c>EEControlBits::STRETCHING</c> on whenever <c>IsFitToSize() || IsAutoFit()</c>
+    /// (<c>svx/source/svdraw/svdotext.cxx</c>:1177-1183) and only then calls
+    /// <c>setupAutoFitText</c>. So an autofitted shape always satisfies the guard, and the
+    /// scale applies.
+    /// </para>
+    /// <para>
+    /// Measured rather than argued, on <c>research/probes/slides-r20/make-spacing-probe.py</c>:
+    /// twelve autofit boxes of one text at twelve box heights, each holding four paragraphs of
+    /// two lines with the second forced by a hard break, so the line count cannot move with the
+    /// font size. The reference disagreed with us on three of the twelve — <em>every one of them
+    /// a box where we kept a larger font at nine- or eight-tenths spacing and it took a smaller
+    /// font at full spacing</em> — and scaling the paragraph space is what turns all three round.
+    /// The other nine land on full spacing, where this is a no-op by construction.
+    /// </para>
+    /// <para>
+    /// The predecessor of this note recorded the opposite, citing the same guard: that
+    /// <c>scaleYSpacingValue</c> "returns its argument unchanged unless <c>DoStretch()</c> is
+    /// set". The citation is right and the inference from it is backwards — under autofit the
+    /// flag is set.
+    /// </para>
+    /// </remarks>
+    private static Length ScaledSpace(Length space, Scaling scaling)
+        => scaling.Spacing is <= 0 or 1.0 || space.Emu == 0
+            ? space
+            : Length.FromMm100((long)Rounded(space.Mm100 * scaling.Spacing));
 
     /// <summary>
     /// The tallest ascent and the tallest ascent-plus-descent among the runs a line touches.
@@ -730,45 +846,6 @@ public static partial class SlideTextLayout
     private static Length Rounded(Length metric)
         => Length.FromMm100((long)Math.Round((double)metric.Emu / Length.EmuPerMm100));
 
-    /// <summary>
-    /// Where the baseline sits inside a line whose height proportional spacing has changed.
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// One em under the plain font-independent rule, and <strong>not</strong> one em as soon as a
-    /// paragraph states a proportional line spacing other than 100%: EditEngine moves the baseline
-    /// with the box rather than leaving it where the font would put it. Below 100% the new ascent
-    /// is <c>round(lineHeight × proportion × 0.8)</c> and the old one is kept if it is already
-    /// smaller; above it the ascent grows by exactly the height the line gained
-    /// (<c>editeng/source/editeng/impedit3.cxx:1553-1580</c>).
-    /// </para>
-    /// <para>
-    /// The four-fifths is not derivable from anything; it is a constant EditEngine took from
-    /// Writer's line formatter and it decides the first baseline of every shape in a deck that
-    /// tightens its spacing. Measured on <c>ppt-features.ppt</c>, whose paragraphs all state 93%:
-    /// the reference puts the 40 pt title's baseline 35.7 pt below the text top, where one em
-    /// would be 40 and <c>1.2 × 40 × 0.93 × 0.8</c> is 35.71.
-    /// </para>
-    /// <para>
-    /// Guarded on the proportion so that it costs nothing for the two families whose corpus decks
-    /// state none: <see cref="LineSpacingRule.SingleSpaced"/> is exactly 100% and takes neither
-    /// branch.
-    /// </para>
-    /// </remarks>
-    private static Length Ascent(Length em, Length natural, Length height, LineSpacingRule spacing)
-    {
-        if (spacing.Mode != LineSpacingMode.Proportional || spacing.Proportion == 1.0) return em;
-
-        if (spacing.Proportion < 1.0)
-        {
-            Length reduced = Length.FromEmu(
-                (long)Math.Round(natural.Emu * spacing.Proportion * ShortSpacingAscent));
-            return Length.Min(em, reduced);
-        }
-
-        return em + (height - natural);
-    }
-
     /// <summary>The fraction of a tightened line EditEngine puts above the baseline.</summary>
     private const double ShortSpacingAscent = 0.8;
 
@@ -819,7 +896,7 @@ public static partial class SlideTextLayout
     /// <remarks>
     /// <para>
     /// A pass-through for single spacing rather than a call to
-    /// <see cref="LineSpacingRule.Apply"/>, and the reason is the unit rather than the arithmetic.
+    /// <see cref="LineSpacingRule.Apply(Length)"/>, and the reason is the unit rather than the arithmetic.
     /// <c>Apply</c> computes in <strong>whole twips</strong>, because that is Writer's layout unit
     /// and the truncation there is observable; Impress lays out in hundredths of a millimetre, and
     /// a twip is 0.05 pt against a hundredth of a millimetre's 0.028, so round-tripping a line
@@ -838,29 +915,209 @@ public static partial class SlideTextLayout
     /// LibreOffice draws 27. Three of the eighty-eight boxes in the fit probe deck turned on this
     /// one unit.
     /// </para>
+    /// <para>
+    /// <strong>The proportional case needs the same unit, and it used to be the one exception.</strong>
+    /// The paragraph above argues that a twip is too coarse for the draw layer and then routed every
+    /// proportion other than single through <c>Apply</c> anyway. EditEngine computes the
+    /// proportional height in hundredths of a millimetre with one rounding —
+    /// <c>nHeight = fround(pLine-&gt;GetHeight() * fProportionalScale * fSpacingFactor)</c> below
+    /// a hundred per cent, and a truncating <c>sal_Int32</c> conversion of the same product above it
+    /// (<c>editeng/source/editeng/impedit3.cxx:1553-1580</c>, 24.2.7). <c>basegfx::fround</c> is
+    /// <c>(Int)(x + 0.5)</c> for a positive value (<c>include/basegfx/numeric/ftools.hxx:39-50</c>),
+    /// so the two branches round in opposite directions and both are reproduced here.
+    /// </para>
+    /// <para>
+    /// Worth a line height rather than a rounding curiosity, because the fit search reads it. On the
+    /// 40 pt probe box at 8 pt and nine-tenths spacing a 338-unit natural line gives the reference
+    /// <c>fround(338 × 0.8 × 0.9) = 243</c>; through whole twips 338 becomes 191.62 twips, rounds to
+    /// 192, loses a fifth to 154, and comes back 271.6 — <strong>244.5</strong> after the ninety per
+    /// cent. Over six lines that is 1417 against the reference's 1408 in a box of 1413, so the
+    /// reference fits 8 pt at nine-tenths by five hundredths of a millimetre and we did not, falling
+    /// back to 7 pt at full spacing and drawing the text a point too small.
+    /// </para>
+    /// <para>
+    /// Two divergences from <see cref="LineSpacingRule.Apply(Length)"/> come with the change, both
+    /// deliberate. <c>Apply</c> raises a proportion below fifty per cent to fifty, which is Writer's
+    /// <c>CalcRealHeight</c> rule and not EditEngine's; measured across the slides track,
+    /// <strong>nothing states a line proportion under fifty per cent at all</strong> — the minimum
+    /// is sixty — so the clamp is inert here and dropping it is unmeasurable rather than an
+    /// improvement (<c>research/probes/slides-r16/lnspc-scan.py</c>). And <c>Apply</c> works in
+    /// whole percentage points with truncating integer division, which is a second quantisation on
+    /// top of the unit; the reference's own whole-percent quantisation happens at import instead
+    /// (<c>oox/inc/drawingml/textspacing.hxx:52</c>), which is where we do it too.
+    /// </para>
+    /// </remarks>
+    /// <remarks>
+    /// <para>
+    /// <strong>The paragraph above described this method and the code did the opposite.</strong>
+    /// A rule that changes nothing — single spacing, or a proportion of exactly one hundred per
+    /// cent — went to <see cref="LineSpacingRule.Apply(Length)"/>, whose <em>first</em> line is
+    /// <c>naturalHeight.Twips</c>, so it round-trips through whole twips before its
+    /// <c>_ =&gt; natural</c> arm hands the value back. That is a quantisation on every
+    /// single-spaced slide line in the corpus, and it survives only line heights that are a whole
+    /// multiple of 3.6 pt.
+    /// </para>
+    /// <para>
+    /// Measured on <c>research/probes/slides-r21/make-pitch-probe.py</c>, whose plain boxes are
+    /// <c>fround(em × 1.2)</c> on all 53 reference sizes: through the twip trip an 8 pt line is
+    /// drawn at 338.67 units against the reference's 338, a 10 pt line at 423.33 against 424, and
+    /// a 28 pt line at 1185.2 against 1186. Under a unit it is invisible in a page image and it is
+    /// not invisible to the fit search, which decides between two candidates on one hundredth of a
+    /// millimetre — see the paragraph above about 1144 against 1143.
+    /// </para>
     /// </remarks>
     private static Length Spacing(LineSpacingRule rule, Length natural)
-        => rule.Mode == LineSpacingMode.Proportional && rule.Proportion is <= 0 or 1.0
-            ? natural
+        => Proportion(rule) is { } proportion ? Proportioned(natural, proportion)
+            : Neutral(rule) ? natural
             : rule.Apply(natural);
+
+    /// <summary>Whether a rule leaves a natural line height alone.</summary>
+    /// <remarks>
+    /// Exactly the rules <see cref="LineSpacingRule.Apply(Length)"/> would return the natural height for,
+    /// so this changes the unit the answer is held in and never the answer itself. The three modes
+    /// that state an absolute height keep going through <c>Apply</c>, because a stated height is a
+    /// length the file gives rather than one the line derives.
+    /// </remarks>
+    private static bool Neutral(LineSpacingRule rule) => rule.Mode switch
+    {
+        LineSpacingMode.AtLeast or LineSpacingMode.Exact or LineSpacingMode.Leading => false,
+        LineSpacingMode.Proportional => rule.Proportion is <= 0 or 1.0,
+        _ => true,
+    };
+
+    /// <summary>
+    /// The proportion a paragraph states, or <c>null</c> when it states none that changes anything.
+    /// </summary>
+    /// <remarks>
+    /// The test for EditEngine's <c>SvxInterLineSpaceRule::Prop</c> branch, and therefore for which
+    /// of two different arithmetics a line height goes through. A proportion of zero counts as
+    /// stating nothing, because that is what <c>Apply</c> does with it and what the guard in
+    /// <c>impedit3.cxx:1561</c> does with it — a default-constructed rule and an explicit hundred
+    /// per cent are the same rule, and a hand-built body states neither.
+    /// </remarks>
+    private static double? Proportion(LineSpacingRule rule)
+        => rule.Mode == LineSpacingMode.Proportional && rule.Proportion is > 0 and not 1.0
+            ? rule.Proportion
+            : null;
+
+    /// <summary>
+    /// A natural line height under a proportion, in the draw layer's unit and rounded once.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>proportion</c> is the <em>product</em> of everything that scales the line — the
+    /// paragraph's own <c>a:lnSpc</c> and the shrink-to-fit search's spacing scale — because
+    /// EditEngine multiplies them together and rounds the result once:
+    /// <c>nHeight = fround(pLine-&gt;GetHeight() * fProportionalScale * fSpacingFactor)</c> below a
+    /// hundred per cent, and a truncating <c>sal_Int32</c> conversion of the same product above it
+    /// (<c>editeng/source/editeng/impedit3.cxx:1568,1575</c>, 24.2.7). <c>basegfx::fround</c> is
+    /// <c>(Int)(x + 0.5)</c> for a positive value
+    /// (<c>include/basegfx/numeric/ftools.hxx:39-50</c>), so the two branches round in opposite
+    /// directions and both are reproduced here.
+    /// </para>
+    /// <para>
+    /// <strong>Rounding the two factors separately is not a smaller version of this; it is a
+    /// different answer.</strong> Measured against the six pitches
+    /// <c>slide-autofit-grid.pptx</c>'s reference PDF states, one rounding of the product is exact
+    /// on <strong>6 of 6</strong> to a thousandth of a point, rounding twice is exact on
+    /// <strong>1</strong>, and the whole-twip arithmetic this replaces on <strong>none</strong>
+    /// (<c>research/probes/slides-r16/fold-check.py</c>). Rounding twice is also worse than the
+    /// defect on two of the six.
+    /// </para>
+    /// </remarks>
+    private static Length Proportioned(Length natural, double proportion)
+    {
+        if (proportion is <= 0 or 1.0) return natural;
+
+        double scaled = natural.Mm100 * proportion;
+
+        return Length.FromMm100(proportion < 1.0
+            ? (long)Math.Floor(scaled + 0.5)
+            : (long)scaled);
+    }
+
+    /// <summary>
+    /// Where the baseline sits in a line the <c>Prop</c> branch has scaled.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// One em under the plain font-independent rule, and <strong>not</strong> one em as soon as a
+    /// paragraph states a proportional line spacing other than 100%: EditEngine moves the baseline
+    /// with the box rather than leaving it where the font would put it. Below a hundred per cent it
+    /// <em>caps</em> the ascent at
+    /// <c>fround(GetTxtHeight() × fSpacingFactor × fProportionalScale × 0.8)</c> and never raises
+    /// it, which is what keeps a line whose ascent was already short where it was; above a hundred
+    /// the ascent moves by the whole of the height's change
+    /// (<c>editeng/source/editeng/impedit3.cxx:1564-1578</c>, 24.2.7).
+    /// </para>
+    /// <para>
+    /// The four-fifths is not derivable from anything; it is a constant EditEngine took from
+    /// Writer's line formatter and it decides the first baseline of every shape in a deck that
+    /// tightens its spacing. Measured on <c>ppt-features.ppt</c>, whose paragraphs all state 93%:
+    /// the reference puts the 40 pt title's baseline 35.7 pt below the text top, where one em would
+    /// be 40 and <c>1.2 × 40 × 0.93 × 0.8</c> is 35.71.
+    /// </para>
+    /// <para>
+    /// It is also why <see cref="Spaced"/> cannot stand in for this. That method transcribes the
+    /// <c>Off</c> branch — the one a paragraph stating no line spacing takes — which has the fit's
+    /// scale to apply and <em>no</em> four-fifths. Running both in sequence would apply the fit's
+    /// scale twice and the four-fifths to only one of them, which is why the caller picks a branch
+    /// rather than composing them.
+    /// </para>
+    /// <para>
+    /// <c>proportion</c> is the product of the paragraph's own and the fit's, and the rounding is a
+    /// whole hundredth of a millimetre for the reason <see cref="Proportioned"/> gives.
+    /// </para>
+    /// </remarks>
+    private static Length ProportionedAscent(
+        Length em, Length natural, Length height, double proportion)
+    {
+        if (proportion is <= 0 or 1.0) return em;
+
+        if (proportion < 1.0)
+        {
+            Length reduced = Length.FromMm100(
+                (long)Math.Floor((natural.Mm100 * proportion * ShortSpacingAscent) + 0.5));
+            return Length.Min(em, reduced);
+        }
+
+        return em + (height - natural);
+    }
 
     /// <summary>
     /// Applies the fit's spacing scale to a line, which moves its baseline as well as its box.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// EditEngine's <c>SvxInterLineSpaceRule::Off</c> branch — the one a paragraph that states no
     /// line spacing takes — turns the scale into a proportional spacing and applies it to both:
     /// the height is multiplied and the ascent is <em>capped</em> at the text height times the
     /// same factor, never raised (<c>editeng/source/editeng/impedit3.cxx:1584-1600</c>). Capping
     /// rather than assigning is what keeps a line whose ascent was already short where it was.
+    /// </para>
+    /// <para>
+    /// <strong>In hundredths of a millimetre, like every other line height here.</strong> The
+    /// branch is <c>fround(pLine-&gt;GetHeight() * fSpacingFactor)</c> and <c>SetHeight</c> takes a
+    /// <c>sal_uInt16</c> of the outliner's map unit, which for a draw object is 1/100 mm — so the
+    /// reference cannot hold a line height finer than that whatever the arithmetic produces.
+    /// Scaling in EMU instead leaves fractions of a unit the reference has nowhere to put, and
+    /// they accumulate down the block: this is the same defect as the one
+    /// <see cref="Proportioned"/> documents, in the branch that takes no stated proportion.
+    /// </para>
+    /// <para>
+    /// The paragraph that *does* state one never reaches here — its caller takes the <c>Prop</c>
+    /// branch instead, because the two are alternatives in EditEngine and composing them would
+    /// apply this scale twice.
+    /// </para>
     /// </remarks>
     private static PlacedLine Spaced(PlacedLine line, Scaling scaling)
     {
         if (scaling.Spacing is <= 0 or >= 1.0) return line;
 
-        Length ascent = Length.FromEmu(
-            (long)Math.Round(line.TextHeight.Emu * scaling.Spacing));
-        Length height = Length.FromEmu((long)Math.Round(line.Height.Emu * scaling.Spacing));
+        Length ascent = Length.FromMm100(
+            (long)Math.Floor((line.TextHeight.Mm100 * scaling.Spacing) + 0.5));
+        Length height = Length.FromMm100(
+            (long)Math.Floor((line.Height.Mm100 * scaling.Spacing) + 0.5));
 
         return line with
         {
@@ -1168,24 +1425,17 @@ public static partial class SlideTextLayout
         Scaling Scaling,
         ParagraphFormat Format)
     {
-        /// <summary>The space above the paragraph.</summary>
+        /// <summary>The space above the paragraph, after the fit's spacing scale.</summary>
         /// <remarks>
-        /// <strong>Not touched by the fit's spacing scale, which reaches only the lines.</strong>
-        /// The reference does put a paragraph's own space through <c>scaleYSpacingValue</c>
-        /// (<c>ImpEditEngine::CalcHeight</c>, <c>editeng/source/editeng/impedit2.cxx:4406,4412</c>
-        /// in 24.2) — but that helper returns its argument unchanged unless
-        /// <c>maStatus.DoStretch()</c> is set (<c>impedit.hxx:748-754</c>), whereas the line
-        /// heights are scaled by <c>mfSpacingScaleY</c> directly and unconditionally
-        /// (<c>impedit3.cxx:1493-1528</c>). Scaling the paragraph space as well was measured
-        /// wrong: it shrank the sixth slide of
-        /// <c>slides/batch-002/ppt/gfopportunitiesforlinkagespres_2010_en.ppt</c> a step below
-        /// the reference, where leaving it alone reproduces the reference's text width to
-        /// 0.2 per cent.
+        /// See <see cref="ScaledSpace"/> for why the scale reaches this and for the probe that
+        /// settled it. Kept here as well as in <see cref="Height"/> because the two must agree:
+        /// the height a fit is chosen by and the height the block is then stacked at are the same
+        /// quantity, and letting them differ moves every anchored block by the difference.
         /// </remarks>
-        public Length SpaceBefore => Paragraph.SpaceBefore;
+        public Length SpaceBefore => ScaledSpace(Paragraph.SpaceBefore, Scaling);
 
-        /// <summary>The space below the paragraph, likewise unscaled.</summary>
-        public Length SpaceAfter => Paragraph.SpaceAfter;
+        /// <summary>The space below the paragraph, scaled the same way.</summary>
+        public Length SpaceAfter => ScaledSpace(Paragraph.SpaceAfter, Scaling);
 
         /// <summary>The colour covering a character, or black when no run does.</summary>
         /// <remarks>

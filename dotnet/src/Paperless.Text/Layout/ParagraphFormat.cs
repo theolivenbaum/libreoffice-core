@@ -152,13 +152,42 @@ public readonly record struct LineSpacingRule(
     /// every line on one baseline, which is worse output than ignoring the document.
     /// </para>
     /// </remarks>
-    public Length Apply(Length naturalHeight)
+    public Length Apply(Length naturalHeight) => Apply(naturalHeight, naturalHeight);
+
+    /// <summary>
+    /// The height a line gets, when the height its <em>text</em> wants differs from the height of the
+    /// line.
+    /// </summary>
+    /// <param name="naturalHeight">The line's own height, an as-character object included.</param>
+    /// <param name="baseHeight">
+    /// The height the line's text alone wants. Proportional spacing is a percentage <em>of this</em>,
+    /// added to <paramref name="naturalHeight"/> — never a scaling of the line.
+    /// </param>
+    /// <remarks>
+    /// The two are the same on any line of plain text, and differ on a line an inline picture has made
+    /// taller. <c>SwTextFormatter::CalcRealHeight</c> (<c>sw/source/core/text/itrform2.cxx</c>:2441-2453)
+    /// is explicit — <em>"extend line height by (nPropLineSpace - 100) percent of the font height"</em> —
+    /// and the height it takes the percentage of is <c>GetLineSpacingBaseHeight()</c>, which only a
+    /// portion that <c>IsUsedToCalcLineSpacingHeight</c> ever raises. A fly-in-content is not one.
+    ///
+    /// Measured on <c>1257259179492_2007_TPPT_102_Supporting_Doc_2.doc</c>, a 214.5 pt inline picture
+    /// alone in a 12 pt paragraph at 150%: LibreOffice gives the line 221.5 pt and scaling it gives
+    /// 321.9, a difference of 100.4 pt on page one that pushed four lines of the introduction onto a
+    /// tenth page the reference does not have.
+    /// </remarks>
+    public Length Apply(Length naturalHeight, Length baseHeight)
     {
         long natural = naturalHeight.Twips;
 
+        // Below a hundred per cent Writer takes the other branch and scales the whole line, object
+        // included — `SvxLineSpaceRule::Auto` with `PROP_LINE_SPACING_SHRINKS_FIRST_LINE`, which does
+        // `nTmp *= nLineHeight` rather than the base height. Measured on the authored probes: a 150 pt
+        // picture at 75% comes back 112.5 pt, which is 150 × 0.75 and not 150 − 25% of the text.
+        long basis = Proportion >= 1.0 && baseHeight.Twips > 0 ? baseHeight.Twips : natural;
+
         long twips = Mode switch
         {
-            LineSpacingMode.Proportional => natural + Extra(natural),
+            LineSpacingMode.Proportional => natural + Extra(basis),
             LineSpacingMode.AtLeast => Math.Max(natural, Value.Twips),
             LineSpacingMode.Exact => Value.Twips,
             LineSpacingMode.Leading => natural + Value.Twips,
@@ -351,6 +380,29 @@ public sealed record ParagraphFormat
     /// the difference between one line and three.
     /// </remarks>
     public bool TabsRelativeToIndent { get; init; } = true;
+
+    /// <summary>
+    /// Whether a right, centred or decimal stop declared past the line's right edge is honoured at the
+    /// edge instead of where it was declared.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Writer's rule and Writer's alone: <c>SwTabPortion::PostFormat</c>
+    /// (<c>sw/source/core/text/txttab.cxx</c>:503) sets
+    /// <c>nRight = std::min(GetTabPos(), rInf.Width())</c> above the comment <em>"If the tab position is
+    /// larger than the right margin, it gets scaled down by default"</em>. A <em>left</em> stop past the
+    /// edge is never clamped — <c>PreFormat</c> breaks the line there instead, which is what this engine
+    /// does already.
+    /// </para>
+    /// <para>
+    /// A flag rather than unconditional behaviour because the code that states it is the text frame's,
+    /// so it governs a word-processing document and says nothing about a slide's text body or a
+    /// spreadsheet cell, which Impress and Calc lay out through other code entirely. Every
+    /// word-processing reader turns it on; the presentation and spreadsheet layouts leave it off and
+    /// place such a stop exactly where it was declared, as they did before this existed.
+    /// </para>
+    /// </remarks>
+    public bool ClampsTabsAtLineEdge { get; init; }
 
     /// <summary>
     /// Whether a justified line may squeeze its blanks below their natural width to fit another word.

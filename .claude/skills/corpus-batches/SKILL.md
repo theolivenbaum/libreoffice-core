@@ -120,6 +120,31 @@ and that band separates "the same text" from "text is missing" on this corpus.
 it is correct. Where the ink actually lands is the fidelity suite's job — it compares PDF
 operators directly. Use `render-comparison` to diagnose *why* two renderings differ.
 
+### The order of instruments, and what each is for
+
+Progress slows when a round is spent on forensics rather than fixing. Four questions come up
+every round, and each now has a permanent answer rather than a throwaway script:
+
+| Question | Instrument |
+|---|---|
+| which documents are wrong | `batch-check.sh` — page count, words, embedding |
+| which *pages* of one document | `pdf-image-diff.py`, ranked by `\|ink\|%` |
+| which *element* on that page | **`pdf-ops.py diff`** — typed records, named differences |
+| which *source run* made that element | **`trace-text.py rewrite`**, then `resolve` the diff |
+| what did each renderer resolve a face to | `pdf-ops.py dump`, then the embedded program's `name` table |
+
+**Go down that list, not sideways.** The commonest waste is reaching a page and then reading its
+content stream by hand; `pdf-ops.py` was written because seven consecutive rounds did exactly
+that, each with its own script. On its first real run it found a workbook passing the whole gate
+— 34 pages against 34, 1828 words against 1828 — whose text records all report the wrong face.
+
+Note the last row and what it does **not** say. `pdffonts` reports the same `/BaseFont` string
+`pdf-ops.py` does, so running it corroborates nothing; the decisive read is the TrueType `name`
+table inside the embedded program. Doing that on the workbook above showed we embed the correct
+bold face and merely *name* it wrong — a metadata defect reaching every document in any
+non-regular face and moving zero pixels anywhere. The first reading, "we never draw bold", was
+wrong in the most expensive available direction: it implied a corpus-wide rendering fix.
+
 ### The fourth check, once the first three pass
 
 When a document's page count and word count both agree, the gate has nothing left to say
@@ -176,6 +201,53 @@ Watch for the inversion: **when over-drawing dominates under-drawing by an order
 magnitude, the gate is measuring a difference in rendering strategy rather than a defect.**
 Further progress there needs a pixel metric, not a word count. Say so and switch instruments
 rather than driving the number down by making the output worse.
+
+#### The other ceiling: a real fix that moves no verdict
+
+The section above is about the gate scoring good output as failure. This one is about the gate
+not scoring at all — and it arrived on all three tracks in the same round, which is what makes
+it a property of the project rather than a run of bad luck:
+
+| Round | The fix | Measured reach | Verdicts moved |
+|---|---|---|---:|
+| sheets | `/BaseFont` named the family, not the face | 156 of 171 documents changed; font-name set matching the reference went 11 → 131 | **0** |
+| sheets | drawn font size, fitted through the reference device | 48 of 171 documents changed a drawn size; probe agreement 117/194 → 194/194 | **0** |
+| words | a border box joined across two paragraphs | sweep byte-identical across all 200 rows; image diff moves nothing | **0** |
+| slides | the fit's spacing scale reaching a paragraph's space | `\|ink\|%` 1603.08 → 1583.00; unexplained pages 325 → 304 | **0** |
+
+Every one of those is real, measured and worth having. Three are invisible to `batch-check.sh`
+by construction — it decides on page count, word count and *unembedded* fonts, and a face name,
+a sub-pixel stroke and a 0.4% font size reach none of them. The fourth is visible only to the
+census.
+
+Three things follow, and the fourth is the one that actually costs rounds:
+
+- **"Nothing moved" is the honest headline, and burying it is the failure.** All four agents led
+  with it. A round that reports a fix's mechanism and reach while stating plainly that the
+  scoreboard did not move is a good round; one that quotes the reach and lets the reader assume
+  the score followed is how a track's recorded position drifts away from its real one.
+- **Measure reach by rendering, never by censusing.** The census is usually the ceiling, not the
+  reach, and it has overstated by two-fold (56 of 134 DOCX declare a `w:pBdr`; 28 documents
+  actually changed), by six-fold (54 of 66 `.doc` carry the border sprms; 9 draw a new rule,
+  because Word writes `sprmPBrcTop` with a nil `BRC` constantly), and by an order of magnitude
+  elsewhere. Quote it as a ceiling and label it as one.
+
+  **But a census is only a ceiling for the formats it can actually read, and it has understated
+  too.** A `textRotation` search through `xl/styles.xml` found four documents; **eleven**
+  changed when rendered, and **eight of those are `.xls`**, which states rotation in an `XF`
+  record no zip-level census can see. A census over an OOXML part is blind to the binary half of
+  a track outright — which on words is 66 of 200 documents and on sheets 61 of 171.
+
+  So the sentence to write is not "the census says N" but "**the census says N over the
+  formats it can read, which is M of the track**". The failure that costs a round is not
+  over-stating or under-stating; it is quoting a number without saying what it counted over.
+- **When the gate goes quiet, go down the instrument list, not sideways.** The two font findings
+  were invisible until somebody ran an operator diff over documents that *already passed* —
+  which nothing had ever done, and which found two thirds of them differing.
+- **A fix that no instrument can see needs saying so in those words.** The joined border box
+  rests entirely on comparing operators against the reference's own strokes, because a
+  0.5 pt × 6 pt hole is a third of a pixel at 512 px. That is a legitimate justification and it
+  must not quietly become the normal standard of evidence.
 
 #### Flag those pages instead of rediscovering them
 
@@ -249,6 +321,28 @@ So an over-count is not automatically extra text, and a document that matches is
 automatically right. When a word delta has no plausible textual explanation, check what the
 two renderers are drawing rather than what they are saying.
 
+#### The token multiset separates the two errors that `wc -w` adds together
+
+`wc -w` compares two **sums**, so a change that draws much more of the missing text while
+trimming rather less of the spurious text moves the number *the wrong way* while moving the
+document much closer. Comparing the token multisets instead splits it:
+
+```python
+under = sum((ref_counter - ours_counter).values())   # text the reference draws and we do not
+over  = sum((ours_counter - ref_counter).values())   # text we draw and it does not
+```
+
+Measured on the document a round's balanced-column work made "worse", and re-verified here at
+the merge: total mismatch **3565 → 2438**, of which **under-draw 1535 → 781**. The gate reads a
+regression; the page now holds half the text it was missing. A second document on the same
+change went 1120 → 693 the same way.
+
+**Report both halves whenever a change moves the word gate adversely.** It costs one small
+script, it is decisive, and without it the honest choice is between shipping a fix that looks
+like a regression and reverting one that is not. It is also the cheapest way to tell this case
+apart from the raster ceiling, where the surplus is *ours* and legitimate — there, over-draw
+dominates and under-draw is near nought.
+
 ## Priority
 
 `words` and `slides` first; `sheets` last. A spreadsheet's value is in its cells rather
@@ -287,17 +381,55 @@ A brief that works contains all of:
    | "the residue is the box drawn once per column band" | exactly | the page-edge clip, cutting the block mid-word |
    | "row pitch 5.8% out" | exactly, on thirty probe rows | three separate 96 dpi pixel quantisations, not one ratio |
    | "the shape's `rot` should not reach its text" | the symptom, yes | `dsp:txXfrm/@rot`, a *second* angle that adds to it |
+   | "this workbook never draws bold — a defect in the BIFF font path" | exactly, and on a DOCX too | the bold face **is** drawn; our PDF names `/BaseFont` from the family instead of the PostScript name |
+
+   The last row is mine, written in a brief in this session, and it is the cheapest possible
+   demonstration of the rule: the measurement held on a second document in a different family,
+   which felt like corroboration and was actually the refutation — a BIFF-specific cause cannot
+   reach a DOCX. **A finding reproducing somewhere the stated cause cannot reach is evidence
+   against the cause, not for it.**
 
    A measurement is evidence; the sentence after it is a hypothesis. Briefs should carry both
    and label which is which. Note the last row: an explanation can be wrong in the direction of
    *inverting* the fix — that agent's predecessor thought a rotation needed removing, and what
    was actually missing was a second rotation to add.
-4. **Known-good test counts, per project, with the instruction to compare counts.** A
+### Re-read a brief for sentences that read as instructions
+
+A brief meant to say a tool *had never been run* on a track wrote **"Never run on sheets"**, and
+the next sentence said *"running it here is cheap and may reorder this brief"*. The agent
+honoured the prohibition, did not run it, and said so — correctly, because between a prohibition
+and an invitation the prohibition is the safe reading.
+
+The cost was a whole track's worth of a measurement that had already reframed another one. The
+fix is mechanical: **a statement of fact about a tool's history must not be phrasable as a
+command.** Write "has never been run on this track" rather than "never run on sheets". Before
+dispatching, re-read the brief for any bare imperative that was meant as a description.
+
+The same agent flagged the contradiction rather than silently picking one, which is the
+behaviour to want — ask for it explicitly, because the alternative is a round that quietly did
+the other thing.
+
+4. **Do not put per-batch figures in the brief at all.** Three rounds running, mine were a
+   round stale — the agent that closed a batch also updated the scoreboard, and the brief was
+   written from what the *previous* round reported. Every time, the agent measured its own
+   baseline, found the numbers wrong, and had to spend part of its report saying so.
+
+   The whole class disappears if the brief says **"measure your own baseline first and report
+   it; treat any figure here as a hypothesis"** and names only the *shape* of the work — which
+   batch is weakest, what the open leads are, what has been refuted. Numbers in a brief are
+   worth having only when the agent cannot cheaply produce them, and on this corpus it always
+   can. Where a figure is genuinely load-bearing, give it a commit to reproduce it at.
+
+   The same applies to whole-track headlines: one brief carried a per-batch table from round
+   sixteen beside a track total from round eighteen, which is worse than either alone because
+   the two disagree and neither is labelled.
+
+5. **Known-good test counts, per project, with the instruction to compare counts.** A
    truncated run prints `Passed! - Failed: 0` while silently dropping the tests it never
    reached. Measured: 470 passed on one run and 353 on the next, both green, nothing
    changed between them. The colour means nothing; only the count does.
-5. **No special-casing.** A fix that helps exactly one document in the corpus is not a fix.
-6. **Commit, do not push.** The parent session merges and re-verifies.
+6. **No special-casing.** A fix that helps exactly one document in the corpus is not a fix.
+7. **Commit, do not push.** The parent session merges and re-verifies.
 
 Ask for honesty about what is unproven. An overstated claim costs more than an admitted gap,
 because the next worker builds on it.
@@ -345,6 +477,174 @@ explanation usually does not, and an unmeasured diff has only the explanation.
 The parent session's job at salvage time is to check each killed agent's branch for commits
 (`git log --oneline HEAD..worktree-agent-*`), merge and re-verify what is there, and stash the
 rest as patches before removing the worktrees — which also frees the disk the next round needs.
+
+**Do not merge a salvage into the branch yourself — hand the branch on and make its successor
+re-derive it.** A restart killed an agent whose two commits looked complete: clean worktree, a
+fix and its probe, the message written as a finding rather than as a `wip:`. Its successor
+cherry-picked them, reproduced every measurement *to the digit*, and then found the commit left
+`Paperless.Core.Tests` at **246 of 247** — an existing test asserted exactly the structure the
+fix stopped producing. **A salvaged commit has not been through the gate**, however finished it
+reads, and "the tree is clean" says only that nothing was left unstaged.
+
+The same round shows why re-deriving pays beyond catching that: the salvage's own numbers were
+right and *incomplete*. It fixed one of two cancelling errors, so applied alone it made three of
+seven probe decks measurably worse (mean absolute plot-edge error 11.14 → 9.59 with it, → **1.27**
+with the second fix beside it). A successor that merely re-ran the sweep and saw the aggregate
+improve would have shipped half a fix and called it done.
+
+### Pin a refuted rule with a test, so it cannot be silently re-proposed
+
+When a round kills a candidate rule, the refutation lives in a report that the next agent may or
+may not read. Put it in the suite instead. A words round shipped ten tests where
+**removing the rule it adopted fails five, and reinstating the rule it rejected fails nine** —
+so the dead idea now breaks the build if anyone tries it again.
+
+This is cheap and it is the only durable form a refutation takes. Two of this project's most
+expensive episodes were a correct measurement with a wrong sentence attached being inherited and
+built on; a test that fails on the wrong rule ends that chain.
+
+Ask for it whenever a round rejects a specific alternative it can state in code.
+
+### A round that ships no code can be one of the better ones
+
+One words round changed nothing in `dotnet/src` and was worth having. In order, it:
+
+1. **Refuted the cause it was handed.** The claim was that `SliceRow` loses a row's minimum
+   height when the row crosses a page. Traced on the failing document, nine rows split and
+   **every one already sums past its floor across its parts** — and LibreOffice charges the floor
+   to the sum too, skipping it for a row `IsInSplit()` and subtracting earlier parts for a
+   follow.
+2. **Found a rule that fit, and made it causal rather than correlational.** Lowering one row's
+   declared height and nothing else makes LibreOffice break the row again, sharply, between 4250
+   and 4300 twips. All ten of the document's split decisions fit "a row breaks only when the room
+   left is at least its floor", and that took the first twelve pages from diverging at page 3 to
+   matching word for word.
+3. **Refuted its own rule.** A committed fixture breaks its floored row at every declared height
+   from 4.8 cm to 8.0 cm with about 100 pt of room — the last being the whole body height.
+   Implemented, the rule failed five tests. Reverted.
+
+Its measured reach had been 12 of 200 renderings with **one verdict moving in the wrong
+direction**, so shipping it would have cost a document and left a false explanation in the tree
+for whoever came next. What it shipped instead: a probe that reproduces both halves in one
+command and lists what is ruled out.
+
+**Ask for this explicitly in a brief.** "Find the cause, and if the rule you find does not survive
+the fixtures, say so and ship the probe" is a legitimate assignment. The failure mode it prevents
+is the expensive one — a plausible rule, a corpus that half-agrees, and three later rounds built
+on top of it.
+
+The same round also swept a *second* lead whole and did not ship it: charging a cell's border
+width against its text width moved **119 of 200 renderings**, the largest reach any words change
+has had, and turned one document into a full match. It was held back because it fails to
+reproduce the wrap it was derived from. **A large reach on an unconfirmed premise is a reason for
+more caution, not less** — it is exactly the change that would be hardest to unpick later.
+
+### "Both signs means a rounding" is a good prior and it has now been wrong
+
+A term that errs in both directions has three times turned out to be a rounding or a threshold
+rather than a missing factor, and that reading has been briefed as a heuristic. The fourth time
+it was wrong, and the shape of the miss is worth keeping.
+
+A row-height difference that ran 17 short and 2 long across one workbook was **LibreOffice's own
+line-break rule for paths**. `BreakIterator_Unicode::getLineBreak` (i#17155), having chosen a
+break, asks whether the character before it is a `/` and if so scans **backwards up to 66
+characters** for whitespace, moving the break to just after it. When that lands on the line's own
+start, EditEngine throws the break iterator away and cuts at the fitting limit — *"No separator
+in line ⇒ Chop!"*. **One rule, both directions**: glued, a cell grows a line; chopped, it loses
+one.
+
+No rounding can break the same characters differently depending on what precedes the blank, and
+the probe that settled it was twelve cells where `AMC1 CAT.IDE.A.170/…` and `CAT.IDE.A.170/…`
+are identical after the blank and LibreOffice breaks them differently.
+
+So keep the prior — it is cheap and often right — but state it as a prior. **A content-dependent
+rule produces both signs just as readily as a rounding does**, and the way to tell them apart is
+to find two inputs that differ only in the context the rule reads.
+
+### Prototype a ported algorithm in a script until it reproduces the reference's own answer
+
+The largest single move on the sheets track came from porting `convertOutlines` — the rule by
+which a collapsed outline group hides its detail rows. SpreadsheetML states `outlineLevel` per
+row and `collapsed` on the summary row and expects the reader to derive the rest; Excel normally
+*also* writes `hidden="1"`, so the derivation is invisible on almost every document. One
+workbook states no `hidden` anywhere, and **329 of one sheet's 1033 rows** are hidden by the
+rule alone.
+
+What made it cheap was the order of work: **a Python prototype reproduced LibreOffice's own
+hidden set exactly, 329 of 329, before a line of C# was written.** The port then had a known
+answer to be right against, and the C# was a transcription rather than an experiment.
+
+Use this shape whenever porting an algorithm rather than a constant:
+
+1. Get the reference's answer out of the binary — a hidden-row set, a computed rectangle, an
+   exported ODF attribute. Not from the source; the source has been wrong about a constant twice
+   while the binary was right both times.
+2. Reproduce it in a throwaway script. Iterate there, where a run costs seconds.
+3. Only then write the C#, and verify it against the same answer.
+
+The temptation is to skip to (3) because the C++ is right there. That is how a port becomes a
+debugging session against a corpus, at minutes per iteration, with no oracle.
+
+### An authored probe must state its styles, or it measures a different document
+
+Authoring a probe is now the standard move when the corpus cannot separate two hypotheses, and
+it has decided most of the last dozen rounds. It has one failure mode that produces confident
+nonsense: **a hand-built DOCX with no `word/styles.xml` lays out in the application's fallback
+face, not the one a real document gets.** Measured — two probes came out in Liberation Serif
+10 pt where the corpus documents they were being compared against are Carlito 11 pt, so the
+comparison meant nothing at all.
+
+The tell is that nothing looks wrong. The file opens, renders, and gives plausible numbers.
+
+So when a probe measures a **length** — a height, a width, an advance, a line pitch — state the
+style explicitly and check the reference's own PDF reports the face you meant, with `pdffonts`
+or `pdf-ops.py dump`. Probes that measure a **count** (pages, fields, how many times something
+is drawn) are unaffected, which is why the same round's page-count probes stayed valid while
+its height probes did not. Say which kind yours is.
+
+### LibreOffice's PDF export drops empty pages, so a page it lays out may not be in the file
+
+`SwPrintUIOptions::IsPrintEmptyPages` reads `IsSkipEmptyPages`, whose default is **true** for a
+PDF export (`printdata.cxx`:391-399). An empty page — the filler an odd-page section break
+inserts, for instance — is laid out, **takes a page number**, and then is not written.
+
+This is worth knowing before diagnosing any page-count difference, because it breaks the natural
+assumption that the reference's PDF is a faithful list of the pages the reference's layout
+produced. A round spent its predecessor's whole diagnosis on the theory that our filler was
+being *predicted* wrongly; the filler was predicted exactly right and simply should not have
+been drawn. The page numbering downstream still counts it, so "delete the page" and "do not
+predict the page" give different answers and only one of them matches.
+
+### Use `verify-test.sh` rather than doing the cycle by hand
+
+```sh
+.claude/skills/corpus-batches/scripts/verify-test.sh <project> '<mutation command>' [filter]
+
+.claude/skills/corpus-batches/scripts/verify-test.sh Paperless.Core \
+    "sed -i 's/TitleWidthFraction = 0.8/TitleWidthFraction = 9.9/' dotnet/src/…/ChartLayout.cs"
+```
+
+It **refuses to start unless `dotnet/` is clean**, which is the whole point: the restore step
+discards the working tree, so with a clean start it cannot destroy anything. It then builds
+explicitly on both legs, runs the project, **names the tests that failed**, restores, and rebuilds.
+
+Exit status is the finding: `0` the mutation was detected, `1` nothing caught it, `2` it refused
+to run or the mutated tree would not compile — because a mutation that fails to build is not a
+detection.
+
+The script exists because the prose warnings below were **not enough**. Every one of these was
+measured, and the last one happened to an agent with this skill open in front of it:
+
+- `git checkout -- <file>` discards the file, not the patch, taking any *uncommitted* real work
+  in it. Two agents lost a working fix this way; the second had already read the warning.
+- `git add -A` while the patch is applied commits the defect.
+- `--no-build` afterwards measures the defect — a clean tree once reported `Core Failed: 2`.
+- `mv backup original` restores an *older* mtime, so MSBuild skips the rebuild and even a plain
+  `dotnet build` reports success over a binary that still holds the defect.
+
+The cycle deliberately puts the tree in a state that looks like a mistake, and every ordinary
+gesture for cleaning up a mistake is then wrong. That is a bad thing to defend with a warning
+and a good thing to defend with a precondition.
 
 ### A green test that proves nothing is worse than no test
 
@@ -423,6 +723,59 @@ git merge --ff-only <briefed-commit>       # if not, fast-forward before measuri
 The tell that it worked: your own baseline sweep should reproduce the briefed numbers
 exactly. If it does not, stop — either the base is wrong or the measurement is.
 
+### A round can lose its own code and still show a clean tree
+
+To measure a shared-layer change cross-track, a round checked `dotnet/src` out at its base
+commit — the right idea — and then ran `git add -A` while that checkout was in place. It
+committed the revert. Twice. The branch held the round's tests, probes and results with
+**none of its code**, and `git status` was clean throughout, because the tree matched its own
+HEAD exactly. Nothing about the working copy said anything was wrong.
+
+The check is one command, and it belongs both in the round's own report and in the merge:
+
+```sh
+git diff <base>..HEAD --stat -- dotnet/src     # a round that shipped code must show a diff here
+```
+
+A round that describes a fix and shows no `src` diff has lost it. The general form: **`git
+status` compares the tree to HEAD, so it cannot see a bad HEAD.** Any workflow that moves
+`dotnet/src` to another commit — a cross-track sweep, a `--no-build` re-measurement, a
+bisect — must restore it before anything stages, and must be checked against the *base*
+rather than against the tree.
+
+### A prediction that is low for the wrong reason still comes true
+
+The standing warning is that a grep over what a file *declares* overstates what it *draws*.
+The mirror of it is worse. A census that searched each `w:p` for its own `w:spacing` missed
+style inheritance, gave a ceiling of 2–4 documents, and the round predicted 2–4 and measured
+**11**. Repaired three times, the census reached 17 of 134 and still named only 5 of the 8
+that moved — the other three carried no inline object at all, because a list label taller
+than its item is the same rule.
+
+A low prediction that comes true reads as a well-calibrated one, so an under-reaching census
+is self-concealing in a way an over-reaching one is not. State what the census **cannot**
+see, in the prediction file, before the sweep — inheritance, defaults, the other reader, the
+other format. The bands that have missed on this project were nearly all bands whose census
+had a blind spot nobody wrote down.
+
+### The reference is not perfectly stable either
+
+The whole method rests on `soffice` being the fixed point, and it very nearly is — but not
+exactly. A one-page movement in the sheets track's absolute page error was traced to the
+*reference*: the same workbook came back 191 pages on one sweep and 190 on the next, while our
+own output was byte-identical across both runs and 192 either time.
+
+So before attributing a small movement to a change, **check which side moved.** The check is
+cheap and decisive: byte-compare our two renderings first. If ours are identical, the delta is
+not ours, whatever the scoreboard column says. This is the mirror of the reproducibility work —
+we pinned our own clock and found 17 documents printing the date, and the same discipline has to
+be applied to the reference rather than assumed away.
+
+Two related cautions from the same rounds: an `soffice` has three times now **wedged past its own
+`timeout`** and returned `ref-failed` for a document that converts fine when re-run alone, and a
+figure quoted from one round's report was **four off that round's own committed probe data**.
+Re-derive a headline from the TSV rather than from the prose whenever it is load-bearing.
+
 ### A full disk looks exactly like a rendering regression
 
 When `/tmp` fills, `soffice` converts nothing and `batch-check.sh` reports the documents as
@@ -438,6 +791,24 @@ Check headroom before starting a sweep: a whole-corpus run writes two PDFs per d
 several agents' worth of these accumulate quickly. The disposable part is the rendered PDFs
 (`<outdir>/ours`, `<outdir>/ref`, `<outdir>/prof*`); the TSV is what you keep.
 
+#### But do not delete them until everything that reads them has run
+
+"Rendered PDFs are disposable, TSVs are what you keep" is right and it is not the whole rule,
+because some analyses need the *material* rather than the numbers. A round lost its size census
+exactly this way: the census was killed part-way to let the whole-track sweep finish under
+load 23, and by the time it could be restarted the sweep's `ours/` directories — 163 PDFs a
+side — had been cleaned up. The numbers survived; the thing the census reads did not. The
+figure it would have produced stayed a round stale, and the scoreboard had to say so.
+
+Two habits close it, and the first is better:
+
+- **Run per-page analyses inside the sweep's own comparison pass**, while both renderings are
+  on disk anyway, rather than as a second pass afterwards. That is a sequencing change, not a
+  new tool.
+- If an analysis must run afterwards, **keep the renderings until it has**, and say in the
+  commit that they are being kept and why — otherwise the next disk-pressure cleanup takes them
+  and looks entirely reasonable doing it.
+
 ### A sweep and a build cannot share a tree
 
 `batch-check.sh` invokes the CLI once per document over tens of minutes. Rebuild that tree
@@ -449,6 +820,47 @@ This caught an agent twice and the parent session once in a single round. Either
 sweep before touching the tree, or snapshot the CLI first and point the sweep at the copy.
 When in doubt, discard and re-run: a sweep is cheap next to a wrong number that reaches a
 report.
+
+### Give absolute paths for anything outside the repository
+
+A brief pointed an agent at `scratchpad/salvage5/<id>.patch`. The agent resolved it against its
+own worktree, found nothing, and reported the file as missing — correctly, from where it stood.
+The file was there all along under the session's absolute scratchpad path.
+
+Two costs, and the second is the worse one: the agent worked without material it was meant to
+have, and its report contained a confident, wrong statement of fact that a reader could have
+acted on. **Write every path outside the repo in full**, and if a brief hands over an artefact,
+say how to check it is the right one.
+
+### A relative scratch path lands inside the repository
+
+The rule above says to give absolute paths for anything outside the repository, and it was
+written after a *brief* used a relative path that an agent resolved against its worktree. The
+mirror image happens too and is worse: an agent writing to `scratchpad/<name>` puts it in the
+repository working tree. Measured: **406 MB inside the repo root** while the round was still
+running.
+
+Untracked is not safe. The parent's merge routine resolves the scoreboard conflict with
+`git add -A`, which would have committed the whole directory; the only reason it did not is that
+that particular merge fast-forwarded and never reached the line. It also spends the repository's
+filesystem allowance rather than the scratch area's, and three agents plus rendered PDFs have
+taken this container to 95% before.
+
+So: **absolute paths in both directions**, and as a backstop add `scratchpad/` to
+`.git/info/exclude` — it is shared across worktrees, so one entry covers every agent, and it
+does not modify a tracked file. Treat the exclude as a guard rather than the fix; a sweep whose
+TSVs record the old location after a move is worse than one that fails outright.
+
+### Name scratch directories after the agent, not after the sweep
+
+The scratchpad is shared by every agent in a session, and worktrees do not isolate it. One
+agent had its probe files deleted mid-round by another; a second had its `run-tests.sh`
+overwritten. Both survived because the *sweep output* directories happened to carry
+agent-specific names while the loose files did not.
+
+So the rule is not "name your outputs" but **name the directory**: `scratchpad/<track>-<agent>/`
+and everything under it. A brief should say so, because the failure is silent — a probe that
+vanishes looks like a probe that was never written.
 
 ### Worktrees isolate the code, not the scratch directory
 
@@ -553,6 +965,29 @@ across the track went 385 → 357, and documents with an exactly-correct page co
 change that is right on its own evidence because a compensating bug elsewhere made the old
 number look better.
 
+### A shared-layer merge owes a parent-side sweep, not just a green suite
+
+The parent verifies every merge with the test suite. The *corpus* sweep only ever happens inside
+a round, on that round's own base. So when two rounds touch a shared layer in the same merge
+window, **the tree that actually ships is one neither of them swept** — each measured a base that
+predates the other.
+
+A words agent caught this about its own figures and said so rather than letting them stand:
+
+> my figures describe my own branch, not the merged tree … the sheets round measured its
+> cross-track reach as words 0/200, but on *its* base, which predates my merge, so it proves the
+> merge safe in one direction only.
+
+It was right to flag it and the check was cheap. Measured on the merged tree: match, page error
+and exact page counts identical to the words branch, and word error **182 better** than either
+round measured alone — the shared shaper reaching words documents once the other round's recode
+was wired beside it. No regression, and a real interaction that neither sweep could have seen.
+
+So: **when a merge window contains a shared-layer change plus any other round, re-sweep the
+affected tracks on the merged commit.** A green suite proves the code compiles and the unit tests
+hold; it says nothing about 534 documents. And record the result even when it is favourable —
+"the two interact and it helped" is a fact about the layer worth having next time.
+
 ### Merging several agents into one branch
 
 Merge one agent at a time, and **re-verify after each merge, not once at the end**. The
@@ -635,6 +1070,14 @@ whichever lost. Use `<stem>__<ext>.pdf` throughout.
 documents in about 25. Make it resumable and run it in the background; do not hold a
 foreground shell for it.
 
+**A worktree shares `.claude/` with the main checkout, so a script in it resolves to the wrong
+tree.** `batch-check.sh` located the CLI relative to its own path, four levels up — which from
+inside any agent worktree is the *main* checkout, not the agent's. An agent measured another
+session's binary for two sweeps, and the first looked entirely normal because the two trees
+happened to sit near the same commit. It now takes `$PAPERLESS_CLI`, else the git root of `$PWD`,
+and prints which binary it is measuring on every run. **Read that line.** The same trap waits for
+any script under `.claude/` that infers a tree from `$BASH_SOURCE`.
+
 **A crash in your own CLI is indistinguishable from a mismatch.** One baseline row reported
 zero pages and was read as a parity failure; it was a SIGBUS, and the document re-ran cleanly
 at 2/2. A sweep records what came back, not why. Treat a zero-page result as "did not run"
@@ -677,6 +1120,81 @@ conflicted file is easy to miss:
 
 The same shape catches other inverted guards: any `check && commit` where the check reports a
 *count* rather than a verdict is backwards.
+
+### `nohup … &` inside a tool call orphans the sweep instead of ending it
+
+A sweep started with `nohup … &` from a backgrounded call is **not killed when the call returns**
+— it is reparented and keeps running. Start a second sweep and both append to the same
+`rows.tsv` while twice the workers fight over the cores.
+
+Measured: duplicate paths in the output and about **thirty documents reported `ours-failed` or
+`ref-failed` purely from 240-second timeouts**. Both symptoms are indistinguishable from a code
+regression, and the round nearly began by bisecting one.
+
+The tell is `ps -eo ppid,args` against the sweep script: **an orphan has ppid 1**. Two habits make
+it safe — write each sweep to its own output path rather than appending to a shared one, and
+check for a running sweep before starting one. The skill's existing sanity checks (no duplicate
+path, count the rows) are what caught this; keep running them on every sweep rather than only on
+suspicious ones.
+
+### Never `pkill` on a tool name while another agent is running
+
+Three agents share this machine and run the same scripts. A round stopped its own comparison
+with `pkill -f pdf-image-diff` and recorded afterwards that **it would have killed the slides
+agent's comparison too** — same script, different worktree, no way for the pattern to tell them
+apart.
+
+Match on your own script's **full path** — `pkill -f /tmp/…/scratchpad/<your-dir>/sweep.sh` — or
+better, keep the PID you started and kill that. A tool name is never specific enough here.
+
+The same reasoning covers the reverse direction: **a byte-reach outlier measured under load is
+not a finding until it is re-run alone.** A cross-track sweep reported two slides documents
+changed by a sheets-only change; both were renders truncated at load average 20–35 and came back
+byte-identical when re-run individually. Two is exactly the size of result that looks worth
+explaining.
+
+### `pkill` on `dotnet test` orphans the runner that was doing the work
+
+Killing a `dotnet test` leaves its `vstest.console` child alive. The orphan keeps its share of
+the machine, so the replacement run competes with it and looks hung — which invites killing
+*that* one too, and the loop compounds. Kill the process tree, or wait for the run rather than
+racing it. Both of this round's "test host wedged" episodes were this.
+
+The same shape shows up outside tests: an `soffice` has twice now wedged **past its own
+`timeout`**, once 44 minutes past a 240-second limit, and returned `ref-failed` for a document
+that converts fine when re-run alone. Splice the row rather than repeating the sweep.
+
+### `--no-build` after reintroducing a defect measures the defect
+
+The skill asks you to verify every new test by putting its bug back and watching it fail. That
+cycle leaves a binary containing the bug, and the per-project loop below runs with `--no-build`
+— so **the next full test run measures the defective tree while the source is clean.** Measured:
+a round's first full run reported `Core Failed: 2` on a tree with nothing wrong with it.
+
+The failure looks exactly like a real regression introduced by the round's own change, which is
+the expensive part: the natural next move is to start bisecting a fix that is fine. Rebuild
+after the defect comes back out, before the run that produces the numbers you will report.
+
+Two more ways the same cycle destroys work, both measured:
+
+- **`git checkout -- <file>` to undo a reintroduced defect wipes any *uncommitted* fix in that
+  file too.** It does not undo the patch; it discards the file. An agent lost a working fix this
+  way. **Commit before reintroducing, not after** — then the undo is `git checkout` against a
+  commit that holds the real work.
+- **`git add -A` while the patch is applied commits the defect.** Stage explicit paths.
+- **`mv backup original` keeps the backup's *older* mtime, so MSBuild skips the rebuild.** A
+  plain `dotnet build` then prints success over a binary that still holds the defect — so it is
+  not only `--no-build` that lies here. An agent's seam check reported three documents differing
+  and read like a stale snapshot; the reference settled it the other way round, and the snapshot
+  had been right while the tree was wrong. Use `cp`, or `touch` the file after restoring it.
+
+The through-line is that the reintroduction cycle deliberately puts the tree in a state that
+looks like a mistake, and every routine gesture for cleaning up a mistake is then wrong. Commit
+first and the cycle has nothing to lose.
+
+The same shape catches anyone who edits a script while it is running — a sweep's summary died
+mid-run that way in the same round, and its data had to be recomputed from the per-document
+files. Neither is subtle once seen; both cost an hour when they are not.
 
 ### Capture the whole test output, not just the count
 

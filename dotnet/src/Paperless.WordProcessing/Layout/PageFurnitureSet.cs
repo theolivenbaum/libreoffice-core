@@ -18,16 +18,21 @@ namespace Paperless.WordProcessing.Layout;
 /// <para>
 /// Laid out per <em>slot</em> and cached, not per page. Most pages of a document share one header, and
 /// shaping its text again for each would be the largest single cost in paginating a long document for an
-/// answer that cannot change. What does change per page — a page number in a header — is a field, and
-/// resolving fields is a later pass than this.
+/// answer that cannot change.
+/// </para>
+/// <para>
+/// The exception is a running head carrying a page number, which is a different running head on every
+/// page: it is resolved by <see cref="PageFields"/> before it is laid out, and cached against the number
+/// as well as the slot. Resolving it afterwards is not open to us — the number is text of a different
+/// width from the cached one, so it has to take part in the line breaking rather than be painted over it.
 /// </para>
 /// </remarks>
 public sealed class PageFurnitureSet
 {
     private readonly Dictionary<PageFurnitureSlot, IReadOnlyList<PageBlock>> _headers;
     private readonly Dictionary<PageFurnitureSlot, IReadOnlyList<PageBlock>> _footers;
-    private readonly Dictionary<PageFurnitureSlot, PlacedFlow?> _laidOutHeaders = [];
-    private readonly Dictionary<PageFurnitureSlot, PlacedFlow?> _laidOutFooters = [];
+    private readonly Dictionary<(PageFurnitureSlot Slot, int PageNumber), PlacedFlow?> _laidOutHeaders = [];
+    private readonly Dictionary<(PageFurnitureSlot Slot, int PageNumber), PlacedFlow?> _laidOutFooters = [];
 
     /// <summary>Creates a set from the blocks each slot holds.</summary>
     /// <param name="headers">The headers, by slot; a slot with no entry has no header.</param>
@@ -43,6 +48,52 @@ public sealed class PageFurnitureSet
     /// <summary>True when the set holds nothing, so a page needs no furniture at all.</summary>
     public bool IsEmpty => _headers.Count == 0 && _footers.Count == 0;
 
+    /// <summary>True when any of this set's furniture carries a <c>NUMPAGES</c> field.</summary>
+    /// <remarks>
+    /// Asked by the paginator to decide whether the document needs the second pass at all — a page count
+    /// costs one extra fill of the whole document, and almost no document carries one.
+    /// </remarks>
+    public bool CarriesPageCount
+    {
+        get
+        {
+            foreach (IReadOnlyList<PageBlock> blocks in _headers.Values)
+            {
+                if (PageFields.CarriesPageCount(blocks)) return true;
+            }
+
+            foreach (IReadOnlyList<PageBlock> blocks in _footers.Values)
+            {
+                if (PageFields.CarriesPageCount(blocks)) return true;
+            }
+
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// How many pages the document turned out to have, or nought while that is not yet known.
+    /// </summary>
+    /// <remarks>
+    /// Set between the two passes of a layout that has to resolve a <c>NUMPAGES</c> field. Assigning it
+    /// discards the laid-out cache, because every flow in it was laid out against the old answer — and a
+    /// stale cache here is exactly the defect this whole file exists to undo, one step further along.
+    /// </remarks>
+    public int TotalPages
+    {
+        get => _totalPages;
+        set
+        {
+            if (_totalPages == value) return;
+
+            _totalPages = value;
+            _laidOutHeaders.Clear();
+            _laidOutFooters.Clear();
+        }
+    }
+
+    private int _totalPages;
+
     /// <summary>The header a page takes, laid out, or null when it has none.</summary>
     /// <param name="section">The section, for its slot rules.</param>
     /// <param name="geometry">The page's geometry, for the header's area.</param>
@@ -53,15 +104,21 @@ public sealed class PageFurnitureSet
     /// adding it — see <see cref="FlowLayouter.LayOut"/>. A header is a frame like any other and Writer
     /// measures the gap above its paragraphs with the same method it uses in the body.
     /// </param>
+    /// <param name="addsCellLineSpacing">
+    /// Whether a table in the running head grows its cells by their last paragraph's proportional line
+    /// spacing — see <see cref="PaginationOptions.AddsCellLineSpacing"/>. A header laid out as a table is
+    /// the ordinary way a Word document puts a logo beside a title, so this reaches many of them.
+    /// </param>
     public PlacedFlow? Header(
         WritingSection section,
         PageGeometry geometry,
         int pageNumber,
         bool isFirstPageOfSection,
-        bool collapsesSpacing = false)
+        bool collapsesSpacing = false,
+        bool addsCellLineSpacing = false)
         => Resolve(
             _headers, _laidOutHeaders, section, geometry.HeaderArea, pageNumber, isFirstPageOfSection,
-            offsetFromTop: Length.Zero, collapsesSpacing);
+            offsetFromTop: Length.Zero, collapsesSpacing, addsCellLineSpacing);
 
     /// <summary>
     /// The footer a page takes, laid out, or null when it has none.
@@ -76,6 +133,7 @@ public sealed class PageFurnitureSet
     /// <param name="pageNumber">The page's printed number.</param>
     /// <param name="isFirstPageOfSection">True for the section's own first page.</param>
     /// <param name="collapsesSpacing">As <see cref="Header"/>'s.</param>
+    /// <param name="addsCellLineSpacing">As <see cref="Header"/>'s.</param>
     /// <remarks>
     /// The title-page suppression <see cref="Header"/> applies is deliberately <em>not</em> applied here.
     /// It is measured for headers in both directions and the footer evidence contradicts itself: the
@@ -89,10 +147,12 @@ public sealed class PageFurnitureSet
         PageGeometry geometry,
         int pageNumber,
         bool isFirstPageOfSection,
-        bool collapsesSpacing = false)
+        bool collapsesSpacing = false,
+        bool addsCellLineSpacing = false)
         => Resolve(
             _footers, _laidOutFooters, section, geometry.FooterArea, pageNumber, isFirstPageOfSection,
-            offsetFromTop: geometry.FooterOffset, collapsesSpacing, mayBeSuppressed: false);
+            offsetFromTop: geometry.FooterOffset, collapsesSpacing, addsCellLineSpacing,
+            mayBeSuppressed: false);
 
     /// <summary>
     /// True when something — a header or a footer — was named for a first page.
@@ -108,13 +168,14 @@ public sealed class PageFurnitureSet
 
     private PlacedFlow? Resolve(
         Dictionary<PageFurnitureSlot, IReadOnlyList<PageBlock>> slots,
-        Dictionary<PageFurnitureSlot, PlacedFlow?> cache,
+        Dictionary<(PageFurnitureSlot Slot, int PageNumber), PlacedFlow?> cache,
         WritingSection section,
         DocRect area,
         int pageNumber,
         bool isFirstPageOfSection,
         Length? offsetFromTop,
         bool collapsesSpacing,
+        bool addsCellLineSpacing,
         bool mayBeSuppressed = true)
     {
         PageFurnitureSlot? chosen = ChosenSlot(
@@ -124,11 +185,28 @@ public sealed class PageFurnitureSet
 
         if (chosen is not { } slot) return null;
         if (!slots.TryGetValue(slot, out IReadOnlyList<PageBlock>? blocks)) return null;
-        if (cache.TryGetValue(slot, out PlacedFlow? cached)) return cached;
+
+        // A running head carrying a page number is a different running head on every page, so the cache
+        // has to be keyed on the number as well as on the slot. Everything else is the same on every page
+        // and is keyed on the slot alone — which is the case that matters, because re-shaping one header
+        // per page is the largest single cost in paginating a long document.
+        bool varies = PageFields.CarriesPageNumber(blocks);
+        var key = (slot, varies ? pageNumber : 0);
+        if (cache.TryGetValue(key, out PlacedFlow? cached)) return cached;
+
+        // A page *count* does not vary from page to page, so it does not reach the cache key — but it does
+        // have to be substituted once the total is known, which is why the resolve is asked for whenever
+        // either kind is present rather than only when the head varies.
+        bool resolves = varies || (_totalPages > 0 && PageFields.CarriesPageCount(blocks));
 
         PlacedFlow? placed = FlowLayouter.LayOut(
-            blocks, area, offsetFromTop, collapsesSpacing: collapsesSpacing);
-        cache[slot] = placed;
+            resolves
+                ? PageFields.Resolve(blocks, pageNumber, section.PageNumberFormat, _totalPages)
+                : blocks,
+            area, offsetFromTop,
+            collapsesSpacing: collapsesSpacing,
+            addsCellLineSpacing: addsCellLineSpacing);
+        cache[key] = placed;
         return placed;
     }
 

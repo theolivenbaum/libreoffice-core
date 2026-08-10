@@ -69,6 +69,25 @@ public sealed partial class Ww8DocumentReader
     /// from <paramref name="Size"/>, and then it makes the item's first line taller — see
     /// <see cref="Layout.PageParagraph.LabelRaisesFirstLine"/>.
     /// </param>
+    /// <param name="ListLabelFamily">
+    /// The face the level sets its label in, from <c>sprmCRgFtc0</c> in the level's <c>grpprlChpx</c>,
+    /// or null when the level states none and the label takes the item's own face.
+    /// <para>
+    /// It is the face rather than the character that says a bullet is a symbol: WW8 states the slot
+    /// raw — <c>0xB7</c> against a font of <c>Symbol</c>, where DOCX would write the private-use
+    /// alias — so the character on its own cannot be told from MIDDLE DOT.
+    /// </para>
+    /// </param>
+    /// <param name="ListLabelSlot">
+    /// A bullet level's character exactly as the file states it, or <c>\0</c> when the level draws a
+    /// counter rather than a bullet.
+    /// <para>
+    /// Carried beside <paramref name="ListMarker"/> rather than replacing it because the two answer
+    /// different questions. <paramref name="ListMarker"/> is what a caller <em>extracts</em>, and a
+    /// private-use code point means nothing outside one font, so it is normalised to U+2022. This is
+    /// what the level <em>drew</em>, which only a resolved face can interpret.
+    /// </para>
+    /// </param>
     public readonly record struct Ww8LayoutParagraph(
         int SectionIndex,
         string Text,
@@ -86,7 +105,9 @@ public sealed partial class Ww8DocumentReader
         string? ListMarker = null,
         byte ListFollow = 2,
         int ListTabStop = 0,
-        Length ListLabelSize = default)
+        Length ListLabelSize = default,
+        string? ListLabelFamily = null,
+        char ListLabelSlot = '\0')
     {
         /// <summary>
         /// True when <see cref="Text.Layout.ParagraphFormat.SpaceBefore"/> came from
@@ -101,6 +122,16 @@ public sealed partial class Ww8DocumentReader
 
         /// <inheritdoc cref="HasAutoSpaceBefore"/>
         public bool HasAutoSpaceAfter { get; init; }
+
+        /// <summary>
+        /// Where a <c>PAGE</c> or <c>NUMPAGES</c> field's cached result sits in <see cref="Text"/>.
+        /// </summary>
+        /// <remarks>
+        /// The cached result is left in the text rather than removed, because it is the right string for
+        /// every consumer but the paginator — and the paginator is the only one that can compute a better
+        /// one. See <see cref="Layout.PageFields"/>.
+        /// </remarks>
+        public IReadOnlyList<Layout.PageFieldSpan>? Fields { get; init; }
 
         /// <summary>The list this paragraph belongs to, or zero when it belongs to none.</summary>
         /// <remarks>
@@ -139,6 +170,17 @@ public sealed partial class Ww8DocumentReader
         /// moved back out of the fly (<c>sw/source/filter/ww8/ww8par6.cxx:2674</c>).
         /// </remarks>
         public IReadOnlyList<Ww8LayoutTextFrame>? TextFrames { get; init; }
+
+        /// <summary>
+        /// The rules round the paragraph, or null when nothing in its style chain states one.
+        /// </summary>
+        /// <remarks>
+        /// Already in the layout engine's own type rather than as five <c>BRC</c>s, because the
+        /// translation needs nothing this reader lacks — see
+        /// <see cref="Ww8LayoutFormat.ToParagraphBorders"/> — and because the joining pass that follows
+        /// compares two paragraphs' sets and has to compare them in one form.
+        /// </remarks>
+        public Layout.ParagraphBorderSet? Borders { get; init; }
     }
 
     /// <summary>
@@ -171,6 +213,11 @@ public sealed partial class Ww8DocumentReader
     /// <param name="AutoKerning">
     /// True when <c>sprmCHpsKern</c> asks for the run's pairs to be kerned. Off unless it does.
     /// </param>
+    /// <param name="SymbolSlot">
+    /// The slot <c>sprmCSymbol</c> names, or null for ordinary text. The character the file stores at
+    /// this position is a placeholder and this is what stands in its place; <see cref="FamilyName"/> is
+    /// already the face the same sprm named, since a slot means nothing without one.
+    /// </param>
     public readonly record struct Ww8LayoutRun(
         int Start,
         int Length,
@@ -185,7 +232,8 @@ public sealed partial class Ww8DocumentReader
         Colour? Highlight = null,
         bool IsUnderlined = false,
         bool IsStruckThrough = false,
-        bool AutoKerning = false)
+        bool AutoKerning = false,
+        char? SymbolSlot = null)
     {
         /// <summary>One past the run's last character.</summary>
         public int End => Start + Length;
@@ -341,10 +389,20 @@ public sealed partial class Ww8DocumentReader
     /// not match the order the other formats use, so it is spelled out in <see cref="FurnitureSlots"/>.
     /// </para>
     /// <para>
-    /// Word writes all six whether the section uses them or not, so most hold nothing but a paragraph
-    /// mark; an empty story therefore means "this section has no such header" rather than "it has an empty
-    /// one", and filling the slot with the empty paragraph would draw a blank line on every page and push
-    /// nothing anywhere. Emptiness is the only thing distinguishing the two.
+    /// A slot the section does not use has a story of <em>no length at all</em>, and that is the only thing
+    /// distinguishing it from a slot holding one blank line. LibreOffice draws the line in the same place
+    /// and states it twice: <c>wwSectionManager::SetSegmentToPageDesc</c> clears the slot's bit out of the
+    /// synthesised <c>grpfIhdt</c> only when the story's length is zero (<c>ww8par6.cxx</c>:1247), and
+    /// <c>Read_HdFt</c> reads the text only when the length is two or more (<c>ww8par.cxx</c>:2500) —
+    /// leaving a story of one paragraph mark as a header that exists and holds one empty paragraph.
+    /// </para>
+    /// <para>
+    /// So an empty paragraph read out of a story that exists is a blank line to lay out, not a placeholder
+    /// to drop, and dropping it is not free: the header still occupies its band, and where a section
+    /// reserves none — <c>dyaTop == dyaHdrTop</c> — that band is what pushes the body down. Measured across
+    /// the 66 DOC files of the sample corpus, <em>no</em> story has a length of one, so the case that
+    /// motivated dropping them does not arise; fourteen documents have a story of length two, which is one
+    /// empty paragraph and its mark.
     /// </para>
     /// <para>
     /// Six stories per section, so the section's own six start six further along for each section before
@@ -359,11 +417,13 @@ public sealed partial class Ww8DocumentReader
 
         Dictionary<Model.PageFurnitureSlot, List<Ww8LayoutBlock>> headers = [];
         Dictionary<Model.PageFurnitureSlot, List<Ww8LayoutBlock>> footers = [];
+        int[] lengths = new int[FurnitureSlots.Length];
 
         for (int slot = 0; slot < FurnitureSlots.Length; slot++)
         {
             int story = SeparatorStories + (Math.Max(0, section) * FurnitureSlots.Length) + slot;
             if (story >= stories.Count) break;
+            lengths[slot] = stories[story].Length;
             if (stories[story].Length <= 0) continue;
 
             // Each flow numbers its own lists: a numbered paragraph in a running head does not continue
@@ -375,25 +435,75 @@ public sealed partial class Ww8DocumentReader
             // no table has and push the body text down by the difference on every page.
             List<Ww8LayoutBlock> blocks = ReadLayoutBlocks(stories[story], keepTrailingEmpty: false);
 
-            // Word writes all six stories whether the section uses them or not, so an empty paragraph is a
-            // placeholder rather than a blank line — but only when there is nothing else in the story.
-            //
-            // "Nothing else" has to include the shapes anchored in it. A running head that is one logo and
-            // no words is an ordinary thing, and its paragraph reads back with no text at all: the U+0001
-            // that stood for the picture is consumed by the frame it made (see CollectFrame), so testing
-            // the text alone throws the whole header away and leaves the body starting at the top margin.
-            blocks.RemoveAll(
-                block => block.Paragraph is { Text.Length: 0, Frames: null or { Count: 0 } }
-                    && block.Table is null);
-
             if (blocks.Count == 0) continue;
 
             (bool isHeader, Model.PageFurnitureSlot which) = FurnitureSlots[slot];
             (isHeader ? headers : footers)[which] = blocks;
         }
 
-        return new Ww8LayoutFurniture(headers, footers);
+        return new Ww8LayoutFurniture(headers, footers, lengths);
     }
+
+    /// <summary>
+    /// One blank running head or foot: a single empty paragraph in the document's default style.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// What <c>Read_HdFt</c> leaves behind when it turns a slot on and has no text to put in it —
+    /// <c>SwFormatHeader(true)</c> creates the frame whether or not the story was read
+    /// (<c>ww8par.cxx</c>:2540), so a section that states a header for one page kind alone still gets an
+    /// empty one for the others. It draws nothing and it is not nothing: it occupies the header band, and
+    /// a section that reserves no band pushes its body down by the whole of it.
+    /// </para>
+    /// <para>
+    /// The default paragraph style rather than Word's <c>header</c> style, and the difference does not
+    /// reach the page. LibreOffice puts the paragraph in <c>Header</c>, whose definition in its own
+    /// flat-ODF export of both corpus documents that need this is <em>Standard plus two tab stops</em> —
+    /// and a tab stop cannot change the height of a line with nothing on it, which is the only quantity an
+    /// empty running head contributes. Matching by style would mean matching a built-in style identifier
+    /// this stylesheet reader does not carry, for a difference of nought.
+    /// </para>
+    /// </remarks>
+    /// <param name="section">The section the paragraph belongs to, for the section-indexed lookups.</param>
+    public List<Ww8LayoutBlock> BlankFurniture(int section)
+    {
+        Ww8LayoutFormat layout = default;
+        foreach (ReadOnlyMemory<byte> inherited in _styles.ResolveChain(DefaultStyleIndex))
+        {
+            layout = ApplyLayoutSprms(layout, inherited);
+        }
+
+        Ww8LayoutFormat character = default;
+        foreach (ReadOnlyMemory<byte> inherited in _styles.ResolveCharacterChain(DefaultStyleIndex))
+        {
+            character = ApplyLayoutSprms(character, inherited);
+        }
+
+        Length size = SizeOf(character);
+
+        Text.Layout.ParagraphFormat format = layout.ToParagraphFormat(size) with
+        {
+            DefaultTabInterval = DocumentProperties.DefaultTabInterval,
+            TabsRelativeToIndent = false,
+            ClampsTabsAtLineEdge = true,
+        };
+
+        Ww8LayoutParagraph paragraph = new(
+            Math.Max(0, section),
+            string.Empty,
+            format,
+            character.FontIndex is { } index ? Fonts.Name(index) : null,
+            size,
+            character.IsBold == true ? 700 : 400,
+            character.IsItalic == true,
+            LanguageOf(character),
+            IsInTable: false);
+
+        return [new Ww8LayoutBlock(paragraph)];
+    }
+
+    /// <summary>The stylesheet index of the default paragraph style, which WW8 fixes at nought.</summary>
+    private const int DefaultStyleIndex = 0;
 
     /// <summary>How many stories precede the first section's furniture in the header subdocument.</summary>
     private const int SeparatorStories = 6;
@@ -468,6 +578,14 @@ public sealed partial class Ww8DocumentReader
         // single value — `IsInlineEscherHack` asks about the innermost one alone.
         (Ww8FieldTypes fieldTypes, int fieldBase) = FieldTypesOf(body);
         Stack<int> openFields = new();
+
+        // Where each open field's cached result began, as an offset into the paragraph being built, or
+        // −1 for a field whose separator has not been seen — and for one whose result began in an
+        // earlier paragraph, which `Close` resets. A field result that crosses a paragraph mark is left
+        // to its cached value: no page-number field does, and a span into a cleared builder would splice
+        // the wrong characters.
+        Stack<int> fieldResults = new();
+        List<Layout.PageFieldSpan> pageFields = [];
 
         // How many enclosing fields had their result replaced by a computed one, and which they were.
         // A count for the same reason `instruction` is one — fields nest, and the result of an outer
@@ -575,6 +693,7 @@ public sealed partial class Ww8DocumentReader
                     instruction++;
                     openFields.Push(fieldTypes.At(position - fieldBase) ?? 0);
                     replacedFields.Push(false);
+                    fieldResults.Push(-1);
                     continue;
 
                 case Special.FieldSeparator:
@@ -582,6 +701,12 @@ public sealed partial class Ww8DocumentReader
                     // The instruction ends and the cached result begins. A field with no separator has
                     // no result, and its instruction stays hidden until its end.
                     if (instruction > 0) instruction--;
+
+                    if (fieldResults.Count > 0)
+                    {
+                        fieldResults.Pop();
+                        fieldResults.Push(current.Length);
+                    }
 
                     // The one point at which a computed field can be written: the instruction has been
                     // read, so the field's type is known, and the result it is replacing starts here.
@@ -602,10 +727,36 @@ public sealed partial class Ww8DocumentReader
                 }
 
                 case Special.FieldEnd:
+                {
                     if (instruction > 0) instruction--;
-                    if (openFields.Count > 0) openFields.Pop();
+                    int closed = openFields.Count > 0 ? openFields.Pop() : 0;
+                    int resultAt = fieldResults.Count > 0 ? fieldResults.Pop() : -1;
+
+                    // The field's *type* names it here, not its instruction: WW8 puts the type in the
+                    // PlcFld beside the marker, which is read already, and the instruction is hidden
+                    // text this walk deliberately drops. So a `\*` picture switch on a DOC page number
+                    // is not seen and the section's own `sprmSNfcPgn` decides the sequence — which is
+                    // where Word states it and what LibreOffice's importer reads
+                    // (`wwSectionManager::SetNumberingType`, ww8par6.cxx:838).
+                    if (resultAt >= 0 && resultAt <= current.Length && computed == 0)
+                    {
+                        Layout.PageFieldKind? kind = closed switch
+                        {
+                            Ww8FieldTypes.CurrentPage => Layout.PageFieldKind.PageNumber,
+                            Ww8FieldTypes.PageCount => Layout.PageFieldKind.PageCount,
+                            _ => null,
+                        };
+
+                        if (kind is { } named)
+                        {
+                            pageFields.Add(
+                                new Layout.PageFieldSpan(resultAt, current.Length - resultAt, named));
+                        }
+                    }
+
                     if (replacedFields.Count > 0 && replacedFields.Pop() && computed > 0) computed--;
                     continue;
+                }
 
                 case Special.AutoNumberedReference:
                 {
@@ -725,6 +876,7 @@ public sealed partial class Ww8DocumentReader
                 {
                     Notes = _pendingNotes.Count == 0 ? null : [.. _pendingNotes],
                     Frames = _pendingFrames.Count == 0 ? null : [.. _pendingFrames],
+                    Fields = pageFields.Count == 0 ? null : [.. pageFields],
                 };
 
             // The U+000C above this paragraph was a hard page break rather than a section boundary, so
@@ -747,6 +899,17 @@ public sealed partial class Ww8DocumentReader
 
             current.Clear();
             positions.Clear();
+            pageFields.Clear();
+
+            // A field still open across the paragraph mark loses its result start with the builder it
+            // pointed into; its cached result stays, which is what it was before this existed.
+            if (fieldResults.Count > 0)
+            {
+                int depth = fieldResults.Count;
+                fieldResults.Clear();
+                for (int open = 0; open < depth; open++) fieldResults.Push(-1);
+            }
+
             _pendingNotes.Clear();
             _pendingFrames.Clear();
             emitted++;
@@ -774,6 +937,7 @@ public sealed partial class Ww8DocumentReader
                 new Ww8LayoutFrame(anchor, shape, offset, ReadShapeText(shape, anchor.IsHeaderAnchor))
                 {
                     Picture = PictureOf(shape),
+                    Members = GroupMembers(shape, anchor),
 
                     // SwWW8ImplReader::IsInlineEscherHack, ww8par.hxx:1737 — the innermost open field
                     // being a SHAPE is the whole of the test, and ww8graf.cxx:2355 then anchors the
@@ -824,6 +988,72 @@ public sealed partial class Ww8DocumentReader
 
     /// <summary>Which text-box stories the walk is already inside, guarding a self-referential index.</summary>
     private readonly HashSet<(bool IsHeader, int Story)> _openStories = [];
+
+    /// <summary>
+    /// The leaf shapes of a group, each with its own text and picture.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Word anchors a group with a single <c>FSPA</c> naming the group's shape identifier; the shapes
+    /// underneath it have no entry in the anchor table at all, and each states its rectangle in the
+    /// group's own coordinate space with an <c>msofbtChildAnchor</c>. So a reader that stops at the
+    /// anchor's own shape draws the group's outline — which is often a plain rectangle round a
+    /// masthead — and none of the text boxes and pictures inside it.
+    /// </para>
+    /// <para>
+    /// Flattened rather than nested, which is what the layout engine can place and what the DOCX
+    /// reader already does for a <c>wpg:wgp</c> (<see cref="Ooxml.DocxFrames"/>). A nested group
+    /// contributes its own leaves, composed through both coordinate spaces at build time; the group
+    /// shapes themselves are not members, since an <c>SpgrContainer</c>'s first child is a placeholder
+    /// carrying the coordinate space rather than something to draw.
+    /// </para>
+    /// </remarks>
+    private List<Ww8LayoutFrameMember> GroupMembers(
+        MsBinary.Escher.EscherShape? shape, Ww8ShapeAnchor anchor)
+    {
+        if (shape is not { IsGroup: true }) return [];
+
+        List<Ww8LayoutFrameMember> members = [];
+        Collect(shape, Ww8GroupTransform.Of(shape, anchor.Width, anchor.Height), 0);
+        return members;
+
+        void Collect(MsBinary.Escher.EscherShape group, Ww8GroupTransform transform, int depth)
+        {
+            if (depth > MaxGroupNesting) return;
+
+            foreach (MsBinary.Escher.EscherShape child in group.Children)
+            {
+                if (child.IsDeleted || child.ChildAnchor is not { } within) continue;
+
+                (int x, int y, int width, int height) = transform.Map(within);
+
+                if (child.IsGroup)
+                {
+                    Collect(child, Ww8GroupTransform.Of(child, width, height, x, y), depth + 1);
+                    continue;
+                }
+
+                if (width <= 0 || height <= 0) continue;
+
+                members.Add(
+                    new Ww8LayoutFrameMember(child, ReadShapeText(child, anchor.IsHeaderAnchor))
+                    {
+                        Picture = PictureOf(child),
+                        Left = x,
+                        Top = y,
+                        Width = width,
+                        Height = height,
+                    });
+            }
+        }
+    }
+
+    /// <summary>How deep a group may nest before the walk gives up.</summary>
+    /// <remarks>
+    /// The same bound the DOCX reader uses. Real files nest one group inside another and stop; this is
+    /// against a file that says otherwise, since the walk is the only thing keeping it finite.
+    /// </remarks>
+    private const int MaxGroupNesting = 8;
 
     /// <inheritdoc cref="ReadShapeText"/>
     private List<Ww8LayoutBlock> ReadShapeTextCore(int story, bool isHeader)
@@ -902,8 +1132,30 @@ public sealed partial class Ww8DocumentReader
     /// </summary>
     private const char LineSeparator = '\u2028';
 
-    /// <summary>The non-breaking hyphen a WW8 U+001E becomes.</summary>
-    private const char NonBreakingHyphen = '\u2011';
+    /// <summary>
+    /// The character a WW8 U+001E is <em>drawn</em> as: an ordinary hyphen.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Not U+2011, which is what the model holds and what this reader's extraction half still
+    /// reports. Writer keeps the character as <c>CHAR_HARDHYPHEN</c> (U+2011,
+    /// <c>sw/inc/swtypes.hxx:179</c>) and the layout then swaps it out \u2014
+    /// <c>case CHAR_HARDHYPHEN: pPor = new SwBlankPortion('-')</c>,
+    /// <c>sw/source/core/text/itrform2.cxx:1881-1882</c>. Measured on the reference's own PDF of
+    /// <c>316r_a_e.doc</c>, whose text layer reads <c>A340-500/600</c> with a U+002D against our
+    /// <c>A340\u2011500/600</c>.
+    /// </para>
+    /// <para>
+    /// It is not only a code point. U+2011 is in no Liberation face and in no Carlito, so keeping it
+    /// sent one character of a word through glyph fallback and pulled DejaVu Sans into the PDF for it.
+    /// </para>
+    /// <para>
+    /// The half not reproduced is the one the name states: a <c>SwBlankPortion</c> cannot be broken
+    /// and U+002D is UAX #14 class HY, which is a break opportunity. Drawing the right glyph in the
+    /// right face is worth more than the breaking, which differs only when a line ends exactly there.
+    /// </para>
+    /// </remarks>
+    private const char NonBreakingHyphen = '-';
 
     /// <summary>The character an anchor occupies, matching the other formats' readers.</summary>
     private const char AnchorCharacter = '\u0001';
@@ -937,6 +1189,7 @@ public sealed partial class Ww8DocumentReader
             // Word measures its tab stops from the text area rather than from the paragraph's
             // indent, which is what `ww8par.cxx` records by clearing TABS_RELATIVE_TO_INDENT.
             TabsRelativeToIndent = false,
+            ClampsTabsAtLineEdge = true,
         };
 
         // The level is looked up whether or not it draws a label, because a continuation paragraph of a
@@ -964,12 +1217,17 @@ public sealed partial class Ww8DocumentReader
             ListTabStop: level?.TabPosition ?? 0,
             ListLabelSize: level is { HalfPointSize: > 0 } sized
                 ? Length.FromPoints(sized.HalfPointSize / 2.0)
-                : default)
+                : default,
+            ListLabelFamily: level is { FontIndex: >= 0 } faced ? Fonts.Name(faced.FontIndex) : null,
+            ListLabelSlot: level is { IsBullet: true, NumberText.Length: 1 } bullet
+                ? bullet.NumberText[0]
+                : '\0')
         {
             HasAutoSpaceBefore = layout.HasAutoSpaceBefore ?? false,
             HasAutoSpaceAfter = layout.HasAutoSpaceAfter ?? false,
             ListRule = paragraph.ListNumber,
             AutoKerning = character.AutoKerning ?? false,
+            Borders = layout.ToParagraphBorders(),
 
             // Not for a paragraph in a table: Word applies a frame to a whole row or to nothing, and
             // LibreOffice declines the test outright unless the paragraph is the first in the first cell
@@ -1070,7 +1328,8 @@ public sealed partial class Ww8DocumentReader
                 format.Highlight,
                 format.IsUnderlined ?? false,
                 format.IsStruckThrough ?? false,
-                format.AutoKerning ?? false);
+                format.AutoKerning ?? false,
+                format.SymbolSlot);
 
             if (runs.Count > 0 && MatchesFormatting(runs[^1], run))
             {
@@ -1526,8 +1785,22 @@ public sealed partial class Ww8DocumentReader
             ? Ww8LayoutFormat.HtmlAutoSpacingTwips
             : Ww8LayoutFormat.WordAutoSpacingTwips;
 
+        // Which of the five paragraph border sides this grpprl has already stated in its WW9 form, so
+        // that the WW8 form beside it cannot overwrite an RGB colour with a palette index.
+        int ninetySides = 0;
+
         foreach (Ww8Sprm sprm in Ww8SprmReader.Read(grpprl))
         {
+            if (ParagraphBorderSprm(sprm.Identifier) is { } border)
+            {
+                if (border.IsVersion9) ninetySides |= 1 << border.Side;
+                else if ((ninetySides & (1 << border.Side)) != 0) continue;
+
+                format = WithParagraphBorder(
+                    format, border.Side, sprm.Operand.Span, border.IsVersion9);
+                continue;
+            }
+
             switch (sprm.Identifier)
             {
                 // Which of the two sprms stated it travels with the value, because the two disagree
@@ -1678,6 +1951,17 @@ public sealed partial class Ww8DocumentReader
                 case LayoutSprms.FontIndex:
                     format = format with { FontIndex = sprm.Word };
                     break;
+
+                // The face comes with the slot, exactly as Read_Symbol sets RES_CHRATR_FONT beside
+                // m_cSymbol: a slot means nothing without the face it indexes into.
+                case LayoutSprms.Symbol when sprm.Operand.Length >= 4:
+                    format = format with
+                    {
+                        FontIndex = BinaryPrimitives.ReadUInt16LittleEndian(sprm.Operand.Span),
+                        SymbolSlot = (char)BinaryPrimitives.ReadUInt16LittleEndian(
+                            sprm.Operand.Span[2..]),
+                    };
+                    break;
                 case LayoutSprms.Bold:
                     format = format with
                     {
@@ -1741,6 +2025,66 @@ public sealed partial class Ww8DocumentReader
     }
 
     /// <summary>
+    /// Which paragraph border a sprm sets, and in which of the two forms, or null when it sets none.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Both runs of ids are contiguous and in WW8's own side order, so the offset from the first is the
+    /// side. The ranges deliberately stop one short of <c>sprmPBrcBar</c>: the bar is a revision rule down
+    /// the margin rather than a side of the paragraph's box, and <c>SwWW8ImplReader::Read_Border</c>
+    /// likewise reads five and leaves the sixth to <c>Read_Bar</c>.
+    /// </para>
+    /// <para>
+    /// Answering both questions at once is what lets the caller apply the newer form's precedence without
+    /// depending on the order a producer wrote the two in.
+    /// </para>
+    /// </remarks>
+    /// <param name="identifier">The sprm's id.</param>
+    internal static (int Side, bool IsVersion9)? ParagraphBorderSprm(ushort identifier) => identifier switch
+    {
+        >= LayoutSprms.BorderTop and <= LayoutSprms.BorderBetween
+            => (identifier - LayoutSprms.BorderTop, true),
+        >= LayoutSprms.BorderTop80 and <= LayoutSprms.BorderBetween80
+            => (identifier - LayoutSprms.BorderTop80, false),
+        _ => null,
+    };
+
+    /// <summary>
+    /// Sets one of the five paragraph border sides from the <c>BRC</c> a sprm carries.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A sprm that is present always assigns, even when its <c>BRC</c> states nothing at all. That is the
+    /// whole of <c>##826##</c> in <c>SwWW8ImplReader::SetBorder</c>: a style may set a border and the
+    /// paragraph then remove it, and the removal is written as exactly this — the sprm present, its code
+    /// nought or nil. Skipping it because the structure "said nothing" leaves the style's rule drawn on a
+    /// paragraph that asked for none, and reserves room for it as well.
+    /// </para>
+    /// <para>
+    /// The sides are WW8's own order — top, left, bottom, right, between — which is the order the sprm
+    /// ids run in and lets the identifier's offset select the field.
+    /// </para>
+    /// </remarks>
+    /// <param name="format">The format so far.</param>
+    /// <param name="side">Nought to four: top, left, bottom, right, between.</param>
+    /// <param name="operand">The sprm's operand, which begins with the <c>BRC</c>.</param>
+    /// <param name="isVersion9">True for the newer <c>BRC</c>, whose colour is RGB.</param>
+    internal static Ww8LayoutFormat WithParagraphBorder(
+        Ww8LayoutFormat format, int side, ReadOnlySpan<byte> operand, bool isVersion9)
+    {
+        Ww8Border border = ReadBorder(operand, isVersion9) ?? new Ww8Border(Ww8Border.Nil, 0, null);
+
+        return side switch
+        {
+            0 => format with { BorderTop = border },
+            1 => format with { BorderLeft = border },
+            2 => format with { BorderBottom = border },
+            3 => format with { BorderRight = border },
+            _ => format with { BorderBetween = border },
+        };
+    }
+
+    /// <summary>
     /// Whether a <c>kul</c> names a line that is actually drawn.
     /// </summary>
     /// <remarks>
@@ -1778,6 +2122,54 @@ public sealed partial class Ww8DocumentReader
         internal const ushort ContextualSpacing = 0x246D;
         internal const ushort RightToLeft = 0x2441;
 
+        /// <summary>
+        /// The five paragraph borders in their WW8 form, whose operand is a four-byte <c>BRC80</c>.
+        /// </summary>
+        /// <remarks>
+        /// Consecutive on purpose — <c>sprmids.hxx</c> assigns 0x24 to 0x28 to top, left, bottom, right
+        /// and between, and 0x29 to the bar, which is the revision rule down the margin and is not a
+        /// border of the paragraph's box. <c>SwWW8ImplReader::Read_Border</c> reads the first five and
+        /// leaves the bar to <c>Read_Bar</c>, which is why only five appear here.
+        /// </remarks>
+        internal const ushort BorderTop80 = 0x6424;
+
+        /// <inheritdoc cref="BorderTop80"/>
+        internal const ushort BorderLeft80 = 0x6425;
+
+        /// <inheritdoc cref="BorderTop80"/>
+        internal const ushort BorderBottom80 = 0x6426;
+
+        /// <inheritdoc cref="BorderTop80"/>
+        internal const ushort BorderRight80 = 0x6427;
+
+        /// <inheritdoc cref="BorderTop80"/>
+        internal const ushort BorderBetween80 = 0x6428;
+
+        /// <summary>
+        /// The same five in their WW9 form, whose operand is a variable-length <c>BRC</c> carrying RGB.
+        /// </summary>
+        /// <remarks>
+        /// A document written by any recent producer states both forms, and the newer wins wherever it
+        /// says anything — the same rule the cell borders follow, and the same reason: reading only the
+        /// older form names a colour by its index in Word's seventeen-entry palette, so <c>#CCCCCC</c>
+        /// comes back as <c>#C0C0C0</c>. Order inside one grpprl is <em>not</em> relied on: the newer
+        /// form is remembered as it is read and the older one then declines to overwrite it, so a
+        /// producer writing them the other way round still gets its RGB colour.
+        /// </remarks>
+        internal const ushort BorderTop = 0xC64E;
+
+        /// <inheritdoc cref="BorderTop"/>
+        internal const ushort BorderLeft = 0xC64F;
+
+        /// <inheritdoc cref="BorderTop"/>
+        internal const ushort BorderBottom = 0xC650;
+
+        /// <inheritdoc cref="BorderTop"/>
+        internal const ushort BorderRight = 0xC651;
+
+        /// <inheritdoc cref="BorderTop"/>
+        internal const ushort BorderBetween = 0xC652;
+
         internal const ushort Bold = 0x0835;
         internal const ushort Italic = 0x0836;
         internal const ushort Strike = 0x0837;
@@ -1814,6 +2206,25 @@ public sealed partial class Ww8DocumentReader
 
         internal const ushort FontSize = 0x4A43;
         internal const ushort FontIndex = 0x4A4F;
+
+        /// <summary>
+        /// <c>sprmCSymbol</c>: a character named by slot in a face of its own, WW8's <c>w:sym</c>.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// Four bytes: <c>ftcSym</c>, an index into the font table, then <c>xchar</c>, the slot
+        /// (<c>SwWW8ImplReader::Read_Symbol</c>, <c>sw/source/filter/ww8/ww8par6.cxx:3009-3048</c>).
+        /// The text stream holds a placeholder at that position — <c>(</c>, U+0028, on every corpus
+        /// document carrying one — and <c>SwWW8ImplReader::ReadChars</c> (<c>ww8par.cxx</c>:3395-3418)
+        /// throws it away and inserts <c>xchar</c> once per character the run covers instead.
+        /// </para>
+        /// <para>
+        /// Its companion <c>sprmCFSpec</c> (0x0855) is what marks the placeholder as special, and it
+        /// is not needed to read this: a CHPX carrying <c>sprmCSymbol</c> is the case, and Word writes
+        /// the two together.
+        /// </para>
+        /// </remarks>
+        internal const ushort Symbol = 0x6A09;
         internal const ushort Language80 = 0x486D;
         internal const ushort Language = 0x4873;
         internal const ushort ColourIndex = 0x2A42;
@@ -1962,6 +2373,13 @@ public sealed partial class Ww8DocumentReader
 /// </remarks>
 /// <param name="Headers">The headers, by slot; a slot with no entry has no header.</param>
 /// <param name="Footers">The footers, by slot.</param>
+/// <param name="StoryLengths">
+/// How long each of the section's six stories is, in the order DOC writes them, which is also the bit
+/// order of <c>grpfIhdt</c>. The dictionaries above cannot answer the question the caller has to ask —
+/// a slot missing from them may hold a story that was empty, or one whose blocks all came out blank —
+/// and the difference decides whether the section inherits the slot from the one before it.
+/// </param>
 public sealed record Ww8LayoutFurniture(
     IReadOnlyDictionary<Model.PageFurnitureSlot, List<Ww8LayoutBlock>> Headers,
-    IReadOnlyDictionary<Model.PageFurnitureSlot, List<Ww8LayoutBlock>> Footers);
+    IReadOnlyDictionary<Model.PageFurnitureSlot, List<Ww8LayoutBlock>> Footers,
+    IReadOnlyList<int> StoryLengths);

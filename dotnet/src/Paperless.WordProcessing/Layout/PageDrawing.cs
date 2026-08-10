@@ -83,18 +83,18 @@ public static class PageDrawing
     private static void DrawBody(
         LaidOutPage page, IReadOnlyList<PageBlock> blocks, IDrawingSink sink)
     {
-        if (page.ColumnCount <= 1)
+        if (page.ColumnCount <= 1 && page.Lines.All(line => line.Columns <= 1))
         {
             DrawLines(page.BodyArea, page.Lines, blocks, sink);
             return;
         }
 
-        for (int column = 0; column < page.ColumnCount; column++)
+        // Grouped by the *line's* own band rather than by the page's column index, because one page can
+        // carry sections that disagree about how many columns there are — see `PlacedLine.Columns`.
+        foreach (IGrouping<(int Columns, int Column), PlacedLine> band in
+                 page.Lines.GroupBy(line => (line.Columns, line.Column)))
         {
-            DocRect area = page.ColumnArea(column);
-            int at = column;
-
-            DrawLines(area, [.. page.Lines.Where(line => line.Column == at)], blocks, sink);
+            DrawLines(page.ColumnArea(band.First()), [.. band], blocks, sink);
         }
     }
 
@@ -453,6 +453,7 @@ public static class PageDrawing
         IDrawingSink sink)
     {
         DrawParagraphShading(area, lines, blocks, sink);
+        DrawParagraphBorders(area, lines, blocks, sink);
 
         foreach (PlacedLine line in lines)
         {
@@ -578,6 +579,102 @@ public static class PageDrawing
         Emit();
     }
 
+    /// <summary>
+    /// Draws the rules round each bordered paragraph, after its shading and before its text.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Per paragraph rather than per run of joined paragraphs, because the reader has already resolved the
+    /// join — the lower of two identically bordered paragraphs carries no top border and the upper none at
+    /// the bottom, so their left and right rules meet as two abutting segments and the box reads as one.
+    /// That is what LibreOffice's own PDF holds: a two-paragraph box emits its verticals as
+    /// <c>691.45-707.30</c> and <c>675.55-691.45</c> rather than as one stroke.
+    /// </para>
+    /// <para>
+    /// The geometry is measured rather than assumed, and two parts of it are counter-intuitive. The rule
+    /// sits at the <em>outer</em> edge with <c>w:space</c> between it and the text, so a rule's near edge
+    /// is a distance from the text and its far edge is the frame; and the vertical rules sit
+    /// <em>outside</em> the print area, which means a bordered paragraph can draw into the page margin and
+    /// its lines break exactly where an unbordered one's would.
+    /// </para>
+    /// </remarks>
+    private static void DrawParagraphBorders(
+        DocRect area,
+        IReadOnlyList<PlacedLine> lines,
+        IReadOnlyList<PageBlock> blocks,
+        IDrawingSink sink)
+    {
+        int index = -1;
+        Length top = Length.Zero;
+        Length bottom = Length.Zero;
+
+        // Where the box the paragraph above opened stopped, and which paragraph that was. A joined
+        // paragraph starts its own box there rather than at its own text, so the side rules run across
+        // whatever `w:spacing` stands between the two — which is what LibreOffice draws and what a box
+        // per paragraph gets visibly wrong on a spaced list.
+        int joined = -2;
+        Length joinedAt = Length.Zero;
+
+        void Flush()
+        {
+            if (index < 0 || blocks[index] is not PageParagraph paragraph) return;
+            if (paragraph.Borders is not { Draws: true } borders) return;
+
+            DocRect text = ShadeArea(area, paragraph, top, bottom);
+
+            Length left = text.X - (borders.Left?.Allowance ?? Length.Zero);
+            Length right = text.Right + (borders.Right?.Allowance ?? Length.Zero);
+            Length above = borders.JoinsAbove && joined == index - 1 && joinedAt < text.Y
+                ? joinedAt
+                : text.Y - borders.Above;
+            Length below = text.Bottom + borders.Below;
+
+            joined = index;
+            joinedAt = below;
+
+            if (borders.Top is { Draws: true } rule)
+            {
+                Fill(
+                    new DocRect(left, text.Y - rule.Space - rule.Width, right - left, rule.Width),
+                    rule.Colour, sink);
+            }
+
+            if (borders.Bottom is { Draws: true } under)
+            {
+                Fill(
+                    new DocRect(left, text.Bottom + under.Space, right - left, under.Width),
+                    under.Colour, sink);
+            }
+
+            if (borders.Left is { Draws: true } start)
+            {
+                Fill(new DocRect(left, above, start.Width, below - above), start.Colour, sink);
+            }
+
+            if (borders.Right is { Draws: true } end)
+            {
+                Fill(
+                    new DocRect(right - end.Width, above, end.Width, below - above), end.Colour, sink);
+            }
+        }
+
+        foreach (PlacedLine line in lines)
+        {
+            if (line.ParagraphIndex < 0 || line.ParagraphIndex >= blocks.Count) continue;
+
+            if (line.ParagraphIndex != index)
+            {
+                Flush();
+                index = line.ParagraphIndex;
+                top = line.Top;
+            }
+
+            bottom = line.Top + line.Box.Height;
+        }
+
+        Flush();
+    }
+
     /// <summary>The rectangle a paragraph's shading fills, in the coordinates of the area holding it.</summary>
     /// <remarks>
     /// The indents narrow it from both sides, and which side each one is on depends on the paragraph's
@@ -618,7 +715,7 @@ public static class PageDrawing
         LaidOutPage page, PlacedLine line, PageParagraph paragraph)
     {
         ArgumentNullException.ThrowIfNull(page);
-        return RunsIn(page.ColumnArea(line.Column), line, paragraph);
+        return RunsIn(page.ColumnArea(line), line, paragraph);
     }
 
     /// <summary>The glyph runs one line draws, relative to whichever area it belongs to.</summary>
@@ -666,7 +763,7 @@ public static class PageDrawing
                         shapedLabel,
                         label.Text,
                         label.EmSize,
-                        label.Font ?? Reference(label.Face),
+                        label.Font ?? Reference(paragraph, label.Face),
                         new DocPoint(lineLeft - paragraph.LabelAdvance, baseline),
                         Length.Zero),
                     label.Colour.A == 0 ? Colour.Black : label.Colour));
@@ -675,7 +772,8 @@ public static class PageDrawing
 
         if (end <= start) return runs;
 
-        List<TabbedSegment> stretches = Stretches(paragraph, start, end, line.StartsParagraph);
+        List<TabbedSegment> stretches =
+            Stretches(paragraph, start, end, line.StartsParagraph, area.Width);
 
         for (int index = 0; index < stretches.Count; index++)
         {
@@ -723,7 +821,7 @@ public static class PageDrawing
                     shaped,
                     text,
                     run.EmSize,
-                    run.Font ?? Reference(run.Face),
+                    run.Font ?? Reference(paragraph, run.Face),
                     new DocPoint(pen, baseline - run.Rise),
                     spaceAdd,
                     run.Tracking);
@@ -772,7 +870,8 @@ public static class PageDrawing
     private static DocRect Band(
         PageParagraph paragraph, PageRun run, Length pen, Length extent, Length baseline)
     {
-        LineMetrics metrics = LineSpacing.Resolve(run.Face, paragraph.Metrics);
+        LineMetrics metrics = LineSpacing.Resolve(
+            run.Face, paragraph.Metrics, WriterLineBox.LeadingAboveText);
         Length size = run.MetricEmSize > Length.Zero ? run.MetricEmSize : run.EmSize;
 
         Length ascent = metrics.ScaledAscent(size);
@@ -910,7 +1009,7 @@ public static class PageDrawing
                 shaped,
                 fill,
                 at.EmSize,
-                at.Font ?? Reference(at.Face),
+                at.Font ?? Reference(paragraph, at.Face),
                 new DocPoint(lineLeft + segment.GapLeft, baseline - at.Rise),
                 Length.Zero),
             at.EffectiveColour);
@@ -953,8 +1052,19 @@ public static class PageDrawing
     /// measurement handed to the ruler is the same one the layout used, so the stops land in the same
     /// places here as they did when the line's width was decided.
     /// </remarks>
+    /// <param name="paragraph">The paragraph the line belongs to.</param>
+    /// <param name="start">Where the line's text starts.</param>
+    /// <param name="end">Where its visible text ends.</param>
+    /// <param name="isFirstLine">True for the paragraph's own first line.</param>
+    /// <param name="areaWidth">
+    /// How wide the rectangle holding the line is — the column for a body paragraph, the cell's inner
+    /// width for one in a table — or null when the caller does not have it. It is what turns a right stop
+    /// declared past the margin into one at the margin, and the layout resolved it the same way, so
+    /// omitting it here would draw a leader running off the page that the line was never measured to
+    /// have. See <c>TabRuler.Place</c>.
+    /// </param>
     private static List<TabbedSegment> Stretches(
-        PageParagraph paragraph, int start, int end, bool isFirstLine)
+        PageParagraph paragraph, int start, int end, bool isFirstLine, Length? areaWidth = null)
     {
         if (!TabRuler.HasTab(paragraph.Text, start, end))
         {
@@ -967,7 +1077,10 @@ public static class PageDrawing
             end,
             paragraph.Format,
             (from, to) => WidthBetween(paragraph, from, to),
-            isFirstLine);
+            isFirstLine,
+            paragraph.Format.ClampsTabsAtLineEdge && areaWidth is { } width
+                ? width - paragraph.Format.EndIndent - paragraph.Format.TabOrigin
+                : null);
     }
 
     /// <summary>
@@ -982,19 +1095,21 @@ public static class PageDrawing
     {
         if (!paragraph.HasRuns)
         {
-            return AroundObjects(
+            return ByFace(
                 paragraph,
-                [
-                    new PageRun(
-                        start,
-                        end - start,
-                        paragraph.Face,
-                        paragraph.EmSize,
-                        paragraph.Font,
-                        paragraph.Colour,
-                        paragraph.Shaping,
-                        Tracking: paragraph.Tracking),
-                ]);
+                AroundObjects(
+                    paragraph,
+                    [
+                        new PageRun(
+                            start,
+                            end - start,
+                            paragraph.Face,
+                            paragraph.EmSize,
+                            paragraph.Font,
+                            paragraph.Colour,
+                            paragraph.Shaping,
+                            Tracking: paragraph.Tracking),
+                    ]));
         }
 
         List<PageRun> clipped = [];
@@ -1007,7 +1122,64 @@ public static class PageDrawing
             clipped.Add(run with { Start = from, Length = to - from });
         }
 
-        return AroundObjects(paragraph, clipped);
+        return ByFace(paragraph, AroundObjects(paragraph, clipped));
+    }
+
+    /// <summary>
+    /// The runs cut again wherever the run's own face has no glyph, as the measurement cut them.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The same <see cref="FontItemiser.Split"/> <see cref="MeasuredParagraph"/> runs, and it has to be
+    /// the same one for the same reason the object cut does: the line's break was decided against the
+    /// fallback face's advances, so drawing the stretch in the primary face would put the glyphs at
+    /// widths the layout never measured — on top of drawing the wrong glyphs.
+    /// </para>
+    /// <para>
+    /// A paragraph whose faces cover all of its text comes back through here untouched. The itemiser
+    /// returns one non-fallback piece per run in that case, which is checked for explicitly rather
+    /// than rebuilt: a run split at a boundary it does not need loses its shaping context and
+    /// measures very slightly wide, which is enough to move a line break.
+    /// </para>
+    /// <para>
+    /// A fallback piece drops the run's <see cref="PageRun.Font"/>, because that reference names the
+    /// face the reader resolved and this piece is drawn in a different one. The caller derives a
+    /// reference from the face itself when there is none, which is what puts the right font program
+    /// in the PDF.
+    /// </para>
+    /// </remarks>
+    private static List<PageRun> ByFace(PageParagraph paragraph, List<PageRun> runs)
+    {
+        if (paragraph.Fallback is not { } fallback) return runs;
+
+        List<PageRun> split = [];
+
+        foreach (PageRun run in runs)
+        {
+            List<FaceRun> faces = FontItemiser.Split(
+                paragraph.Text, run.Start, run.Length, run.Face, fallback);
+
+            if (faces.Count == 1 && !faces[0].IsFallback)
+            {
+                split.Add(run);
+                continue;
+            }
+
+            foreach (FaceRun face in faces)
+            {
+                split.Add(face.IsFallback
+                    ? run with
+                    {
+                        Start = face.Start,
+                        Length = face.Length,
+                        Face = face.Face,
+                        Font = fallback.ReferenceFor(face.Face),
+                    }
+                    : run with { Start = face.Start, Length = face.Length });
+            }
+        }
+
+        return split;
     }
 
     /// <summary>
@@ -1293,6 +1465,21 @@ public static class PageDrawing
     /// reference. Naming the face's own family is enough for a backend to group runs by font, and it
     /// records no substitution because none was made.
     /// </remarks>
+    /// <summary>
+    /// A reference for a face the run did not name, preferring one that can be embedded.
+    /// </summary>
+    /// <remarks>
+    /// A reader stores a <see cref="PageRun.Font"/> for the runs it resolved and leaves it null for
+    /// the faces the layout supplied — a list label, a tab leader, a paragraph with no runs. The
+    /// name-only reference below is enough to draw with and not enough to embed, because a PDF
+    /// writer loads the font program through the face key: measured on
+    /// <c>Annex-10-to-the-Aircraft-Maintenance-Specialist-Certification-Rule-GCAA.docx</c>, which
+    /// announces <c>DejaVuSans</c> unembedded beside four faces it embeds, and fails the corpus
+    /// gate for it. The resolver that loaded the face can still name the file it came from.
+    /// </remarks>
+    private static FontReference Reference(PageParagraph paragraph, Text.Fonts.OpenTypeFace face)
+        => paragraph.Fallback?.ReferenceFor(face) ?? Reference(face);
+
     private static FontReference Reference(Text.Fonts.OpenTypeFace face) => new()
     {
         FamilyName = face.FamilyName ?? string.Empty,

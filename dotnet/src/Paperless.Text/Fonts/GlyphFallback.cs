@@ -13,10 +13,12 @@ namespace Paperless.Text.Fonts;
 /// <para>
 /// LibreOffice asks the platform first — fontconfig's <c>FcFontMatch</c> with the missing characters
 /// as a charset, in <c>vcl/unx/generic/fontmanager/fontconfig.cxx</c> — and falls back to a
-/// hard-coded list of families when that fails. Paperless has only the second half, deliberately:
-/// going through fontconfig would add a second source of truth for substitution rather than the
-/// missing one, and the same document would then render differently on two machines with the same
-/// fonts but different fontconfig configurations.
+/// hard-coded list of families when that fails. Paperless takes the second half as its main path,
+/// deliberately: going through fontconfig for substitution would add a second source of truth rather
+/// than the missing one. It reads the platform's configuration for one thing only — the order in
+/// which faces are tried once <em>nothing</em> on that hard-coded list is installed, where there is
+/// no other source of truth to compete with. See <see cref="FontconfigPreferences"/>, which records
+/// the measurement showing that this last step's answer cannot be derived from the font files.
 /// </para>
 /// </remarks>
 public interface IGlyphFallbackResolver
@@ -28,6 +30,23 @@ public interface IGlyphFallbackResolver
     /// <param name="weight">The weight to match, on the OpenType 1-1000 scale.</param>
     /// <param name="isItalic">Whether an italic face is wanted.</param>
     OpenTypeFace? FallbackFor(int codePoint, int weight = 400, bool isItalic = false);
+
+    /// <summary>
+    /// The reference naming a face this resolver returned, or null when it did not return it.
+    /// </summary>
+    /// <remarks>
+    /// A face on its own is enough to <em>measure</em> and to <em>shape</em>, and not enough to
+    /// <em>embed</em>: a PDF writer loads the font program through the reference's face key, so a
+    /// fallback face named only by its family reaches the writer with no program behind it and is
+    /// announced in the file without being embedded. Measured on <c>手机免提系统TSB.doc</c>, whose
+    /// three fallback faces all came out <c>emb no</c> — which the corpus gate scores as a failure,
+    /// correctly, because a reader without those fonts installed sees nothing.
+    /// <para>
+    /// Defaulted to null so an implementation that only answers coverage questions stays valid; the
+    /// caller then falls back to naming the face, which is what it did before this existed.
+    /// </para>
+    /// </remarks>
+    Core.Graphics.FontReference? ReferenceFor(OpenTypeFace face) => null;
 }
 
 /// <summary>One mid-run fallback: a stretch the run's own face could not show.</summary>

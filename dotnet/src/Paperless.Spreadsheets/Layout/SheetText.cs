@@ -1,6 +1,7 @@
 using Paperless.Core.Geometry;
 using Paperless.Core.Graphics;
 using Paperless.Core.Units;
+using Paperless.Text.Itemisation;
 using Paperless.Text.Shaping;
 
 namespace Paperless.Spreadsheets.Layout;
@@ -146,8 +147,11 @@ internal static class SheetText
     {
         if (text.Length == 0 || face is not { } resolved) return null;
 
-        return new SheetTextRun(
-            [Segment(text, resolved, size, colour, Length.Zero, out Length width)], width);
+        List<SheetTextSegment> segments = [];
+        Length offset = Length.Zero;
+        Append(segments, text, resolved, size, colour, ref offset);
+
+        return segments.Count == 0 ? null : new SheetTextRun(segments, offset);
     }
 
     /// <summary>
@@ -194,12 +198,57 @@ internal static class SheetText
             Length size = SizeOf(portion.Format.FontSize, scale, percent);
             if (size <= Length.Zero) continue;
 
-            segments.Add(Segment(
-                text[from..to], face, size, portion.Format.Colour, offset, out Length width));
-            offset += width;
+            Append(segments, text[from..to], face, size, portion.Format.Colour, ref offset);
         }
 
         return segments.Count == 0 ? null : new SheetTextRun(segments, offset);
+    }
+
+    /// <summary>
+    /// Shapes one stretch, splitting it again wherever its own face has no glyph.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A cell's face is chosen from a family name and coverage is a property of a character, so a
+    /// workbook whose cells name a Latin face and hold Japanese would otherwise draw a row of
+    /// missing-glyph boxes — at that face's <c>.notdef</c> advance, which is nothing like the width
+    /// of the ideographs the reference renderer lays out after its own fallback. LibreOffice does
+    /// the same split after shaping rather than before (<c>OutputDevice::ImplGlyphFallbackLayout</c>).
+    /// </para>
+    /// <para>
+    /// A stretch whose face covers it is one segment and reaches the shaper in the identical call it
+    /// did before this existed, which matters: shaping is contextual, so a run split it did not need
+    /// measures very slightly differently.
+    /// </para>
+    /// </remarks>
+    private static void Append(
+        List<SheetTextSegment> segments,
+        string text,
+        SheetFace face,
+        Length size,
+        Colour? colour,
+        ref Length offset)
+    {
+        List<FaceRun> runs = FontItemiser.Split(
+            text, 0, text.Length, face.Face, SheetFonts.Fallback);
+
+        foreach (FaceRun run in runs)
+        {
+            if (run.Length <= 0) continue;
+
+            // Nothing to name the face with is nothing to embed it through, so a fallback the
+            // resolver cannot reference falls back again to the primary face's missing-glyph box —
+            // which is what happened before this existed — rather than to a font the PDF would
+            // announce without carrying.
+            SheetFace drawn = run.IsFallback && SheetFonts.ForFallback(run.Face) is { } resolved
+                ? resolved
+                : face;
+
+            segments.Add(Segment(
+                text.Substring(run.Start, run.Length), drawn, size, colour, offset,
+                out Length width));
+            offset += width;
+        }
     }
 
     /// <summary>
@@ -213,7 +262,7 @@ internal static class SheetText
     /// </remarks>
     public static Length SizeOf(Length stated, double scale, long percent)
     {
-        Length scaled = SheetDeviceUnits.SnapFontSize(stated) * scale;
+        Length scaled = SheetDeviceUnits.SnapFontSize(stated, scale);
 
         return percent == 100
             ? scaled
@@ -252,6 +301,50 @@ internal static class SheetText
     /// <param name="size">The em size.</param>
     public static Length Measure(string text, SheetFace? face, Length size)
         => Shape(text, face, size)?.Width ?? Length.Zero;
+
+    /// <summary>
+    /// How wide a string is on a device that can only advance by whole pixels.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>OutputDevice::GetTextWidth</c> returns the sum of the layout's glyph advances, and a
+    /// glyph's advance on a raster device is a whole number of pixels. So the width of a string is
+    /// the <em>sum of the rounded advances</em> and not the rounded sum, and the two differ by more
+    /// than a pixel as soon as the string is long: at twelve point on a 96 dpi device a
+    /// seventy-two character run measures 516 pixels one way and 523 the other, which is 1.4%.
+    /// </para>
+    /// <para>
+    /// Fitted against LibreOffice 24.2.7.2's own row heights for turned cells — six string lengths
+    /// at ten, eleven and twelve point, read out of its flat-ODF round trip of
+    /// <c>sheet-row-height-rotated.fods</c>. <strong>All eighteen are reproduced exactly by this
+    /// and fourteen by rounding the total</strong>, which is what says the rounding is per glyph.
+    /// </para>
+    /// <para>
+    /// Only <see cref="SheetOptimalRowHeights"/> wants this: it is the one place a length measured
+    /// on Calc's measuring device has to come back as that device's own integer. Drawing measures
+    /// on the page, where nothing is quantised.
+    /// </para>
+    /// </remarks>
+    /// <param name="text">The text to measure.</param>
+    /// <param name="face">The face; null measures as nothing.</param>
+    /// <param name="size">The em size, already snapped to the device's own pixel grid.</param>
+    /// <param name="twipsPerPixel">The device's pixel, in twips.</param>
+    public static long MeasurePixels(string text, SheetFace? face, Length size, int twipsPerPixel)
+    {
+        if (twipsPerPixel <= 0 || Shape(text, face, size) is not { } run) return 0;
+
+        long pixels = 0;
+        foreach (SheetTextSegment segment in run.Segments)
+        {
+            foreach (PositionedGlyph glyph in segment.Glyphs)
+            {
+                pixels += (long)Math.Round(
+                    glyph.Advance.Twips / (double)twipsPerPixel, MidpointRounding.AwayFromZero);
+            }
+        }
+
+        return pixels;
+    }
 
     /// <summary>The face a sheet's cells fall back to, resolved once.</summary>
     public static SheetFace? DefaultFace => SheetFonts.For(SheetCellFormat.Default);

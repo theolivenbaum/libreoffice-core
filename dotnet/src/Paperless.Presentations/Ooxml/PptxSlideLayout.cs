@@ -1325,11 +1325,40 @@ internal sealed partial class PptxSlideLayout
     private static RasterImage Duotoned(
         RasterImage image, DrawingBlipFill blip, DrawingTheme? theme)
     {
+        image = Adjusted(image, blip);
+
         if (blip.Duotone is not { } pair) return image;
         if (pair.Dark.Resolve(theme, placeholder: null) is not { } dark) return image;
         if (pair.Light.Resolve(theme, placeholder: null) is not { } light) return image;
 
         return image with { Duotone = new DuotoneRecolour(dark, light) };
+    }
+
+    /// <summary>
+    /// The picture with its <c>a:lum</c> attached — PowerPoint's picture recolour.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Attached rather than applied, for the reason <see cref="Duotoned"/> gives. What the pair
+    /// means is <see cref="LuminanceRecolour"/>'s subject and is not a matter of reading it:
+    /// <c>bright="70000" contrast="-70000"</c> — the "Washout" a picture placed behind text gets
+    /// from PowerPoint's own gallery — is mapped by the reference to a different pair entirely.
+    /// </para>
+    /// <para>
+    /// <c>N2_E_Maestroni_Swarm_COP.pptx</c>'s title slide is the corpus instance that found it:
+    /// a full-bleed photograph of a satellite, washed almost white by the reference and drawn at
+    /// full strength by us, worth <strong>63.62 of unaccounted ink on that one page</strong>
+    /// against the deck's 66.29 over thirty. 15 of the slides track's 112 pptx-family decks
+    /// state a blip <c>a:lum</c>, of which twelve blips are that exact pair, one is 20 and 20,
+    /// and the rest state it empty and mean nothing by it
+    /// (<c>research/probes/slides-r19/count-bliplum.py</c>).
+    /// </para>
+    /// </remarks>
+    private static RasterImage Adjusted(RasterImage image, DrawingBlipFill blip)
+    {
+        LuminanceRecolour recolour = new(blip.Brightness, blip.Contrast);
+
+        return recolour.IsIdentity ? image : image with { Luminance = recolour };
     }
 
     /// <summary>
@@ -1374,16 +1403,59 @@ internal sealed partial class PptxSlideLayout
         }
 
         // a:fillToRect states the inner rectangle the gradient converges on; its centre is what
-        // LibreOffice keeps, as (MAX_PERCENT + l - r) / 2 (fillproperties.cxx:531-536).
+        // LibreOffice keeps, as (MAX_PERCENT + l - r) / 2, truncated to whole per cent and
+        // clamped into the box (fillproperties.cxx:531-537).
+        int cx = FocusPerCent(gradient.FillToRect.Left, gradient.FillToRect.Right);
+        int cy = FocusPerCent(gradient.FillToRect.Top, gradient.FillToRect.Bottom);
+
+        if (gradient.Path == "circle" && (cx is 0 or 100) && (cy is 0 or 100))
+        {
+            // The focus is a corner: the reference draws the diagonal linear ramp instead,
+            // stop 0 at that corner. Direction runs corner-to-opposite-corner, and Linear
+            // spans the box's rotated extent, so the two corners land on the ramp's ends.
+            return SlideGradients.Linear(box, cx == 0 ? 1 : -1, cy == 0 ? 1 : -1, stops)
+                with { Transform = space };
+        }
+
         DocPoint centre = new(
-            box.Left + (box.Width * ((1 + gradient.FillToRect.Left - gradient.FillToRect.Right) / 2)),
-            box.Top + (box.Height * ((1 + gradient.FillToRect.Top - gradient.FillToRect.Bottom) / 2)));
+            box.Left + (box.Width * (cx / 100.0)),
+            box.Top + (box.Height * (cy / 100.0)));
 
         GradientKind kind = gradient.Path == "circle"
             ? GradientKind.Radial
             : GradientKind.Rectangular;
 
         return SlideGradients.Centred(kind, box, centre, stops) with { Transform = space };
+    }
+
+    /// <summary>
+    /// One axis of an <c>a:fillToRect</c>'s centre, as the whole number of per cent inside the
+    /// filled box that LibreOffice keeps.
+    /// </summary>
+    /// <remarks>
+    /// Both halves matter and both are observable. The <b>clamp</b> is what makes the stock
+    /// Office theme's gradient a gradient at all: its <c>fillToRect</c> is
+    /// <c>t="-80000" b="180000"</c>, a centre 80% of the box above its own top edge, and
+    /// unclamped every point of the box sits past the ramp's last stop and the fill comes out
+    /// flat. On the probe deck that is 56.94% of the page's pixels against 0.15%.
+    /// <b>Its measured corpus reach is nought</b>, and the distinction is worth keeping: 79 of the
+    /// 114 zip-container decks state that exact <c>fillToRect</c>, all of them in a theme's
+    /// <c>a:fillStyleLst</c>, and not one of them changed a pixel when this landed — a theme's
+    /// third fill style is almost never what a drawn shape resolves to. Correct, tested, and
+    /// waiting for a document. The <b>truncation</b> to whole per cent decides the corner test in
+    /// <see cref="Gradient"/>, which is where the corpus movement was: measured against
+    /// LibreOffice 24.2.7.2, a stated centre of 0.5% is treated as 0 and takes the linear
+    /// branch, and 1% does not (<c>probes/slides-r39/gradient-path.md</c>).
+    /// </remarks>
+    private static int FocusPerCent(double nearInset, double farInset)
+    {
+        // Back to the file's own thousandths of a per cent before truncating: a stated 98000
+        // must not arrive as 0.9999999 and fall on the wrong side of the corner test.
+        long near = (long)Math.Round(nearInset * 100000);
+        long far = (long)Math.Round(farInset * 100000);
+
+        // Both divisions truncate towards zero, as the C++ integer arithmetic does.
+        return (int)Math.Clamp((100000 + near - far) / 2 / 1000, 0, 100);
     }
 
     /// <summary>

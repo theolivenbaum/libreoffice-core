@@ -214,6 +214,103 @@ Traps that cost time, recorded so they are not rediscovered:
   them has a blank page to drop, which is exactly why this went unnoticed until a `sc/qa` sheet
   turned up with 516 empty rows.
 
+## The thirtieth sweep: an `.xls` cell's margin is twice everything else's
+
+Swept whole at `946b3defc` before anything was changed, 171 documents, two workers, 171 rows, no
+path twice and no `ref-failed`: **146 of 171, total absolute page error 90, 154 exact page counts**,
+batches 001–009 at 89/89. That reproduces the brief and round twenty-seven's closing figures in
+every number and in every per-batch figure. The one discrepancy is the word error — 42859 here
+against a briefed 42848 — and it is one document, `Keywords_Mapping_Graphs_and_Charts.xlsx`, which
+reads 4635 against the 4647 round twenty-six recorded; its verdict is `words` under all three
+readings.
+
+**`ECA Sinters.xls` did not need splicing.** Three rounds running it came back `ref-failed` under
+load and had to be re-run alone; it converted on the first pass in both sweeps here.
+
+### The rule
+
+`ATTR_MARGIN` is a **cell attribute**, and `Paperless` had it as one constant shared by all three
+readers. Its pool default really is 20 twips on every side (`SvxMarginItem`'s default constructor,
+`svx/source/items/algitem.cxx:123-132`, installed by `ScDocumentPool` at `docpool.cxx:145`) — and
+`XclImpXF::CreatePattern` ends by overriding it on **every pattern the BIFF filter builds**:
+
+```cpp
+// Excel's cell margins are different from Calc's default margins.
+SvxMarginItem aItem(40, 40, 40, 40, ATTR_MARGIN);
+ScfTools::PutItem(rItemSet, aItem, bSkipPoolDefs);
+                          sc/source/filter/excel/xistyle.cxx:1349-1351
+```
+
+Unconditional, cell XFs and style XFs alike, and **the only line in all of `sc/source/filter` that
+touches the item** — so SpreadsheetML, XLSB and ODF keep the 20 and only an `.xls` gets 40.
+`SheetCellFormat.Margin` now carries it, and the four places Calc reads the item read the cell's own
+value: where the text is placed, how much of a clipped string survives, the width a wrapping cell
+breaks at and the height a row asks for, and how far a long string reaches when it widens the print
+area.
+
+### It had been read as a page-origin offset for several rounds
+
+The difference is in every `.xls` comparison this project has ever made, and it is written down as
+a tolerance in `pdf-ops.py`: *"every show sits about 1 pt apart (51.39 against 52.38, 743.75 against
+742.73) because the two put their page origin in slightly different places"*. Those are
+`underlying-holdings-…-state-street-emu-esg-screened-index-equity-fund.xls`'s own numbers and the
+sentence is wrong.
+
+**A page origin moves every run the same way; a margin moves left-aligned text right and
+right-aligned text left.** On that document's page 6 the reference draws its left-aligned `Fx` 0.99
+pt to the *right* of ours and its right-aligned `31895` 0.96 pt to the *left*, which no origin can
+do and 20 twips a side does exactly. The `sheet-cell-text` fixture triple then settles it without
+the corpus: LibreOffice's own PDFs put the left-aligned `Lft` of A1 at **58.68 pt** in the `.xls`
+and **57.69** in the `.xlsx` and `.fods`, with the baselines the same 0.99 pt apart the other way
+because the cells are bottom-aligned.
+
+### The half that moves a number: how much of a clipped string survives
+
+The same `nTotalMargin` reaches `ScOutputData::GetOutputArea`, so the room a cell has is the column
+less *both* margins — and that room is the numerator of the ratio the shortening bisects on
+(`fVisibleRatio * nTextLen + 1`, `output2.cxx:2216-2227`). Doubling the margins takes about four per
+cent off the ratio, which on a cell near a character boundary is one glyph. On the document above,
+whose 49.75 pt column holds the same 49-character string on every row, we kept `State Stree` and the
+reference keeps `State Stre`, on every row of its first five pages: **4743 extractable words against
+4991, and 4988 now.**
+
+The forensic step worth keeping: the visible-to-total ratio implied by the reference's glyph counts
+is 0.948–0.962 of ours across nine independent cells of one page — a single scalar, which *two*
+hypotheses fit (a 4% wider text measurement or a 4% narrower cell). The sign of the right-aligned
+runs is the observation that separates them, and nothing else on that page does.
+
+### Reach, and what deliberately did not move
+
+The gate registers a difference on **35 of the 171 rows**, 34 of them `.xls`; the one `.xlsx` is
+`PBN Matrix NAAs (V01).xlsx`, whose *reference* count moved by one. A byte-level reach run was
+stopped after 35 documents at a load average above 17 and its partial is unambiguous: **15 of 15
+`.xls` differ byte for byte and 20 of 20 `.xlsx` are identical**, so the reach is the track's 62
+`.xls` and nothing else.
+
+**No page count moves anywhere** — page error 90 and 154 exact on both sides — and that has a
+mechanism rather than being luck. `RowHeightsAreManual` is set outright for BIFF8, so no `.xls` row
+height is ever recomputed and the margin cannot reach the one quantity pagination turns on. Its
+other three consumers move ink and words, not paper.
+
+| | matches | abs page error | exact page counts | abs word error |
+|---|---|---|---|---|
+| base | 146/171 | 90 | 154 | 42859 |
+| after | **147/171** | 90 | 154 | **42322** |
+
+`batch-016` goes 4/9 → **5/9**. Four documents move by twenty words or more and three go towards the
+reference: `underlying-holdings…` 4743 → **4988 of 4991** (the round's match),
+`laufende-nip-vorhaben-hyland.xls` 6514 → **6579 of 6579**, `fy2011-aip-grants.xls` 54933 → 54755 of
+54488, and `fy2010-aip-grants.xls` 63775 → 63113 of 63452 — the last being 323 over before and 339
+under now, which is 16 worse in absolute and still a match.
+
+### One observation left as an observation
+
+`SIL_TDB648.xlsx` (89 pages against 88) draws its "General Info" sheet's long overflowing string in
+full on both of its column bands, where the reference draws the tail cut mid-word on the second —
+`nway Change Information…` against our `Airport Runway Change Information`. That is the page-edge
+clip this file already records as a mechanism elsewhere, and it is *not* where the extra page is:
+aligning the two page sequences by their text puts the surplus much later. Not diagnosed.
+
 ## What the tenth sheets sweep found: a paragraph is not one size, and a note is not on its cell
 
 Swept whole at `5ec407cf3` before anything was changed: **127 of 171**, page error 117, 142 exact
@@ -393,6 +490,689 @@ Two things to hold onto before starting:
   bound. No corpus `.xlsx` writes `&#10;` at all, so the SpreadsheetML side of this is unmeasured
   and may not be affected. `ZenithAviation_AuctionList.xls` matches exactly at 6626 words while
   carrying the same byte pattern 158 times, which is the warning: the pattern is not the defect.
+
+## The twenty-second sweep: the bold that was never missing, and the size nobody had looked at
+
+Swept whole at `9cffaa02a` before anything was changed, 171 documents, two workers, 171 rows,
+no path twice and no `ref-failed`: **144 of 171, total absolute page error 94, 153 exact page
+counts**, batches 001–009 at **89/89**. That reproduces round twenty-one's closing figures to
+the digit in all four numbers, so nothing has drifted under the scoreboard.
+
+**Nothing this round moved a corpus verdict**, and the two findings are worth having anyway.
+
+### `Praktikastellen_…xls` does draw bold. The brief said it does not, and the brief was wrong
+
+This is the eighth entry in the project's standing pattern — *the measurement reproduces
+exactly, the sentence attached to it inverts* — and it is the first time the pattern has caught
+`pdf-ops.py` itself.
+
+Everything the brief measured is real. The workbook passes every gate (34 pages against 34,
+1828 words against 1828, two faces, both embedded); `pdf-ops.py diff` reports 0 records
+one-sided and, document-wide, **81** text records differing as `face Carlito vs Carlito-Bold` at
+identical positions with identical glyph counts; and `pdffonts` shows ours embedding `Carlito`
+twice against the reference's `Carlito-Bold` and `Carlito-Regular`.
+
+The conclusion drawn from it — "we do not draw bold on that workbook at all" — is refuted by
+four separate observations, and the first is decisive on its own:
+
+| observation | result |
+|---|---|
+| the embedded font programs' own `name` tables | our two subsets are family `Carlito` subfamily **`Bold`** and subfamily `Regular` |
+| the descriptors' `StemV` | **140** and 80 — the bold stem and the regular one |
+| `/Widths`, ours against the reference's | our first subset matches `Carlito-Bold` on 68.7% of shared codes and `Carlito-Regular` on **1.5%**; the crossed pairing is 0.0% |
+| `pdf-image-diff`, and then the page itself | 34 pages, **0 major**, `ink%` 0.00 throughout; page 1 renders bold by eye, down to the trailing regular `e` |
+
+Bold glyphs carry visibly more ink, so a document that drew none of them could not come back at
+`ink%` 0.00 on every page. **The correct bold program was always being selected, subset and
+embedded.** Only the announced name was wrong.
+
+**The fix is one expression, and it is not in this library.**
+`PdfFontCatalogue.BaseName` took `/BaseFont` from the face's *family* name; `/BaseFont` names a
+face (PDF 1.7 §9.6.2.1), so it now takes the PostScript name from the `name` table's ID 6,
+falling back to the full name with spaces stripped and only then to the family name a face whose
+file could not be read is left with. `OpenTypeFace` gained `PostScriptName` and `FullName` to
+serve it.
+
+Reach, measured by rendering all 171 documents before and after rather than by grepping for
+bold:
+
+| | before | after |
+|---|---|---|
+| documents whose font-name set changed | — | **156 of 171** |
+| font-name set equal to the reference's | 11 | **131 of 171** |
+| matches, page error, exact counts | 144 / 94 / 153 | **144 / 94 / 153** |
+
+So it moves almost the whole track's font metadata into agreement with LibreOffice's own font
+list and **moves no page, no word and no verdict** — which is the correct result, because
+`batch-check.sh` decides on page count, word count and the count of *unembedded* fonts, and a
+`/BaseFont` name reaches none of the three. On `Praktikastellen_…xls` the operator diff goes
+from 626 differing text records to **296** and face differences from 81 to **0**; the residue is
+294 `shows N vs M`, the known `Tj`-granularity artefact.
+
+> **The general lesson, since this cost a round's opening.** `pdf-ops.py` reports the
+> `/BaseFont` name, which is what the producer *called* the face — not what it embedded. When it
+> says two renderers used different faces, read the embedded programs' `name` tables before
+> believing it. The tool is right that something differs and wrong about what.
+
+### The first operator-level survey of the documents that already pass
+
+Nobody had ever run `pdf-ops.py diff` over the *passing* documents, which is where a defect the
+gate cannot see has to live. Run on all **89** matching documents of batches 001–009, text
+records only, against the fixed binary so the `/BaseFont` false positive could not swamp it:
+
+```
+only in ours          15189 records
+only in the reference 16044
+drawn differently     41154
+   size                27603     <- the finding
+   shows-only (Tj granularity, known, benign)   7457
+   face                  281
+clean (nothing one-sided, every difference granularity):  23 of 89
+```
+
+**Two thirds of the documents the gate calls finished have operator-level differences**, and the
+largest class is one nobody has named.
+
+#### The size difference is systematic, real, and unexplained
+
+Every affected document is a sheet printed at a **zoom**, and on each the ratio is one constant
+repeated across every record — 34 of the 89 carry it and the other 55 show none:
+
+| document | records | ours vs reference |
+|---|---|---|
+| `june_2025_published.xlsx` | 6686 | — |
+| `airports_6.xlsx` | 6326 | 6.76 vs 6.80 |
+| `commander-authorisation-…-2025.xlsx` | 2997 | 10.78 vs 10.81 |
+| `flying-log-passenger-23rd-september-2014.xls` | 2509 | — |
+| `SectorAdvisoryGroupandStrategyBoards.xls` | 1058 | 5.36 vs 5.39 |
+| `Chicago.List.2025.xlsx` | 664 | 7.37 vs 7.41 |
+
+Read off the content streams rather than off the tool, which is the check the bold finding
+earned: ours writes `/F1 6.7606 Tf` and the reference `/F1 6.803 Tf`. Both are numbers really in
+the files.
+
+**What is measured**: LibreOffice's own export of `airports_6.xlsx` states
+`style:scale-to="75%"` and a 9 pt body font, and 6.803 pt is exactly **240 hundredths of a
+millimetre**, a round number in the draw layer's unit.
+
+**What is not, and must not be asserted**: the mechanism. The naive product 9 × 0.75 = **6.75**
+is what *neither* side writes — ours sits 0.16% above it and the reference 0.79% above it — so
+this is not "they round and we do not", and any account that starts from 6.75 owes an
+explanation of both departures. The 1/100 mm observation explains the reference's number and
+says nothing yet about ours.
+
+**It does not explain the under-pagination cluster, and that is checked rather than assumed.**
+The sign matched — a font 0.63% small shortens every advance, so wraps come later and a row and
+then a page can be lost — but the three open under-paginating documents state no zoom at all:
+
+| document | | |
+|---|---|---|
+| `sectors-defense-and-aerospace.xlsx` | 225/227 | no `scale=`, no `fitToPage` |
+| `flightstandards-doc-Cross-reference-table_version02.xlsx` | 461/464 | no `scale=`, no `fitToPage` |
+| `tk-syllabus-comparison-document-v5.xlsx` | 852/855 | no `scale=`, no `fitToPage` |
+
+against `airports_6.xlsx`, which carries the defect and states `scale="75"`. There is no zoom
+for the rounding to happen in, so **the rule cannot reach any of the three** and their two or
+three pages keep the cause this file already gives them.
+
+### `INDEX_Digital_Transformation_Toolkits.xls` — closed: a bare `CONTINUE` is Escher
+
+**Fixed in round twenty-five; the document now renders 24 pages against 24 and matches.** Kept
+here because the wrong reading survived three rounds and the shape of the error is worth having.
+
+The measurements were always right. Word counts identical at 1982, page starts aligned either
+side of the gap, 63 images drawn against 207, and the shortfall shaped like a prefix — our page
+13 drawing the reference's 15 images exactly, our page 14 drawing 10 where its draws 21, then
+nothing. Two rounds called that a truncated shape walk; round twenty-four called it *not* a
+truncated walk, on the grounds that a walk stopping at 25 would not place the first fifteen
+exactly and then thin, and proposed `SheetDrawingArea` instead.
+
+A truncation at 25 does exactly that. The first 25 shapes are placed exactly, and the reference's
+pages that hold only shapes 26 onwards do not exist for us at all — which is the four missing
+pages. So the first reading was right about the symptom and neither reading had the mechanism,
+which is in the record stream rather than in the drawing layer:
+
+```
+sheet 12:  MSODRAWING x25, 8034 bytes    CONTINUE x70    OBJ x95
+```
+
+Excel writes one `MSODRAWING` per shape with that shape's `OBJ` after it, and stops writing
+`MSODRAWING` once the sheet's Escher stream passes the 8224-byte record ceiling — writing the rest
+as `CONTINUE` in the same interleaving. `BiffRecordReader` absorbed each into the `OBJ` before it.
+See `InDrawingBlock` in `XlsWorkbookReader` and `XclImpDrawing::ReadMsoDrawing`
+(`sc/source/filter/excel/xiescher.cxx:4021`), which switches its own continuation handling off for
+the whole block and reaches the same answer without a flag.
+
+**207 drawn against 107 read is explained by the same file**: the reference prints the block of
+pictures twice, once alone and once under the text, and 95 shapes plus one per sheet is the 107.
+
+## The twenty-first sweep: Excel's row heights are read on a 0.75 pt grid
+
+Swept whole at `09a35cdae` before anything was changed, 171 documents, two workers, no path
+twice and no `ref-failed`: **142 of 171, total absolute page error 106, 149 exact page counts**,
+batches 001 to 009 at 89/89 with page error 0. That reproduces round twenty's closing figures to
+the digit, so nothing has drifted under the scoreboard.
+
+Two changes landed, each swept whole on its own:
+
+| | baseline | + the row-height grid | + the embedded chart |
+|---|---|---|---|
+| matches | 142 | **144** | 144 |
+| total absolute page error | 106 | 99 | **94** |
+| exactly-correct page counts | 149 | 151 | **153** |
+| batches 001–009, the gate | 89/89 | 89/89 | **89/89** |
+
+### The rule
+
+LibreOffice's OOXML filter rounds a row height **down** to a multiple of 0.75 pt in two places:
+
+| site | citation |
+|---|---|
+| `sheetFormatPr/@defaultRowHeight` | `sc/source/filter/oox/worksheetfragment.cxx:681-684` |
+| every `row/@ht` | `sc/source/filter/oox/sheetdatacontext.cxx:316-319` |
+
+Both are `fHeight -= fmod(fHeight, 0.75)` and both are gated on `getFilter().isMSODocument()`,
+which is one test and no more: `docProps/app.xml`'s `<Application>` begins with "Microsoft",
+ignoring case (`oox/source/core/xmlfilterbase.cxx:241-245`, reached through
+`XDocumentProperties::getGenerator`, which `oox/source/docprop/docprophandler.cxx:501` fills from
+that element). **So the same bytes in the same sheet are read as two different heights depending
+on what the package says wrote them**, and `IsOffice2007`'s extra `AppVersion` condition is a
+different question that must not be folded into this one.
+
+The rounding is the XML filter's and not the format's. BIFF12 states a row height in whole twips
+and its own `importRow` and `importSheetFormatPr` apply nothing
+(`sheetdatacontext.cxx:412-440`, `worksheetfragment.cxx:790-808`), so XLSB is deliberately left
+alone.
+
+### Re-derived rather than inherited
+
+The rule arrived as a killed agent's unswept commit, so it was measured again from scratch: two
+packages differing in `docProps/app.xml` and in **no other part** — asserted by comparing every
+part of the two zips — round-tripped through the installed `soffice` to flat ODF.
+
+| stated | Microsoft Excel | Wibble Sheets |
+|---|---|---|
+| 14.4 | `0.198in` (14.25) | `0.2in` (14.4) |
+| 15.0 | `0.2083in` (15.0) | `0.2083in` (15.0) |
+| 18.6 | `0.25in` (18.0) | `0.2583in` (18.6) |
+| 29.4 | `0.4063in` (29.25) | `0.4083in` (29.4) |
+| 30.0 | `0.4165in` (30.0) | `0.4165in` (30.0) |
+| 22.9 | `0.3126in` (22.5) | `0.3181in` (22.9) |
+| 12.4 | `0.1665in` (12.0) | `0.172in` (12.4) |
+
+15.0 and 30.0 are already multiples of 0.75 and agree on both sides. That is what makes the pair
+a measurement of a *rounding* rather than of a difference between two packages, and it is why the
+corpus fixtures carry a 30 pt row as a control.
+
+**One claim in the inherited commit does not survive.** It said the subtraction has to be written
+as `h - h % 0.75` because `floor(h / 0.75) * 0.75` "is free to land a unit in the last place
+below" and would give 584 twips against 585 on a 29.4 pt row. The two agree on 29.4 and on every
+other height Excel can write — checked over each hundredth of a point and each twip up to the
+409.5 pt ceiling, 49142 values, zero disagreements. A test had been written to defend that claim
+and it could not fail; it is replaced rather than kept.
+
+### Reach: nine documents, against the 56 a grep predicts
+
+56 of the corpus's 109 SpreadsheetML workbooks are written by a Microsoft application *and* state
+at least one height the rule moves. **Nine are documents whose rendering actually changes**, which
+is the sixfold overstatement this project's skill warns about, measured again:
+
+| document | before | after |
+|---|---|---|
+| `NAARMO_Mexico_RVSM_Approvals.xlsx` | 17/16 | **16/16**, and 6792/6792 words |
+| `EASA_PRODUCT_LIST_-_ALL.xlsx` | 270/264 | **264/264** |
+| `Capability_List_…_unsorted.xlsx` | +6 pages | +3 pages |
+| `ODs-February-2022-Airbus-Commercial-Aircraft.xlsx` | −18 pages | **−21 pages** |
+| four more | — | one or two words each |
+
+`NAARMO` is the lead round twenty left open and it closes exactly as that round predicted: it had
+been passing on two errors cancelling until the header band was fixed, its drawn row pitch was
+then measured at 14.40 pt against the reference's 14.23, and 14.4 snaps to **14.25**.
+
+`ODs-February-2022` is the honest cost. It already under-paginated, and shorter rows under-
+paginate further; page error and exact page counts both improve over the same change, so it
+stands.
+
+### The second change: a chart on an `.xls` worksheet was dropped, and its pages with it
+
+`Template Pilot Logbook JAR-FCL V3.0.xls` rendered **35 pages against 38** and 1279 words against
+1610. Its sheets `GraphHDV` and `Real TT` hold **no cells at all** — LibreOffice's own flat-ODF
+export of them is one `draw:frame` carrying a `draw:object` chart and nothing else — and the
+reference prints two pages for the first and one for the second. We printed none.
+
+The mechanism was one line. `XlsDrawing.Build` dropped any Escher shape carrying neither a picture
+nor `TXO` text, which is the right rule for a solver entry or a group's own frame and the wrong
+one for a chart: an embedded chart's `OBJ` is `ftCmo` type 5 and carries neither. It therefore
+never reached `sheet.Drawings`, `SheetDrawingArea` could not widen `PrintedRange`, the range
+stayed invalid, `SheetPagination` returned no placements, and `SheetEmptyPages.Occupied`'s "a
+sheet always prints one" floor never fired because there was nothing to floor. Calc has the
+object on its draw page, so `ScDocument::GetPrintArea` takes the maximum of the cells' extent and
+the drawing layer's (`documen2.cxx:649-658`) and finds a print area where we found none.
+
+The chart records were skipped rather than missing: `ReadSheetRecords` counts `BOF` depth and
+stepped over everything inside the embedded chart's substream. They are now read, and
+**deliberately not the way a chart sheet's are**. A chart sheet's substream carries the sheet's
+own page setup and the drawing objects laid over the chart, and both are routed onward; an
+embedded chart's carries a page setup belonging to the chart's notional page and drawing objects
+anchored inside the chart's rectangle, and both arrive *after* the worksheet's own records — so
+routing them onward overwrites the worksheet's header, footer, margins and `SETUP`. Only the
+chart records are taken. That claim is asserted rather than stated: the corpus fixture's chart
+sheet carries a header and nothing else in the workbook does, and a mutation reading the
+substream the chart-sheet way blanks it.
+
+The plot joins the `OBJ` that opened the substream by adjacency, which is what
+`XclImpChartObj::ReadChartSubStream` does too; no identifier is needed because a chart substream
+can only follow its own object.
+
+**Reach, counted from the files rather than grepped for**: a census of every `ftCmo` type across
+the track's 62 `.xls` finds 13 chart objects in **4 workbooks**, and the wider census is worth
+keeping since nobody had taken it —
+
+```
+dropdown 200 records / 14 documents      text      48 / 9       chart 13 / 4
+picture  130 / 8                         note      47 / 9       rect  13 / 3
+button    60 / 2                         line      41 / 1       group 16 / 2
+```
+
+Measured whole-track, five documents moved and none regressed:
+
+| document | before | after |
+|---|---|---|
+| `Template Pilot Logbook JAR-FCL V3.0.xls` | 35/38 | **38/38**, 1279 → 1305 words |
+| `EHEST-Pre-departure-checklist…xls` | 22/24 | **24/24**, 7734 → 7825 words |
+| `TOGAF9-Tool-ConfReqts-CSQ.xls` | 28/28, matching | 28/28, still matching |
+| `orbus_togaf_tool_csq.xls` | 33/75 | 33/75, +15 words |
+| `ans_mappings_of_eccairs_terms.xlsx` | — | the *reference's* word count moved by one |
+
+**It wins no match, and it is right anyway**: total page error 99 → **94** and exact page counts
+151 → **153**, `batch-010`'s page error 9 → 4 and its exact counts 7 → 9. Neither of the two
+documents whose pages are now right passes the word gate, because an `.xls` chart states its
+series as cell ranges on another sheet and nothing resolves them — the chart draws its title and
+both axis titles and then a value axis scaled from an empty series, 0 to 12 where the reference
+reads 0 to 180. **That is the next piece of this**, and it is worth 305 words on the Logbook and
+557 on EHEST.
+
+**Done in round twenty-four.** `CHSOURCELINK` is decoded, `SUPBOOK`/`EXTERNSHEET` resolve the
+`ixti`, and the workbook pre-scans for the rectangles its charts name and reads those sheets before
+the content pass — because a chart is built when its substream ends and the cells it plots are on
+a later sheet. The two documents plot 0…1400/0…1200 and 0…90, matching the reference exactly.
+Neither passes the word gate yet, and the reasons are now measured rather than guessed: see
+`dotnet/probes/sheets-r24/README.md`. What is still not read from a chart substream is the series
+colours (`CHLINEFORMAT`, `CHAREAFORMAT`), the label font (`CHFONT`, which needs `ChartLabel` to
+carry a family at all), and a date axis (`CHDATERANGE`).
+
+`TOGAF9-Tool-ConfReqts-CSQ.xls` was the risk and is worth recording: it matched before the change
+and carries a chart object, so it could have been the cost. It moved by 14 words out of 24 141 and
+stayed a match.
+
+### Where the rest of batches 010–012 stands
+
+- `FAA-2019-0995-0002_attachment_2.xlsx` (32/33) is a wrap difference, not a pitch one. On the
+  "Accessory List" sheet the reference's repeating row group is **28.70 pt** and ours is
+  **14.93 pt** — it breaks each row's text onto two lines where we fit one — so the residue is
+  the width the text is measured at rather than the height reserved for it. That is the same
+  device model the ninth sweep fitted and the same live caveat.
+- `Keywords_Mapping_Graphs_and_Charts.xlsx` is 46/46 pages and 4695 words against 4808, and the
+  shortfall is spread evenly over pages 19 to 40 at about five words a page. Every one of those
+  pages is a chart, so this is chart *labels* rather than pagination — an XLSX chart, so it is a
+  different defect from the `.xls` one above.
+- `Application_Compliance_Checklist_5_Apr_2021.xlsx` is unchanged and still deliberately unfixed;
+  see below.
+
+### A harness trap that produced a red run meaning nothing
+
+A mutation script that restores the source but does not rebuild leaves the *mutant's* assemblies
+on disk, and the per-project test loop this project recommends runs `--no-build`. The suite then
+reported `Failed: 1` on exactly the test the last mutation had been written to break, on a tree
+whose source was clean. Rebuild between restoring and re-running — or, better, make the restore
+step rebuild — because the failure looks like a real regression in the change you just made and
+the diff that would explain it is not there.
+
+## The twentieth sweep: a header's band is measured, not stated
+
+Swept whole at `b7950ffd5` before anything was changed, 171 documents, two workers, no path
+twice and no `ref-failed`: **139 of 171, total absolute page error 111, 147 exact page counts**,
+batches 001 to 008 at 80/80 and `batch-009` at 8/9.
+
+Round nineteen reported **138** at its final commit with the same page error (111) and the same
+exact count (147). One row differs and it is a word-count verdict, so LibreOffice's own
+non-determinism is the likely explanation rather than a code difference — this file already
+records `PBN Matrix NAAs (V01).xlsx` returning 5554, 5557 and 5556 across three runs of the same
+binary on the same file. **The brief's other figures were right**, which is worth saying because
+three consecutive rounds before this one were handed stale ones.
+
+### `RegChangeReport.xlsx`: the contradiction was in the model, not in either measurement
+
+Round nineteen left this document with two numbers that could not both be right. Both reproduce
+here exactly. Greedy pagination over LibreOffice's own row heights matches its page breaks only
+for a body height in **[681.62, 682.14)**; the page geometry it exported gives **661.6 pt**, which
+matches none of them.
+
+**661.6 is not a number Calc paginates with.** It is the body left over once the footer's
+*spacing* and its *height* are both subtracted, and Calc's page rectangle subtracts only the
+height —
+
+```
+aPageRect.SetBottom( ( aPageRect.Bottom() - nBottomMargin ) * 100 / nZoom - aFtr.nHeight );
+                                                        printfun.cxx:3003
+```
+
+— so the body is `pageHeight - top - bottom - hdr.nHeight - ftr.nHeight` = **684.0 pt** on this
+workbook, which is what we already computed. The real gap was never twenty points. It is 1.9.
+
+### Where the 1.9 pt goes, and why it is on every page of every sheet with furniture
+
+The band a header or footer occupies is stated twice in a SpreadsheetML file and Calc believes
+neither. It measures the text itself, and it does so twice with two different rulers:
+
+1. **At import, crudely.** A line is as tall as the largest *bare point size* on it — no ascent,
+   no descent, no leading. `HeaderFooterParser::getCurrHeight` returns `maFontModel.mfHeight`
+   (`sc/source/filter/oox/pagesettings.cxx:738-741`) and `XclImpHFConverter::GetMaxLineHeight`
+   is the same function under another name (`sc/source/filter/excel/xihelper.cxx:504-508`).
+   Both total it down a portion's lines and take the maximum across the three portions, and an
+   empty portion still stands one line tall.
+2. **It stores the difference as a distance.** `bodyDistance = statedBand - nominal`, with the
+   stated band kept as a minimum (`pagesettings.cxx:1029-1040`, `xipage.cxx:311-330`). A
+   negative distance means the text does not fit, and the band is pinned rather than dynamic
+   (`#i23296`).
+3. **At print, properly.** `ScPrintFunc::UpdateHFHeight` throws the crude figure away and asks
+   the EditEngine: `nHeight = nMaxHeight + nDistance`, floored at the stated band
+   (`printfun.cxx:838-849`).
+
+Composed: **`printedBand = statedBand + max(0, measured - nominal)`**. For ordinary one-line
+furniture that is about a tenth of the font size, and it comes off the printable body on every
+page.
+
+`Layout/SheetBandHeight.cs` is the port. It walks the `&`-code string a second time rather than
+reusing `SheetHeaderFooter.ParseCodes`, because the two want opposite halves of it: `ParseCodes`
+discards the size and face codes precisely because they do not print, and this needs exactly
+those and can ignore the literal text.
+
+**The arithmetic reproduces LibreOffice's own export to the digit**, which is what makes this a
+port rather than a fitted constant. On `RegChangeReport.xlsx`: stated band 0.45 in, one 10 pt
+line, so `bodyDistance = 1143 - 353 = 790` hundredths of a millimetre — and the export states
+`fo:min-height="0.45in"` and `fo:margin-top="0.311in"`.
+
+### The band's default font is the workbook's, and that took two documents to see
+
+The first cut used a fixed 10 pt Liberation Sans. Calc uses the workbook's own default cell font
+— `ScPrintFunc::MakeEditEngine` fills the band's defaults from `getDefaultCellAttribute`
+(`printfun.cxx:1769-1774`) and both filters' parsers start from the workbook's first font
+(`XclImpHFConverter::ResetFontData`, `xihelper.cxx:534-542`). Two documents disagree with each
+other and settle it, both read out of LibreOffice's export rather than inferred:
+
+| document | band states | export | nominal |
+|---|---|---|---|
+| `NAARMO_Mexico_RVSM_Approvals.xlsx` | no size; default font Calibri 11 | `min-height="0.45in"`, `margin-bottom="0.2972in"` | **11.0 pt** |
+| `sheet-ooxml-features.xlsx` | `&"Times New Roman,Regular"&12` | `min-height="0.2654in"`, `margin-bottom="0.0984in"` | **12.02 pt** |
+
+`SheetDefaultFont` was already threaded into all three print-setup readers for column widths, so
+this is a parameter rather than new plumbing. The growth on the second resolves exactly against
+Liberation Serif — ascent 0.891 em plus descent 0.216 em is 1.107 em, 13.29 pt at 12 point.
+
+`SheetPaginationTests.AnOoxmlTopMarginSurvivesTheHeaderBandConversion` asserted the invariant
+this breaks: that `TopMargin + HeaderHeight` comes back out as the file's own `top` margin. It is
+not an invariant Calc keeps — the first printed row sits *below* the file's top margin by the
+growth — and the test is rewritten to the measured value rather than relaxed.
+
+### What it bought, and the one document it cost
+
+Reach is stated as documents whose rendering changed, measured by rendering them, because
+counting files that state a header overstates it: **28 of the 109 corpus SpreadsheetML documents
+state a header or footer at all, and 10 documents in the track rendered differently.**
+
+After the change, swept whole again: **142 of 171, page error 106, 149 exact**, batches 001 to
+008 still 80/80 and `batch-009` at 9/9. Four documents gained a match and one lost it.
+
+| document | before | after |
+|---|---|---|
+| `RegChangeReport.xlsx` | 12/12, 3060 words of 3137 | 12/12, **3131** |
+| `fy20-may20-sep20.xlsx` | 95/96 | **96/96** |
+| `fy2011-aip-grants.xls` | 90/93 | **93/93** |
+| `certification-type-…-Light-Prop-14-28112013.xlsx` | 341/343 | **343/343**, words exact |
+| `NAARMO_Mexico_RVSM_Approvals.xlsx` | 16/16 | 17/16 — lost, see below |
+
+`fy2011-aip-grants.xls` is a BIFF workbook and it moved only on the *second* commit, the one
+that takes the default font from the workbook. That is the evidence that the refinement is not
+cosmetic and that the rule reaches both filters.
+
+Of the eleven documents that were under-paginating by one to three pages with their word counts
+already inside the gate's band — the cluster this was aimed at — **three have no header or footer
+anywhere in the workbook**, so the rule cannot reach them and their two or three pages have a
+different cause. **Three of the remaining eight closed.**
+
+`NAARMO_Mexico_RVSM_Approvals.xlsx` went 16/16 to 17/16 and is the round's one lost match. It was
+passing because two errors cancelled: measured off both PDFs, its drawn row pitch is **14.40 pt
+against the reference's 14.23**, 1.2% tall, and a body 2.4 pt too long was hiding it. The change
+is right on its own evidence and on the continuous measures, so it stands.
+
+### `Application_Compliance_Checklist_5_Apr_2021.xlsx`: collapsed outline groups, and reach 1
+
+The track's largest single word error — 18 pages against 14 and **26 353 words against 17 718** —
+and round eight's two candidate mechanisms both still hold as refutations: the vertical clip and
+`EnableSkipOutsideFormat` were implemented for this document and measured to move nothing, and
+its five hidden sheets are already dropped by `SpreadsheetPages.IsPrinted`.
+
+Narrowed this round with the round-trip:
+
+- **Extraction agrees between the readers** — 70 008 words from the `.xlsx` against 70 047 from
+  LibreOffice's own flat-ODF export of it. The cell content is not in question, so this is a
+  value only rendering resolves.
+- **Rendering that same `.fods` through our own layout engine gives 12 pages and 17 016 words**
+  against the reference's 14 and 17 718, and its per-page counts track the reference page for
+  page across the offending sheet (2497/2785, 2631/2880, 2764/2995, …). From the `.xlsx` the
+  same engine gives 18 and 26 353. **So the defect is in the XLSX reader and the layout engine
+  is exonerated.**
+- The sheet states `outlineLevel` on 1025 rows and `collapsed="1"` on 31, and the string
+  `hidden` **does not occur anywhere** in `xl/worksheets/sheet3.xml`. LibreOffice's export marks
+  329 rows of that sheet `table:visibility="collapse"` or `"filter"` — 548 and 457 across the
+  workbook. Calc derives the hidden state from the outline structure and the `autoFilter`; we
+  read only `hidden="1"` and hide none of them, so we draw text the reference draws nowhere at
+  all (`(2) Section 450.139(e)(1) regarding toxic hazards for flight;`, cell `E94`, appears once
+  in ours and zero times in both the reference and the `.fods` render).
+
+**Not implemented, and the reason is reach rather than difficulty.** Exactly **1 of the 109
+corpus SpreadsheetML documents uses row outline levels at all**, and it is this one. A fix that
+helps one document is not a fix. Recorded so the next agent does not re-derive it, and so that a
+corpus that later grows an outline-heavy workbook has the diagnosis waiting.
+
+### The next leads on this track
+
+- **An `.xls` chart's series are not resolved**, which is round twenty-one's unfinished half. The
+  chart on a worksheet now draws its title, both axis titles and a value axis fitted to no data —
+  0 to 12 where the reference reads 0 to 180 — because the series are stated as cell ranges on
+  another sheet and nothing resolves them. Worth 305 words on
+  `Template Pilot Logbook JAR-FCL V3.0.xls` and 557 on `EHEST-Pre-departure-checklist…xls`, which
+  are the only things left between those two and a match now that their page counts agree.
+- **The three under-paginating documents with no furniture** —
+  `flightstandards-doc-Cross-reference-table_version02.xlsx` (461/464),
+  `tk-syllabus-comparison-document-v5.xlsx` (852/855) and
+  `sectors-defense-and-aerospace.xlsx` (225/227). On the last of these both renderings put page
+  20's ink between y 71.8 and y 745.6, so the body height agrees and the residue is row heights
+  somewhere in the document; the sampled pitch is 14.64 against 14.60. Not diagnosed, and note
+  the sign: rows too *tall* should over-paginate, and these under-paginate.
+- **`RegChangeReport.xlsx`'s footer face** is still a fidelity defect. The reference embeds
+  Carlito on all twelve pages from the footer's `&"Calibri"` code and we embed none; the band
+  now honours the face for its *height* and `SheetPageDecoration` still draws every band at
+  `SheetBandText.DefaultSize` in the default face. Splitting a band into sized, faced runs is the
+  same work as the `&<size>` code that puts the reference's `#` on its own baseline.
+
+## The nineteenth sweep: a button is on the screen and not on the paper
+
+Swept whole at `7e1b7c79e` before anything was changed, 171 documents, two workers, no path twice
+and no `ref-failed`: **138 of 171, total absolute page error 111, 147 exact page counts**, batches
+001 to 008 at 80/80 with zero page error and `batch-009` at **8/9**.
+
+**The brief handed over round sixteen's per-batch figures again, and this time the whole-track
+headline was round eighteen's.** It gave `batch-009` as 6/9 with `airports_6.xlsx` and
+`Company_Seniority_Date_Calculator.xlsx` open; both have matched since rounds seventeen and
+eighteen respectively, and `RegChangeReport.xlsx` is the only document left in that batch. It also
+repeated the "fixed 75% scale, so the shortfall is cumulative row height" account of
+`airports_6.xlsx` that round seventeen had already refuted. That is three consecutive rounds
+described by a brief written before their merge; the base commit's own numbers are the only ones
+worth starting from.
+
+### `ftCmo`'s flag word was skipped, and its `fPrint` bit with it
+
+`XlsDrawingCollector.ReadObject` read `ftCmo`'s object type and identifier and skipped the rest, so
+the third field — the flag word — never reached the page. Its `fPrint` bit
+(`EXC_OBJCMO_PRINTABLE = 0x0010`, `sc/source/filter/inc/xlescher.hxx:228`) is what Excel's
+"Print object" checkbox writes, and Excel leaves it **off** for a button by default.
+
+**The rule is narrower than the flag, and getting that wrong loses shapes the reference draws.**
+Calc reads the bit for every object but acts on it in exactly one place:
+`XclImpControlHelper::ProcessControl` writes it to the control model's `Printable` property
+(`sc/source/filter/excel/xiescher.cxx:1998`). A plain shape with the bit clear reaches
+`XclImpDrawObjBase::DoPreProcessSdrObj`, which merely *traces* that the object is not printable
+(`xiescher.cxx:843-845`) and prints it anyway. `PC1000.xls` states both cases at once: its OBJ
+records are six Buttons at `0x4001`, one Rectangle at `0x6001` and one Picture at `0x6001` — every
+one of them with `fPrint` clear — and the reference PDF draws the rectangle and the picture and
+none of the buttons. So the flag is honoured for the eleven types Calc's factory turns into an
+`XclImpTbxObjBase` (`xiescher.cxx:280-292` against `xiescher.hxx:503-776`): button, check box,
+option button, edit box, label, dialog, spin, scroll bar, list box, group box, drop-down.
+
+Measured on `sheets/batch-010/xls/PC1000.xls`, which is as clean a signature as this track has
+produced: **exactly +9 words on each of pages 2 to 9** and +17 on page 1, on a document whose page
+count already matched at 13. The nine are the captions of two buttons — `Clear Individual Lot Data`
+and `Clear Data From all Lots`. **957 words against 873 before and 863 after**, and the document is
+inside the gate's band.
+
+### The object is flagged, not dropped, because its anchor still moves the page break
+
+The first cut skipped the object in the reader. That is wrong and the corpus would have shown it
+somewhere unrelated: `ScDrawLayer::GetPrintArea` walks every object on the page and excludes
+exactly one thing, the hidden layer a closed comment's caption sits on
+(`sc/source/core/data/drwlayer.cxx:1395-1424`) — so an unprintable button anchored past the last
+cell **still widens the printed block**, which is what `SheetDrawingArea.Extend` reproduces.
+`SheetDrawing` therefore carries `IsPrintable` beside `IsHidden`, and only `SheetPageGraphics`
+reads it.
+
+### Reach, measured on the files rather than grepped
+
+**16 of the corpus's 62 binary workbooks carry an unprintable form control**, spread across batches
+005, 008, 010, 011, 012, 013, 014, 016 and 017 — so this is not a one-document rule. What it is
+*not* is a change with sixteen documents' worth of effect: only one of the sixteen moved, because
+the others' controls carry no `TXO` text and were drawing nothing to begin with. Both figures are
+worth stating together; the first says the rule is general and the second says what it bought.
+
+**Zero of the 109 SpreadsheetML documents in the corpus state `fPrintsWithSheet="0"` or a VML
+`<x:PrintObject>False</x:PrintObject>`**, so the OOXML side of this is deliberately not implemented:
+there is nothing in the corpus to measure it against, and a reader written blind is the thing this
+file keeps recording as a mistake.
+
+### `RegChangeReport.xlsx` is a page break, not a redraw — and the −1 a page is not the footer face
+
+Both of round eighteen's measurements reproduce exactly: **3060 words against 3137**, page 6 alone
+**−72** and every other page within 4; and the reference embeds **Carlito-Regular** on all twelve
+pages where we embed three Liberation Sans subsets and no Carlito. Two of its conclusions need
+correcting.
+
+**The mechanism is not a missing clip-and-redraw.** `SpreadsheetPages.DrawCoveredMerge` already
+redraws a merge straddling a page break from its true origin, and its own remark cites this
+workbook. The band the reference draws at the top of its page 6 is **row 135 alone**, and row 135
+is 95.25 pt tall: LibreOffice ends page 5 at row 134 and we fit row 135 onto it, so there is no
+covered cell on our page 6 for the existing code to reach back from. Measured off LibreOffice's own
+flat-ODF export of the sheet: page 5 begins at row 100 on both sides, rows 100–134 sum to
+**586.90 pt** and rows 100–135 to **682.14 pt**, and a greedy row-band pagination over those heights
+reproduces LibreOffice's own breaks — pages 1–4 at rows 1–28, 29–57, 58–83, 84–99 — for a usable
+body height in **[681.62, 682.14)**. Ours admits 682.14. So this is one number, and it is about four
+points of page rather than anything about merges.
+
+**And the exported page geometry does not explain that number**, which is the thing to measure
+first next round rather than assume. The flat-ODF page layout states `fo:margin-top="0.75in"`,
+`fo:margin-bottom="0.3in"`, a footer `fo:min-height="0.45in"` and a footer `fo:margin-top="0.311in"`,
+which sum to a body of **661.6 pt** — and 661.6 puts page 5 at rows 99–133 and page 6 starting at
+row 134, which is not what the reference draws.
+
+**The steady −1 a page is the `&<size>` code, not the `&"font"` code.** The footer is
+`&L_x000D_&1#&"Calibri"&10&K000000 Security Classification: Protected A`. Both renderings draw the
+literal `_x000D_`, the `#` and the sentence; the reference draws the `#` **on its own baseline** —
+page 5 has `Security Classification: Protected A` at y 758.10, `_x000D_` at 758.60 and `#` at
+766.70 — because `&1` sets it to one point, and poppler therefore reads it as a separate token. We
+draw the whole part at one size and `wc -w` sees `_x000D_#` as one word. Honouring the size would
+be worth +1 a page, +12 in all, taking −77 to −65 against a 2% band of 62.7 — still short. **Only
+page 6's band closes this document**, and the face is a fidelity defect with no effect on the gate.
+
+## The eighteenth sweep: an empty row band is not a page the zoom search can count
+
+Swept whole at `54729fdc7` before anything was changed, 171 documents, two workers, no path twice
+and no `ref-failed`: **137 of 171, total absolute page error 112, 146 exact page counts**, batches
+001 to 008 at 80/80. After the one change, **138 of 171, page error 111, 147 exact**, the gate
+still 80/80 and `batch-009` 7/9 → 8/9.
+
+**The brief handed over round sixteen's figures, not round seventeen's** — 136/113/145 with
+`batch-009` at 6/9, and a description of `airports_6.xlsx` as "a fixed 75% scale, so the shortfall
+is cumulative row height". Round seventeen is already merged at this commit; it had refuted that
+explanation (the fault was horizontal — `Helv` resolving to Liberation Sans where the binary takes
+DejaVu Sans) and the document already matched. Check the base commit's own numbers before taking a
+handover's, on this track especially: two consecutive rounds have now been described by a brief
+written before their merge.
+
+### `m_nPagesY` is not the number of bands the geometry produces
+
+`CalcZoom` bisected on the raw row-band count. Calc's does not:
+`PrintPageRanges::calculate` increments `m_nPagesY` only for a band `IsPrintEmpty` is false across
+— `printfun.cxx:3176` for each band the row-break iterator ends, `:3220` for the last one — so
+every predicate in `ScPrintFunc::CalcZoom` compares the smaller number, the tdf#103516 nudge at
+`:2955` included.
+
+Measured on `Company_Seniority_Date_Calculator.xlsx`, which the seventeenth round left
+unreconciled. Its `Bulletin Clarification` sheet states a print area of `A1:Y49` over a sheet whose
+**last `<row>` element is 48**. Fitting to width alone gives zoom 80; the nudge tries 78, where the
+rows split into 1–48 and the empty row 49 — **one page to Calc and two to us** — so the count
+looked unchanged, the nudge was abandoned, and the sheet printed at 80, spilling a thirteenth page
+holding one row. **13 pages against 12, and 12 now.**
+
+The predecessor's note said one of three inputs — the row sum, the printable height, or the row the
+band ends at — was not what it assumed, and asked for that to be measured first. **It was none of
+the three**, and the arithmetic it distrusted was right: 14750.6 twips of rows against a printable
+14769 at zoom 78 and 14400 at 80. The missing input was that the count skips empty bands.
+
+`SheetEmptyPages.IsPrintEmpty` is now reachable from inside pagination as well as after it, threaded
+in as a predicate rather than by giving `SheetPagination` the sheet, so the class still needs only
+the grid and the print setup to answer a geometric question.
+
+Corpus document and test: `sheet-fit-empty-band.xlsx`, built to the *shape* rather than copied from
+the workbook — A4 portrait, quarter-inch margins, fit-to-width with the height unconstrained, 54
+rows pinned at 15 pt summing to 16200 twips against a printable 16118 at zoom 100 and 16447 at 98,
+print area `A1:B55`. One page in LibreOffice 24.2.7.2 and one page here. **Verified against a
+faithful wrong implementation rather than a mutation**: restoring the previous call —
+`Paginate(setup, grid, range)` with no emptiness test threaded in, which is exactly what the code
+did before — renders it on two pages.
+
+### `RegChangeReport.xlsx`: the residue is one visible band, and the pitch theory is refuted
+
+Still `words`, at **3060 against 3137** — 77 short of a 3137 total whose 2% band allows 63. Measured
+per page, ours minus the reference: page 6 is **−72** and every other page is within 4.
+
+The reference's page 6 **opens with a yellow-filled, bordered continuation band** carrying the tail
+of the row above — three sentences ending `(Bulletin 2026-32)`. It is plainly visible in the
+rendered page, so this is not the text layer differing: we omit that band and start at
+`Modernize Resources`, and everything below is shifted up by its height. We draw the same text at
+the foot of **page 5** instead, where the reference clips it away and re-emits it on page 6.
+
+**Two mechanisms fit that, and one is now refuted.** If our line pitch inside the 35-row merge were
+tighter, the text would end on page 5 for that reason alone. Measured off both PDFs on page 5, the
+description column: **46 lines on both sides**, dominant pitch **10.1 pt against 10.0**, spanning
+y 55.0–752.2 here and 54.9–758.1 there. The pitch agrees and the line count agrees, so the cause is
+the remaining one — **we do not clip a cell's text at the page boundary and redraw the remainder on
+the following page**, which is what `ScOutputData` does and what puts that band on page 6.
+
+Note what this means for the gate: the reference emits that tail **twice**, once clipped away on
+page 5 and once visibly on page 6, and we emit it once. So the word deficit is partly the
+reference's draw-and-clip strategy — but the *visible* difference is real and ours is the wrong
+page, so this is a defect and not a ceiling. It is the same family as the reverted
+`CRFlags::ManualSize` work, and it is a feature rather than a wiring change.
+
+### The footer's stated font is not honoured, on a document where it is measurable
+
+Independent of the above and found on the same file. `RegChangeReport.xlsx`'s footer is
+`&L_x000D_&1#&"Calibri"&10&K000000 Security Classification: Protected A`, and the reference PDF
+embeds **Carlito-Regular on every one of its twelve pages** beside Liberation Sans regular, italic
+and bold. Ours embeds three Liberation Sans subsets and no Carlito — every font in the workbook's
+`styles.xml` is Arial, so **Calibri can only have come from the footer's `&"…"` code**. The gate
+sees it as the steady −1 a page that accompanies the page-6 deficit; `pdffonts` sees it outright.
+Whether `&"font"` and `&<size>` are parsed at all was not chased further this round.
 
 ## The seventeenth sweep: the workbook's default font is not the one the chain names
 
@@ -861,7 +1641,7 @@ line taking the horizontal path, where Calc *shortens* the string — dropping c
 clip it instead, which keeps every glyph in the text layer. That is the same defect in the other
 axis and would explain an over-count with the row heights agreeing.
 
-### `INDEX_Digital_Transformation_Toolkits.xls`: six pages of pictures we never draw
+### `INDEX_Digital_Transformation_Toolkits.xls`: six pages of pictures we never draw *(closed — see above)*
 
 18 pages against 24 with the words matching **exactly** (1982 against 1982), which reads as six
 blank pages the reference keeps and is not. The last sheet's two columns are 0.2374 in and
@@ -881,6 +1661,12 @@ anchored at `svg:x="0in"`, so their rectangles begin exactly on the band's left 
 `TouchedByADrawing` compares a drawing's bounds against the block's with `>=`/`<=` on both sides.
 Whether every icon on those four pages is inside the *printed* range at all is the thing to measure
 next — `HasAnyDraw` walks the whole drawing page rather than the objects anchored in the range.
+
+**Closed in round twenty-five, and the empty-page question above was the wrong one.** The four
+pages were not an empty-page rule and not a column-band question: 70 of the sheet's 95 shapes were
+never read at all, because Excel wrote them as `CONTINUE` records once the Escher stream passed
+8224 bytes and `BiffRecordReader` joined each to the `OBJ` before it. All 95 now reach the page and
+the document matches at 24 pages. See the closed section earlier in this file.
 
 ### `TK-Syllabus-Comparison-Document-v2.xlsx`: rows 10.4% too tall, lines exactly right
 

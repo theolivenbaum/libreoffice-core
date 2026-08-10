@@ -37,6 +37,13 @@ public readonly record struct InstalledFace(
 /// fontconfig would add a second source of truth rather than the missing one.
 /// </para>
 /// <para>
+/// One decision is the exception, and it is marked out rather than quietly folded in: which of
+/// several installed faces draws a character <em>nothing on LibreOffice's fallback list</em> covers.
+/// No table answers that, and the answer is measurably a property of the machine's fontconfig
+/// configuration rather than of the fonts — see <see cref="FontconfigPreferences"/>. That is read,
+/// and only for that. Everything above it still comes from the table.
+/// </para>
+/// <para>
 /// Only the family name, weight and slant are read at index time, which is a few kilobytes per file
 /// rather than the whole face. A machine with several hundred fonts is indexed in well under a
 /// second, and nothing is parsed twice: the face itself is loaded only when something asks to measure
@@ -227,15 +234,23 @@ public sealed class SystemFontResolver : IFontResolver, IGlyphFallbackResolver
 {
     private readonly SystemFontIndex _index;
     private readonly Dictionary<string, OpenTypeFace> _loaded = new(StringComparer.Ordinal);
+    private readonly Dictionary<OpenTypeFace, string> _keys = new(ReferenceEqualityComparer.Instance);
     private readonly List<FontSubstitution> _substitutions = [];
     private readonly Dictionary<(int CodePoint, int Weight, bool Italic), OpenTypeFace?> _fallbacks = [];
     private readonly List<GlyphFallback> _glyphFallbacks = [];
+    private readonly FontconfigPreferences _preferences;
 
     /// <summary>Creates a resolver over an index of installed faces.</summary>
-    public SystemFontResolver(SystemFontIndex index)
+    /// <param name="index">The faces found on the machine.</param>
+    /// <param name="preferences">
+    /// The machine's fontconfig preferences, used only to order the last-resort glyph fallback;
+    /// null takes this machine's own, which is read once per process.
+    /// </param>
+    public SystemFontResolver(SystemFontIndex index, FontconfigPreferences? preferences = null)
     {
         ArgumentNullException.ThrowIfNull(index);
         _index = index;
+        _preferences = preferences ?? FontconfigPreferences.Machine;
     }
 
     /// <summary>Creates a resolver over the platform's font directories.</summary>
@@ -295,9 +310,19 @@ public sealed class SystemFontResolver : IFontResolver, IGlyphFallbackResolver
         }
 
         // Nothing on LibreOffice's list covers it. Anything installed that does is still better than
-        // a box, and the choice is made deterministic by name so two runs of the same document agree.
+        // a box, and the order is the machine's fontconfig preference for a generic family — which
+        // is what LibreOffice itself lands on here, since it asks fontconfig before it ever reads
+        // the list above. Ordinal family name remains the last resort, so a machine with no
+        // fontconfig behaves exactly as this did before.
+        //
+        // The rank comes ahead of slant and weight because fontconfig scores family above both
+        // (`PRI_FAMILY_WEAK` precedes `PRI_SLANT` and `PRI_WEIGHT` in `fcmatch.c`), and because at
+        // this point the primary face has already failed: a character drawn in the preferred family
+        // upright is closer to the reference than the same character drawn in an unrelated family
+        // that happens to be italic.
         found ??= _index.Faces
-            .OrderBy(face => face.IsItalic == isItalic ? 0 : 1)
+            .OrderBy(face => _preferences.RankOf(face.FamilyName))
+            .ThenBy(face => face.IsItalic == isItalic ? 0 : 1)
             .ThenBy(face => Math.Abs(face.Weight - weight))
             .ThenBy(face => face.FamilyName, StringComparer.Ordinal)
             .Select(face => Covers(face, codePoint))
@@ -321,7 +346,14 @@ public sealed class SystemFontResolver : IFontResolver, IGlyphFallbackResolver
     /// <summary>Loads a face by key through the resolver's own cache, or null when it cannot be read.</summary>
     private OpenTypeFace? LoadCached(string faceKey)
     {
-        if (_loaded.TryGetValue(faceKey, out OpenTypeFace? existing)) return existing;
+        if (_loaded.TryGetValue(faceKey, out OpenTypeFace? existing))
+        {
+            // Also on the hit, because the face may have been loaded through `LoadOpenType` — which
+            // fills `_loaded` and not `_keys` — and a fallback that finds it there would otherwise
+            // have no key to be embedded by.
+            _keys[existing] = faceKey;
+            return existing;
+        }
 
         (string path, int index) = SplitKey(faceKey);
 
@@ -336,9 +368,33 @@ public sealed class SystemFontResolver : IFontResolver, IGlyphFallbackResolver
             face = null;
         }
 
-        if (face is not null) _loaded[faceKey] = face;
+        if (face is not null)
+        {
+            _loaded[faceKey] = face;
+            _keys[face] = faceKey;
+        }
+
         return face;
     }
+
+    /// <inheritdoc/>
+    /// <remarks>
+    /// A reverse lookup over the faces this resolver has loaded rather than a fresh resolution: the
+    /// face is the answer already given, and re-resolving by family name could land on a different
+    /// file — a family with several faces installed, or a collection whose members share one name.
+    /// Reference equality is the right key for exactly that reason.
+    /// </remarks>
+    public FontReference? ReferenceFor(OpenTypeFace face)
+        => face is not null && _keys.TryGetValue(face, out string? faceKey)
+            ? new FontReference
+            {
+                FamilyName = face.FamilyName ?? string.Empty,
+                RequestedFamily = face.FamilyName ?? string.Empty,
+                Weight = face.Weight,
+                IsItalic = face.IsItalic,
+                FaceKey = faceKey,
+            }
+            : null;
 
     /// <summary>The families a resolver falls back to when nothing in the chain is installed.</summary>
     /// <remarks>

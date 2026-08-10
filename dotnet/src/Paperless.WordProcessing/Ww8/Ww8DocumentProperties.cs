@@ -84,6 +84,41 @@ public readonly record struct Ww8DocumentProperties
     /// </remarks>
     public bool UsesPrinterMetrics { get; init; }
 
+    /// <summary>
+    /// True when the document switches column balancing off for every section at once.
+    /// </summary>
+    /// <remarks>
+    /// <c>fNoColumnBalance</c>, bit 5 of the first compatibility word — <c>fNoColumnBalance = (a32Bit &amp;
+    /// 0x00000020) &gt;&gt; 5</c> (<c>ww8scan.cxx</c>:7896). The WW8 importer reads it before it looks at
+    /// anything else about a section's columns: <c>if (mrReader.m_xWDop-&gt;fNoColumnBalance)
+    /// pRet-&gt;SetFormatAttr(SwFormatNoBalancedColumns(true))</c> (<c>ww8par.cxx</c>:4569). Word's own
+    /// dialogue calls it "don't balance columns for continuous section starts", which is exactly the case
+    /// it governs.
+    /// </remarks>
+    public bool NoColumnBalance { get; init; }
+
+    /// <summary>
+    /// True when the document distinguishes even pages from odd ones — Word's "different odd and even".
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>fFacingPages</c>, the lowest bit of the <c>Dop</c>'s very first word
+    /// (<c>a16Bit &amp; 0x0001</c>, <c>ww8scan.cxx</c>:7643). It is a <em>document</em> flag rather than a
+    /// section one, which is why it lives here and reaches every section at once.
+    /// </para>
+    /// <para>
+    /// It decides two things together, and reading it for only one of them is what makes a document look
+    /// nearly right. It is the condition on which the even header and footer stories are read at all —
+    /// <c>wwSectionManager::SetSegmentToPageDesc</c> adds <c>WW8_HEADER_EVEN | WW8_FOOTER_EVEN</c> to the
+    /// synthesised <c>grpfIhdt</c> only under it (<c>ww8par6.cxx</c>:1234) — and it is the condition under
+    /// which the left page stops sharing the right page's running head, since
+    /// <c>wwSectionManager::SetUseOn</c> adds <c>UseOnPage::HeaderShare | FooterShare</c> exactly when it is
+    /// <em>clear</em> (<c>ww8par.cxx</c>:4319). So a document without it has one head for every page
+    /// whatever its even stories hold, and a document with it has two.
+    /// </para>
+    /// </remarks>
+    public bool HasFacingPages { get; init; }
+
     /// <summary>How the document's footnotes are numbered.</summary>
     /// <remarks>
     /// The DOP states the two classes in three different places: <c>nFootnote</c> and <c>nEdn</c> hold the
@@ -101,6 +136,16 @@ public readonly record struct Ww8DocumentProperties
     public static Ww8DocumentProperties Parse(ReadOnlySpan<byte> dop)
     {
         Ww8DocumentProperties properties = Default;
+
+        // The very first word, whose lowest bit is fFacingPages. Every Dop that exists at all is long
+        // enough for it, so the guard is against a truncated one rather than against an old one.
+        if (dop.Length >= 2)
+        {
+            properties = properties with
+            {
+                HasFacingPages = (BinaryPrimitives.ReadUInt16LittleEndian(dop) & 0x0001) != 0,
+            };
+        }
 
         if (dop.Length >= TabIntervalOffset + 2)
         {
@@ -186,7 +231,11 @@ public readonly record struct Ww8DocumentProperties
         if (dop.Length >= CompatibilityOptionsOffset + 4)
         {
             uint options = BinaryPrimitives.ReadUInt32LittleEndian(dop[CompatibilityOptionsOffset..]);
-            properties = properties with { UsesPrinterMetrics = (options & 0x80000000) != 0 };
+            properties = properties with
+            {
+                UsesPrinterMetrics = (options & 0x80000000) != 0,
+                NoColumnBalance = (options & 0x00000020) != 0,
+            };
         }
 
         if (dop.Length >= CompatibilityOptions2Offset + 4)

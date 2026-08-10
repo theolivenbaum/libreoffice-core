@@ -309,6 +309,35 @@ public sealed partial record ChartPlot
     /// <summary>Whether the secondary value axis is drawn.</summary>
     public bool SecondaryAxisVisible { get; init; } = true;
 
+    /// <summary>Whether the value axis' tick labels are drawn.</summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>Hiding the labels is not deleting the axis, and the two reserve different
+    /// amounts.</strong> <c>c:tickLblPos val="none"</c> maps to chart2's <c>DisplayLabels</c>
+    /// (<c>oox/source/drawingml/chart/axisconverter.cxx:221</c>,
+    /// <c>aAxisProp.setProperty(PROP_DisplayLabels, mrModel.mnTickLabelPos != XML_none)</c>),
+    /// which <c>VAxisProperties</c> reads at <c>:307</c> and which suppresses the labels alone —
+    /// the axis line and its tick marks are still drawn. <see cref="ValueAxisVisible"/> is
+    /// <c>c:delete</c> and removes all three.
+    /// </para>
+    /// <para>
+    /// Measured on a probe over <c>chart-face-theme-minor.pptx</c> with
+    /// <c>tickLblPos="none"</c> on its category axis: the reference stops drawing
+    /// <c>Q1 Q2 Q3 Q4</c> and its plot area's bottom edge drops 12.70 pt, keeping the 4.25 pt
+    /// tick. Reading only <c>c:delete</c> both drew four labels the reference does not and held
+    /// the plot area 12.79 pt short.
+    /// </para>
+    /// </remarks>
+    public bool ValueLabelsVisible { get; init; } = true;
+
+    /// <summary>Whether the category axis' tick labels are drawn.</summary>
+    /// <remarks><c>c:catAx/c:tickLblPos</c>; see <see cref="ValueLabelsVisible"/>.</remarks>
+    public bool CategoryLabelsVisible { get; init; } = true;
+
+    /// <summary>Whether the secondary value axis' tick labels are drawn.</summary>
+    /// <remarks><c>c:valAx/c:tickLblPos</c>; see <see cref="ValueLabelsVisible"/>.</remarks>
+    public bool SecondaryLabelsVisible { get; init; } = true;
+
     /// <summary>Whether the chart has a pair of axes at all.</summary>
     /// <remarks>
     /// A pie has neither, so it gets no axis lines, no ticks, no gridlines and — the part that
@@ -494,8 +523,190 @@ public sealed partial record ChartPlot
     /// <summary>The size the axis titles are set at; LibreOffice's default is 9 pt.</summary>
     public Length AxisTitleSize { get; init; } = Length.FromPoints(9);
 
-    /// <summary>The size the axis labels and legend entries are set at; the default is 10 pt.</summary>
+    /// <summary>Whether the main title is drawn in the family's bold face.</summary>
+    /// <remarks>
+    /// <para>
+    /// False here because this is the <c>chart2</c> model's answer, which is what an ODF chart
+    /// gets: an ODF chart states its weight in the title's own <c>style:style</c> and states it
+    /// on every title LibreOffice itself writes, so a reader that finds nothing has found a
+    /// document that means regular.
+    /// </para>
+    /// <para>
+    /// <strong>An OOXML chart never reaches this default</strong> — its import applies
+    /// <c>objectformatter.cxx</c>'s auto-text table first, which makes a chart title bold and an
+    /// axis title bold before any of the file's own properties are read. That is why
+    /// <c>DrawingChartPlot</c> sets both of these true when the part states nothing, and why the
+    /// two readers disagree about the default rather than sharing one.
+    /// </para>
+    /// </remarks>
+    public bool IsTitleBold { get; init; }
+
+    /// <summary>Whether the axis titles are drawn in the family's bold face.</summary>
+    /// <remarks>See <see cref="IsTitleBold"/>; the same table decides both.</remarks>
+    public bool IsAxisTitleBold { get; init; }
+
+    /// <summary>The size the axis labels are set at; the default is 10 pt.</summary>
     public Length LabelSize { get; init; } = Length.FromPoints(10);
+
+    /// <summary>Whether the axis labels — and the data labels — are set in the bold face.</summary>
+    /// <remarks>
+    /// <para>
+    /// False by default in both readers, and for once they agree: the OOXML auto-text table
+    /// leaves <c>spOtherTexts</c> regular (<c>objectformatter.cxx</c>:415-434) and chart2's own
+    /// model default is regular too, so a file that states nothing means regular either way. That
+    /// is the difference from <see cref="IsTitleBold"/>, where the two disagree.
+    /// </para>
+    /// <para>
+    /// <strong>It is read because it decides layout, not only appearance.</strong> The widest
+    /// value label reserves the plot rectangle's left edge and the widest category label its
+    /// bottom band, and a bold face is wider — so measuring a bold axis as regular puts the plot
+    /// rectangle in the wrong place and every mark inside it follows. <c>171128IPAP.pptx</c>'s
+    /// <c>chart4.xml</c> states <c>&lt;a:defRPr sz="900" b="1"/&gt;</c> on both axes and the
+    /// reference draws those labels in Carlito-Bold; 36 of the slides corpus's 61 chart parts
+    /// state a weight somewhere.
+    /// </para>
+    /// </remarks>
+    public bool IsLabelBold { get; init; }
+
+    /// <summary>
+    /// The size a series' data labels are set at, when the file states one of their own.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A data label is not an axis label and states its size somewhere else — in the series'
+    /// <c>c:dLbls/c:txPr</c> rather than on an axis — so collapsing both into
+    /// <see cref="LabelSize"/> draws one of them at the other's size whenever a file states two.
+    /// </para>
+    /// <para>
+    /// <strong>Measured, on the page that named the defect.</strong> Page 11 of
+    /// <c>southern-classic-kennesaw-state-university-final.pptx</c> carries four charts;
+    /// <c>chart15.xml</c> states <c>sz="1600"</c> on each of its four series' <c>c:dLbls</c> and
+    /// <c>sz="1400"</c> on its category axis and its legend. LibreOffice's own <c>odp</c> of the
+    /// deck writes that chart's styles as four at <c>16pt</c> and two at <c>14pt</c>, so the two
+    /// sizes are in the imported model and not an artefact of the rendering; we drew all
+    /// seventy-four records on the page at one flat 14 pt.
+    /// </para>
+    /// <para>
+    /// Null rather than a default, exactly as <see cref="LegendSize"/> is: a reader that does not
+    /// look for it leaves every data label reading <see cref="LabelSize"/>, which is what all
+    /// three readers did before this existed.
+    /// </para>
+    /// </remarks>
+    public Length? DataLabelSize { get; init; }
+
+    /// <summary>The size a data label is drawn at, falling back to the axis labels'.</summary>
+    public Length DataLabelFont => DataLabelSize ?? LabelSize;
+
+    /// <summary>
+    /// Whether a series' data labels are set bold, when the file states a weight of their own.
+    /// </summary>
+    /// <remarks>
+    /// Null rather than false for the reason <see cref="DataLabelSize"/> is null: an unstated
+    /// data-label weight has to keep taking the axis labels', which is what round thirty measured
+    /// and what <see cref="ChartLayout"/>'s stamping pass does. This only overrides the ones the
+    /// file states directly.
+    /// </remarks>
+    public bool? IsDataLabelBold { get; init; }
+
+    /// <summary>Whether a data label is drawn bold, falling back to the axis labels'.</summary>
+    public bool DataLabelBold => IsDataLabelBold ?? IsLabelBold;
+
+    /// <summary>
+    /// The size a legend entry's name is set at, when the legend states one of its own.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>Every length in the legend is a fraction of this and not of
+    /// <see cref="LabelSize"/>.</strong> <c>lcl_placeLegendEntries</c> takes its font height from
+    /// the legend's own character properties (<c>VLegend.cxx:263-320</c>) and derives the padding
+    /// <c>0.33</c>, the column gap <c>0.66</c>, the key gap <c>0.22</c>, the row gap <c>0.20</c>
+    /// and the key's <c>0.6</c> square from it — so a legend set larger than the axis labels is
+    /// wider, taller, and pushes the plot rectangle's right edge in by the difference.
+    /// </para>
+    /// <para>
+    /// Measured on <c>research/probes/slides-r23</c>'s decks, which vary only the legend's own
+    /// <c>sz</c>: the reference's key is <strong>4.20, 5.98 and 8.39 pt</strong> and its row pitch
+    /// <strong>10.34, 14.09 and 19.33 pt</strong> at a 7, 10 and 14 pt legend font, while ours was
+    /// 6.00 and 14.18 at all three — the axis label size, which the probe never changes. 22 of the
+    /// 61 chart parts in the slides corpus state a legend font size, at 9, 11, 12, 14, 15, 16, 18
+    /// and 22 pt.
+    /// </para>
+    /// <para>
+    /// Null rather than a 10 pt default so that a reader which does not set it keeps whatever it
+    /// set <see cref="LabelSize"/> to, exactly as before this existed. Only the readers that were
+    /// taught to look for it change behaviour.
+    /// </para>
+    /// </remarks>
+    public Length? LegendSize { get; init; }
+
+    /// <summary>The size a legend entry's name is set at, falling back to the axis labels'.</summary>
+    public Length LegendFont => LegendSize ?? LabelSize;
+
+    /// <summary>
+    /// Whether a legend entry's name is set bold, when the legend states a weight of its own.
+    /// </summary>
+    /// <remarks>
+    /// Null rather than false for the reason <see cref="LegendSize"/> is: the legend's own
+    /// <c>c:txPr</c> is a separate statement from the axes', and a reader that finds none should
+    /// leave the legend reading whatever the axis labels read rather than force it regular.
+    /// </remarks>
+    public bool? IsLegendBold { get; init; }
+
+    /// <summary>Whether a legend entry is drawn bold, falling back to the axis labels'.</summary>
+    public bool LegendBold => IsLegendBold ?? IsLabelBold;
+
+    /// <summary>
+    /// The family the chart's own text is set in, or null when the file states none.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>A chart does not inherit the face of the shape or cell it sits in, and it is not
+    /// one fixed face either.</strong> Every automatic text entry in LibreOffice's OOXML chart
+    /// import names the theme's <em>minor</em> font — chart titles, axis titles and everything
+    /// else alike (<c>oox/source/drawingml/chart/objectformatter.cxx</c>:415-434) — and a
+    /// <c>c:txPr</c> stating <c>&lt;a:latin typeface="+mn-lt"/&gt;</c>, which is what most decks
+    /// write, resolves to exactly the same face. So the chart's face is the theme's body face,
+    /// with a stated <c>a:latin</c> overriding it.
+    /// </para>
+    /// <para>
+    /// <strong>It is read because it decides layout, not appearance.</strong> The widest axis
+    /// label reserves the plot area's left edge and the legend's widest entry reserves its
+    /// right, so a chart measured in the wrong face has its plot rectangle in the wrong place
+    /// and every mark inside it follows. Measured on the corpus: the two decks that pinned this
+    /// have theme minor faces of Constantia and Calibri, whose reference renderings draw chart
+    /// text in DejaVu Serif and Carlito respectively — neither of them the Liberation Sans a
+    /// hardcoded default assumed, and the first of them a serif.
+    /// </para>
+    /// <para>
+    /// Null rather than a default here on purpose: which face "no family stated" resolves to is
+    /// the consumer's question, and a slide, a sheet and a text frame answer it through
+    /// different caches. See <see cref="IChartTextMeasurer.Measure"/>.
+    /// </para>
+    /// </remarks>
+    public string? TextFamily { get; init; }
+
+    /// <summary>
+    /// The face the chart's <em>main title</em> is set in, when it names one of its own, or null
+    /// to take <see cref="TextFamily"/> like everything else.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>The one element of a chart that routinely disagrees with its chart space.</strong>
+    /// <see cref="TextFamily"/> is the chart space's statement and reaches every axis label,
+    /// legend entry and data label, which is right: they are all "the chart's text". A title is
+    /// authored separately and OOXML lets it say so — <c>171128IPAP.pptx</c>'s <c>chart7.xml</c>
+    /// states <c>Arial</c> on <c>c:title/c:txPr</c> and <c>Calibri</c> on
+    /// <c>c:chartSpace/c:txPr</c>, and LibreOffice draws its title in Arial and everything else
+    /// in Carlito.
+    /// </para>
+    /// <para>
+    /// Nullable, and null for the ODF and BIFF readers, so neither the sheets nor the words track
+    /// can move on it: those two formats state a chart's faces in one place and there is nothing
+    /// yet measured to say they do otherwise. The same reason
+    /// <see cref="DataLabelSize"/> is nullable.
+    /// </para>
+    /// </remarks>
+    public string? TitleFamily { get; init; }
 
     /// <summary>The plot area's fill — DrawingML's wall — or null.</summary>
     public Colour? PlotBackground { get; init; }

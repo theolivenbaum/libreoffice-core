@@ -124,6 +124,63 @@ public sealed record SheetDrawing
 
     /// <summary>True when the drawing is hidden and therefore not printed.</summary>
     public bool IsHidden { get; init; }
+
+    /// <summary>
+    /// False when the file marks the object as one that does not print.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Separate from <see cref="IsHidden"/>, and deliberately, because the two differ in the one
+    /// place it matters: both stop the object being painted, and <em>neither</em> stops it moving
+    /// the page break. <see cref="SheetDrawingArea.Extend"/> counts every drawing it is given, as
+    /// <c>ScDrawLayer::GetPrintArea</c> does (<c>sc/source/core/data/drwlayer.cxx:1395-1424</c>,
+    /// whose only exclusion is the hidden-comment layer) — so an unprintable button anchored to
+    /// the right of the last cell still widens the printed block, and dropping it from the model
+    /// instead of flagging it would quietly narrow the print area of every workbook carrying one.
+    /// </para>
+    /// <para>
+    /// In BIFF this is <c>ftCmo</c>'s <c>fPrint</c> bit and it is acted on for form controls
+    /// alone — see <c>XlsDrawing.IsFormControl</c> for why, and for what LibreOffice does with a
+    /// plain shape carrying the same bit clear.
+    /// </para>
+    /// </remarks>
+    public bool IsPrintable { get; init; } = true;
+
+    /// <summary>The colour the shape's box is filled with, or null when it is not filled.</summary>
+    /// <remarks>
+    /// Carried for the shapes whose fill is part of what they say rather than decoration around
+    /// it — a shown cell comment is the case that put it here, since a caption drawn as bare text
+    /// over the cells under it is unreadable where they hold anything. Nothing reads it for a
+    /// picture or a chart, both of which paint their own ground.
+    /// </remarks>
+    public Colour? Fill { get; init; }
+
+    /// <summary>The colour of the box's outline, or null when it has none.</summary>
+    public Colour? Stroke { get; init; }
+
+    /// <summary>
+    /// The cell a shown comment's caption hangs off, or null for every other drawing.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>A caption is placed relative to its cell, not to the cell its anchor names.</strong>
+    /// Calc stores a shown comment as an offset from the commented cell —
+    /// <c>ScNoteUtil::CreateNoteData</c> keeps <c>maCaptionOffset</c> and <c>maCaptionSize</c> and
+    /// throws the absolute rectangle away (<c>sc/source/core/data/postit.cxx:966-973</c>) — and
+    /// <c>ScPostIt::CreateCaptionFromInitData</c> puts it back at
+    /// <c>cellRect.Right() + offset</c> (<c>:1046-1053</c>). The two differ on every page that
+    /// repeats a print title: a caption anchored in row 2 and belonging to a cell in row 1 is
+    /// drawn in the repeated band on <em>every</em> page, because the band prints row 1 and the
+    /// object hangs off it.
+    /// </para>
+    /// <para>
+    /// Measured on <c>Application_Compliance_Checklist_5_Apr_2021.xlsx</c>, whose
+    /// <c>App. Compliance Checklist</c> repeats row 1 and carries four shown comments on it:
+    /// LibreOffice draws all four on each of the sheet's six pages, at the same place on every
+    /// one, and anchoring them where their VML says drew them on the first page alone.
+    /// </para>
+    /// </remarks>
+    public (int Column, int Row)? NoteCell { get; init; }
 }
 
 /// <summary>

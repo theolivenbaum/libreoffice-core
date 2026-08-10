@@ -177,14 +177,46 @@ public static class DrawingChartPlot
             ValueAxisVisible = Shown(axes.Value),
             SecondaryAxisVisible = Shown(axes.Secondary),
             CategoryAxisVisible = Shown(axes.Domain ?? axes.Category),
+            ValueLabelsVisible = Labelled(axes.Value),
+            SecondaryLabelsVisible = Labelled(axes.Secondary),
+            CategoryLabelsVisible = Labelled(axes.Domain ?? axes.Category),
             Legend = LegendOf(Child(chart, "legend")),
             Background = FillOf(Child(chartSpace, "spPr"), theme),
             PlotBackground = FillOf(Child(plotArea, "spPr"), theme),
             ValueGrid = GridOf(axes.Value, theme),
             CategoryGrid = GridOf(axes.Category, theme) ?? GridOf(axes.Domain, theme),
-            TitleSize = SizeOf(Child(chart, "title")) ?? Length.FromPoints(13),
-            AxisTitleSize = AxisTitleSizeOf(plotArea) ?? Length.FromPoints(9),
-            LabelSize = AxisLabelSizeOf(plotArea) ?? Length.FromPoints(10),
+            // The three automatic-text sizes and weights, which are *not* chart2's model
+            // defaults — see AutoText below for why an OOXML chart never reaches those.
+            TitleSize = SizeOf(Child(chart, "title"))
+                        ?? AutoText(chartSpace, 18.0, 120),
+            AxisTitleSize = AxisTitleSizeOf(plotArea)
+                            ?? AutoText(chartSpace, 10.0, 100),
+            IsTitleBold = BoldOf(Child(chart, "title")) ?? true,
+            IsAxisTitleBold = AxisTitleBoldOf(plotArea) ?? true,
+            LabelSize = AxisLabelSizeOf(plotArea)
+                        ?? AutoText(chartSpace, 10.0, 100),
+
+            // The axes' own c:txPr, which states the weight of their *labels*. Unlike the two
+            // titles this defaults to regular, because the auto-text table leaves spOtherTexts
+            // regular — so an unstated weight and a stated b="0" mean the same thing here.
+            IsLabelBold = AxisLabelBoldOf(plotArea) ?? false,
+
+            // The legend's own c:txPr, not the axes' — every length in the legend is a fraction
+            // of it. Read from the legend element directly rather than through its descendants,
+            // because a c:legendEntry carries a c:txPr of its own and precedes the legend's.
+            LegendSize = SizeOf(Child(Child(chart, "legend"), "txPr")),
+            IsLegendBold = BoldOf(Child(Child(chart, "legend"), "txPr")),
+
+            // A series' c:dLbls/c:txPr, which is where a data label states its own size — not on
+            // an axis. 20 of the corpus's 61 chart parts state one that differs from the axes'.
+            DataLabelSize = DataLabelSizeOf(plotArea),
+            IsDataLabelBold = DataLabelBoldOf(plotArea),
+            TextFamily = FamilyOf(chartSpace, theme),
+
+            // The main title's own face, when it names one. Read from c:title alone and left null
+            // otherwise, so a chart whose title says nothing goes on taking TextFamily and the
+            // stamping pass in ChartLayout.InFamily still decides every other label.
+            TitleFamily = LiteralFamily(Child(chart, "title")),
             // Fractions of the frame, and no Space: an OOXML chart has no coordinate space of
             // its own — the frame is the space — which is what keeps it out of the stretch an
             // ODF chart goes through.
@@ -349,6 +381,21 @@ public static class DrawingChartPlot
     /// </remarks>
     private static bool Shown(XElement? axis)
         => axis is null || Number(Child(axis, "delete")) is not 1.0;
+
+    /// <summary>
+    /// Whether an axis draws its tick labels — <c>c:tickLblPos val="none"</c> says it does not.
+    /// </summary>
+    /// <remarks>
+    /// One line in <c>AxisConverter::convertFromModel</c>:
+    /// <c>aAxisProp.setProperty(PROP_DisplayLabels, mrModel.mnTickLabelPos != XML_none)</c>
+    /// (<c>oox/source/drawingml/chart/axisconverter.cxx:221</c>). Every other value —
+    /// <c>nextTo</c>, <c>high</c>, <c>low</c>, and an absent element — leaves the labels on and
+    /// only moves where they sit, which this does not model. It is deliberately *not* folded into
+    /// <see cref="Shown"/>: the axis line and its ticks survive, and the plot area gives up the
+    /// tick's length either way. See <c>ChartPlot.ValueLabelsVisible</c>.
+    /// </remarks>
+    private static bool Labelled(XElement? axis)
+        => !string.Equals(Value(Child(axis, "tickLblPos")), "none", StringComparison.Ordinal);
 
     private static NumberFormatCode? FormatOf(XElement? axis)
     {
@@ -1150,6 +1197,156 @@ public static class DrawingChartPlot
         return null;
     }
 
+    /// <summary>
+    /// The family a chart part's text is set in, or null when neither the part nor the theme
+    /// names one.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The <c>c:chartSpace</c>'s own <c>c:txPr</c> first — the part's <em>global</em> statement,
+    /// which is the same element <see cref="AutoText"/> reads a global size from — then the first
+    /// <em>literal</em> <c>a:latin/@typeface</c> anywhere in the part, then the theme's minor
+    /// Latin face. Anything beginning with a plus — <c>+mn-lt</c>, <c>+mj-lt</c> — is a
+    /// <em>reference</em> to the theme rather than a name, so taking it as one asks the resolver
+    /// for a family no system has and every label is measured in a fallback.
+    /// </para>
+    /// <para>
+    /// <strong>Document order is not a precedence rule, and reading it as one cost a whole
+    /// deck.</strong> <c>c:chart</c> precedes <c>c:txPr</c> under <c>c:chartSpace</c>, so a part
+    /// whose <em>title</em> names a face and whose chart space names another had every axis
+    /// label, legend entry and data label drawn in the title's. Measured on page 38 of
+    /// <c>171128IPAP.pptx</c>, whose <c>chart7.xml</c> states <c>Arial</c> on
+    /// <c>c:title/c:txPr</c> and <c>Calibri</c> on <c>c:chartSpace/c:txPr</c>: the reference draws
+    /// 31 records in Carlito-Bold and 2 in LiberationSans — its title, in Arial — and we drew 34
+    /// in LiberationSans-Bold. Two of the corpus's 61 chart parts state two faces this way.
+    /// </para>
+    /// <para>
+    /// The title's own face is still lost, because the model carries one family: what this
+    /// changes is which of the two the whole chart takes, and the chart-wide one is right for
+    /// every element but the title.
+    /// </para>
+    /// <para>
+    /// <strong>Falling back to the theme's minor face is not a guess.</strong> All three of the
+    /// automatic text entries LibreOffice's chart import carries — chart titles, axis titles, and
+    /// everything else — name <c>XML_minor</c>
+    /// (<c>oox/source/drawingml/chart/objectformatter.cxx</c>:415-434), and the <c>c:txPr</c> most
+    /// decks write states <c>+mn-lt</c>, which resolves to the same face. Measured on the slides
+    /// corpus: of the fifteen decks holding chart parts, ten state <c>+mn-lt</c> and four state
+    /// nothing at all, so the theme is what decides fourteen of them.
+    /// </para>
+    /// <para>
+    /// This is the same rule <c>DocxPictures.LabelFamily</c> already applies on the words track,
+    /// deliberately: it is one reader serving three families, and two nearly-identical rules in
+    /// two places is how they come apart. Only the final fallback differs — that one ends in
+    /// <c>"Calibri"</c> and this ends in null, because which face "nothing stated" means is the
+    /// consumer's question and a slide, a sheet and a text frame answer it through different
+    /// caches. See <see cref="ChartPlot.TextFamily"/>.
+    /// </para>
+    /// </remarks>
+    private static string? FamilyOf(XElement chartSpace, DrawingTheme? theme)
+        => LiteralFamily(Child(chartSpace, "txPr"))
+           ?? LiteralFamily(chartSpace)
+           ?? theme?.Fonts?.MinorLatin;
+
+    /// <summary>The first literal <c>a:latin/@typeface</c> under an element, or null.</summary>
+    private static string? LiteralFamily(XElement? element)
+    {
+        if (element is null) return null;
+
+        foreach (XElement latin in element.Descendants(
+                     XName.Get("latin", OoxmlNamespaces.DrawingML)))
+        {
+            string? typeface = latin.Attribute("typeface")?.Value;
+            if (string.IsNullOrWhiteSpace(typeface)) continue;
+            if (typeface[0] == '+') continue;
+
+            return typeface;
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// The size a chart part's automatic text takes when the part itself states none.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>An OOXML chart never reaches <c>chart2</c>'s model defaults.</strong> The import
+    /// applies its own auto-text table before any of them
+    /// (<c>oox/source/drawingml/chart/objectformatter.cxx</c>:415-434, applied by
+    /// <c>TextFormatter::TextFormatter</c>:906-929): a chart title is <c>1800</c> and bold, an
+    /// axis title <c>1000</c> and bold, and everything else — axis labels, legend entries, data
+    /// labels — <c>1000</c> and not bold. Citing <c>chart2/source/model/main/Title.cxx</c>'s 13 pt
+    /// here was right for an ODF chart and wrong for every OOXML one.
+    /// </para>
+    /// <para>
+    /// <paramref name="relative"/> is <c>mnRelFontSize</c>, and it bites only when the
+    /// <em>chart space</em> states a size of its own: <c>TextFormatter</c> keeps the absolute
+    /// default until the global <c>c:txPr</c> supplies a height, and then takes that height times
+    /// the percentage instead (<c>:926-928</c>). So a chart whose <c>c:txPr</c> says 1400 gets a
+    /// 16.8 pt title, not an 18 pt one. Six of the slides corpus's 61 chart parts state it.
+    /// </para>
+    /// <para>
+    /// Measured against LibreOffice's own model rather than only against its ink:
+    /// <c>Demick_JetBlue.pptx</c>, whose five chart parts state no <c>sz</c> and no <c>b</c>
+    /// anywhere, round-trips through <c>--convert-to odp</c> with the chart title carrying
+    /// <c>fo:font-size="18pt" fo:font-weight="bold"</c>, its two axis titles
+    /// <c>10pt</c>/<c>bold</c>, and its axes and legend <c>10pt</c> with no weight at all.
+    /// </para>
+    /// </remarks>
+    /// <param name="chartSpace">The <c>c:chartSpace</c>, whose direct <c>c:txPr</c> is the global one.</param>
+    /// <param name="points">The table's absolute default, in points.</param>
+    /// <param name="relative">The table's percentage of the global size.</param>
+    private static Length AutoText(XElement chartSpace, double points, int relative)
+        => SizeOf(Child(chartSpace, "txPr")) is { } global
+            ? global * (relative / 100.0)
+            : Length.FromPoints(points);
+
+    /// <summary>
+    /// Whether a titled element's text states a weight, and which — <c>@b</c> on the first
+    /// <c>a:defRPr</c> or <c>a:rPr</c> under it, in document order.
+    /// </summary>
+    /// <remarks>
+    /// Null rather than false when nothing states one, because "stated regular" and "stated
+    /// nothing" are different answers here: the auto-text table makes an unstated chart title
+    /// bold, so collapsing the two would draw <c>b="0"</c> bold. Five of the corpus's chart parts
+    /// state <c>b="0"</c> on a title and three state <c>b="1"</c>.
+    /// </remarks>
+    private static bool? BoldOf(XElement? element)
+    {
+        if (element is null) return null;
+
+        foreach (XElement properties in element.Descendants())
+        {
+            if (properties.Name.NamespaceName != OoxmlNamespaces.DrawingML) continue;
+            if (properties.Name.LocalName is not ("defRPr" or "rPr")) continue;
+            if (properties.Attribute("b")?.Value is not { Length: > 0 } stated) continue;
+
+            return stated is "1" or "true";
+        }
+
+        return null;
+    }
+
+    /// <summary>The weight the axis <em>titles</em> state, from the first axis that states one.</summary>
+    /// <remarks>
+    /// One answer for every axis title, which is the same simplification
+    /// <see cref="AxisTitleSizeOf"/> already makes and for the same reason: the model carries one
+    /// axis-title size and one axis-title weight. Of the corpus's 38 axis titles, 13 state a
+    /// weight and no document states both values on different axes of one chart.
+    /// </remarks>
+    private static bool? AxisTitleBoldOf(XElement plotArea)
+    {
+        foreach (XElement axis in plotArea.Elements())
+        {
+            if (axis.Name.NamespaceName != OoxmlNamespaces.DrawingMLChart) continue;
+            if (!axis.Name.LocalName.EndsWith("Ax", StringComparison.Ordinal)) continue;
+            if (BoldOf(Child(axis, "title")) is { } bold) return bold;
+        }
+
+        return null;
+    }
+
     private static Length? AxisTitleSizeOf(XElement plotArea)
     {
         foreach (XElement axis in plotArea.Elements())
@@ -1163,6 +1360,71 @@ public static class DrawingChartPlot
     }
 
     /// <summary>The size the axis <em>labels</em> are set at — <c>c:txPr</c>, not the title's.</summary>
+    /// <summary>The weight the axis <em>labels</em> state, from the first axis that states one.</summary>
+    /// <remarks>
+    /// The same one-answer-per-chart simplification <see cref="AxisLabelSizeOf"/> makes, and the
+    /// model carries one label weight for the same reason it carries one label size. Read from
+    /// the axis' own <c>c:txPr</c> rather than from its descendants, because a <c>c:title</c>
+    /// under the same axis carries a <c>c:txPr</c> of its own and states the <em>title's</em>
+    /// weight — which is a different question and already has its own reader.
+    /// </remarks>
+    private static bool? AxisLabelBoldOf(XElement plotArea)
+    {
+        foreach (XElement axis in plotArea.Elements())
+        {
+            if (axis.Name.NamespaceName != OoxmlNamespaces.DrawingMLChart) continue;
+            if (!axis.Name.LocalName.EndsWith("Ax", StringComparison.Ordinal)) continue;
+            if (BoldOf(Child(axis, "txPr")) is { } bold) return bold;
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// The size a series' <em>data</em> labels state, from the first series that states one.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>c:dLbls</c> hangs off the series (and, for a whole type group, off the group), and its
+    /// own <c>c:txPr</c> is a different statement from the axes'. Read from the <c>c:dLbls</c>
+    /// element's direct <c>c:txPr</c> child rather than from its descendants, because a
+    /// <c>c:dLbl</c> for one point carries a <c>c:txPr</c> of its own and precedes it — the same
+    /// trap the legend's reader documents.
+    /// </para>
+    /// <para>
+    /// One answer for every series, which is the simplification the model already makes for the
+    /// axes and the axis titles. Of the corpus's 61 chart parts, 18 state a data-label size and
+    /// none states two different ones across its own series.
+    /// </para>
+    /// </remarks>
+    private static Length? DataLabelSizeOf(XElement plotArea)
+        => DataLabelProperties(plotArea).Select(SizeOf).FirstOrDefault(size => size is not null);
+
+    /// <summary>The weight a series' data labels state, from the first series that states one.</summary>
+    /// <remarks>
+    /// Read beside the size because it comes from the same element, and separate from
+    /// <see cref="AxisLabelBoldOf"/> because an unstated data-label weight must keep falling back
+    /// to the axis labels' — see <c>ChartPlot.IsDataLabelBold</c>.
+    /// </remarks>
+    private static bool? DataLabelBoldOf(XElement plotArea)
+        => DataLabelProperties(plotArea).Select(BoldOf).FirstOrDefault(bold => bold is not null);
+
+    /// <summary>Every <c>c:dLbls/c:txPr</c> in the plot area, series before type group.</summary>
+    private static IEnumerable<XElement> DataLabelProperties(XElement plotArea)
+    {
+        foreach (XElement group in plotArea.Elements())
+        {
+            if (group.Name.NamespaceName != OoxmlNamespaces.DrawingMLChart) continue;
+
+            foreach (XElement series in Children(group, "ser"))
+            {
+                if (Child(Child(series, "dLbls"), "txPr") is { } stated) yield return stated;
+            }
+
+            if (Child(Child(group, "dLbls"), "txPr") is { } shared) yield return shared;
+        }
+    }
+
     private static Length? AxisLabelSizeOf(XElement plotArea)
     {
         foreach (XElement axis in plotArea.Elements())

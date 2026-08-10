@@ -53,6 +53,11 @@ public static class XlsxReader
                     (OpcPackage)file.Package, DocumentFamily.Spreadsheet),
             };
 
+            // Read once for the whole package: Calc's OOXML filter decides it in
+            // `checkDocumentProperties` before a single sheet is parsed, and it changes how a
+            // row height is read on every one of them.
+            bool isMicrosoftGenerated = OoxmlMetadata.IsMicrosoftGenerated((OpcPackage)file.Package);
+
             XlsxSheetReader reader = new(file, diagnostics);
 
             // The print names are workbook-level and scoped to a sheet by position, so they are
@@ -100,10 +105,20 @@ public static class XlsxReader
                 XlsxSheetPrintNames print = names.GetValueOrDefault(entry.Index, XlsxSheetPrintNames.None);
                 (SheetPrintSetup setup, SheetGrid grid) = XlsxPrintSetup.Read(
                     worksheet, print.PrintAreas, print.RepeatColumns, print.RepeatRows,
-                    cellFormats.DefaultColumnFont);
+                    cellFormats.DefaultColumnFont, isMicrosoftGenerated);
 
                 (SheetCellFormats formats, SheetRichText rich) =
                     XlsxSheetFormats.Read(worksheet, cellFormats, file);
+
+                // A shown cell comment is an object on the internal layer, which Calc prints
+                // after the front layer (`printfun.cxx:1704-1713`), so the captions go last and
+                // cover whatever they overlap.
+                SheetDrawings drawings = XlsxDrawings.Read(
+                    file.Package, entry.PartName, theme, themeFonts);
+                List<SheetDrawing> captions =
+                    XlsxNoteCaptions.Read(file.Package, entry.PartName);
+                if (captions.Count > 0)
+                    drawings = new SheetDrawings([.. drawings.Items, .. captions]);
 
                 layouts.Add(new SheetLayout
                 {
@@ -118,8 +133,7 @@ public static class XlsxReader
                     Formatting = XlsxCellDecoration.Read(file.StyleSheet, file.ThemeRoot, worksheet),
                     Formats = formats,
                     RichText = rich,
-                    Drawings = XlsxDrawings.Read(
-                        file.Package, entry.PartName, theme, themeFonts),
+                    Drawings = drawings,
                     Notes = setup.PrintsNotes ? reader.ReadNotes(entry) : SheetNotes.Empty,
                     FileName = source.FileName ?? string.Empty,
                 });

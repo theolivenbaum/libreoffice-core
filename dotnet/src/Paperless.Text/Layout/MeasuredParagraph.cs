@@ -250,6 +250,10 @@ public sealed class MeasuredParagraph
     /// for; see <see cref="HeightOf"/>. False — the default — measures every run on the line, which is
     /// what ODF and RTF want.
     /// </param>
+    /// <param name="leadingAboveText">
+    /// Whether each run's external leading is charged to its ascent. True only for Writer's own text;
+    /// see <see cref="LineMetrics.ScaledAscent"/>.
+    /// </param>
     public static MeasuredParagraph Measure(
         string text,
         IReadOnlyList<FormattedRun> runs,
@@ -257,7 +261,8 @@ public sealed class MeasuredParagraph
         ItemisationOptions? itemisation = null,
         IReadOnlyList<InlineObject>? objects = null,
         MetricGrid? grid = null,
-        bool blanksAreTransparentToHeight = false)
+        bool blanksAreTransparentToHeight = false,
+        bool leadingAboveText = false)
     {
         ArgumentNullException.ThrowIfNull(text);
         ArgumentNullException.ThrowIfNull(runs);
@@ -287,7 +292,8 @@ public sealed class MeasuredParagraph
                 ShapedText shaped = engine.Shape(
                     part.Face, text.AsSpan(part.Start, part.Length), part.Shaping);
 
-                measured.Add(new MeasuredRun(part, shaped, LineSpacing.Resolve(part.Face, grid)));
+                measured.Add(new MeasuredRun(
+                    part, shaped, LineSpacing.Resolve(part.Face, grid, leadingAboveText)));
 
                 // Each sub-run's own prefix widths, scaled from its own grid into EMUs and added to
                 // the running total. Summing in design units instead would add numbers from two
@@ -295,7 +301,7 @@ public sealed class MeasuredParagraph
                 // moment a control character left a gap between two sub-runs.
                 for (int i = 1; i <= part.Length; i++)
                 {
-                    prefix[part.Start + i] = running + shaped.WidthUpTo(i, part.EmSize).Emu;
+                    prefix[part.Start + i] = running + Advance(shaped, shaped.AdvanceUpTo(i), part.EmSize, grid);
                 }
 
                 if (part.Tracking != Length.Zero)
@@ -304,7 +310,7 @@ public sealed class MeasuredParagraph
                     for (int i = 0; i < part.Length; i++) tracking[part.Start + i] = part.Tracking.Emu;
                 }
 
-                running += shaped.Width(part.EmSize).Emu;
+                running += Advance(shaped, shaped.AdvanceInDesignUnits, part.EmSize, grid);
             }
         }
 
@@ -467,6 +473,21 @@ public sealed class MeasuredParagraph
         return parts;
     }
 
+    /// <summary>
+    /// A sub-run's advance width, through the device grid when the document asks for one.
+    /// </summary>
+    /// <remarks>
+    /// Applied to each *cumulative* width rather than to each glyph, because that is what the device
+    /// does — see <see cref="MetricGrid.ToAdvance"/>. A sub-run is the nearest thing this measurement
+    /// has to Writer's text portion, which is the unit the reference device's width is truncated over.
+    /// The truncation is monotonic, so the prefix table stays monotonic, which every reader of it
+    /// depends on.
+    /// </remarks>
+    private static long Advance(ShapedText shaped, long designUnits, Length emSize, MetricGrid? grid)
+        => grid is { } device
+            ? device.ToAdvance(designUnits, shaped.UnitsPerEm, emSize).Emu
+            : shaped.Scale(designUnits, emSize).Emu;
+
     /// <summary>The width of the characters between two indices.</summary>
     public Length WidthBetween(int start, int end)
         => Length.FromEmu(At(end) - At(start));
@@ -515,6 +536,33 @@ public sealed class MeasuredParagraph
     /// </remarks>
     public (Length Height, Length Ascent) HeightOf(int start, int end)
     {
+        (Length height, Length ascent, _) = MeasureLine(start, end);
+        return (height, ascent);
+    }
+
+    /// <summary>
+    /// The same measurement, with the height the line's <em>text</em> alone wants beside it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The two differ only where an as-character object is taller than the text around it, and the
+    /// difference is what proportional line spacing multiplies. Writer keeps them apart deliberately:
+    /// <c>SwLineLayout::Height(nNew, bText)</c> (<c>sw/source/core/text/porlay.cxx</c>:110) records
+    /// <c>m_nLineSpacingBaseHeight</c> only when the portion that raised the line
+    /// <c>IsUsedToCalcLineSpacingHeight</c>, which for a legacy document is true for text portions and
+    /// false for a fly-in-content — so an inline picture raises <c>Height()</c> and leaves the base
+    /// alone. <c>SwTextFormatter::CalcRealHeight</c> then adds
+    /// <c>(prop − 100)% × GetLineSpacingBaseHeight()</c> to the full line height rather than scaling it.
+    /// </para>
+    /// <para>
+    /// Zero when the range holds no run at all — a paragraph whose whole content is a picture. Writer
+    /// falls back to the paragraph's own font there (<c>porlay.cxx</c>:645,
+    /// <c>SetLineSpacingBaseHeight(rInf.GetTextHeight())</c>), which the caller supplies because it is
+    /// the one that knows the paragraph's face and size.
+    /// </para>
+    /// </remarks>
+    public (Length Height, Length Ascent, Length TextHeight) MeasureLine(int start, int end)
+    {
         Length height = Length.Zero;
         Length ascent = Length.Zero;
         Length descent = Length.Zero;
@@ -534,6 +582,9 @@ public sealed class MeasuredParagraph
         {
             Accumulate(_runs[0], ref height, ref ascent, ref descent);
         }
+
+        // Held before the objects have their say: this is what proportional line spacing scales.
+        Length textHeight = Length.Max(height, ascent + descent);
 
         // An as-character object divides at the baseline: the part above raises the ascent and the part
         // below raises the descent, which for the ordinary inline picture is the whole of it above and
@@ -555,7 +606,7 @@ public sealed class MeasuredParagraph
             descent = Length.Max(descent, one.BelowBaseline);
         }
 
-        return (Length.Max(height, ascent + descent), ascent);
+        return (Length.Max(height, ascent + descent), ascent, textHeight);
     }
 
     /// <summary>Folds every run touching a range into the maxima a line's height is built from.</summary>
