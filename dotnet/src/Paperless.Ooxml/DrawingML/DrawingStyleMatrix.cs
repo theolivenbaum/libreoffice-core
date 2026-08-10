@@ -141,6 +141,19 @@ public sealed class DrawingStyleMatrix
         => Resolve(Drawing.Child(style, "lnRef"), _lines, theme);
 
     /// <summary>
+    /// The theme's own <c>a:ln</c> at a one-based index, with its <c>phClr</c> left in place.
+    /// </summary>
+    /// <remarks>
+    /// The raw entry rather than a resolved one, because the caller that needs it — a chart's
+    /// automatic series formatting — wants the <em>width</em> and supplies its own colour from
+    /// the accent cycle rather than from an <c>a:lnRef</c>. Clamped to the last entry the way
+    /// <c>lclGetStyleElement</c> clamps (<c>oox/source/drawingml/theme.cxx:40-45</c>).
+    /// </remarks>
+    /// <param name="index">The one-based index into <c>a:lnStyleLst</c>.</param>
+    public XElement? LineStyle(int index)
+        => _lines.Count == 0 || index < 1 ? null : _lines[Math.Min(index, _lines.Count) - 1];
+
+    /// <summary>
     /// The <c>a:effectLst</c> an <c>a:effectRef</c> names, or null when it names none.
     /// </summary>
     /// <remarks>

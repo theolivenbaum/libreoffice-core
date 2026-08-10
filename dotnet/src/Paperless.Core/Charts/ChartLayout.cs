@@ -681,8 +681,10 @@ public static partial class ChartLayout
         List<ChartLabel> labels = [];
         List<ChartShape> shapes = [];
 
-        if (plot.Background is { } background)
-            boxes.Add(new ChartBox(frame, background));
+        // The frame is drawn whenever either half is stated: a chart may state an outline and no
+        // fill, and a box with a null fill is still a box with a stroke.
+        if (plot.Background is not null || plot.Border is not null)
+            boxes.Add(new ChartBox(frame, plot.Background, plot.Border, plot.BorderWidth));
 
         int categories = plot.CategoryCount();
         (double? dataMinimum, double? dataMaximum) = plot.ValueRange(0);

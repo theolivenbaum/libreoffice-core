@@ -31,6 +31,17 @@ internal sealed class Recorder : IDrawingSink
     /// <summary>Every stroked path, with its bounds in final coordinates.</summary>
     public List<(DocRect Bounds, Stroke Stroke)> Strokes { get; } = [];
 
+    /// <summary>
+    /// The commands of every filled path, for a test that has to see the subpath structure.
+    /// </summary>
+    /// <remarks>
+    /// Bounds cannot see how many subpaths a path is cut into, and one figure filled as several
+    /// open fragments has exactly the bounds of the figure. That is the shape of a real defect —
+    /// a <c>…BezierTo</c> record restarting the figure it was meant to continue — so the verb
+    /// sequence has to be visible to assert against.
+    /// </remarks>
+    public List<IReadOnlyList<PathCommand>> FilledPaths { get; } = [];
+
     /// <summary>Every clip, with its bounds in final coordinates.</summary>
     public List<DocRect> Clips { get; } = [];
 
@@ -96,7 +107,11 @@ internal sealed class Recorder : IDrawingSink
 
     /// <inheritdoc/>
     public void FillPath(GraphicsPath path, Paint paint, FillRule rule = FillRule.NonZero)
-        => Fills.Add((Bounds(path), paint, rule));
+    {
+        ArgumentNullException.ThrowIfNull(path);
+        Fills.Add((Bounds(path), paint, rule));
+        FilledPaths.Add([.. path.Commands]);
+    }
 
     /// <inheritdoc/>
     public void StrokePath(GraphicsPath path, Stroke stroke) => Strokes.Add((Bounds(path), stroke));
