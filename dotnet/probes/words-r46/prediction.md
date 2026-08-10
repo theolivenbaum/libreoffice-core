@@ -77,3 +77,60 @@ test.
   in *how* Writer applies the counts rather than in whether it has them.
 - Any authored variant where an empty `w:pPrDefault` fails to turn the control on. None of the
   five straddle positions did.
+
+---
+
+# The second change, predicted before its sweep
+
+Baseline for this one is the tree after the widow/orphan commit: **158/200**, |page error| 67,
+168 exactly-correct page counts, |word error| 6695 (`after-widow-orphan.tsv`).
+
+## The change
+
+`MeasuredParagraph.MeasureLine` no longer lets a line's *text* descent count when the line holds
+no text — a line whose characters are all non-printing controls and which carries an as-character
+object. Round 45 left this open in exactly those words; `picture-alone-descent.py` closes it by
+authoring the shape in **both** DOCX and flat ODF and measuring both against the installed
+24.2.7.2:
+
+| shape | picture | LibreOffice | before |
+|---|---:|---:|---:|
+| docx alone | 20 / 50 / 150 pt | 33.80 / 63.80 / 163.80 | **+2.60 each** |
+| docx with text | 20 / 50 / 150 pt | 36.40 / 66.40 / 166.40 | exact |
+| fodt alone | 20 / 50 / 150 pt | 33.80 / 63.80 / 163.80 | exact |
+| docx & fodt alone | 5 pt | 27.60 / 18.80 | exact |
+
+The two formats agree to 0.00 pt in all eight pairs, so **it was never a format difference**: the
+fixture `MeasuredParagraph` cites, `picture-anchor.fodt`, has text on the picture's line, so it is
+the with-text row. The 5 pt rows are what say the paragraph font still *floors* the line, which is
+why only the descent is dropped and not the whole fallback.
+
+## What the census counts and cannot see
+
+`picture-only-paragraph-census.py`: **76 of 134 DOCX** carry at least one paragraph whose whole
+content is an inline picture, 281 such paragraphs in all. It reads `word/document.xml`, the headers
+and the footers of a zip container only, so it cannot see the **66 `.doc`**, which the change
+reaches identically; nor a picture that ends up alone on a line of a longer paragraph; nor — the
+one that decides the reach — **whether 2.6 pt ever moved a page break.** A logo above a heading is
+2.6 pt short on every page it appears on and moves nothing.
+
+## Predicted
+
+| | after widow/orphan | predicted |
+|---|---:|---|
+| documents matching | 158 | **156–161** |
+| absolute page error | 67 | **60–72** |
+| exactly-correct page counts | 168 | **165–172** |
+| absolute word error | 6695 | 6550–6800 |
+| renderings changed | — | **25–70 of 200** |
+
+The sign is the opposite of the first change's: this one makes pages *shorter*, so our page counts
+can only fall. The 13 documents still at −1 are the ones it can hurt and the 7 at +1 are the ones
+it can help, so a small net loss of verdicts is as likely as a gain and the aggregate is again the
+check.
+
+`Paperless.Text` is a shared layer below all three families, so a cross-track measurement is owed
+and will be made by rendering slides and sheets whole at the widow/orphan commit and at this one,
+with `SOURCE_DATE_EPOCH` pinned and `/CreationDate` normalised. **A non-zero count there is not
+automatically a regression** — a deck with an as-character picture alone on a line is the same
+defect — but it is a result that has to be reported either way.
