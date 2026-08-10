@@ -586,6 +586,34 @@ public sealed class MeasuredParagraph
         // Held before the objects have their say: this is what proportional line spacing scales.
         Length textHeight = Length.Max(height, ascent + descent);
 
+        // A line holding no text has nothing to hang below its baseline. Writer builds a line's descent
+        // out of the portions that carry text and a fly-in-content is not one of them, so a picture
+        // alone on its line makes a line exactly as tall as the picture — floored at the paragraph
+        // font's own line height, which is why the run's *height* above is still wanted and only its
+        // descent is dropped.
+        //
+        // Measured against the installed 24.2.7.2 by `dotnet/probes/words-r46/picture-alone-descent.py`:
+        // sixteen rows over two formats, two shapes and four picture heights. A DOCX picture alone on
+        // its line at 20, 50 and 150 pt gives a baseline-to-baseline gap of h + 13.8 with a 12 pt
+        // Liberation Serif paragraph, and h + 13.8 + 2.6 with any text beside the picture — 2.6 pt
+        // being that font's descent to the tenth. At 5 pt both come back 13.8 + 13.8, the floor.
+        //
+        // This closes round 45's open item, which could not act because <see cref="HeightOf"/> cites an
+        // ODF fixture where LibreOffice *does* add that descent. It does, and it is not a format
+        // difference: `picture-anchor.fodt` has text on the picture's line — "An inline picture
+        // follows: … and that was it" — so it is the with-text row. The probe authors both shapes in
+        // both formats to settle exactly that, and LibreOffice's fodt and docx agree to 0.00 pt in all
+        // eight pairs. Nothing here is conditioned on the format.
+        //
+        // Keyed on the line's *characters*, not on the run being empty, because the readers disagree
+        // about whether an inline picture puts a character in the text at all: DOCX and DOC emit an
+        // anchor character for one and RTF and ODF emit nothing, so the same paragraph reaches here as
+        // `start == end` from one reader and as a one-character line from another. Both are lines whose
+        // whole content is the object. A U+0001 standing for something that is *not* an as-character
+        // object — a field result, a note reference — is deliberately not covered: that mark is drawn,
+        // and its descent is real.
+        if (_objects.Length > 0 && HoldsNoText(start, end)) descent = Length.Zero;
+
         // An as-character object divides at the baseline: the part above raises the ascent and the part
         // below raises the descent, which for the ordinary inline picture is the whole of it above and
         // nothing below. The `Max(height, ascent + descent)` below then grows the box to hold it, which is
@@ -607,6 +635,36 @@ public sealed class MeasuredParagraph
         }
 
         return (Length.Max(height, ascent + descent), ascent, textHeight);
+    }
+
+    /// <summary>True when a line carries an as-character object and no text at all.</summary>
+    /// <remarks>
+    /// <para>
+    /// Two shapes, because the readers disagree about whether an inline picture is a character. RTF and
+    /// ODF put nothing in the text for one, so the line is an empty range with an object on it; DOCX and
+    /// DOC emit an anchor character, so it is a one-character line. Neither line has any text.
+    /// </para>
+    /// <para>
+    /// The test is on the characters rather than on the object offsets, which is the distinction that
+    /// matters: an <see cref="InlineObject"/>'s offset is a <em>boundary</em>, so an object at nought in
+    /// the paragraph "x" sits before a real letter and that line does have text. A control character is
+    /// never drawn and never has a descent, whoever put it there. Tab is excluded because it is a
+    /// control by Unicode's reckoning and a measured portion by Writer's — see the remarks on
+    /// <see cref="HeightOf"/>.
+    /// </para>
+    /// </remarks>
+    /// <param name="start">Where the line starts.</param>
+    /// <param name="end">Where its visible text ends.</param>
+    private bool HoldsNoText(int start, int end)
+    {
+        int last = Math.Min(end, Text.Length);
+
+        for (int at = Math.Max(start, 0); at < last; at++)
+        {
+            if (Text[at] >= ' ' || Text[at] == '\t') return false;
+        }
+
+        return Array.Exists(_objects, one => start <= one.Offset && one.Offset <= end);
     }
 
     /// <summary>Folds every run touching a range into the maxima a line's height is built from.</summary>
