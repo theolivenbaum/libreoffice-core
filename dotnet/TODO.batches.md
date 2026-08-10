@@ -12039,3 +12039,126 @@ committed the revert — twice. The branch briefly held the round's tests and re
 its code**, and `git status` was clean the whole time because the tree matched its own HEAD. The
 check that catches it is `git diff <base>..HEAD --stat -- dotnet/src`: a round that shipped code and
 shows no `src` diff has lost it. Run it before reporting, and again at the merge.
+
+## Round forty-six — words: a DOCX has widow control because Word writes an empty `w:pPrDefault`
+
+Branch `worktree-words-r46` on `ee87a6d0e`. Baseline reproduced **exactly**: 157/200, absolute page
+error 75, 167 exactly-correct page counts, absolute word error 6602. `probes/words-r46/baseline.tsv`.
+
+| | baseline `ee87a6d0e` | after | predicted |
+|---|---:|---:|---|
+| documents matching | 157 | **158** | 154–161, then 156–161 |
+| absolute page error | 75 | **70** | 62–82, then 60–72 |
+| exactly-correct page counts | 167 | **168** | 162–173, then 165–172 |
+| absolute word error | 6602 | **6666** | 6450–6750, then 6550–6800 |
+| renderings changed | — | **80** | 55–100, then 25–70 |
+
+Two changes, each with its own prediction committed before its own sweep (`d5f75ad3b`,
+`086c42cfb`). Every band held. Full results in `probes/words-r46/results.md`.
+
+### 1. The rule: `w:docDefaults/w:pPrDefault` is what turns widow and orphan control on
+
+> A DOCX paragraph gets widow and orphan control of two lines when `word/styles.xml` carries a
+> `w:docDefaults/w:pPrDefault` element — **empty or not** — unless that element's own `w:pPr`, the
+> style chain or the paragraph turns `w:widowControl` off.
+
+`WordParagraphFormats` read an absent `w:widowControl` as off, so **no ordinary DOCX had widow or
+orphan control at all**, while `Ww8LayoutFormat` has defaulted it on for the 66 `.doc` all along.
+That asymmetry between two readers of the same property is what raised the question.
+
+The trigger is the element's *presence*, and Word writes it empty.
+`StyleSheetTable::applyDefaults` puts `ParaWidows` and `ParaOrphans` at 2 on the built-in style
+every other style inherits from, reached only from the `w:pPrDefault` arm
+(`sw/source/writerfilter/dmapper/StyleSheetTable.cxx`:653-670, 2115-2160) — *"these defaults only
+take effect IF there is a DocDefaults style section"*.
+
+**The citation is the hypothesis; nine authored variants at five straddle positions against the
+installed 24.2.7.2 are the evidence** (`widow-orphan-default.py`), with a `para-off` variant
+measuring the room at the foot of the page rather than assuming it. `empty-pPrDefault` behaves
+exactly like an explicit `<w:widowControl/>`; `no-pPrDefault` and `no-docDefaults` exactly like an
+explicit off.
+
+`gpp-pr-top-7-office-markets-4q-2023.docx` 3/4 → **4/4 `match`** — the document round 45 gave up a
+verdict to expose. The causal test is a mutation of the real file: `w:widowControl w:val="0"` on its
+two-line "In the year 2023 …" paragraph puts that line back on page 1 *in the reference*. Both
+700-page rule-and-fill documents moved towards the reference too, 686/697 → 690/697 and
+711/721 → 714/721.
+
+### Refuted: the document-level `w:settings/w:widowControl` is inert
+
+`WordCompatibility` records that adding it *"moved nothing in LibreOffice's output"* and reads that
+as the per-paragraph flag already covering it. The measurement was right and the sentence wrong: the
+flag does nothing in 24.2.7.2 — the `settings-on` variant is indistinguishable from the control at
+all five straddle positions — and the reason nothing moved is that the file already carried a
+`w:pPrDefault`. The dev tree has a `SettingsTable.cxx` path that would honour it; the binary that
+made the references does not. Pinned by a test.
+
+### Our widow/orphan model was checked against Writer before being switched on for 130 documents
+
+The probe takes the paragraph's line count, and `Paginator.Allowed` reproduces LibreOffice at all
+fifteen (lines, room) points measured — including the three a "keep what fits" model gets wrong:
+3 lines with room 2 → 0, 4 lines with room 3 → 2, 5 lines with room 4 → 3.
+
+### 2. A line holding only an as-character picture keeps no text descent
+
+Round 45's open item, closed with the probe pair it asked for. `picture-alone-descent.py` authors
+picture-alone and picture-with-text in **both** DOCX and flat ODF at four heights:
+**LibreOffice's fodt and docx agree to 0.00 pt in all eight pairs, and with-text − alone is +2.60 in
+all four.** So it was never a format difference — the fixture `MeasuredParagraph` cites,
+`picture-anchor.fodt`, reads "An inline picture follows: ⟨picture⟩ and that was it" and is the
+*with-text* row.
+
+The 5 pt rows fix the shape rather than the constant: alone, a 5 pt picture gives 13.8 in DOCX and 5
+in flat ODF, because DOCX emits an anchor character and flat ODF emits nothing. Only the descent is
+dropped; the run's height still floors the line.
+
+**No verdict moved and page error went the wrong way by three**, all of it
+`AC-150-5370-10G-updated-201604.docx` 690/697 → 687/697, a document with six picture-only paragraphs
+that was already the track's largest page outlier for an unrelated reason. Word error fell 29.
+Reported as a fix that cost three points of page error: it is right on its own evidence, 14 of 16
+authored probe rows exact against 11 of 16 before.
+
+`Paperless.Text` is a shared layer, so the cross-track measurement was made rather than argued:
+slides and sheets rendered whole with our own CLI at `453ed3081` and at this tree,
+`SOURCE_DATE_EPOCH` pinned and `/CreationDate` normalised — **334 of 334 byte-identical**.
+
+### Measured and deliberately not fixed: an ODF inline object at the end of its paragraph
+
+The `fodt with-text` rows come back 27.60 against 36.40 at every picture height — the object is
+measured as though absent — and one more word *after* the picture makes them exact. It is
+`one.Offset < end` in `MeasureLine`'s object walk, and the obvious widening attaches the object to
+every line of a wrapped paragraph; `FrameLayout` solves the same problem for placement with an
+`EndsParagraph` flag, which is where a fix should start. No ODF document is in the words track.
+
+### The list-label population, measured — round 45's other open item
+
+`list-label-population.py`: **51 of 134 DOCX** both resolve a paragraph to proportional spacing above
+100% *and* carry a numbering level stating its own `w:sz`. A ceiling and a partial one — blind to the
+66 `.doc`, to a level taller for any reason other than `w:sz` (every Symbol or Wingdings level beside
+a Latin item), and to whether the taller label ever moves a break.
+
+### Tests
+
+Seven in `DocxWidowControlTests` (`Paperless.WordProcessing` 746 → **753**), all seven verified by
+reintroduction over four mutations, two of which are the refuted alternatives — "widow control is
+simply on for every DOCX" and "the document-wide default overrides an explicit off". Five in
+`PictureAloneLineHeightTests` (`Paperless.Text` 277 → **282**), of which **three** are verified by
+reintroduction and **two are labelled drift guards in the file**: one asserts unchanged behaviour,
+and for the other, widening the guard is an *equivalent formulation* rather than an undetected
+defect, because with nothing raising the ascent the run's height dominates either way.
+
+### Still open
+
+- **43 → 42 mismatches.** The ±1 cluster is 13 at −1 and 7 at +1; round 45's refutation of a shared
+  cause stands.
+- `template---tpr-technical-progress-report-with-guidance.docx` 7/8 was examined and not fixed: its
+  page 2 holds 37 lines against the reference's 33 while ending *lower* (85.40 against 74.35), so the
+  reference's lines are taller there — a header table about 2 pt taller per row over eight rows, on a
+  document with a 14 pt numbering level.
+- The two 700-page rule-and-fill documents, `A_320.doc` 141/150, the 249 `FORMCHECKBOX` fields across
+  16 documents, the `.doc` reader-split clusters, both round-38 leads, `手机免提系统TSB.doc`, the
+  standing table-only-header import-defect decision, and Escher picture cropping.
+
+Test counts on the final tree: Core 284, Containers 109, Text **282**, Vector 293, Rendering 121,
+Markup 259, OpenDocument 125, WordProcessing **753**, Spreadsheets 621, Presentations 576,
+Fidelity 550 — **0 skipped, 0 warnings**.

@@ -38,6 +38,21 @@ namespace Paperless.Text.Tests;
 /// character for an inline picture and RTF and ODF emit nothing, so the same paragraph arrives as a
 /// one-control-character line from one reader and as an empty line from another.
 /// </para>
+/// <para>
+/// <strong>Which of these are pinned rules and which are drift guards</strong>, established with
+/// <c>verify-test.sh</c> rather than asserted. Three are detectors: dropping the rule fails
+/// <see cref="APictureAloneOnAnAnchorCharacterLineIsExactlyAsTallAsThePicture"/>; letting it fire on
+/// a line that does hold text fails <see cref="TextBesideThePictureKeepsItsDescent"/> and two
+/// existing tests elsewhere in this project; dropping the run's <em>height</em> beside its descent
+/// fails <see cref="AShortPictureAloneStillGetsTheParagraphFontsLineAsAFloor"/>. The other two are
+/// drift guards and are labelled as such —
+/// <see cref="APictureOnAnEmptyLineIsExactlyAsTallAsThePicture"/> asserts behaviour this change did
+/// not alter, and no mutation of the guard can fail
+/// <see cref="AControlCharacterWithNoObjectIsUntouched"/>, because with nothing raising the ascent
+/// the run's height dominates the maximum whether its descent is counted or not. That is an
+/// equivalent formulation rather than an undetected defect, which is a different finding and is
+/// recorded as one.
+/// </para>
 /// </remarks>
 public class PictureAloneLineHeightTests
 {
