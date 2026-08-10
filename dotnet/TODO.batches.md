@@ -12177,3 +12177,130 @@ one: slides and sheets, **334 of 334 byte-identical**.
 The verdict round 45 gave up came back. `gpp-pr-top-7-office-markets-4q-2023.docx` went 3/4 → **4/4
 match**, and the causal test was a mutation of the real file rather than an argument — the right
 way to close a document a previous round left open with a stated cost.
+
+## Rounds forty to forty-seven — three rounds finished by the parent after their agents died
+
+All three agents were lost mid-round to a worker restart. Each had committed as it went, which is
+the only reason any of it survived; each also had **uncommitted working-tree changes**, and those
+turned out to be three different things. Reviewing them separately rather than merging the branches
+as found is what this section records.
+
+### words r47 — complete, and it gained a verdict
+
+Seven commits, coherent, tested, with a prediction committed before each sweep. Merged as found.
+
+Two findings. **A list label DOES raise the line-spacing base height** — round 46 had written the
+opposite from a citation (`SwNumberPortion` is `PortionType::Number` and
+`IsUsedToCalcLineSpacingHeight` is true only for `PortionType::Text`), and three authored probes
+against the installed 24.2.7.2 say otherwise: 31 probe rows, 12 wrong before and 0 after. Writer's
+own arrangement, cited but not relied on, is that `CalcHeightOfLastLine` takes
+`MaxAscentDescent(..., bNoFlyCnt = true)` — a fly is suppressed, a `SwNumberPortion` is not. Reach
+**1 of 200**, no verdict moved, against a predicted 10–45: the band missed high because the change
+bites only where the label's line box exceeds the paragraph's own, and a numbered heading normally
+sets its runs at its level's size, so the runs already dominate.
+
+And **a `w:style` with no `w:name` is dropped on a DOCX import** — `StyleSheetTable::sprm` appends a
+finished entry to neither the style table nor its identifier map unless it has a name
+(`StyleSheetTable.cxx:774`, guarded on `IsOOXMLImport`), so such a style cannot be referenced at
+all. LibreOffice draws 10 pt with the name and 12 pt without it in all three families; we drew
+10 pt either way. `template---tpr-technical-progress-report-with-guidance.docx` **7/8 → 8/8 match**;
+it sets its cell text on a 13.45 pt pitch where the reference uses 15.45 because we honour a table
+style the reference never resolved. Exactly 2 of 200 renderings changed against a predicted 2–4.
+
+Refuted along the way: that LibreOffice puts `w:docDefaults` *above* a table style. Six authored
+variants say it does not, and we already agreed on all six rows. Two test fixtures were declaring
+styles with no `w:name` and asserting behaviour LibreOffice does not have; they now carry names.
+
+### slides r41 — merged, minus a broken experiment
+
+Four commits: an EMF fix in the shared `Paperless.Vector`, the chart automatic-format work, and
+sixteen tests.
+
+`Bezier(continueFrom: true)` emitted `MoveTo(whole[0])` unconditionally while a path was recording,
+so every `EMR_POLYBEZIERTO` record started a fresh subpath instead of extending the open one. An
+EMF that draws text as filled outlines writes one glyph as a run of `PolyBezierTo16` records inside
+a single `BeginPath`/`EndPath`; cut into one open fragment per record and filled even-odd, that
+draws a solid blot. On `16 - UTM - (NASA).pptx` page 29 every Calibri "ti" ligature came out as a
+box. **That is the user's "unknown character rendering" report on that deck, and it was never a
+font problem.** 15 of 163 documents carry such a record.
+
+The chart blocker round 39 named **was a route, not a rule** — `DrawingTheme` and
+`DrawingStyleMatrix` were both read, both correct, and neither reached `DrawingChartPlot`;
+`PptxSlideLayout` had held the matrix for rounds and passed only the colour scheme. **Sixth
+instance of that shape on this project.** Ported from `objectformatter.cxx`: the three automatic
+format tables over all 48 chart styles, the four colour patterns behind them, `getPhColor`'s
+shade/tint, `LineFormatter`'s relative line width, and the pie/`c:varyColors` point cycle.
+Confirmed against the reference rather than the source — `Demick_JetBlue`'s three series state
+nothing and LibreOffice draws them `F07F09`, `9F2936`, `1B587C`, the Aspect theme's accents 1–3
+exactly. Signed `ink%`: JetBlue 35.97 → 29.13, Maestroni 2.36 → 1.72.
+
+Three more chart readings replaced, each pinned by tests that the refuted reading fails: `c:marker`
+absent means an **automatic** marker rather than none; a chart space's stated `c:spPr/a:ln` is
+drawn; and a series' `a:gradFill` is read as its **middle stop** rather than as no fill — reading it
+as no fill drew none of `N2_E_Maestroni_Swarm_COP`'s 111 bars. `TypeGroupModel::mbShowMarker` is
+parsed and read by nothing in the whole of `oox` and `chart2` — the reference's own
+read-and-never-used property.
+
+**The uncommitted change was discarded.** It removed the `MoveTo` from the non-continuing arm as
+well, and it **fails the round's own `ABezierNotEndingInToStillStartsItsOwnFigure`** — a broken
+mid-edit, not a finished thought. Its committed state passes 295 of 295.
+
+### sheets r40 — the round's result is a refutation, and its last commit was the wrong half
+
+Two commits, and an uncommitted working tree that **reverted the second one** with the reasoning
+already written into the comment. Merging the branch as found would have landed a change its own
+author had measured and rejected. The revert was committed from the working tree and merged with
+it.
+
+Extending the print band's right edge to the last **allocated** column fixes
+`CSJU List of Recipients of funds 2013-2020.xlsx` (97 → 96) and breaks two others:
+`fy20-may20-sep20.xlsx`, a sheet with no data at all, allocated to column E, which then prints a
+page it should not; and `fm-provider-service-measures.xlsx`, whose data stops at column C and whose
+closed run reaches T, which then fits to a smaller zoom and loses two pages. Being materialised is
+what lets a column be looked at, not what puts it in the block — `bFound` in
+`ScTable::GetPrintArea` is set by the data loop and by `GetLastVisibleAttr`, and by nothing else.
+
+What survives is the **scan rewrite**: a column's attribute array is walked as runs, so a
+whole-column or sheet-wide format participates. The old note claimed such a format is one run
+longer than `SC_VISATTR_STOP` and therefore invisible; a single `<row>` with `customFormat` cuts it
+in three and the piece above the cut is short and visible.
+
+### The scoreboard, measured rather than inherited
+
+None of the three rounds survived to run its final whole-track sweep, and two touched shared layers
+(`Paperless.Text` reaches slides; `Paperless.Vector` reaches everything), so the parent ran all
+three sweeps at the merge:
+
+| track | verdicts | \|page error\| | exact pages | \|word error\| |
+|---|---:|---:|---:|---:|
+| words | **159 / 200** | 69 | 169 | 6666 |
+| slides | 151 / 163 | 0 | 163 | 6080 |
+| sheets | 155 / 171 | 73 | 161 | 27162 |
+| **total** | **465 / 534** | | | |
+
+Words reproduces r47's own figures to the digit. Slides and sheets hold their verdicts exactly, so
+neither shared-layer change cost anything. Sheets' word error moved by **one**, 27163 → 27162, which
+is the scan rewrite and is the only measured effect it has on the gate.
+
+Test counts: Core 284, Containers 109, Text **287**, Vector **295**, Rendering 121, Markup 259,
+OpenDocument 125, WordProcessing **761**, Spreadsheets 621, Presentations **592**, Fidelity 550 —
+0 skipped, 0 warnings.
+
+### A new trap: the shell's working directory is not where the last `cd` put it
+
+The first attempt at this merge ran `cd <primary> && git merge …` and then issued the next two
+merges with no `cd`, on the understanding that the directory persists. It did not: both landed on
+the **agent worktree's** branch, `git log` in the primary showed a clean fast-forward of the first
+round only, and the build and full test suite that followed measured **the worktree, not the tree
+being merged into** — reporting Presentations 592 and Vector 295, which are correct numbers for the
+wrong checkout.
+
+Nothing was lost, because the commits were reachable from the worktree's branch. What makes this
+worth recording is that **every check passed**: the merges reported success, the counts were right,
+and the tree was clean. It is the same family as "`git status` cannot see a bad HEAD" — a
+measurement of the wrong tree announces nothing.
+
+The rule: **pass `-C <path>` explicitly to every `git` invocation that matters**, and confirm with
+`git -C <path> rev-parse --abbrev-ref HEAD` before merging. After a merge, `git log --oneline
+--graph` in the target must show the merge commit; if it shows a fast-forward of something else,
+stop.
