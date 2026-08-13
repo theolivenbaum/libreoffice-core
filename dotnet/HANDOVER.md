@@ -16,9 +16,15 @@ Two things about that arrangement matter and are easy to get wrong:
 - **The C++ tree is reference material, never a build dependency.** You read it to understand
   what LibreOffice intends. You do not link it, port it wholesale, or trust it over measurement.
 - **The C++ in this checkout is not the reference binary.** Ground truth is the *installed*
-  `soffice` — **LibreOffice 24.2.7.2 420(Build:2)**. Several rounds have found the checked-out
-  source contradicting the installed binary's actual behaviour. When they disagree, the binary
-  wins, and an authored probe read against the binary is how you settle it.
+  `soffice` — **LibreOffice 26.2.4.2 620(Build:2)**, where the checked-out tree is
+  **27.2.0.0.alpha0+**. Several rounds have found the checked-out source contradicting the
+  installed binary's actual behaviour. When they disagree, the binary wins, and an authored probe
+  read against the binary is how you settle it.
+
+  **Five rounds have now burned predictions on forgetting this**, most expensively one that
+  believed line-spacing machinery which does not exist in 26.2.4.2 at all, and one that predicted
+  from the 27.2 source that LibreOffice never overlaps a border at a joint when it overlaps by the
+  crossing border's full width. Cite the C++ for *intent*; measure `soffice` for *truth*.
 
 ### Layering
 
@@ -57,39 +63,66 @@ merge, verify, record and re-dispatch**, one agent per track, indefinitely.
 
 ## 3. Where things stand right now
 
-Repository at **`0fb6d41e0`** on `claude/paperless-odf-phase-1-rnyzcu`, pushed, tree clean,
-**no worktrees, no agents running.** The scoreboard below was measured by three whole-track
-sweeps at that commit, not inherited from a round's report.
+> **This section was rewritten after a container move. Read `dotnet/CLAUDE.md` § "This container"
+> before reproducing any figure below — three of the inputs a measurement depends on changed, and
+> none of them is our code.**
 
-| track | verdicts | \|page error\| | exact pages | \|word error\| |
-|---|---:|---:|---:|---:|
-| words | **159 / 200** | 69 | 169 | 6666 |
-| slides | **151 / 163** | 0 | 163 | 6080 |
-| sheets | **155 / 171** | 73 | 161 | 27162 |
-| **total** | **465 of 534** | | | |
+Repository on `claude/paperless-odf-phase-1-rnyzcu`, pushed. Scoreboards measured at HEAD, not
+inherited from a round's report.
 
-Slides carries no `unembedded` verdict and no page-count error at all — its twelve mismatches are
-word counts and fonts. Words' word error has been *rising* while the tree improves; see §7.
+| track | verdicts |
+|---|---:|
+| words | **155 / 200** |
+| slides | **144 / 163** |
+| sheets | **146 / 171** |
+| **total** | **445 of 534** |
 
-Test counts at `0fb6d41e0`, **0 skipped and 0 warnings throughout**:
+**That total is not comparable with the 465 recorded before it, and neither is any per-track
+figure.** Four things moved underneath the number, in order of size:
+
+1. **The reference binary is LibreOffice 26.2.4.2**, where every stored figure was taken against
+   **24.2.7.2**. Net cost on words alone: 5 verdicts.
+2. **`fonts-dejavu-core` was missing from the container and is now installed.** It sits ahead of
+   WenQuanYi Zen Hei in the fallback chain and **267 of the 534 reference PDFs resolve a fallback**.
+   Cost on words: **25 verdicts** — larger than the version change. See `MISSING_PACKAGES.md`.
+3. **The gate's word check changed**: a token is a word iff it carries a Unicode letter or digit,
+   because LibreOffice now emits bullet glyphs into the text layer and `wc -w` counted each as a
+   word. Worth **+14 across the corpus** and, on slides, it un-hid a document that had been passing
+   by the arithmetic of two opposite errors.
+4. **poppler is 26.01.0**, and it was an *undeclared* input: with our source provably unchanged, our
+   own word counts moved on 169 of 200 documents and 86 of them moved by exactly the amount the
+   reference moved. `paperless analyze` now reads PDFs in process to remove that dependency —
+   though `batch-check.sh` still calls poppler, deliberately, because rewiring it restates every
+   scoreboard again.
+
+Test counts at HEAD, **0 failed**:
 
 ```
-Core 284   Containers 109   Text 287   Vector 295   Rendering 121   Markup 259
-OpenDocument 125   WordProcessing 761   Spreadsheets 621   Presentations 592
-Fidelity 550
+Core 313   Containers 109   Text 289   Vector 295   Rendering 149(1 skipped)   Markup 259
+OpenDocument 125   WordProcessing 792   Spreadsheets 676   Presentations 631      = 3638
+Fidelity 519 passed / 31 failed of 550
 ```
 
-### The last three rounds were finished by the parent, not by their agents
+**Fidelity's 31 are classified, not mysterious** (`dotnet/probes/fidelity-01/results.md`): it
+rebuilds the reference live via `soffice` rather than pinning stored figures, the same 40 reproduce
+byte-identically at the handover's own green commit, and of them **12 were genuinely ours** — nine
+of which shipped. Three of the remainder are places where **we are right and LibreOffice is wrong**.
+The single `Rendering` skip is an environment gap: the container has zero `.otf` files.
 
-Rounds 40 (sheets), 41 (slides) and 47 (words) all lost their agents mid-round to a worker
-restart. All three had committed as they went — the only reason anything survived — and all three
-had uncommitted working trees. Those turned out to be three different things, and merging the
-branches as found would have been wrong in two of the three cases. The pattern is recorded in §7
-and in `.claude/skills/corpus-batches/SKILL.md`; the outcomes are in `dotnet/TODO.batches.md` under
-"Rounds forty to forty-seven".
+### The method changed, at the user's instruction
 
-**There is nothing left unmerged.** The next session starts clean and picks its own targets from
-§8.
+**Look at the rendering. Do not chase it through metrics alone.** The gate is blind to most real
+defects, and this is now written into `dotnet/CLAUDE.md` § "Fidelity" and
+`.claude/skills/render-comparison/SKILL.md` § "Look at the page", with a tool:
+
+```sh
+python3 .claude/skills/render-comparison/scripts/look.py "<doc>__pptx" --worst
+```
+
+Rank **all** documents by `|ink|%` — not the failing ones, which are picked over — open the worst
+pages, and describe them before checking the record. The first three *passing* slide decks opened
+this way produced three findings, two previously unrecorded. See §9: the user's own review of 30
+decks found **17 in a single class no gate column can see**.
 
 ---
 
@@ -392,7 +425,30 @@ foot of the page rather than assuming it, is the model.
 
 ## 8. Per-track open items
 
-### Words — 159/200
+> Scoreboards below are at HEAD under the **corrected** word check and the **current** environment.
+> Items closed since the last handover are struck through where the closure is itself instructive;
+> `dotnet/TODO.batches.md` carries a merge note per round with the measurements.
+
+**The live fronts, largest first:**
+
+1. **Slides text metrics — 17 of the user's 30 observations, one class.** Nine used the identical
+   words "text sizes are different". Every affected deck is page-exact and passes the word gate, so
+   no gate column can see it. `dotnet/probes/user-review-slides-02/review.md`.
+2. **The `.ppt` text shadow — 36 of 51 decks, 843 runs.** Character bit `0x0010`, unread and with
+   nowhere to hold it. LibreOffice's rule reproduces to the digit at three sizes; the blocker is
+   that those three points do not separate Liberation Sans's `hhea` sum from its `OS/2` typo sum,
+   and shipping on that would be a rounding rule resting on an unresolved metric.
+3. **Hyperlink underline and colour — 41 of 112 `.pptx`, 297 runs.** A hyperlink run stating
+   neither gets both from `textrun.cxx:161-166`.
+4. **The ~0.1% advance divergence.** Tab stops exact to 0.0000 pt so the pen is right; drift
+   accumulates *between* them and LibreOffice **kerns 19% harder**. Underlies 8 Fidelity failures.
+   The claim "advance widths agree by construction" was false and has been removed from both places
+   it appeared.
+5. **`apron-area.xls` page 1 draws no grid at all on our side** — 70 vertical and 56 horizontal
+   reference hairlines, three missing border classes — **while matching the gate exactly**.
+
+
+### Words — 155/200
 
 - **The list-label rule is done and its reach was 1 of 200.** Round 47 established, against round
   46's citation-derived claim, that a list label **does** raise the line-spacing base height —
@@ -428,7 +484,7 @@ foot of the page rather than assuming it, is the model.
   nowhere in the word path.
 - `dotnet/TODO.raster-ceiling.md` lists 37 pages the word gate cannot win.
 
-### Slides — 151/163
+### Slides — 144/163
 
 Round 41 closed most of the chart cluster. **Its whole-track sweep was never run by the agent** —
 the parent measured 151/163 at the merge, so the chart work is known not to have cost a verdict,
@@ -485,7 +541,7 @@ Still open on the track:
 - `glyphs` is dead as a slides class too: dominant on 66 of the 151 that pass (44%). `size` is
   dominant on 22 matching and **0** failing.
 
-### Sheets — 155/171
+### Sheets — 146/171
 
 Round 40 worked the page-split cluster and **its result was a refutation** — read it before
 starting, because the obvious repair is measured and rejected.
