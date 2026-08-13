@@ -1,29 +1,29 @@
 #!/usr/bin/env python3
-"""Build this round's two fixtures: a cropped inline WMF, and one whose `pib` collides.
+"""Build this round's fixtures: an inline picture whose `pib` collides, and a cropped WMF.
 
     make-wmf-fixtures.py <outdir>
-    soffice --headless --convert-to doc --outdir <fresh> <outdir>/picture-crop-wmf.docx
     soffice --headless --convert-to doc --outdir <fresh> <outdir>/picture-blip-collision.docx
+    soffice --headless --convert-to doc --outdir <fresh> <outdir>/picture-crop-wmf.docx
 
-Both are newly authored, element by element — no corpus document is copied or excerpted.
+Both are newly authored, element by element - no corpus document is copied or excerpted.
 The `.docx` is the input and the `.doc` is what the tests read, because LibreOffice's own
 export is what turns an `a:srcRect` into Escher's cropFromTop/Bottom/Left/Right (256-259)
-and puts an inline shape in the `Data` stream where Word puts one.
+and puts an inline shape in the `Data` stream where Word puts one. Both are then patched
+into the shape Word writes - the PICF crop zeroed and the goal shrunk to the visible extent
+- by the same edit and for the same reason as `picture-crop-goal.doc`.
 
-**`crop-wiring-01` §4's warning applies and is why both fixtures are checked against the
-corpus after conversion**: a file round-tripped through the reference implementation is a
-statement about the reference implementation. What is being pinned here is not the export's
-choices but two facts that the corpus confirms independently — that the blip is a WMF, and
-that an inline picture's `pib` is numbered inside its own container.
+`picture-blip-collision.docx` is the one the tests use. It holds an **anchored** PNG, which
+is what puts an entry in the document's shared blip store, and an **inline** PNG whose `pib`
+is numbered from one inside its own container and therefore names that entry too. The two
+are 100 x 100 and 64 x 64 pixels, and the difference in size is the whole instrument: both
+are drawn at the same place whichever way the `pib` is read, so the pixel count is the only
+thing that says which one arrived.
 
-Same geometry as `picture-crop.docx` so the two are comparable to the point: 288 x 216 pt,
-10% off the left, 20% off the top, 30% off the right, 40% off the bottom. A PNG at those
-fractions is drawn 480 x 540 pt. A WMF at those fractions is drawn 288 x 216 — that is the
-whole of the WMF rule, and it is measured on the installed 26.2.4.2, not assumed.
-
-The second fixture adds an *anchored* PNG, which is what puts an entry in the document's
-shared blip store. The inline WMF's `pib` is numbered from one inside its own container and
-therefore names that entry too, which is the collision.
+`picture-crop-wmf.docx` is the same shape with a hand-assembled WMF inline. **It is not used
+by any test**, because it refutes rather than supports the rule it was built for: 26.2.4.2
+applies its Escher crop, while it ignores the crop on every WMF in `150_5300_13_chg10.doc`,
+`150_5300_13_chg12.doc` and `150_5300_13_chg8.doc`. See `results.md` section 4. It is kept
+because reproducing that contradiction is the next round's starting point.
 """
 import os
 import struct
