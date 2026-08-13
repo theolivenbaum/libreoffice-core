@@ -135,9 +135,42 @@ between two columns it reads identically. What can, and demonstrably does:
 they do not have to be settled together.** The repair is the same either way, which is the
 useful part: a count defined over letters and digits is insensitive to whether an extractor
 surfaces a bullet, so it removes the producer-side asymmetry *and* immunises check 2 against the
-extractor change `words-rebase-02` found — and against the next one. Pinning poppler is not
-available in this image; owning the extractor (the `paperless analyze` work) is the durable form
-of the same normalisation, and **this definition is what it should implement**.
+extractor change `words-rebase-02` found — and against the next one.
+
+### (c) "The term is poppler's, so own the extractor and leave the definition alone" — I was
+offered this conclusion and it is half right
+
+It was put to me as an available and legitimate result, so it is answered rather than skirted,
+and on one track it is simply correct.
+
+**Where it is right: words.** Zero verdicts move (§7). Every words failure's correction is 1–5%
+of its delta and the two sides' non-alphanumeric counts are near-identical document by document.
+On `.doc` and `.docx` the term is exactly what a shared extractor shift looks like — it lands on
+both columns and cancels — and no change to the definition can or should recover anything there.
+**That is the honest, publishable negative result for a third of the corpus, and it is reported
+as the headline of the words row rather than buried.**
+
+**Where it is not: the residue is not shared.** An extractor cannot make `fy2011-aip-grants.xls`
+show 11 538 `$`/`-` tokens on our side and 9 020 on the reference's; it cannot make one workbook
+carry 1101 `###` and the other 2; it cannot map the same Wingdings bullet to `U+F0A7` in one file
+and `U+E437` in the other. Those are bytes each producer wrote, and they are what buys the
+fourteen verdicts.
+
+**Where the two genuinely interact, and I checked rather than assumed.** On `Thailand17.ppt` our
+text layer emits `•MORE` and `•LONG` as single tokens where the reference emits `•` and `MORE`
+separately — poppler's word-joining heuristic reacting to *our* glyph spacing. That is an
+extractor behaviour driven by a producer difference, and it is precisely the class the raw count
+cannot survive: `•MORE` scores 1 and `• MORE` scores 2 under `wc -w`, but both score 1 under the
+corrected count. The letter-or-digit definition is stable across the join, which is a property I
+did not design for and should be recorded as a reason to keep it.
+
+**Owning the extractor does not substitute for the definition.** Pinning poppler is unavailable
+here and would only freeze the problem; replacing it with PdfPig moves it. Whatever reads the
+PDF still has to answer "is a bullet a word?", and it will answer it whether or not anyone
+writes the answer down. §5 is that answer written down, and **`paperless analyze` should
+implement it, not re-decide it** — raw token count, letters-or-digits count, and the excluded
+classes broken out. If a reimplementation changes the count for any reason other than a bug,
+that is a third incomparable scoreboard and has to be published as one.
 
 ---
 
@@ -469,7 +502,21 @@ text or a fragmented letter-spaced run; and everything `words-rebase-02` §8 lis
    letters in our text layer suggesting a tracked run being fragmented.
 3. **`ODs-February-2022…xlsx`** — we emit 895 more real words than the reference and do not emit
    `###`. Whether we *should* emit `###` is a rendering question this round does not answer.
-4. **Rewiring to `paperless analyze`.** The definition in §5 is what the tool should implement:
-   raw count, letter-or-digit count, and the excluded classes broken out. When it lands, the
-   `python3` in `words_of()` is what it replaces — the definition should not change with it, and
-   if it does, that is a third incomparable scoreboard and must be written up as one.
+4. **Rewiring to `paperless analyze`.** A Tooling agent is replacing `pdfinfo` +
+   `pdftotext | wc -w` + `pdffonts` with an in-process PdfPig reader. **`words_of()` in
+   `batch-check.sh` is the seam**: it already returns exactly the pair the new verb should emit,
+   `<letters-or-digits> <raw>`, so the rewiring is a substitution of that one function body and
+   nothing else in the script has to move. Three requirements fall out of this round and are
+   handed over rather than assumed:
+   - **the definition is §5's and must not be re-decided** — categories `L*`/`N*`, tokenisation
+     unchanged from `wc -w`;
+   - **the tokenisation control must be re-run**, because PdfPig's text extraction is not
+     poppler's. My split reproduces `wc -w` on 1068 of 1068 PDFs; a PdfPig-based count that does
+     not reproduce the `rawwords` column on all 534 documents is **a fourth incomparable
+     scoreboard**, not a drop-in, and the divergence has to be measured and published before any
+     verdict taken with it is quoted;
+   - **the excluded classes should be emitted as counts**, not merely dropped, so the next agent
+     to find a systematic term can see it without authoring a census.
+5. **`ref-baseline-all.tsv` still carries the old `refwords`.** Left alone deliberately (§9).
+   Whoever re-bakes the canonical reference should add the corrected column rather than
+   overwrite the old one; `census.tsv` holds the corrected values for all 534 in the meantime.

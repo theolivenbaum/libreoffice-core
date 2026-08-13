@@ -112,6 +112,12 @@ mkdir -p "$OUT/ours" "$OUT/ref"
 # construction and cannot be changed by the environment. The split is `str.split()`, which
 # reproduces `wc -w` on 1068 of 1068 corpus PDFs — so the tokenisation is untouched and the
 # only thing that changed is the filter.
+# This function is also the seam for the in-process extractor (`paperless analyze`): it returns
+# exactly the pair that verb should emit, so replacing poppler here is a substitution of this
+# body and nothing else in the script. The definition above is the durable part and must not be
+# re-decided by the reimplementation — and the `wc -w` reproduction is a *control on poppler's
+# tokenisation*, so a different reader has to re-establish it against the `rawwords` column of a
+# stored sweep before any verdict it produces is comparable to one here.
 words_of() {  # words_of <pdf> -> "<words> <rawwords>"
   pdftotext "$1" - 2>/dev/null | python3 -c '
 import sys
