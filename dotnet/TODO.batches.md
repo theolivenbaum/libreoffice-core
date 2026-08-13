@@ -12950,3 +12950,70 @@ the point of the tool, but it would restate all three scoreboards a second time,
 are in flight against the current numbers. It is a round of its own, and its prerequisite —
 re-establishing the `wc -w` control against a stored `rawwords` column — is what the table above
 provides.
+
+---
+
+## Merge note — crop-wiring-01, and "one call" would have shipped a regression
+
+Merged `wt-crop`. Build 0 warnings / 0 errors. **Ten non-Fidelity projects: 3577 total, 0 failed** —
+Core 298 → **305**, WordProcessing 775 → **783**, Spreadsheets 643 → **650**, Presentations 609 →
+**613**. 26 tests added, **14 verified by reintroduction**, 6 labelled drift guards.
+
+### The brief was wrong, and the way it was wrong is the finding
+
+I briefed both sites as "each one call from `EscherPicture.Cropped`". **Neither was**, and the
+smaller error was the count. Both named lines sit inside a `PictureOf(EscherShape)` with **no
+rectangle in scope** — a sheet drawing is anchored to cells, a Word frame is placed by the layout
+engine. And **neither painter clipped a picture at all**: the `.ppt` path only ever worked because
+`SlideDrawing` already clipped every picture to the shape outline.
+
+So shipping the briefed "one call" would have drawn every cropped picture at **1/(1−l−r) size across
+the page** — a regression, introduced by following the instruction exactly. Each site is three
+changes: carry, apply, **clip**.
+
+### The round refuted its own first answer, which is the harder kind
+
+`Uncropped` on the fixture's inline `.doc` returned 800 pt where 480 was wanted, so the operation
+was inverted. That **passed the fixture and was wrong on all seven corpus documents**.
+
+The reason is worth keeping: **LibreOffice's DOC export is the only writer in play that states the
+crop twice** — in `PICF` *and* in Escher — and sizes `dxaGoal` to the whole picture. Across the
+words track, over 52 `.doc` files carrying a `Data` stream and 32 cropped inline pictures,
+**`dxaCrop*` is zero on every one**. One formula covers both writers:
+`visible = (dxaGoal − PICF crops) × scale`, then `Uncropped` by the Escher fractions. A third
+fixture, `picture-crop-goal.doc`, exists because a round trip cannot produce the shape Word writes.
+
+**A fixture is not a corpus.** Passing the authored case is what let the wrong operation through.
+
+### The census was validated before use, and the control caught two errors
+
+Built as a binary record walk and checked against `slides-b-01`'s known answer (16 decks / 100
+shapes) **before** being trusted. Its first two words answers were wrong and the control column
+caught both: inline containers live in the `Data` stream, and a `.doc`'s `OfficeArtWordDrawing`
+puts a **one-byte `dgglbl`** before its `DgContainer`, which had hidden every floating shape.
+Corrected to **7 documents / 38 shapes**.
+
+| | |
+|---|---|
+| **words** | **7 of 200** — exactly the census ceiling, document for document |
+| **sheets** | **0 of 171** |
+| **slides** | **0 of 163** |
+| verdicts | **0 of 7**, page counts identical on both legs, predicted beforehand |
+
+Raw and date-normalised sweeps agree everywhere; six sweeps, all re-counted from disk. The slides
+zero is load-bearing rather than a formality, because this round *did* add to Core and re-express
+`EscherPicture.Cropped`. **On sheets it is dead code for this corpus** — 26 workbooks, 60 pictures,
+zero crops — and that is said plainly rather than dressed up as coverage.
+
+### Direction: not a clean win, and the debit is named
+
+A page-level pixel tally is **uninterpretable** on six of the seven, because our `chg10` page 50 is
+the reference's page 47 and both hold Figure 4-19. That run was abandoned rather than reported, and
+the crop was read out of the PDF operators instead, paired by frame:
+
+- agreement with the reference goes **0 → 6 of 8**, several to within 0.3%;
+- **2 WMF pictures in `chg10` are now cropped where the reference crops nothing** (growth 2.395 and
+  1.175).
+
+The rule that decides which of those two behaviours applies was **not established**, and it leads
+the next-round list rather than being guessed at.
