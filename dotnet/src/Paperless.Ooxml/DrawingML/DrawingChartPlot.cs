@@ -795,7 +795,7 @@ public static class DrawingChartPlot
                 DrawingChartText.Label(Child(element, "tx")),
                 numbers,
                 FillOf(properties, theme) ?? autoFill,
-                LineOf(properties, theme) ?? autoLine,
+                SuppressesLine(properties) ? null : LineOf(properties, theme) ?? autoLine,
                 StatedLineWidth(properties) ?? AutoLineWidth(automatic, frame, theme, seriesIndex),
                 PointFills(
                     element,
@@ -810,8 +810,9 @@ public static class DrawingChartPlot
             {
                 XValues = domain,
                 Marker = MarkerOf(element, kind, scatterStyle, radarStyle, seriesIndex),
-                HasLine = scatterLine
-                          && Drawing.Child(Drawing.Child(properties, "ln"), "noFill") is null,
+                MarkerFill = MarkerFillOf(element, theme),
+                MarkerLine = LineOf(MarkerProperties(element), theme),
+                HasLine = scatterLine && !SuppressesLine(properties),
                 Label = WithSource(LabelOf(seriesLabels, groupLabel, kind, office2007), sourceFormat),
                 PointLabels = PointLabelsOf(
                     seriesLabels, numbers.Length, groupLabel, kind, sourceFormat, office2007),
@@ -1426,6 +1427,68 @@ public static class DrawingChartPlot
         if (line is null) return null;
         if (Drawing.Child(line, "noFill") is not null) return null;
         return FillOf(line, theme);
+    }
+
+    /// <summary>
+    /// Whether these shape properties state <em>no line at all</em>, as against stating nothing.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <see cref="LineOf"/> returns null for both, which is right for a colour and wrong for the
+    /// question a caller with a fallback is asking. <c>c:ser/c:spPr/a:ln/a:noFill</c> is a
+    /// <em>suppression</em>: <c>LineFormatter::convertFormatting</c> resolves it to
+    /// <c>LineStyle_NONE</c> (<c>objectformatter.cxx:857-889</c> through
+    /// <c>LineProperties::pushToPropMap</c>), so the automatic colour the chart's style would
+    /// otherwise have given the series must not be substituted for it.
+    /// </para>
+    /// <para>
+    /// Absence is the opposite and stays the opposite: a series with no <c>a:ln</c> is what the
+    /// automatic table exists for. Collapsing the two is why a scatter series whose file says it
+    /// has no line was carrying one in <see cref="ChartSeries.Line"/> — invisible in the polyline,
+    /// which <see cref="ChartSeries.HasLine"/> already suppressed, and visible in every consumer
+    /// that reads the colour without consulting that flag.
+    /// </para>
+    /// </remarks>
+    private static bool SuppressesLine(XElement? properties)
+        => Drawing.Child(Drawing.Child(properties, "ln"), "noFill") is not null;
+
+    /// <summary>A series' <c>c:marker/c:spPr</c>, or null when it states none.</summary>
+    private static XElement? MarkerProperties(XElement? series)
+        => Child(Child(series, "marker"), "spPr");
+
+    /// <summary>
+    /// The colour a marker is filled in when it states shape properties of its own.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>TypeGroupConverter::convertMarker</c> (<c>typegroupconverter.cxx:657-678</c>) takes
+    /// <c>xShapeProps->getFillProperties().maFillColor</c> for the symbol's fill and, when there
+    /// is none, falls back to the symbol's <em>line</em> colour — the fix for tdf#124817, whose
+    /// comment says so in as many words. Both halves matter on this corpus: the marker is stated
+    /// with a <c>a:solidFill</c> on <c>FAAAI…</c> and with a three-stop <c>a:gradFill</c> on
+    /// <c>8_P-Pavese_AIRBUS…</c>, where only the fallback finds a colour at all.
+    /// </para>
+    /// <para>
+    /// <strong>A gradient is deliberately not read here, though <see cref="FillOf"/> reads one
+    /// for a series.</strong> <c>maFillColor</c> is set by <c>a:solidFill</c> alone, so the
+    /// reference genuinely does not see the gradient's stops, and taking the middle stop instead
+    /// would draw the AIRBUS markers in a colour LibreOffice never computes. The two policies
+    /// differ because the questions do: an unfilled bar is a missing row, an unfilled marker has
+    /// a line colour standing behind it.
+    /// </para>
+    /// </remarks>
+    private static Colour? MarkerFillOf(XElement? series, DrawingTheme? theme)
+    {
+        XElement? properties = MarkerProperties(series);
+        if (properties is null) return null;
+
+        if (Drawing.Child(properties, "solidFill") is { } fill)
+        {
+            foreach (XElement child in fill.Elements())
+                if (DrawingColour.Read(child) is { } colour) return colour.Resolve(theme);
+        }
+
+        return LineOf(properties, theme);
     }
 
     /// <summary>

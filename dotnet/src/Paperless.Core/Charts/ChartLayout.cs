@@ -2084,9 +2084,15 @@ public static partial class ChartLayout
 
             if (series.Marker != ChartMarker.None)
             {
+                // The marker's own colours first, and only then the series'. A symbol states its
+                // paint in c:marker/c:spPr and convertMarker reads it from there; the series
+                // colour is the fallback for a file that says nothing, not the rule.
                 Length size = plot.LabelSize * MarkerSize;
+                Colour marker = series.MarkerFill ?? series.Fill ?? stroke;
+                Colour outline = series.MarkerLine ?? stroke;
+
                 foreach ((DocPoint at, _, _) in points)
-                    shapes.Add(Marker(series.Marker, at, size, series.Fill ?? stroke, stroke));
+                    shapes.Add(Marker(series.Marker, at, size, marker, outline));
             }
 
             AddPointLabels(plot, series, points, ChartLabelPlacement.Right, area, labels);

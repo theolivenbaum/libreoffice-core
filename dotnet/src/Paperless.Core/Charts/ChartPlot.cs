@@ -167,6 +167,30 @@ public sealed partial record ChartSeries(
     /// </remarks>
     public ChartMarker Marker { get; init; } = ChartMarker.None;
 
+    /// <summary>
+    /// The colour the marker is filled in where it states one of its own, or null to take the
+    /// series' colour.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>c:marker/c:spPr</c>. A marker carries its own shape properties and they are not the
+    /// series': <c>TypeGroupConverter::convertMarker</c> reads the symbol's fill colour, falling
+    /// back to the symbol's line colour when there is no fill
+    /// (<c>typegroupconverter.cxx:657-678</c>, tdf#124817), and only then does the series' colour
+    /// come into it.
+    /// </para>
+    /// <para>
+    /// Null means "the file states nothing", which keeps every marker whose file says nothing
+    /// drawn exactly as before — including every ODF chart, whose reader has no such element to
+    /// give.
+    /// </para>
+    /// </remarks>
+    public Colour? MarkerFill { get; init; }
+
+    /// <summary>The marker's own outline colour, or null to take the series'.</summary>
+    /// <remarks><c>c:marker/c:spPr/a:ln</c>. See <see cref="MarkerFill"/>.</remarks>
+    public Colour? MarkerLine { get; init; }
+
     /// <summary>Whether the series joins its points with a line.</summary>
     /// <remarks>
     /// False for a scatter chart whose <c>c:scatterStyle</c> is <c>marker</c>, and for a line
