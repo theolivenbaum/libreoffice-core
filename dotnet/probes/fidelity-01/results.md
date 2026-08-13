@@ -390,9 +390,116 @@ quantisation mechanism as an unproven hypothesis.**
 
 ---
 
-## 6. What I propose to repair, and what I actually changed
+## 6. The brief's leading hypothesis, tested rather than accepted
 
-**Nothing has been re-baselined.** No expectation was loosened to make a test green. Both files I
-instrumented were restored byte-for-byte and `git status` on `dotnet/tests/` is clean.
+> "If Fidelity pins expectations to the old binary's output, some or all of the 40 are the
+> environment moving rather than our code breaking."
 
-*(proposals below)*
+**The first clause is largely false, and it changes what repairs are available.**
+
+Fidelity does **not** pin stored figures. `LibreOfficeRunner` shells out to `soffice` and rebuilds
+the reference **live, at test time**, on every run. Both sides move together. That is why "the
+stored figure is stale, re-baseline it" — the repair the brief anticipated — applies to almost none
+of the 40.
+
+The suite *does* contain hard-coded figures read off 24.2.7.2, and they are exactly where you would
+expect: `TableAutoLayoutComparisonTests.cs:145-159` pins column widths as literal
+`[InlineData("table-autofit.fodt", 160.6, 107.1, 214.1, …)]`. **Every one of those passes.** The
+stored numbers are fine; it is the *live* comparisons that broke.
+
+So the environment did not invalidate our recorded measurements. It changed the thing being
+measured against — and in three of the five families it changed it **for the worse**.
+
+---
+
+## 7. What I propose to repair, and what I actually changed
+
+**What I changed: nothing.** No expectation was re-baselined, no tolerance loosened, no test
+deleted. The two files I instrumented (`PageDrawingComparisonTests.cs`, `TabStopComparisonTests.cs`)
+were restored byte-for-byte from copies taken first; `git status` on `dotnet/tests/` is clean and
+the only committed artifacts are this document and the measurement `.tsv`s. The suite still reports
+40 red, honestly.
+
+That is deliberate. Every one of these repairs is a judgement about *which side is right*, and on a
+project whose recorded failure mode is "the number reproduces and the sentence attached to it is
+wrong", shipping five of them in one round on one agent's reading is how a suite stops meaning
+anything. Below is what I would ship, each justified separately, in the order I would do it.
+
+### 7.1 `ExtractionComparisonTests` × 5 — add a documented deviation (recommend: ship)
+
+Do **not** weaken the assertion. Add a `KnownDeviations` entry for `tables.*` in the switch at
+`ExtractionComparisonTests.cs:85`, in the same style as the three quirks already recorded there,
+naming the evidence: *LibreOffice 26.2.4.2's `Text (encoded)` filter absorbs the paragraph after a
+table into a phantom row and duplicates it across the remaining columns; its own PDF rendering of
+the same file emits it once, and so does the file.*
+
+This is the file's established pattern for "the reference filter is wrong here and we decline to
+copy it", and it keeps the test's real assertion — that we lose no content — fully live. It is the
+one repair I would ship without further corroboration, because LibreOffice contradicting its own
+renderer settles it.
+
+### 7.2 `TableComparisonTests` × 3 — hold, and report upstream (recommend: do not change the test)
+
+Paperless produces exactly the declared 454 twips; LibreOffice adds exactly the declared
+`w:tblCellMar/w:top`. I would leave these three **red** rather than paper over them: they are a
+correct test catching a reference regression, and a `KnownDeviations`-style suppression here would
+hide it if LibreOffice fixes it back. The right action is an upstream bug report against
+LibreOffice's Word-import handling of `hRule="exact"`, and a note in `TODO.md` so the next round
+does not re-derive it.
+
+*If* the suite must be green, the honest form is a skip with that reason attached — never a widened
+tolerance, because 2.85 pt is not noise and a tolerance that admits it would admit a real defect.
+
+### 7.3 `TableAutoLayoutComparisonTests` × 3 — fix the test, it is measuring the wrong thing (recommend: ship)
+
+Filter whitespace-only runs out of the reference before counting, at
+`TableAutoLayoutComparisonTests.cs:120`. This is **not** a relaxation: a run count is the producer's
+internal portion-splitting choice, and whether LibreOffice emits a line-ending space as its own
+`Tj` is invisible in the rendered page. Filtering makes the assertion measure what its comment says
+it measures — "a column too narrow wraps a cell that should not wrap" — and it would have been the
+right code before the environment moved.
+
+### 7.4 The footnote separator × 4 — a real defect; diagnose now, fix as its own round (recommend: do not fix here)
+
+Diagnosed to file and line:
+
+- **Where the file's own answer is discarded:** `Paperless.WordProcessing/Ooxml/DocxFile.cs:293`
+  drops `w:type="separator"` pseudo-notes as "drawing furniture, not content". True for extraction,
+  but the layout side then has nothing to draw from.
+- **Where the wrong value is substituted:** `Paperless.WordProcessing/Layout/Paginator.cs:170`,
+  `NoteSeparatorWidth = 0.25`, consumed at `Paginator.cs:1888` as
+  `page.TextWidth * _options.NoteSeparatorWidth` — one global fraction, no format distinction,
+  overridden nowhere in `src/`.
+- **What the file actually says:** `word/footnotes.xml` carries
+  `<w:footnote w:type="separator"><w:p><w:pPr><w:rPr><w:sz w:val="12"/></w:rPr></w:pPr><w:r><w:separator/></w:r></w:p></w:footnote>`
+  — Word's 2-inch rule, in a 6 pt paragraph. That single element accounts for **both** discrepancies:
+  the 144 pt width *and* the 2.214 pt vertical shift (the 6 pt paragraph's own metrics).
+- **The mechanism to express it already exists:** `PaginationOptions.Word` (`Paginator.cs:32-37`),
+  already selected by `DocxReader`, `RtfReader` and `DocReader` while ODF uses `.Default`.
+
+**Why I did not ship it.** The small version — an absolute 144 pt on the `Word` preset — **turns no
+test green**, because `FootnoteComparisonTests.cs:227` also asserts the rule's `Y`, and that is
+still 2.214 pt out. So the cheap fix costs a behaviour change for every Word document with
+footnotes and buys nothing measurable, which fails the brief's own test for shipping a fix. The
+version that *is* correct — read the separator pseudo-note and lay it out with its own paragraph
+metrics — is a real piece of work and deserves its own round with its own prediction.
+
+### 7.5 `PageDrawing` × 4 + `TabStop` × 4 — do not touch the tolerances yet (recommend: measure first)
+
+This is where I most expect a future round to do the wrong thing, so I want the reasoning on record.
+
+The tempting repair is 0.5 → 0.75 and 0.1 → 0.2. **Resist it.** Those numbers would be chosen to
+clear the observed maxima (0.557 and 0.189) and nothing else — the definition of a silent
+re-baseline. And they would blunt genuinely sharp instruments: `TabStop`'s 0.1 pt bound is two
+twips, and its comment explains that it exists to catch a default tab interval of 720 twips where
+LibreOffice uses 709. Doubling it to catch a 0.13 pt drift would also stop catching that.
+
+What these eight actually show is a **systematic ~0.1–0.2 % advance divergence** that both tests
+were absorbing. The right repair is to characterise and fix *that*, after which both tolerances can
+stay where they are. Until then I would leave them red: they are correctly reporting a real
+divergence, and the divergence is the more valuable object.
+
+The cheap, honest interim option — if red must be cleared — is to split the assertion: keep the
+tight bound on **absolutely positioned** points (margins and tab stops, where we are exact to
+0.0000 pt, measured on 10 of 24 words) and assert the drift **per unit of text** rather than
+absolutely, so the bound stops depending on how long the line happens to be.
