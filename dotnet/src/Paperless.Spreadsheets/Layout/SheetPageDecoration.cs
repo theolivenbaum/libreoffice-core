@@ -704,17 +704,23 @@ internal sealed class SheetPageDecoration(SheetLayout sheet, SheetPagePlacement 
                 {
                     PlacedColumn column = columns[c];
                     SheetCellBorders own = decoration(row.Row, column.Column).Borders;
+                    bool firstRowOfBand = r == 0 || rows[r - 1].Row != row.Row - 1;
+                    bool firstColumnOfBand = c == 0 || columns[c - 1].Column != column.Column - 1;
 
                     if (!merges.IsOverlappedTop(row.Row, column.Column))
                     {
-                        edges.Add(true, row.Y, column.X, column.Right, SheetCellBorders.Resolve(
-                            own.Top, decoration(row.Row - 1, column.Column).Borders.Bottom));
+                        edges.Add(true, row.Y, column.X, column.Right, firstRowOfBand
+                            ? own.Top
+                            : SheetCellBorders.Resolve(
+                                own.Top, decoration(row.Row - 1, column.Column).Borders.Bottom));
                     }
 
                     if (!merges.IsOverlappedLeft(row.Row, column.Column))
                     {
-                        edges.Add(false, column.X, row.Y, row.Bottom, SheetCellBorders.Resolve(
-                            own.Left, decoration(row.Row, column.Column - 1).Borders.Right));
+                        edges.Add(false, column.X, row.Y, row.Bottom, firstColumnOfBand
+                            ? own.Left
+                            : SheetCellBorders.Resolve(
+                                own.Left, decoration(row.Row, column.Column - 1).Borders.Right));
                     }
 
                     // The far edges only where nothing follows to cover them, because every
@@ -728,15 +734,13 @@ internal sealed class SheetPageDecoration(SheetLayout sheet, SheetPagePlacement 
                     if ((r == rows.Count - 1 || rows[r + 1].Row != row.Row + 1)
                         && !merges.IsOverlappedBottom(row.Row, column.Column))
                     {
-                        edges.Add(true, row.Bottom, column.X, column.Right, SheetCellBorders.Resolve(
-                            own.Bottom, decoration(row.Row + 1, column.Column).Borders.Top));
+                        edges.Add(true, row.Bottom, column.X, column.Right, own.Bottom);
                     }
 
                     if ((c == columns.Count - 1 || columns[c + 1].Column != column.Column + 1)
                         && !merges.IsOverlappedRight(row.Row, column.Column))
                     {
-                        edges.Add(false, column.Right, row.Y, row.Bottom, SheetCellBorders.Resolve(
-                            own.Right, decoration(row.Row, column.Column + 1).Borders.Left));
+                        edges.Add(false, column.Right, row.Y, row.Bottom, own.Right);
                     }
                 }
             }
