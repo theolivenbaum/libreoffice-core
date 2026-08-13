@@ -13,8 +13,8 @@ A batch is **done** when it matches *and* every earlier batch in its track still
 
 ```sh
 S=.claude/skills/corpus-batches/scripts
-$S/batch-check.sh /workspace/sample-files 'words/batch-007' out 3      # the batch you are on
-$S/batch-check.sh /workspace/sample-files 'words/batch-00[1-6]' out 3  # the gate for moving on
+$S/batch-check.sh /c/sandbox/workdir/sample-files 'words/batch-007' out 3      # the batch you are on
+$S/batch-check.sh /c/sandbox/workdir/sample-files 'words/batch-00[1-6]' out 3  # the gate for moving on
 ```
 
 Advancing on the first condition alone is how a corpus rots from the front: rendering

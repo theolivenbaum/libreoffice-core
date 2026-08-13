@@ -6,7 +6,7 @@ they share machinery (e.g. the OOXML/ODF detectors) that must be understood to r
 detection correctly.
 
 This document is derived entirely from reading the LibreOffice core source tree at
-`/home/user/libreoffice-core` (this checkout). All non-obvious facts are cited as
+`/c/sandbox/workdir/libreoffice-core` (this checkout). All non-obvious facts are cited as
 `path/to/file:line`. No behavior is guessed; anywhere the source was ambiguous or the
 investigation ran out of budget, it is called out explicitly in **"Open questions /
 ambiguities"** at the end.

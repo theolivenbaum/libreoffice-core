@@ -3,7 +3,7 @@
 A reference for a pure C# reimplementation that renders documents headlessly to raster
 images and PDF with reasonable visual fidelity to LibreOffice. All citations are
 `path/file.cxx:line` relative to the repository root
-(`/home/user/libreoffice-core`). Line numbers reflect the checked-out commit at the
+(`/c/sandbox/workdir/libreoffice-core`). Line numbers reflect the checked-out commit at the
 time of writing and will drift over time, but the surrounding architecture is stable.
 
 ---

@@ -3,8 +3,8 @@
 #
 #   batch-check.sh <corpus-root> <batch-glob> [outdir] [workers]
 #
-#   batch-check.sh /workspace/sample-files 'batch-001'          # one batch
-#   batch-check.sh /workspace/sample-files 'batch-0[0-1]*'      # batches 1-19, a regression sweep
+#   batch-check.sh /c/sandbox/workdir/sample-files 'batch-001'          # one batch
+#   batch-check.sh /c/sandbox/workdir/sample-files 'batch-0[0-1]*'      # batches 1-19, a regression sweep
 #
 # Writes a TSV per document and a one-line verdict. Exit status is 0 only when every
 # document in range matches, so this can gate a commit.

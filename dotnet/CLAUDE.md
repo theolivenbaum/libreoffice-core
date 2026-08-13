@@ -285,8 +285,8 @@ track turned out to hold the corpus's largest systematic defects — one workboo
 All three tracks now advance in parallel and never wait for one another.
 
 ```sh
-.claude/skills/corpus-batches/scripts/batch-check.sh /workspace/sample-files 'words/batch-003' out 3
-.claude/skills/corpus-batches/scripts/batch-check.sh /workspace/sample-files 'words/batch-00[1-2]' out 3
+.claude/skills/corpus-batches/scripts/batch-check.sh /c/sandbox/workdir/sample-files 'words/batch-003' out 3
+.claude/skills/corpus-batches/scripts/batch-check.sh /c/sandbox/workdir/sample-files 'words/batch-00[1-2]' out 3
 ```
 
 **Both of those runs are the workflow, and the second is not optional.** Make the current
@@ -319,6 +319,79 @@ Verify the environment before trusting any comparison:
 ```bash
 .claude/skills/libreoffice-reference/scripts/check-env.sh
 ```
+
+## This container — read before reproducing any stored figure
+
+The project has moved containers, and two of the three things a measurement depends on are
+not what the stored figures were taken against. Neither is a defect in the tree.
+
+**Roots.** The repository is at `/c/sandbox/workdir/libreoffice-core` and the corpus at
+`/c/sandbox/workdir/sample-files`. The live scripts and documents have been rewritten to
+these. The archival probe scripts under `dotnet/probes/` and `dotnet/research/probes/` have
+**not** been, deliberately — they are the record of what a given round actually ran, and
+rewriting them would falsify it. A `/workspace/sample-files` symlink points at the corpus so
+they remain runnable as written.
+
+**The reference binary is `26.2.4.2`, not the `24.2.7.2` every stored figure was measured
+against.** The base image is Ubuntu 26.04 and its archives offer no earlier LibreOffice.
+This is not a nuance to note and move past — ground truth genuinely moved, measured over the
+whole corpus by re-rendering the reference half of the gate at both versions:
+
+| track | reference page count changed | total \|Δ\| pages | reference words beyond the 2% band |
+|---|---:|---:|---:|
+| words | **47 of 200** | 453 | large |
+| slides | **0 of 163** | 0 | 160 of 163 moved at all |
+| sheets | **16 of 171** | 305 | large |
+| total | **63 of 534** | 758 | **210 of 534** |
+
+So **the 465/534 scoreboard is not reproducible here**, and the §7 rule "if your baseline
+sweep does not reproduce the briefed numbers, stop" would fire on almost every round. It has
+to be re-baselined against 26.2.4.2 before any verdict movement means anything. Slides is the
+exception worth knowing: a deck's page count is its slide count, so check 1 is structurally
+stable there and slide-count claims survive the version change intact.
+
+Individual claims calibrated to 24.2.7.2 behaviour — "the document-level `w:widowControl` is
+inert", the 720 dpi device round trip, the reference's own table-only-header import defect —
+are now claims about a superseded binary and each needs one re-check before it is relied on.
+The largest single movers were `sectors-defense-and-aerospace.xlsx` (reference 227 → 449
+pages), `CIS_Debian_Linux_8_Benchmark_v1.0.0.xls` (109 → 88), `A_320.doc` (150 → 118) and
+`grants-2005.xls` (220 → 201).
+
+**`nuget.org` is blocked by the container firewall (HTTP 403) and the package cache is
+empty**, so `dotnet build` fails on restore and there is no `Paperless.Cli` binary. Until the
+sandbox network policy allows `api.nuget.org`, nothing can be built, tested, rendered or
+gated, and the only work available is what can be done by reading source and running
+`soffice` — which does work. `github.com` and `archive.ubuntu.com` are reachable; the
+LibreOffice download hosts are not.
+
+**`git status` shows 56 files modified that are not modified.** This mount reports a
+symlink's size as 0, so git reads every symlink in the tree as having been emptied — the
+`sysui` and `android` icon PNGs, `.vsconfig`, 56 in all. They are all mode `120000` in HEAD
+and all still correct on disk; `readlink` returns the right target for every one.
+
+The consequence is the dangerous part. **`git add -A` or `git add .` in this container
+replaces 56 symlinks with empty files** and commits that as real work — a corruption of the
+LibreOffice tree that no test would catch, because nothing under `dotnet/` reads them. Stage
+explicit paths, always. `git status --short | grep -v '\.png$'` is not sufficient as a filter
+either: `.vsconfig` is in the list and is a symlink too. The reliable test is the mode:
+
+```sh
+git ls-files -s <paths-you-are-about-to-stage> | awk '$1=="120000"'   # must print nothing
+```
+
+**The reference half of the gate can be banked without a build.** `batch-check.sh` refuses to
+start without a CLI, which is right for a round and wrong when the reference binary is what
+changed. `ref-baseline.sh` is the reference-only half, with `batch-check.sh`'s conventions
+column for column, so the two are comparable:
+
+```sh
+.claude/skills/corpus-batches/scripts/ref-baseline.sh \
+  /c/sandbox/workdir/sample-files 'words/batch-0*' /abs/out 6
+```
+
+It is resumable, records the binary version in its header, and was validated against an
+independent known answer before use — reference page counts against `ppt/slides/slideN.xml`
+counts taken from the zip, 4 of 4 exact.
 
 ## Research notes
 

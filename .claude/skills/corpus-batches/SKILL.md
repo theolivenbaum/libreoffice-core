@@ -97,8 +97,8 @@ green, batches 1–11 quietly broken, and no idea which change did it.
 ```sh
 S=.claude/skills/corpus-batches/scripts
 
-$S/batch-check.sh /workspace/sample-files 'words/batch-007' out 3     # the batch you are on
-$S/batch-check.sh /workspace/sample-files 'words/batch-00[1-6]' out 3 # the gate for moving on
+$S/batch-check.sh /c/sandbox/workdir/sample-files 'words/batch-007' out 3     # the batch you are on
+$S/batch-check.sh /c/sandbox/workdir/sample-files 'words/batch-00[1-6]' out 3 # the gate for moving on
 ```
 
 Both exit non-zero on any mismatch, so either can gate a commit.
@@ -257,8 +257,8 @@ separate agents have now spent part of a round re-deriving that a particular pag
 class.
 
 ```sh
-.claude/skills/corpus-batches/scripts/raster-ceiling-pages.py /workspace/sample-files out           # full, slow
-.claude/skills/corpus-batches/scripts/raster-ceiling-pages.py /workspace/sample-files out --documents-only
+.claude/skills/corpus-batches/scripts/raster-ceiling-pages.py /c/sandbox/workdir/sample-files out           # full, slow
+.claude/skills/corpus-batches/scripts/raster-ceiling-pages.py /c/sandbox/workdir/sample-files out --documents-only
 ```
 
 **The flag keys on the observable signature, never on the presumed cause**, and getting that
@@ -1083,7 +1083,7 @@ insurance against a shared layer being disturbed. Still run it; stop expecting i
 S=.claude/skills/corpus-batches/scripts
 
 # 1. Render everything. Parallel, resumable — a whole corpus outlives whatever starts it.
-for i in 0 1 2; do $S/render-corpus.sh /workspace/sample-files /tmp/triage $i 3 & done; wait
+for i in 0 1 2; do $S/render-corpus.sh /c/sandbox/workdir/sample-files /tmp/triage $i 3 & done; wait
 
 # 2. Retry the failures once with a generous ceiling before writing any of them off.
 
@@ -1091,8 +1091,8 @@ for i in 0 1 2; do $S/render-corpus.sh /workspace/sample-files /tmp/triage $i 3 
 python3 $S/pdf-complexity.py /tmp/triage/pdf > /tmp/triage/complexity.tsv
 
 # 4. Preview the plan, then apply it on a clean working tree.
-python3 $S/make-batches.py /workspace/sample-files /tmp/triage/complexity.tsv
-python3 $S/make-batches.py /workspace/sample-files /tmp/triage/complexity.tsv --apply
+python3 $S/make-batches.py /c/sandbox/workdir/sample-files /tmp/triage/complexity.tsv
+python3 $S/make-batches.py /c/sandbox/workdir/sample-files /tmp/triage/complexity.tsv --apply
 ```
 
 ## Traps

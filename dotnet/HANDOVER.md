@@ -9,7 +9,7 @@ top to bottom, before anything is run.
 
 **Paperless** is a pure C#/.NET library set for content extraction and headless rendering of
 office documents. It lives in `dotnet/` inside a LibreOffice checkout at
-`/home/user/libreoffice-core`.
+`/c/sandbox/workdir/libreoffice-core`.
 
 Two things about that arrangement matter and are easy to get wrong:
 
@@ -95,7 +95,7 @@ and in `.claude/skills/corpus-batches/SKILL.md`; the outcomes are in `dotnet/TOD
 
 ## 4. The corpus and the gate
 
-Corpus: `theolivenbaum/sample-files`, checked out at **`/workspace/sample-files`**. Real
+Corpus: `theolivenbaum/sample-files`, checked out at **`/c/sandbox/workdir/sample-files`**. Real
 documents kept as found — mislabelled extensions, version quirks, malformed markup included.
 
 ```

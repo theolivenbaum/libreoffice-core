@@ -13,7 +13,7 @@ where the cause lives; everything after it is consequence. It then runs the oper
 was it a size, a face, a position or a missing element".
 
     first-divergence.py ours.pdf ref.pdf
-    first-divergence.py --corpus rows.tsv --root /workspace/sample-files --out div.tsv
+    first-divergence.py --corpus rows.tsv --root /c/sandbox/workdir/sample-files --out div.tsv
 
 The second form sweeps a track: one row per document, with the first divergent page and the
 dominant kind of difference on it. Aggregating that column is the point — it answers "what do
@@ -225,7 +225,7 @@ def main() -> int:
     ap.add_argument("ours", nargs="?", type=Path)
     ap.add_argument("ref", nargs="?", type=Path)
     ap.add_argument("--corpus", type=Path, help="a batch-check rows.tsv; sweeps every row")
-    ap.add_argument("--root", type=Path, default=Path("/workspace/sample-files"))
+    ap.add_argument("--root", type=Path, default=Path("/c/sandbox/workdir/sample-files"))
     ap.add_argument("--cli", type=Path,
                     default=Path("dotnet/tools/Paperless.Cli/bin/Debug/net10.0/linux-x64/Paperless.Cli"))
     ap.add_argument("--out", type=Path)

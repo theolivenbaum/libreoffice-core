@@ -3,7 +3,7 @@
 #
 #   track-ink-sweep.sh <corpus-root> <batch-glob> <outdir> [workers] [cli] [refdir]
 #
-#   track-ink-sweep.sh /workspace/sample-files 'slides/batch-0*' out-slides 2
+#   track-ink-sweep.sh /c/sandbox/workdir/sample-files 'slides/batch-0*' out-slides 2
 #
 # `batch-check.sh` answers "is the right text on the right page". Once a track passes that
 # — slides is at 152/163 with every remaining failure attributed — the only instrument left

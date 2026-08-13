@@ -12,8 +12,8 @@ those numbers down would mean drawing less text, which is the wrong direction.
 Regenerate with:
 
 ```sh
-.claude/skills/corpus-batches/scripts/raster-ceiling-pages.py /workspace/sample-files out
-.claude/skills/corpus-batches/scripts/raster-ceiling-pages.py /workspace/sample-files out --documents-only
+.claude/skills/corpus-batches/scripts/raster-ceiling-pages.py /c/sandbox/workdir/sample-files out
+.claude/skills/corpus-batches/scripts/raster-ceiling-pages.py /c/sandbox/workdir/sample-files out --documents-only
 ```
 
 Machine-readable copy: `dotnet/raster-ceiling-pages.tsv`.
@@ -232,7 +232,7 @@ rest of that census as suspect.
 rendered PDFs — no re-rendering, so it can be reproduced from any sweep's output:
 
 ```sh
-python3 dotnet/probes/slides-r22/alternate-content-oleobj-census.py /workspace/sample-files/slides > altcontent.tsv
+python3 dotnet/probes/slides-r22/alternate-content-oleobj-census.py /c/sandbox/workdir/sample-files/slides > altcontent.tsv
 python3 dotnet/probes/slides-r22/raster-pages-from-renderings.py <sweepdir> > raster-pages.tsv
 python3 dotnet/probes/slides-r22/slides-ink-ranking.py            # reads both, beside sweep-base/
 ```

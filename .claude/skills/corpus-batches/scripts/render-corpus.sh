@@ -5,7 +5,7 @@
 #
 # Run one process per worker index:
 #
-#   for i in 0 1 2; do render-corpus.sh /workspace/sample-files /tmp/triage $i 3 & done
+#   for i in 0 1 2; do render-corpus.sh /c/sandbox/workdir/sample-files /tmp/triage $i 3 & done
 #
 # Three details this exists to get right, each of which has cost real time here:
 #
