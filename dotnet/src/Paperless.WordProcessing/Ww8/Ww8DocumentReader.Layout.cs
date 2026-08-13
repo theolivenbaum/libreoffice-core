@@ -505,6 +505,34 @@ public sealed partial class Ww8DocumentReader
     /// <summary>The stylesheet index of the default paragraph style, which WW8 fixes at nought.</summary>
     private const int DefaultStyleIndex = 0;
 
+    /// <summary>
+    /// The face and em size the default paragraph style sets its text in.
+    /// </summary>
+    /// <remarks>
+    /// Style nought's character chain, resolved exactly as <see cref="BlankFurniture"/> resolves it —
+    /// the same call, so a document whose default style is reached one way here and another way there
+    /// cannot happen. Wanted for the note separator, whose reservation Word takes from this style's
+    /// line height and not from the page's or the note's (see
+    /// <see cref="Layout.PaginationOptions.NoteSeparatorHeight"/>).
+    /// </remarks>
+    public (string? FamilyName, Length Size, int Weight, bool IsItalic) DefaultStyleFont
+    {
+        get
+        {
+            Ww8LayoutFormat character = default;
+            foreach (ReadOnlyMemory<byte> inherited in
+                     _styles.ResolveCharacterChain(DefaultStyleIndex))
+            {
+                character = ApplyLayoutSprms(character, inherited);
+            }
+
+            return (character.FontIndex is { } index ? Fonts.Name(index) : null,
+                    SizeOf(character),
+                    character.IsBold == true ? 700 : 400,
+                    character.IsItalic == true);
+        }
+    }
+
     /// <summary>How many stories precede the first section's furniture in the header subdocument.</summary>
     private const int SeparatorStories = 6;
 

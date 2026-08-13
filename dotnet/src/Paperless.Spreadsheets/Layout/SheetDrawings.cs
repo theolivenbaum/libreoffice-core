@@ -22,7 +22,31 @@ namespace Paperless.Spreadsheets.Layout;
 /// <param name="Row">The zero-based row.</param>
 /// <param name="RowOffset">How far down that row it sits.</param>
 public readonly record struct SheetCellPoint(
-    int Column, Length ColumnOffset, int Row, Length RowOffset);
+    int Column, Length ColumnOffset, int Row, Length RowOffset)
+{
+    /// <summary>
+    /// An offset into a cell, pulled back to the cell's far edge when the file overruns it.
+    /// </summary>
+    /// <remarks>
+    /// The whole of <see cref="SheetDrawing.ClampsOffsetsToCell"/>, in one place because four call
+    /// sites resolve these points against a grid and a rule written out four times is a rule that will
+    /// be four rules. A no-op when <paramref name="clamps"/> is false, and a no-op on any offset the
+    /// file states honestly — the cap is the cell's own size less the twip
+    /// <c>calcCellAnchorEmu</c> takes off it.
+    /// </remarks>
+    /// <param name="index">The column or row the offset is into.</param>
+    /// <param name="offset">How far into it the file says the point sits.</param>
+    /// <param name="axis">The columns or the rows, for that cell's size.</param>
+    /// <param name="clamps">Whether the rule applies at all; see the drawing's own flag.</param>
+    public static Length OffsetWithin(int index, Length offset, SheetAxis axis, bool clamps)
+    {
+        ArgumentNullException.ThrowIfNull(axis);
+        if (!clamps) return offset;
+
+        Length limit = axis.PrintedSizeAt(index) - Length.FromTwips(1);
+        return offset > limit ? limit : offset;
+    }
+}
 
 /// <summary>How a drawing is fastened to the sheet.</summary>
 public enum SheetAnchorKind
@@ -67,6 +91,33 @@ public sealed record SheetDrawing
     /// Its bottom-right corner, for a two-cell anchor.
     /// </summary>
     public SheetCellPoint To { get; init; }
+
+    /// <summary>
+    /// Whether an offset that overruns its own cell is pulled back to the cell's far edge.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Excel's rule, and only SpreadsheetML's reader applies it, which is why it is a property of the
+    /// drawing rather than of the resolver. <c>ShapeAnchor::calcCellAnchorEmu</c> clamps each corner to
+    /// the <em>next</em> cell's origin less one twip
+    /// (<c>sc/source/filter/oox/drawingbase.cxx</c>:267-300), under a comment that says what it is for:
+    /// <em>"It is easily possible that the provided Offset is invalid (too large). Excel seems to limit
+    /// the offsets to the bottom/left edge of the cell. Because most calculations are rounded down to
+    /// TWIPs, reduce cell's right edge by a full twip."</em>
+    /// </para>
+    /// <para>
+    /// Since the next cell's origin is this cell's origin plus its size, the rule is local: the offset
+    /// is capped at the cell's own size less a twip. It bites only on a file whose offset genuinely
+    /// overruns — where it does, it is worth 0.170 pt on <c>sheet-rich-text.xlsx</c>'s third-page
+    /// picture, which is what <c>SheetDrawingComparisonTests</c> measures.
+    /// </para>
+    /// <para>
+    /// Off for the BIFF and ODF readers because LibreOffice does not clamp there. BIFF states an offset
+    /// as a fraction of the cell in 1024ths, so it can only ever overrun by rounding — a twip at most —
+    /// and clamping it anyway would be a change of half a comparison tolerance made for no reason.
+    /// </para>
+    /// </remarks>
+    public bool ClampsOffsetsToCell { get; init; }
 
     /// <summary>Its size, for a one-cell or absolute anchor.</summary>
     public DocSize Extent { get; init; }

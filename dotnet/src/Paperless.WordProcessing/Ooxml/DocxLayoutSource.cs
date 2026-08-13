@@ -197,6 +197,41 @@ public sealed partial class DocxLayoutSource
     /// <summary>The substitutions made while resolving the document's fonts.</summary>
     public IReadOnlyList<FontSubstitution> Substitutions => _fonts.Substitutions;
 
+    /// <summary>
+    /// The room Word leaves above a page's notes: the default paragraph style's line height.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>sw::FootnoteSeparatorHeight</c> takes this branch for every document a Word filter opened
+    /// (<c>sw/source/core/layout/ftnfrm.cxx</c>:257-272), and its helper is explicit about the source:
+    /// <em>"the height of the line that hosts the separator line (the top margin of the container),
+    /// based on the default paragraph style"</em>, read as <c>SwFont::GetHeight</c> of that style's
+    /// font (<c>:57-77</c>). Not the note's font, and not the body paragraph's — the <em>default
+    /// style's</em>, which in a DOCX is what a paragraph naming no <c>w:pStyle</c> resolves to.
+    /// </para>
+    /// <para>
+    /// So it is asked of the same chain and the same faces every other run goes through, and measured
+    /// with <see cref="Paperless.Text.Fonts.LineSpacing"/> on the document's own device grid: this has
+    /// to be the height a line of that text would be, or it is a different number that happens to be
+    /// close.
+    /// </para>
+    /// <para>
+    /// Zero when no face can be read at all, which the paginator reads as "no reservation of this
+    /// kind"; a document whose default font is missing has larger problems than its note separator.
+    /// </para>
+    /// </remarks>
+    public Length DefaultParagraphLineHeight
+    {
+        get
+        {
+            WordTextStyle text = WordParagraphFormats.ResolveText(_styles, null, _theme);
+            if (Face(text) is not { } face) return Length.Zero;
+
+            return LineSpacing.Resolve(face, _metrics, WriterLineBox.LeadingAboveText)
+                .ScaledLineHeight(text.Size);
+        }
+    }
+
     /// <summary>Reads the body's blocks — its paragraphs and its tables — in document order.</summary>
     /// <param name="body">The <c>w:body</c> element.</param>
     public List<PageBlock> Read(XElement body)

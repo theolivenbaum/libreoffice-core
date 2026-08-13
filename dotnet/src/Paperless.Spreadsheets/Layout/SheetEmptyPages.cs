@@ -215,8 +215,14 @@ internal static class SheetEmptyPages
             return (x, y, x + drawing.Extent.Width.Twips, y + drawing.Extent.Height.Twips);
         }
 
-        long left = Start(drawing.From.Column, grid.Columns) + drawing.From.ColumnOffset.Twips;
-        long top = Start(drawing.From.Row, grid.Rows) + drawing.From.RowOffset.Twips;
+        bool clamps = drawing.ClampsOffsetsToCell;
+
+        long left = Start(drawing.From.Column, grid.Columns)
+                    + SheetCellPoint.OffsetWithin(
+                        drawing.From.Column, drawing.From.ColumnOffset, grid.Columns, clamps).Twips;
+        long top = Start(drawing.From.Row, grid.Rows)
+                   + SheetCellPoint.OffsetWithin(
+                       drawing.From.Row, drawing.From.RowOffset, grid.Rows, clamps).Twips;
 
         if (drawing.Anchor == SheetAnchorKind.OneCell)
         {
@@ -224,8 +230,12 @@ internal static class SheetEmptyPages
                     left + drawing.Extent.Width.Twips, top + drawing.Extent.Height.Twips);
         }
 
-        long right = Start(drawing.To.Column, grid.Columns) + drawing.To.ColumnOffset.Twips;
-        long bottom = Start(drawing.To.Row, grid.Rows) + drawing.To.RowOffset.Twips;
+        long right = Start(drawing.To.Column, grid.Columns)
+                     + SheetCellPoint.OffsetWithin(
+                         drawing.To.Column, drawing.To.ColumnOffset, grid.Columns, clamps).Twips;
+        long bottom = Start(drawing.To.Row, grid.Rows)
+                      + SheetCellPoint.OffsetWithin(
+                          drawing.To.Row, drawing.To.RowOffset, grid.Rows, clamps).Twips;
         return (left, top, Math.Max(left, right), Math.Max(top, bottom));
     }
 

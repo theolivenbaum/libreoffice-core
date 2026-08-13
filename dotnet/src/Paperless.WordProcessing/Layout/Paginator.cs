@@ -151,11 +151,23 @@ public sealed record PaginationOptions
     /// How much room the footnote separator takes above the notes.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// The rule above a page's footnotes, plus the space around it. Writer's default is a quarter of the
     /// text width at half a point, with the spacing coming from the <c>Footnote Separator</c> frame style —
     /// so the <em>line</em> costs almost nothing and the spacing is nearly all of this. The value cannot be
     /// measured from a text comparison, which sees no lines, so it is a stated default rather than a
     /// measured one: 0.1 cm above and below, which is what that style ships with.
+    /// </para>
+    /// <para>
+    /// <b>Under <see cref="UsesWordNoteSeparator"/> it is a different quantity and the reader has to
+    /// supply it.</b> Writer computes the container's top border from the page style —
+    /// <c>TopDist + BottomDist + LineWidth</c> — and Word computes it from the <em>default paragraph
+    /// style's font height</em> (<c>sw::FootnoteSeparatorHeight</c> and
+    /// <c>FootnoteSeparatorHeightFromParagraph</c>, <c>sw/source/core/layout/ftnfrm.cxx</c>:57-77,
+    /// 257-272). It is roughly twice Writer's, so it is not a refinement of a position: it takes that
+    /// much more room out of the body, which is what moves a line off a page. On this branch the rule's
+    /// own position is 60 % of it, so a wrong value here is wrong twice.
+    /// </para>
     /// </remarks>
     public Length NoteSeparatorHeight { get; init; } = Length.FromMm100(200);
 
@@ -181,6 +193,49 @@ public sealed record PaginationOptions
     /// the space reserved for it.
     /// </remarks>
     public Length NoteSeparatorSpacing { get; init; } = Length.FromMm100(100);
+
+    /// <summary>
+    /// Whether the rule above the notes follows Word's rules rather than Writer's.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// LibreOffice's <c>DocumentSettingId::CONTINUOUS_ENDNOTES</c>, which switches
+    /// <c>SwFootnoteContFrame::PaintLine</c> onto a branch its own source comments call
+    /// <em>"Word style"</em> (<c>sw/source/core/layout/paintfrm.cxx</c>:5845-5868). Two things change
+    /// together and neither is any use without the other:
+    /// </para>
+    /// <list type="bullet">
+    /// <item><description>
+    /// <b>The rule's length becomes an absolute two inches</b> rather than
+    /// <see cref="NoteSeparatorWidth"/> of the column — <em>"Length is 2 inches, but don't paint
+    /// outside the container frame"</em>, so it is clamped to the column and never stretched to it.
+    /// </description></item>
+    /// <item><description>
+    /// <b>The rule sits 60 % of the way down the reservation</b> — <em>"instead of fixed value, upper
+    /// spacing is 60% of all space"</em> — where Writer puts it a fixed <c>TopDist</c> below the
+    /// container's top. <see cref="NoteSeparatorSpacing"/> is not consulted on this branch;
+    /// <see cref="NoteSeparatorHeight"/> is, and it has to be the reservation Word would take (see
+    /// its remarks), because the position is a proportion <em>of</em> it.
+    /// </description></item>
+    /// </list>
+    /// <para>
+    /// <b>Set for DOCX and DOC and deliberately not for RTF</b>, which is why this is a flag of its own
+    /// rather than part of <see cref="Word"/>: LibreOffice sets the document setting in
+    /// <c>WriterFilter::setTargetDocument</c> (<c>sw/source/writerfilter/filter/WriterFilter.cxx</c>:338,
+    /// under a comment reading "options that are valid for the DOCX format") and in
+    /// <c>SwWW8ImplReader</c> (<c>sw/source/filter/ww8/ww8par.cxx</c>:2050), and in neither the RTF
+    /// filter nor either ODF one. Measured rather than read off, on one authored document converted to
+    /// all five spellings and rendered by the installed 26.2.4.2 — DOCX and DOC draw 144.000 pt
+    /// (exactly 2 in, and unchanged when the column is halved from 481.890 pt to 255.118 pt), while
+    /// FODT, ODT <em>and RTF</em> all draw 25.0 % of whatever the column is. Paperless routes RTF
+    /// through <see cref="Word"/>, so folding this into that preset would have moved the one format
+    /// that must not move. See <c>probes/fidelity-b-01/separator-probe.py</c>.
+    /// </para>
+    /// </remarks>
+    public bool UsesWordNoteSeparator { get; init; }
+
+    /// <summary>Word's fixed note-separator length: two inches.</summary>
+    public static Length WordNoteSeparatorLength { get; } = Length.FromInches(2);
 }
 
 /// <summary>
@@ -1885,17 +1940,39 @@ public sealed class Paginator
     {
         if (notes is null || notes.Lines.Count == 0) return null;
 
-        Length width = page.TextWidth * _options.NoteSeparatorWidth;
+        // Word's rule is an absolute two inches, clamped to the column rather than stretched to it;
+        // Writer's is a fraction of the column. See PaginationOptions.UsesWordNoteSeparator.
+        Length width = _options.UsesWordNoteSeparator
+            ? Length.Min(PaginationOptions.WordNoteSeparatorLength, page.TextWidth)
+            : page.TextWidth * _options.NoteSeparatorWidth;
+
         if (width <= Length.Zero) return null;
 
         // The first note line's *box* top, which is where the flow put it — not its baseline.
-        Length top = notes.Area.Y + notes.Lines[0].Top
-            - _options.NoteSeparatorSpacing
-            - _options.NoteSeparatorThickness;
+        Length notesTop = notes.Area.Y + notes.Lines[0].Top;
+
+        Length top = _options.UsesWordNoteSeparator
+            ? notesTop - RaisedAboveNotes(_options.NoteSeparatorHeight)
+            : notesTop - _options.NoteSeparatorSpacing - _options.NoteSeparatorThickness;
 
         return new DocRect(
             page.TextArea.X, top, width, _options.NoteSeparatorThickness);
     }
+
+    /// <summary>
+    /// How far above the note flow's top Word's rule sits, given the reservation above it.
+    /// </summary>
+    /// <remarks>
+    /// The container's top is the reservation above the notes and the rule sits 60 % of the way down it
+    /// (<c>paintfrm.cxx</c>:5850-5852), so what is left above the notes is the other 40 % — but not
+    /// arithmetically, because the 60 % is computed in <c>double</c> and assigned through
+    /// <c>Point::setY</c>, which takes a <c>tools::Long</c> of twips and therefore <em>truncates</em>.
+    /// Doing the same here is worth the awkwardness: it is what makes the authored probe's three
+    /// separator positions come out exactly rather than to a twip, and a twip is half the tolerance the
+    /// comparison tests allow.
+    /// </remarks>
+    private static Length RaisedAboveNotes(Length reservation)
+        => reservation - Length.FromTwips((long)(reservation.Twips * 0.6));
 
     /// <summary>
     /// The format of the nearest preceding paragraph, for the contextual-spacing comparison.

@@ -682,6 +682,24 @@ internal sealed partial class PptxSlideLayout
         // colour or weight still wins, and this is what it wins over.
         IReadOnlyList<XElement> themed = CellTextStyle(cell);
 
+        // A table cell takes the same font-independent line spacing every other PPTX text body takes
+        // — one em of ascent and a 1.2 em box — so nothing is set below and SlideTextBody's default
+        // stands. It is worth saying why the *absence* of an override is the interesting part.
+        //
+        // This was an override, and against LibreOffice 24.2.7.2 it was right: that binary drew
+        // deck-features.pptx's first cell (18 pt Arial, substituted by Liberation Sans) with a
+        // 16.33 pt ascent, 0.907 em — the face's own, not the em's. Its own C++ said otherwise even
+        // then, and the note here recorded the disagreement rather than resolving it.
+        //
+        // `a47776a938c` (2025-03-27, tdf#165521, "pptx layout: don't use font's leading for cells
+        // too") resolved it the other way, and its commit message says why: "Microsoft just ignores
+        // the font metrics, and simply adds 20% to the font height." So the measurement that
+        // justified the override was a measurement of a defect, and the rule the rest of this
+        // library already implements — SlideTextLayout's 1.2 em box, reached only when
+        // FontIndependentLineSpacing is true — is now what the reference draws for cells as well.
+        //
+        // Not touched: the ODP path, which states the flag per paragraph style and usually does not
+        // set it (OdpSlideLayout), because ODF has no such compatibility default to follow.
         return PptxTextBody.Read(
             body, theme.Colours, theme.MinorLatin,
             themed.Count == 0 ? null : _ => themed) with
@@ -693,15 +711,6 @@ internal sealed partial class PptxSlideLayout
                 "b" => TextAnchor.Bottom,
                 _ => TextAnchor.Top,
             },
-
-            // Measured, and it is the opposite of what the current C++ says. A slide shape's line
-            // height is the em (FontIndependentLineSpacing); a table cell's is the face's own
-            // ascent. LibreOffice 24.2.7.2 draws deck-features.pptx's first cell — 18 pt Arial,
-            // substituted by Liberation Sans, in a cell whose top edge its own PDF puts at
-            // 170.079 pt — with a baseline 19.93 pt below that edge. Take off the 3.6 pt top
-            // margin and the ascent is 16.33 pt, which is 0.907 em: the font's, not the em's,
-            // which would have been 18.00.
-            FontIndependentLineSpacing = false,
         };
     }
 
