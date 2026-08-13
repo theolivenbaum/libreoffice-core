@@ -320,6 +320,58 @@ public sealed class PdfAnalysisTests
         counts.Punctuation.ShouldBe(1);
     }
 
+    /// <summary>Rotated text is grouped into words rather than into one word per glyph.</summary>
+    /// <remarks>
+    /// <para>
+    /// The reason the default grouping is the orientation-aware one, stated as a test rather than
+    /// only as a corpus figure. Every glyph of a 90°-rotated run sits at a different height, so a
+    /// grouper that decides "same line" by comparing heights starts a new word at every character —
+    /// and a chart's rotated axis labels are the commonest place this happens. On
+    /// <c>Keywords_Mapping_Graphs_and_Charts.xlsx</c> that is 8225 words against poppler's 4519.
+    /// </para>
+    /// <para>
+    /// Both groupings are asserted, because the point is the difference between them: the simpler
+    /// one is not merely worse here, it returns one word per glyph.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void RotatedTextIsGroupedIntoWordsUnderTheDefaultGrouping()
+    {
+        // A text matrix of [0 1 -1 0] turns the baseline through 90°.
+        using TempPdf pdf = TempPdf.Write(MinimalPdf.Build(
+            mediaBox: "[0 0 200 300]",
+            content: "BT /F1 12 Tf 0 1 -1 0 100 40 Tm (rotated words here) Tj ET",
+            fonts: [MinimalPdf.SimpleFont("Helvetica", embedded: false)]));
+
+        PdfAnalysis.Analyze(pdf.Path).Words.Raw.ShouldBe(3);
+
+        PdfAnalysis.Analyze(pdf.Path, grouping: WordGrouping.Simple).Words.Raw
+            .ShouldBe("rotatedwordshere".Length, "the simpler grouper has no concept of orientation");
+    }
+
+    /// <summary>A Symbol or Wingdings glyph lands in its own class, not among the words.</summary>
+    /// <remarks>
+    /// A producer subsetting Symbol or Wingdings maps its glyphs into the Private Use Area, so a
+    /// list bullet arrives as U+F0B7 rather than as U+2022 and no amount of looking for bullet code
+    /// points finds it. It is reported separately from <see cref="PdfWordCounts.Bullet"/> because
+    /// the two have different causes: a previous round's entire PUA census was fitted against a
+    /// difference that turned out to be the extractor, and keeping the classes apart is what lets
+    /// the next one tell those cases apart. The corpus carries 8622 such tokens across 534
+    /// documents; nothing tested the class until reintroduction showed it could be deleted for free.
+    /// </remarks>
+    [Fact]
+    public void APrivateUseSymbolIsCountedApartFromWordsAndFromBullets()
+    {
+        using TempPdf pdf = TempPdf.Write(RenderFlatOdt("alpha \uF0B7 beta \uF0B7 gamma"));
+
+        PdfWordCounts counts = PdfAnalysis.Analyze(pdf.Path).Words;
+
+        counts.Raw.ShouldBe(5);
+        counts.Alphanumeric.ShouldBe(3, "alpha beta gamma");
+        counts.PrivateUse.ShouldBe(2);
+        counts.Bullet.ShouldBe(0);
+    }
+
     /// <summary>The token classes add up to the raw count, on every document.</summary>
     /// <remarks>
     /// The classes exist so a comparison can show what a difference is made of. A decomposition
