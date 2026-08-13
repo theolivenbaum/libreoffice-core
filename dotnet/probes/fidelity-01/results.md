@@ -46,6 +46,44 @@ and carry real assertion values. This was checked before any mass-failure patter
 550 = 510 + 40 exactly, and 0 skipped means no part of the suite silently covered nothing.
 **Prediction P1 confirmed.**
 
+### Two corrections to the brief's expected non-Fidelity state
+
+The brief states the ten non-Fidelity projects must hold at **"3465 total, 0 failed"**. Measured
+today, project by project:
+
+```
+Core 284  Containers 109  Text 287  Vector 295  Rendering 121  Markup 259
+OpenDocument 125  WordProcessing 761  Spreadsheets 621  Presentations 592
+                                                     TOTAL 3454, FAILED 0
+```
+
+**Every project matches its handover figure exactly. The total is 3454, not 3465** — and the
+handover's own table sums to 3454 as well. The brief's 3465 is an arithmetic slip of 11, not a
+regression and not a change. Nothing moved; the expected figure was wrong. **0 failed confirmed.**
+
+**But one thing did move, and nothing had flagged it.** The handover says "0 skipped and 0 warnings
+throughout". Today `Paperless.Rendering.Tests` reports **120 passed, 1 skipped, 121 total**:
+
+```
+Skipped Paperless.Rendering.Tests.PdfFontTests.ACffFlavouredFaceIsNotClaimedToBeTrueType
+```
+
+It skips on `Assert.SkipUnless(TestCffFace.IsAvailable, "no CFF-flavoured face on this machine")`.
+`TestCffFace` scans the machine for any sfnt beginning `OTTO` (`DrawnPage.cs:146-170`). Measured:
+`find /usr/share/fonts -name '*.otf'` returns **zero files** on this container.
+
+This matters more than a skip count suggests. The test's own remarks record what it guards: poppler
+reporting *"Mismatch between font type and embedded font file"* and then *"No font in show"* **161
+times**, leaving 161 glyph runs blank on a document that passed every other check. That guard is
+currently not running at all.
+
+**This is a thirteenth environment variable, undeclared: the container has no CFF-flavoured font.**
+It belongs in `MISSING_PACKAGES.md` beside `fonts-dejavu-core`, and it presents exactly the way that
+file warns about — as nothing at all except a skip count nobody was totalling. I have **not**
+installed a font to fix it: three other agents are measuring against this machine's fontconfig
+chain right now, and adding a face mid-session would silently move their reference renderings. It
+is a recommendation, not a change.
+
 **21 names, 40 cases — confirmed, not assumed.** The 40 failing cases resolve to exactly 21
 distinct test names; the 19 extra failures are additional `[InlineData]` rows on 9 of those names
 (the largest being `ExtractionComparisonTests` ×5, and four names at ×4/×3). There is no second
