@@ -137,8 +137,15 @@ public sealed record SheetCellFormat
     /// <remarks>
     /// Not a property of the face: the three formats state it beside the weight and the slant and
     /// it is drawn as a rule rather than shaped, so it belongs to the format rather than to the
-    /// font resolution. Every workbook with a hyperlink has one, since the hyperlink style is an
-    /// underlined blue font, and a column heading ruled off from its data is the other common case.
+    /// font resolution. Every workbook with a hyperlink has one, since the built-in
+    /// <c>Hyperlink</c> style is an underlined blue font, and a column heading ruled off from its
+    /// data is the other common case.
+    /// <para>
+    /// <strong>The underline survives that style and the colour does not.</strong> A hyperlink
+    /// cell is drawn as an <c>SvxURLField</c> in the application's <c>LINKS</c> colour whatever
+    /// <see cref="Colour"/> says — see <c>SheetTextLayout</c>'s <c>LinkColour</c> — so the blue
+    /// half of "underlined blue font" never reaches the page and this half always does.
+    /// </para>
     /// </remarks>
     public SheetUnderline Underline { get; init; }
 

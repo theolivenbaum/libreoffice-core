@@ -59,11 +59,18 @@ public static class DrawingChartPlot
     /// series draws. Null when the caller has none, which leaves such a line at the hairline the
     /// reader would otherwise give it.
     /// </param>
+    /// <param name="ranges">
+    /// Resolves a sequence's <c>c:f</c> against the cells it names, when the caller has the
+    /// workbook to resolve it in. Null — the default, and what the presentation and
+    /// word-processing readers pass — keeps the cached points as the only source. See
+    /// <see cref="ChartRangeResolver"/> for why the two differ.
+    /// </param>
     public static ChartPlot? Read(
         XElement chartSpace,
         DrawingTheme? theme = null,
         bool office2007 = false,
-        DrawingStyleMatrix? styles = null)
+        DrawingStyleMatrix? styles = null,
+        ChartRangeResolver? ranges = null)
     {
         ArgumentNullException.ThrowIfNull(chartSpace);
 
@@ -111,7 +118,8 @@ public static class DrawingChartPlot
         for (int at = 0; at < groups.Count; at++)
         {
             (List<ChartSeries> read, string?[] labels) = ReadSeries(
-                groups[at], kinds[at], theme, axes.IndexOf(groups[at]), office2007, automatic);
+                groups[at], kinds[at], theme, axes.IndexOf(groups[at]), office2007, automatic,
+                ranges);
 
             if (categories.Length == 0 && labels.Length > 0) categories = labels;
             series.AddRange(read);
@@ -698,7 +706,8 @@ public static class DrawingChartPlot
         DrawingTheme? theme,
         int axisIndex,
         bool office2007,
-        ChartAutoContext automatic = default)
+        ChartAutoContext automatic = default,
+        ChartRangeResolver? ranges = null)
     {
         List<ChartSeries> series = [];
         string?[] categories = [];
@@ -732,11 +741,12 @@ public static class DrawingChartPlot
 
         foreach (XElement element in Children(group, "ser"))
         {
-            (string?[] labels, _) = ReadSequence(Child(element, "cat") ?? Child(element, "xVal"));
+            (string?[] labels, _) = ReadSequence(
+                Child(element, "cat") ?? Child(element, "xVal"), ranges);
             if (categories.Length == 0 && labels.Length > 0) categories = labels;
 
             XElement? valueSource = Child(element, "val") ?? Child(element, "yVal");
-            (_, double?[] numbers) = ReadSequence(valueSource);
+            (_, double?[] numbers) = ReadSequence(valueSource, ranges);
 
             // The format the *data* carries, which is what a label showing a value falls back to
             // when it states none of its own — VSeriesPlotter's detectNumberFormatKey, which asks
@@ -749,7 +759,7 @@ public static class DrawingChartPlot
             if (kind is ChartPlotKind.Scatter or ChartPlotKind.Bubble
                 && Child(element, "xVal") is { } xVal)
             {
-                (_, double?[] xs) = ReadSequence(xVal);
+                (_, double?[] xs) = ReadSequence(xVal, ranges);
                 if (xs.Length > 0) domain = xs;
             }
 
@@ -758,7 +768,7 @@ public static class DrawingChartPlot
             double?[]? sizes = null;
             if (kind == ChartPlotKind.Bubble && Child(element, "bubbleSize") is { } bubbleSize)
             {
-                (_, double?[] read) = ReadSequence(bubbleSize);
+                (_, double?[] read) = ReadSequence(bubbleSize, ranges);
                 if (read.Length > 0) sizes = read;
             }
 
@@ -1724,17 +1734,35 @@ public static class DrawingChartPlot
         return DrawingChartText.Label(tx);
     }
 
-    /// <summary>Reads a cached data sequence, sparse indices and all.</summary>
+    /// <summary>Reads a data sequence: its live cells where the caller can reach them, else its
+    /// cached points.</summary>
     /// <remarks>
-    /// The same rule <see cref="DrawingChart"/> documents at length: the array is sized from
-    /// <c>c:ptCount</c> and every point placed at its own <c>@idx</c>, because the indices skip
-    /// blanks and reading in document order slides every later value onto the wrong category. A
-    /// chart drawn that way has the right bars against the wrong labels and looks entirely
-    /// plausible.
+    /// <para>
+    /// <strong>The <c>c:f</c> wins and the cache is the fallback</strong>, when a resolver is
+    /// given at all — <c>ExcelChartConverter::createDataSequence</c>'s own order
+    /// (<c>sc/source/filter/oox/excelchartconverter.cxx:76-94</c>). With no resolver the cache is
+    /// the only source, which is the <c>ChartConverter</c> base and the right answer for a deck or
+    /// a document whose numbers live in a workbook this reader must not open. See
+    /// <see cref="ChartRangeResolver"/>.
+    /// </para>
+    /// <para>
+    /// Reading the cache: the same rule <see cref="DrawingChart"/> documents at length — the array
+    /// is sized from <c>c:ptCount</c> and every point placed at its own <c>@idx</c>, because the
+    /// indices skip blanks and reading in document order slides every later value onto the wrong
+    /// category. A chart drawn that way has the right bars against the wrong labels and looks
+    /// entirely plausible.
+    /// </para>
     /// </remarks>
-    private static (string?[] Text, double?[] Numbers) ReadSequence(XElement? source)
+    private static (string?[] Text, double?[] Numbers) ReadSequence(
+        XElement? source, ChartRangeResolver? ranges = null)
     {
         if (source is null) return ([], []);
+
+        if (ranges is not null && FormulaOf(source) is { } formula
+            && ranges(formula) is { } live && live.Text.Count > 0)
+        {
+            return ([.. live.Text], [.. live.Numbers]);
+        }
 
         XElement? cache =
             Child(Child(source, "strRef"), "strCache")
@@ -1770,6 +1798,23 @@ public static class DrawingChartPlot
         }
 
         return (text, numbers);
+    }
+
+    /// <summary>The <c>c:f</c> a reference states, or null when the sequence is a literal.</summary>
+    /// <remarks>
+    /// Only the three <c>…Ref</c> containers carry one; <c>c:strLit</c> and <c>c:numLit</c> hold
+    /// the numbers themselves and name nothing, which is exactly the case
+    /// <c>maFormula.isEmpty()</c> tests for.
+    /// </remarks>
+    private static string? FormulaOf(XElement source)
+    {
+        foreach (string container in (string[])["numRef", "strRef", "multiLvlStrRef"])
+        {
+            if (Child(Child(source, container), "f")?.Value is { Length: > 0 } formula)
+                return formula;
+        }
+
+        return null;
     }
 
     private static double? Number(XElement? element)

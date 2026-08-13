@@ -27,6 +27,7 @@ internal static class BiffChartRecords
     public const ushort Axis = 0x101D;
     public const ushort ValueRange = 0x101F;
     public const ushort LabelRange = 0x1020;
+    public const ushort DateRange = 0x1062;
     public const ushort AxisLine = 0x1021;
     public const ushort DefaultText = 0x1024;
     public const ushort Text = 0x1025;
@@ -102,6 +103,18 @@ internal sealed class XlsChartBuilder
     private bool _stacked;
     private ChartScaleRequest _valueScale;
     private ChartAxisText _categoryText = DefaultCategoryText;
+
+    /// <summary>Whether <c>CHLABELRANGE</c> asked for every category to be labelled.</summary>
+    /// <remarks>
+    /// Kept beside <see cref="_isDateAxis"/> rather than folded straight into
+    /// <see cref="_categoryText"/> because the two records that decide the answer are separate and
+    /// unordered, exactly as <c>XclImpChLabelRange</c> keeps <c>maLabelData</c> and
+    /// <c>maDateData</c> apart until <c>Convert</c>.
+    /// </remarks>
+    private bool _everyLabel = true;
+
+    /// <summary>Whether <c>CHDATERANGE</c> declared the category axis a date axis.</summary>
+    private bool _isDateAxis;
     private bool _hasType;
     private bool _hasLegend;
 
@@ -242,6 +255,10 @@ internal sealed class XlsChartBuilder
 
             case BiffChartRecords.LabelRange when _axis == AxisX:
                 ReadLabelRange(stream);
+                break;
+
+            case BiffChartRecords.DateRange when _axis == AxisX:
+                ReadDateRange(stream);
                 break;
 
             case BiffChartRecords.Legend:
@@ -714,6 +731,13 @@ internal sealed class XlsChartBuilder
     /// <see cref="ChartAxisLabels"/> happens at all.
     /// </para>
     /// <para>
+    /// <strong>Only on an axis that is not a date axis.</strong> Those three lines are the
+    /// <c>else</c> of an <c>if</c> over <c>CHDATERANGE</c>'s <c>DATEAXIS</c> flag, and this
+    /// frequency decides nothing on the other branch — see <see cref="ReadDateRange"/>, which is
+    /// why the answer is composed by <see cref="CategoryTextOf"/> from both records rather than
+    /// settled here.
+    /// </para>
+    /// <para>
     /// <strong>This is worth 25 words a page on a checklist with eight chart pages</strong>, and
     /// it is invisible to anything but a drawn comparison: the labels our layout dropped were
     /// dropped because they collide, which is the correct answer to a question BIFF does not ask.
@@ -724,14 +748,57 @@ internal sealed class XlsChartBuilder
     private void ReadLabelRange(BiffRecordReader stream)
     {
         stream.Skip(2);
-        bool everyLabel = stream.ReadUInt16() == 1;
+        _everyLabel = stream.ReadUInt16() == 1;
+        _categoryText = CategoryTextOf(_everyLabel, _isDateAxis);
+    }
 
-        _categoryText = new ChartAxisText(
+    /// <summary>
+    /// Reads <c>CHDATERANGE</c>, whose one flag decides which of two label rules applies.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>XclImpChLabelRange::Convert</c> (<c>xichart.cxx:3013-3047</c>) is an <c>if</c> and an
+    /// <c>else</c> over exactly this flag, and the label properties are set in the <em>else</em>
+    /// alone. A date axis takes the other branch, sets a scaling and a time increment, and never
+    /// touches <c>TEXTOVERLAP</c>, <c>TEXTBREAK</c> or <c>ARRANGEORDER</c> at all — so what stands
+    /// is chart2's own defaults for them, all three of which are set at
+    /// <c>chart2/source/model/main/Axis.cxx:239-242</c>: <c>TextBreak</c> false,
+    /// <c>TextOverlap</c> false, <c>ArrangeOrder</c> automatic.
+    /// </para>
+    /// <para>
+    /// <strong>That is the difference between an axis that rotates its labels and one that cannot.</strong>
+    /// <see cref="ChartAxisLabels.Resolve"/> returns on its first test when overlap is allowed, so
+    /// a chart whose <c>CHLABELRANGE</c> says "label every category" — which is the default, and
+    /// what nearly every chart states — never reaches the auto-rotate ladder. Applying that to a
+    /// date axis as well is a rule the reference deliberately does not have. Measured on
+    /// <c>Template Pilot Logbook JAR-FCL V3.0.xls</c>, whose <c>CHDATERANGE</c> flags are
+    /// <c>0x00ff</c> and therefore include <c>DATEAXIS</c>: the reference sets 848 glyphs at 45°
+    /// across the document and we set none.
+    /// </para>
+    /// <para>
+    /// The record is read even when it arrives before its <c>CHLABELRANGE</c>, because BIFF does
+    /// not fix their order and LibreOffice keeps both halves on one object and decides at the end.
+    /// </para>
+    /// </remarks>
+    private void ReadDateRange(BiffRecordReader stream)
+    {
+        stream.Skip(16);
+        _isDateAxis = (stream.ReadUInt16() & DateAxis) != 0;
+        _categoryText = CategoryTextOf(_everyLabel, _isDateAxis);
+    }
+
+    /// <summary>What a category axis states about its labels, given the two records that decide it.</summary>
+    private static ChartAxisText CategoryTextOf(bool everyLabel, bool dateAxis) => dateAxis
+        ? new ChartAxisText(
+            Rotation: 0.0,
+            OverlapAllowed: false,
+            LineBreakAllowed: false,
+            Stagger: ChartLabelStagger.Auto)
+        : new ChartAxisText(
             Rotation: 0.0,
             OverlapAllowed: everyLabel,
             LineBreakAllowed: everyLabel,
             Stagger: ChartLabelStagger.SideBySide);
-    }
 
     /// <summary>
     /// Which axis a major gridline belongs to.
@@ -888,6 +955,9 @@ internal sealed class XlsChartBuilder
     private const ushort BarPercent = 0x0004;
     private const ushort LineStacked = 0x0001;
     private const ushort LinePercent = 0x0002;
+
+    /// <summary><c>EXC_CHDATERANGE_DATEAXIS</c>, <c>xlchart.hxx:716</c>.</summary>
+    private const ushort DateAxis = 0x0010;
 
     private const ushort AutoMinimum = 0x0001;
     private const ushort AutoMaximum = 0x0002;

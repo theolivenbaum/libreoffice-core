@@ -102,6 +102,41 @@ internal static class SheetTextLayout
     /// <summary>What a numeric cell that will not fit draws instead of its number.</summary>
     private const string HashText = "###";
 
+    /// <summary>
+    /// The colour a hyperlink cell's text is painted in, whatever the file says it is.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>#000080</c>: the application's configured <c>LINKS</c> colour, which is
+    /// <c>COL_BLUE</c> — <c>svtools/source/config/colorcfg.cxx:534</c> lists
+    /// <c>{ COL_BLUE, Color(0x1D99F3) }</c> for <c>LINKS</c>, light theme first, and
+    /// <c>include/tools/color.hxx:443</c> defines <c>COL_BLUE</c> as
+    /// <c>Color(0x00, 0x00, 0x80)</c>. Navy, not the pure blue the name suggests, and not the
+    /// <c>#0000FF</c> every workbook's own hyperlink style states.
+    /// </para>
+    /// <para>
+    /// <strong>The substitution is unconditional, and that was established rather than assumed.</strong>
+    /// A hyperlink cell is an <c>SvxURLField</c> inside an <c>EditTextObject</c>
+    /// (<c>WorksheetGlobals::insertHyperlink</c>,
+    /// <c>sc/source/filter/oox/worksheethelper.cxx:1062-1080</c>) and the EditEngine paints a URL
+    /// field in the configured link colour rather than in the character colour, so the character
+    /// colour never reaches the page. Measured with an authored probe holding a hyperlink cell
+    /// stated <c>#FF0000</c> and a second stated <c>#00B050</c>, each beside an unlinked control
+    /// in the same colour: the reference painted both hyperlink cells <c>#000080</c> and left both
+    /// controls alone. So this beats a stated colour rather than filling in for an absent one.
+    /// </para>
+    /// <para>
+    /// It applies to whatever <see cref="SheetLayout.HoldsField"/> is true of and to nothing else —
+    /// the same predicate that already decides that such a cell neither wraps nor shortens, so the
+    /// three consequences of being a field are stated once between them.
+    /// </para>
+    /// </remarks>
+    private static readonly Colour LinkColour = Colour.FromRgb(0x000080);
+
+    /// <summary>The ink one run is painted with: its own colour, the cell's, or the link's.</summary>
+    private static Colour Ink(Colour? portion, Colour fallback, bool field)
+        => field ? LinkColour : portion ?? fallback;
+
     private static readonly ConcurrentDictionary<string, ParagraphLayouter> Layouters =
         new(StringComparer.Ordinal);
 
@@ -172,10 +207,10 @@ internal static class SheetTextLayout
                     // it has taken its height already and there is nothing to draw or underline.
                     if (run.Glyphs.Count == 0) continue;
 
-                    sink.DrawGlyphRun(run, Paint.Solid(colour ?? fallback));
+                    sink.DrawGlyphRun(run, Paint.Solid(Ink(colour, fallback, cell.IsField)));
                 }
 
-                Decorate(sink, cell.Format, face, line, fallback);
+                Decorate(sink, cell.Format, face, line, Ink(null, fallback, cell.IsField));
             }
         }
         finally
@@ -1199,7 +1234,7 @@ internal static class SheetTextLayout
                 {
                     if (run.Glyphs.Count == 0) continue;
 
-                    sink.DrawGlyphRun(run, Paint.Solid(colour ?? fallback));
+                    sink.DrawGlyphRun(run, Paint.Solid(Ink(colour, fallback, cell.IsField)));
                 }
 
                 down += line.Run.LineHeight;
@@ -1289,7 +1324,7 @@ internal static class SheetTextLayout
 
             Length x = cell.Box.X + ((cell.Box.Width - glyph.Width) / 2);
             foreach ((GlyphRun run, Colour? colour) in glyph.At(new DocPoint(x, y)))
-                sink.DrawGlyphRun(run, Paint.Solid(colour ?? fallback));
+                sink.DrawGlyphRun(run, Paint.Solid(Ink(colour, fallback, cell.IsField)));
             y += pitch;
         }
     }
