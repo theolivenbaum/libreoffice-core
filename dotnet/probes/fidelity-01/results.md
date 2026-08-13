@@ -123,7 +123,8 @@ answers, and it splits the 40 four ways — including **twelve** cases where the
 Two of the three suspects in the brief are **excluded by measurement** for the families I took,
 and this matters because the brief's leading hypothesis names all three.
 
-**The font set is excluded for 26 of the 40 here, and for the remaining 14 in §6.0.** `MISSING_PACKAGES.md` is right that DejaVu moves
+**The font set is excluded for the 32 word-processing cases here, and for the 8 sheets/slides
+cases in §6.0 — that is all 40.** `MISSING_PACKAGES.md` is right that DejaVu moves
 53 of 534 corpus reference page counts — but that is the *corpus*, not this suite. The Fidelity
 fixtures are Latin text in Carlito. Measured, by listing the fonts LibreOffice actually embedded
 in its own reference PDF for each failing document:
