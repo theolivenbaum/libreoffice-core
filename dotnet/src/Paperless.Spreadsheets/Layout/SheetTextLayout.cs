@@ -451,9 +451,10 @@ internal static class SheetTextLayout
             if (run.Width <= available) area = area.Unclipped();
         }
 
+        bool hashed = false;
         if (isValue && area.IsClipped)
         {
-            (run, text) = Hash(cell, face, run.Size, available, run);
+            (run, text, hashed) = Hash(cell, face, run.Size, available, run);
             if (run.Width + totalMargin <= area.Width) area = area.Unclipped();
         }
 
@@ -470,7 +471,14 @@ internal static class SheetTextLayout
             run = Shorten(run, text, ShapeRange, percent, horizontal, area);
         }
 
-        List<SheetTextRun> lines = breaks
+        // `###` is never wrapped, even in a wrapping cell. Measured on `sheet-hash.fods`'s
+        // `wrapdate` row under 26.2.4.2: a wrapping date cell too narrow for its date draws
+        // `###` on **one** line at the same baseline as the unwrapped row beside it, and the row
+        // keeps its single-line height. We drew three lines of one `#` each and made the row
+        // three times as tall, which moves every row under it. The seat is that Calc replaces the
+        // *engine text* with the hash string after the paper has been decided
+        // (`output2.cxx:3605`, `:3849`, `:4070`), so there is nothing left to break.
+        List<SheetTextRun> lines = breaks && !hashed
             ? Wrap(text, portions, face, size, scale, available, ShapeRange, percent)
             : [run];
         if (lines.Count == 0) return new Placement([]);
@@ -888,23 +896,28 @@ internal static class SheetTextLayout
     /// decision: hashes are a function of a column width that extracted text does not have.
     /// </para>
     /// </remarks>
-    private static (SheetTextRun Run, string Text) Hash(
+    private static (SheetTextRun Run, string Text, bool Hashed) Hash(
         in SheetCellText cell, SheetFace face, Length size, Length available, SheetTextRun run)
     {
-        string text;
-
         if (cell.Value is double value && cell.Format.HasGeneralFormat)
         {
             Length digit = face.MaxDigitWidthAt(size);
             int characters = digit > Length.Zero ? (int)(available.Emu / digit.Emu) : 0;
-            text = SheetGeneralWidth.Render(value, characters);
-        }
-        else
-        {
-            text = HashText;
+            string shortened = SheetGeneralWidth.Render(value, characters);
+
+            // **The shortening can fail, and then the cell hashes like any other.** This is the
+            // last three lines of `SetTextToWidthOrHash` — "Even after the decimal adjustment the
+            // text doesn't fit. Give up." (`output2.cxx:704-710`) — and leaving it out is what
+            // made a column 0.43 characters wide draw `1E+00` where Calc draws `###`, 1099 times
+            // in one workbook. Re-shape and re-measure rather than counting characters: the
+            // budget is digit widths and the answer is a shaped run, so only the run can decide.
+            if (SheetText.Shape(shortened, face, size) is { } fitted && fitted.Width <= available)
+            {
+                return (fitted, shortened, false);
+            }
         }
 
-        return (SheetText.Shape(text, face, size) ?? run, text);
+        return (SheetText.Shape(HashText, face, size) ?? run, HashText, true);
     }
 
     // ------------------------------------------------------------------------------ shorten
