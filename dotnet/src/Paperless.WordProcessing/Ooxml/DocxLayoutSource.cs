@@ -395,16 +395,39 @@ public sealed partial class DocxLayoutSource
     /// </para>
     /// <para>
     /// "Nothing but the mark" is read from what the paragraph produced rather than from its markup, so a
-    /// mark that anchors a frame, cites a note, or defers a page break keeps its paragraph: each of those
-    /// is content the page would otherwise lose, and Writer guards them individually
-    /// (<c>HasTopAnchoredObjects</c>, <c>IsParaWithInlineObject</c>, the column-break test).
+    /// mark that anchors a frame or cites a note keeps its paragraph: each of those is content the page
+    /// would otherwise lose, and Writer guards them individually (<c>HasTopAnchoredObjects</c>,
+    /// <c>IsParaWithInlineObject</c>).
+    /// </para>
+    /// <para>
+    /// <strong>A page break does not save the mark, and used to.</strong> The guard list in
+    /// <c>bRemove</c> protects a <em>column</em> break — <c>bIsColumnBreak</c>, built from
+    /// <c>BreakType_COLUMN_BEFORE</c>/<c>_AFTER</c>/<c>_BOTH</c> a dozen lines above it — and names no
+    /// page break at all, so a mark carrying one is removed and the break dies with the paragraph it was
+    /// attached to. Measured on the installed 26.2.4.2 by four authored routes onto the same flag, each a
+    /// three-paragraph section ending in an empty mark followed by a landscape section: a preceding
+    /// <c>&lt;w:br w:type="page"/&gt;</c>, two of them, a <c>w:pageBreakBefore</c> on the mark itself, and
+    /// the same on a section already filling its page. LibreOffice emits one portrait page for the first
+    /// three and two for the fourth; taking the break at its word emits one more in every case.
+    /// </para>
+    /// <para>
+    /// The corpus case is <c>1_tpr_template__from_fy14_.docx</c>, whose first section ends with a
+    /// page-break paragraph and then an empty mark. Its first two pages are word for word and line for
+    /// line the reference's; page three held one word, the footer's page number, and pushed the landscape
+    /// section that follows onto page four. Nine of the corpus's 200 documents change with this rule.
+    /// </para>
+    /// <para>
+    /// Column breaks are not guarded here because the reader does not model one: only
+    /// <c>w:br w:type="page"</c> reaches <see cref="ParagraphFormat.StartsNewPage"/>, so the flag this
+    /// test used to read can never have meant a column break. That is a real gap in the other direction —
+    /// 26.2.4.2 keeps a mark carrying a column break and gives it a page, and we drop it — and it is
+    /// recorded in <c>dotnet/probes/words-e-01/results.md</c> rather than guessed at here.
     /// </para>
     /// </remarks>
     private static bool IsSectionMarkOnly(PageParagraph paragraph)
         => paragraph.Text.Length == 0
            && paragraph.Frames.Count == 0
-           && paragraph.Notes.Count == 0
-           && !paragraph.Format.StartsNewPage;
+           && paragraph.Notes.Count == 0;
 
     /// <summary>
     /// How many tables enclose the one being read, counted while its rows are walked.

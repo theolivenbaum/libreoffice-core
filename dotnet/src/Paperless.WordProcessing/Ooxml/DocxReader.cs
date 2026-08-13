@@ -104,6 +104,8 @@ public static class DocxReader
 
         if (sections.Count == 0) sections.Add(DocxPageGeometry.Read(null, file.Settings));
 
+        PromoteContinuousAcrossOrientation(sections);
+
         // Under `w:compat`, not directly under `w:settings` — `SettingsTable` reads it as
         // `LN_CT_Compat_noColumnBalance` (`dmapper/SettingsTable.cxx`:418). Looking for it one level too
         // high finds nothing and silently balances a document that asked not to be.
@@ -112,6 +114,53 @@ public static class DocxReader
             Word.IsOn(Word.Child(Word.Child(file.Settings, "compat"), "noColumnBalance")));
 
         return sections;
+    }
+
+    /// <summary>
+    /// Turns a <c>continuous</c> section break into a <c>nextPage</c> one when the section's
+    /// <c>w:orient</c> flag differs from the previous section's.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A sheet has one orientation, so a section that wants the other one cannot share a page with the
+    /// section above it — LibreOffice says so in as many words and does exactly this, in
+    /// <c>SectionPropertyMap::CloseSectionGroup</c>
+    /// (<c>sw/source/writerfilter/dmapper/PropertyMap.cxx</c>:1661-1678): "if page orientation differs
+    /// from previous section, it can't be treated as continuous", and the break type becomes
+    /// <c>nextPage</c>.
+    /// </para>
+    /// <para>
+    /// <strong>The comparison is on the flag and on nothing else</strong>, which is the part worth
+    /// measuring rather than assuming. The property compared is <c>PROP_IS_LANDSCAPE</c>, written once
+    /// from <c>w:orient</c> alone (<c>DomainMapper.cxx</c>:2859 and :830) after being reset to false, so
+    /// the stated width and height never enter it. Swept on the installed 26.2.4.2, one section holding a
+    /// page and a line so a promoted break shows as an extra page: a continuous section 720 twips wider,
+    /// 720 twips taller, one twip wider, carrying <c>w:orient="portrait"</c> where the previous section
+    /// carried none, or an inch of extra top margin, all stay on the page. A continuous section stating
+    /// <c>w:orient="landscape"</c> takes a new one. The corner that settles it: a first section stating
+    /// <c>15840 × 12240</c> with <em>no</em> <c>w:orient</c> — a physically landscape sheet — followed by
+    /// a continuous portrait-shaped section does <strong>not</strong> break, because neither carries the
+    /// flag; state <c>w:orient="landscape"</c> on the second and it does. Eight authored variants, six of
+    /// them controls.
+    /// </para>
+    /// <para>
+    /// The previous section is the one before it in document order, taken as stated rather than as
+    /// resolved: LibreOffice reads <c>GetLastSectionContext()</c>'s own property map, and every DOCX
+    /// section states a <c>w:pgSz</c> or defaults to a portrait Letter. So this pass does not carry a
+    /// resolved orientation forward the way the WW8 reader's <c>ResolveContinuousBreaks</c> carries a
+    /// sheet — that reader implements a different importer's rule and is not this one.
+    /// </para>
+    /// </remarks>
+    private static void PromoteContinuousAcrossOrientation(List<WritingSection> sections)
+    {
+        for (int i = 1; i < sections.Count; i++)
+        {
+            if (sections[i].Break == SectionBreak.Continuous
+                && sections[i].Page.IsLandscape != sections[i - 1].Page.IsLandscape)
+            {
+                sections[i] = sections[i] with { Break = SectionBreak.NextPage };
+            }
+        }
     }
 
     /// <summary>
