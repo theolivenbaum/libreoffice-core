@@ -478,6 +478,36 @@ The parent session's job at salvage time is to check each killed agent's branch 
 (`git log --oneline HEAD..worktree-agent-*`), merge and re-verify what is there, and stash the
 rest as patches before removing the worktrees — which also frees the disk the next round needs.
 
+### Try resuming before salvaging: the agent itself is usually still there
+
+**Salvage is the fallback, not the first move.** When the process dies — a restart, a crash, the
+harness exiting — the agents' *transcripts* survive on disk, and sending a message to a dead
+agent's id resumes it from that transcript with its context intact. That is strictly better than
+salvage, because the thing salvage cannot recover is exactly the thing the transcript keeps: what
+the agent had already measured, refuted and decided but not yet written down.
+
+Six agents died mid-round this way in one session. All six resumed, and the survey that decided it
+took one command:
+
+```sh
+git worktree list
+for b in <branches>; do git log --oneline -1 "$b"; git rev-list --count "$b" ^HEAD; done
+for w in <worktrees>; do git -C "$w" status --short | grep -vE '\.(png|ico)$'; done
+```
+
+What that survey showed is the reason to run it before writing any brief: **three branches had
+real code committed with tests and fixtures, and not one had a `results.md` for its own round** —
+only a `prediction.md`. Two others had nothing committed at all, with a full round's work sitting
+as untracked files. So the honest summary was not "some agents finished and some did not"; it was
+"every one of them shipped something and none of them had been through the gate". A resume message
+that says *what the parent can see on disk* — the exact commits, the exact dirty paths — gets a
+far better result than one that asks the agent what it was doing.
+
+**The standing defence is to make agents commit early.** Brief every agent to commit on its branch
+as soon as it has anything, `wip:` if unfinished, because an interrupted round that committed is a
+salvage and an interrupted round that did not is a rescue. Two rounds in one session were nearly
+lost to this, and both were recovered only because the worktrees happened to survive.
+
 **Do not merge a salvage into the branch yourself — hand the branch on and make its successor
 re-derive it.** A restart killed an agent whose two commits looked complete: clean worktree, a
 fix and its probe, the message written as a finding rather than as a `wip:`. Its successor
