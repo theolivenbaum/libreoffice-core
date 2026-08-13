@@ -20,10 +20,17 @@
 
     Rasterisation and text are handled by SkiaSharp plus HarfBuzzSharp, with a
     hand-rolled OpenType metrics reader in Paperless.Text. HarfBuzz is what LibreOffice
-    itself shapes with, so advance widths agree by construction; and reading the font
-    tables ourselves is wanted regardless, because matching LibreOffice's line heights
-    needs raw hhea/OS-2 access and our own precedence rules rather than a library's
-    interpretation of them.
+    itself shapes with, which is why it was chosen; and reading the font tables ourselves
+    is wanted regardless, because matching LibreOffice's line heights needs raw hhea/OS-2
+    access and our own precedence rules rather than a library's interpretation of them.
+
+    This note used to claim that sharing the shaper made advance widths "agree by
+    construction". That is measurably false and the claim has been removed rather than
+    softened: a Fidelity round found a real ~0.1% advance divergence, with tab stops exact
+    to 0.0000 pt — so the pen is right and the drift accumulates between them — and both
+    sides starting from the same unkerned sum while LibreOffice kerns 19% harder on the
+    line measured. Choosing the same shaper narrows the gap; it does not close it, and
+    nothing about a shared dependency guarantees the same kerning decisions.
   -->
 
   <PropertyGroup>

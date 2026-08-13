@@ -95,6 +95,19 @@ matters more than the thorough-looking sweep.
 - **`fonts-dejavu-extra`** — adds Condensed variants that would enter the fallback chain. Only
   `-core` (which pulls `-mono`) is evidenced by the test suite; adding more is an unforced
   change to the font environment.
+- **Anything shipping a `.otf`** — and this one is a genuine, measured gap that is still being
+  left open on purpose. `fc-list | grep -c '\.otf'` is **0** here, so the single remaining skip
+  in `Paperless.Rendering.Tests` never runs: it guards a poppler failure mode that once blanked
+  **161 glyph runs**, and it needs a CFF-outline face to exercise. A guard that cannot run is
+  worth roughly nothing, so this is a real loss.
+
+  It is nonetheless the right call for now, because **installing a font is precisely what caused
+  this project's worst confound**. Adding `fonts-dejavu-core` moved 53 of 534 reference page
+  counts and 31 of 171 of our own sheets renderings; any new face may enter the fallback chain
+  and invalidate the canonical reference bank, forcing a 534-document re-sweep and re-stating
+  every scoreboard. **The cost is a re-baseline; the benefit is one test.** If it is ever taken,
+  take it deliberately: install, re-sweep the reference, and diff the banks before believing any
+  figure measured across the change.
 
 ## Already present, and required — do not remove
 

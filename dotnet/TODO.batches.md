@@ -12780,3 +12780,84 @@ Of the four movers, three move towards the reference and **`EHEST-SMS-Safety-Man
 moves away** (80/82 → 79/82). Its mark is one 26.2.4.2 also removes, so the page it had been
 carrying was cancelling a loss elsewhere — a second defect in that document, now visible because the
 first is fixed. Recorded, not smoothed over.
+
+---
+
+## Merge note — fidelity-01, the 40 classified
+
+Merged `wt-fidelity`. **No source or test file changed**, so the ten non-Fidelity projects stay at
+**3523 total, 0 failed**. This round shipped a classification and three corrections, not code.
+
+### The count reconciles and the bisect is decisive
+
+550 discovered, 510 + 40, 0 skipped — **the total never moved, only the split**. At `0fb6d41e0`,
+the commit the handover records green on 24.2.7.2, today's environment gives **40/510/550 with a
+byte-identical failing set**. No Paperless code change caused any of the 40.
+
+### But "environment" is not "we are right", and that is the round's value
+
+| class | count |
+|---|---:|
+| **genuine Paperless defects** | **12** |
+| the reference's own behaviour | 26 |
+| unexplained | 2 |
+
+**Nine of the twelve are one root cause.** `DocumentSettingId::CONTINUOUS_ENDNOTES` is set
+unconditionally by both Word filters, and `paintfrm.cxx:5845-5868` states the rule outright —
+*"Length is 2 inches"*, *"upper spacing is 60% of all space"* — which predicts both measured
+numbers: **144.000 pt**, invariant when the text width was halved, and **2.214 pt** vertical. We
+apply Writer's 25% rule format-blind at **`Paginator.cs:170`**.
+
+**Two more** (`SlideTableComparisonTests`) are the cheapest real fix in the set: we already
+implement PowerPoint's 1.2 × font-height pitch for text boxes and simply do not apply it to table
+cells.
+
+### The brief's hypothesis was refuted at its premise
+
+I briefed "Fidelity pins expectations to the old binary's output". **It does not pin anything** —
+it rebuilds the reference live via `soffice` on every run. The suite's actual hard-coded 24.2.7.2
+numbers (`TableAutoLayoutComparisonTests.cs:145-159`) **all pass**. So "re-baseline the stale
+expectation" was never an available repair, and had the round taken my framing it would have looked
+for a file that does not exist.
+
+**Both named environment suspects measured exactly zero.** Every failing document embeds Carlito
+alone, and removing DejaVu from fontconfig leaves the reference content streams byte-identical;
+poppler tracks the PDF's own geometry to 0.022 pt. Two predictions, both zero, both stated in
+advance.
+
+### Three places the reference is wrong and we are right
+
+LibreOffice's text filter emits "After the tables." **three times** where its own PDF and the source
+file say once; its Word import adds the declared `w:tblCellMar/w:top` (57 twips = **2.85 pt**
+exactly) on top of an `hRule="exact"` row; and Calc now drops visible spilled text in **tagged-PDF**
+mode, where untagged it reproduces our numbers exactly.
+
+### The correction that matters most
+
+Underneath 8 more failures is a real **~0.1% advance divergence**, and it is now located rather
+than suspected: **tab stops are exact to 0.0000 pt**, so our pen is right, and the drift accumulates
+*between* them. Both sides start from the same unkerned sum and **LibreOffice kerns 19% harder** on
+the line measured.
+
+That makes the standing claim **"HarfBuzz is what LibreOffice shapes with, so advance widths agree
+by construction" measurably false**. It has been removed from both `dotnet/CLAUDE.md` and
+`Directory.Packages.props` rather than softened — sharing a shaper narrows the gap and does not
+close it, and nothing about a shared dependency guarantees the same kerning decisions.
+
+### Two further corrections
+
+- The non-Fidelity total at that base is **3454, not 3465**; every project matches its handover
+  figure and the handover's own table sums to 3454. (At the current HEAD it is 3523, after five
+  rounds' additions.)
+- **`Paperless.Rendering.Tests`' single skip is an environment gap, not a design choice.** The
+  container has **zero `.otf` files**, so a guard against a poppler failure mode that once blanked
+  161 glyph runs never runs. Recorded in `MISSING_PACKAGES.md` as a deliberate non-install: the
+  fix costs a 534-document re-baseline and buys one test.
+
+### No code shipped, honestly
+
+Three proposed repairs turned out larger than they look once attempted — `PdfTextRun` carries no
+text, so the whitespace filter needs a TestKit change; `KnownDeviations` suppresses tokens rather
+than counts, so an Extraction entry would mask any future loss of "the"; and a width-only separator
+fix turns no test green because the same test also asserts Y. Sizes are stated in §9 of the round's
+`results.md` rather than the round claiming a partial fix.

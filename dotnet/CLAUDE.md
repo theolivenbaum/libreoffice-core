@@ -25,10 +25,20 @@ format (Paperless reads), macro execution (never — Paperless only reports that
 2. **Never execute macros.** Macro-enabled formats are read as data. `CanCarryMacros` on
    `FormatInfo` exists so callers can surface the risk; nothing executes.
 3. **Rasterise with SkiaSharp, shape with HarfBuzzSharp.** HarfBuzz is what LibreOffice
-   shapes with, so advance widths agree by construction. Font metrics come from a
-   hand-rolled OpenType reader in `Paperless.Text` — matching LibreOffice's line heights
-   needs raw `hhea`/`OS/2` access and our own precedence rules. Before adding any graphics
-   dependency, read the note at the top of `Directory.Packages.props`.
+   shapes with, which is why it was chosen. Font metrics come from a hand-rolled OpenType
+   reader in `Paperless.Text` — matching LibreOffice's line heights needs raw `hhea`/`OS/2`
+   access and our own precedence rules. Before adding any graphics dependency, read the note
+   at the top of `Directory.Packages.props`.
+
+   **"So advance widths agree by construction" used to stand here and is measurably false.**
+   Shared shaper or not, the two stacks do not agree: a Fidelity round measured a real ~0.1%
+   advance divergence, and located it precisely — tab stops are exact to **0.0000 pt**, so the
+   pen is right, and the drift accumulates *between* them. Both sides start from the same
+   unkerned sum and **LibreOffice kerns 19% harder** on the line measured. It underlies 8 of
+   the 40 Fidelity failures.
+
+   Treat it as a real open defect with a known seat, not as a rounding artefact — and do not
+   re-derive "our pen is off", because the declared-margin probe already refuted that.
 4. **Detect formats by content, never by extension.** Mislabelled files are common, and
    some distinctions (DOCX vs DOCM, which application owns an OLE2 file) cannot be made
    from a name at all. The extension is a tie-breaker hint only.
