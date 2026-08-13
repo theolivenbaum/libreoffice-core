@@ -12861,3 +12861,92 @@ text, so the whitespace filter needs a TestKit change; `KnownDeviations` suppres
 than counts, so an Extraction entry would mask any future loss of "the"; and a width-only separator
 fix turns no test green because the same test also asserts Y. Sizes are stated in §9 of the round's
 `results.md` rather than the round claiming a partial fix.
+
+---
+
+## Merge note — tooling-01, `paperless analyze` owns the PDF instrument
+
+Merged `wt-tooling`. Build 0 warnings / 0 errors. **Ten non-Fidelity projects: 3551 total, 0
+failed** — Rendering 121 → **149**, exactly the round's 28 new cases. Nothing under `src/` gains a
+dependency; PdfPig moves into its own `PDF reading` group in `Directory.Packages.props` with the
+pin's reasoning written beside it.
+
+**Why this exists:** the gate read its three figures out of poppler's `pdfinfo`/`pdftotext`/
+`pdffonts`, which made the machine's poppler an **undeclared input to every number this project has
+recorded**. That was caught by measurement, not suspicion: with the renderer's source *provably*
+unchanged, our own word counts moved on 169 of 200 documents and **86 of them moved by exactly the
+amount the reference moved**. A term that shifts both sides of a comparison equally belongs to
+neither renderer.
+
+`paperless analyze` reads a PDF **in process** — no subprocess, no poppler — and reports page count,
+per-page size, text with word counts, and every face with embedded/subset status. Two decisions are
+**named options rather than hidden constants**: `--words alnum|raw` (default `alnum`, the gate's
+merged metric, *reimplemented* from `words_of()` rather than re-decided) and
+`--grouping nearest|simple`. Both totals and the three excluded classes are always emitted.
+
+### Acceptance, and it is a proof rather than an assertion
+
+| check | result |
+|---|---|
+| page count vs poppler | **534/534** |
+| page count vs the banked baseline | **534/534** (poppler-now vs banked, 534/534, as the control) |
+| fonts — face count, unembedded **and** subset | **534/534**, no disagreements to explain |
+| words, raw vs raw | 129 exact / 471 in band |
+| words, gate metric | 154 exact / **480 in band**, net **−0.17% over 6.64M words** |
+| known answer | an authored document returns 285/270/10/5 **exactly as constructed** — error zero, not near zero |
+| determinism | two independent full sweeps identical on all 16 columns × 534 rows |
+
+Spot-checked at merge on `wells08_basic__ppt.pdf`: 27 pages, 4 faces, 0 unembedded — all three
+identical to poppler — with `wordsRaw` 1188 against poppler's 1171, and the classes reconciling
+exactly (1004 alnum + 136 bullets + 48 punctuation = 1188).
+
+### The two defects the reader had, both found by measuring
+
+The acceptance bar earned its cost twice over. **The font walk did not terminate** — shared resource
+dictionaries make it O(fan-out^depth), it hung on 17 of 534, and the tell was that a second pass
+added zero. And **off-page glyphs were being counted**: half of `CIS_Debian…xls`'s 125k glyphs sit
+off the page, giving 18 106 words against poppler's 9290. Fixing that alone took the corpus Σ|Δ|
+from 120 122 to **74 088**.
+
+### The word difference, by cause
+
+Off-page glyphs (removed), rotated text (removed — the simple grouper returns one word per glyph on
+a rotated axis label), **accounting-format `$-` cells, which are real and invisible under the
+gate's merged metric** — an independent confirmation of that decision — coincident double strikes
+(measured at +6 in band and deliberately *not* landed), nearest-neighbour merging across sheet
+columns (three documents carry 34 365 of sheets' 47 175), and three decks where **poppler fragments
+words we return whole**.
+
+One correction to the brief: `NearestNeighbourWordExtractor` measures at 2× poppler **only because
+it returns space glyphs as singleton `Word` objects**. Tokenising the text — which is what `wc -w`
+does — it matches.
+
+### Tests, and what reintroduction bought
+
+28 cases in 17 methods; **12 methods verified by reintroduction**, 5 labelled drift guards.
+Reintroduction **found three real coverage gaps** that review had not: `/FontFile3` was untested,
+the subset theory could not tell position from presence, and nothing tested inherited `/Resources`.
+Two more were closed by adding tests. Every mutation is now detected.
+
+### Follow-up reach — smaller than briefed
+
+Measured rather than assumed: **only `PdfWords` launches `pdftotext`** (the sole launch site in the
+tree) and **`PdfPageSizes`** re-parses its output. `PdfTextRuns` and `PdfFills` inflate content
+streams themselves and merely *mention* poppler in comments. So the remaining conversion is **2
+files, 1 subprocess, 44 call sites across 25 Fidelity test files** — not the four readers the brief
+claimed.
+
+### A new environment fact
+
+**This mount is case-insensitive.** `git status` lists new files twice, under two spellings of the
+same directory, pointing at the same inode — which also explains why a `grep` over the tree returns
+both `dotnet/src/Paperless.Rendering/...` and `dotnet/src/paperless.rendering/...`. Stage only
+correctly-cased paths; `git ls-files | tr 'A-Z' 'a-z' | sort | uniq -d` must print nothing.
+
+### Not done, deliberately
+
+**`batch-check.sh` still calls poppler.** Rewiring it to `paperless analyze` is now possible and is
+the point of the tool, but it would restate all three scoreboards a second time, and three rounds
+are in flight against the current numbers. It is a round of its own, and its prerequisite —
+re-establishing the `wc -w` control against a stored `rawwords` column — is what the table above
+provides.
