@@ -95,6 +95,25 @@ public sealed record SheetDrawing
     /// </remarks>
     public Lazy<VectorImage>? Vector { get; init; }
 
+    /// <summary>
+    /// How much of the picture each edge throws away, or <see cref="PictureCropFractions.None"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>Carried rather than applied, because a sheet's drawing has no rectangle until the
+    /// page does.</strong> A two-cell anchor's size is the columns and rows between its corners,
+    /// which the reader cannot know; <see cref="SheetPageGraphics"/> resolves the box and applies
+    /// the crop there. Cropping is drawing the picture into a <em>larger</em> rectangle and
+    /// clipping to the anchor, so both halves have to happen in the same place.
+    /// </para>
+    /// <para>
+    /// BIFF states it as Escher properties 256–259 (<c>EscherPicture.Crop</c>). SpreadsheetML's
+    /// <c>a:srcRect</c> and ODF's <c>fo:clip</c> say the same thing and are not read yet, which is
+    /// why this is fractions rather than anything Escher-shaped.
+    /// </para>
+    /// </remarks>
+    public PictureCropFractions Crop { get; init; }
+
     /// <summary>The shape's name, as the file records it.</summary>
     public string? Name { get; init; }
 

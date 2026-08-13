@@ -89,6 +89,42 @@ def shapes(buf, off, end, out, depth=0):
             shapes(buf, b, s, out, depth + 1)
 
 
+def scan_shapes(buf, out):
+    """Every OfficeArtSpContainer in a buffer, found by scanning rather than by walking.
+
+    The recursive walk below is right whenever the container tree starts at offset 0 and
+    every record is where its parent's length says it is. Two of the four hosts break that:
+
+      * a .doc's OfficeArtContent is a DggContainer followed by OfficeArtWordDrawings, and
+        each Word drawing has a one-byte `dgglbl` in front of its DgContainer, so a walk
+        that trusts the previous record's length reads that byte as the next header and
+        finds nothing at all beyond the first record;
+      * an inline picture's container sits behind a PICF in the Data stream at an offset
+        only the piece table knows.
+
+    So the shapes are scanned for and validated three ways — the version nibble must be
+    0x0F, the length must fit, and the first child must be an FSP (0xF00A) of exactly 8
+    bytes. Validated against the walk on the .ppt track, where both are applicable: 51
+    decks, same shape count, same 16 documents / 100 cropped shapes.
+    """
+    off = 0
+    while off + 16 <= len(buf):
+        vi, rt, rl = struct.unpack_from("<HHI", buf, off)
+        if rt == SP_CONTAINER and (vi & 0x0F) == 0x0F and 8 <= rl <= len(buf) - off - 8:
+            v2, r2, l2 = struct.unpack_from("<HHI", buf, off + 8)
+            if r2 == SP and l2 == 8:
+                sp = {"props": {}, "type": None}
+                for _v, i3, r3, b3, s3 in children(buf, off + 8, off + 8 + rl):
+                    if r3 == SP:
+                        sp["type"] = i3
+                    elif r3 in (OPT, OPT2, OPT3):
+                        sp["props"].update(properties(buf, b3, s3, i3))
+                out.append(sp)
+                off += 8 + rl
+                continue
+        off += 1
+
+
 def cropped_shapes(buf):
     """(cropped shapes, total shapes, shapes carrying a picture) in an OfficeArt blob.
 
@@ -97,7 +133,7 @@ def cropped_shapes(buf):
     with the corpus.
     """
     out = []
-    shapes(buf, 0, len(buf), out)
+    scan_shapes(buf, out)
     found = []
     pictures = 0
     for sp in out:

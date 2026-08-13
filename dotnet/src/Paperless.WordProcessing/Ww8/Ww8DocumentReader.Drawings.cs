@@ -1,5 +1,6 @@
 using System.Buffers.Binary;
 using Paperless.Core.Diagnostics;
+using Paperless.Core.Geometry;
 using Paperless.Core.Graphics;
 using Paperless.MsBinary.Escher;
 using Paperless.MsBinary.Records;
@@ -189,9 +190,17 @@ public sealed partial class Ww8DocumentReader
     /// The picture a shape's <c>pib</c> names, or nothing when it names none this library can draw.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// <c>pib</c> is one-based and zero means "no picture", so the lookup and the emptiness test are the
     /// same question. A blip with no bytes leaves a diagnostic and no picture: the frame keeps its room,
     /// which is what stops a missing picture from moving every line after it.
+    /// </para>
+    /// <para>
+    /// The crop rides along with the bytes. It cannot be applied here — <c>EscherPicture.Cropped</c>
+    /// wants the rectangle the visible part of the picture lands in, and a frame has no rectangle
+    /// until <c>FrameLayout</c> has placed it — so the four fractions are read and carried, and
+    /// <c>PageDrawing</c> grows the rectangle and takes the clip that makes it read as a crop.
+    /// </para>
     /// </remarks>
     private FramePicture PictureOf(EscherShape? shape)
     {
@@ -200,9 +209,10 @@ public sealed partial class Ww8DocumentReader
         uint pib = shape.Properties.Value(EscherPropertyIds.Picture);
         if (pib == 0 || !Blips.TryGetValue((int)pib, out EscherBlip blip)) return FramePicture.None;
 
-        return blip.Bytes.IsEmpty
+        return (blip.Bytes.IsEmpty
             ? Declined(blip)
-            : EmbeddedPicture.Read(blip.Bytes, blip.Kind, "blip " + pib, _diagnostics);
+            : EmbeddedPicture.Read(blip.Bytes, blip.Kind, "blip " + pib, _diagnostics))
+            with { Crop = EscherPicture.Crop(shape.Properties) };
     }
 
     /// <summary>Records that a blip was found whose bytes could not be reached.</summary>
@@ -267,8 +277,7 @@ public sealed partial class Ww8DocumentReader
             shapeAt += 1 + _pictures[shapeAt];
         }
 
-        EscherShape? shape = InlineShape(shapeAt);
-        if (!IsPictureShape(shape)) return null;
+        if (InlineShape(shapeAt) is not { } shape || !IsPictureShape(shape)) return null;
 
         _inlinePictures ??= new DffRecordBuffer(_pictures);
         FramePicture image = PictureOf(shape);
@@ -277,9 +286,42 @@ public sealed partial class Ww8DocumentReader
             && _inlinePictures.TryReadHeader(shapeAt, out DffRecordHeader container)
             && EscherBlips.Inline(_inlinePictures, _inlinePictures.EndOf(container)) is { } own)
         {
-            image = own.Bytes.IsEmpty
+            // The crop is the shape's, not the blip's, so it survives the fall-through: an inline
+            // picture's bytes are inside its own `SpContainer` rather than in the blip store, and
+            // taking them by that route must not lose the four properties beside them.
+            image = (own.Bytes.IsEmpty
                 ? Declined(own)
-                : EmbeddedPicture.Read(own.Bytes, own.Kind, "inline blip", _diagnostics);
+                : EmbeddedPicture.Read(own.Bytes, own.Kind, "inline blip", _diagnostics))
+                with { Crop = EscherPicture.Crop(shape.Properties) };
+        }
+
+        // `dxaGoal` is the whole picture and the frame is what survives the crop, which is the
+        // opposite of every other host this library reads. A slide shape's anchor, an FSPA and a
+        // sheet's client anchor all state the rectangle the *visible* part lands in — the FSPA of
+        // this fixture's own floating twin measures 287.95 x 215.95 pt for a 480 x 540 pt picture
+        // 40% cropped away — so `PictureCrop.Uncropped` grows those. Here the goal is already the
+        // grown rectangle: 1500 twips at mx 6400 is 480 pt, and LibreOffice draws the picture at
+        // exactly that and reserves 288 x 216 pt of line for it. Applying the crop a second time
+        // would draw it 480/0.6 = 800 pt wide, so what belongs here is the inverse.
+        //
+        // Read from the Escher properties rather than from the PICF's own `dxaCropLeft` and its
+        // three siblings, which state the same crop in twips of the goal: this keeps one source
+        // for the crop across all four hosts, and a `.doc` whose PICF crops without an OPT is a
+        // case this round does not claim.
+        PictureCropFractions crop = EscherPicture.Crop(shape.Properties);
+        if (!crop.IsNone)
+        {
+            double across = 1 - crop.Left - crop.Right;
+            double down = 1 - crop.Top - crop.Bottom;
+
+            // A crop that keeps nothing leaves the goal alone, for the reason `Uncropped` returns
+            // the rectangle it was given: a picture in the wrong size beats a frame with no room.
+            if (across > 0 && down > 0)
+            {
+                width = (int)Math.Round(width * across);
+                height = (int)Math.Round(height * down);
+                if (width <= 0 || height <= 0) return null;
+            }
         }
 
         return new Ww8LayoutFrame(
