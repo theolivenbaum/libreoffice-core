@@ -95,6 +95,17 @@ matters more than the thorough-looking sweep.
 - **`fonts-dejavu-extra`** — adds Condensed variants that would enter the fallback chain. Only
   `-core` (which pulls `-mono`) is evidenced by the test suite; adding more is an unforced
   change to the font environment.
+- **`python3-pil` and `python3-numpy`** — these are now installed on this container, and that was
+  **an unnecessary install, recorded so nobody repeats it**. They went in to build a one-off
+  side-by-side review page. The project's own comparison tooling does **not** want them and says
+  so in `pdf-image-diff.py`'s own header: poppler renders to PPM, which is a header and raw RGB,
+  and PNG is zlib plus four chunks, so *"adding numpy or Pillow to read two rectangles of bytes
+  would be a dependency for its own sake"*. It reads P6 directly with `struct` and diffs a page in
+  about a tenth of a second.
+
+  Nothing was broken by their absence and nothing is broken by their presence — they do not touch
+  rendering. **Do not add them to a provisioning script**, and prefer `pdf-image-diff.py` to
+  writing a second pixel comparator.
 - **Anything shipping a `.otf`** — and this one is a genuine, measured gap that is still being
   left open on purpose. `fc-list | grep -c '\.otf'` is **0** here, so the single remaining skip
   in `Paperless.Rendering.Tests` never runs: it guards a poppler failure mode that once blanked
