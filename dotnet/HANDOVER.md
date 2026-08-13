@@ -458,9 +458,17 @@ What round 41 settled, so it is not re-derived:
 Still open on the track:
 
 - **`Demick_JetBlue.pptx`'s missing subgrid** was not addressed; the legend and line colours were.
-- `Fundamentals_Module_1_basics.ppt` and `W3_Case_Study…` — arrow shapes drawn as rectangles.
-  `PptShapeGeometry.PresetOf` went 6 → 148 entries in an earlier round; establish whether these
-  decks' shapes reach that table before assuming an entry is missing.
+- ~~`Fundamentals_Module_1_basics.ppt` and `W3_Case_Study…` — arrow shapes drawn as
+  rectangles.~~ **Stale — closed by round 21, and this entry outlived it by twenty-six rounds.**
+  The shapes do reach `PptShapeGeometry.PresetOf`: `Fundamentals` carries 7× type 69, 2× type
+  104 and 1× type 13, `W3` 3× type 103, none with `pVertices`, so the preset branch is taken at
+  `PptSlideLayout.cs:939`, and all 148 names resolve against `PresetShapeGeometry.txt` with none
+  missing. Both decks render proper arrows; max `|ink|%` on any page is 0.89. Round 21 measured
+  the fix at the time (`TODO.batches.md:9927`, ink 7.18 → 3.37 and 7.61 → 3.78).
+  **The instruction attached to it was sound and is what caught it** — "establish whether these
+  decks' shapes reach that table before assuming an entry is missing" — so the lesson is not
+  about arrows. A defect list is not self-expiring: an item that no round re-measures survives
+  every handover it appears in, and the two documents named here were carried forward by three.
 - `8_P-Pavese_AIRBUS…pptx` — missing orange table backgrounds and borders. Its `a:tblPr` **does**
   name a style id and the reference draws 30 `#FBECE7` + 25 `#F8D7CD` fills. PowerPoint's 74
   built-in table styles were ported from `predefined-table-styles.cxx`; find out whether this
