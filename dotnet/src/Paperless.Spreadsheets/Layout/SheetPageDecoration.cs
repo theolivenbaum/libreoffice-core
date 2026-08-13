@@ -704,17 +704,28 @@ internal sealed class SheetPageDecoration(SheetLayout sheet, SheetPagePlacement 
     /// Which run a cell edge belongs to: everything but its position along that run.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// Two edges coalesce when their keys are equal and their <c>Index</c> values are adjacent.
-    /// <c>At</c> is held in twips rather than as a <see cref="Length"/> because a grid line is
-    /// reached from two rectangles — a row's bottom and the next row's top — whose EMU can differ
-    /// in the last digit once the print scale has been applied, which is the same reason
-    /// <see cref="Edges.ExtensionAt"/> keys on twips.
+    /// </para>
+    /// <para>
+    /// <c>Line</c> identifies the grid line by <em>which edge of which placed row or column</em>
+    /// stated it — <c>2 × index</c> for a top or left edge and <c>2 × index + 1</c> for a bottom
+    /// or right one — and not by its coordinate. Keying on the coordinate is wrong and cost this
+    /// round a measured regression: a workbook with a zero-height row puts two grid lines at the
+    /// same y, so the pieces of two different lines land in one bucket with duplicate indices, and
+    /// what came out of the run builder was five mutually overlapping segments where there should
+    /// have been two coincident ones. Measured on page 2 of
+    /// <c>6880ac7361ca1b99a9230811_ST Capability List Rev.16 - Web.xlsx</c>, where the overhang
+    /// double-ink went 251 pt → 710 pt against a reference of 1.8 pt. With the line identity in
+    /// the key an index cannot repeat, by construction.
+    /// </para>
     /// </remarks>
     /// <param name="IsHorizontal">True when the run goes across the page.</param>
-    /// <param name="At">Which grid line it sits on, in twips.</param>
+    /// <param name="Line">Which grid line stated it, as an edge of a placed row or column.</param>
     /// <param name="Band">Which printed band drew it; runs never cross one.</param>
     /// <param name="Border">The resolved border, compared in full — width, gap, colour, pattern.</param>
-    private readonly record struct RunKey(bool IsHorizontal, long At, int Band, SheetBorder Border);
+    private readonly record struct RunKey(
+        bool IsHorizontal, int Line, int Band, SheetBorder Border);
 
     /// <summary>
     /// A page's borders, with the crossings indexed so an end can be extended.
@@ -768,7 +779,9 @@ internal sealed class SheetPageDecoration(SheetLayout sheet, SheetPagePlacement 
 
                     if (!merges.IsOverlappedTop(row.Row, column.Column))
                     {
-                        edges.Add(true, columnBand, c, row.Y, column.X, column.Right, firstRowOfBand
+                        edges.Add(
+                            true, 2 * r, columnBand, c,
+                            row.Y, column.X, column.Right, firstRowOfBand
                             ? own.Top
                             : SheetCellBorders.Resolve(
                                 own.Top, decoration(row.Row - 1, column.Column).Borders.Bottom));
@@ -776,7 +789,9 @@ internal sealed class SheetPageDecoration(SheetLayout sheet, SheetPagePlacement 
 
                     if (!merges.IsOverlappedLeft(row.Row, column.Column))
                     {
-                        edges.Add(false, rowBand, r, column.X, row.Y, row.Bottom, firstColumnOfBand
+                        edges.Add(
+                            false, 2 * c, rowBand, r,
+                            column.X, row.Y, row.Bottom, firstColumnOfBand
                             ? own.Left
                             : SheetCellBorders.Resolve(
                                 own.Left, decoration(row.Row, column.Column - 1).Borders.Right));
@@ -794,14 +809,16 @@ internal sealed class SheetPageDecoration(SheetLayout sheet, SheetPagePlacement 
                         && !merges.IsOverlappedBottom(row.Row, column.Column))
                     {
                         edges.Add(
-                            true, columnBand, c, row.Bottom, column.X, column.Right, own.Bottom);
+                            true, (2 * r) + 1, columnBand, c,
+                            row.Bottom, column.X, column.Right, own.Bottom);
                     }
 
                     if ((c == columns.Count - 1 || columns[c + 1].Column != column.Column + 1)
                         && !merges.IsOverlappedRight(row.Row, column.Column))
                     {
                         edges.Add(
-                            false, rowBand, r, column.Right, row.Y, row.Bottom, own.Right);
+                            false, (2 * c) + 1, rowBand, r,
+                            column.Right, row.Y, row.Bottom, own.Right);
                     }
                 }
             }
@@ -827,6 +844,7 @@ internal sealed class SheetPageDecoration(SheetLayout sheet, SheetPagePlacement 
 
         private void Add(
             bool horizontal,
+            int line,
             int band,
             int index,
             Length at,
@@ -836,7 +854,7 @@ internal sealed class SheetPageDecoration(SheetLayout sheet, SheetPagePlacement 
         {
             if (border.IsNone) return;
 
-            RunKey key = new(horizontal, at.Twips, band, border);
+            RunKey key = new(horizontal, line, band, border);
             if (!_pieces.TryGetValue(key, out List<Piece>? pieces))
             {
                 _pieces[key] = pieces = [];
