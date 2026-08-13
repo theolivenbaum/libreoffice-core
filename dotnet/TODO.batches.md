@@ -13101,3 +13101,78 @@ suite gave 3583.
 **A green test run proves nothing if the build that preceded it failed.** Check the build's exit
 status before trusting `--no-build`, and treat an unchanged total after a merge that added tests as
 the same class of evidence as "`git status` cannot see a bad HEAD".
+
+---
+
+## Merge note — sheets-d-01, border run coalescing
+
+Merged `wt-sheets-d`. Build 0 warnings / 0 errors. **Ten non-Fidelity projects: 3596 total, 0
+failed** — Spreadsheets 650 → **663**. 13 new cases, **all verified by reintroduction**, none a
+drift guard.
+
+**Sheets is 146 of 171, not the 144 this brief quoted.** 144 is the pre-`gate-01` figure and
+reproduces exactly under the old `rawwords` column; under the current letter-or-digit word check the
+track is 146. Neither number moves in this round — **verdict movement is zero, as predicted plainly.**
+
+### The rule, measured against 26.2.4.2 rather than read
+
+Authored fixture `sheet-border-runs.fods` — fourteen four-cell runs, one variable each, plus a
+hidden-line sheet — rendered by `soffice` itself.
+
+Two collinear cell edges sharing an endpoint merge into one stroke **iff their border is equal in
+width, colour, line pattern and sub-line count**. Any one differing splits the run into exactly two
+abutting runs. A hole is not bridged. Merging is per grid line, maximal, crosses the boundary
+between the two cell attributes that state one line, and is **not** broken by a hidden row or column
+(Calc's array holds visible lines only) nor by a perpendicular border crossing an interior joint.
+The merged stroke keeps the crossing extension at its two **outer** ends and discards every interior
+one.
+
+**The one inferred half is named as such**: runs may not cross a printed band
+(`printfun.cxx:2303-2335`, four separate `PrintArea` calls). It has **no test, and no mutation
+detects it** — stated by the round as its weakest part rather than left to be discovered.
+
+### Three refutations, one of them of this brief's premise
+
+- **My premise was wrong.** I briefed "our segments overlap by ~0.75 pt, which doubles the ink on
+  hairlines, so our rules look heavier and slightly ragged". Measured, it does **neither**: the
+  overlap is interior and opaque, so the union is identical. **400 of 408 sampled pages are
+  byte-identical rasters** before and after, and the two pages I named have 200 dpi ink equal to the
+  last digit. **This is a fidelity fix, not a visual one** — the right reason to want it is that the
+  operator stream now says what LibreOffice's says.
+- **The round's own predictions died to the C++ tree again.** It predicted from the 27.2 source that
+  a used collinear neighbour zeroes the extension, so LibreOffice would never overlap at a joint. It
+  overlaps by the crossing border's **full width** at a joint broken by colour. The extension is
+  always computed; *merging* is the only thing that removes it. That is now three rounds burned by
+  reading a checkout that is not the reference binary.
+- **Our own documentation was wrong.** `DrawBorders`' remarks asserted "Calc does not merge", citing
+  a four-direction box that cannot show it; and `SheetMergedDecorationTests` asserted **10** strokes
+  round a merged block where 26.2.4.2 draws **4** — which that test's own docstring already said.
+  Both corrected.
+
+### A defect introduced and measured out
+
+Keying a run on the grid line's **coordinate** breaks on a zero-height row, where two lines share
+one *y*: five overlapping segments where two coincident ones belong, taking overhang from 251 to
+710 pt on one page. Now keyed on **which edge of which placed row or column stated the line**. Worth
+recording because the fixture did not catch it and the corpus sweep did.
+
+### Reach and direction
+
+**136 of 171 renderings change**; 33 of the 35 that do not draw no stroke at all. Cross-track was
+**asserted statically rather than swept**, and correctly: the entire `src/` diff is one file in
+`Paperless.Spreadsheets`, which words and slides cannot reach.
+
+Over 13 872 page-aligned pages, restricted to stroke classes both sides draw:
+
+| | before | after | reference |
+|---|---:|---:|---:|
+| pages closer / unchanged / further | — | **9463 / 4408 / 1** | — |
+| pages matching the reference's distinct-line count | 4 122 | **13 498** | — |
+| distinct lines | 2 761 996 | **350 206** | 364 637 |
+| overhang | 1.79 M pt | **459 k pt** | 704 k pt |
+| PDF bytes | 75.0 MB | **53.4 MB** | — |
+
+The single "further" page is our **uncoalesced grid** — 107 reference rules against our 17 — and its
+*border* class lands exactly on the reference, so the regression is in a different class from the
+one this round touched. Eight raster-changing pages, all closer in ink, and one is a real visual
+win: a dash phase now runs once across a rule instead of restarting at every cell.
