@@ -172,13 +172,20 @@ public static class DrawingChartAutoFormat
     /// <param name="index">The series' <c>c:ser/c:idx</c>, or its point index when varying.</param>
     /// <param name="maximum">The largest such index in the whole plot area.</param>
     /// <param name="theme">The theme the accent names resolve against.</param>
+    /// <param name="styles">
+    /// The theme's format matrix. A stroke's accent is a <em>placeholder</em> pushed into the
+    /// theme's subtle line style rather than the drawn colour itself — see
+    /// <see cref="ThroughSubtleLineStyle"/>. Null leaves the accent raw, which is what a caller
+    /// with no theme to ask has to do.
+    /// </param>
     public static Colour? ColourOf(
         int style,
         ChartAutoObject what,
         bool stroke,
         int index,
         int maximum,
-        DrawingTheme? theme)
+        DrawingTheme? theme,
+        DrawingStyleMatrix? styles = null)
     {
         AutoFormatEntry[] table = (what, stroke) switch
         {
@@ -189,8 +196,56 @@ public static class DrawingChartAutoFormat
         };
 
         if (Entry(table, style) is not { } entry) return null;
+        if (Resolve(entry, index, maximum, theme) is not { } placeholder) return null;
 
-        return Resolve(entry, index, maximum, theme);
+        return stroke ? ThroughSubtleLineStyle(placeholder, styles, theme) : placeholder;
+    }
+
+    /// <summary>
+    /// The accent a stroke's automatic entry names, put through the theme's subtle line style.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>The accent is not the colour drawn; it is what the theme's line style is drawn
+    /// <em>in terms of</em>.</strong> <c>LineFormatter</c> copies
+    /// <c>Theme::getLineStyle(THEMED_STYLE_SUBTLE)</c> whole and then resolves it with
+    /// <c>getPhColor(nSeriesIdx)</c> as the placeholder —
+    /// <c>aLineProps.pushToPropMap(rPropMap, …, getPhColor(nSeriesIdx))</c>,
+    /// <c>oox/source/drawingml/chart/objectformatter.cxx:857-864</c>. So whatever the theme wrapped
+    /// around its <c>phClr</c> acts on the accent.
+    /// </para>
+    /// <para>
+    /// Measured on <c>Demick_JetBlue.pptx</c>, whose theme's first <c>a:lnStyleLst</c> entry is a
+    /// <c>phClr</c> under <c>shade 50000</c> and <c>satMod 103000</c>: the reference draws its three
+    /// automatic series in <c>B45D03</c>, <c>761D26</c> and <c>12415C</c>, not in the accents
+    /// <c>F07F09</c>, <c>9F2936</c> and <c>1B587C</c> they are derived from. Taking the accent raw
+    /// draws every automatic chart line noticeably too bright on any theme that states a transform
+    /// there, and every theme Office ships states one.
+    /// </para>
+    /// <para>
+    /// A theme entry with no <c>a:solidFill</c> — a bare width, or an <c>a:noFill</c> — leaves the
+    /// accent alone rather than making the series invisible. LibreOffice would draw no line at all
+    /// in that case, but no corpus theme states it and inventing an absence is the more expensive
+    /// way to be wrong.
+    /// </para>
+    /// </remarks>
+    /// <param name="placeholder">The accent the automatic table names, cycle shading applied.</param>
+    /// <param name="styles">The theme's format matrix, or null.</param>
+    /// <param name="theme">The theme the substituted colour resolves against.</param>
+    public static Colour ThroughSubtleLineStyle(
+        Colour placeholder, DrawingStyleMatrix? styles, DrawingTheme? theme)
+    {
+        if (styles?.LineStyle(SubtleStyleIndex) is not { } line) return placeholder;
+        if (Drawing.Child(DrawingStyleMatrix.Substitute(line, placeholder), "solidFill")
+            is not { } fill)
+        {
+            return placeholder;
+        }
+
+        foreach (XElement child in fill.Elements())
+            if (DrawingColour.Read(child)?.Resolve(theme) is { } resolved) return resolved;
+
+        return placeholder;
     }
 
     /// <summary>

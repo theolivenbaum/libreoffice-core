@@ -144,10 +144,19 @@ public sealed class DrawingStyleMatrix
     /// The theme's own <c>a:ln</c> at a one-based index, with its <c>phClr</c> left in place.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// The raw entry rather than a resolved one, because the caller that needs it — a chart's
-    /// automatic series formatting — wants the <em>width</em> and supplies its own colour from
-    /// the accent cycle rather than from an <c>a:lnRef</c>. Clamped to the last entry the way
+    /// automatic series formatting — has no <c>a:lnRef</c> to take a placeholder from: the accent
+    /// cycle supplies it instead, and the caller substitutes it with <see cref="Substitute"/>
+    /// before reading either the width or the colour. Clamped to the last entry the way
     /// <c>lclGetStyleElement</c> clamps (<c>oox/source/drawingml/theme.cxx:40-45</c>).
+    /// </para>
+    /// <para>
+    /// This comment used to say the caller "wants the width and supplies its own colour from the
+    /// accent cycle". That was the bug written down: the accent <em>is</em> the placeholder, and
+    /// the entry's own <c>a:shade</c>/<c>a:satMod</c> act on it. See
+    /// <see cref="DrawingChartAutoFormat.ThroughSubtleLineStyle"/>.
+    /// </para>
     /// </remarks>
     /// <param name="index">The one-based index into <c>a:lnStyleLst</c>.</param>
     public XElement? LineStyle(int index)

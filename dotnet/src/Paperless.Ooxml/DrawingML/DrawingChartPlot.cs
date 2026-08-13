@@ -785,9 +785,11 @@ public static class DrawingChartPlot
                 : ChartAutoObject.LinearSeries;
 
             Colour? autoFill = DrawingChartAutoFormat.ColourOf(
-                automatic.Style, frame, stroke: false, seriesIndex, automatic.MaxSeriesIndex, theme);
+                automatic.Style, frame, stroke: false, seriesIndex, automatic.MaxSeriesIndex,
+                theme, automatic.Styles);
             Colour? autoLine = DrawingChartAutoFormat.ColourOf(
-                automatic.Style, frame, stroke: true, seriesIndex, automatic.MaxSeriesIndex, theme);
+                automatic.Style, frame, stroke: true, seriesIndex, automatic.MaxSeriesIndex,
+                theme, automatic.Styles);
 
             series.Add(new ChartSeries(
                 DrawingChartText.Label(Child(element, "tx")),
@@ -1290,7 +1292,8 @@ public static class DrawingChartPlot
                     stroke: false,
                     byPoint ? index : seriesIndex,
                     byPoint ? count - 1 : automatic.MaxSeriesIndex,
-                    theme);
+                    theme,
+                    automatic.Styles);
 
                 if (cycled is null) continue;
 
