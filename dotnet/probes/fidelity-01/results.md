@@ -388,11 +388,29 @@ LibreOffice shapes with, so advance widths agree by construction." Measured, the
 much, but systematically and cumulatively. That sentence should not be relied on again without a
 number beside it.
 
-*Inferred, not measured:* the drift steps are close to whole multiples of 1/100 mm (0.02835 pt) —
-1.94, 1.94, 1.10, 1.03 units on consecutive words — which would suggest LibreOffice quantises pen
-positions to its internal 1/100 mm grid while we stay in continuous points. Other steps (0.66, 2.50,
-3.47, 4.20 units) do **not** fit that cleanly. **I am recording the accumulation as measured and the
-quantisation mechanism as an unproven hypothesis.**
+**Where the divergence actually lives — measured, and it is not rounding.** Both sides shape the
+same string in the same face, so the *unkerned* advance sum is identical by construction. Computed
+from Carlito's `hmtx` with fontTools for `paginated`'s line 1 (100 characters, 11 pt):
+
+```
+exact unkerned advance sum      462.747 pt
+Paperless's line width          459.573 pt   -> we remove 3.174 pt
+LibreOffice's, from its own PDF  458.975 pt   -> it removes 3.772 pt
+```
+
+**LibreOffice applies ~19 % more kerning than we do on this line** (3.772 vs 3.174 pt). The
+divergence is in the *shaping*, not in a rounding step — which is a much better lead for whoever
+picks this up than the one I started with.
+
+*Inferred and explicitly not established:* I first suspected quantisation, because the tab-stop
+drift steps sit near whole multiples of 1/100 mm (0.02835 pt) — 1.94, 1.94, 1.10, 1.03 units on
+consecutive words. Other steps (0.66, 2.50, 3.47, 4.20) do **not** fit, and the kerning measurement
+above is a cleaner account of the same 0.6 pt. I record the quantisation idea as **refuted-ish
+rather than supported**, and the kerning gap as the measured fact.
+
+I did **not** determine which side's kerning is right. That needs a per-pair comparison against
+Carlito's `kern`/`GPOS` tables, which is a round of its own — and it is worth one, because
+`dotnet/CLAUDE.md`'s "advance widths agree by construction" is the assumption it would test.
 
 ---
 
