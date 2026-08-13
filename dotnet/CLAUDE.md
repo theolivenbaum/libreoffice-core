@@ -151,7 +151,42 @@ drawings to it, so implementing it once buys shapes in all three.
 
 ## Fidelity: the thing that will bite you
 
-**Rendering errors cascade.** One wrong measurement — a font metric, a margin, a line
+### Look at the rendering. Do not chase it through metrics alone.
+
+**This is the standing instruction and it comes before the rest of this section.** The gate is
+page count, extractable words in a 2%+3 band, and unembedded fonts. **It is blind to most real
+defects** — a whole track can be 163 of 163 page-exact while the pages are visibly wrong.
+
+```bash
+export PAPERLESS_CLI=<the tree you mean to measure>/dotnet/tools/…/Paperless.Cli
+python3 .claude/skills/render-comparison/scripts/look.py "<doc>__pptx" --worst
+```
+
+It renders the most divergent page both ways and prints two PNG paths. **Open them and read
+them.** Stack them so the same region lands under itself.
+
+Three things this changes about how a round is run:
+
+1. **Look before you theorise, and look at documents that PASS.** The failing set is picked
+   over. Rank the *passing* documents by `|ink|%` and open the worst — the first three tried
+   that way produced three findings, two of them previously unrecorded (a missing custom bullet,
+   and a hanging indent we invent where the reference has none).
+2. **Looking gives direction and kind; it does not give cause.** *"Every line breaks earlier in
+   the reference, so our glyphs are narrower"* is a lead that no ink percentage contains. But an
+   image cannot tell a picture bullet from a character bullet in a substituted symbol font.
+   **Name the causes the image cannot decide between, then measure.**
+3. **Describe before checking the record.** Reading a page blind and only then looking up what is
+   known is a control on the reading, and it works: a gradient description produced that way
+   matched a diagnosis made a week earlier from source.
+
+The user's own visual reviews remain **primary evidence** — see
+`dotnet/probes/user-review-slides-02/review.md`, where 17 of 30 observations turned out to be a
+single class no gate column can see. Where a brief has contradicted one of their observations,
+the brief has been wrong.
+
+### Rendering errors cascade
+
+One wrong measurement — a font metric, a margin, a line
 break — shifts everything after it, so a single bug manufactures hundreds of unrelated-
 looking failures across a corpus. Fix cascades before anything else; they are cheap to fix
 and expensive to work around.
