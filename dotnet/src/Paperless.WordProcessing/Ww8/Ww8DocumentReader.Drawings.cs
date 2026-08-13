@@ -212,39 +212,8 @@ public sealed partial class Ww8DocumentReader
         return (blip.Bytes.IsEmpty
             ? Declined(blip)
             : EmbeddedPicture.Read(blip.Bytes, blip.Kind, "blip " + pib, _diagnostics))
-            with { Crop = CropOf(shape, blip) };
+            with { Crop = EscherPicture.Crop(shape.Properties) };
     }
-
-    /// <summary>
-    /// The crop a <c>.doc</c> picture is drawn with: the shape's four properties, unless the picture
-    /// is a WMF, in which case none.
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// <b>The exception is measured, not inferred.</b> Word's reader applies an Escher
-    /// <c>cropFrom*</c> to a PNG, a JPEG, a DIB and an EMF, and ignores it entirely on a WMF.
-    /// Rewriting a WMF's crop in place inside <c>150_5300_13_chg10.doc</c> — 0.1489 to 0.0409 on one
-    /// edge — moves not one pixel of any of that document's 77 pages, while the same edit to the PNG
-    /// beside it and to the EMF beside that moves exactly one page each and grows the picture by the
-    /// factor the fraction asks for. The document states twenty crops on WMFs, from 0.0002 to 0.8599,
-    /// and the reference draws every one of them at its frame.
-    /// </para>
-    /// <para>
-    /// So the discriminator is neither the crop's size nor "metafile against bitmap": an EMF is a
-    /// metafile and is cropped. It is the WMF, on its own. Without this, two of that document's
-    /// pictures are drawn at 2.4x and 1.2x their frame where LibreOffice draws them whole.
-    /// </para>
-    /// <para>
-    /// <b>Scope is deliberate.</b> This is a rule of Word's binary reader, so it lives here and not
-    /// in <c>EscherPicture.Crop</c>: a <c>.ppt</c> and a <c>.xls</c> reach the crop through
-    /// <c>lcl_ApplyCropping</c> instead, which has no such exception, and a hundred cropped shapes
-    /// across sixteen decks already agree with the reference through the shared arithmetic.
-    /// </para>
-    /// </remarks>
-    private static PictureCropFractions CropOf(EscherShape shape, EscherBlip blip)
-        => blip.IsWindowsMetafile
-            ? PictureCropFractions.None
-            : EscherPicture.Crop(shape.Properties);
 
     /// <summary>
     /// The picture stored inside an inline shape's own container, or null when it stores none.
@@ -291,7 +260,7 @@ public sealed partial class Ww8DocumentReader
         return (own.Bytes.IsEmpty
             ? Declined(own)
             : EmbeddedPicture.Read(own.Bytes, own.Kind, "inline blip", _diagnostics))
-            with { Crop = CropOf(shape, own) };
+            with { Crop = EscherPicture.Crop(shape.Properties) };
     }
 
     /// <summary>Records that a blip was found whose bytes could not be reached.</summary>
