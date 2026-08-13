@@ -350,6 +350,25 @@ to be re-baselined against 26.2.4.2 before any verdict movement means anything. 
 exception worth knowing: a deck's page count is its slide count, so check 1 is structurally
 stable there and slide-count claims survive the version change intact.
 
+**The table above is confounded, and the correction is the more useful fact.** Two things
+differed from the environment the stored figures were taken in, not one: the LibreOffice
+version *and* a missing `fonts-dejavu-core`. Attributing all of that movement to the version
+bump was wrong. Holding LibreOffice constant at 26.2.4.2 and varying only the font set moves
+**53 of 534 page counts and 426 pages** on its own — the same order as the whole figure above,
+on overlapping documents (`AC-150-5370-10G` appears in both). See `MISSING_PACKAGES.md` in the
+repository root for the per-track split and the reasoning that establishes DejaVu *was* present
+originally: `SheetColumnDigitsTests` pins its metrics against values read from 24.2.7.2's own
+output, so the repository's test suite is a statement about the environment.
+
+The lesson generalises past this container. **The gate's inputs include the font set**, and
+nothing in the harness declares it. Before trusting any figure, check `fc-match "DejaVu Sans"`
+resolves to DejaVu rather than a fallback — `fc-match` never fails, it always returns
+*something*, which is why the gap survived a whole pass unnoticed.
+
+Canonical reference renderings for this environment, all 534 documents at 26.2.4.2 with the
+correct font set, are kept at `/c/sandbox/workdir/refpdfs-26.2.4.2-fonts/` with a
+`ref-baseline-all.tsv` beside them. Reuse them rather than re-rendering the reference.
+
 Individual claims calibrated to 24.2.7.2 behaviour — "the document-level `w:widowControl` is
 inert", the 720 dpi device round trip, the reference's own table-only-header import defect —
 are now claims about a superseded binary and each needs one re-check before it is relied on.
@@ -357,12 +376,33 @@ The largest single movers were `sectors-defense-and-aerospace.xlsx` (reference 2
 pages), `CIS_Debian_Linux_8_Benchmark_v1.0.0.xls` (109 → 88), `A_320.doc` (150 → 118) and
 `grants-2005.xls` (220 → 201).
 
-**`nuget.org` is blocked by the container firewall (HTTP 403) and the package cache is
-empty**, so `dotnet build` fails on restore and there is no `Paperless.Cli` binary. Until the
-sandbox network policy allows `api.nuget.org`, nothing can be built, tested, rendered or
-gated, and the only work available is what can be done by reading source and running
-`soffice` — which does work. `github.com` and `archive.ubuntu.com` are reachable; the
-LibreOffice download hosts are not.
+**The package feed was firewalled and is now open; the build works.** `dotnet restore`
+succeeds for all 26 projects and `dotnet build -v q -nologo` gives **0 warnings, 0 errors**.
+Recorded because the diagnosis cost a round and the shape of it recurs:
+
+- The host that must be allowed is **`api.nuget.org`**, named literally. The policy matches
+  hosts **exactly**, so an apex allow does not cover subdomains — and `nuget.org` was already
+  allowed here throughout (it answers 301 from IIS) while `api.nuget.org` answered the proxy's
+  403. A request phrased as "allow nuget.org" therefore changes nothing and looks like the
+  allow having failed. A wildcard (`*.nuget.org`) does cover it.
+- `api.nuget.org` alone is sufficient: it serves the service index, `RegistrationsBaseUrl`,
+  the `PackageBaseAddress` flat-container download endpoint, and the `VulnerabilityInfo` feed.
+  `www` / `globalcdn` / `azuresearch-*` are the gallery UI, the legacy V2 redirect target and
+  `SearchQueryService` — a V3 restore under central package management touches none of them.
+- There is **no offline route**, established rather than assumed: the SDK's five bundled packs
+  are all first-party, there is no fallback folder or cache anywhere on the filesystem, and
+  every upstream GitHub release for these packages ships **zero** attached assets. Even a
+  dependency-free project cannot restore offline, because the bundled apphost is
+  `ubuntu.26.04-x64` while `Directory.Build.props` correctly computes the portable
+  `linux-x64` — so `Microsoft.NETCore.App.Host.linux-x64` is always one download.
+- `NuGetAudit` is on by default and `TreatWarningsAsErrors` promotes an unreachable
+  vulnerability feed to a hard error (NU1900). Any scheme that leaves that feed unreachable
+  also needs `<NuGetAudit>false</NuGetAudit>`.
+- `HOME=/tmp` here, so the package cache lands in `/tmp/.nuget/packages` on the 20 GB overlay,
+  not on the large host mount. It counts against the disk budget.
+
+`github.com` and `archive.ubuntu.com` are reachable; the LibreOffice download hosts are not,
+which is why the reference binary cannot be pinned back to 24.2.7.2.
 
 **`git status` shows 56 files modified that are not modified.** This mount reports a
 symlink's size as 0, so git reads every symlink in the tree as having been emptied — the
