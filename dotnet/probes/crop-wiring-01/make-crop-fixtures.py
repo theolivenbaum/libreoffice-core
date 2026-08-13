@@ -190,3 +190,40 @@ def main():
 
 if __name__ == '__main__':
     main()
+
+
+# --------------------------------------------------------------- the Word-shaped variant
+
+def word_shaped(src, dest):
+    """`picture-crop-goal.doc`: the same picture with the crop stated only in Escher.
+
+    LibreOffice's DOC export writes the crop TWICE — into the PICF's dxaCropLeft and
+    its three siblings, and into Escher properties 256-259 — and sizes dxaGoal to the
+    WHOLE picture. Word does not: every one of the 32 cropped inline pictures in the
+    corpus has dxaCrop* = 0 and a dxaGoal that is already the *visible* size.
+
+    A round trip through soffice therefore cannot produce the file the corpus is made
+    of, and testing only against the round trip is what made this round's first word
+    implementation pass its own fixture and be wrong on all seven documents it moved.
+    So the exported file is patched into the Word-shaped form: the crop fields go to
+    zero and the goal shrinks to the visible extent, which is the same edit in reverse.
+    Both fixtures must produce the same 288 x 216 pt frame and the same 480 x 540 pt
+    destination, by the two different routes a .doc can state them.
+
+    The patch is byte-for-byte in place — same field widths, no structural change — so
+    the OLE2 container is untouched and the file stays exactly as `soffice` wrote it
+    everywhere else.
+    """
+    data = bytearray(open(src, 'rb').read())
+
+    # dxaGoal, dyaGoal, mx, my then the four crops, as the exported file states them.
+    old = struct.pack('<hhHHhhhh', 1500, 1500, 6400, 7200, 150, 300, 450, 600)
+    # The visible goal, and no PICF crop at all: (1500-150-450) and (1500-300-600).
+    new = struct.pack('<hhHHhhhh', 900, 600, 6400, 7200, 0, 0, 0, 0)
+
+    if data.count(old) != 1:
+        raise SystemExit(f'expected exactly one PICF to patch, found {data.count(old)}')
+
+    data[data.index(old):data.index(old) + len(old)] = new
+    open(dest, 'wb').write(bytes(data))
+    print('wrote', dest, len(data), 'bytes')
