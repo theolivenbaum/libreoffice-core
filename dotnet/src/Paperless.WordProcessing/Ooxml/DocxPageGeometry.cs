@@ -155,11 +155,18 @@ internal static class DocxPageGeometry
     /// zero is not. Treating them the same either rejects a legitimate zero margin or accepts a page
     /// with no width, and the second produces a document where every line overflows.
     /// </remarks>
+    /// <remarks>
+    /// Fitted to the nearest standard paper dimension when it is within 0.44 mm of one, which is
+    /// what <c>DomainMapper</c> does to <c>w:pgSz</c>'s two attributes and to nothing else — see
+    /// <see cref="Model.PaperSizes"/>. Margins are left exactly as stated: the fit is applied to
+    /// the sheet, so a page whose width moves keeps the measure it was written for only to within
+    /// the same 0.44 mm, and that is the behaviour, not an oversight.
+    /// </remarks>
     private static Length? Dimension(XElement? element, string attribute)
         => Word.Attribute(element, attribute) is { } text
            && Word.Long(text, out long twips)
            && twips is > 0 and <= MaxDimensionTwips
-            ? Length.FromTwips(twips)
+            ? Model.PaperSizes.SloppyFit(Length.FromTwips(twips))
             : null;
 
     /// <summary>

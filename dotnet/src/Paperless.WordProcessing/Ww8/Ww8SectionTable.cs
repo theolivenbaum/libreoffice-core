@@ -418,10 +418,17 @@ internal static class Ww8SectionTable
     }
 
     /// <summary>A page dimension, or null when it is absent or implausible.</summary>
+    /// <remarks>
+    /// Fitted to the nearest standard paper dimension when it is within 0.44 mm of one, which is
+    /// what <c>ww8par6.cxx</c>:521 and :1083 do to <c>sprmSXaPage</c> and <c>sprmSYaPage</c> and to
+    /// no other section measurement — see <see cref="Model.PaperSizes"/>.
+    /// </remarks>
     private static Length? Dimension(Ww8Sprm sprm)
     {
         int twips = sprm.Word;
-        return twips is > 0 and <= 22 * 1440 ? Length.FromTwips(twips) : null;
+        return twips is > 0 and <= 22 * 1440
+            ? Model.PaperSizes.SloppyFit(Length.FromTwips(twips))
+            : null;
     }
 
     /// <summary>

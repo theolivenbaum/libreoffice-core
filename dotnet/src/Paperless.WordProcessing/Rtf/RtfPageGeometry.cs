@@ -232,9 +232,20 @@ internal sealed class RtfPageGeometry
             {
                 Page = new PageGeometry
                 {
+                    // Fitted to the nearest standard paper dimension when it is within 0.44 mm of
+                    // one. RTF reaches the same rule as DOCX rather than a parallel one:
+                    // `rtfdispatchvalue.cxx`:1274-1289 dispatches \paperw, \paperh, \pgwsxn and
+                    // \pghsxn through `LN_CT_PageSz_w`/`_h`, which is where `DomainMapper` applies
+                    // the fit. See `Model.PaperSizes`. The corpus's words track holds no RTF, so
+                    // this arm is reasoned rather than measured, and is written that way on purpose:
+                    // an unfitted RTF page would be the one Word-family reader out of step.
                     Size = new DocSize(
-                        Width is { } w ? Length.FromTwips(w) : PageGeometry.Default.Size.Width,
-                        Height is { } h ? Length.FromTwips(h) : PageGeometry.Default.Size.Height),
+                        Width is { } w
+                            ? Model.PaperSizes.SloppyFit(Length.FromTwips(w))
+                            : PageGeometry.Default.Size.Width,
+                        Height is { } h
+                            ? Model.PaperSizes.SloppyFit(Length.FromTwips(h))
+                            : PageGeometry.Default.Size.Height),
                     Margins = new PageMargins(
                         Left is { } l ? Length.FromTwips(l) : fallback.Left,
                         Right is { } r ? Length.FromTwips(r) : fallback.Right,
