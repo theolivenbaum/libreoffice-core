@@ -12440,3 +12440,69 @@ against a stored `rawwords` column before quoting any PdfPig verdict**, since Pd
 is not poppler's; and emit the excluded classes as counts.
 
 The round scored **9 of its 21 predictions refuted**.
+
+---
+
+## Merge note — sheets-rebase-02, the band clip and the cell XF's own bytes
+
+Merged `wt-sheets-a`. Build 0 warnings / 0 errors. **Ten non-Fidelity projects: 3465 total, 0
+failed** — Spreadsheets 621 → **628**, everything else unchanged. All 7 new tests are **detectors
+verified by reintroduction**; none is a drift guard, and two of them detect *over*-application
+(mutating `HasStyleParent` to `return true` fails both).
+
+**Sheets is 143 of 171** — 142 at the merge base, +1 from these fixes. Residual: 19 `words`,
+5 `pages,words`, 4 `pages`, with 0 `ref-failed` and 0 `ours-failed`.
+
+### The inferred step is now executed
+
+The previous round could name the clip-range defect from control flow in both trees but never ran
+it. It runs: on `7-memento-2015-transports-aeriens-b.xls` page 2, `#0066CC` goes **18 061 →
+64 628** against the reference's 63 765, and `#003366` goes **847 → 0** against the reference's 1.
+Vector vertical ink is 436.48 pt against 436.41, the same 5 blocks at both band edges. The residual
+1.35% raster excess is antialiasing: we emit 34 per-row segments where LibreOffice merges 5 runs —
+which is the border-coalescing item, still open.
+
+It is also no longer inferred from the C++ at all. A new `sheet-band-clip.fods` fixture has
+**26.2.4.2 itself** draw red on page 1 and blue on page 2, each on its own row. One correction to
+the previous round's citation: the clip range is set only in `mbPageMode`, but `ScPrintFunc::PrintPage`
+passes it true, so it does govern ordinary printing.
+
+### Reach, and a second defect nobody asked for
+
+| fix | renders changed | verdicts |
+|---|---:|---:|
+| cell XF used-flags | **2 of 171** | **+1** |
+| band clip range | **63 of 171** | 0 |
+
+The XF figure is corroborated independently: a static census of the XF records finds the class in
+exactly the same 2 of 61 OLE2 workbooks. Its verdict is `aircraft_analysis_2016-04-27.xls`, 44 → 46
+and matching, with the word count unchanged — decoration extends the print range. Direction on the
+clip fix was measured rather than assumed: 14 pages closer to the reference, 1 further by a single
+pixel, and no matching document stopped matching under either change.
+
+### Three refutations, each of a figure that reproduced while its sentence did not
+
+1. **The withdrawn 135/171 was not a mismatched pair.** `dpkg` installed DejaVu at 15:53:15 and
+   that `ours/` bank finished at **15:52:22** — both halves were pre-DejaVu, so the number was
+   internally consistent. What is true, and is the more useful fact, is that **the font set is an
+   input to both halves of the gate**: our own column moved on 31 of 171 documents when re-rendered
+   at the same source with DejaVu.
+2. **"Every page change in the same direction" is false.** The font's 11 / 43 pages / 36 words
+   reproduce to the digit, but **6 of the 11 gain pages with DejaVu and 5 lose them**. It also
+   restores a bold that had collapsed into WenQuanYi. `MISSING_PACKAGES.md` is corrected.
+3. **The `7-memento` defect was not extra ink.** Wrong-colour ink was 1.3% of it; **98.7% was ink
+   we never painted** — the cell-XF used-flags defect, sitting underneath the clip-range one.
+
+`sectors-defense-and-aerospace.xlsx` is settled as a **version effect**, and settled without using
+the page count at all: it is identical in both reference banks at 449 pages / 23 964 words /
+1 084 225 bytes, and it embeds exactly one face, Carlito — no DejaVu and no WenQuanYi anywhere in
+it, so the font set cannot reach it.
+
+### Fidelity: 40 failures, pre-existing and unexplained
+
+**`Paperless.Fidelity.Tests` is 510 passed / 40 failed**, with an **identical 21-name failing set
+before and after this round's changes**, verified by building and running the pre-fix tree. So it
+is not this round's doing — but the handover recorded Fidelity at 550 with 0 failures, so
+something between that figure and now broke 40 tests and nobody has looked. **The ten non-Fidelity
+projects being green does not cover this**, and no round this session has run Fidelity until now.
+It is the largest unexamined regression on the branch.

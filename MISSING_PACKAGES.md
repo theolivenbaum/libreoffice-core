@@ -31,8 +31,8 @@ environment**, and this is the case that proves it.
 fallback chain. **267 of the 534 reference PDFs — half the corpus — fall back to
 WenQuanYiZenHei when DejaVu is absent.**
 
-Measured, by sweeping the whole corpus twice with LibreOffice held constant at 26.2.4.2 and
-*only* the font set differing:
+Measured on the **reference half only**, by sweeping the whole corpus twice with LibreOffice held
+constant at 26.2.4.2 and *only* the font set differing:
 
 | track | documents | page counts changed | total \|Δpages\| | word counts changed | total \|Δwords\| |
 |---|---:|---:|---:|---:|---:|
@@ -41,10 +41,25 @@ Measured, by sweeping the whole corpus twice with LibreOffice held constant at 2
 | sheets | 171 | **11** | 43 | 36 | 3191 |
 | **total** | **534** | **53** | **426** | **152** | **13 896** |
 
-Every page-count change is in the same direction — **fewer** pages with DejaVu present, up to
-68 on a single document — because the DejaVu fallback is narrower than the WenQuanYi one, so
-text occupies less room. Slides moving zero pages is the expected structural result: a deck's
-page count is its slide count, so only the text channel can move there, and it did (61 decks).
+Slides moving zero pages is the expected structural result: a deck's page count is its slide
+count, so only the text channel can move there, and it did (61 decks).
+
+**Two corrections to the first reading of this table, each established by later measurement:**
+
+- **The direction is not uniform.** This was first written up as "every page-count change is in
+  the same direction — fewer pages with DejaVu, because the DejaVu fallback is narrower". That
+  holds on words but is false on sheets, where **6 of the 11 gain pages with DejaVu and 5 lose
+  them**. DejaVu is not uniformly narrower than the face it displaced, and it also restores a bold
+  that had collapsed into WenQuanYi. A tidy directional story was reached for before the sign had
+  been checked per document.
+- **The font set is an input to *both* halves of the gate, not only the reference.** Paperless
+  resolves faces through fontconfig as well, so our own column moves too: re-rendering the sheets
+  track from the same source with DejaVu present moved **31 of 171** of our own documents. The
+  practical rule is that a parity figure is valid only when **both** banks were rendered on the
+  same font set. A mismatched pair is worse than a merely stale one, because it is silently
+  internally inconsistent. One round withdrew its number as a mismatched pair and it was later
+  shown to have been consistent after all — both halves had been rendered before the font landed,
+  53 seconds ahead of the `dpkg` timestamp.
 
 A missing font is therefore not a cosmetic gap. It moves glyph advances, and glyph advances
 move wrapping, row heights, cropping and pagination — which is to say it moves the gate's first
