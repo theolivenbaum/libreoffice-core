@@ -242,11 +242,18 @@ public sealed partial class Ww8DocumentReader
     /// <c>pib</c>.
     /// </para>
     /// <para>
-    /// The rectangle is <c>dxaGoal</c> and <c>dyaGoal</c> scaled by <c>mx</c> and <c>my</c>, which are
-    /// in <strong>tenths of a percent</strong> — <c>WW8_PIC</c>, <c>ww8struc.hxx:457</c>. A reader
-    /// taking them as whole percent draws every picture ten times too large, and one ignoring them
-    /// draws a resized picture at its original size, which is the more common defect because the
-    /// unscaled case is what every hand-made test file has.
+    /// The rectangle is <c>dxaGoal</c> and <c>dyaGoal</c>, less the <c>PICF</c>'s own crop, scaled by
+    /// <c>mx</c> and <c>my</c>, which are in <strong>tenths of a percent</strong> — <c>WW8_PIC</c>,
+    /// <c>ww8struc.hxx:457</c>. A reader taking them as whole percent draws every picture ten times
+    /// too large, and one ignoring them draws a resized picture at its original size, which is the
+    /// more common defect because the unscaled case is what every hand-made test file has.
+    /// </para>
+    /// <para>
+    /// <strong>What comes out of that is the <em>visible</em> rectangle, as on every other path.</strong>
+    /// The crop then grows it back to the whole picture in <c>PageDrawing</c>. Which of the two
+    /// statements of the crop is present depends on who wrote the file — Word puts it in the Escher
+    /// properties and leaves <c>dxaCrop*</c> zero, LibreOffice's own export writes both — and
+    /// subtracting the <c>PICF</c> crop here is what makes the one arithmetic serve both.
     /// </para>
     /// </remarks>
     private Ww8LayoutFrame? InlinePicture(int position, int offset)
