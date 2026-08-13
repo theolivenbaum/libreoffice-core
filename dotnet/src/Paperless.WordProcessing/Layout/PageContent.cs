@@ -1045,6 +1045,12 @@ public sealed record LaidOutPage
     /// Carried on the page rather than derived by a backend, because its position depends on where the notes
     /// ended up and only pagination knows that.
     /// </para>
+    /// <para>
+    /// Both measurements above are Writer's, and a document a Word filter opened gets neither: a fixed two
+    /// inches, and a position 60 % of the way down a reservation taken from the default paragraph style.
+    /// See <see cref="PaginationOptions.UsesWordNoteSeparator"/>, which is where that switch lives and why
+    /// it is not simply part of <see cref="PaginationOptions.Word"/>.
+    /// </para>
     /// </remarks>
     public DocRect? NoteSeparator { get; init; }
 

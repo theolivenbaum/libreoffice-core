@@ -150,36 +150,65 @@ public class SlideTablePlacementTests
     [Fact]
     public void ACellsTextStartsAtItsOwnMarginAndNotAtTheBodysInsets()
     {
-        // 72 + 7.2 for the default marL of 91440 EMU, and 72 + 3.6 + the face's ascent down —
-        // the reference draws the first cell's text at 79.2, 91.928.
+        // 72 + 7.2 for the default marL of 91440 EMU, and 72 + 3.6 + one em of ascent down — the
+        // reference draws the first cell's text at 79.2, 93.6, which is 18.000 below the cell's
+        // top inset and therefore exactly the em rather than Liberation Sans's 0.907 of it.
+        // Measured on LibreOffice 26.2.4.2, whose PDF puts that baseline at 446.4 on a 540 pt
+        // slide; see ACellsLineHeightIsTheEmAndNotTheFaces for what moved and when.
         PlacedGlyphRun run = Cells(Slide(0))[0].Text.ShouldNotBeNull().Runs[0];
 
         run.Run.Origin.X.Points.ShouldBe(79.2, TolerancePoints);
-        run.Run.Origin.Y.Points.ShouldBe(91.928, TolerancePoints);
+        run.Run.Origin.Y.Points.ShouldBe(93.6, TolerancePoints);
     }
 
+    /// <summary>
+    /// A cell's line pitch is 1.2 em, the same rule a slide's own text boxes take.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The wrapping cell on the second slide, whose two reference baselines are <b>21.600 pt</b>
+    /// apart — 1.2 × 18 pt, exactly. Read out of LibreOffice 26.2.4.2's own PDF, whose two
+    /// <c>Td</c> origins on that cell are 302.4 and 280.8.
+    /// </para>
+    /// <para>
+    /// <b>This test asserted the opposite, and the number it asserted was correct when it was
+    /// taken.</b> LibreOffice 24.2.7.2 put the two baselines 20.154 pt apart — the face's own
+    /// metrics — and the pptx reader carried an explicit override to match, against what even that
+    /// binary's own C++ said. <c>a47776a938c</c> (2025-03-27, tdf#165521, "pptx layout: don't use
+    /// font's leading for cells too") settled it the other way, with the reason in its commit
+    /// message: <em>"Microsoft just ignores the font metrics, and simply adds 20% to the font
+    /// height."</em> So this is a re-baseline against a reference that moved deliberately toward
+    /// the application that owns the format, not a relaxation — the tolerance is unchanged and the
+    /// new figure is measured, not adopted from our own output.
+    /// </para>
+    /// </remarks>
     [Fact]
-    public void ACellsLineHeightIsTheFacesAndNotTheEm()
+    public void ACellsLineHeightIsTheEmAndNotTheFaces()
     {
-        // The wrapping cell on the second slide, whose two reference baselines are 20.154 pt
-        // apart. The em rule a slide *shape* uses would put them 21.6 apart.
         List<PlacedGlyphRun> runs =
             [.. Cells(Slide(1)).Single(shape => shape.Text?.Runs.Count == 2).Text!.Runs];
 
         double spacing = runs[1].Run.Origin.Y.Points - runs[0].Run.Origin.Y.Points;
-        spacing.ShouldBe(20.154, GrownRowTolerance);
+        spacing.ShouldBe(21.6, GrownRowTolerance);
+
+        // And it is the em rather than the face, which needs saying because 21.6 is a plausible
+        // answer for several faces: Liberation Sans's own metrics give 20.154 at this size.
+        Math.Abs(spacing - 20.154).ShouldBeGreaterThan(
+            GrownRowTolerance, "and not the face's own line height");
     }
 
     [Fact]
     public void ARowWithNoStatedHeightGrowsToItsText()
     {
         // The second slide's last row states h="0" and holds a cell that wraps onto two lines,
-        // so the reference puts the table's bottom rule at 263.537 pt — 216 for the two stated
-        // rows plus 3.6 + 2 x 20.154 + 3.6 for the third.
+        // so the reference puts the table's bottom rule at 266.428 pt — 216 for the two stated
+        // rows plus 3.6 + 2 x 21.6 + 3.6 for the third. Re-measured on 26.2.4.2 with the pitch:
+        // the figure was 263.537 while a cell's pitch was the face's 20.154, and the two moved
+        // together because this row's height *is* two of them. See ACellsLineHeightIsTheEmAndNotTheFaces.
         List<PlacedShape> strokes = Strokes(Slide(1));
 
         (DocPoint from, _) = Ends(strokes[^1]);
-        from.Y.Points.ShouldBe(263.537, GrownRowTolerance);
+        from.Y.Points.ShouldBe(266.428, GrownRowTolerance);
     }
 
     [Fact]

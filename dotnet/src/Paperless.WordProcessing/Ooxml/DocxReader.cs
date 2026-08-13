@@ -335,6 +335,18 @@ public sealed class OoxmlWordDocument : IWordProcessingDocument, IPaginatedDocum
             CollapsesUpperAtPageTop = compatibility.CompatibilityMode >= 15,
 
             JustifiesLinesEndedByBreak = !compatibility.DoNotExpandShiftReturn,
+
+            // `WriterFilter::setTargetDocument` sets `ContinuousEndnotes` on every package it opens,
+            // under a comment reading "options that are valid for the DOCX format" — so this is not
+            // read from the document, exactly as `AddsCellLineSpacing` above is not. The RTF reader
+            // shares `PaginationOptions.Word` and must *not* set it; see the flag's own remarks.
+            UsesWordNoteSeparator = true,
+            // Zero means no face could be read, in which case Writer's fixed reservation is a better
+            // answer than reserving nothing: a note area with no room above it would overprint.
+            NoteSeparatorHeight = source.DefaultParagraphLineHeight > Core.Units.Length.Zero
+                ? source.DefaultParagraphLineHeight
+                : PaginationOptions.Word.NoteSeparatorHeight,
+
             MaxPages = options?.MaxPages is > 0
                 ? options.MaxPages
                 : PaginationOptions.Word.MaxPages,

@@ -208,6 +208,15 @@ public sealed class Ww8Document : IWordProcessingDocument, IPaginatedDocument
         PaginationOptions pagination = PaginationOptions.Word with
         {
             CollapsesSpacing = _reader.DocumentProperties.CollapsesSpacing,
+
+            // `SwWW8ImplReader::ReadDocInfo` sets `CONTINUOUS_ENDNOTES` on every DOC it opens
+            // (`ww8par.cxx`:2050), as `WriterFilter` does for every DOCX — and as neither the RTF
+            // filter nor either ODF one does. See PaginationOptions.UsesWordNoteSeparator.
+            UsesWordNoteSeparator = true,
+            NoteSeparatorHeight = NoteReservation(fonts) is { } reservation
+                ? reservation
+                : PaginationOptions.Word.NoteSeparatorHeight,
+
             MaxPages = options?.MaxPages is > 0 ? options.MaxPages : PaginationOptions.Word.MaxPages,
         };
 
@@ -224,6 +233,26 @@ public sealed class Ww8Document : IWordProcessingDocument, IPaginatedDocument
         return new WordProcessingPages(
             paginator.Paginate(blocks, sections),
             paginator.Blocks ?? blocks);
+    }
+
+    /// <summary>
+    /// The room Word leaves above a page's notes, or null when the default style's face cannot be read.
+    /// </summary>
+    /// <remarks>
+    /// The default paragraph style's line height, measured on the same faces and the same device grid
+    /// every other run in the document is measured on — see
+    /// <see cref="PaginationOptions.NoteSeparatorHeight"/> for why it is that style and not the note's.
+    /// Null rather than zero for an unreadable face, so that the caller falls back to Writer's fixed
+    /// reservation instead of reserving nothing at all.
+    /// </remarks>
+    private Length? NoteReservation(LayoutFonts fonts)
+    {
+        (string? family, Length size, int weight, bool italic) = _reader.DefaultStyleFont;
+
+        return fonts.Face(family, weight, italic) is { } face
+            ? LineSpacing.Resolve(face, fonts.Metrics, WriterLineBox.LeadingAboveText)
+                .ScaledLineHeight(size)
+            : null;
     }
 
     /// <summary>
