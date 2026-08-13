@@ -61,11 +61,18 @@ internal static class XlsxDrawings
     /// <param name="fonts">
     /// The theme's font scheme, for resolving a shape run's <c>+mn-lt</c> into a real family.
     /// </param>
+    /// <param name="ranges">
+    /// Resolves a chart sequence's <c>c:f</c> against the workbook's own cells. This is the whole
+    /// difference between Calc's chart data provider and the base one — see
+    /// <see cref="ChartRangeResolver"/> — and it is a parameter because only a spreadsheet reader
+    /// has a workbook to resolve in.
+    /// </param>
     public static SheetDrawings Read(
         IPackage package,
         string? sheetPartName,
         DrawingTheme? theme = null,
-        DrawingFontScheme? fonts = null)
+        DrawingFontScheme? fonts = null,
+        ChartRangeResolver? ranges = null)
     {
         ArgumentNullException.ThrowIfNull(package);
         if (sheetPartName is null || package is not OpcPackage opc) return SheetDrawings.Empty;
@@ -107,7 +114,7 @@ internal static class XlsxDrawings
                 };
 
                 if (kind is not { } anchored) continue;
-                if (ReadAnchor(anchor, anchored, opc, images, theme, fonts) is { } drawing)
+                if (ReadAnchor(anchor, anchored, opc, images, theme, fonts, ranges) is { } drawing)
                     drawings.Add(drawing);
             }
         }
@@ -121,7 +128,8 @@ internal static class XlsxDrawings
         OpcPackage package,
         Dictionary<string, OpcXml.Relationship> images,
         DrawingTheme? theme,
-        DrawingFontScheme? fonts)
+        DrawingFontScheme? fonts,
+        ChartRangeResolver? ranges)
     {
         XElement? picture = Child(anchor, DrawingNamespace, "pic");
         XElement? frame = Child(anchor, DrawingNamespace, "graphicFrame");
@@ -179,7 +187,11 @@ internal static class XlsxDrawings
 
             if (Attribute(data, "uri") != ChartUri) return drawing;
 
-            return drawing with { IsChart = true, Chart = Plot(data, package, images, theme) };
+            return drawing with
+            {
+                IsChart = true,
+                Chart = Plot(data, package, images, theme, ranges),
+            };
         }
 
         // A shape's text box, which is the only content on a sheet that no walk of the cells can
@@ -242,7 +254,8 @@ internal static class XlsxDrawings
         XElement? data,
         OpcPackage package,
         Dictionary<string, OpcXml.Relationship> parts,
-        DrawingTheme? theme)
+        DrawingTheme? theme,
+        ChartRangeResolver? ranges)
     {
         string? id = Attribute(
             Child(data, OoxmlNamespaces.DrawingMLChart, "chart"),
@@ -256,7 +269,8 @@ internal static class XlsxDrawings
 
         return chartSpace is null
             ? null
-            : DrawingChartPlot.Read(chartSpace, theme, OoxmlMetadata.IsOffice2007(package));
+            : DrawingChartPlot.Read(
+                chartSpace, theme, OoxmlMetadata.IsOffice2007(package), styles: null, ranges);
     }
 
     /// <summary>

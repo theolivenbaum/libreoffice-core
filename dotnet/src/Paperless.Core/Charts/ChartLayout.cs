@@ -2265,6 +2265,29 @@ public static partial class ChartLayout
     /// Unstacked areas are drawn in file order and overlap, which is what LibreOffice draws and
     /// what makes a later series hide an earlier one — the reason a real area chart is usually
     /// stacked.
+    /// <para>
+    /// <strong>A category with no value contributes no vertex, and ends the polygon.</strong>
+    /// <c>AreaChart::createShapes</c> (<c>chart2/source/view/charttypes/AreaChart.cxx:691-706</c>)
+    /// <c>continue</c>s past a point whose Y is NaN, and under the <c>LEAVE_GAP</c> treatment
+    /// advances <c>m_nPolygonIndex</c> first — so the series is drawn as one polygon per run of
+    /// consecutive real points rather than as one polygon with the gaps pinned to the axis.
+    /// </para>
+    /// <para>
+    /// <strong>Plotting a gap as zero is not a smaller error than it looks.</strong> Measured on
+    /// <c>Template Pilot Logbook JAR-FCL V3.0.xls</c>, whose three series declare 615 points of
+    /// which 17 carry a value: with the gaps zeroed the polygon hugs the baseline across 97% of
+    /// its width, which is a filled rectangle 451 pt wide sitting on the axis, against the
+    /// reference's forty-point sliver at the right-hand end.
+    /// </para>
+    /// <para>
+    /// <strong>Only the default treatment is implemented, because only the default is read.</strong>
+    /// <c>LEAVE_GAP</c> is what both importers fall back to — <c>XclImpChChart::CreateDiagram</c>
+    /// (<c>xichart.cxx:4222-4229</c>) initialises to it and overrides from <c>CHPROPERTIES</c>'
+    /// empty mode; <c>ChartSpaceConverter</c> (<c>chartspaceconverter.cxx:218-240</c>) does the
+    /// same from <c>c:dispBlanksAs</c>. Neither of those two records is read here, so a chart
+    /// asking for <c>zero</c> or <c>span</c> gets the gap. Worth knowing before reading a
+    /// difference on a chart that states one.
+    /// </para>
     /// </remarks>
     private static void AddAreas(
         ChartPlot plot,
@@ -2287,13 +2310,20 @@ public static partial class ChartLayout
         {
             List<DocPoint> upper = [];
             List<DocPoint> lower = [];
+            List<(DocPoint At, int Index, double Value)> points = [];
 
             for (int at = 0; at < categories; at++)
             {
-                double value = at < series.Values.Count && series.Values[at] is { } stated
-                               && double.IsFinite(stated)
-                    ? stated
-                    : 0.0;
+                // A missing point closes whatever run is open and contributes nothing to it. The
+                // running total is untouched, so a series above this one keeps its own footing
+                // across the gap rather than stepping down to the axis at it.
+                if (at >= series.Values.Count
+                    || series.Values[at] is not { } value
+                    || !double.IsFinite(value))
+                {
+                    Emit(series, upper, lower, shapes);
+                    continue;
+                }
 
                 double top;
 
@@ -2308,28 +2338,13 @@ public static partial class ChartLayout
                 }
 
                 double across = CategoryAt(plot, at, categories);
-                upper.Add(Point(area, across, top, columns));
+                DocPoint vertex = Point(area, across, top, columns);
+                upper.Add(vertex);
                 lower.Add(Point(area, across, plot.IsStacked ? previous[at] : baseline, columns));
+                points.Add((vertex, at, value));
             }
 
-            if (upper.Count < 2) continue;
-
-            GraphicsPath path = new();
-            path.MoveTo(upper[0]);
-            for (int at = 1; at < upper.Count; at++) path.LineTo(upper[at]);
-            for (int at = lower.Count - 1; at >= 0; at--) path.LineTo(lower[at]);
-            path.Close();
-
-            shapes.Add(new ChartShape(path, series.Fill, series.Line, series.LineWidth));
-
-            List<(DocPoint, int, double)> points = [];
-            for (int at = 0; at < categories && at < upper.Count; at++)
-            {
-                if (at >= series.Values.Count) continue;
-                if (series.Values[at] is not { } stated || !double.IsFinite(stated)) continue;
-                points.Add((upper[at], at, stated));
-            }
-
+            Emit(series, upper, lower, shapes);
             AddPointLabels(plot, series, points, ChartLabelPlacement.Centre, area, labels);
 
             if (plot.IsStacked)
@@ -2337,6 +2352,31 @@ public static partial class ChartLayout
                 for (int at = 0; at < categories; at++) previous[at] = scale.Fraction(running[at]);
             }
         }
+    }
+
+    /// <summary>
+    /// Closes one run of consecutive real points into a filled polygon, and empties the run.
+    /// </summary>
+    /// <remarks>
+    /// A run of one is dropped rather than drawn: a polygon of a single point up and the same
+    /// point down has no area, and <c>AreaChart</c> likewise leaves a one-point polygon unfilled.
+    /// </remarks>
+    private static void Emit(
+        ChartSeries series, List<DocPoint> upper, List<DocPoint> lower, List<ChartShape> shapes)
+    {
+        if (upper.Count >= 2)
+        {
+            GraphicsPath path = new();
+            path.MoveTo(upper[0]);
+            for (int at = 1; at < upper.Count; at++) path.LineTo(upper[at]);
+            for (int at = lower.Count - 1; at >= 0; at--) path.LineTo(lower[at]);
+            path.Close();
+
+            shapes.Add(new ChartShape(path, series.Fill, series.Line, series.LineWidth));
+        }
+
+        upper.Clear();
+        lower.Clear();
     }
 
     /// <summary>

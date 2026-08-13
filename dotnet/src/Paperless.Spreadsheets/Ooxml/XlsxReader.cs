@@ -81,6 +81,12 @@ public static class XlsxReader
             DrawingFontScheme? themeFonts = DrawingFontScheme.Read(
                 Drawing.Child(Drawing.Child(file.ThemeRoot, "themeElements"), "fontScheme"));
 
+            // What lets a chart's c:f name a cell rather than a cache. It is handed the same
+            // reader this loop uses, and the loop hands it each sheet as it parses one, so a
+            // workbook with no chart in it never parses a sheet twice and never pays for an
+            // index. See XlsxChartRanges.
+            XlsxChartRanges ranges = new(file, reader);
+
             foreach (XlsxSheetEntry entry in file.Sheets)
             {
                 ContentSection section = new()
@@ -92,9 +98,7 @@ public static class XlsxReader
                 };
 
                 XElement? worksheet = file.LoadSheet(entry);
-                ContentTable table = worksheet is null
-                    ? new ContentTable()
-                    : reader.ReadSheet(worksheet);
+                ContentTable table = ranges.TableFor(entry, worksheet);
 
                 section.Children.Add(table);
                 content.Children.Add(section);
@@ -114,7 +118,7 @@ public static class XlsxReader
                 // after the front layer (`printfun.cxx:1704-1713`), so the captions go last and
                 // cover whatever they overlap.
                 SheetDrawings drawings = XlsxDrawings.Read(
-                    file.Package, entry.PartName, theme, themeFonts);
+                    file.Package, entry.PartName, theme, themeFonts, ranges.Resolve);
                 List<SheetDrawing> captions =
                     XlsxNoteCaptions.Read(file.Package, entry.PartName);
                 if (captions.Count > 0)
@@ -146,7 +150,8 @@ public static class XlsxReader
                 // A chart follows its sheet for the same reason, and cannot go inside it: the
                 // sheet section holds exactly one table, and a chart is another one. The ODS
                 // path puts it in the same place.
-                foreach (ContentSection chart in XlsxCharts.Read(file.Package, entry.PartName))
+                foreach (ContentSection chart in XlsxCharts.Read(
+                             file.Package, entry.PartName, ranges.Resolve))
                     content.Children.Add(chart);
             }
 
