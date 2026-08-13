@@ -190,6 +190,28 @@ public sealed class PdfAnalysisTests
         result.Fonts[0].Name.ShouldBe("Helvetica");
     }
 
+    /// <summary>A page inherits its resources from the page tree, and its fonts with them.</summary>
+    /// <remarks>
+    /// <c>/Resources</c> is inheritable (ISO 32000-2 7.7.3.4), and a producer that shares one
+    /// dictionary across every page routinely puts it on the <c>/Pages</c> node and nowhere else. A
+    /// reader that only looks at the page dictionary then reports <em>zero fonts for the whole
+    /// document</em> — a failure with no partial form, which is exactly the kind that reads as a
+    /// corpus-wide result rather than as a bug. Not covered until reintroduction showed that
+    /// replacing the parent walk with <c>null</c> broke nothing.
+    /// </remarks>
+    [Fact]
+    public void APageInheritsItsResourcesFromThePageTree()
+    {
+        using TempPdf pdf = TempPdf.Write(MinimalPdf.BuildWithInheritedResources());
+
+        PdfAnalysisResult result = PdfAnalysis.Analyze(pdf.Path);
+
+        result.Error.ShouldBeNull();
+        result.Fonts.Count.ShouldBe(1);
+        result.Fonts[0].Name.ShouldBe("Helvetica");
+        result.Fonts[0].Embedded.ShouldBeFalse();
+    }
+
     /// <summary>A shared resource tree is walked once, not once per path through it.</summary>
     /// <remarks>
     /// <para>
@@ -526,6 +548,20 @@ public sealed class PdfAnalysisTests
 
             return Assemble(objects);
         }
+
+        /// <summary>A page whose <c>/Resources</c> is on its parent rather than on itself.</summary>
+        public static byte[] BuildWithInheritedResources()
+            =>
+            [
+                .. Assemble(
+                [
+                    "<< /Type /Catalog /Pages 2 0 R >>",
+                    "<< /Type /Pages /Kids [3 0 R] /Count 1 /Resources << /Font << /F1 5 0 R >> >> >>",
+                    "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 300] /Contents 4 0 R >>",
+                    Stream("BT /F1 12 Tf 20 100 Td (hello) Tj ET"),
+                    SimpleFont("Helvetica", embedded: false),
+                ]),
+            ];
 
         private static string Stream(string content, string? extra = null)
             => $"<< {extra} /Length {content.Length} >>\nstream\n{content}\nendstream";
