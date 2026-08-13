@@ -425,18 +425,26 @@ project whose recorded failure mode is "the number reproduces and the sentence a
 wrong", shipping five of them in one round on one agent's reading is how a suite stops meaning
 anything. Below is what I would ship, each justified separately, in the order I would do it.
 
-### 7.1 `ExtractionComparisonTests` × 5 — add a documented deviation (recommend: ship)
+### 7.1 `ExtractionComparisonTests` × 5 — a documented deviation, but the blunt form is not good enough
 
-Do **not** weaken the assertion. Add a `KnownDeviations` entry for `tables.*` in the switch at
-`ExtractionComparisonTests.cs:85`, in the same style as the three quirks already recorded there,
-naming the evidence: *LibreOffice 26.2.4.2's `Text (encoded)` filter absorbs the paragraph after a
-table into a phantom row and duplicates it across the remaining columns; its own PDF rendering of
-the same file emits it once, and so does the file.*
+The obvious repair is a `KnownDeviations` entry for `tables.*` in the switch at
+`ExtractionComparisonTests.cs:85`, in the style of the three quirks already recorded there, naming
+the evidence: *LibreOffice 26.2.4.2's `Text (encoded)` filter absorbs the paragraph after a table
+into a phantom row and duplicates it across the remaining columns; its own PDF rendering of the
+same file emits it once, and so does the file.*
 
-This is the file's established pattern for "the reference filter is wrong here and we decline to
-copy it", and it keeps the test's real assertion — that we lose no content — fully live. It is the
-one repair I would ship without further corroboration, because LibreOffice contradicting its own
-renderer settles it.
+**I did not ship it, and the reason is worth recording rather than the entry.** `KnownDeviations`
+suppresses **tokens**, not occurrences — the entry would have to allow `the`, `tables.` and `After`
+across the entire document. `the` is one of the commonest words in the corpus; allowing it wholesale
+means a genuine future loss of a different `the` from this document would be silently masked. The
+existing `revisions.*` entry has the same weakness, which is presumably why nobody noticed.
+
+The repair that is actually right is to make `FindMissingTokens` deviation-aware by **count**
+(allow *two* extra `the`, not all `the`), which is a `TestKit.Comparison` change, not a one-line
+switch case. Recommended, but as its own small piece of work with a test of its own.
+
+*Confidence in the diagnosis: high — LibreOffice contradicting its own renderer settles which side
+is wrong. Confidence that the blunt entry is the right repair: low, hence not shipped.*
 
 ### 7.2 `TableComparisonTests` × 3 — hold, and report upstream (recommend: do not change the test)
 
@@ -450,14 +458,24 @@ does not re-derive it.
 *If* the suite must be green, the honest form is a skip with that reason attached — never a widened
 tolerance, because 2.85 pt is not noise and a tolerance that admits it would admit a real defect.
 
-### 7.3 `TableAutoLayoutComparisonTests` × 3 — fix the test, it is measuring the wrong thing (recommend: ship)
+### 7.3 `TableAutoLayoutComparisonTests` × 3 — the test is measuring the wrong thing, but the fix is not one line
 
-Filter whitespace-only runs out of the reference before counting, at
-`TableAutoLayoutComparisonTests.cs:120`. This is **not** a relaxation: a run count is the producer's
-internal portion-splitting choice, and whether LibreOffice emits a line-ending space as its own
-`Tj` is invisible in the rendered page. Filtering makes the assertion measure what its comment says
-it measures — "a column too narrow wraps a cell that should not wrap" — and it would have been the
-right code before the environment moved.
+The assertion to change is the run count at `TableAutoLayoutComparisonTests.cs:120`: whitespace-only
+reference runs should be filtered out before counting. This is **not** a relaxation — a run count is
+the producer's internal portion-splitting choice, and whether LibreOffice emits a line-ending space
+as its own `Tj` is invisible in the rendered page. Filtering would make the assertion measure what
+its own comment says it measures ("a column too narrow wraps a cell that should not wrap").
+
+**I attempted this and stopped, because it is not small.** `PdfTextRun`
+(`PdfTextRuns.cs:29-36`) carries `PageIndex, X, Y, FontSize, FontResource, GlyphCount, Colour` —
+**it does not carry the text**. There is no way to ask "is this run whitespace" without teaching
+the reader to decode the font's `ToUnicode` CMap, and that class states outright that it is
+"deliberately not a PDF parser". Filtering on `GlyphCount == 1` instead would be a guess that
+discards legitimate single-glyph runs.
+
+So: recommended, sized honestly as a `TestKit` change rather than a test tweak. I identified the
+offending run by decoding the CMap by hand for this document only (`0x08` → `' '`), which is fine
+for a diagnosis and not a basis for a shipped filter.
 
 ### 7.4 The footnote separator × 4 — a real defect; diagnose now, fix as its own round (recommend: do not fix here)
 
