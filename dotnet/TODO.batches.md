@@ -12719,3 +12719,64 @@ over-aggressive label rhythm, so page 16 ends only slightly closer — 8.32% →
   having finished.** This is the same family as the slides round's "163 of 163" that had written
   158 files, and the two together make the rule: wait for the process, then re-count from disk;
   neither the loop counter nor the file count alone is evidence.
+
+---
+
+## Merge note — words-e-01, a page break dies with the section mark it lands on
+
+Merged `wt-words-e`. Build 0 warnings / 0 errors. **Ten non-Fidelity projects: 3523 total, 0
+failed** — WordProcessing 769 → **775**. All six new tests are **detectors verified by
+reintroduction**, none a drift guard, and four of them detect *over*-application.
+
+**Words 154 → 155 of 200.** Page error 117 → **115**, exact page counts 163 → **165**. Four
+renderings changed byte-for-byte; all four moved a page count and two moved a verdict.
+
+### The methodological refutation, which outranks the verdict
+
+**"Exactly one extra portrait page immediately before the first landscape run" is not a
+localisation.** The three documents I briefed as one sub-shape are **three unrelated defects**, and
+the shape itself is an artefact of the description: under run-length coding, *any* extra page
+anywhere in a portrait prefix looks like "one extra page just before the landscape run".
+`33004.docx` has fifteen consecutive portrait sections and its extra page is at page 39 of a 40-page
+run — a table splitting, forty pages from the landscape boundary.
+
+Two further briefed claims did not survive. `template---tpr`'s "the reference fits 37 lines where
+we fit 33" measures **30 against 27** on page 2, with page 3 at 37 on *both* sides. And words-d's
+"±1 cluster bunched at page 1" does not hold under a flow-only instrument: first breaks run
+1,1,1,1,1,1,1,1,2,2,2,2,2,2,3,3,3,3,4,11,16.
+
+**The standing finding survives on the new instrument**, which is what makes the new instrument
+trustworthy: 80 of 155 matching documents have no flow divergence, **0 of 45 failures have none**,
+and conditional on diverging the two distributions are 36% against 34% identical. The instrument
+was validated by a reference-against-reference control returning `none` on all 200 first.
+
+### The law, from 72 authored variants against the installed 26.2.4.2
+
+- **Break type never inserts a page at a portrait→landscape boundary.** Portrait pages are
+  `ceil(fill/46)` exactly, at five fills, for `nextPage`, `continuous`, `evenPage`, `oddPage` and an
+  absent `w:type` alike — slope 1, intercept 0.
+- **A `continuous` break is promoted iff the `w:orient` flag differs, and by nothing else.** 720
+  twips wider, 720 taller, one twip wider, an extra inch of margin: all stay on the page. The corner
+  that settles it is that a *physically* landscape sheet stating no `w:orient` does not count as
+  landscape — `PropertyMap.cxx:1661-1678` compares `PROP_IS_LANDSCAPE`, written only from `w:orient`.
+- **The rule that actually mattered was not predicted at all.** LibreOffice's `bRemove` guard
+  (`DomainMapper.cxx:4852`) protects a *column* break and names **no page break whatever**, so a page
+  break landing on an empty section mark dies with the mark. We kept the mark and emitted a page
+  holding one word — the footer's page number. That is exactly `1_tpr_template__from_fy14_.docx`
+  page 3, whose pages 1–2 were word- and line-identical to the reference.
+
+Fix: `DocxLayoutSource.cs:403` drops `&& !paragraph.Format.StartsNewPage` from `IsSectionMarkOnly`;
+`DocxReader.cs` gains `PromoteContinuousAcrossOrientation`. Authored-variant agreement **55/72 →
+70/72**; the two remaining are a gap in the *other* direction — 26.2.4.2 keeps a mark carrying a
+column break where we drop it — recorded rather than guessed at.
+
+**The continuous/orientation half has zero corpus reach**: 0 of 134 DOCX, said independently by a
+static census *before* the sweep and by the byte comparison *after* it. Shipped anyway and labelled
+as such, because it is measured law and the next document to need it should not have to re-derive it.
+
+### One honest debit
+
+Of the four movers, three move towards the reference and **`EHEST-SMS-Safety-Management-Manual-V2.docx`
+moves away** (80/82 → 79/82). Its mark is one 26.2.4.2 also removes, so the page it had been
+carrying was cancelling a loss elsewhere — a second defect in that document, now visible because the
+first is fixed. Recorded, not smoothed over.
