@@ -561,7 +561,7 @@ internal sealed class XlsWorkbookReader
 
             // The borders and the fill come after the alignment in the same record, so they are
             // read here rather than in a second pass: the stream is already positioned on them.
-            ReadXfDecoration(xf.IsCellXf, used);
+            ReadXfDecoration(xf.IsCellXf, xf.ParentIndex, used);
         }
         else
         {
@@ -623,7 +623,7 @@ internal sealed class XlsWorkbookReader
     /// six-bit field and area bit 4.
     /// </para>
     /// </remarks>
-    private void ReadXfDecoration(bool isCellXf, ushort used)
+    private void ReadXfDecoration(bool isCellXf, int parentIndex, ushort used)
     {
         const int borderBit = 0x08;
         const int areaBit = 0x10;
@@ -639,7 +639,10 @@ internal sealed class XlsWorkbookReader
             uint border1 = _stream.ReadUInt32();
             uint border2 = _stream.ReadUInt32();
             ushort fill = _stream.ReadUInt16();
-            _decoration.Add(XlsXfDecoration.FromBiff8(border1, border2, fill, border, area));
+            _decoration.Add(
+                XlsXfDecoration.FromBiff8(border1, border2, fill, border, area),
+                isCellXf,
+                parentIndex);
         }
         else
         {
@@ -647,7 +650,8 @@ internal sealed class XlsWorkbookReader
 
             uint fill = _stream.ReadUInt32();
             uint lines = _stream.ReadUInt32();
-            _decoration.Add(XlsXfDecoration.FromBiff5(fill, lines, border, area));
+            _decoration.Add(
+                XlsXfDecoration.FromBiff5(fill, lines, border, area), isCellXf, parentIndex);
         }
     }
 
