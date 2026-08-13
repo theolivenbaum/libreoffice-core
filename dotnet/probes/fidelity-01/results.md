@@ -77,7 +77,7 @@ reporting *"Mismatch between font type and embedded font file"* and then *"No fo
 times**, leaving 161 glyph runs blank on a document that passed every other check. That guard is
 currently not running at all.
 
-**This is a thirteenth environment variable, undeclared: the container has no CFF-flavoured font.**
+**This is an undeclared environment variable of its own: the container has no CFF-flavoured font.**
 It belongs in `MISSING_PACKAGES.md` beside `fonts-dejavu-core`, and it presents exactly the way that
 file warns about — as nothing at all except a skip count nobody was totalling. I have **not**
 installed a font to fix it: three other agents are measuring against this machine's fontconfig
@@ -114,7 +114,7 @@ The failing set is **byte-identical** at the two commits (`fails-0fb6d41e0.txt`)
 change" is *not* the same as "our code is right". A reference binary that gets **more** correct
 will newly disagree with a defect we have always had. So every one of the 40 was pushed through a
 second question: **which side is now wrong?** That question is what the rest of this document
-answers, and it splits the 40 four ways — including four cases where the answer is *we are*.
+answers, and it splits the 40 four ways — including **twelve** cases where the answer is *we are*.
 
 ---
 
@@ -123,7 +123,7 @@ answers, and it splits the 40 four ways — including four cases where the answe
 Two of the three suspects in the brief are **excluded by measurement** for the families I took,
 and this matters because the brief's leading hypothesis names all three.
 
-**The font set is excluded for 18 of the 40.** `MISSING_PACKAGES.md` is right that DejaVu moves
+**The font set is excluded for 26 of the 40 here, and for the remaining 14 in §6.0.** `MISSING_PACKAGES.md` is right that DejaVu moves
 53 of 534 corpus reference page counts — but that is the *corpus*, not this suite. The Fidelity
 fixtures are Latin text in Carlito. Measured, by listing the fonts LibreOffice actually embedded
 in its own reference PDF for each failing document:
@@ -136,7 +136,8 @@ in its own reference PDF for each failing document:
 | `table-autofit.fodt` / `.docx` | `Carlito-Regular` only |
 
 No DejaVu, no WenQuanYi, no fallback of any kind. **A font that is never resolved cannot move a
-measurement.** Prediction P4 (2–6 font failures) is heading to **zero** in my share.
+measurement.** §6.0 goes further and removes DejaVu from fontconfig entirely: the reference content
+streams come back **byte-identical**. Prediction P4 (2–6 font failures) measures **zero**.
 
 **Poppler is excluded as a *geometric* variable.** I checked whether `pdftotext -bbox` faithfully
 reports what the PDF says, rather than computing its own boxes. For `paginated.pdf` line 1, I
@@ -162,14 +163,36 @@ By elimination, for the position-comparing families the variable is the **LibreO
 
 ## 4. The 40, classified
 
+### The tally, first
+
+| class | cases | where |
+|---|---:|---|
+| **Genuine defect / gap in Paperless** | **12** | §4.4 + §5.1 (9, one root cause), §6.4 (2), §6.1 (1) |
+| Environment (LibreOffice) — reference regressed or merely differs; **we are right** | 18 | §4.1, §4.2, §4.3, §5.2, §5.3, §6.2, §6.3, §6.5, §6.6 |
+| Environment (LibreOffice) — **exposes a real divergence in our shaping** | 8 | §4.5 |
+| **Unexplained** | 2 | §5.4 |
+| Environment (**font set**) | **0** | excluded by measurement, §3 |
+| Environment (**poppler**) | **0** | excluded by measurement, §3 and §6.0 |
+| **Total** | **40** | |
+
+**Every one of the 40 is environment-*triggered*** — §2 proves that. But **12 of them are ours**, and
+that is the finding the brief hoped was there. The reference binary did not simply drift: in twelve
+cases it moved deliberately **toward the application that owns the format** — Word, Excel,
+PowerPoint — and we did not follow.
+
+**Nine of those twelve are a single root cause**, `DocumentSettingId::CONTINUOUS_ENDNOTES`, which
+LibreOffice's Word filters now set unconditionally. It is treated as one item across §4.4 and §5.1.
+
 | # | class | cases | verdict |
 |---|---|---:|---|
 | 4.1 | environment (LibreOffice) — **reference regressed, we are right** | 5 | LO's text filter triples a paragraph |
 | 4.2 | environment (LibreOffice) — **reference regressed, we are right** | 3 | LO adds a cell margin to an exact row |
 | 4.3 | environment (LibreOffice) — **reference artifact, we are right** | 3 | LO emits a trailing space as its own portion |
-| 4.4 | **genuine defect in Paperless** | 4 | format-blind footnote separator |
-| 4.5 | environment (LibreOffice) — **exposes a real sub-point divergence** | 8 | accumulated advance drift crossing two tolerances |
-| 4.6 | *(covered separately — see §5)* | 17 | notes/pagination and sheets/slides |
+| 4.4 | **genuine gap in Paperless** (with §5.1) | 4 | Word's note separator, not Writer's |
+| 4.5 | environment (LibreOffice) — **exposes a real divergence** | 8 | a kerning gap crossing two tolerances |
+| 5.1 | **genuine gap in Paperless** (with §4.4) | 5 | Word's continuous-endnote layout |
+| 5.2-5.4 | environment / unexplained | 4 | justification rework, a self-referential test, a boundary tie |
+| 6.1-6.6 | see §6 | 8 | sheets and slides |
 
 ### 4.1 `ExtractionComparisonTests` × 5 — the reference oracle is wrong
 
@@ -541,7 +564,148 @@ in this tree and whose effects were reproduced, and on §2's proof that these te
 
 ---
 
-## 5A. The prediction, scored against what was measured
+## 6. The sheets and slides families — 8 cases
+
+### 6.0 Two exclusions, both established by measurement rather than by argument
+
+**Poppler is structurally unable to reach 6 of the 8.** `PdfTextRuns`, `PdfStrokes` and `PdfPaints`
+inflate the PDF content streams and read the operators directly
+(`PdfTextRuns.cs:66-83`, `PdfStrokes.cs:81,258`, `PdfPaints.cs:308`); only `PdfWords` shells out to
+`pdftotext` (`PdfWords.cs:52,64-81`). Cases 1, 2, 4, 5, 7 and 8 never touch poppler at all. For the
+two that do, it was exonerated by direct comparison against the content stream (§6.6).
+
+**The font set is excluded for all 8, and this time by an actual A/B.** Every reference was
+re-rendered with a fontconfig that rejects `/usr/share/fonts/truetype/dejavu/*` (`fc-list | grep -c
+dejavu` → 0) into a fresh LibreOffice profile. The content streams are **byte-identical with and
+without DejaVu** for all six documents. No render embeds a DejaVu face: these themes name DejaVu
+only as the `ea`/`cs` face and all the text is Latin. This is the strongest form of the §3 result —
+the variable was actually removed and nothing moved.
+
+### 6.1 `SheetDrawingComparisonTests.APictureIsDrawnWhereLibreOfficeDrawsIt` ×1 — **a Paperless gap**
+
+`sheet-rich-text.xlsx`, picture 1 on page 3: reference 94.904 pt wide, ours 95.074 pt.
+
+`sc/source/filter/oox/drawingbase.cxx:267-300` (`calcCellAnchorEmu`) now clamps the `to` offset —
+*"Excel seems to limit the offsets to the bottom/left edge of the cell… reduce cell's right edge by
+a full twip"* — in commits `50421467b80` / `71dc2b20cc7` (Nov 2025). Height moved the same way
+(46.800 → 46.658).
+
+The test's own docstring records the 24.2.7.2 figure as **1.3201 in = 95.05 pt**
+(`SheetDrawingComparisonTests.cs:19`), which is the raw anchor arithmetic and matches **ours**.
+So we match the file and the old reference; LibreOffice deliberately changed to match Excel.
+
+**Verdict: genuine gap in Paperless.** Parity now requires adopting the clamp. Same shape as §4.4:
+the reference moved toward the owning application and we did not follow.
+
+### 6.2 `SheetSpilledTextComparisonTests` ×2 — **the reference is dropping visible text**
+
+`AStringSpillingPastAPageBreakIsDrawnOnBothSidesOfIt` and
+`EveryPageShowsAsManyWordsAsLibreOfficeShows(xls-features.xls)`. One root cause, and it is decisive.
+
+`sc/source/ui/view/output2.cxx:1542` now reads:
+
+```cpp
+if ( mnX1 > 0 && !bTaggedPDF ) --nLoopStartX;
+```
+
+The test's own docstring cites that line **without** the `!bTaggedPDF` guard
+(`SheetSpilledTextComparisonTests.cs:33-35`). Calc skips the spill lead-in column when exporting
+**tagged** PDF, and `officecfg/…/Common.xcs:4318-4324` now defaults `UseTaggedPDF` to `true`.
+
+**Proof, by re-rendering with tagged PDF explicitly off: `[40, 34, 1213, 1011]` and 48 long runs on
+page 4 — exactly what Paperless produces.** So Paperless draws what a reader actually sees, and the
+reference silently drops visible text in its new default export mode.
+
+**Verdict: environment (LibreOffice version), and a *fourth* environment variable nobody had
+declared — the PDF export's tagging default.** Paperless is right.
+
+Two details worth keeping. It is **not** a pagination change: both sides have 4 pages with identical
+counts on pages 1–3. And the reported `963` rather than `1011` is a **harness artifact** —
+`PdfWords.cs:117-119` matches `xMin="([0-9.]+)"`, which rejects the 48 words whose box starts at a
+*negative* x. `1011 − 48 = 963`. The harness cannot see text that spills left of the page origin.
+
+### 6.3 `SheetTextComparisonTests` ×1 — a one-twip rounding flip upstream
+
+`sheet-cell-text.xlsx`, run 12: reference 261.666 pt, ours 261.3827 pt — Δ 0.283 pt = 6 twips, on an
+`indent="2"` cell.
+
+This is *exactly* the failure mode Paperless's own source comment predicts
+(`XlsxCellFormats.cs:485-489`): *"Ten-point Liberation Sans has a 55.57-twip space, and rounding it
+to 56 rather than truncating to 55 puts a two-level indent 0.3 pt out."* Reference = 6 × 56 twips =
+16.8 pt; ours = 6 × 55 = 16.5 pt. LibreOffice's chain is `scaleValue(3.0 * indent, …)`
+(`stylesbuffer.cxx:1263`) over `xFont->getCharWidth(' ')` (`unitconverter.cxx:139-142`).
+
+**Verdict: environment (LibreOffice version).** A rounding-vs-truncation flip upstream, on a case our
+own code comment had already anticipated and chosen the other side of.
+
+### 6.4 `SlideTableComparisonTests` ×2 — **the clearest Paperless defect in the 40**
+
+`EveryCellsTextIsDrawnWhereLibreOfficeDrawsIt` (baseline: ref 93.600, ours 91.899) and
+`EveryGridLineIsTheStrokeLibreOfficeDraws` (grid line 14 `ToY`: ref 266.854, ours 263.925).
+
+Measured: the reference's first baseline is `row_top + 3.6 + 18.000` — an ascent of exactly
+**1.0 em** — and its line pitch is **21.600 = 1.2 em**. Ours uses the `hhea` ascent
+(16.299 = 1854/2048 × 18) and a pitch of 20.150. Case 2 falls straight out of case 1: the `h="0"`
+third row on slide 2 wraps to two lines, so reference = 2 × 21.6 + 7.2 = 50.4 and ours =
+2 × 20.15 + 7.2 = 47.5.
+
+The mechanism is `ImplCalculateFontIndependentLineSpacing` (`impedit3.cxx:500-504`, `×12/10`) plus
+`impedit3.cxx:3138-3142` (`nAscent = font height`), enabled for table cells by commit
+**`a47776a938c` (2025-03-27), tdf#165521, "pptx layout: don't use font's leading for cells too"**,
+whose message says: *"Microsoft just ignores the font metrics, and simply adds 20 % to the font
+height."*
+
+**Verdict: genuine defect in Paperless — and an unusually actionable one. Paperless already applies
+the 1.2 rule to pptx text boxes** (its autofit box pitch is 14.4 = 1.2 × 12); it simply does not
+apply it to **table cells**. The rule is implemented and in the tree; it is not reaching one call
+site.
+
+### 6.5 `SlideAutofitParagraphSpaceComparisonTests` ×1 — a second reference-pinning test
+
+`SlideAutofitParagraphSpaceComparisonTests.cs:91-93`:
+
+```csharp
+SizeAt(theirs, 10).ShouldBe(SizeAt(ours, 10), TolerancePoints, "150 pt box");
+```
+
+It fails because the **reference** now picks 14.003 / 18.992 / 20.013 where 24.2.7.2 picked
+11.99 / 17.01 / 18.00. Lines 86-88, `SizeAt(ours, …).ShouldBe(11.99 …)`, **still pass** — so
+Paperless reproduces the old binary exactly, and the whole test, literals included, is calibrated to
+24.2.7.2. Cause: the autofit search was reworked in `f61ea135430` / `db64748f1ee` / `a3daf52dd21`
+(Mar–Apr 2024, first shipped in 24.8).
+
+**Verdict: environment (LibreOffice version).** Note the test's *thesis* survives intact — the
+reference's paragraph gap is 9.580 against a nominal 12 pt `spcBef`, so the fit's spacing scale
+(~0.8) still does reach the paragraph's own space. **Only the numbers moved, not the claim.**
+
+### 6.6 `SlideChartFaceComparisonTests` ×1 — a third reference-pinning test
+
+`SlideChartFaceComparisonTests.cs:125`:
+
+```csharp
+theirs.ShouldBe(MonospacedDigitAdvance, 0.1, "the reference's digit advance");
+```
+
+A literal assertion about the **reference binary's** output. Poppler is exonerated by direct
+measurement: the reference's content stream has `83.703 … Tm … [<02>16<06>16<06>]TJ` for "100" and
+`89.542 … Tm` for "80", and `pdftotext -bbox` reports `left=83.7030` / `89.5420` — poppler
+reproduces the pen exactly. The 5.839 comes from LibreOffice now emitting a `16`/1000-em tightening
+between every glyph (6.003 − 0.16 = 5.84); Paperless writes a single `<…>Tj` with no adjustment,
+giving the true 6.009.
+
+**Verdict: environment (LibreOffice version). The test's actual claim still holds** — 5.839 is still
+far nearer Mono's 6.01 than Sans' 5.556, which is what the test set out to prove. Only the 0.1 pt
+tolerance breaks.
+
+*Not determined:* which release first flipped `UseTaggedPDF` for the headless `--convert-to pdf`
+path (§6.2). The schema default changed in `544d6d781b3c` (2023) but the `output2.cxx` guard arrived
+in `b3c93b16d62` (Jan 2024), and this repo carries no release tags to resolve the branch point. It
+does not affect the verdict — the untagged re-render reproduces Paperless's numbers exactly, which
+isolates the cause regardless of when it shipped.
+
+---
+
+## 7. The prediction, scored against what was measured
 
 Committed at `2420db95528` before the suite was run once. Scoring it honestly matters more than
 scoring it well.
@@ -550,7 +714,7 @@ scoring it well.
 |---|---|---|
 | **P1** | 550 unchanged, only the split moved | **Right.** 550 discovered, 510+40, 0 skipped |
 | **P2** | 21 names / 40 cases are parameterised rows, no second mechanism | **Right.** 9 names carry the extra 19 rows |
-| **P3** | plurality is LibreOffice-version, ~20-25, concentrated in **hard-coded figures** | **Half right, and the reasoning was wrong.** The class is right and far larger than predicted (~34). The *mechanism* is backwards: the hard-coded figures all **pass**; it is the live comparisons that broke (§6) |
+| **P3** | plurality is LibreOffice-version, ~20-25, concentrated in **hard-coded figures** | **Half right, and the reasoning was wrong.** The class is right and far larger than predicted (~34). The *mechanism* is backwards: the hard-coded figures all **pass**; it is the live comparisons that broke (§8) |
 | **P4** | 2-6 font-set failures | **Wrong — zero.** Every failing document embeds Carlito alone. I reasoned from `MISSING_PACKAGES.md`'s corpus-wide result to a suite that shares none of its documents |
 | **P5** | 3-8 poppler failures | **Wrong — zero.** Poppler tracks the PDF's own geometry to 0.022 pt (§3) |
 | **P6** | ≥1 genuine defect hiding behind the environment story; 1-8 | **Right, 4** — the footnote separator (§4.4), plus a real sub-point advance divergence underneath 8 more (§4.5) |
@@ -567,7 +731,7 @@ is why the prediction was committed first.
 
 ---
 
-## 6. The brief's leading hypothesis, tested rather than accepted
+## 8. The brief's leading hypothesis, tested rather than accepted
 
 > "If Fidelity pins expectations to the old binary's output, some or all of the 40 are the
 > environment moving rather than our code breaking."
@@ -589,7 +753,7 @@ measured against — and in three of the five families it changed it **for the w
 
 ---
 
-## 7. What I propose to repair, and what I actually changed
+## 9. What I propose to repair, and what I actually changed
 
 **What I changed: nothing.** No expectation was re-baselined, no tolerance loosened, no test
 deleted. The two files I instrumented (`PageDrawingComparisonTests.cs`, `TabStopComparisonTests.cs`)
@@ -602,7 +766,7 @@ project whose recorded failure mode is "the number reproduces and the sentence a
 wrong", shipping five of them in one round on one agent's reading is how a suite stops meaning
 anything. Below is what I would ship, each justified separately, in the order I would do it.
 
-### 7.1 `ExtractionComparisonTests` × 5 — a documented deviation, but the blunt form is not good enough
+### 9.1 `ExtractionComparisonTests` × 5 — a documented deviation, but the blunt form is not good enough
 
 The obvious repair is a `KnownDeviations` entry for `tables.*` in the switch at
 `ExtractionComparisonTests.cs:85`, in the style of the three quirks already recorded there, naming
@@ -623,7 +787,7 @@ switch case. Recommended, but as its own small piece of work with a test of its 
 *Confidence in the diagnosis: high — LibreOffice contradicting its own renderer settles which side
 is wrong. Confidence that the blunt entry is the right repair: low, hence not shipped.*
 
-### 7.2 `TableComparisonTests` × 3 — hold, and report upstream (recommend: do not change the test)
+### 9.2 `TableComparisonTests` × 3 — hold, and report upstream (recommend: do not change the test)
 
 Paperless produces exactly the declared 454 twips; LibreOffice adds exactly the declared
 `w:tblCellMar/w:top`. I would leave these three **red** rather than paper over them: they are a
@@ -635,7 +799,7 @@ does not re-derive it.
 *If* the suite must be green, the honest form is a skip with that reason attached — never a widened
 tolerance, because 2.85 pt is not noise and a tolerance that admits it would admit a real defect.
 
-### 7.3 `TableAutoLayoutComparisonTests` × 3 — the test is measuring the wrong thing, but the fix is not one line
+### 9.3 `TableAutoLayoutComparisonTests` × 3 — the test is measuring the wrong thing, but the fix is not one line
 
 The assertion to change is the run count at `TableAutoLayoutComparisonTests.cs:120`: whitespace-only
 reference runs should be filtered out before counting. This is **not** a relaxation — a run count is
@@ -654,7 +818,7 @@ So: recommended, sized honestly as a `TestKit` change rather than a test tweak. 
 offending run by decoding the CMap by hand for this document only (`0x08` → `' '`), which is fine
 for a diagnosis and not a basis for a shipped filter.
 
-### 7.4 The footnote separator × 4 — a real defect; diagnose now, fix as its own round (recommend: do not fix here)
+### 9.4 The footnote separator × 4 — a real defect; diagnose now, fix as its own round (recommend: do not fix here)
 
 Diagnosed to file and line:
 
@@ -679,7 +843,7 @@ footnotes and buys nothing measurable, which fails the brief's own test for ship
 version that *is* correct — read the separator pseudo-note and lay it out with its own paragraph
 metrics — is a real piece of work and deserves its own round with its own prediction.
 
-### 7.5 `PageDrawing` × 4 + `TabStop` × 4 — do not touch the tolerances yet (recommend: measure first)
+### 9.5 `PageDrawing` × 4 + `TabStop` × 4 — do not touch the tolerances yet (recommend: measure first)
 
 This is where I most expect a future round to do the wrong thing, so I want the reasoning on record.
 
@@ -698,3 +862,53 @@ The cheap, honest interim option — if red must be cleared — is to split the 
 tight bound on **absolutely positioned** points (margins and tab stops, where we are exact to
 0.0000 pt, measured on 10 of 24 words) and assert the drift **per unit of text** rather than
 absolutely, so the bound stops depending on how long the line happens to be.
+
+### 9.6 The two defects the sheets/slides half turned up
+
+**`SlideTableComparisonTests` ×2 (§6.4) — recommend: fix, and it is small.** This is the one place I
+would spend a following round's budget first. Paperless already implements the rule (a 1.2 × font
+height pitch with a 1.0 em ascent) and already applies it to pptx **text boxes** — its autofit box
+pitch is 14.4 = 1.2 × 12. It simply does not apply it to **table cells**. That is a call-site gap,
+not a missing feature, and it is measurable in one test class in seconds. I did not ship it only
+because I did not find and verify the call site myself — it came from the parallel investigation and
+the brief's standard is that I measure what I ship.
+
+**`SheetDrawingComparisonTests` ×1 (§6.1) — recommend: adopt the clamp.** `calcCellAnchorEmu`'s
+"reduce the cell's right edge by a full twip" is Excel's behaviour, and the test's own docstring
+already records the pre-change figure, so the before/after is documented in the test.
+
+---
+
+## 10. What I would do next, in order
+
+1. **`SlideTableComparisonTests` ×2** — smallest real defect, rule already in the tree, one call site
+   (§6.4, §9.6).
+2. **`CONTINUOUS_ENDNOTES` ×9** — the largest single root cause in the 40 and the largest single
+   parity gap, spanning the note separator's width *and* vertical placement *and* endnote placement
+   *and* note-container spacing (§4.4, §5.1). One flag, four behaviours, nine tests.
+3. **The kerning gap (§4.5)** — 8 tests, and it tests `dotnet/CLAUDE.md`'s "advance widths agree by
+   construction", which is measurably false. Worth a round on its own before anyone widens a
+   tolerance to hide it.
+4. **`MISSING_PACKAGES.md`** — add the missing CFF-flavoured font (§1) and the PDF export's tagging
+   default (§6.2). Both are undeclared environment inputs; both present as something else.
+5. **The three reference-pinning tests** (§5.3, §6.5, §6.6) — decide deliberately whether a test that
+   asserts the installed binary's own output belongs in a parity suite. In all three cases the
+   *claim* survives and only the number broke, so restating beats deleting.
+
+## 11. Honest limits of this round
+
+- **No A/B against 24.2.7.2 was possible** — the LibreOffice download hosts are firewalled. Every
+  "the reference moved" verdict rests on measurement against 26.2.4.2, on upstream commits dated
+  after the 24.2 branch whose code paths were read in this tree and whose effects were reproduced,
+  and on §2's proof that these tests were green at `0fb6d41e0` on 24.2.7.2. That is strong, but it
+  is not the direct comparison, and it should not be quoted as one.
+- **§4.1's trigger was not reduced.** Three hand-built minimal fixtures failed to reproduce the
+  phantom row. The misbehaviour is measured; its trigger is unexplained.
+- **§5.4 is unexplained on purpose.** A one-twip exact-touch tie is a `>` versus `>=` decision, not a
+  defect, and I declined to pick a side by re-baselining.
+- **§4.5's mechanism is open.** The accumulation and the 19 % kerning gap are measured; which side's
+  kerning is correct is not established.
+- Two of the eight sheets/slides cases and all nine notes/pagination cases were measured by parallel
+  investigation rather than by me directly. I verified the load-bearing citation myself
+  (`paintfrm.cxx:5845-5868`, quoted in §4.4) and it held exactly; I did not re-verify every other
+  line reference.
