@@ -1,6 +1,5 @@
 using System.Buffers.Binary;
 using Paperless.Core.Diagnostics;
-using Paperless.Core.Geometry;
 using Paperless.Core.Graphics;
 using Paperless.MsBinary.Escher;
 using Paperless.MsBinary.Records;
@@ -262,11 +261,21 @@ public sealed partial class Ww8DocumentReader
         short mappingMode = BinaryPrimitives.ReadInt16LittleEndian(picture[6..]);
         if (mappingMode is not (InlineShapeMappingMode or NamedInlineShapeMappingMode)) return null;
 
+        // The goal less what the PICF crops off it, which is the *visible* rectangle and is what
+        // `SwWW8ImplReader::ImportGraf` measures — dxaCropLeft and its three siblings are twips of
+        // the goal (`WW8_PIC`, ww8struc.hxx:457). Every one of the 32 cropped inline pictures in
+        // the corpus states these as zero and puts the crop in the Escher properties alone, so
+        // this is a no-op there; a `.doc` that LibreOffice itself exported states both, and
+        // without this its goal is the whole picture and the frame comes out 1/(1-l-r) too large.
         int width = Scaled(
-            BinaryPrimitives.ReadInt16LittleEndian(picture[0x1C..]),
+            BinaryPrimitives.ReadInt16LittleEndian(picture[0x1C..])
+                - BinaryPrimitives.ReadInt16LittleEndian(picture[0x24..])
+                - BinaryPrimitives.ReadInt16LittleEndian(picture[0x28..]),
             BinaryPrimitives.ReadUInt16LittleEndian(picture[0x20..]));
         int height = Scaled(
-            BinaryPrimitives.ReadInt16LittleEndian(picture[0x1E..]),
+            BinaryPrimitives.ReadInt16LittleEndian(picture[0x1E..])
+                - BinaryPrimitives.ReadInt16LittleEndian(picture[0x26..])
+                - BinaryPrimitives.ReadInt16LittleEndian(picture[0x2A..]),
             BinaryPrimitives.ReadUInt16LittleEndian(picture[0x22..]));
 
         if (width <= 0 || height <= 0) return null;
@@ -293,35 +302,6 @@ public sealed partial class Ww8DocumentReader
                 ? Declined(own)
                 : EmbeddedPicture.Read(own.Bytes, own.Kind, "inline blip", _diagnostics))
                 with { Crop = EscherPicture.Crop(shape.Properties) };
-        }
-
-        // `dxaGoal` is the whole picture and the frame is what survives the crop, which is the
-        // opposite of every other host this library reads. A slide shape's anchor, an FSPA and a
-        // sheet's client anchor all state the rectangle the *visible* part lands in — the FSPA of
-        // this fixture's own floating twin measures 287.95 x 215.95 pt for a 480 x 540 pt picture
-        // 40% cropped away — so `PictureCrop.Uncropped` grows those. Here the goal is already the
-        // grown rectangle: 1500 twips at mx 6400 is 480 pt, and LibreOffice draws the picture at
-        // exactly that and reserves 288 x 216 pt of line for it. Applying the crop a second time
-        // would draw it 480/0.6 = 800 pt wide, so what belongs here is the inverse.
-        //
-        // Read from the Escher properties rather than from the PICF's own `dxaCropLeft` and its
-        // three siblings, which state the same crop in twips of the goal: this keeps one source
-        // for the crop across all four hosts, and a `.doc` whose PICF crops without an OPT is a
-        // case this round does not claim.
-        PictureCropFractions crop = EscherPicture.Crop(shape.Properties);
-        if (!crop.IsNone)
-        {
-            double across = 1 - crop.Left - crop.Right;
-            double down = 1 - crop.Top - crop.Bottom;
-
-            // A crop that keeps nothing leaves the goal alone, for the reason `Uncropped` returns
-            // the rectangle it was given: a picture in the wrong size beats a frame with no room.
-            if (across > 0 && down > 0)
-            {
-                width = (int)Math.Round(width * across);
-                height = (int)Math.Round(height * down);
-                if (width <= 0 || height <= 0) return null;
-            }
         }
 
         return new Ww8LayoutFrame(
