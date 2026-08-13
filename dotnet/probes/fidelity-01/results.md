@@ -402,6 +402,19 @@ LibreOffice's, from its own PDF  458.975 pt   -> it removes 3.772 pt
 divergence is in the *shaping*, not in a rounding step — which is a much better lead for whoever
 picks this up than the one I started with.
 
+*I checked the obvious alternative before believing this.* If the paragraph were **justified**, both
+sides would stretch to their own measure and a 0.6 pt gap would mean our text area was 0.6 pt wide,
+not that our kerning differed. Measured: `paginated.docx` declares `<w:jc w:val="start"/>` — left
+aligned — and the reference's line right-edges are ragged (529.903, 530.596, 531.212, 532.697,
+533.643, …), not flush. Justification is ruled out.
+
+That check also **settles the left edge in our favour**, which is worth stating because §4.5's other
+column depends on it. The document declares `w:left="1417"` twips = **70.850 pt**, and Paperless
+puts the pen at exactly **70.850**. LibreOffice's PDF puts it at 70.950. So the constant 0.1000 pt
+seen on all 732 left comparisons is **LibreOffice's export offset, not our error** — which is
+precisely what `TabStopComparisonTests.cs:37-42` documents `PdfPenOffsetPoints` to be, now confirmed
+from the source document's own margin rather than from a fitted constant.
+
 *Inferred and explicitly not established:* I first suspected quantisation, because the tab-stop
 drift steps sit near whole multiples of 1/100 mm (0.02835 pt) — 1.94, 1.94, 1.10, 1.03 units on
 consecutive words. Other steps (0.66, 2.50, 3.47, 4.20) do **not** fit, and the kerning measurement
