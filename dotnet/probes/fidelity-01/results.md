@@ -378,15 +378,117 @@ quantisation mechanism as an unproven hypothesis.**
 
 ---
 
-## 5. Remaining 17 cases
+## 5. The notes, pagination and frame families — 9 cases
 
-`EndnoteComparisonTests` ×1, `FootnoteComparisonTests.EveryNoteSitsAtTheFootOfItsOwnPage` ×2,
-`NoteRestartComparisonTests` ×2, `JustificationShrinkComparisonTests` ×2,
-`FrameComparisonTests` ×2, `SheetDrawingComparisonTests` ×1, `SheetSpilledTextComparisonTests` ×2,
-`SheetTextComparisonTests` ×1, `SlideAutofitParagraphSpaceComparisonTests` ×1,
-`SlideChartFaceComparisonTests` ×1, `SlideTableComparisonTests` ×2.
+### 5.1 One LibreOffice compatibility flag accounts for 5 of them, and for §4.4 as well
 
-*(filled in below)*
+`EndnoteComparisonTests` ×1 (`endnotes.docx`),
+`FootnoteComparisonTests.EveryNoteSitsAtTheFootOfItsOwnPage` ×2 (`footnote-pages.doc/.docx`),
+`NoteRestartComparisonTests` ×2 (`note-restart.doc/.docx`).
+
+All five are DOC/DOCX; **every ODF twin in the same `[Theory]` passes**. That polarity, which is now
+the round's recurring signature, traces to a single setting: `DocumentSettingId::CONTINUOUS_ENDNOTES`,
+set **unconditionally** by both Word filters — `sw/source/writerfilter/filter/WriterFilter.cxx:338`
+(DOCX) and `sw/source/filter/ww8/ww8par.cxx:2050` (DOC) — and by neither ODF filter. It switches
+three things at once:
+
+- **The note container's top border** becomes the default paragraph's line height (≈13.4 pt here)
+  instead of Writer's `TopDist+BottomDist+LineWidth` = 57+57+10 twips = 6.2 pt
+  (`sw/source/core/layout/ftnfrm.cxx:257-272`). Measured separator positions confirm it: the ODF
+  rule sits at y 108.339/157.139, DOC and DOCX at 110.539/159.339. That ≈7 pt is what evicts one
+  body line from page 1 — which is exactly what cases 2–5 report.
+- **The separator's length.** `sw/source/core/layout/paintfrm.cxx:5845-5868` carries the comment
+  *"Length is 2 inches"*. **This is §4.4's 144.000 pt, found independently in the source.**
+- **Endnote placement**: laid out inline at the end of the body rather than on their own page,
+  which is case 1. Measured: `endnotes.docx` page-1 text bottom 740.53 pt (1 page); `endnotes.odt`
+  702.30 pt (2 pages). `endnotes.doc` passes because that file states section-end placement
+  explicitly and we honour it; the DOCX states nothing and LibreOffice now applies a compat
+  *default* we do not implement.
+
+The enabling commits are the `tdf#160984` "sw continuous endnotes" series — `d74fb6b5713`
+(2024-05-16, DOC) and `1ae5ea3f78c` (2024-05-21, DOCX) — both after the 24.2 branch point, so
+present in 26.2.4.2 and absent from 24.2.7.2.
+
+**Verdict: environment (LibreOffice version) for all five.** Cases 2–5 are pagination, not text and
+not numbering — verified word-level: `note-restart` cites 1,2,3,4 on each page identically on both
+sides, and a `SequenceMatcher` over `footnote-pages` page 1 gives exactly one non-equal opcode, the
+same eleven words, in both DOC and DOCX. We simply keep one more body line on page 1.
+
+**This also strengthens §4.4 rather than replacing it.** The 2-inch rule is not an accident of the
+new binary: it is LibreOffice deliberately implementing Word's behaviour behind a Word-only compat
+flag, with a source comment saying so. Paperless applying Writer's 25 % rule to Word documents is a
+real defect, and it now has a source-level citation as well as a measurement.
+
+### 5.2 `JustificationShrinkComparisonTests.TheParagraphBreaksWhereLibreOfficeBreaksIt` ×1
+
+`justify-shrink-2013.docx`: we set it in 4 lines, LibreOffice in 5. The companion
+`justify-shrink-2007.docx` matches line for line on both sides, which **rules out any font-metric
+explanation independently** — identical metrics, different shrink decision. The compatibilityMode-15
+flag is still imported; the algorithm behind it was rewritten toward MSO's. Best candidate:
+`529755f0919` (2025-06-02), *"tdf#166113 sw smart justify: adjust algorithm for interoperability"*.
+
+**Verdict: environment (LibreOffice version).** Which side is *right* is undetermined — the change
+was made in the name of matching Word, which suggests the reference is now closer, but that was not
+proven and 24.2.7.2 could not be installed to A/B it.
+
+### 5.3 `JustificationShrinkComparisonTests.TheReferenceItselfSetsTheModeFifteenDocumentInFewerLines` ×1 — **the test does not test Paperless**
+
+This is the distinct category the brief asked to have flagged, and it is real
+(`JustificationShrinkComparisonTests.cs:96-109`):
+
+```csharp
+List<double> newer = Rendered(Corpus.Require("justify-shrink-2013.docx"));
+List<double> older = Rendered(Corpus.Require("justify-shrink-2007.docx"));
+newer.Count.ShouldBeLessThan(older.Count);
+```
+
+`Rendered()` (`:111-114`) is *only* `PdfWords.Read(_libreOffice.ConvertToPdf(...))`. There is **no
+`Drawn()`, no `WordProcessingReader`, no `Layout()` — Paperless never executes.** The test asserts
+that the *installed binary* sets one fixture in fewer lines than another. Its own comment says so:
+"Guards the fixture rather than the engine."
+
+Measured: both documents now come out in **5 lines**, so `5 < 5` fails.
+
+**Verdict: environment (LibreOffice version), and the only case in the 40 that is a candidate for
+deletion rather than repair.** It can never be a statement about Paperless's correctness.
+
+**But it should not simply be deleted, and this is the nuance worth keeping.** The flag still *has*
+an effect — LibreOffice breaks line 1 of the 2013 document after "across" and the 2007 document
+after "dam". The fixture is not dead; only its chosen proxy ("fewer lines") has expired. Restating
+it as *"the two documents break differently"* keeps the guard the test was written to provide.
+
+### 5.4 `FrameComparisonTests` ×2 — **unexplained, and deliberately left so**
+
+`frame-parallel.odt` and `.fodt`: "line 4 resumes at 354.40 pt, where LibreOffice drew nothing."
+
+Both sides place the frame **identically** — the frame's own 9 pt word "Both." is at (240.95, 110.48)
+in ours and (240.95, 110.48) in the reference. The frame occupies x 240.95–354.35 with its top at
+y 110.5; line 4's box is 97.0–110.4. **It touches the frame's top edge and does not cross it.** We
+treat touching as overlapping and divide the line around the frame; 26.2.4.2 treats touching as
+non-overlapping and runs the line straight through.
+
+Confirmed as a pure boundary tie by nudging the frame in copies of the fixture and re-rendering:
+
+| `svg:y` | LibreOffice 26.2.4.2, line 4 |
+|---|---|
+| −0.05 cm | divided — "pagination" at 354.5 (= Paperless) |
+| −0.02 cm | divided — 354.5 |
+| **0 cm (as shipped)** | **not divided** — "pagination" at 242.7 |
+| +0.02 cm | not divided |
+| +0.05 cm | not divided |
+
+**Verdict: environment (LibreOffice version) as the trigger; which side is right is UNEXPLAINED.**
+This is a one-twip tie-break on an exact-touch boundary, not a defect on either side. Geometrically
+the reference's current answer is the more defensible one, but that is an opinion about a `>` versus
+a `>=`, and it should be decided deliberately rather than re-baselined into existence. The test's
+own remark (`FrameComparisonTests.cs:353-358`) records that the ODF forms *did* narrow that line
+while the DOCX did not — so the old behaviour was already format-inconsistent.
+
+**Caveat carried from this whole section:** 24.2.7.2 could not be installed for a true A/B — the
+LibreOffice download hosts are firewalled. Every "reference moved" verdict here rests on the
+measurements above, on LibreOffice commits dated after the 24.2 branch whose code paths were read
+in this tree and whose effects were reproduced, and on §2's proof that these tests were green at
+`0fb6d41e0` on 24.2.7.2.
 
 ---
 
