@@ -307,10 +307,28 @@ measurement is *still exactly right today*, **for ODF**. It was generalised to e
 2-inch separator; we still apply Writer's 25 %-of-text-width rule to Word documents. The environment
 change is what made the defect *visible*; the defect is ours and it is real.
 
-*Confidence, stated honestly:* **high** on the width (2 inches is Word's separator, and the
-absoluteness is measured). **Medium** on the 2.214 pt vertical shift — I measured that it moved and
-that it moved only for Word formats, but I did not independently establish that Word's separator
-sits there, so I have not proven LibreOffice's new vertical placement is the correct one.
+*Confidence:* **high on both numbers**, and this was upgraded from "medium on the vertical" once the
+source was found. `sw/source/core/layout/paintfrm.cxx:5845-5868` predicts **both** measurements
+exactly, behind the Word-only `CONTINUOUS_ENDNOTES` flag of §5.1:
+
+```cpp
+if (rIDSA.get(DocumentSettingId::CONTINUOUS_ENDNOTES))
+{
+    // Word style: instead of fixed value, upper spacing is 60% of all space.
+    aPoint.setY(getFrameArea().Pos().Y() + nPrintAreaTop * 0.6);
+    ...
+    // Length is 2 inches, but don't paint outside the container frame.
+    nWidth = o3tl::convert(2, o3tl::Length::in, o3tl::Length::twip);
+```
+
+"Length is 2 inches" is the 144.000 pt I measured; "upper spacing is 60% of all space **instead of
+fixed value**" is the 2.214 pt vertical shift. Both are commented *"Word style"*.
+
+The brief rightly warns that this checkout is 27.2.0.0.alpha0+ and is **not** the reference binary.
+That warning is respected here rather than ignored: the source is not the evidence, it is the
+*explanation*. The evidence is the measurement against the installed 26.2.4.2 — 144.000 pt,
+invariant under halving the text width — and the source predicts that measurement exactly. Source
+and binary agreeing is the strong case; source alone would not have been.
 
 ### 4.5 `PageDrawingComparisonTests` × 4 + `TabStopComparisonTests` × 4 — one phenomenon, two tolerances
 
