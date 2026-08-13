@@ -13324,3 +13324,67 @@ strokes `#8B8B8B`/`#666666` against the documented `0xB3B3B3`.
 Two better next items, both newly measured: **the marker ignoring `c:size`** — 0.03 `|ink|%` on one
 page, and the reason a correct colour currently reads as a regression — then the missing marker
 outline.
+
+---
+
+## Merge note — words-f-01, the crop debit was never a crop defect
+
+Merged `wt-words-f`. Build 0 warnings / 0 errors. **Ten non-Fidelity projects: 3625 total, 0
+failed** — WordProcessing 789 → **792**. 3 tests added, 1 verified by reintroduction, 2 labelled
+drift guards (deliberate controls). One `Paperless.TestKit` addition, `DrawnPage.Pictures`, because
+**a rectangle cannot see this defect** — the frame was always right.
+
+**Words stays 155 of 200**; page error 115 → 115, exact page counts 165 → 165, failures unchanged.
+**Absolute word error 6869 → 6840.** Reach **6 of 200**, all `.doc`, no page count and no verdict
+moved.
+
+### We were drawing the wrong picture
+
+The previous round's named debit — two WMF pictures "cropped where the reference crops nothing" —
+**was not a crop defect at all**. An inline `.doc` picture's `pib` is numbered **inside its own
+`OfficeArtInlineSpContainer`**, and we were resolving it against the document's *shared* blip
+store, which answers whenever `pib ≤ store size`. In `150_5300_13_chg10.doc` four figures were each
+drawn as **the same 197×77 greyscale JPEG belonging to a floating shape elsewhere in the file** —
+at exactly the right frame and the right size, which is precisely why a crop round measured it as a
+crop error.
+
+LibreOffice avoids this with `DisableFallbackStream()` / `##835##` (`ww8graf2.cxx:531`) — **a
+comment describing this defect in 2003**.
+
+Crop frames re-measured: **6 agreeing / 2 over-cropped / 4 unpaired → 7 / 0 / 3**, a seventh
+agreement gained (`chg10` 462.9×551.4, ours 1.010 against the reference's 1.010). The round states
+honestly that "0 over-cropped" is partly because those two WMFs are now **not drawn at all** — see
+below.
+
+### A rule that was measured, refuted, and deliberately not shipped
+
+"26.2.4.2 ignores an Escher crop on a WMF" **holds for 18 corpus pictures across three documents**
+and survives three in-place experiments that kill the obvious alternatives — magnitude (a 0.0409
+WMF crop ignored, a 0.3105 PNG crop applied) and metafile-versus-bitmap (the EMF beside them *is*
+cropped).
+
+It is then **contradicted** by a WMF in `150_5335_5a.doc` whose crop *is* applied — patched, 1 of 64
+pages moves, with a determinism control at 0 of 64 — and by an authored fixture. Six candidate
+discriminators were ruled out by measurement and **the real one was not found**.
+
+So it was **removed rather than shipped on a partial rule**, and it survives in branch history at
+`6722b2550fc`. It also bought nothing: the lookup fix alone gives the same 7 / 0 / 3.
+
+**This is the right disposal.** A rule that explains 18 cases and is contradicted by the nineteenth
+is not a rule yet, and shipping it would have made the next round's measurements harder to read.
+
+### The strongest lead left, stated as inferred
+
+**Our `.doc` path draws no WMF at all** — an EMF in the same document renders fine. Likely because
+`EscherBlips` hands on a non-placeable WMF; inferred from the bytes and flagged as such rather than
+asserted.
+
+Direction: `5335_5a` goes 116 → **49**, closer. `chg10` goes 499 → **537**, further — and that is
+the raster-ceiling direction, predicted in advance, because its four figures now correctly resolve
+to WMFs we cannot yet draw at all.
+
+### Not started
+
+Task 2, the page cluster, was not begun; task 1 did not close early. The cluster's standing facts
+are unchanged: existence of a divergence is the only discriminator (0 of 45 failures have none),
+and the ±1 cluster has no single shared cause, refuted three times.
