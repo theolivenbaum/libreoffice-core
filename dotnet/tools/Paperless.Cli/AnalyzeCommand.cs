@@ -44,7 +44,8 @@ internal static class AnalyzeCommand
         bool json = false;
         bool header = true;
         OutputMode mode = OutputMode.Document;
-        WordCountPolicy policy = WordCountPolicy.Raw;
+        WordCountPolicy policy = WordCountPolicy.Alphanumeric;
+        WordGrouping grouping = WordGrouping.NearestNeighbour;
         bool includeText = false;
         List<string> paths = [];
 
@@ -59,6 +60,17 @@ internal static class AnalyzeCommand
                 case "--fonts": mode = OutputMode.Fonts; break;
                 case "--text": mode = OutputMode.Text; includeText = true; break;
                 case "-h" or "--help": PrintUsage(); return Program.ExitSuccess;
+                case "--grouping":
+                    if (++i >= args.Length) { Console.Error.WriteLine("paperless analyze: --grouping needs a value."); return Program.ExitUsage; }
+                    switch (args[i])
+                    {
+                        case "nearest": grouping = WordGrouping.NearestNeighbour; break;
+                        case "simple": grouping = WordGrouping.Simple; break;
+                        default:
+                            Console.Error.WriteLine($"paperless analyze: unknown grouping '{args[i]}'. Use nearest or simple.");
+                            return Program.ExitUsage;
+                    }
+                    break;
                 case "--words":
                     if (++i >= args.Length) { Console.Error.WriteLine("paperless analyze: --words needs a policy."); return Program.ExitUsage; }
                     switch (args[i])
@@ -94,7 +106,7 @@ internal static class AnalyzeCommand
         foreach (string path in paths)
         {
             PdfAnalysisResult result = File.Exists(path)
-                ? PdfAnalysis.Analyze(path, includeText)
+                ? PdfAnalysis.Analyze(path, includeText, grouping)
                 : new PdfAnalysisResult { File = path, Error = "File not found." };
 
             results.Add(result);
@@ -219,15 +231,20 @@ internal static class AnalyzeCommand
               --pages         TSV with one row per page instead of per document
               --fonts         TSV with one row per font face instead of per document
               --text          Write the extracted text, as `pdftotext FILE -` would
+              --grouping HOW  How glyphs are grouped into words:
+                                nearest  nearest-neighbour, orientation aware (default)
+                                simple   line-then-gap; no concept of rotated text
               --words POLICY  Which tokens the `words` column counts:
-                                raw    every whitespace-delimited token (default)
-                                alnum  only tokens holding a letter or a digit
+                                alnum  tokens holding a Unicode letter or digit (default)
+                                raw    every whitespace-delimited token
               --no-header     Omit the TSV header line
               -h, --help      Print this message
 
             The `words` column follows --words; `wordsRaw` and `wordsAlnum` are always both present,
             along with the counts of the tokens the two differ by (bullets, symbols, punct), so a
-            comparison can show what a difference is made of rather than only how big it is.
+            comparison can show what a difference is made of rather than only how big it is. The
+            default matches the corpus gate's `words_of()`: a token is a word iff it carries at
+            least one Unicode letter or digit.
 
             Word boundaries are inferred from glyph geometry, here as in every PDF text extractor.
             Two extractors will disagree; the point of this one is that it is pinned in the

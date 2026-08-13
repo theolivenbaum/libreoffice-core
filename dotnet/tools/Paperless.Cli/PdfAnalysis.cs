@@ -1,8 +1,10 @@
 using System.Text;
 using UglyToad.PdfPig;
 using UglyToad.PdfPig.Content;
+using UglyToad.PdfPig.Core;
 using UglyToad.PdfPig.Tokenization.Scanner;
 using UglyToad.PdfPig.Tokens;
+using UglyToad.PdfPig.DocumentLayoutAnalysis.WordExtractor;
 using UglyToad.PdfPig.Util;
 
 namespace Paperless.Cli;
@@ -36,14 +38,25 @@ public static class PdfAnalysis
     /// <summary>Reads <paramref name="pdfPath"/> and reports everything the gate needs.</summary>
     /// <param name="pdfPath">The PDF to read.</param>
     /// <param name="includeText">Whether to retain the extracted text on the result.</param>
+    /// <param name="grouping">How glyphs are grouped into words.</param>
     /// <returns>
     /// The analysis. A file that cannot be parsed comes back with <see cref="PdfAnalysisResult.Error"/>
     /// set rather than throwing: a corpus sweep must be able to record a broken document as broken
     /// and carry on.
     /// </returns>
-    public static PdfAnalysisResult Analyze(string pdfPath, bool includeText = false)
+    public static PdfAnalysisResult Analyze(
+        string pdfPath,
+        bool includeText = false,
+        WordGrouping grouping = WordGrouping.NearestNeighbour)
     {
         ArgumentNullException.ThrowIfNull(pdfPath);
+
+        IWordExtractor extractor = grouping switch
+        {
+            WordGrouping.NearestNeighbour => NearestNeighbour,
+            WordGrouping.Simple => DefaultWordExtractor.Instance,
+            _ => throw new ArgumentOutOfRangeException(nameof(grouping)),
+        };
 
         try
         {
@@ -77,7 +90,7 @@ public static class PdfAnalysis
                 fonts.Collect(page);
 
                 bool first = true;
-                foreach (Word word in page.GetWords(DefaultWordExtractor.Instance))
+                foreach (Word word in extractor.GetWords(OnPage(page)))
                 {
                     tally.Add(word.Text);
 
@@ -116,6 +129,75 @@ public static class PdfAnalysis
                 Error = $"{exception.GetType().Name}: {Flatten(exception.Message)}",
             };
         }
+    }
+
+    /// <summary>
+    /// PdfPig's orientation-aware word grouper, run single-threaded.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>MaxDegreeOfParallelism = 1</c> for two reasons. The extractor otherwise fans out over the
+    /// five orientation buckets and merges them under a lock, so the <em>order</em> of the words it
+    /// returns is not reproducible — the count is, but a tool that prints text must not depend on
+    /// that distinction holding. And this runs inside a corpus sweep that is already parallel across
+    /// documents; a second layer of threads underneath it buys nothing and costs scheduling.
+    /// </para>
+    /// <para>
+    /// The remaining defaults are taken as they come, deliberately. Every one of them is a tuning
+    /// constant over glyph geometry, and re-tuning them here would put the heuristic back in our
+    /// hands and out of the pinned package — which is the whole point of pinning it.
+    /// </para>
+    /// </remarks>
+    private static readonly NearestNeighbourWordExtractor NearestNeighbour =
+        new(new NearestNeighbourWordExtractor.NearestNeighbourWordExtractorOptions
+        {
+            MaxDegreeOfParallelism = 1,
+        });
+
+    /// <summary>The glyphs of a page that are actually on it.</summary>
+    /// <remarks>
+    /// <para>
+    /// A glyph counts when the pen position it was drawn at falls inside the crop box. Everything
+    /// else is text the file contains and no reader ever shows — a spreadsheet cell whose contents
+    /// overflow past the printable area, a slide's off-canvas scratch area, a drawing parked beside
+    /// the page. It is not visible, so for a question of the form "does our rendering carry the same
+    /// text as LibreOffice's" it is not text.
+    /// </para>
+    /// <para>
+    /// This is the single largest term in the difference between this reader and <c>pdftotext</c>,
+    /// and it was found by measurement rather than assumed. Poppler discards out-of-bounds
+    /// characters in <c>TextPage::addChar</c>; the first version of this code did not, and on
+    /// <c>CIS_Debian_Linux_8_Benchmark_v1.0.0.xls</c> — <b>50.8% of whose 125 086 glyphs lie off the
+    /// page</b> — it reported 18 106 words against poppler's 9290, very nearly a factor of two.
+    /// Applying the rule takes that document to 9015, and the whole-corpus Σ|Δ| against poppler from
+    /// 120 122 tokens to 74 088.
+    /// </para>
+    /// <para>
+    /// The pen position rather than the glyph's ink box, tested and chosen: an ink-box intersection
+    /// test scores 442 documents inside the gate's 2%+3 band against this rule's 446, and is
+    /// marginally worse on every track, because a glyph half off the edge is drawn clipped and
+    /// poppler drops it too. The crop box rather than the media box, because the crop box is what a
+    /// viewer shows (ISO 32000-2 14.11.2) and it has already been clipped to the media box.
+    /// </para>
+    /// </remarks>
+    private static List<Letter> OnPage(Page page)
+    {
+        PdfRectangle box = page.CropBox.Bounds;
+        double left = Math.Min(box.BottomLeft.X, box.TopRight.X);
+        double right = Math.Max(box.BottomLeft.X, box.TopRight.X);
+        double bottom = Math.Min(box.BottomLeft.Y, box.TopRight.Y);
+        double top = Math.Max(box.BottomLeft.Y, box.TopRight.Y);
+
+        IReadOnlyList<Letter> letters = page.Letters;
+        List<Letter> onPage = new(letters.Count);
+
+        foreach (Letter letter in letters)
+        {
+            PdfPoint pen = letter.StartBaseLine;
+            if (pen.X >= left && pen.X <= right && pen.Y >= bottom && pen.Y <= top) onPage.Add(letter);
+        }
+
+        return onPage;
     }
 
     /// <summary>Rounds a point measurement to a thousandth, so two runs print the same digits.</summary>
@@ -158,7 +240,7 @@ public static class PdfAnalysis
 
                 raw++;
 
-                if (ContainsLetterOrDigit(span)) alphanumeric++;
+                if (ContainsAlphanumeric(span)) alphanumeric++;
                 else if (AllBullet(span)) bullet++;
                 else if (ContainsPrivateUse(span)) privateUse++;
                 else punctuation++;
@@ -168,13 +250,21 @@ public static class PdfAnalysis
         public readonly PdfWordCounts ToCounts()
             => new(raw, alphanumeric, bullet, privateUse, punctuation);
 
+        /// <summary>Splits on whitespace the way Python's <c>str.split()</c> with no argument does.</summary>
+        /// <remarks>
+        /// The gate's <c>words_of()</c> is <c>text.split()</c> in Python, so this has to agree with it
+        /// and not merely with <c>wc -w</c>. The two differ in one place: Python's whitespace set
+        /// includes the C0 file, group, record and unit separators U+001C–U+001F, which
+        /// <see cref="char.IsWhiteSpace(char)"/> does not. They are rare and they do turn up in text
+        /// lifted out of legacy binary formats, so they are added rather than argued about.
+        /// </remarks>
         private static List<Range> Tokenise(string token)
         {
             List<Range> ranges = [];
             int start = -1;
             for (int i = 0; i < token.Length; i++)
             {
-                bool space = char.IsWhiteSpace(token[i]);
+                bool space = char.IsWhiteSpace(token[i]) || token[i] is >= '\u001C' and <= '\u001F';
                 if (!space && start < 0) start = i;
                 else if (space && start >= 0) { ranges.Add(start..i); start = -1; }
             }
@@ -182,9 +272,30 @@ public static class PdfAnalysis
             return ranges;
         }
 
-        private static bool ContainsLetterOrDigit(ReadOnlySpan<char> span)
+        /// <summary>Whether a token carries at least one Unicode letter or digit.</summary>
+        /// <remarks>
+        /// <para>
+        /// This is the corpus gate's word definition, decided and merged by the round that owns it,
+        /// and reimplemented here rather than re-decided. The gate expresses it as Python's
+        /// <c>any(c.isalnum() for c in w)</c>, and <c>str.isalnum()</c> is true for the letter
+        /// categories <em>and</em> for every numeric category — Nd, Nl and No. So the predicate is
+        /// <c>IsLetter || IsNumber</c>, not <c>IsLetterOrDigit</c>: the latter stops at Nd and would
+        /// score "½", "Ⅻ" and a superscript "²" as not-a-word where the gate scores them as words.
+        /// </para>
+        /// <para>
+        /// Enumerated as runes rather than chars. Python iterates code points; .NET iterates UTF-16
+        /// units, and <see cref="char.IsLetter(char)"/> is false for either half of a surrogate pair.
+        /// A CJK ideograph above the BMP — extension B onwards, which real documents do carry — would
+        /// otherwise be counted as punctuation by a reader that believes it handles Unicode.
+        /// </para>
+        /// </remarks>
+        private static bool ContainsAlphanumeric(ReadOnlySpan<char> span)
         {
-            foreach (char c in span) if (char.IsLetterOrDigit(c)) return true;
+            foreach (Rune rune in span.EnumerateRunes())
+            {
+                if (Rune.IsLetter(rune) || Rune.IsNumber(rune)) return true;
+            }
+
             return false;
         }
 
@@ -278,6 +389,22 @@ public static class PdfAnalysis
         private readonly List<PdfFontInfo> fonts = [];
         private readonly HashSet<string> seen = [];
 
+        /// <summary>
+        /// Every form XObject and pattern already descended into, for the whole document.
+        /// </summary>
+        /// <remarks>
+        /// <b>This set is not an optimisation; without it the walk does not terminate on real files.</b>
+        /// Resource dictionaries are shared: a deck's ten slides point at one resources dictionary
+        /// holding <i>n</i> form XObjects, and each of those points back at a resources dictionary
+        /// holding the same <i>n</i>. Descending without remembering therefore costs O(<i>n</i>ᵈ) —
+        /// the depth cap alone does not save it, it only bounds the exponent — and the first version
+        /// of this code hung on 17 of the corpus's 534 documents, indefinitely rather than slowly:
+        /// <c>1-secretariat__ppt.pdf</c> is 10 pages and 2402 glyphs, reads in 0.7 s with the walk
+        /// removed, and had not finished the walk after 570 s. Keyed on the indirect reference,
+        /// document-wide, so each object is entered exactly once however many pages reach it.
+        /// </remarks>
+        private readonly HashSet<string> descended = [];
+
         public void Collect(Page page)
         {
             // /Resources is inheritable through the page tree (ISO 32000-2 7.7.3.4), so a page
@@ -319,6 +446,8 @@ public static class PdfAnalysis
             {
                 foreach (KeyValuePair<string, IToken> entry in xobjects.Data)
                 {
+                    if (!ShouldDescend("x", entry.Value)) continue;
+
                     if (Resolve(entry.Value) is StreamToken form
                         && form.StreamDictionary.TryGet(NameToken.Resources, scanner, out DictionaryToken? nested))
                     {
@@ -331,6 +460,8 @@ public static class PdfAnalysis
             {
                 foreach (KeyValuePair<string, IToken> entry in patterns.Data)
                 {
+                    if (!ShouldDescend("p", entry.Value)) continue;
+
                     IToken? resolved = Resolve(entry.Value);
                     DictionaryToken? pattern = resolved as DictionaryToken
                                                ?? (resolved as StreamToken)?.StreamDictionary;
@@ -344,6 +475,18 @@ public static class PdfAnalysis
 
         private IToken? Resolve(IToken token)
             => token is IndirectReferenceToken reference ? scanner.Get(reference.Data)?.Data : token;
+
+        /// <summary>
+        /// Whether this nested resource holder has not been descended into yet, recording it if so.
+        /// </summary>
+        /// <remarks>
+        /// Only an indirect reference can be remembered, and only an indirect reference can be shared
+        /// — a dictionary written inline is reachable from one place by construction, so it cannot be
+        /// the thing that multiplies. The <paramref name="kind"/> prefix keeps the XObject and Pattern
+        /// namespaces apart; an object can legitimately be both.
+        /// </remarks>
+        private bool ShouldDescend(string kind, IToken token)
+            => token is not IndirectReferenceToken reference || descended.Add(kind + reference.Data);
 
         /// <summary>The key a font is de-duplicated by.</summary>
         /// <remarks>
@@ -508,28 +651,77 @@ public sealed record PdfAnalysisResult
     /// <summary>The word count under a given policy.</summary>
     public int WordCount(WordCountPolicy policy) => policy switch
     {
-        WordCountPolicy.Raw => Words.Raw,
         WordCountPolicy.Alphanumeric => Words.Alphanumeric,
+        WordCountPolicy.Raw => Words.Raw,
         _ => throw new ArgumentOutOfRangeException(nameof(policy)),
     };
 }
 
+/// <summary>How glyphs are grouped into words.</summary>
+/// <remarks>
+/// <para>
+/// Both are PdfPig's, not ours, and both are heuristics over glyph geometry. The choice was made by
+/// measurement against poppler over all 534 canonical reference PDFs, under the gate's own metric
+/// and its own 2%+3 band — see <c>dotnet/probes/tooling-01/results.md</c>. It is exposed rather than
+/// fixed so the next round can re-take that measurement instead of trusting this sentence.
+/// </para>
+/// <para>
+/// <b>Result: 480 documents in band for <see cref="NearestNeighbour"/> against 460 for
+/// <see cref="Simple"/></b>, 37 documents moving in and 17 out.
+/// </para>
+/// </remarks>
+public enum WordGrouping
+{
+    /// <summary>
+    /// Nearest-neighbour clustering, bucketed by text orientation first.
+    /// </summary>
+    /// <remarks>
+    /// The default, and the one that is structurally right rather than merely better on average:
+    /// <see cref="Simple"/> has no concept of orientation at all, so a rotated chart axis label —
+    /// every glyph at a different height — becomes one word per glyph. On
+    /// <c>Keywords_Mapping_Graphs_and_Charts.xlsx</c> that is 8225 words against poppler's 4519;
+    /// this grouping reports 4431. Costs about four times the word-grouping time, which is a small
+    /// share of a run dominated by content-stream parsing.
+    /// </remarks>
+    NearestNeighbour,
+
+    /// <summary>
+    /// PdfPig's simpler line-then-gap grouper.
+    /// </summary>
+    /// <remarks>
+    /// Kept because it is better on one identifiable shape: a wide spreadsheet whose columns sit
+    /// close together, where nearest-neighbour clustering bridges the gap between two cells and
+    /// merges their contents. Three sheets carry most of that cost, <c>Laser Report 2024 FOIA
+    /// (Oct).xlsx</c> alone 22 308 words of it.
+    /// </remarks>
+    Simple,
+}
+
 /// <summary>Which tokens count as words.</summary>
 /// <remarks>
+/// <para>
 /// Named and selectable rather than a constant inside the counter, because <em>what a word is</em>
-/// is a separate decision from <em>how to measure it</em>, and baking one into the other is how the
-/// project ended up unable to tell a renderer change from a poppler change. Both counts are always
-/// reported; this only chooses which one the single <c>words</c> column carries.
+/// is a separate decision from <em>how to measure it</em>. Both counts are always reported, along
+/// with the classes they differ by; this only chooses which one the single <c>words</c> column
+/// carries.
+/// </para>
+/// <para>
+/// The default is <see cref="Alphanumeric"/> because that is the corpus gate's decided metric —
+/// measured and merged by the round that owns the definition, not chosen here. <see cref="Raw"/>
+/// remains so that any figure recorded before that decision can still be reproduced; a figure
+/// quoted without saying which of the two produced it is ambiguous.
+/// </para>
 /// </remarks>
 public enum WordCountPolicy
 {
     /// <summary>
-    /// Every whitespace-delimited token. The like-for-like replacement for
-    /// <c>pdftotext | wc -w</c>, and the default so that swapping the gate over changes the tool
-    /// without also changing the definition.
+    /// Tokens holding at least one Unicode letter or digit. The gate's metric.
+    /// </summary>
+    Alphanumeric,
+
+    /// <summary>
+    /// Every whitespace-delimited token, including bullets, rendering markers and lone currency
+    /// symbols. What <c>pdftotext | wc -w</c> counted, kept for reconciling stored figures.
     /// </summary>
     Raw,
-
-    /// <summary>Only tokens holding at least one letter or digit.</summary>
-    Alphanumeric,
 }
