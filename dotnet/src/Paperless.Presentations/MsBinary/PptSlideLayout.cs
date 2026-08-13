@@ -1030,10 +1030,13 @@ internal sealed class PptSlideLayout
     /// type.
     /// </para>
     /// <para>
-    /// The destination is the shape's placed rectangle, with no crop applied.
-    /// <c>cropFromTop</c> and its three siblings are recorded in the TODO rather than
-    /// approximated; a cropped picture drawn whole is the right picture in the right place at the
-    /// wrong scale, where dropping it is a hole.
+    /// The destination is the shape's placed rectangle grown by whatever <c>cropFromTop</c> and
+    /// its three siblings throw away, so the surviving part of the picture is what fills the
+    /// frame — <see cref="EscherPicture.Cropped"/>. The clip that makes it look cropped is the
+    /// shape's outline, which <see cref="Layout.SlideDrawing"/> applies to every picture anyway.
+    /// Measured on <c>Thailand17.ppt</c> page 22: an anchor of 655.63 × 528.25 pt under crops of
+    /// 8% left, 2.667% right and 10% bottom becomes 733.92 × 586.97, which is the reference's own
+    /// destination to 0.03 pt in three independent coordinates.
     /// </para>
     /// </remarks>
     private PlacedPicture? Picture(EscherShape shape, DocRect bounds)
@@ -1041,7 +1044,7 @@ internal sealed class PptSlideLayout
         PptPicture picture = PictureOf(shape);
         return picture.IsEmpty
             ? null
-            : new PlacedPicture(picture.Raster, bounds)
+            : new PlacedPicture(picture.Raster, EscherPicture.Cropped(shape.Properties, bounds))
             {
                 Vector = picture.Vector,
 

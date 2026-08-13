@@ -171,6 +171,40 @@ public static class EscherPropertyIds
     /// </remarks>
     public const ushort TextAnchor = 135;
 
+    /// <summary>
+    /// How much of the picture's top edge is cropped away, as a 16.16 fixed-point fraction of
+    /// its height.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A <em>fraction of the picture</em>, not a length: <c>include/svx/msdffdef.hxx:131</c>
+    /// states the unit in its own comment as "16.16 fraction times total image width or height,
+    /// as appropriate", and <c>lcl_ApplyCropping</c>
+    /// (<c>filter/source/msfilter/msdffimp.cxx:3781-3833</c>) divides each of the four by
+    /// 65536.0. So 6554 is 10.00% and 5243 is 8.00%.
+    /// </para>
+    /// <para>
+    /// <b>Signed.</b> LibreOffice reads the raw property with <c>GetPropertyValue</c>, which is
+    /// unsigned, and immediately casts it to <c>sal_Int32</c>; a negative crop pads rather than
+    /// trims. Read these with <see cref="EscherPropertyTable.SignedValue"/> for that reason —
+    /// <see cref="EscherPropertyTable.Value"/> turns a small negative fraction into a crop of
+    /// some sixty-five thousand times the picture.
+    /// </para>
+    /// </remarks>
+    public const ushort CropFromTop = 256;
+
+    /// <inheritdoc cref="CropFromTop"/>
+    /// <summary>How much of the picture's bottom edge is cropped away.</summary>
+    public const ushort CropFromBottom = 257;
+
+    /// <inheritdoc cref="CropFromTop"/>
+    /// <summary>How much of the picture's left edge is cropped away.</summary>
+    public const ushort CropFromLeft = 258;
+
+    /// <inheritdoc cref="CropFromTop"/>
+    /// <summary>How much of the picture's right edge is cropped away.</summary>
+    public const ushort CropFromRight = 259;
+
     /// <summary>The blip to display, as an index into the blip store.</summary>
     public const ushort Picture = 260;
 
