@@ -130,18 +130,42 @@ internal sealed class SheetPageDecoration(SheetLayout sheet, SheetPagePlacement 
     }
 
     /// <summary>
-    /// Draws the cells' borders, one stroke per cell edge, with each shared edge settled.
+    /// Draws the cells' borders, coalesced into one stroke per run of identically styled edges.
     /// </summary>
     /// <remarks>
     /// <para>
-    /// Per <em>cell edge</em> and not per grid line, which is where a sheet parts company with a
-    /// Writer table and is worth stating because the two look alike: <c>Array::CreateB2DPrimitiveRange</c>
-    /// emits one primitive for each cell's top and left edge, and the bottom and right only for
-    /// the last row and column (<c>svx/source/dialog/framelinkarray.cxx:1490-1537</c>). Two
-    /// vertically adjacent cells agreeing about a border therefore produce two strokes, not one.
-    /// Writer's <c>PageDrawing</c> merges runs because <c>SwTabFramePainter</c> does; Calc does
-    /// not, and measuring LibreOffice's own PDF of <c>sheet-decor-ods.ods</c> confirms it —
-    /// B4's box arrives as four separate <c>m … l S</c> pairs rather than one closed path.
+    /// <c>Array::CreateB2DPrimitiveRange</c> emits one primitive for each cell's top and left edge,
+    /// and the bottom and right only for the last row and column
+    /// (<c>svx/source/dialog/framelinkarray.cxx:1490-1537</c>) — but that is not what reaches the
+    /// page. <c>SdrFrameBorderPrimitive2D::create2DDecomposition</c>
+    /// (<c>svx/source/sdr/primitive2d/sdrframeborderprimitive2d.cxx:782-841</c>) decomposes them
+    /// all and then folds each new segment into any already-emitted one it can, through
+    /// <c>tryMergeBorderLinePrimitive2D</c>
+    /// (<c>drawinglayer/source/primitive2d/borderlineprimitive2d.cxx:300-417</c>). So a grid line
+    /// arrives as **one** stroke per maximal run of identically styled cell edges.
+    /// </para>
+    /// <para>
+    /// **Measured, not inferred.** <c>tests/corpus/features/sheet-border-runs.fods</c> is fourteen
+    /// four-cell runs each varying one property, rendered by LibreOffice 26.2.4.2 itself; the
+    /// stroke census is in <c>probes/sheets-d-01/results.md</c>. Four identically styled cells give
+    /// one stroke spanning all four. A change of colour, of width, of pattern, or of the number of
+    /// sub-lines gives two. A cell that states nothing gives two, and they do not bridge the hole.
+    /// A perpendicular border crossing an interior joint does <em>not</em> break the run. A hidden
+    /// row or column does not break it either — Calc's array holds visible lines only.
+    /// </para>
+    /// <para>
+    /// The correction this supersedes, recorded because the measurement behind it was real and
+    /// the conclusion drawn from it was not: <c>sheet-decor-ods.ods</c>'s B4 box does arrive as
+    /// four separate <c>m … l S</c> pairs, and that says nothing about coalescing, because a
+    /// cell's four edges run in four directions and <c>tryMergeBorderLinePrimitive2D</c> refuses a
+    /// non-zero cross product by construction. Calc merges collinear runs and only those.
+    /// </para>
+    /// <para>
+    /// A run may not cross a band. <c>ScPrintFunc::PrintPage</c> makes up to four separate
+    /// <c>PrintArea</c> calls per page — the repeated corner, the repeated column band, the
+    /// repeated row band and the data (<c>sc/source/ui/view/printfun.cxx:2303-2335</c>) — each
+    /// with its own <c>ScOutputData</c>, hence its own array and its own primitive group, so two
+    /// segments from different bands can never meet in the merge loop.
     /// </para>
     /// <para>
     /// Which border a shared edge gets is <see cref="SheetCellBorders.Resolve"/>: the heavier of
@@ -156,12 +180,9 @@ internal sealed class SheetPageDecoration(SheetLayout sheet, SheetPagePlacement 
     /// drawn at all. <c>Array::GetCellStyleTop</c> and its three siblings return
     /// <c>OBJ_STYLE_NONE</c> when <c>IsMergedOverlapped*</c> and otherwise read from
     /// <c>GetMergedStyleSourceCell</c> (<c>svx/source/dialog/framelinkarray.cxx:782-856</c>).
-    /// Note which edges that suppresses and which it does not: a block three rows tall still emits
-    /// its left edge <em>per row</em>, all three carrying the origin's style, because only
-    /// <c>mbOverlapX</c> suppresses a left edge. The reference then merges the three into one line
-    /// (<c>tryMergeBorderLinePrimitive2D</c>, which merges collinear lines only when their
-    /// <c>LineAttribute</c> matches); three abutting butt-capped segments of the same colour and
-    /// width put down the same ink, so they are left as segments here.
+    /// A block three rows tall still emits its left edge <em>per row</em>, all three carrying the
+    /// origin's style, because only <c>mbOverlapX</c> suppresses a left edge — and the three are
+    /// now folded back into one line, which is what the reference draws.
     /// </para>
     /// </remarks>
     /// <param name="columns">The columns on the page.</param>
@@ -173,7 +194,13 @@ internal sealed class SheetPageDecoration(SheetLayout sheet, SheetPagePlacement 
         SheetFormatting formatting = sheet.Formatting;
         if (formatting.IsEmpty || columns.Count == 0 || rows.Count == 0) return;
 
-        Edges edges = Edges.Build(DecorationAt, sheet.Merges, columns, rows);
+        Edges edges = Edges.Build(
+            DecorationAt,
+            sheet.Merges,
+            columns,
+            rows,
+            placement.RepeatColumns is { IsValid: true } rc ? rc.LastColumn : int.MinValue,
+            placement.RepeatRows is { IsValid: true } rr ? rr.LastRow : int.MinValue);
 
         foreach (Edge edge in edges.All) Stroke(edge, edges, sink);
     }
@@ -674,6 +701,33 @@ internal sealed class SheetPageDecoration(SheetLayout sheet, SheetPagePlacement 
         bool IsHorizontal, Length At, Length From, Length To, SheetBorder Border);
 
     /// <summary>
+    /// Which run a cell edge belongs to: everything but its position along that run.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Two edges coalesce when their keys are equal and their <c>Index</c> values are adjacent.
+    /// </para>
+    /// <para>
+    /// <c>Line</c> identifies the grid line by <em>which edge of which placed row or column</em>
+    /// stated it — <c>2 × index</c> for a top or left edge and <c>2 × index + 1</c> for a bottom
+    /// or right one — and not by its coordinate. Keying on the coordinate is wrong and cost this
+    /// round a measured regression: a workbook with a zero-height row puts two grid lines at the
+    /// same y, so the pieces of two different lines land in one bucket with duplicate indices, and
+    /// what came out of the run builder was five mutually overlapping segments where there should
+    /// have been two coincident ones. Measured on page 2 of
+    /// <c>6880ac7361ca1b99a9230811_ST Capability List Rev.16 - Web.xlsx</c>, where the overhang
+    /// double-ink went 251 pt → 710 pt against a reference of 1.8 pt. With the line identity in
+    /// the key an index cannot repeat, by construction.
+    /// </para>
+    /// </remarks>
+    /// <param name="IsHorizontal">True when the run goes across the page.</param>
+    /// <param name="Line">Which grid line stated it, as an edge of a placed row or column.</param>
+    /// <param name="Band">Which printed band drew it; runs never cross one.</param>
+    /// <param name="Border">The resolved border, compared in full — width, gap, colour, pattern.</param>
+    private readonly record struct RunKey(
+        bool IsHorizontal, int Line, int Band, SheetBorder Border);
+
+    /// <summary>
     /// A page's borders, with the crossings indexed so an end can be extended.
     /// </summary>
     /// <remarks>
@@ -683,16 +737,24 @@ internal sealed class SheetPageDecoration(SheetLayout sheet, SheetPagePlacement 
     /// </remarks>
     private sealed class Edges
     {
-        private readonly List<Edge> _edges = [];
+        private readonly List<Edge> _runs = [];
         private readonly Dictionary<(bool Horizontal, long At, long Along), Length> _widths = [];
+        private readonly Dictionary<RunKey, List<Piece>> _pieces = [];
 
-        public IReadOnlyList<Edge> All => _edges;
+        // Iterated rather than the dictionary, so the order strokes reach the page is the order
+        // the cells were walked in and does not depend on a hash. Two renders of one document
+        // have to be byte-identical: that is how this project measures a change's reach.
+        private readonly List<RunKey> _keys = [];
+
+        public IReadOnlyList<Edge> All => _runs;
 
         public static Edges Build(
             Func<int, int, SheetCellDecoration> decoration,
             SheetMerges merges,
             IReadOnlyList<PlacedColumn> columns,
-            IReadOnlyList<PlacedRow> rows)
+            IReadOnlyList<PlacedRow> rows,
+            int lastRepeatedColumn,
+            int lastRepeatedRow)
         {
             Edges edges = new();
 
@@ -700,16 +762,26 @@ internal sealed class SheetPageDecoration(SheetLayout sheet, SheetPagePlacement 
             {
                 PlacedRow row = rows[r];
 
+                // Which of the page's up-to-four printed areas this cell was drawn by. A repeated
+                // band is a separate ScPrintFunc::PrintArea call with its own ScOutputData, so a
+                // border run may not cross into it; SheetPagePlacement only carries a repeat range
+                // when the page's own cells start past it, so the test cannot misfire on the page
+                // that holds the band itself.
+                int rowBand = row.Row <= lastRepeatedRow ? 0 : 1;
+
                 for (int c = 0; c < columns.Count; c++)
                 {
                     PlacedColumn column = columns[c];
+                    int columnBand = column.Column <= lastRepeatedColumn ? 0 : 1;
                     SheetCellBorders own = decoration(row.Row, column.Column).Borders;
                     bool firstRowOfBand = r == 0 || rows[r - 1].Row != row.Row - 1;
                     bool firstColumnOfBand = c == 0 || columns[c - 1].Column != column.Column - 1;
 
                     if (!merges.IsOverlappedTop(row.Row, column.Column))
                     {
-                        edges.Add(true, row.Y, column.X, column.Right, firstRowOfBand
+                        edges.Add(
+                            true, 2 * r, columnBand, c,
+                            row.Y, column.X, column.Right, firstRowOfBand
                             ? own.Top
                             : SheetCellBorders.Resolve(
                                 own.Top, decoration(row.Row - 1, column.Column).Borders.Bottom));
@@ -717,7 +789,9 @@ internal sealed class SheetPageDecoration(SheetLayout sheet, SheetPagePlacement 
 
                     if (!merges.IsOverlappedLeft(row.Row, column.Column))
                     {
-                        edges.Add(false, column.X, row.Y, row.Bottom, firstColumnOfBand
+                        edges.Add(
+                            false, 2 * c, rowBand, r,
+                            column.X, row.Y, row.Bottom, firstColumnOfBand
                             ? own.Left
                             : SheetCellBorders.Resolve(
                                 own.Left, decoration(row.Row, column.Column - 1).Borders.Right));
@@ -734,31 +808,60 @@ internal sealed class SheetPageDecoration(SheetLayout sheet, SheetPagePlacement 
                     if ((r == rows.Count - 1 || rows[r + 1].Row != row.Row + 1)
                         && !merges.IsOverlappedBottom(row.Row, column.Column))
                     {
-                        edges.Add(true, row.Bottom, column.X, column.Right, own.Bottom);
+                        edges.Add(
+                            true, (2 * r) + 1, columnBand, c,
+                            row.Bottom, column.X, column.Right, own.Bottom);
                     }
 
                     if ((c == columns.Count - 1 || columns[c + 1].Column != column.Column + 1)
                         && !merges.IsOverlappedRight(row.Row, column.Column))
                     {
-                        edges.Add(false, column.Right, row.Y, row.Bottom, own.Right);
+                        edges.Add(
+                            false, (2 * c) + 1, rowBand, r,
+                            column.Right, row.Y, row.Bottom, own.Right);
                     }
                 }
             }
 
+            edges.Coalesce();
             return edges;
         }
 
         /// <summary>How far an end reaches past its own line to meet what crosses it.</summary>
+        /// <remarks>
+        /// Asked of a coalesced run but answered from the <em>uncoalesced</em> crossing edges,
+        /// which is what makes an interior joint disappear and an outer end keep its overshoot.
+        /// A merged vertical run has endpoints only at the top and bottom of the whole run, so a
+        /// horizontal in the middle of a table would find nothing to extend to if the index were
+        /// rebuilt after coalescing — and the reference extends it: on page 3 of
+        /// <c>T0A0D0000090006XLSE.xls</c> every one of the twelve horizontals starts at 53.433
+        /// where the vertical sits at 53.802, half a 0.75 pt border away.
+        /// </remarks>
         public Length ExtensionAt(Edge edge, Length end)
             => _widths.TryGetValue((!edge.IsHorizontal, end.Twips, edge.At.Twips), out Length width)
                 ? width / 2
                 : Length.Zero;
 
-        private void Add(bool horizontal, Length at, Length from, Length to, SheetBorder border)
+        private void Add(
+            bool horizontal,
+            int line,
+            int band,
+            int index,
+            Length at,
+            Length from,
+            Length to,
+            SheetBorder border)
         {
             if (border.IsNone) return;
 
-            _edges.Add(new Edge(horizontal, at, from, to, border));
+            RunKey key = new(horizontal, line, band, border);
+            if (!_pieces.TryGetValue(key, out List<Piece>? pieces))
+            {
+                _pieces[key] = pieces = [];
+                _keys.Add(key);
+            }
+
+            pieces.Add(new Piece(index, at, from, to));
 
             // Recorded at both ends so that either end of a crossing line can find it. The
             // narrowest wins a tie, which is what getExtends does when several lines meet at one
@@ -766,6 +869,51 @@ internal sealed class SheetPageDecoration(SheetLayout sheet, SheetPagePlacement 
             Note(horizontal, at, from, border.Width);
             Note(horizontal, at, to, border.Width);
         }
+
+        /// <summary>Folds each grid line's identically styled cell edges into maximal runs.</summary>
+        /// <remarks>
+        /// Adjacency is by <em>placed</em> index rather than by sheet row or column, and that is
+        /// measured rather than assumed: sheet 2 of <c>sheet-border-runs.fods</c> hides a column
+        /// in the middle of a four-cell top border and a row in the middle of a four-row left
+        /// border, and LibreOffice draws one stroke for each — 56.665→226.743 across three visible
+        /// columns, and 717.306→768.245 down three visible rows. A hidden line is not in Calc's
+        /// border array at all, so it does not interrupt a run.
+        /// </remarks>
+        private void Coalesce()
+        {
+            foreach (RunKey key in _keys)
+            {
+                List<Piece> pieces = _pieces[key];
+                pieces.Sort(static (a, b) => a.Index.CompareTo(b.Index));
+
+                int at = 0;
+                while (at < pieces.Count)
+                {
+                    int last = at;
+                    while (last + 1 < pieces.Count
+                           && pieces[last + 1].Index == pieces[last].Index + 1)
+                    {
+                        last++;
+                    }
+
+                    _runs.Add(new Edge(
+                        key.IsHorizontal,
+                        pieces[at].At,
+                        pieces[at].From,
+                        pieces[last].To,
+                        key.Border));
+
+                    at = last + 1;
+                }
+            }
+        }
+
+        /// <summary>One cell edge, before its run is folded together.</summary>
+        /// <param name="Index">Where it sits along the run: the placed column or row index.</param>
+        /// <param name="At">Its exact position on the other axis, kept rather than the key's twips.</param>
+        /// <param name="From">Where it starts along its own axis.</param>
+        /// <param name="To">Where it ends.</param>
+        private readonly record struct Piece(int Index, Length At, Length From, Length To);
 
         private void Note(bool horizontal, Length at, Length along, Length width)
         {

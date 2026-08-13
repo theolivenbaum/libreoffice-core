@@ -59,12 +59,22 @@ public sealed class SheetMergedDecorationTests
         // The covered cells' 1 pt magenta box is drawn nowhere at all.
         strokes.ShouldAllBe(s => !Paints(s, Covered));
 
-        // What remains of the block is its outline: three left segments, three right, two top and
-        // two bottom, one per covered cell edge, all in the origin's colour. Only the edges
-        // *interior* to the block are suppressed — a left edge is suppressed by an overlap in the
-        // column direction only, which is why a three-row block still emits three of them.
-        strokes.Count(s => Paints(s, Origin))
-            .ShouldBe((2 * Block.RowCount) + (2 * Block.ColumnCount));
+        // What remains of the block is its outline: **four** strokes, one per side.
+        //
+        // This assertion used to read `2*RowCount + 2*ColumnCount` — ten — on the grounds that a
+        // three-row block emits its left edge once per row, because only `mbOverlapX` suppresses
+        // a left edge. That much is true of Calc's border *array* and is not what reaches the
+        // page: `SdrFrameBorderPrimitive2D::create2DDecomposition` folds the three back into one
+        // (see `SheetBorderRunTests`). The count was wrong and the paragraph above it, written
+        // when the test was, already said so — "the reference PDF holds one red rectangle over
+        // the whole block, **four blue lines round it**".
+        //
+        // Re-measured on `probes/sheets-r37/merge-decor.fods` under 26.2.4.2 rather than trusting
+        // the old prose: the PDF holds exactly four `#0000FF` 2 pt strokes, at
+        // H 768.245 (113.102 -> 226.998), V 113.357 (717.051 -> 768.500),
+        // V 226.743 (717.051 -> 768.500) and H 717.306 (113.102 -> 226.998). Ours now sit within
+        // 0.035 pt of each of the four.
+        strokes.Count(s => Paints(s, Origin)).ShouldBe(4);
 
         // The interior vertical between the block's two columns is gone: no stroke sits on it.
         Length interior = ColumnX(2);
