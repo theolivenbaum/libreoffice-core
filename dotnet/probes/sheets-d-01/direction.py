@@ -79,7 +79,10 @@ def measure(pdf, max_pages):
         over = 0.0
         for spans in by_line.values():
             over += union(spans)[1]
-        out[i] = (len(seen), over, dup, raw)
+        classes = collections.Counter()
+        for (orient, at, fr, to, w, col) in seen:
+            classes[(w, col)] += 1
+        out[i] = (len(seen), over, dup, raw, classes)
     return out
 
 
@@ -88,7 +91,8 @@ def main():
     ap.add_argument("before"); ap.add_argument("after"); ap.add_argument("ref")
     ap.add_argument("ids"); ap.add_argument("--max-pages", type=int, default=0)
     a = ap.parse_args()
-    print("id\tpage\tdist_b\tdist_a\tdist_r\tover_b\tover_a\tover_r\tdup_b\tdup_a\tdup_r")
+    print("id\tpage\tdist_b\tdist_a\tdist_r\tover_b\tover_a\tover_r\tdup_b\tdup_a\tdup_r"
+          "\tshr_b\tshr_a\tshr_r")
     for line in open(a.ids):
         pid = line.strip()
         if not pid:
@@ -106,9 +110,17 @@ def main():
             print(f"# pagecount {pid} {len(b)} vs {len(r)}", file=sys.stderr)
             continue
         for p in sorted(b):
-            db, ob, ub, _ = b[p]; da, oa, ua, _ = af[p]; dr, orr, ur, _ = r[p]
+            db, ob, ub, _, cb = b[p]; da, oa, ua, _, ca = af[p]; dr, orr, ur, _, cr = r[p]
+            # Restricted to the (width, colour) classes BOTH sides draw on this page. A class
+            # only one side draws is a different defect -- TK-Syllabus's reference carries red
+            # 0.794 pt strike-through rules we never draw at all -- and folding it into a
+            # coalescing measurement would score that as over-merging.
+            shared = set(ca) & set(cr)
+            sb = sum(v for k, v in cb.items() if k in shared)
+            sa = sum(v for k, v in ca.items() if k in shared)
+            sr = sum(v for k, v in cr.items() if k in shared)
             print(f"{pid}\t{p}\t{db}\t{da}\t{dr}\t{ob:.2f}\t{oa:.2f}\t{orr:.2f}"
-                  f"\t{ub:.2f}\t{ua:.2f}\t{ur:.2f}")
+                  f"\t{ub:.2f}\t{ua:.2f}\t{ur:.2f}\t{sb}\t{sa}\t{sr}")
 
 
 if __name__ == "__main__":
