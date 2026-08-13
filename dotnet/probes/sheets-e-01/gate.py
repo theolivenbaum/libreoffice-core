@@ -1,11 +1,17 @@
 #!/usr/bin/env python3
-"""Reach, direction and the gate's verdict, for all three banks in one pass.
+"""Reach, direction and the gate's verdict for all three banks.
 
     gate.py <before-dir> <after-dir> <reference-dir> > rows.tsv 2> summary.txt
 
-`paperless analyze` reads every bank, so no column here can be an artefact of one extractor
-reading one side. The verdict rule is `words-rebase-02/verdict.py` unchanged — this round moves
-its *input*, never the rule.
+`paperless analyze` takes many files in one invocation and emits one TSV row each, so the whole
+gate is **three** process launches rather than 342. The first version of this script called it
+once per file per bank and had reached the letter C after twenty minutes; the batched form is
+the same instrument and finishes in one.
+
+`###` counts need the extracted text, which is per-file — so they are taken **only for the
+documents whose rendering actually changed**, plus their references. Every other document's
+`###` count is unchanged by construction (its PDF is byte-identical), which is asserted by the
+byte comparison rather than assumed.
 """
 import os
 import subprocess
@@ -18,26 +24,31 @@ from verdict import verdict                                       # noqa: E402
 CLI = os.environ["PAPERLESS_CLI"]
 
 
-def read(path):
-    """(pages, alnum words, unembedded fonts, ### tokens) from one PDF."""
-    row = subprocess.run([CLI, "analyze", "--no-header", path],
-                         capture_output=True, text=True).stdout.rstrip("\n").split("\t")
+def rows(paths):
+    """{path: (pages, alnumWords, unembedded)} for many PDFs in one launch."""
+    out = {}
+    for chunk in (paths[i:i + 40] for i in range(0, len(paths), 40)):
+        text = subprocess.run([CLI, "analyze", "--no-header", *chunk],
+                              capture_output=True, text=True).stdout
+        for line in text.splitlines():
+            f = line.split("\t")
+            if len(f) > 10:
+                # 1 pages, 4 wordsAlnum, 9 unembedded. **Not 10** — that is `subset`, which is
+                # nonzero on nearly every PDF here, and reading it as the unembedded count made
+                # the first run of this script score all 171 documents as failing.
+                out[f[0]] = (f[1], f[4], f[9])
+    return out
+
+
+def hashes(path):
     text = subprocess.run([CLI, "analyze", "--text", path],
                           capture_output=True, text=True).stdout
-    hashes = sum(1 for t in text.split() if t and set(t) == {"#"})
-    return row[1], row[4], row[10], hashes
+    return sum(1 for t in text.split() if t and set(t) == {"#"})
 
 
 def main(before, after, ref):
     names = sorted(f for f in os.listdir(after) if f.endswith(".pdf"))
-    print("stem\tpagesB\tpagesA\tpagesR\twordsB\twordsA\twordsR"
-          "\thashB\thashA\thashR\tverdictB\tverdictA\tbytesChanged")
-
-    moved = closer = further = unchanged = 0
-    sums = {"B": 0, "A": 0, "R": 0}
-    vb = va = 0
-    flips = []
-
+    pairs = []
     for n in names:
         stem = n[:-4]
         cands = [f for f in os.listdir(ref)
@@ -45,46 +56,65 @@ def main(before, after, ref):
         if not cands:
             print("NO REFERENCE FOR %s" % stem, file=sys.stderr)
             continue
+        pairs.append((stem, os.path.join(before, n), os.path.join(after, n),
+                      os.path.join(ref, cands[0])))
 
-        bp, bw, bu, bh = read(os.path.join(before, n))
-        ap, aw, au, ah = read(os.path.join(after, n))
-        rp, rw, _, rh = read(os.path.join(ref, cands[0]))
+    B = rows([p[1] for p in pairs])
+    A = rows([p[2] for p in pairs])
+    R = rows([p[3] for p in pairs])
 
-        changed = (open(os.path.join(before, n), "rb").read()
-                   != open(os.path.join(after, n), "rb").read())
-        moved += changed
-        if changed:
-            if abs(ah - rh) < abs(bh - rh):
+    changed = [p for p in pairs
+               if open(p[1], "rb").read() != open(p[2], "rb").read()]
+    hb = {p[0]: hashes(p[1]) for p in changed}
+    ha = {p[0]: hashes(p[2]) for p in changed}
+    hr = {p[0]: hashes(p[3]) for p in changed}
+
+    print("stem\tpagesB\tpagesA\tpagesR\twordsB\twordsA\twordsR"
+          "\thashB\thashA\thashR\tverdictB\tverdictA\tbytesChanged")
+
+    closer = further = level = 0
+    vb = va = 0
+    flips = []
+    tot = [0, 0, 0]
+
+    for stem, bp_, ap_, rp_ in pairs:
+        bpg, bw, bu = B[bp_]
+        apg, aw, au = A[ap_]
+        rpg, rw, _ = R[rp_]
+        ch = stem in ha
+
+        if ch:
+            tot[0] += hb[stem]
+            tot[1] += ha[stem]
+            tot[2] += hr[stem]
+            if abs(ha[stem] - hr[stem]) < abs(hb[stem] - hr[stem]):
                 closer += 1
-            elif abs(ah - rh) > abs(bh - rh):
+            elif abs(ha[stem] - hr[stem]) > abs(hb[stem] - hr[stem]):
                 further += 1
             else:
-                unchanged += 1
+                level += 1
 
-        sums["B"] += bh
-        sums["A"] += ah
-        sums["R"] += rh
-
-        b = verdict(bp, rp, bw, rw, bu)
-        a = verdict(ap, rp, aw, rw, au)
+        b = verdict(bpg, rpg, bw, rw, bu)
+        a = verdict(apg, rpg, aw, rw, au)
         vb += b == "match"
         va += a == "match"
         if a != b:
-            flips.append((stem, b, a, bw, aw, rw, bh, ah, rh))
+            flips.append((stem, b, a, bw, aw, rw))
 
-        print("\t".join(str(x) for x in
-                        (stem, bp, ap, rp, bw, aw, rw, bh, ah, rh, b, a, int(changed))))
+        print("\t".join(str(x) for x in (
+            stem, bpg, apg, rpg, bw, aw, rw,
+            hb.get(stem, "-"), ha.get(stem, "-"), hr.get(stem, "-"),
+            b, a, int(ch))))
 
-    print("documents: %d" % len(names), file=sys.stderr)
-    print("renderings byte-changed: %d" % moved, file=sys.stderr)
-    print("of those, ### count closer / unchanged / further: %d / %d / %d"
-          % (closer, unchanged, further), file=sys.stderr)
-    print("total ###: before %d, after %d, reference %d"
-          % (sums["B"], sums["A"], sums["R"]), file=sys.stderr)
-    print("gate matches: before %d, after %d" % (vb, va), file=sys.stderr)
+    print("documents: %d" % len(pairs), file=sys.stderr)
+    print("renderings byte-changed: %d" % len(changed), file=sys.stderr)
+    print("of those, ### count closer / equal / further: %d / %d / %d"
+          % (closer, level, further), file=sys.stderr)
+    print("### on the changed documents: before %d, after %d, reference %d"
+          % tuple(tot), file=sys.stderr)
+    print("gate matches over 171: before %d, after %d" % (vb, va), file=sys.stderr)
     for f in flips:
-        print("VERDICT %s: %s -> %s (words %s -> %s vs %s; ### %s -> %s vs %s)"
-              % f, file=sys.stderr)
+        print("VERDICT %s: %s -> %s (words %s -> %s vs ref %s)" % f, file=sys.stderr)
 
 
 if __name__ == "__main__":

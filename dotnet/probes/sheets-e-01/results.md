@@ -172,7 +172,87 @@ target. Both binaries **validated before use**: the pre-fix build draws `1E+00` 
 first row and the post-fix build draws `###`; the post-fix bank's `ODs-February` reproduces
 **byte for byte** when re-rendered individually.
 
-REACH_TABLE_PLACEHOLDER
+### 3.1 Reach — 2 of 171, and my prediction was an order of magnitude high
+
+**Two renderings change**, byte for byte, out of 171. P4.1 predicted 8–35 with a point estimate
+of 18. **Refuted.** The reasoning behind the estimate was "most workbooks size their columns to
+their content", which was right about the direction and wrong about the magnitude: a column
+narrower than a single digit is not a common accident, it is a deliberate spacer column, and two
+workbooks in the corpus use one to hold a number.
+
+| document | `###` before | after | reference |
+|---|---:|---:|---:|
+| `ODs-February-2022-Airbus-Commercial-Aircraft.xlsx` | 2 | **1101** | **1101** |
+| `18-02RD301_ILS_components_Master_9-13-18.xls` | 1 | **97** | **723** |
+| total, the two changed documents | **3** | **1198** | **1824** |
+
+**Direction: 2 closer, 0 unchanged, 0 further.** P4.2 holds — no document's `###` count
+overshoots the reference's, which is the check that would have caught over-application.
+
+`ODs-February` is **exact**: 1101 against 1101, which is also the number of numeric column-A
+cells the record census counted (§1.1). Three independent numbers agreeing on 1101 is what makes
+this a rule rather than a fit.
+
+Over the **whole track**, all 171 documents on each of the three banks:
+
+| | `###` tokens, 171 documents |
+|---|---:|
+| ours, before | **2640** |
+| ours, after | **3835** |
+| reference | **4424** |
+
+The change closes **1195 of the 1784-token gap, 67%**, and the +1195 reconciles exactly with the
+two changed documents' 3 → 1198. **The aggregate hides offsetting errors and should be read with
+that stated**: §3.2's single document is 626 tokens short on its own, which is *more* than the
+589 the track is short overall — so somewhere in the other 169 documents we draw about 37 `###`
+more than the reference does. Those documents are byte-identical before and after, so that
+surplus is pre-existing and untouched, but a reader who took 589 as "626 minus progress" would be
+reading a difference of two errors as one. (`sheets-d-01`'s rule, in a second dress: a count that
+sums across cases measures something other than the case.)
+
+### 3.2 The residue, named rather than rounded away
+
+`18-02RD301_ILS_components_Master_9-13-18.xls` goes 1 → 97 against a reference of 723. **626
+cells still fail to hash and this round does not explain them.** They are visible in the
+reference's text as `… 200 ### FT 200 3 HIRL PAPI …` — a numeric column beside a unit column —
+where ours draws the number. The document is a `.xls`, so its column widths and formats come
+through the BIFF path rather than the SpreadsheetML one, and its page count already agrees
+(166 = 166). It is the first thing a successor should take, and it is the reason §3.1's headline
+is "2 documents" rather than "`###` is fixed".
+
+### 3.3 Verdict movement — zero, exactly as predicted, and predicted plainly
+
+The verdict rule is `words-rebase-02/verdict.py`, unchanged; this round moves its *input* only.
+Every one of the 171 has **0 unembedded fonts** on our side (`unembedded.tsv`, asserted rather
+than assumed), so the verdict is decided by pages and words alone.
+
+| | match | words | pages,words | pages |
+|---|---:|---:|---:|---:|
+| before | **146** | 16 | 5 | 4 |
+| after | **146** | 16 | 4 | 5 |
+
+**Sheets is 146 of 171 before and after.** That reproduces `sheets-d-01`'s scoreboard to the
+digit — 146 / 16 / 5 / 4 — computed here from `paperless analyze` rather than from `pdftotext`,
+which is a second instrument returning the same four numbers.
+
+**One document's verdict string changes and the scoreboard does not move**, which is exactly
+P4.3:
+
+| | words ours | reference | Δ | band (2% + 3) | verdict |
+|---|---:|---:|---:|---:|---|
+| `ODs-February`, before | 16 635 | 15 740 | **+895** | 317 | `pages,words` |
+| `ODs-February`, after | 15 536 | 15 740 | **−204** | 317 | `pages` |
+
+P4.3 predicted **−206**; the measured figure is **−204**. The document still fails check 1 on
+pages (154 against 175), so it does not enter the scoreboard — and the words verdict it now
+carries is true where the one it carried was false. This is the round the gate *could* have
+moved, and it did not, for the reason predicted before it was measured.
+
+### 3.4 What the byte comparison also settles
+
+169 of 171 renderings are **byte-identical** before and after. So the wrap-suppression half of
+the change (§2) reaches nothing in this corpus beyond the two documents above, and the row-height
+concern it raised is out of its reach entirely — recorded in §10 rather than claimed as fixed.
 
 ## 4. The accounting `$`/`-` — refuted as a rendering defect, and then seated anyway
 
@@ -362,11 +442,121 @@ the 1.75 pt class exactly. The document nonetheless **matches the gate** — 3 p
 on both sides — which is the cleanest demonstration in this report of what check 2 cannot see. Not
 diagnosed; recorded as the largest single lead this round produced.
 
-SCORING_PLACEHOLDER
+## 6. Two instrument findings, both of which cost time
 
-TESTS_PLACEHOLDER
+**A batched instrument and a serial one are not the same instrument in practice.** The first
+`gate.py` called `paperless analyze` once per file per bank — 342 process launches. Twenty
+minutes in it had reached the letter C. `analyze` takes many files in one invocation and emits a
+row each; the batched form is the identical measurement and finishes. Recorded because the serial
+version *looked* correct and would have been abandoned as "too slow to measure" rather than
+rewritten.
 
-BUILD_PLACEHOLDER
+**And it read the wrong column.** `analyze`'s TSV is
+`file pages words wordsRaw wordsAlnum bullets symbols punct fonts unembedded subset …` — the
+unembedded count is field **9** and field 10 is `subset`, which is nonzero on nearly every PDF
+here. Taking 10 for 9 scored **all 171 documents as failing the unembedded check** and produced
+"gate matches: before 0, after 0" — a number so obviously wrong that it was caught, which is the
+only reason it is a footnote and not a published figure. The comparable trap in `sheets-c-01` was
+`zipfile.is_zipfile`; this one is a column index, and it is worse in one way: it produced a *plausible
+shape* (before and after equal) with a wrong magnitude.
+
+## 7. The prediction, scored
+
+| # | predicted | outcome |
+|---|---|---|
+| P0.1 | the brief's `###` direction is inverted; reference ≈1101, ours ≈2 | **right** — 1101 and 2, exactly |
+| P0.2 | the fix is *adding* `###` | **right** |
+| P1.1 | a non-`General` format hashes outright, no shortening | **right** — `0.00` gives `###`×9 then `1.00`, never `1.0` |
+| P1.2 | `General` shortens, then goes scientific, and only then hashes | **right** — `123456789012` gives `###`, then `1E+11`, then the full number |
+| P1.3 | a text cell never hashes | **right**, at all twenty widths |
+| P1.4 | a formula in error hashes | **not tested** — the fixture has no formula; stated as untested rather than claimed |
+| P1.5 | a value never borrows an empty neighbour; a string does | **right**, and it is the fixture's second sheet |
+| P1.6 | shrink-to-fit suppresses `###` — *"weakest of the six"* | **right**, and not weak: `12345` at all twenty widths |
+| P1.7 | wrap does not save a plain number | **right**; and the *date* half of the variant was **void — the fixture reused the non-wrapping style**, corrected and re-run |
+| P1.8 | a merged cell hashes on the merged width | **not tested**; the fixture has no merge |
+| P1.9 | the corpus gap is the **clip decision**, priors (i) 30% / (ii) 30% / (iii) 15% / (iv) 15% / (v) 10% | **refuted, all five** — the clip decision is *identical* on both sides at every width in the sweep. The gap is the hash rule after all: the missing third branch. My whole candidate list was built on "our `Hash` already implements the rule", which was 2/3 true |
+| P2.1 | glyph counts agree within a few percent | **right, and far stronger** — `$` 8242 = 8242, and every `analyze` column identical |
+| P2.2 | the reference emits `$` and `-` in one run, ours in two | **not shown as an operator claim**; measured instead as a 6.28 pt position difference, which is the same finding at the level the PDF actually exposes |
+| P2.3 | verdict movement from subject 2: zero | **right**, and structural — the metric cannot see a `$` |
+| P2.4 | if 2.1 fails, look at the repeat-fill count | **not reached** |
+| P3.1 | we draw the grid; the 17 is one rule per column | **right** — 17 rules at the reference's 17 positions |
+| P3.2 | the 107 is `bSingle`'s per-row branch | **right**, and all three of its triggers reproduce |
+| P3.3 | `bHideGrid` from overflow is the cause on that page, 70% | **refuted** — the split rules have no holes, so the trigger there is the **hidden neighbour**, my 20% branch |
+| P3.4 | the reference's grid has holes where text spills; that is the visible defect | **half right, and the half that matters is right** — on the briefed page there are none, but the authored fixture shows the hole is real and that **we do not draw it** |
+| P3.5 | implementing holes alone moves the page's count to 14–17 | **not reached** |
+| P4.1 | 8–35 renderings change, point estimate 18 | **refuted** — **2** |
+| P4.2 | every changed document moves toward the reference, none overshoots | **right** — 2 closer, 0 further |
+| P4.3 | `ODs-February` words Δ +895 → **−206**, inside the band; verdict string flips; scoreboard does not move | **right**, and the arithmetic to within 2 words (**−204**) |
+| P4.4 | cross-track reach zero by a static argument | **right** — the whole `src/` diff is one file in `Paperless.Spreadsheets` |
+| P4.5 | subject 1 fully, subject 2 to a diagnosis, subject 3 to a diagnosis | **right** |
+
+**The refutation worth carrying forward is P1.9.** I predicted the corpus gap was upstream of the
+hash rule because our `Hash` "already implements P1.1/P1.2", and listed five candidate causes with
+priors. All five are wrong and the sixth possibility — that the rule itself was two-thirds
+implemented — was not on the list at all. The lesson is narrow and repeatable: **a docstring that
+correctly states two branches of a three-branch rule reads as a complete implementation**, and
+`SheetGeneralWidth`'s does, at length, with citations. The way it was caught was measuring the
+*boundary* on both sides rather than the *outcome*: the boundaries were identical, which killed
+every clip-side candidate in one reading.
+
+## 8. Tests
+
+`tests/Paperless.Spreadsheets.Tests/SheetHashOverflowTests.cs`, **13 cases**, every expectation
+quoted from 26.2.4.2's own render of an authored fixture
+(`tests/corpus/features/sheet-hash.fods`, generated by `probes/sheets-e-01/mkhash.py`).
+
+### Verified by reintroduction — all 13, none a drift guard
+
+`verify-test.sh Paperless.Spreadsheets '<mutation>' SheetHashOverflowTests`:
+
+| mutation | what it puts back | detected by |
+|---|---|---:|
+| `is { } fitted && fitted.Width <= available)` → `is { } fitted)` | the missing third branch — the round's defect, exactly | **7 of 13** |
+| `breaks && !hashed` → `breaks` | wrapping the hash text again | **12 of 13** |
+| `cell.Value is double value && …HasGeneralFormat` → `false && …` | **over**-application: every clipped value hashes | **2 of 13** |
+
+The first proves the cases detect **under**-hashing; the third proves they detect
+**over**-hashing, which one blunt mutation cannot separate — `ShrinkToFitNeverHashes` and the
+`General` sweep rows are what fail there, and they are in the file for exactly that reason.
+
+### Deliberate controls that must *not* fail
+
+`ShrinkToFitNeverHashes`, the `string-XX` sweep row and `AValueHashesWhereAStringSpills`'s
+middle two assertions pin the cases where LibreOffice does **not** hash. Without them the fix
+reads as "a number that does not fit hashes", which is the trap `SheetGeneralWidth`'s own
+docstring was written to prevent.
+
+### Not tested, and named
+
+* **A formula in error** (P1.4) and **a merged cell** (P1.8). The fixture has neither, so the
+  first branch of `SetTextToWidthOrHash` is unexercised on this side. It was already implemented
+  and is unchanged by this round, but it has no case here and that is stated rather than implied.
+* **Nothing in `sheet-grid.fods` has a test.** The fixture is committed and its reference answers
+  are in §5.2; the implementation it is for was not done, so a test would assert our current
+  behaviour, which is the definition of a drift guard for a known-wrong output. Left untested
+  deliberately.
+
+## 9. Build and test counts
+
+`dotnet build Paperless.slnx -v q -nologo`: **0 warnings, 0 errors**, and the exit status was
+checked (`EXIT=0`) rather than the colour.
+
+| project | briefed | now | Δ |
+|---|---:|---:|---:|
+| Core | 305 | 305 | |
+| Containers | 109 | 109 | |
+| Text | 289 | 289 | |
+| Vector | 295 | 295 | |
+| Rendering | 149 (1 skipped) | 149 (1 skipped) | |
+| Markup | 259 | 259 | |
+| OpenDocument | 125 | 125 | |
+| WordProcessing | 789 | 789 | |
+| Spreadsheets | 663 | **676** | **+13** |
+| Presentations | 613 | 613 | |
+| **total** | **3596** | **3609** | **+13** |
+
+**0 failed**, projects run individually and totalled by hand. `Paperless.Fidelity.Tests` was not
+run, as instructed.
 
 ## 10. What this round could not see
 
@@ -384,10 +574,13 @@ BUILD_PLACEHOLDER
   indistinguishable in the output.
 * **The exact blank widths LibreOffice reserves for `?` and `_x`** are inferred from em ratios,
   not read out of the binary (§4.3).
-* **Row heights are not asserted anywhere.** The fixture exposed that our auto row height wraps a
-  plain-number cell where Calc does not — the `wrap-general-12345` row is ~93 pt tall on our side
-  and 14.6 pt on the reference's — which is **pre-existing, unchanged by this round in either
-  direction**, and outside the hash rule. Named in §11.
+* **Row heights are not asserted anywhere**, and the fixture exposed a defect in them that this
+  round does not touch. The fixture's last three rows span, baseline to baseline, **217.38 →
+  244.76 pt** on the reference and **196.11 → 324.11 pt** on ours — 27 pt against 128 — because
+  our row-height pass wraps a `General` number in a wrapping cell where Calc disables automatic
+  line breaks for a plain number format outright. It is **pre-existing and unchanged in either
+  direction by this round**: the same 196.11 → 324.11 span is measured on the pre-fix binary, and
+  the fix moves only *where inside that span* the hashed cell's single baseline sits. Named in §11.
 * **The 27.2 tree is not 26.2.4.2.** Every `output.cxx` / `output2.cxx` citation is a statement
   about a binary that was not measured.
 
@@ -405,3 +598,29 @@ BUILD_PLACEHOLDER
 5. **The scientific mantissa is one digit short at three widths** (§2.1) — a
    `SheetGeneralWidth.Scientific` budget question, safe in the direction that matters and
    unresolved.
+6. **`18-02RD301_ILS_components_Master_9-13-18.xls`: 626 cells that should hash and do not**
+   (§3.2), and **~37 across the rest of the track that hash and should not** (§3.1). The first is
+   a `.xls`, so the BIFF column-width and format path is where to look.
+
+---
+
+## Appendix — artefacts
+
+Everything in `dotnet/probes/sheets-e-01/`:
+
+| file | what it is |
+|---|---|
+| `prediction.md` | committed as `4933bb8f462` before any measurement |
+| `mkhash.py` | authors `sheet-hash.fods` — fourteen variants × twenty widths |
+| `mkgrid.py` | authors `sheet-grid.fods` — the three `bSingle` triggers, one per sheet |
+| `cells.py` | reads a rendered PDF back as a (row, column) grid, keyed on the **right** edge |
+| `table.py` | the two-sided variant table |
+| `sweep.sh` | renders the whole track into one directory with the clock pinned |
+| `gate.py` | reach, direction and verdict over three banks, batched |
+| `gridreach.py` | how often `bSingle` fires, page 1 of all 171 |
+| `gate.tsv` | 171 rows: pages, words and `###` on all three banks, both verdicts |
+| `gridreach.tsv` | 171 rows: grid rules and segments, reference against ours |
+| `unembedded.tsv` | the unembedded-font column for all 171, all zero |
+
+Fixtures, committed under `tests/corpus/features/`: `sheet-hash.fods`, `sheet-grid.fods`. Both
+are **authored**, not collected.
