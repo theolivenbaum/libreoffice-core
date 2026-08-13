@@ -401,15 +401,22 @@ The brief's per-project baseline reproduced exactly, project for project, before
 
 ## 10. What the next round should take from this
 
-1. **`a:srcRect` on the `.docx` and `.xlsx` paths is unwired** — 11 words documents / 14 instances,
+1. **Two WMF pictures in `150_5300_13_chg10` are now cropped where the reference crops nothing**,
+   at growth 2.395 and 1.175 (§6). Twenty-one of that document's twenty-six reference images are
+   drawn at their frame with an identical clip, so LibreOffice is refusing the crop for a reason I
+   did not find. Candidates, none of them established: the graphic's kind (`lcl_ApplyCropping`
+   treats a bitmap and a metafile differently at `msdffimp.cxx:3826`); a second crop statement
+   overriding the `OPT`; or the shape not being the one that reaches the page. **Start here** — it
+   is the only measured regression this round leaves, and it is two pictures in one document.
+2. **`a:srcRect` on the `.docx` and `.xlsx` paths is unwired** — 11 words documents / 14 instances,
    0 sheets, 63 slides decks / 318 instances. `DrawingFill.SourceRect` already reads it and
    `DocxFrames`, `OdfFrames` and the SpreadsheetML drawing reader all drop it. The Core arithmetic,
    the model properties and both clips now exist, so it is a read and a hand-off on each.
-2. **ODF's `fo:clip` is not read at all**, on any of the three families.
-3. **A `.doc` may state a crop in the `PICF` alone.** Nothing in this corpus does, so nothing here
+3. **ODF's `fo:clip` is not read at all**, on any of the three families.
+4. **A `.doc` may state a crop in the `PICF` alone.** Nothing in this corpus does, so nothing here
    measures it; the frame would come out right and the picture would be squashed into it rather
    than cropped. Deriving the fractions from `dxaCrop*/dxaGoal` when the Escher properties are
    absent is three lines and needs its own fixture.
-4. **Do not test a binary importer against a round trip alone.** §4. The exporter and importer of
+5. **Do not test a binary importer against a round trip alone.** §4. The exporter and importer of
    one program agree by construction; the corpus is written by a different program, and on the one
    field that mattered here they disagree completely.
