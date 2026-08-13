@@ -616,7 +616,7 @@ internal static class PptxTextBody
                 : Literal(Drawing.Attribute(Drawing.Child(element, "latin"), "typeface")));
 
         Colour? colour = sources.Resolve(
-            runProperties, style => style.Colour, element => SolidColour(element, theme));
+            runProperties, style => style.Colour, element => RunColour(element, theme));
 
         // a:rPr/@spc, in hundredths of a point, and negative far more often than not: a deck's
         // designer pulls a heading in and PowerPoint records it per run. LibreOffice reads it into
@@ -741,17 +741,61 @@ internal static class PptxTextBody
         }
     }
 
-    private static Colour? SolidColour(XElement properties, DrawingTheme? theme)
+    /// <summary>
+    /// The one colour a run's fill reduces to, from either an <c>a:solidFill</c> or an
+    /// <c>a:gradFill</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>A run's colour is a fill, not a colour</b>, and DrawingML lets it be any of the fills a
+    /// shape can have. Text is drawn with one colour, so LibreOffice reduces whichever fill it
+    /// finds to a single one on the way in — <c>FillProperties::getBestSolidColor</c>
+    /// (<c>oox/source/drawingml/fillproperties.cxx:402-425</c>), reached from
+    /// <c>TextCharacterProperties::pushToPropMap</c>
+    /// (<c>oox/source/drawingml/textcharacterproperties.cxx:115-117</c>), which then sets
+    /// <c>PROP_CharColor</c> at <c>:139</c> and <c>PROP_CharTransparence</c> from that colour's
+    /// alpha at <c>:153-156</c>. Reading only <c>a:solidFill</c> left a gradient-filled run with
+    /// no stated colour at all, so it inherited whatever was above it and usually came out
+    /// opaque black.
+    /// </para>
+    /// <para>
+    /// <b>The alpha is the visible half.</b> Measured on
+    /// <c>OnTrac_StarCertificationProgram-3Day.pptx</c>, whose <c>slideMaster3.xml</c> draws an
+    /// 82 pt page number from a <c>defRPr</c> whose <c>a:gradFill</c> is two identical <c>tx1</c>
+    /// stops at <c>a:alpha val="10000"</c>: the reference emits <c>0 0 0 rg</c> under an
+    /// ExtGState of <c>/CA 0.1 /ca 0.1</c>. It is black at a tenth opacity and not a grey, which
+    /// is worth stating because it looks like a grey and the two are only the same over a white
+    /// background.
+    /// </para>
+    /// <para>
+    /// <b>Which stop.</b> LibreOffice takes the first, unless there are more than two, in which
+    /// case it takes the second — its stops are a map keyed by position, so "first" means lowest
+    /// and not first in the file. Neither the file order nor
+    /// <c>DrawingChartPlot.FillOf</c>'s nearest-to-the-middle rule reproduces that; the chart
+    /// heuristic is a deliberate choice for a series colour and is not this.
+    /// </para>
+    /// </remarks>
+    /// <param name="properties">One <c>a:rPr</c> or <c>a:defRPr</c>.</param>
+    /// <param name="theme">The theme its scheme colours resolve against.</param>
+    private static Colour? RunColour(XElement properties, DrawingTheme? theme)
     {
-        XElement? solid = Drawing.Child(properties, "solidFill");
-        if (solid is null) return null;
-
-        foreach (XElement child in solid.Elements())
+        if (Drawing.Child(properties, "solidFill") is { } solid)
         {
-            if (DrawingColour.Read(child)?.Resolve(theme) is { } colour) return colour;
+            foreach (XElement child in solid.Elements())
+            {
+                if (DrawingColour.Read(child)?.Resolve(theme) is { } colour) return colour;
+            }
+
+            return null;
         }
 
-        return null;
+        if (DrawingFill.ReadGradient(Drawing.Child(properties, "gradFill")) is not { Stops.Count: > 0 } gradient)
+        {
+            return null;
+        }
+
+        List<DrawingGradientStop> ordered = [.. gradient.Stops.OrderBy(stop => stop.Position)];
+        return ordered[ordered.Count > 2 ? 1 : 0].Colour.Resolve(theme);
     }
 
     private static XElement? LevelStyle(XElement? listStyle, int level)

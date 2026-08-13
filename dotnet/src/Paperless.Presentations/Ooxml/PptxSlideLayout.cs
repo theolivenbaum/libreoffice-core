@@ -1247,7 +1247,7 @@ internal sealed partial class PptxSlideLayout
     /// <para>
     /// <c>a:srcRect</c> becomes a larger destination rectangle rather than a crop, because the
     /// drawing model has clipping and no crop and the two are the same thing — see
-    /// <see cref="SlideImages.Uncropped"/>. The clip is the shape's outline, applied by
+    /// <see cref="PictureCrop.Uncropped"/>. The clip is the shape's outline, applied by
     /// <see cref="SlideDrawing"/>, which also handles the picture-inside-a-preset-shape case for
     /// free.
     /// </para>
@@ -1283,11 +1283,11 @@ internal sealed partial class PptxSlideLayout
 
         DocRect area = blip.FillRect.IsWhole
             ? bounds
-            : SlideImages.Inset(
+            : PictureCrop.Inset(
                 bounds, blip.FillRect.Left, blip.FillRect.Top,
                 blip.FillRect.Right, blip.FillRect.Bottom);
 
-        DocRect? destination = SlideImages.Uncropped(
+        DocRect? destination = PictureCrop.Uncropped(
             area, blip.SourceRect.Left, blip.SourceRect.Top,
             blip.SourceRect.Right, blip.SourceRect.Bottom);
 
