@@ -12651,3 +12651,71 @@ put through `soffice --convert-to ppt`.
 `EscherPicture.Cropped`**. They were left alone so that this round's cross-track sweep measured the
 Core move and nothing else — which is why the 0-of-200 and 0-of-171 above mean what they say. That
 is the next round's cheapest win, and it now has a tested Core layer beneath it.
+
+---
+
+## Merge note — sheets-c-01, the chart axis takes its range from the sheet
+
+Merged `wt-sheets-c`. Build 0 warnings / 0 errors. **Ten non-Fidelity projects: 3517 total, 0
+failed** — Core 294 → **298**, Spreadsheets 628 → **643**, Presentations 605 → **609**, exactly the
+round's 23 new cases. **All five test files verified by reintroduction**, none a drift guard;
+within them three cases are deliberate controls that must *not* fail
+(`AnUnbrokenSeriesIsOnePolygon`, `WithoutAResolverTheCacheIsRead`,
+`ANonDateAxisTakesItsOverlapRuleFromTheLabelFrequency`).
+
+**Sheets 143 → 144 of 171.**
+
+### The acceptance test passed, on all eleven
+
+`Keywords_Mapping` pages 21/22 go from ours **0..8** against the reference's **0..40** to **0..40**,
+and all eleven charts reproduce the reference's range. The *interval* agrees too, which the range
+alone would not prove: our `#D9D9D9` gridline stroke count now sits exactly one below the
+reference's on all twelve chart pages, where the offset previously ranged from 0 to −16.
+Independently, `pdf-image-diff.py` improves on **12 of 12** chart pages, mean 3.50% → 2.94%, and
+page 22 crosses `shifted` → `ok`.
+
+| | reach |
+|---|---|
+| **sheets** | **34 of 171** — `c:f` 1, date axis 1, area gap 2, link colour **31 of 33** hyperlink documents |
+| **words** | **0 of 200** |
+| **slides** | **0 of 163** |
+
+**Verdict movement is one, not zero, and the round's own prediction of zero is refuted in the
+good direction.** `Keywords_Mapping` crosses the *word* gate: reference 4814, ours 4641 (Δ173,
+outside the 96.3 band) → 4776 (Δ38, inside). The extra 135 words are the pivot's grand-total row —
+the same row whose absence from the series cache caused the axis defect. One fix, two checks.
+
+### Two refutations of this brief, and the second is a warning about testing
+
+1. **The "for free" claim is refuted: the `c:f` fix did not and could not fix
+   `Template Pilot Logbook…`.** That file is a `.xls`, and `XlsChartReader.BuildSeries` has
+   *always* resolved against the live sheet — its 615 labels already reached `autoRotate45`. The
+   shared-root story was wrong.
+2. **The `Tm` test the brief specified cannot be run on our output at all.** LibreOffice turns text
+   with the **text matrix**, Paperless with the **CTM** (`cm`), so a `Tm`-only count scores a
+   working fix as **zero**. The round made exactly that error on its first pass and caught it.
+   Counting both: 45° matrices **0 before, 6 after**, against the reference's 848. *An instrument
+   that can only see one renderer's idiom will report the other's success as failure* — and this
+   brief handed the agent that instrument.
+
+### The fourth fix, and its honest cost
+
+The BIFF **date axis**. `XclImpChLabelRange::Convert` sets `TEXTOVERLAP`/`TEXTBREAK` from the label
+frequency **in its `else` branch only**; a date axis keeps chart2's defaults. We applied the
+frequency rule to both and never read `CHDATERANGE`. It fires the rotation but exposes an
+over-aggressive label rhythm, so page 16 ends only slightly closer — 8.32% → 8.01% — and is still
+`MAJOR`. Recorded rather than smoothed over.
+
+### Two instrument findings, both about believing a sweep too early
+
+- **`zipfile.is_zipfile` returns true for an OLE2 workbook** that happens to carry an EOCD
+  signature. The area census tested zip first, routed `EHEST-Pre-departure-checklist.xls` down the
+  OOXML branch, and missed its nine `CHAREA` records — so it predicted 1 document where the sweep
+  found 2. On EHEST the fix is exact: **4 outline strokes against the reference's 2 before, 2
+  after**, on all four chart pages. Corrected census committed. **Detect a container by its magic
+  bytes, not by asking a zip library whether it feels like a zip.**
+- **A sweep diff run before the sweep exits reports false positives.** A first pass said 35; the
+  extra was a 13.6 MB PDF still being written. **A file count reaching its target is not the sweep
+  having finished.** This is the same family as the slides round's "163 of 163" that had written
+  158 files, and the two together make the rule: wait for the process, then re-count from disk;
+  neither the loop counter nor the file count alone is evidence.
