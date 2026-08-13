@@ -12304,3 +12304,61 @@ The rule: **pass `-C <path>` explicitly to every `git` invocation that matters**
 `git -C <path> rev-parse --abbrev-ref HEAD` before merging. After a merge, `git log --oneline
 --graph` in the target must show the merge commit; if it shows a fast-forward of something else,
 stop.
+
+---
+
+## Merge note — words-b-01, the per-side line composition
+
+Merged `wt-words-b` into `claude/paperless-odf-phase-1-rnyzcu`. Build 0 warnings / 0 errors.
+
+**Test counts after the merge**, all ten non-Fidelity projects, **3458 total, 0 failed**: Core 284,
+Containers 109, Text **289**, Vector 295, Rendering 121 (1 skipped), Markup 259, OpenDocument 125,
+WordProcessing **763**, Spreadsheets 621, Presentations 592. Fidelity not run. Text and
+WordProcessing each gain 2; nothing else moves.
+
+**Verdict movement: none, and none was predicted.** 37 of 200 words renderings changed, 0 page
+counts. A spacing law is invisible to all three gate checks by construction.
+
+**The shared-layer sweep was owed and was taken**: this touches `Paperless.Text`, and slides plus
+sheets were measured at **0 of 334 renderings changed** — measured, not argued.
+
+### What a future round reading only the scoreboard would misread
+
+**The scoreboard on this branch is not comparable to anything recorded above this note.** Three
+things changed underneath it, none of them our code:
+
+1. **LibreOffice is 26.2.4.2**, not 24.2.7.2. Its own effect on words is 14 of 200 page counts and
+   76 pages, and a net **5** verdicts.
+2. **`fonts-dejavu-core` was missing** and is now installed. Its effect is larger than the version's
+   — 33 documents and 377 pages on words, and **25** verdicts. See `MISSING_PACKAGES.md`.
+3. **poppler is 26.01.0.** Our own word counts moved on 169 of 200 documents with *provably
+   identical code*, 86 of them by the exact amount the reference moved. A term that moves both sides
+   equally is neither renderer's.
+
+So the old "47 of 200 reference page counts moved, 453 pages", written up as the version's doing, is
+**33 documents and 377 pages of missing font**. And the comparator for the current words figure is
+**159, not 158** — `git log 83c0acda971..4cbaeb41c3b -- dotnet/src dotnet/tools` returns nothing, so
+158 was r47's *pre-fix* baseline and the "r47 → HEAD gives back 21 verdicts" claim describes work
+that does not exist.
+
+### Scoreboard at the time of this merge
+
+| track | verdicts | notes |
+|---|---|---|
+| words | **154 / 200** | 29 `pages`, 9 `words`, 8 both, 0 `unembedded`; page error 117, 163 exact |
+| slides | **132 / 163** | **all 31 failures are `words`**; 163/163 page-exact, page error 0 |
+| sheets | — | re-measurement in flight |
+
+**Do not read the slides number as a regression.** Its 31 failures are all check 2, and at least 13
+are the gate counting bullet glyphs as words — 8 of those agree on real words *to the digit*. The
+gate's word check is itself under correction; treat every check-2 verdict on this branch as
+provisional until that lands.
+
+### The trap this round paid for
+
+The C++ tree in this checkout is **27.2.0.0.alpha0+**. Two of the round's refuted predictions came
+from reading it and believing what it said about line spacing: its
+`IsUsedToCalcLineSpacingHeight` / `LINE_SPACING_AS_GAP_BELOW` machinery **is not in 26.2.4.2 at
+all**. The checkout is reference material and the installed binary is ground truth — this is what it
+costs when that is forgotten, and the cost was small only because the probe was written before the
+reading was believed.
