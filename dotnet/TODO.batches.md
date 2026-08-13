@@ -13459,3 +13459,70 @@ a column index off by one produces a confident, wrong, well-formed answer.
 **`apron-area.xls` page 1 draws no grid at all on our side** — the reference draws 70 vertical and
 56 horizontal hairlines — and it is missing three border width classes, **while matching the gate
 exactly**.
+
+---
+
+## Merge note — slides-paint-01, three clusters diagnosed, two are not what the review named
+
+Merged `wt-slides-paint`. **Diagnosis only — no code changed**, so the ten non-Fidelity projects
+stay at **3638 total, 0 failed** and verdict movement is zero, as predicted.
+
+Reach was censused by record walk over all 163 documents with **0 read errors** — no regex, after a
+regex census on this track was wrong by a factor of sixteen.
+
+### Transparency — half of it, and the half that reproduces is exactly what the user said
+
+**`1-secretariat.ppt` is the user's guess, confirmed.** Its logo states Escher property
+**263 `pictureTransparent` = `0x00FFFFFF`** on `pib=2`, a PNG with **zero transparent pixels as
+stored**; a `soffice --convert-to odp` round trip at 26.2.4.2 writes it back with **51 361 of
+67 332 pixels at alpha 0**. The reference's page 1 holds two 362×186 images each carrying an
+`/SMask`; ours holds one with none. **We read the property nowhere** — grepping
+`clrChange|pictureTransparent|TransparentColour` across `dotnet/src` and `dotnet/tests` returns
+**zero lines**.
+
+The bonus is the useful part: the reference's *second* image is a grey silhouette — the picture's
+**shadow** — which `SlideDrawing.DrawShadow` (`SlideDrawing.cs:199-215`) declines to cast because a
+PNG's alpha is not visible at that layer. Implementing 263 supplies exactly the alpha that rule is
+waiting for, so **page 1 is one fix, not two**.
+
+**`pres_ioc_phuket.ppt` does not reproduce, and the round's own prediction was wrong.** It states
+263 nowhere, its transparency is native PNG `tRNS`, and **our image XObjects match the reference on
+all 26 pages, `/SMask` byte-lengths included**. Its real defect is on its worst page: a
+gradient-filled WordArt title band that the reference clips to the **glyph outlines** and we paint
+as a solid rectangle.
+
+The round's phrasing for this deserves keeping: *"the user's words describe the pixels correctly and
+name the wrong feature."* That is the right way to treat a visual report — the observation stands,
+the attributed mechanism does not, and the two are separable.
+
+### Shadow — both decks, one cause, and we draw nothing at all
+
+The `.ppt` character bit **`0x0010`**, which `PptCharacterStyle.ToEmphasis`
+(`PptStyleSheet.cs:528-542`) does not read and which `RunEmphasis` (`Content.cs:177-199`) has
+nowhere to hold. **Not** `a:outerShdw`, and **not** the shape shadow already implemented.
+
+LibreOffice's rule (`vcl/source/outdev/text.cxx:394-407`) reproduces **to the digit at three font
+sizes**: 1.4 / 1.5 / 1.7 pt down-right at 32.00 / 33.99 / 38.01 pt, black, hard-edged, no blur.
+
+**Reach: 36 of 51 `.ppt` decks, 843 runs** — the largest on this track, and *the user picked two of
+the top five unaided*.
+
+### Underline — both decks, two unrelated causes
+
+- **`Stakeholders`**: the underline *and* the `hlink` colour that
+  `oox/source/drawingml/textrun.cxx:161-166` supplies for a hyperlink run stating neither — which
+  also explains why page 13, where the file *does* state `u="sng"`, draws the rule in the wrong
+  colour. Reach **41 of 112 `.pptx`, 297 runs**.
+- **`16 - UTM`**: the title rule is a **master connector** whose visible mark is a 3 pt `a:ln`
+  carrying a `gradFill`. `PptxSlideLayout.Pen:1678` returns null unless the `a:ln` has a
+  `solidFill`, so width, colour and dash are dropped together and only the shape's 0.125 pt body in
+  `accent1` survives. Reach **8 of 112**, but it is in that deck's master, so every page.
+
+### Why nothing shipped, which is the right call
+
+Cluster 2 was otherwise ready. The three measured offsets bound the line-height factor to
+**[1.073, 1.122] em**, and that interval **contains both Liberation Sans's hhea sum and its OS/2
+typo sum without separating them**. Shipping would mean a device-unit rounding rule resting on an
+unresolved metric — *"how a fixture passes and the corpus fails"*, which has happened twice this
+session already. One authored probe at a size where the two straddle a 24-unit boundary settles it,
+and that is the next round's first move.
