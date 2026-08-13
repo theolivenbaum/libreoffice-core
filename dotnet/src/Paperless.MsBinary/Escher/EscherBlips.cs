@@ -379,6 +379,14 @@ public static class EscherBlips
 /// </param>
 public readonly record struct EscherBlip(ushort RecordType, ReadOnlyMemory<byte> Bytes)
 {
+    /// <summary>Whether the picture is a Windows Metafile — <c>msofbtBlip_WMF</c>, <c>0xF01B</c>.</summary>
+    /// <remarks>
+    /// Asked because Word's own <c>.doc</c> reader treats a WMF differently from every other blip
+    /// on one point: it ignores the shape's <c>cropFrom*</c> properties outright. See
+    /// <c>Ww8DocumentReader.CropOf</c>, which is the only caller and carries the measurement.
+    /// </remarks>
+    public bool IsWindowsMetafile => RecordType == 0xF01B;
+
     /// <summary>The document's own name for the format, for a diagnostic about one that will not draw.</summary>
     public string Kind => RecordType switch
     {
