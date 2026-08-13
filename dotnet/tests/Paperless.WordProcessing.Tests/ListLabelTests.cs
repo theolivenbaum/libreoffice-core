@@ -433,6 +433,82 @@ public sealed class ListLabelTests
         Math.Abs(doubled.Twips - (2 * natural.Twips)).ShouldBeLessThanOrEqualTo(1);
     }
 
+    /// <summary>
+    /// A label deeper than its text raises the first line, even when its whole box is shorter.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Round 47 asked whether the label's <em>box</em> or its <em>ascent</em> beat the item's, and a
+    /// level naming a different face at the same size regularly does neither while still hanging
+    /// further below the baseline. It recorded that as a blind spot it could not act on.
+    /// </para>
+    /// <para>
+    /// Liberation Mono at 12 pt is ascent 9.99, descent 3.60, box 13.59; Liberation Serif at 12 pt is
+    /// 11.20, 2.60, 13.80. So the label is shorter overall and lower-topped, and only its descent
+    /// reaches past the item's — and the line Writer builds is 11.20 + 3.60 = 14.80.
+    /// </para>
+    /// <para>
+    /// Measured against the installed 26.2.4.2 by <c>dotnet/probes/words-b-01/labelshape.py</c>:
+    /// LibreOffice's baseline-to-baseline gap to the paragraph below is 14.80 pt with a Liberation
+    /// Mono label and 13.80 without one.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void ALabelDeeperThanItsTextRaisesTheFirstLineEvenWhenItsBoxIsShorter()
+    {
+        PageParagraph paragraph = TwoFaced("Liberation Mono");
+
+        paragraph.LabelRaisesFirstLine.ShouldBeTrue();
+
+        List<LineBox> lines = Lines(paragraph);
+        List<LineBox> plain = Lines(TwoFaced("Liberation Serif"));
+
+        lines[0].Height.ShouldBeGreaterThan(plain[0].Height);
+        Math.Abs(lines[0].Height.Twips - Length.FromPoints(14.80).Twips)
+            .ShouldBeLessThanOrEqualTo(1);
+        Math.Abs(plain[0].Height.Twips - Length.FromPoints(13.80).Twips)
+            .ShouldBeLessThanOrEqualTo(1);
+    }
+
+    /// <summary>
+    /// The two controls the descent rule is not allowed to disturb.
+    /// </summary>
+    /// <remarks>
+    /// Liberation Sans at 12 pt has ascent 11.26 against Liberation Serif's 11.20 and a shallower
+    /// descent, so the old ascent term already fired for it and its answer must not change; a label in
+    /// the item's own face at the item's own size reaches past it on neither side and must still leave
+    /// the paragraph on the unmeasured path. Both were measured against 26.2.4.2 in the same probe and
+    /// both matched before this rule and after it.
+    /// </remarks>
+    [Fact]
+    public void ALabelTallerAboveOrEqualOnBothSidesIsUnaffectedByTheDescentRule()
+    {
+        TwoFaced("Liberation Sans").LabelRaisesFirstLine.ShouldBeTrue();
+        TwoFaced("Liberation Serif").LabelRaisesFirstLine.ShouldBeFalse();
+    }
+
+    /// <summary>A 12 pt Liberation Serif item whose label is 12 pt in a face of its own.</summary>
+    private static PageParagraph TwoFaced(string labelFamily)
+    {
+        SystemFontResolver resolver = new(SystemFontIndex.Build());
+        OpenTypeFace labelFace = resolver.LoadOpenType(
+            resolver.Resolve(new FontRequest(labelFamily, 400, false)));
+
+        return new PageParagraph
+        {
+            Text = "An item labelled in a face that is not its own.",
+            Face = Face,
+            EmSize = Length.FromPoints(12),
+            Format = new ParagraphFormat
+            {
+                StartIndent = Length.FromPoints(36),
+                FirstLineIndent = Length.FromPoints(-36),
+            },
+            Label = PageLabel.Measured("1.", labelFace, Length.FromPoints(12))
+                with { Follow = LabelFollow.Nothing },
+        };
+    }
+
     /// <summary>An item long enough to wrap, whose label is set at a size of its own.</summary>
     private static PageParagraph Wrapping(double labelPoints)
         => new()

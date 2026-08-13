@@ -388,8 +388,46 @@ public sealed record PageParagraph : PageBlock
     public bool LabelRaisesFirstLine => LabelExtent is not null;
 
     /// <summary>
-    /// The label's line box, when it is taller than the paragraph's own, and null otherwise.
+    /// The label's line box, when it reaches past the paragraph's own on either side of the baseline,
+    /// and null otherwise.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>A line is composed side by side, so the test has to be as well.</strong> Writer's
+    /// <c>SwLineLayout::CalcLine</c> keeps a running maximum ascent and a running maximum descent and
+    /// makes the line out of the two, so a portion that is <em>shorter overall</em> than the text beside
+    /// it still deepens the line when its descent alone is deeper. Asking only whether the label's whole
+    /// box or its ascent is bigger misses exactly that case, and it is not exotic: it is what a level
+    /// that names a different <em>face</em> at the <em>same</em> size does, which round 47 recorded as a
+    /// blind spot it could not see and could not act on.
+    /// </para>
+    /// <para>
+    /// Measured against the installed 26.2.4.2 by <c>dotnet/probes/words-b-01/labelshape.py</c>, a 12 pt
+    /// level over a 12 pt Liberation Serif item, reading the baseline-to-baseline gap to the paragraph
+    /// below:
+    /// </para>
+    /// <list type="table">
+    /// <item><description>
+    /// Liberation Mono label — ascent 9.99, descent 3.60 against the item's 11.20 and 2.60, so its
+    /// <em>box</em> is 13.59 against 13.80 and neither old term fires. LibreOffice's gap is 14.80 and
+    /// ours was 13.80: the whole of the label's extra 1.00 pt of descent was lost.
+    /// </description></item>
+    /// <item><description>
+    /// Caladea label — ascent 10.80, descent 3.00, box 13.80 exactly equal to the item's. LibreOffice
+    /// 14.20, ours 13.80.
+    /// </description></item>
+    /// <item><description>
+    /// Carlito (box 14.65, taller outright) and Liberation Sans (ascent 11.26, taller above) are the
+    /// controls this must not move, because the old gate already fired for both — and both matched
+    /// LibreOffice to the hundredth before and still do.
+    /// </description></item>
+    /// </list>
+    /// <para>
+    /// Nothing below this changes: once the extent is returned, <c>MeasuredParagraph.MeasureLine</c>
+    /// already folds the object into the line's ascent and descent separately. The defect was only ever
+    /// that a whole class of label never got that far.
+    /// </para>
+    /// </remarks>
     private (Length Height, Length Ascent)? LabelExtent
     {
         get
@@ -397,36 +435,52 @@ public sealed record PageParagraph : PageBlock
             if (Label is not { Text.Length: > 0 } label) return null;
 
             (Length height, Length ascent) = label.LineExtent(Metrics);
-            (Length own, Length ownAscent) = OwnExtent();
+            (Length own, Length ownAscent, Length ownDescent) = OwnExtent();
 
-            return height > own || ascent > ownAscent ? (height, ascent) : null;
+            return height > own || ascent > ownAscent || height - ascent > ownDescent
+                ? (height, ascent)
+                : null;
         }
     }
 
     /// <summary>The line box the paragraph's own face and size give, for the label to be compared against.</summary>
     /// <remarks>
+    /// <para>
     /// The paragraph's rather than the first line's runs', because this only has to decide whether the
     /// label can matter; <see cref="MeasuredParagraph.HeightOf"/> takes the maximum over whatever is
     /// really on the line, so a run taller than both still wins.
+    /// </para>
+    /// <para>
+    /// The descent is accumulated per face rather than taken as <c>height - ascent</c> at the end. Those
+    /// are different numbers whenever the tallest run and the highest-ascent run are not the same run,
+    /// and the difference would show up as a label that raises the line in a paragraph mixing two faces
+    /// and not in either face alone.
+    /// </para>
     /// </remarks>
-    private (Length Height, Length Ascent) OwnExtent()
+    private (Length Height, Length Ascent, Length Descent) OwnExtent()
     {
         Length height = Length.Zero;
         Length ascent = Length.Zero;
+        Length descent = Length.Zero;
+
+        void Fold(OpenTypeFace face, Length size)
+        {
+            LineMetrics metrics = LineSpacing.Resolve(face, Metrics, WriterLineBox.LeadingAboveText);
+            Length box = Length.FromTwips(metrics.ScaledLineHeight(size).Twips);
+            Length above = Length.FromTwips(metrics.ScaledAscent(size).Twips);
+
+            height = Length.Max(height, box);
+            ascent = Length.Max(ascent, above);
+            descent = Length.Max(descent, box - above);
+        }
 
         foreach (PageRun run in Runs)
         {
-            LineMetrics metrics = LineSpacing.Resolve(
-                run.Face, Metrics, WriterLineBox.LeadingAboveText);
-            Length size = run.MetricEmSize > Length.Zero ? run.MetricEmSize : run.EmSize;
-            height = Length.Max(height, Length.FromTwips(metrics.ScaledLineHeight(size).Twips));
-            ascent = Length.Max(ascent, Length.FromTwips(metrics.ScaledAscent(size).Twips));
+            Fold(run.Face, run.MetricEmSize > Length.Zero ? run.MetricEmSize : run.EmSize);
         }
 
-        LineMetrics own = LineSpacing.Resolve(Face, Metrics, WriterLineBox.LeadingAboveText);
-        return (
-            Length.Max(height, Length.FromTwips(own.ScaledLineHeight(EmSize).Twips)),
-            Length.Max(ascent, Length.FromTwips(own.ScaledAscent(EmSize).Twips)));
+        Fold(Face, EmSize);
+        return (height, ascent, descent);
     }
 
     /// <summary>

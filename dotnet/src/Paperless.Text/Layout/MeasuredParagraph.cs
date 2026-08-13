@@ -609,6 +609,11 @@ public sealed class MeasuredParagraph
         // Held before the objects have their say: this is what proportional line spacing scales.
         Length textHeight = Length.Max(height, ascent + descent);
 
+        // The same two maxima again, kept apart from the line's own so that a fly-in-content can raise
+        // the line without raising this. A label joins these; a picture does not. See the fold below.
+        Length textAscent = ascent;
+        Length textDescent = descent;
+
         // A line holding no text has nothing to hang below its baseline. Writer builds a line's descent
         // out of the portions that carry text and a fly-in-content is not one of them, so a picture
         // alone on its line makes a line exactly as tall as the picture — floored at the paragraph
@@ -658,11 +663,26 @@ public sealed class MeasuredParagraph
 
             // A list label is a portion rather than an object, so it counts towards the height
             // proportional line spacing takes its percentage of — see <see cref="InlineObject"/>.
+            //
+            // Per side, not as a box. Writer keeps a running maximum ascent and a running maximum
+            // descent and makes the base out of the two, so a label that is deeper than the text but no
+            // taller overall still widens the base by its extra descent. Folding its whole box in
+            // instead gives the same answer for a label of the paragraph's own face at a larger size —
+            // which is every row round 47 measured, and why it could not see the difference — and a
+            // short answer for a label that differs by face.
+            //
+            // Measured against the installed 26.2.4.2 by `dotnet/probes/words-b-01/labelshape.py`, a
+            // 12 pt level over a 12 pt Liberation Serif item at 200%: a Liberation Mono label (ascent
+            // 9.99, descent 3.60) gives LibreOffice an extension of 14.80 = 11.20 + 3.60, and a Caladea
+            // one (10.80, 3.00) gives 14.20 = 11.20 + 3.00. The box rule gives 13.59 and 13.80.
             if (one.RaisesTextHeight)
             {
-                textHeight = Length.Max(textHeight, one.AboveBaseline + one.BelowBaseline);
+                textAscent = Length.Max(textAscent, one.AboveBaseline);
+                textDescent = Length.Max(textDescent, one.BelowBaseline);
             }
         }
+
+        textHeight = Length.Max(textHeight, textAscent + textDescent);
 
         return (Length.Max(height, ascent + descent), ascent, textHeight);
     }
