@@ -305,7 +305,9 @@ def probe(path):
             return ("ole-unreadable", [], 0, 0)
         try:
             if ole.exists("WordDocument"):
-                blobs = [doc_office_art(ole)] + doc_inline_containers(ole)
+                floating = [doc_office_art(ole)]
+                inline = doc_inline_containers(ole)
+                blobs = floating + inline
                 kind = "doc"
             elif ole.exists("Workbook") or ole.exists("Book"):
                 blobs, kind = xls_office_art(ole), "xls"
