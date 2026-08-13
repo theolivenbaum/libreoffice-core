@@ -65,6 +65,28 @@ else
         say "        apt-get install -y --no-install-recommends \\"
         say "            fonts-crosextra-carlito fonts-crosextra-caladea fonts-liberation"
     fi
+
+    # The five above are *substitutions* — a requested face mapped to a metric-compatible one.
+    # A missing FALLBACK face is a different failure and passes every check above, because
+    # nothing requests it by name. It is not hypothetical: this container shipped without
+    # fonts-dejavu-core, DejaVu sits ahead of WenQuanYi Zen Hei in the fallback chain, and
+    # 267 of the 534 corpus reference PDFs resolve a fallback. Holding LibreOffice constant
+    # and varying only that one package moved 53 of 534 reference page counts and 426 pages.
+    #
+    # The tell is that fc-match NEVER FAILS. Asked for a face it does not have, it returns
+    # something else and exits 0, which reads as success unless you look at what came back —
+    # which is why the gap survived a whole pass of work, and why this checks the answer
+    # rather than the exit status.
+    #
+    # The repository's own test suite is the authority for what belongs here:
+    # SheetColumnDigitsTests pins DejaVu Sans at 1303/2048 of an em against values read from
+    # LibreOffice 24.2.7.2's own output, so DejaVu was present when the stored figures were
+    # measured. If that test is ever retired, revisit this check rather than deleting it.
+    check_font "DejaVu Sans"      "DejaVu Sans"
+    if ! fc-match "DejaVu Sans" family 2>/dev/null | head -1 | grep -qx "DejaVu Sans"; then
+        say "        apt-get install -y --no-install-recommends fonts-dejavu-core"
+        say "        (see MISSING_PACKAGES.md — this moves pagination, not just glyphs)"
+    fi
 fi
 
 say "== 4. PDF rasteriser (needed only for image comparison) =="
@@ -72,6 +94,25 @@ if command -v pdftoppm >/dev/null 2>&1; then
     ok "pdftoppm $(pdftoppm -v 2>&1 | head -1 | sed 's/^[^0-9]*//')"
 else
     warn "pdftoppm missing: apt-get install -y --no-install-recommends poppler-utils"
+fi
+
+say "== 5. PDF extractor — a measurement input, not a utility =="
+# poppler's version is an uncontrolled input to every figure this project records, because
+# the gate's second check has been `pdftotext | wc -w`. That is not a theoretical worry:
+# with our renderer's code PROVABLY unchanged (git log over dotnet/src returning nothing),
+# our own word counts moved on 169 of 200 documents, and 86 of them moved by the exact
+# amount the reference moved. A term that shifts both sides of a comparison equally belongs
+# to neither renderer.
+#
+# So this prints the version rather than merely checking presence: a stored figure whose
+# extractor version is unrecorded cannot be compared with a new one. `paperless analyze`
+# exists to remove this dependency by reading PDFs in process; until every caller has moved
+# over, record what is printed here beside any figure you keep.
+if command -v pdftotext >/dev/null 2>&1; then
+    ok "pdftotext $(pdftotext -v 2>&1 | head -1 | sed 's/^[^0-9]*//')"
+    say "        (record this beside any word count — it is part of the measurement)"
+else
+    warn "pdftotext missing: apt-get install -y --no-install-recommends poppler-utils"
 fi
 
 say ""
