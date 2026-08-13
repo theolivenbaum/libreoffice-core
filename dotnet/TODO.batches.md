@@ -12362,3 +12362,81 @@ from reading it and believing what it said about line spacing: its
 all**. The checkout is reference material and the installed binary is ground truth — this is what it
 costs when that is forgotten, and the cost was small only because the probe was written before the
 reading was believed.
+
+---
+
+## Merge note — gate-01, the word check corrected
+
+Merged `wt-gate`. **Instrument only: zero C# changed**, so no build or test movement. The
+scoreboards below move because the *measurement* changed, not because anything was fixed.
+
+A token is a word iff it carries a Unicode letter or digit. `batch-check.sh` and
+`ref-baseline.sh` changed in lockstep — they are comparable column for column only if they count
+the same way, and a reference baseline on the old count against a sweep on the new one reads as a
+corpus-wide word failure.
+
+| track | docs | old metric | **new metric** | Δ |
+|---|---:|---:|---:|---:|
+| words | 200 | 154 | **154** | **0** |
+| slides | 163 | 132 | **144** | **+12** |
+| sheets | 171 | 142 | **144** | **+2** |
+| **total** | **534** | **428** | **442** | **+14** |
+
+**The sheets 142 is one agent's alone and is not shared.** The `+2` carries; the 142 does not.
+
+### What the round refuted, including its own brief
+
+**The brief's framing was wrong by a factor of five, and the agent said so.** We emit essentially
+the same glyphs as the reference — 291 830 against 289 808, a per-document Σ|Δ| of **8054, some
+2.8% of the term**. The 15 873 the brief leaned on was a count of *one side*. And corpus-wide the
+term is not bullets at all: U+002D is 34.5%, U+0024 27.4%, U+002F 13.7%, and the bullet class
+**5.3%** — it is the accounting number format writing a zero cell as `$` and `-`.
+
+**On words the poppler framing is exactly right**: zero verdicts move, and the term cancels
+document by document, so no definition change recovers anything there.
+
+### The control earned its keep, and its one loss is a true positive
+
+427 of 428 already-matching documents stay matching (words 154/154, slides 131/132, sheets
+142/142). The single loss, `Thailand17.ppt`, **was passing by the arithmetic of two opposite
+errors**: the reference emits 92 more bullets than we do, and that deficit was cancelling a +111
+real-word surplus in our output. The corrected metric exposed a failure the old one hid.
+
+Also validated: the stored verdict rule replayed over every TSV in the tree, **9552 rows, 0
+mismatches**; tokenisation 1068/1068 against `wc -w`; a fresh end-to-end soffice run 10/10.
+
+### Compatibility, done properly
+
+`rawwords`/`refrawwords` is appended **after** the verdict/status column, so `$7` still reads as
+the verdict for all eleven rounds of stored TSVs and for the replay harness. The header carries an
+explicit non-comparability line.
+
+`python3` rather than `grep`/`awk` because this image has only the `C` and `C.utf8` locales, under
+which `grep [[:alnum:]]` misses Han and `mawk` misses Cyrillic and Greek as well.
+
+### Three defect leads this produced, none of them the gate's business
+
+The residue is **not** shared between the two renderers, and no extractor can produce it — so each
+of these is ours or the reference's, and they are open:
+
+1. **A workbook writes 11 538 `$`/`-` tokens against the reference's 9020.** The accounting number
+   format for a zero cell.
+2. **Another writes 1101 `###` against the reference's 2.** That is the column-too-narrow
+   overflow marker, so we are producing it where the reference is not — a column-width or
+   fitting defect, visible in text rather than in geometry.
+3. **The same Wingdings bullet is written U+F0A7 by the reference and U+E437 by us.** `layer.py`
+   confirms both sides emit real `Tj` operators with real `ToUnicode` entries, so this is a
+   character-mapping difference, not an extraction artefact.
+
+### Corrections to standing beliefs
+
+The **raster-ceiling list is per-page, not per-document**, and reasoning from it to a document
+verdict is invalid: the round predicted no raster-ceiling document would move and five did. **Two
+slides decks on that list now match**, so the raster ceiling was not what was blocking them.
+
+`words_of()` is named in-script as the seam `paperless analyze` should implement. Three
+instructions carried forward: do not re-decide the definition; **re-establish the `wc -w` control
+against a stored `rawwords` column before quoting any PdfPig verdict**, since PdfPig's extraction
+is not poppler's; and emit the excluded classes as counts.
+
+The round scored **9 of its 21 predictions refuted**.
