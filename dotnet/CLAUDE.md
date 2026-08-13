@@ -419,6 +419,17 @@ either: `.vsconfig` is in the list and is a symlink too. The reliable test is th
 git ls-files -s <paths-you-are-about-to-stage> | awk '$1=="120000"'   # must print nothing
 ```
 
+The second consequence is milder and shows up at the end of a round rather than the start:
+**`git worktree remove` refuses**, with `contains modified or untracked files`, because it sees
+those same 56 phantom modifications. Check that the branch is genuinely merged and that nothing
+else is dirty, and then `--force` is correct rather than a shortcut:
+
+```sh
+git -C <primary> merge-base --is-ancestor <worktree-head> HEAD   # must succeed
+git -C <worktree> status --short | grep -vE '\.(png|ico)$' | grep -v '\.vsconfig'   # must be empty
+git -C <primary> worktree remove --force <worktree>
+```
+
 **The reference half of the gate can be banked without a build.** `batch-check.sh` refuses to
 start without a CLI, which is right for a round and wrong when the reference binary is what
 changed. `ref-baseline.sh` is the reference-only half, with `batch-check.sh`'s conventions
