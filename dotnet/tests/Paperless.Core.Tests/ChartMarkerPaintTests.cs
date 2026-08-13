@@ -154,6 +154,25 @@ public class ChartMarkerPaintTests
     }
 
     [Fact]
+    public void AStrokedMarkerIsStrokedInTheColourItStates()
+    {
+        // Cross and Star are the two shapes drawn as a stroke rather than as a fill
+        // (ChartLayout.cs:2240-2252), so they are the only ones a marker's own a:ln reaches.
+        // Without this case the whole MarkerLine path is unmeasured: a mutation that dropped it
+        // at the painter went undetected until this test was added.
+        ChartDrawing drawing = Place(Scatter(
+            new ChartSeries("S", [10.0, 20.0, 30.0], null, SeriesBlue)
+            {
+                Marker = ChartMarker.Cross,
+                MarkerLine = MarkerGreen,
+                HasLine = false,
+            }));
+
+        drawing.Shapes.Count(s => s.Line == MarkerGreen).ShouldBe(3);
+        drawing.Shapes.ShouldNotContain(s => s.Line == SeriesBlue);
+    }
+
+    [Fact]
     public void ARadarMarkerTakesItsOwnColour()
     {
         ChartDrawing drawing = Place(Radar(
