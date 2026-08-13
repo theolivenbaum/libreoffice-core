@@ -12506,3 +12506,67 @@ is not this round's doing — but the handover recorded Fidelity at 550 with 0 f
 something between that figure and now broke 40 tests and nobody has looked. **The ten non-Fidelity
 projects being green does not cover this**, and no round this session has run Fidelity until now.
 It is the largest unexamined regression on the branch.
+
+---
+
+## Merge note — words-d-01, page geometry excluded
+
+Merged `wt-words-d`. Build 0 warnings / 0 errors. **Ten non-Fidelity projects: 3471 total, 0
+failed** — WordProcessing 763 → **769**, everything else unchanged. All six new tests are
+**verified by reintroduction**, none a drift guard: three detect removing the fit, one detects
+widening the window 44 → 60, one 44 → 400, one covers the RTF arm.
+
+**Words is 154/200 before and after. Page error 117 → 117, exact pages 163 → 163, no page count
+moved on any of the 200.** That is the result, not a disappointment attached to one.
+
+### An exclusion, and it cost a shipped fix to earn
+
+**31 of 200 documents were laid out on a sheet the reference does not use** — 8 of them among the
+37 check-1 failures. All 31 are now correct, and **nothing moved**. So **page geometry is excluded
+as a cause of the page cluster**: the causes are inside the flow, not in the sheet. That is worth
+more than another partial explanation of the cluster, because it closes a direction rather than
+opening one.
+
+### The law, measured before it was attributed
+
+Each stated Word page dimension is replaced **independently** by the first dimension in
+LibreOffice's standard-paper table — every entry's width *and* height — strictly within 0.44 mm.
+Swept an authored DOCX one twip at a time: heights **16814–16862** all come back 841.89 pt, while
+16813 and 16863 come back as themselves. That is `MAXSLOPPY = 44` hundredths of a millimetre with
+a strict `<`, edge for edge.
+
+The decisive detail is that it fits **dimensions, not formats**: a stated 20638-twip *width* comes
+back as 364 mm, which is B4(JIS)'s **height** and no paper's width. `aDinTab`'s order is
+load-bearing — Quarto at 21519 and Letter at 21590 are 0.71 mm apart.
+
+Three readers reach the one rule: `DocxPageGeometry`, `RtfPageGeometry` (LibreOffice routes
+`\paperw` through the same `DomainMapper` case) and `Ww8SectionTable`. ODF is deliberately
+excluded, and margins are not fitted, because LibreOffice does not fit them.
+
+Reach: 31 documents disagreeing → **0**; **33 renderings changed** (22 docx, 11 doc), **24 of them
+documents that already passed the gate**. The census under-counted by two at its 0.05 pt tolerance
+and the byte comparison says so; both numbers are in the report rather than the flattering one.
+
+### The instrument finding, which is the transferable part
+
+The round predicted `first-divergence.py` would surface the geometry cluster. It reported
+`page size` on **one** document of the 31, because `pdf-image-diff.py` rasterises at 512 px and a
+0.66 pt sheet error is far below one pixel. **Right cause, wrong instrument** — a media-box census
+found all 31 in one pass by reading the number instead of looking at pixels.
+`first-divergence.py`'s header now carries this, because "a `page size` note is the strongest
+divergence signal" is true and has a resolution floor nobody had written down.
+
+### The classification, all 200, with the matching control
+
+**69 of 154 matching documents have no materially divergent page; 0 of 46 failures do.** The prior
+finding reproduces exactly: **existence of a divergence is the only discriminator**, and `glyphs`
+is the majority kind on *both* sides (54 matching against 21 page-failing). Two corrections: `face`
+is **not** a pass signature at this baseline (9 matching, 4 failing, where it was 5 and 0), and the
+±1 cluster is refuted again but **for a different reason than last time** — its divergence pages
+are bunched at page 1, not spread from 1 to 91.
+
+One real sub-shape recorded rather than claimed: `template---tpr`, `1_tpr_template` and
+`33004.docx` each hold exactly one extra portrait page immediately before the first landscape run.
+
+**The WW8 arm has no test.** Its only evidence is the corpus sweep. Stated here rather than left
+for a future round to discover.

@@ -22,6 +22,23 @@ these failures have in common", which no per-document reading can.
 Page counts that differ are handled by comparing only the common prefix. `pdf-image-diff.py`
 refuses a mismatched pair outright and is right to: page 3 against a different page 3 produces
 a plausible and meaningless report.
+
+WHAT THIS CANNOT SEE: A SHEET THAT IS THE WRONG SIZE BY LESS THAN A PIXEL
+─────────────────────────────────────────────────────────────────────────
+A `page size` note is the strongest divergence signal there is — but its floor is the raster
+resolution, not the PDF's precision. `pdf-image-diff.py` rasterises at 512 px on the long
+edge, so on an A4 page one pixel is about 1.6 pt and **any page-size error below that is
+invisible here**.
+
+Measured: 31 of the 200 words documents were laid out on a sheet the reference does not use,
+and this reported `page size` on **one** of them. The errors were around 0.66 pt. The cause was
+real and the instrument was the wrong one — a media-box census over the same 200 found all 31
+in a single pass, by reading the number out of the PDF instead of looking at pixels.
+
+So when you are asking "is the *sheet* right", read `/MediaBox` directly and compare the
+numbers. Use this tool for what it is good at: where in the flow the content first parts
+company. A round predicted this would surface a geometry cluster and it did not, which cost the
+prediction rather than the round only because a second instrument was run beside it.
 """
 
 from __future__ import annotations
