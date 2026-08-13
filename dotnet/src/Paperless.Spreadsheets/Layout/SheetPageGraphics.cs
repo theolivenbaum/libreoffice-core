@@ -202,19 +202,11 @@ internal sealed class SheetPageGraphics(SheetLayout sheet, double scale)
         if (ColumnX(fromColumn, columns) is not { } columnX) return null;
         if (RowY(fromRow, rows) is not { } rowY) return null;
 
-        // Excel pulls an offset that overruns its own cell back to the cell's far edge, and only for
-        // a SpreadsheetML drawing — see SheetDrawing.ClampsOffsetsToCell.
-        bool clamps = drawing.ClampsOffsetsToCell;
-        Length fromColumnOffset = SheetCellPoint.OffsetWithin(
-            drawing.From.Column, drawing.From.ColumnOffset, sheet.Grid.Columns, clamps);
-        Length fromRowOffset = SheetCellPoint.OffsetWithin(
-            drawing.From.Row, drawing.From.RowOffset, sheet.Grid.Rows, clamps);
-
         Length x = columnX
-                   + (Delta(fromColumn, drawing.From.Column, fromColumnOffset,
+                   + (Delta(fromColumn, drawing.From.Column, drawing.From.ColumnOffset,
                             sheet.Grid.Columns) * scale);
         Length y = rowY
-                   + (Delta(fromRow, drawing.From.Row, fromRowOffset,
+                   + (Delta(fromRow, drawing.From.Row, drawing.From.RowOffset,
                             sheet.Grid.Rows) * scale);
 
         if (drawing.Anchor == SheetAnchorKind.OneCell)
@@ -226,17 +218,13 @@ internal sealed class SheetPageGraphics(SheetLayout sheet, double scale)
         }
 
         Length right = Edge(
-            drawing.From.Column, fromColumnOffset,
-            drawing.To.Column,
-            SheetCellPoint.OffsetWithin(
-                drawing.To.Column, drawing.To.ColumnOffset, sheet.Grid.Columns, clamps),
+            drawing.From.Column, drawing.From.ColumnOffset,
+            drawing.To.Column, drawing.To.ColumnOffset,
             sheet.Grid.Columns);
 
         Length bottom = Edge(
-            drawing.From.Row, fromRowOffset,
-            drawing.To.Row,
-            SheetCellPoint.OffsetWithin(
-                drawing.To.Row, drawing.To.RowOffset, sheet.Grid.Rows, clamps),
+            drawing.From.Row, drawing.From.RowOffset,
+            drawing.To.Row, drawing.To.RowOffset,
             sheet.Grid.Rows);
 
         return new DocRect(x, y, right * scale, bottom * scale);

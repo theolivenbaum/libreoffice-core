@@ -155,12 +155,6 @@ internal static class XlsxDrawings
             To = Point(Child(anchor, DrawingNamespace, "to")),
             Extent = Size(Child(anchor, DrawingNamespace, "ext")),
             Position = Position(Child(anchor, DrawingNamespace, "pos")),
-
-            // `ShapeAnchor::calcCellAnchorEmu` clamps every corner it computes, on this reader and
-            // no other — see SheetDrawing.ClampsOffsetsToCell. It cannot be done here, where the
-            // column widths are not known: a cell's size is a property of the sheet and a drawing
-            // part is read before one.
-            ClampsOffsetsToCell = true,
         };
 
         // Each shape kind wraps its cNvPr in a differently named non-visual container, and they

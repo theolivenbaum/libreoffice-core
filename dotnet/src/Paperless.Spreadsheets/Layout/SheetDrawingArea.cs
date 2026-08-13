@@ -101,26 +101,14 @@ internal static class SheetDrawingArea
                     drawing.Position.Y.Twips + drawing.Extent.Height.Twips);
         }
 
-        bool clamps = drawing.ClampsOffsetsToCell;
-
-        long left = Start(drawing.From.Column, grid.Columns)
-                    + SheetCellPoint.OffsetWithin(
-                        drawing.From.Column, drawing.From.ColumnOffset, grid.Columns, clamps).Twips;
-        long top = Start(drawing.From.Row, grid.Rows)
-                   + SheetCellPoint.OffsetWithin(
-                       drawing.From.Row, drawing.From.RowOffset, grid.Rows, clamps).Twips;
+        long left = Start(drawing.From.Column, grid.Columns) + drawing.From.ColumnOffset.Twips;
+        long top = Start(drawing.From.Row, grid.Rows) + drawing.From.RowOffset.Twips;
 
         if (drawing.Anchor == SheetAnchorKind.OneCell)
             return (left + drawing.Extent.Width.Twips, top + drawing.Extent.Height.Twips);
 
-        return (Math.Max(left, Start(drawing.To.Column, grid.Columns)
-                               + SheetCellPoint.OffsetWithin(
-                                   drawing.To.Column, drawing.To.ColumnOffset,
-                                   grid.Columns, clamps).Twips),
-                Math.Max(top, Start(drawing.To.Row, grid.Rows)
-                              + SheetCellPoint.OffsetWithin(
-                                  drawing.To.Row, drawing.To.RowOffset,
-                                  grid.Rows, clamps).Twips));
+        return (Math.Max(left, Start(drawing.To.Column, grid.Columns) + drawing.To.ColumnOffset.Twips),
+                Math.Max(top, Start(drawing.To.Row, grid.Rows) + drawing.To.RowOffset.Twips));
     }
 
     /// <summary>Where a column or row starts, in twips, hidden ones contributing nothing.</summary>
