@@ -116,18 +116,30 @@ public sealed class PdfAnalysisTests
         result.UnembeddedFontCount.ShouldBe(1);
     }
 
-    /// <summary>A descriptor carrying a font program is reported embedded.</summary>
+    /// <summary>A descriptor carrying a font program is reported embedded, whichever key holds it.</summary>
     /// <remarks>
+    /// <para>
     /// The other half of the previous test, and not redundant with it: a predicate that always
     /// answers "no" passes that one.
+    /// </para>
+    /// <para>
+    /// All three keys, because they are three separate reads and a reader can know one and not the
+    /// others. <c>/FontFile</c> is a Type 1 program, <c>/FontFile2</c> a TrueType one, and
+    /// <c>/FontFile3</c> one whose format its own stream names — which is where every CFF face
+    /// lands. Covering only <c>/FontFile2</c> left the <c>/FontFile3</c> read unverified: removing
+    /// it changed no test.
+    /// </para>
     /// </remarks>
-    [Fact]
-    public void AFaceWithAFontProgramIsReportedEmbedded()
+    [Theory]
+    [InlineData("FontFile")]
+    [InlineData("FontFile2")]
+    [InlineData("FontFile3")]
+    public void AFaceWithAFontProgramIsReportedEmbedded(string fontFileKey)
     {
         using TempPdf pdf = TempPdf.Write(MinimalPdf.Build(
             mediaBox: "[0 0 200 300]",
             content: "BT /F1 12 Tf 20 100 Td (hello) Tj ET",
-            fonts: [MinimalPdf.SimpleFont("ABCDEF+Whatever", embedded: true)]));
+            fonts: [MinimalPdf.SimpleFont("ABCDEF+Whatever", embedded: true, fontFileKey)]));
 
         PdfAnalysisResult result = PdfAnalysis.Analyze(pdf.Path);
 
@@ -144,6 +156,10 @@ public sealed class PdfAnalysisTests
     /// </remarks>
     [Theory]
     [InlineData("ABCDEF+LiberationSerif", true)]
+    // Seven upper-case letters, so the plus is at index 7 and this is not a subset prefix. The
+    // case that discriminates position from mere presence: without it, testing name.Contains('+')
+    // instead of name[6] == '+' passes every other case here.
+    [InlineData("ABCDEFG+LiberationSerif", false)]
     [InlineData("Foo+Bar", false)]
     [InlineData("ABC123+LiberationSerif", false)]
     [InlineData("LiberationSerif", false)]
@@ -443,16 +459,17 @@ public sealed class PdfAnalysisTests
     {
         /// <summary>A simple Type 1 font dictionary, with or without a font program.</summary>
         /// <remarks>
-        /// The embedded variant's <c>/FontFile2</c> holds a stub rather than a real font program:
+        /// The embedded variant's font-file entry holds a stub rather than a real font program:
         /// what is under test is whether the reader reports the presence of the key the way
         /// <c>pdffonts</c>'s <c>emb</c> column does, and a valid TrueType would test the font
-        /// parser instead.
+        /// parser instead. The key is a parameter because there are three of them and a reader that
+        /// knows only <c>/FontFile2</c> reports every CFF face in the corpus as unembedded.
         /// </remarks>
-        public static string SimpleFont(string baseFont, bool embedded)
+        public static string SimpleFont(string baseFont, bool embedded, string fontFileKey = "FontFile2")
             => embedded
                 ? $"<< /Type /Font /Subtype /TrueType /BaseFont /{baseFont} /FirstChar 32 "
                   + "/FontDescriptor << /Type /FontDescriptor /FontName /" + baseFont
-                  + " /Flags 32 /FontFile2 999 0 R >> >>"
+                  + $" /Flags 32 /{fontFileKey} 999 0 R >> >>"
                 : $"<< /Type /Font /Subtype /Type1 /BaseFont /{baseFont} >>";
 
         public static byte[] Build(string mediaBox, string content, string[] fonts)
