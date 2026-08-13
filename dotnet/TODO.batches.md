@@ -13017,3 +13017,87 @@ the crop was read out of the PDF operators instead, paired by frame:
 
 The rule that decides which of those two behaviours applies was **not established**, and it leads
 the next-round list rather than being guessed at.
+
+---
+
+## Merge note — fidelity-b-01, Word's note separator and a stale override
+
+Merged `wt-fid-b`. Build 0 warnings / 0 errors.
+
+**Fidelity 510/40 → 519/31 of 550, verified independently at the merge.** Nine turned green and
+the net is nine. **Ten non-Fidelity projects: 3583 total, 0 failed** — WordProcessing 783 → **789**.
+All six new tests are reintroduction-verified detectors; none is a drift guard.
+
+### Task 1 — the note separator (7 of the 9)
+
+`PaginationOptions.UsesWordNoteSeparator` now switches two things together: an absolute 2 in rule
+clamped to the column, and a position 60% down a reservation taken from the **default paragraph
+style's** line height.
+
+**Both "establish, don't assume" points in the brief mattered, and one would have caused a
+regression.** The rule is **DOCX and DOC, and *not* RTF**: one authored document in five spellings
+against the installed 26.2.4.2 gives DOCX and DOC a 144.000 pt separator at a 481.890 pt column
+*and* at 255.118 pt, while FODT, ODT **and RTF** each draw 25.0% of theirs. Paperless routes RTF
+through `PaginationOptions.Word`, so the obvious implementation — switch on "is this a Word
+format" — **would have broken a currently-green test**. Hence a separate flag, verified by
+reintroduction in both directions.
+
+The vertical rule needed a **second axis** to pin: varying the default paragraph size gives 0.350 /
+2.200 / 7.700 pt at 8 / 12 / 24 pt, and the 60% **truncates to whole twips** (`Point::setY` takes a
+`tools::Long`) — which is what makes all three come out exactly rather than approximately.
+
+Two remain red and are correctly diagnosed rather than forced: `endnotes.docx` is a placement
+default and not a metric (predicted), and `note-restart.docx` is now **byte-exact in pagination and
+drawn text**, its residue being one `pdftotext -layout` column from a 0.040 pt note-line offset —
+i.e. the ~0.1% advance divergence this round was told not to touch.
+
+### Task 2 — the slide table pitch was a stale override, not a missing rule
+
+The call site is `PptxSlideLayout.CellBody`, and the gap was an **override**:
+`FontIndependentLineSpacing = false`, **correct against 24.2.7.2 and wrong since `a47776a938c`**.
+Deleting it reaches the 1.2 em rule already present in `SlideTextLayout`. Three
+`SlideTablePlacementTests` were re-baselined to numbers read out of **26.2.4.2's own PDF** (93.600
+baseline, 21.600 pitch, 266.428 rule) rather than adjusted to fit.
+
+### Task 3 — declined, with its size stated
+
+The `calcCellAnchorEmu` clamp was implemented and **reproduces the source arithmetic to the digit**
+— predicted 1649 hmm, we render 46.7433 pt = 1649 hmm. **The reference draws 1646.** So the clamp
+is right *and is not where the 0.170 pt comes from*; the residue arrives from Calc re-anchoring
+after import. ~60 lines, four call sites, turns no test green, and would change every overrunning
+XLSX drawing. Reverted, and it survives in history at **`59aa76fbc66`** for whoever takes it up.
+
+This is the project's characteristic failure shape, scored honestly by the round itself: **right
+mechanism, right citation, wrong sentence attached.**
+
+### The test that turned red, and why a count would have hidden it
+
+`OdpTableComparisonTests.TheSameTableThroughEitherFormatDrawsTheSameStrokes` **compares our two
+readers to each other and never to LibreOffice**. Measured before touching it: **the reference
+itself now renders the same table 2.891 pt differently through ODP and PPTX**. It was **restated,
+not relaxed** — the divergence is a stated constant over a counted set of 8 of 42 coordinates.
+
+The round compared both failing sets **in both directions** rather than by count, which is the only
+reason this surfaced. A pass/fail tally would have shown 40 → 31 and hidden a new red inside it.
+
+### Corpus reach — measured though not owed
+
+No shared layer changed, so no cross-track sweep was required; it was run anyway because the census
+could not see it. **65 of 363 renderings moved** (48 of 163 slides, 17 of 200 words, sheets 0 by
+construction), and of those 65, **zero page counts and zero gate verdicts moved**. Stated plainly by
+the round: *no bonus — these two defects were not what the scoreboard was losing on.*
+
+### An operational trap, hit by the parent at this merge
+
+The post-merge `dotnet build` **crashed with `Fatal error. Internal CLR error. (0x80131506)`** under
+memory pressure — 21 of 31 GB in use, three agent rounds live, ten parallel test hosts. The next
+step ran `dotnet test --no-build`, which **silently measured the previous build's binaries** and
+produced an entirely plausible 3577 / 0 failed.
+
+The tell was a single number: WordProcessing read **783 where 789 was expected**, because the
+round's six new tests were not in the stale assembly. Run alone, the build succeeded 0/0 and the
+suite gave 3583.
+
+**A green test run proves nothing if the build that preceded it failed.** Check the build's exit
+status before trusting `--no-build`, and treat an unchanged total after a merge that added tests as
+the same class of evidence as "`git status` cannot see a bad HEAD".
