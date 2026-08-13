@@ -5,10 +5,12 @@ long-standing "**Escher picture cropping, implemented nowhere in the word path**
 measurement is below.
 
 **Headline.** Reach is **7 of 200 words renderings**, **0 of 171 sheets** and **0 of 163 slides**.
-**Zero verdicts move**, which was predicted before measuring. The seven that change reconcile the
-reference: `RMI…GettingOffOil.doc` draws its cropped picture at 294.55 pt against LibreOffice's
-294.45, where the base leg was 20.1 pt short; `absrc-pac-01-info-note-en.doc` at 71.2 against 71.1,
-where the base leg was 6.3 pt short.
+**Zero verdicts move**, which was predicted before measuring. Of the cropped pictures the reference
+and we both draw, **agreement with the reference goes from 0 of 8 to 6 of 8** — `RMI…GettingOffOil`
+at 294.55 pt against LibreOffice's 294.45, `absrc-pac-01-info-note-en` at 71.2 against 71.1 — and
+**two get worse**: two WMF pictures in `150_5300_13_chg10` are now cropped where the reference
+crops nothing. That is a finding, it is named, and the rule that decides it is **not** established
+(§6, §10). This is not a clean win and is not reported as one.
 
 **Three things the brief said, and none of them survived.**
 
@@ -19,7 +21,9 @@ where the base leg was 6.3 pt short.
    not crop anything — it spills the whole picture across the page. Shipping "one call" would have
    been a regression, not a fix.
 3. **And the inline `.doc` case needed a second refutation, of my own first answer.** See §4. It
-   is the most useful thing in this round.
+   is the most useful thing in this round: my fixture was the only file in play that LibreOffice
+   itself had written, and on the one field that mattered it disagrees with every real `.doc` in
+   the corpus.
 
 ---
 
@@ -49,7 +53,7 @@ were actually pinned rather than merely masked.
 | sheets reach | **0 of 171** | **right** |
 | slides reach | **0 of 163** | **right** |
 | verdicts | **zero movement, both tracks** | **right** — 0 of 7, every gate column identical to the digit |
-| direction | no changed page worse | see §6 |
+| direction | no changed page worse | **wrong** — 2 pictures of 8 are over-cropped, §6; and the page-level instrument could not answer the question at all |
 | the `+ 1` | not ported | **holds**, nothing reintroduces it |
 
 **The words band was wrong because its ceiling was.** At prediction time the census reported 5
@@ -219,16 +223,70 @@ where it was and sheets stays where it was.
 This is the right outcome rather than a weak one: the gate asks how many pages, how many
 extractable words, and whether the fonts are embedded, and a crop is none of the three.
 
-### Reference agreement, which the gate cannot see
+### Direction — and the instrument that could not answer it
 
-| document | base leg | **after leg** | LibreOffice 26.2.4.2 |
-|---|---:|---:|---:|
-| `RMI…GettingOffOil.doc`, the cropped picture | 274.35 pt tall | **294.55** | **294.45** |
-| `absrc-pac-01-info-note-en.doc`, the cropped picture | 64.8 pt wide | **71.2** | **71.1** |
+**A page-by-page pixel distance is not interpretable on six of the seven, and the round says so
+rather than reporting the tally it produced.** Those six already fail the gate's page-count check,
+so page *N* of ours is not page *N* of the reference. Demonstrated rather than asserted: our
+`150_5300_13_chg10` page **50** and the reference's page **47** both carry *Figure 4-19*, because
+we paginate it at 80 pages and the reference at 77. A page-level "closer or further" there is
+comparing Figure 4-19 against Figure 4-21. The run was stopped and its numbers are not used.
 
-Both to **0.1 pt**, from 20.1 pt and 6.3 pt out. These are the two documents in the seven whose
-cropped picture lands on a page our pagination and the reference's agree about, so they are the two
-where the comparison is unambiguous.
+**A crop can be read out of the PDF directly, and that needs no page alignment at all.** It is an
+exact pair of operators — a clip rectangle and an image placed larger than it — so
+`crop-vs-reference.py` reads every cropped picture on both sides and pairs them **by the frame
+rectangle**, which both legs and the reference agree about because a crop moves no line.
+
+| cropped picture, paired by its frame | base | **after** |
+|---|---:|---:|
+| **agrees with the reference** (growth within 2%) | **0** | **6** |
+| drawn uncropped where the reference crops it | **5** | **0** |
+| cropped where the reference does not crop | 0 | **2** |
+| the reference crops a frame we do not draw at all | 4 | 4 |
+
+**0 → 6 agreeing and 5 → 0 missing**, several to better than 0.3%:
+
+| document | frame | ours | reference |
+|---|---|---:|---:|
+| `RMI…GettingOffOil` | 468.0 × 274.4 | 1.000 / **1.074** | 1.000 / **1.074** |
+| `absrc-pac-01-info-note-en` | 64.8 × 45.9 | **1.099** / 1.000 | **1.101** / 1.002 |
+| `150_5300_13_chg10` | 147.8 × 45.0 | 1.000 / **1.283** | 1.000 / **1.287** |
+| `150_5300_13_chg10`, `chg12` | 503.4 × 586.7 | 1.000 / **1.043** | 1.000 / **1.043** |
+
+The reference's own operators are the same shape as ours, which is the strongest confirmation the
+mechanism is right rather than merely close: it writes
+`q 72.1 159.3 467.8 274.2 re W* n  q 467.9 0 0 294.45 72.05 159.3 cm /Im38 Do Q`, and we write
+`q 72 418.05 468 274.35 re W n  q 468 0 0 294.548 … /Im2 Do Q`. Same clip, same growth, to 0.1 pt.
+
+### The two that got worse, which is a finding and not a rounding error
+
+**Two pictures in `150_5300_13_chg10` we now crop and the reference does not**, both WMF:
+
+| frame | ours | reference |
+|---|---:|---:|
+| 466.6 × 545.8 | **2.395** / 1.241 | 1.000 / 1.000 |
+| 416.9 × 227.4 | **1.175** / 1.018 | 1.000 / 1.000 |
+
+The first states `left 0.0049 right 0.5761 top 0.0198 bottom 0.5366` in its `OPT` and LibreOffice
+draws the picture at its frame with an identical clip — no crop at all. Twenty-one of that
+document's twenty-six reference images are drawn that way. **I did not establish the rule that
+decides it**, and the honest statement is that: the crop reconciles the reference on six pictures
+and over-applies on two, in one document, and the discriminator is unknown. The strongest
+candidate I have is the picture's kind — the six that agree include a PNG and the two that do not
+are metafiles — but `chg10` also has metafiles among the six that agree, so kind alone does not
+explain it and I am not claiming it. See §10.
+
+Four more pictures the reference crops sit on frames our rendering does not produce at all:
+`chg10` emits 6 images where the reference emits 26. That is a pre-existing gap this round neither
+caused nor touched.
+
+### The word counts moved, and the reason is the clip working
+
+Three of the seven move their extracted word count — `chg10` by 145 of 24 197, towards the
+reference's 23 553. The words that vanish are labels **inside the embedded metafiles**
+(`1,000 FEET`, `TERPS (40:1)`, `10,200 FEET`): the clip now cuts away the part of the picture the
+crop hides, and the text in it goes with it. No line moved and no page count changed; this is the
+crop doing exactly what it is for, visible in the one gate column that can see it.
 
 ## 7. Tests
 
