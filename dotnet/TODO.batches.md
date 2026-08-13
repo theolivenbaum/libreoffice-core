@@ -13240,3 +13240,87 @@ tables has reach zero** — 5 decks take automatic fills and none resolves throu
 A mutation that passed a null matrix made the call an identity — an **equivalent formulation**
 rather than a defect. Recorded as such instead of being counted as a hole in the tests, which is the
 distinction a mutation score usually loses.
+
+---
+
+## Merge note — slides-f-01, a leaked colour, and why a correct fix reads as a regression
+
+Merged `wt-slides-f`. Build 0 warnings / 0 errors. **Ten non-Fidelity projects: 3622 total, 0
+failed** — Core 305 → **313**, Presentations 623 → **631**. 16 tests added, **15 verified by
+reintroduction, 0 drift guards**.
+
+**Slides stays 144 of 163, 163 of 163 page-exact, verdicts 0 of 163** — every gate column identical
+to the digit.
+
+### The brief's central claim was wrong, and the round said so before measuring
+
+I briefed that `LineOf` collapses a stated `a:noFill` into "states nothing" and that `:797`'s
+`?? autoLine` **then draws the line the file suppressed**. The first half holds
+(`DrawingChartPlot.cs:1425` against `:1427`) and the marker's `c:marker/c:spPr` was genuinely never
+read — but the second half is **false for every line and scatter series in the corpus**: `:813`
+already sets `HasLine = scatterLine && …noFill is null`, and the polyline is drawn only under that
+flag.
+
+The real defect is a **leaked colour**. `ChartSeries.Line` reaches the marker painter, the radar
+painter, filled-series borders and legend keys — **none of which consult `HasLine`**. So the
+suppression was honoured exactly where it was checked and ignored in four places that never asked.
+This was written into `prediction.md` before the measurement, which is the only reason it reads as
+a finding rather than a correction.
+
+### The fix, both halves together as the previous round insisted
+
+`SuppressesLine` (`DrawingChartPlot.cs:1452`) distinguishes suppression from absence at `:798` and
+`:815`. `MarkerFillOf` (`:1480`) reads the marker's own `a:solidFill` and falls back to its `a:ln`
+colour — `convertMarker`'s tdf#124817 rule, and **the fallback is not decorative**: both AIRBUS
+markers state a three-stop `a:gradFill`, and it is the only thing that finds them a colour at all.
+`ChartSeries.MarkerFill`/`MarkerLine` live in Core; both painters consult them ahead of the series
+colour.
+
+**The debit from the previous round closes.** FAAAI's 8 markers go to `#850F89` and AIRBUS's 10 to
+`#70AD47` — **the reference's own values at the reference's own coordinates** — and the
+whole-document operator dumps differ in exactly those 8 of 1143 and 10 of 2049 records **and nothing
+else**.
+
+### Reach
+
+Census by walking OPC parts over all 534 documents, counting the element directly rather than
+inferring from what currently draws: **22 `a:noFill` series declared across 7 decks, of which only 3
+in 2 decks have a non-null `Line` today** — the other 19 are filled series at style 2, where the
+automatic table is already `Invisible`. Two full slides sweeps, byte-compared: **2 of 163 changed**.
+
+Cross-track **re-measured rather than inherited**, because the change is in a different function
+from last round's: **words 0 of 200, sheets 0 of 171**, both whole tracks rendered on both legs and
+byte-compared. The corpus holds **zero ODF chart parts**, so the shared Core painter is exercised by
+nothing outside OOXML.
+
+### Why a correct fix reads as a regression on the pixel metric
+
+This is the transferable part. FAAAI reads `4.73 / 0.40 / 0.41` on **both** legs — blind, as
+predicted. AIRBUS page 15 reads 0.36 → 0.38, i.e. **further from the reference**.
+
+Rather than argue it away, the round ran a **2×2**: four builds and four renderings, both colours ×
+both marker sizes. At the reference's own marker size the two colours are **indistinguishable**
+(0.33 / 0.33), and both are better than either colour at *our* size. Our marker is
+`LabelSize*0.7` = **6.30 pt** where the file states `<c:size val="5"/>` and the reference draws
+**4.99 pt**.
+
+So the colour fix is right, the size defect is what the metric is seeing, and the round reported
+**1 page further** with the cause measured instead of explained away.
+
+### One mutation exposed a real gap, one did not
+
+M10 — painter ignores `MarkerLine` — went undetected on its first run. That was a **genuine hole**:
+`Cross` and `Star` are the only stroked marker shapes and every test used a circle. A test was added
+and the mutation re-run detected. M11 was undetected and is a **proved equivalent formulation**. The
+distinction is kept explicitly, as it was last round.
+
+### `c:minorGridlines` not taken, and my "it is small" is refuted
+
+There is **no minor-tick concept anywhere in the tree** — `MinorTick|MinorUnit|minorUnit|MinorStep`
+returns nothing across `Core/Charts` and the reader. It needs a minor interval on
+`ChartScaleResult`, a model member, a reader, a painter, **and** a colour, since the reference
+strokes `#8B8B8B`/`#666666` against the documented `0xB3B3B3`.
+
+Two better next items, both newly measured: **the marker ignoring `c:size`** — 0.03 `|ink|%` on one
+page, and the reason a correct colour currently reads as a regression — then the missing marker
+outline.
