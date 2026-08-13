@@ -326,28 +326,15 @@ internal static class XlsxCellDecoration
         }
 
         /// <summary>
-        /// Lightens or darkens a colour by a tint, which is the ECMA-376 formula on luminance.
+        /// Lightens or darkens a colour by a tint, which is a luminance modulation in HSL.
         /// </summary>
         /// <remarks>
-        /// A negative tint scales the luminance towards black and a positive one towards white,
-        /// which is not the same as blending with either — a mid grey tinted by 0.5 comes out
-        /// lighter than a simple blend would put it.
+        /// <see cref="XlsxTint"/> holds the transform and the measurements behind it. This used
+        /// to compute the same target luminance and then apply the <em>difference</em> as one
+        /// additive offset to all three RGB channels, which clamps whichever channel is already
+        /// brightest and so shifts the hue — turning the stock gold accent into lemon.
         /// </remarks>
-        private static Colour Tint(Colour colour, double tint)
-        {
-            double max = Math.Max(colour.R, Math.Max(colour.G, colour.B)) / 255.0;
-            double min = Math.Min(colour.R, Math.Min(colour.G, colour.B)) / 255.0;
-            double luminance = (max + min) / 2;
-
-            double target = tint < 0 ? luminance * (1 + tint) : (luminance * (1 - tint)) + tint;
-            double shift = target - luminance;
-
-            return new Colour(
-                Component(colour.R, shift), Component(colour.G, shift), Component(colour.B, shift));
-
-            static byte Component(byte value, double shift)
-                => (byte)Math.Clamp(Math.Round((value / 255.0 + shift) * 255), 0, 255);
-        }
+        private static Colour Tint(Colour colour, double tint) => XlsxTint.Apply(colour, tint);
 
         /// <summary>
         /// The legacy 64-entry palette a workbook that declares none falls back to.
