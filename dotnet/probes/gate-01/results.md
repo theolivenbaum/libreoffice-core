@@ -357,6 +357,14 @@ The old column reproduces `slides-rebase-01`'s 132 and `words-rebase-02`'s 154 t
 independently re-rendered here. (The brief's 129 for words is `words-rebase-01`'s figure against
 a font-starved reference and is superseded; see `words-rebase-02` §1.)
 
+**The sheets pair, 142 → 144, is mine alone and has no published old figure to reproduce
+against.** A sheets round was being taken concurrently while this was measured, so if its
+scoreboard differs from 142 the difference is a *code* difference — a commit that landed after
+`c13049cc002` — and not a metric difference. **The +2 is the metric's effect and is safe to
+carry across; the 142 is not.** Re-derive the sheets old column from that round's own sweep
+before quoting it; the two named gains (`2012-GA-Survey…xls`, `fy2011-aip-grants.xls`) are
+documents, not counts, and transfer regardless.
+
 ### Every document whose verdict changes — 17 rows, 15 of which move the scoreboard
 
 **slides — 13 in, 1 out**
