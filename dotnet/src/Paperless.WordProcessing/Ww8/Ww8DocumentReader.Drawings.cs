@@ -1,5 +1,6 @@
 using System.Buffers.Binary;
 using Paperless.Core.Diagnostics;
+using Paperless.Core.Geometry;
 using Paperless.Core.Graphics;
 using Paperless.MsBinary.Escher;
 using Paperless.MsBinary.Records;
@@ -214,6 +215,54 @@ public sealed partial class Ww8DocumentReader
             with { Crop = EscherPicture.Crop(shape.Properties) };
     }
 
+    /// <summary>
+    /// The picture stored inside an inline shape's own container, or null when it stores none.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>An inline picture's <c>pib</c> does not index the document's blip store, and reading it as
+    /// though it did draws a different document's picture.</b> Word writes an inline picture as an
+    /// <c>OfficeArtInlineSpContainer</c> — the shape, then its <em>own</em> <c>FBSE</c> — and numbers
+    /// its <c>pib</c> from one inside that container, so the same small number appears on every inline
+    /// picture in the file. Where the document also has floating shapes, that number collides with a
+    /// real entry in the shared store: in <c>150_5300_13_chg10.doc</c>, four inline figures all state
+    /// a <c>pib</c> the store answers, and all four were drawn as the same 197x77 grayscale JPEG that
+    /// belongs to a floating shape elsewhere in the document.
+    /// </para>
+    /// <para>
+    /// So the container's own blip wins whenever there is one, and the store is consulted only when
+    /// there is not. LibreOffice reaches the same order by a different route and says why in the
+    /// code: <c>SwWW8ImplReader::ImportGraf</c> calls <c>DisableFallbackStream()</c> before importing
+    /// an inline shape — "##835## Disable use of main stream as fallback stream for inline direct
+    /// blips as it is known that they are directly after the record header, testing for existence in
+    /// main stream may lead to an incorrect fallback graphic being found"
+    /// (<c>sw/source/filter/ww8/ww8graf2.cxx:531-537</c>). That is this defect, described in 2003.
+    /// </para>
+    /// <para>
+    /// A container whose blip is present but unreadable still answers, rather than falling through:
+    /// the store's answer for that <c>pib</c> would be the wrong picture, and an empty frame in the
+    /// right place is better than the right size holding someone else's figure.
+    /// </para>
+    /// </remarks>
+    private FramePicture? InlinePictureAt(int shapeAt, EscherShape shape)
+    {
+        _inlinePictures ??= new DffRecordBuffer(_pictures);
+
+        if (!_inlinePictures.TryReadHeader(shapeAt, out DffRecordHeader container)) return null;
+        if (EscherBlips.Inline(_inlinePictures, _inlinePictures.EndOf(container)) is not { } own)
+        {
+            return null;
+        }
+
+        // The crop is the shape's, not the blip's: an inline picture's bytes are inside its own
+        // container rather than in the store, and taking them by that route must not lose the four
+        // properties beside them.
+        return (own.Bytes.IsEmpty
+            ? Declined(own)
+            : EmbeddedPicture.Read(own.Bytes, own.Kind, "inline blip", _diagnostics))
+            with { Crop = EscherPicture.Crop(shape.Properties) };
+    }
+
     /// <summary>Records that a blip was found whose bytes could not be reached.</summary>
     /// <remarks>
     /// Always empty, so that it reads as the answer at the call site. The blip store deliberately keeps
@@ -295,21 +344,7 @@ public sealed partial class Ww8DocumentReader
 
         if (InlineShape(shapeAt) is not { } shape || !IsPictureShape(shape)) return null;
 
-        _inlinePictures ??= new DffRecordBuffer(_pictures);
-        FramePicture image = PictureOf(shape);
-
-        if (image.IsEmpty
-            && _inlinePictures.TryReadHeader(shapeAt, out DffRecordHeader container)
-            && EscherBlips.Inline(_inlinePictures, _inlinePictures.EndOf(container)) is { } own)
-        {
-            // The crop is the shape's, not the blip's, so it survives the fall-through: an inline
-            // picture's bytes are inside its own `SpContainer` rather than in the blip store, and
-            // taking them by that route must not lose the four properties beside them.
-            image = (own.Bytes.IsEmpty
-                ? Declined(own)
-                : EmbeddedPicture.Read(own.Bytes, own.Kind, "inline blip", _diagnostics))
-                with { Crop = EscherPicture.Crop(shape.Properties) };
-        }
+        FramePicture image = InlinePictureAt(shapeAt, shape) ?? PictureOf(shape);
 
         return new Ww8LayoutFrame(
             new Ww8ShapeAnchor(
