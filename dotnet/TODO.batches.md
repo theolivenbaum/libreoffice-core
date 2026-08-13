@@ -13388,3 +13388,74 @@ to WMFs we cannot yet draw at all.
 Task 2, the page cluster, was not begun; task 1 did not close early. The cluster's standing facts
 are unchanged: existence of a divergence is the only discriminator (0 of 45 failures have none),
 and the ±1 cluster has no single shared cause, refuted three times.
+
+---
+
+## Merge note — sheets-e-01, and a briefed direction that was inverted
+
+Merged `wt-sheets-e`. Build 0 warnings / 0 errors. **Ten non-Fidelity projects: 3638 total, 0
+failed** — Spreadsheets 663 → **676**. 13 new cases, **all verified by reintroduction**, none a
+drift guard: the missing check is detected by 7, the wrap suppression by 12, and **over**-application
+by 2 controls. Source diff is **one file**, `SheetTextLayout.cs`.
+
+**Sheets stays 146 of 171. Verdict movement zero**, with the single predicted component flip landing
+within 2 words of its predicted delta.
+
+### The brief's direction was backwards, and the prediction said so before measuring
+
+I passed on `gate-01`'s reading that *"we draw 1101 `###` where the reference draws 2"*. **It is the
+reverse: the reference draws 1101 and we drew 2.** We were *under*-producing the overflow marker,
+so every direction in the round is the opposite of the brief's. The round's `prediction.md` was
+committed before a single PDF was opened and led with exactly that.
+
+`ODs-February` holds precisely **1101** numeric column-A cells at width 0.4258, of which 1099 are
+`General`; we drew `1E+00` for those 1099 and `###` only for the two non-`General` ones.
+
+### The rule has three branches and we had implemented two
+
+From an authored `sheet-hash.fods` — **14 variants × 20 column widths**, rendered by 26.2.4.2. A
+clipped **value** hashes if (1) a formula errors, (2) its format is not `General`, or (3) **the
+shortened `General` re-render still does not fit**. We stopped at (2). Branch (3) is
+`output2.cxx:704-710`, three lines: *"Even after the decimal adjustment the text doesn't fit. Give
+up."*
+
+Also measured and fixed: 26.2.4.2 draws the hash on **one line**; we wrapped it into three lines of
+a single `#`. And separately established: shrink-to-fit suppresses `###` at all twenty widths, a
+string never hashes, and a value never borrows an empty neighbour's width.
+
+Reach **2 of 171** — the round predicted 8–35 and refuted itself by an order of magnitude.
+Direction **2 closer, 0 further**. `ODs-February` goes to **1101 = 1101 exact**, and track-wide
+`###` goes 2640 → **3835** against the reference's 4424, closing 67% of the gap.
+
+### The accounting `$` item was refuted as a rendering defect, then seated anyway
+
+Both PDFs draw **the same 8242 `$`**, and `paperless analyze` reports the two documents identical in
+**every column**. The briefed 11 538 against 9020 is **poppler's word-joining alone** — and
+poppler's own `-bbox` mode disagrees with it, so the same binary contradicts itself.
+
+What *is* real is a placement offset: our `-` sits **+6.28 pt** and our `$` **−0.53 pt** across 350
+sampled cells, because the format `_("$"* "-"??_)` renders `?` and `_x` as plain spaces where
+LibreOffice reserves a digit-width and a `)`-width blank. Predicted 0.055 em and 0.611 em, measured
+0.053 and 0.628. **Not implemented**: it is in `Paperless.Core` and owes a 534-document sweep.
+
+### The grid: we do draw it, and my premise was wrong
+
+The reference's 107 verticals are **18 distinct x positions**, and we draw the same 17 grid rules.
+The 107 is per-row segmentation **with no holes on that page**, refuting the round's own prediction.
+An authored `sheet-grid.fods` separates all three `bSingle` triggers: a hidden next column splits
+without a hole; a merge and a string overflow split *and* omit the rule on that row. **We draw the
+merge hole and not the overflow hole** — that is the actionable half, sized at **13 of 171**
+documents and handed over rather than rushed.
+
+### Two instrument findings that cost real time
+
+A **serial** `analyze` loop launching the process 342 times stalled at the letter C. And reading TSV
+**field 10 (`subset`) as field 9 (`unembedded`)** scored all 171 documents as failing — with an
+entirely plausible shape. Both are the same family as the mis-aligned `join` earlier this session:
+a column index off by one produces a confident, wrong, well-formed answer.
+
+### Largest lead produced
+
+**`apron-area.xls` page 1 draws no grid at all on our side** — the reference draws 70 vertical and
+56 horizontal hairlines — and it is missing three border width classes, **while matching the gate
+exactly**.
