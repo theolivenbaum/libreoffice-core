@@ -359,7 +359,59 @@ compares two of our own outputs, so no single-sided mutation is the thing it exi
 `Markup`**, so the 534-rendering sweep the brief mandates for those is not owed. It was run anyway,
 because a Fidelity count cannot see a cascade and "no other project moved" is not the same claim.
 
-CORPUS_SWEEP_PLACEHOLDER
+**Method.** Every corpus document rendered by `paperless render` with `SOURCE_DATE_EPOCH` set — so
+`/CreationDate` is normalised out by construction rather than masked afterwards — and the rendered
+PDF bytes hashed. Run twice over `words` and `slides`: once at `dbdae4be370` and once with
+`dotnet/src/Paperless.WordProcessing` and `dotnet/src/Paperless.Presentations` checked out at the
+base `63d5290aacf` and the CLI rebuilt. 363 documents each side, **0 render failures on either**.
+The tree was restored and rebuilt afterwards and `git status -- dotnet` is clean.
+
+### Reach
+
+| track | documents | renderings changed |
+|---|---:|---:|
+| slides | 163 | **48 (29.4 %)** |
+| words | 200 | **17 (8.5 %)** |
+| sheets | 171 | **0**, by construction |
+| **total** | **534** | **65** |
+
+That is the honest size of these two changes: a table-cell line pitch reaches nearly a third of the
+deck corpus, and a note separator reaches every Word document that has notes.
+
+### Verdict movement
+
+The 65 that moved were then re-rendered on both builds and scored against
+`/c/sandbox/workdir/refpdfs-26.2.4.2-fonts/ref-baseline-all.tsv` on the gate's own two checks —
+page count exact, word count within 2 %:
+
+| | count |
+|---|---:|
+| renderings changed | 65 |
+| of which **page count** changed | **0** |
+| of which word count changed | 6 |
+| **gate verdicts changed** | **0** — none gained, none lost |
+
+**Nothing cascaded.** The change that most invited one is the separator reservation, which nearly
+triples (5.669 pt → ≈13.85 pt for an 11 pt default style) and therefore takes that much more room
+out of the body on every page carrying a footnote — and it moved no page count on the corpus at all.
+The six word-count moves are 2 to 33 words on documents of 2,000 to 58,000, all far inside the 2 %
+band on both sides:
+
+```
+slides/batch-008/pptx/8_P-Pavese_AIRBUS-ATB-journee-CRATB.pptx                    2331 -> 2308
+slides/batch-011/pptx/section_1_our_rights_presentation.pptx                      4257 -> 4245
+slides/batch-012/pptx/NAS-Infrastructure-Roadmaps-v16.0.pptx                     19370 -> 19337
+slides/batch-014/pptx/Intersil_Italy_CAN_Bus_Transceiver_Presentation_Final.pptx   3827 -> 3825
+slides/batch-016/pptx/Reporting_responsibilities_matrix.pptx                      57904 -> 57918
+words/batch-015/doc/644730BRI0mna000BOX361539B00public0.doc                        2336 -> 2338
+```
+
+A taller table cell fits fewer words in a fixed cell, which is where five of the six come from.
+
+*What this does not say:* verdicts held, but "held" includes documents that were failing the gate
+before and after. This is a **no-regression** measurement, not an improvement one — the brief's
+"if a fix moves a corpus verdict, that is a bonus" did not pay out, and the honest reading is that
+these two defects were never what the corpus scoreboard was losing on.
 
 **`Paperless.Spreadsheets` is untouched in the final tree** — `git diff` against the base over
 `dotnet/src/Paperless.Spreadsheets/` is empty — so the sheets track cannot have moved, and it is
