@@ -65,6 +65,7 @@ public sealed class RecordingDrawingSink : IDrawingSink
     {
         ArgumentNullException.ThrowIfNull(image);
         _current?.Images.Add(destination);
+        _current?.Pictures.Add(new DrawnPicture(image, destination));
     }
 
     /// <inheritdoc/>
@@ -171,6 +172,11 @@ public sealed class RecordingDrawingSink : IDrawingSink
     public int TransparencyGroups { get; private set; }
 }
 
+/// <summary>A picture placement: what was drawn as well as where.</summary>
+/// <param name="Image">The raster handed to the sink.</param>
+/// <param name="Destination">The rectangle it was drawn into.</param>
+public readonly record struct DrawnPicture(RasterImage Image, DocRect Destination);
+
 /// <summary>One page's worth of recorded drawing.</summary>
 /// <param name="Size">The page size the drawing path declared.</param>
 public sealed record DrawnPage(DocSize Size)
@@ -180,6 +186,15 @@ public sealed record DrawnPage(DocSize Size)
 
     /// <summary>Where images were placed.</summary>
     public List<DocRect> Images { get; } = [];
+
+    /// <summary>The same placements, paired with the picture that went into each.</summary>
+    /// <remarks>
+    /// <see cref="Images"/> keeps only the rectangles and predates anything caring <em>which</em>
+    /// picture arrived. That distinction is the whole of some questions: a reader that resolves a
+    /// picture reference against the wrong table draws someone else's picture at exactly the right
+    /// place, and a test that looks only at rectangles cannot see it.
+    /// </remarks>
+    public List<DrawnPicture> Pictures { get; } = [];
 
     /// <summary>The paints paths were filled with.</summary>
     public List<Paint> Fills { get; } = [];

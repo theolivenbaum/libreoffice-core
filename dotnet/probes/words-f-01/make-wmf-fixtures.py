@@ -52,14 +52,23 @@ def png(w, h, rows):
             + chunk(b'IEND', b''))
 
 
-SIDE = 100
-_rows = []
-for y in range(SIDE):
-    row = []
-    for x in range(SIDE):
-        row += [255 if x < SIDE // 2 else 0, 255 if y < SIDE // 2 else 0, 128]
-    _rows.append(row)
-IMAGE = png(SIDE, SIDE, _rows)
+def quadrants(side):
+    rows = []
+    for y in range(side):
+        row = []
+        for x in range(side):
+            row += [255 if x < side // 2 else 0, 255 if y < side // 2 else 0, 128]
+        rows.append(row)
+    return png(side, side, rows)
+
+
+# Two sizes, and the difference is the whole instrument: the two pictures are drawn at the
+# same place whichever way the `pib` is read, so the *pixel* size is the only thing that says
+# which one arrived.
+FLOATING_SIDE = 100
+INLINE_SIDE = 64
+IMAGE = quadrants(FLOATING_SIDE)
+INLINE_IMAGE = quadrants(INLINE_SIDE)
 
 
 def wmf():
@@ -121,6 +130,8 @@ def doc_rels(with_png):
     return ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
             '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
             + image
+            + '<Relationship Id="rId7" Type="http://schemas.openxmlformats.org/officeDocument/'
+              '2006/relationships/image" Target="media/image3.png"/>'
             + '<Relationship Id="rId9" Type="http://schemas.openxmlformats.org/officeDocument/'
               '2006/relationships/image" Target="media/image2.wmf"/></Relationships>')
 
@@ -131,7 +142,7 @@ INLINE_WMF = f'''<w:p><w:r><w:drawing>
 <wp:docPr id="1" name="CroppedMetafile"/>
 <a:graphic><a:graphicData uri="{PIC}">
 <pic:pic><pic:nvPicPr><pic:cNvPr id="1" name="CroppedMetafile"/><pic:cNvPicPr/></pic:nvPicPr>
-<pic:blipFill><a:blip r:embed="rId9"/>{SRCRECT}<a:stretch><a:fillRect/></a:stretch></pic:blipFill>
+<pic:blipFill><a:blip r:embed="rId7"/>{SRCRECT}<a:stretch><a:fillRect/></a:stretch></pic:blipFill>
 <pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="{CX}" cy="{CY}"/></a:xfrm>
 <a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr>
 </pic:pic></a:graphicData></a:graphic>
@@ -182,6 +193,7 @@ def main():
         ('word/document.xml', document(INLINE_WMF)),
         ('word/_rels/document.xml.rels', doc_rels(with_png=False)),
         ('word/media/image2.wmf', WMF),
+        ('word/media/image3.png', INLINE_IMAGE),
     ])
 
     write(os.path.join(out, 'picture-blip-collision.docx'), [
@@ -191,6 +203,7 @@ def main():
         ('word/_rels/document.xml.rels', doc_rels(with_png=True)),
         ('word/media/image1.png', IMAGE),
         ('word/media/image2.wmf', WMF),
+        ('word/media/image3.png', INLINE_IMAGE),
     ])
 
 
