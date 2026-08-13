@@ -88,13 +88,27 @@
     <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.10" />
   </ItemGroup>
 
+  <ItemGroup Label="PDF reading">
+    <!--
+      Reading PDFs back: LibreOffice's reference renderings in the fidelity harness, and both sides
+      of the corpus gate through `paperless analyze`.
+
+      Pinned exactly, and the pin is the point. The gate used to read its three figures out of
+      poppler's pdfinfo/pdftotext/pdffonts, which made the machine's poppler an undeclared input to
+      every number this project has recorded. It was caught: with the renderer's source provably
+      unchanged, our own word counts moved on 169 of 200 documents and 86 of them moved by exactly
+      the amount the reference moved. A term that shifts both sides of a comparison equally belongs
+      to neither renderer. This version is 0.1.16-alpha-20260811-39f52 = commit 39f52eb upstream;
+      Apache-2.0, pure managed, no native assets.
+    -->
+    <PackageVersion Include="PdfPig" Version="0.1.16-alpha-20260811-39f52" />
+  </ItemGroup>
+
   <ItemGroup Label="Test-only">
     <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.8.1" />
     <PackageVersion Include="xunit.v3" Version="3.2.2" />
     <PackageVersion Include="xunit.runner.visualstudio" Version="3.1.5" />
     <PackageVersion Include="Shouldly" Version="4.3.0" />
-    <!-- Reading LibreOffice's reference PDFs in the fidelity harness. -->
-    <PackageVersion Include="PdfPig" Version="0.1.15" />
     <!-- Rasterising reference PDFs in-process (pdfium) so the fidelity harness
          does not require poppler-utils on the machine. -->
     <PackageVersion Include="PDFtoImage" Version="5.3.0" />
