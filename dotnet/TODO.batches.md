@@ -13176,3 +13176,67 @@ The single "further" page is our **uncoalesced grid** — 107 reference rules ag
 *border* class lands exactly on the reference, so the regression is in a different class from the
 one this round touched. Eight raster-changing pages, all closer in ink, and one is a real visual
 win: a dash phase now runs once across a rule instead of restarting at every cell.
+
+---
+
+## Merge note — slides-e-01, an automatic chart stroke goes through the theme
+
+Merged `wt-slides-e`. Build 0 warnings / 0 errors. **Ten non-Fidelity projects: 3606 total, 0
+failed** — Presentations 613 → **623**. 10 tests added, **all 10 verified by reintroduction, 0 drift
+guards**, including the original defect reintroduced.
+
+**Slides stays 144 of 163, 163 of 163 page-exact. Verdicts: 0 of 163**, predicted plainly and
+confirmed — every gate column identical to the digit on both changed decks.
+
+### The briefed claims survived, because they were checked first
+
+The immediately preceding crop round was handed a "one call" brief that would have shipped a
+regression, so this round verified before building. All three held: `automatic.Styles` **is**
+genuinely in scope at all three `ColourOf` call sites (`DrawingChartPlot.cs:787` and `:790` as a
+local, `:1289` as a parameter of `PointFills`); `DrawingStyleMatrix.Substitute` at `:263` is public
+and already preserves the placeholder's child transforms; and `ColourOf` at `:175` really did take
+no matrix. **Checking cost little and would have caught the previous round's regression.**
+
+`DrawingChartAutoFormat.cs:175` now takes a `DrawingStyleMatrix?`, and a new `ThroughSubtleLineStyle`
+substitutes the accent for the theme's `THEMED_STYLE_SUBTLE` `phClr` and reads the result back —
+LibreOffice's `LineFormatter::convertFormatting` (`objectformatter.cxx:857-864`).
+`DrawingStyleMatrix.cs:143`, the doc sentence that stated the bug, is **corrected in place rather
+than deleted**.
+
+**`Demick_JetBlue` page 4 now strokes `#B45D03` / `#761D26` / `#12415C` — the reference's own three
+values exactly.** The internal control is the good part: the base's 31 `#F07F09` strokes were 23
+automatic plus 8 records stating accent 1 *directly*, and the branch keeps exactly those 8.
+
+### Reach, and an honest debit
+
+Census by walking OPC parts with ElementTree — **no regex**, after a regex census on this track was
+wrong by a factor of sixteen. Predicted 1 deck, measured **2 of 163**. Words **0 of 200** and sheets
+**0 of 171**, zero *by construction* (`DocxPictures.cs:208` passes no matrix, `XlsxDrawings.cs:272`
+passes `styles: null`) and measured over the corpus's entire OOXML chart surface, which is exactly
+one `.docx` and one `.xlsx`.
+
+- `Demick_JetBlue`: **5 pages changed, 5 closer, 0 further** (`|ink|%` 29.24 → 28.17).
+- `FAAAI…`: **8 scatter markers move away from the reference.** `pdf-image-diff` reads 4.73 / 0.40 /
+  0.41 on **both** legs — and the round refused to report that as "unchanged", because doing so
+  **would report the 512 px raster's resolution as a measurement**. That is the right call and the
+  reason the debit is visible at all.
+
+### Two defects found without looking for them, and they are coupled
+
+1. **`LineOf` (`DrawingChartPlot.cs:1423`) turns a stated `a:noFill` into "states nothing"**, and
+   `:797`'s `?? autoLine` then draws the line the file explicitly suppressed. This is *why* the
+   census undercounted — and in the direction the prediction had said it might.
+2. **A marker's `c:marker/c:spPr` is never read** (`ChartLayout.cs:2089`); markers take the series
+   colour. `FAAAI…` was right **by accident**, which is what the 8 moved markers are.
+
+**Fixing (1) without (2) would make it worse.** They are one round, not two.
+
+Two further reach figures, measured and worth not re-deriving: **the fill half of the automatic
+tables has reach zero** — 5 decks take automatic fills and none resolves through anything but a bare
+`phClr` — and `c:minorGridlines` is **3 decks / 12 instances**.
+
+### One mutation went undetected, and it was not a gap
+
+A mutation that passed a null matrix made the call an identity — an **equivalent formulation**
+rather than a defect. Recorded as such instead of being counted as a hole in the tests, which is the
+distinction a mutation score usually loses.
