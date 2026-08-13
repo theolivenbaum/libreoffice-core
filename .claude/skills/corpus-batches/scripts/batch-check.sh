@@ -21,6 +21,13 @@
 # The checks are the same three, in the same order, as corpus-parity.sh: page count, then
 # extractable words, then font embedding. Each is cheap and rules out a whole class, and
 # a wrong page count makes everything after it meaningless.
+#
+# NOT COMPARABLE TO ANY SCOREBOARD RECORDED BEFORE 2026-08-13. Check 2 used to count
+# `pdftotext … | wc -w`; it now counts only tokens carrying at least one Unicode letter or
+# digit. See `words_of` below for why, and `dotnet/probes/gate-01/results.md` for the
+# conversion — the raw count is still emitted, as the last TSV column, so a run under this
+# script reproduces the old verdict exactly and the two can be reconciled document by
+# document. A figure quoted without saying which metric produced it is now ambiguous.
 set -uo pipefail
 
 ROOT_DIR="${1:?usage: batch-check.sh <corpus-root> <batch-glob> [outdir] [workers]}"
@@ -59,6 +66,65 @@ echo "measuring $CLI" >&2
 mkdir -p "$OUT/ours" "$OUT/ref"
 : > "$OUT/rows.tsv"
 
+# Extractable words, for check 2. A token counts as a word iff it carries at least one
+# Unicode letter or digit — categories L* or N*, which is what Python's str.isalnum() is.
+# Emits "<words> <rawwords>", the second being the old `pdftotext | wc -w` figure, kept so
+# every run can still reproduce the verdict it would have given before this changed.
+#
+# WHY, because this is the check that decides "is the same text present" and the answer turns
+# on what counts as text. Both renderers write list labels and rendering markers into the PDF
+# text layer as real text-showing operators with real ToUnicode mappings, and `wc -w` scored
+# every one of them as a word:
+#
+#   * an authored probe holding its body text fixed at 64 words and varying only the list
+#     label reads 64 with no list and 76 with twelve U+2022 bullets, twelve U+F0A7
+#     Symbol/Wingdings bullets, or twelve U+2013 dashes — a 19% swing on a document whose
+#     text did not change by one character;
+#   * `ODs-February-2022-Airbus-Commercial-Aircraft.xlsx` — the reference emits `###` **1101
+#     times**, the column-too-narrow marker. Those 1101 "words" were cancelling a real
+#     895-word surplus in our own output, so the document passed check 2 by luck;
+#   * `fy2011-aip-grants.xls` — 11538 standalone `$` and `-` against the reference's 9020,
+#     the accounting number format for a zero cell. Raw counts differ by 2518 and fail;
+#     letter-or-digit counts are **43201 and 43201**, exact.
+#
+# A column-overflow marker is not text and neither is a bullet the renderer chose. The gate
+# was manufacturing failures out of them — the same shape as the pdf-ops.py stroke pairing
+# that once produced 142 phantom `box` notes and cost a dispatched round.
+#
+# Three things this deliberately does NOT do.
+#   * It does not widen the 2% band. That band separates hyphenation drift from missing text;
+#     widening it to absorb a systematic term hides the term instead of removing it.
+#   * It does not strip an enumerated set of code points, which is the obvious fix and is
+#     wrong twice over: the set would be fitted to the documents in hand, and it does not even
+#     work — measured on the slides track, the reference writes its Wingdings bullets at
+#     U+F06E/U+F06C/U+F0D8/U+F0A7 and Paperless writes the same glyphs at
+#     U+E439/U+E5CD/U+E46F/U+E437. A list built from one side strips nothing on the other.
+#   * It does not drop short tokens. A numbering label (`1.`, `iv.`, `a)`) carries a digit or
+#     a letter and stays a word on both sides; the probe above reads 76 for a numbered list
+#     under both metrics. That is the definition working, not a hole in it.
+#
+# python3 rather than grep or awk, and this is not a style preference. This image carries only
+# the `C` and `C.utf8` locales. Measured on a file of one token per script: `grep -c
+# '[[:alnum:]]'` under C.utf8 counts Cyrillic and Greek but **not Han**, and mawk — the default
+# awk here — counts neither, scoring ASCII only. Either would silently drop every wholly-CJK
+# or wholly-Cyrillic token while looking perfectly correct on the English majority of the
+# corpus, which is the `fc-match` trap in a second dimension. str.isalnum() is Unicode by
+# construction and cannot be changed by the environment. The split is `str.split()`, which
+# reproduces `wc -w` on 1068 of 1068 corpus PDFs — so the tokenisation is untouched and the
+# only thing that changed is the filter.
+# This function is also the seam for the in-process extractor (`paperless analyze`): it returns
+# exactly the pair that verb should emit, so replacing poppler here is a substitution of this
+# body and nothing else in the script. The definition above is the durable part and must not be
+# re-decided by the reimplementation — and the `wc -w` reproduction is a *control on poppler's
+# tokenisation*, so a different reader has to re-establish it against the `rawwords` column of a
+# stored sweep before any verdict it produces is comparable to one here.
+words_of() {  # words_of <pdf> -> "<words> <rawwords>"
+  pdftotext "$1" - 2>/dev/null | python3 -c '
+import sys
+t = sys.stdin.buffer.read().decode("utf-8", "replace").split()
+print(sum(1 for w in t if any(c.isalnum() for c in w)), len(t))'
+}
+
 # shellcheck disable=SC2086  # the glob is meant to expand
 mapfile -t DIRS < <(cd "$ROOT_DIR" && ls -d $GLOB 2>/dev/null)
 [ "${#DIRS[@]}" -gt 0 ] || { echo "no batches matched $GLOB under $ROOT_DIR" >&2; exit 1; }
@@ -73,7 +139,7 @@ mapfile -t FILES < <(
 )
 
 one() {  # one <index>
-  local idx="$1" i=-1 f base ext stem id o r op rp ow rw of rf un v
+  local idx="$1" i=-1 f base ext stem id o r op rp ow rw of rf un v owraw rwraw
   local prof="$OUT/prof$idx"
   mkdir -p "$prof" "$OUT/t$idx"
   for f in "${FILES[@]}"; do
@@ -91,10 +157,10 @@ one() {  # one <index>
       --headless --convert-to pdf --outdir "$OUT/t$idx" "$f" >/dev/null 2>&1
     [ -f "$OUT/t$idx/$stem.pdf" ] && mv -f "$OUT/t$idx/$stem.pdf" "$r"
 
-    op="-"; rp="-"; ow="-"; rw="-"; of="-"; rf="-"; un="-"
+    op="-"; rp="-"; ow="-"; rw="-"; of="-"; rf="-"; un="-"; owraw="-"; rwraw="-"
     if [ -f "$o" ]; then
       op=$(pdfinfo "$o" 2>/dev/null | awk '/^Pages/{print $2}')
-      ow=$(pdftotext "$o" - 2>/dev/null | wc -w)
+      read -r ow owraw < <(words_of "$o")
       of=$(pdffonts "$o" 2>/dev/null | tail -n +3 | grep -c .)
       # The `emb` column, found by its position from the *right*: pdffonts ends every row with
       # emb, sub, uni and a two-field object id, so `emb` is NF-4 and not NF-3. Counting from
@@ -107,7 +173,7 @@ one() {  # one <index>
     fi
     if [ -f "$r" ]; then
       rp=$(pdfinfo "$r" 2>/dev/null | awk '/^Pages/{print $2}')
-      rw=$(pdftotext "$r" - 2>/dev/null | wc -w)
+      read -r rw rwraw < <(words_of "$r")
       rf=$(pdffonts "$r" 2>/dev/null | tail -n +3 | grep -c .)
     fi
 
@@ -121,6 +187,10 @@ one() {  # one <index>
       [ "$op" = "$rp" ] || v="pages"
       # Extraction drifts a little on hyphenation and soft breaks; 2% is the band that
       # separates "the same text" from "text is missing", measured across this corpus.
+      # The band is unchanged and deliberately so — what changed is `$ow`/`$rw`, above.
+      # Replayed over 9552 stored rows from every probe TSV in the tree, this block returns
+      # the stored verdict on all 9552 when fed the raw counts, so the rule is untouched and
+      # only its input moved.
       if [ "$rw" -gt 0 ] 2>/dev/null; then
         awk -v a="$ow" -v b="$rw" 'BEGIN{d=(a>b?a-b:b-a); exit !(d > b*0.02 && d > 3)}' \
           && v="${v:+$v,}words"
@@ -130,9 +200,14 @@ one() {  # one <index>
       [ -n "$v" ] || v="match"
     fi
 
-    printf "%s\t%s\t%s/%s\t%s/%s\t%s/%s\t%s\t%s\n" \
+    # `rawwords` is appended *after* the verdict rather than beside `words`, so that every
+    # reader that reaches for `$7` — this script's own tallies, ref-baseline.sh's sibling
+    # columns, the replay harness in dotnet/probes/words-rebase-02/verdict.py, and eleven
+    # rounds of stored TSVs — keeps working unchanged. It is what makes a new scoreboard
+    # convertible back to an old one instead of merely incomparable to it.
+    printf "%s\t%s\t%s/%s\t%s/%s\t%s/%s\t%s\t%s\t%s/%s\n" \
       "${f#"$ROOT_DIR"/}" "${ext,,}" "$op" "$rp" "$ow" "$rw" "$of" "$rf" "$un" "$v" \
-      >> "$OUT/rows.tsv"
+      "$owraw" "$rwraw" >> "$OUT/rows.tsv"
   done
 }
 
@@ -140,7 +215,9 @@ for w in $(seq 0 $((WORKERS - 1))); do one "$w" & done
 wait
 
 {
-  printf "path\text\tpages\twords\tfonts\tunemb\tverdict\n"
+  printf "# words = tokens carrying at least one Unicode letter or digit; rawwords = pdftotext | wc -w\n"
+  printf "# NOT comparable to any scoreboard recorded before 2026-08-13 — see dotnet/probes/gate-01/results.md\n"
+  printf "path\text\tpages\twords\tfonts\tunemb\tverdict\trawwords\n"
   sort "$OUT/rows.tsv"
 } > "$OUT/parity.tsv"
 

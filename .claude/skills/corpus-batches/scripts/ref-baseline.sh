@@ -50,6 +50,19 @@ echo "reference binary: $SOFFICE_VERSION" >&2
 mkdir -p "$OUT/ref"
 : > "$OUT/rows.tsv"
 
+# Check 2's word count: tokens carrying at least one Unicode letter or digit, with the old
+# `pdftotext | wc -w` figure alongside. Identical to `batch-check.sh`'s `words_of` on purpose —
+# the two scripts are only comparable column for column if they count the same way, and a
+# reference baseline taken with the old count against a sweep taken with the new one would
+# read as a corpus-wide word failure. The reasoning, the probes and the reason it is python3
+# and not grep or awk are all written out there; do not change one of these without the other.
+words_of() {  # words_of <pdf> -> "<words> <rawwords>"
+  pdftotext "$1" - 2>/dev/null | python3 -c '
+import sys
+t = sys.stdin.buffer.read().decode("utf-8", "replace").split()
+print(sum(1 for w in t if any(c.isalnum() for c in w)), len(t))'
+}
+
 # shellcheck disable=SC2086  # the glob is meant to expand
 mapfile -t DIRS < <(cd "$ROOT_DIR" && ls -d $GLOB 2>/dev/null)
 [ "${#DIRS[@]}" -gt 0 ] || { echo "no batches matched $GLOB under $ROOT_DIR" >&2; exit 1; }
@@ -65,7 +78,7 @@ mapfile -t FILES < <(
 echo "${#FILES[@]} documents across ${#DIRS[@]} batches" >&2
 
 one() {  # one <index>
-  local idx="$1" i=-1 f base ext stem id r rp rw rf runemb st
+  local idx="$1" i=-1 f base ext stem id r rp rw rf runemb st rwraw
   local prof="$OUT/prof$idx"
   mkdir -p "$prof" "$OUT/t$idx"
   for f in "${FILES[@]}"; do
@@ -81,11 +94,11 @@ one() {  # one <index>
       [ -f "$OUT/t$idx/$stem.pdf" ] && mv -f "$OUT/t$idx/$stem.pdf" "$r"
     fi
 
-    rp="-"; rw="-"; rf="-"; runemb="-"; st="ref-failed"
+    rp="-"; rw="-"; rf="-"; runemb="-"; st="ref-failed"; rwraw="-"
     if [ -f "$r" ]; then
       st="ok"
       rp=$(pdfinfo "$r" 2>/dev/null | awk '/^Pages/{print $2}')
-      rw=$(pdftotext "$r" - 2>/dev/null | wc -w)
+      read -r rw rwraw < <(words_of "$r")
       rf=$(pdffonts "$r" 2>/dev/null | tail -n +3 | grep -c .)
       # `emb` is NF-4, not NF-3: pdffonts ends every row with emb, sub, uni and a two-field
       # object id, so counting from NF-3 reads `sub` and is right only by accident for a font
@@ -93,8 +106,10 @@ one() {  # one <index>
       runemb=$(pdffonts "$r" 2>/dev/null | tail -n +3 | awk 'NF>=8 && $(NF-4)=="no"' | wc -l)
     fi
 
-    printf "%s\t%s\t%s\t%s\t%s\t%s\t%s\n" \
-      "${f#"$ROOT_DIR"/}" "${ext,,}" "$rp" "$rw" "$rf" "$runemb" "$st" >> "$OUT/rows.tsv"
+    # `refrawwords` last, after `status`, so `$7` stays the status column for every existing
+    # reader of a stored baseline.
+    printf "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n" \
+      "${f#"$ROOT_DIR"/}" "${ext,,}" "$rp" "$rw" "$rf" "$runemb" "$st" "$rwraw" >> "$OUT/rows.tsv"
   done
   rm -rf "${OUT:?}/t$idx"
 }
@@ -105,7 +120,9 @@ wait
 {
   printf "# reference binary: %s\n" "$SOFFICE_VERSION"
   printf "# corpus: %s  glob: %s\n" "$ROOT_DIR" "$GLOB"
-  printf "path\text\trefpages\trefwords\treffonts\trefunemb\tstatus\n"
+  printf "# refwords = tokens carrying at least one Unicode letter or digit; refrawwords = pdftotext | wc -w\n"
+  printf "# refwords is NOT comparable to a baseline taken before 2026-08-13 — see dotnet/probes/gate-01/results.md\n"
+  printf "path\text\trefpages\trefwords\treffonts\trefunemb\tstatus\trefrawwords\n"
   sort "$OUT/rows.tsv"
 } > "$OUT/ref-baseline.tsv"
 
