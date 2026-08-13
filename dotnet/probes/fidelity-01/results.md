@@ -510,6 +510,32 @@ in this tree and whose effects were reproduced, and on §2's proof that these te
 
 ---
 
+## 5A. The prediction, scored against what was measured
+
+Committed at `2420db95528` before the suite was run once. Scoring it honestly matters more than
+scoring it well.
+
+| | prediction | outcome |
+|---|---|---|
+| **P1** | 550 unchanged, only the split moved | **Right.** 550 discovered, 510+40, 0 skipped |
+| **P2** | 21 names / 40 cases are parameterised rows, no second mechanism | **Right.** 9 names carry the extra 19 rows |
+| **P3** | plurality is LibreOffice-version, ~20-25, concentrated in **hard-coded figures** | **Half right, and the reasoning was wrong.** The class is right and far larger than predicted (~34). The *mechanism* is backwards: the hard-coded figures all **pass**; it is the live comparisons that broke (§6) |
+| **P4** | 2-6 font-set failures | **Wrong — zero.** Every failing document embeds Carlito alone. I reasoned from `MISSING_PACKAGES.md`'s corpus-wide result to a suite that shares none of its documents |
+| **P5** | 3-8 poppler failures | **Wrong — zero.** Poppler tracks the PDF's own geometry to 0.022 pt (§3) |
+| **P6** | ≥1 genuine defect hiding behind the environment story; 1-8 | **Right, 4** — the footnote separator (§4.4), plus a real sub-point advance divergence underneath 8 more (§4.5) |
+| **P7** | 1-5 unexplained | **Right, 2** — the frame boundary tie (§5.4), plus the unreduced trigger in §4.1 |
+
+**The two predictions I was most confident about after P1/P2 — the font set and poppler — were both
+exactly zero.** I had reached for the environment variables the brief handed me and assumed they
+reached this suite because they reach the corpus. They do not: the corpus is 534 mixed real-world
+documents, half of which resolve a fallback; the Fidelity fixtures are hand-built Latin probes in
+Carlito. **Checking which fonts LibreOffice actually embedded took one `grep` and refuted both.**
+
+That is the same failure the brief warns about, committed by me in writing before measuring, and it
+is why the prediction was committed first.
+
+---
+
 ## 6. The brief's leading hypothesis, tested rather than accepted
 
 > "If Fidelity pins expectations to the old binary's output, some or all of the 40 are the
