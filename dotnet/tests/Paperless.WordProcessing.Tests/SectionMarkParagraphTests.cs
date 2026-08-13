@@ -120,6 +120,59 @@ public sealed class SectionMarkParagraphTests
         pages.Pages[2].Size.Width.ShouldBe(Core.Units.Length.FromTwips(11906));
     }
 
+    /// <summary>
+    /// A page break landing on an empty section mark dies with the mark.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The guard list in <c>bRemove</c> (<c>DomainMapper.cxx</c>:4852) protects a mark carrying a
+    /// <em>column</em> break and names no page break at all, so a page break does not save the mark —
+    /// and the break, which was only ever an instruction to put the next paragraph on a new page, has no
+    /// next paragraph left to move. Measured on the installed 26.2.4.2: a three-paragraph section ending
+    /// in a page-break paragraph and an empty mark, followed by a landscape section, emits **one**
+    /// portrait page. Taking the break at its word emits two.
+    /// </para>
+    /// <para>
+    /// The corpus case is <c>1_tpr_template__from_fy14_.docx</c>, whose page three held one word — the
+    /// footer's page number — and pushed everything after it down by a page.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void APageBreakDoesNotSaveAnEmptySectionMark()
+    {
+        // "Alpha", then a paragraph whose only run is a page break, then the mark, then "Omega".
+        WordProcessingPages pages = Paginate(
+            Paragraph("Alpha")
+            + "<w:p><w:r><w:br w:type=\"page\"/></w:r></w:p>"
+            + Paragraph(null, Section("nextPage"))
+            + Paragraph("Omega"));
+
+        // Two pages: everything of section one on the first, "Omega" on the second. A kept mark would
+        // take the page the break asks for and put "Omega" on a third.
+        pages.Count.ShouldBe(2);
+        Texts(pages, 1).ShouldBe(["Omega"]);
+    }
+
+    /// <summary>
+    /// The same rule reached by the other route onto the same flag.
+    /// </summary>
+    /// <remarks>
+    /// <c>w:pageBreakBefore</c> in the mark's own <c>w:pPr</c> sets the same paragraph property a
+    /// preceding <c>w:br w:type="page"</c> defers onto it, so a fix that only forgave the deferred one
+    /// would leave half the defect standing. 26.2.4.2 emits one portrait page for this shape too.
+    /// </remarks>
+    [Fact]
+    public void PageBreakBeforeOnTheMarkItselfDoesNotSaveItEither()
+    {
+        WordProcessingPages pages = Paginate(
+            Paragraph("Alpha")
+            + $"<w:p><w:pPr><w:pageBreakBefore/>{Section("nextPage")}</w:pPr></w:p>"
+            + Paragraph("Omega"));
+
+        pages.Count.ShouldBe(2);
+        Texts(pages, 1).ShouldBe(["Omega"]);
+    }
+
     /// <summary>The text of every paragraph the document laid out, in order and once each.</summary>
     private static List<string> Texts(WordProcessingPages pages)
         => [.. Enumerable.Range(0, pages.Count).SelectMany(page => Texts(pages, page))];
