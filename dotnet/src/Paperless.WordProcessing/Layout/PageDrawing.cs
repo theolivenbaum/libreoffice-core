@@ -5,6 +5,7 @@ using Paperless.Text.Fonts;
 using Paperless.Text.Itemisation;
 using Paperless.Text.Layout;
 using Paperless.Text.Shaping;
+using Paperless.Vector;
 
 namespace Paperless.WordProcessing.Layout;
 
@@ -167,8 +168,8 @@ public static class PageDrawing
         if (frame.Frame.Chart is { } chart)
             FrameChart.Draw(sink, chart, frame.Area, frame.Frame.ChartFontFamily);
         else if (frame.Frame.Vector is { } vector && !vector.Value.IsEmpty)
-            vector.Value.Draw(sink, frame.Area);
-        else if (frame.Frame.Image is { } image) sink.DrawImage(image, frame.Area);
+            DrawPicture(sink, frame, vector, null);
+        else if (frame.Frame.Image is { } image) DrawPicture(sink, frame, null, image);
 
         DrawFlow(frame.Content, sink);
 
@@ -199,6 +200,61 @@ public static class PageDrawing
                 .LineTo(new DocPoint(area.X, area.Bottom))
                 .Close(),
             stroke);
+    }
+
+    /// <summary>
+    /// Draws a frame's picture into its area, cropped when the file says so.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>A crop is a larger destination plus a clip, and until this round the word path had
+    /// neither.</strong> The fractions say how much of the picture each edge throws away, so the
+    /// surviving part is what fills the frame and the whole of it is correspondingly bigger; the
+    /// clip to the frame is what turns that into a crop rather than into a picture drawn over the
+    /// text on either side of it. Adding the rectangle without the clip would be strictly worse
+    /// than doing nothing.
+    /// </para>
+    /// <para>
+    /// Clipped only where there is a crop. Both backends already confine a picture to the
+    /// rectangle they are given — a raster is stretched onto exactly it, and
+    /// <c>VectorImage.Draw</c> clips to its destination — so an unconditional clip would be a
+    /// no-op that changed the bytes of every rendering carrying a picture.
+    /// </para>
+    /// <para>
+    /// The border is drawn after this and is deliberately outside the clip: it belongs to the
+    /// frame rather than to the picture, and half a hairline of it falls on the boundary the clip
+    /// would have cut away.
+    /// </para>
+    /// </remarks>
+    private static void DrawPicture(
+        IDrawingSink sink, PlacedFrame frame, Lazy<VectorImage>? vector, RasterImage? image)
+    {
+        DocRect destination = frame.Frame.Crop.Apply(frame.Area);
+
+        if (destination == frame.Area)
+        {
+            PaintPicture(sink, frame.Area, vector, image);
+            return;
+        }
+
+        sink.Save();
+        try
+        {
+            sink.ClipPath(GraphicsPath.Rectangle(frame.Area));
+            PaintPicture(sink, destination, vector, image);
+        }
+        finally
+        {
+            sink.Restore();
+        }
+    }
+
+    /// <summary>Puts whichever of the two pictures a frame has into a rectangle.</summary>
+    private static void PaintPicture(
+        IDrawingSink sink, DocRect where, Lazy<VectorImage>? vector, RasterImage? image)
+    {
+        if (vector is not null) vector.Value.Draw(sink, where);
+        else if (image is not null) sink.DrawImage(image, where);
     }
 
     /// <summary>

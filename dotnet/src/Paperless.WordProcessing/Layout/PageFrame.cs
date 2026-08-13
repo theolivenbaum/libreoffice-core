@@ -333,6 +333,25 @@ public sealed record PageFrame
     public Lazy<VectorImage>? Vector { get; init; }
 
     /// <summary>
+    /// How much of the picture each edge throws away, or <see cref="PictureCropFractions.None"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>Applied where the frame is placed, not where it is read.</strong> A crop draws the
+    /// whole picture into a rectangle <em>larger</em> than the frame and clips to the frame, and
+    /// the frame's rectangle is <see cref="PlacedFrame.Area"/> — resolved by <c>FrameLayout</c>
+    /// against the anchor, the origin and the alignment, none of which a reader has. So
+    /// <see cref="PageDrawing"/> does both halves together; see <see cref="FramePicture.Crop"/>.
+    /// </para>
+    /// <para>
+    /// Set on the <c>.doc</c> path from Escher properties 256–259. The other three front ends
+    /// state a crop too — <c>a:srcRect</c> in DOCX, <c>fo:clip</c> in ODF, <c>\piccropl</c> and its
+    /// siblings in RTF — and none of them is read yet.
+    /// </para>
+    /// </remarks>
+    public PictureCropFractions Crop { get; init; }
+
+    /// <summary>
     /// The chart the frame holds, or null when it holds none.
     /// </summary>
     /// <remarks>

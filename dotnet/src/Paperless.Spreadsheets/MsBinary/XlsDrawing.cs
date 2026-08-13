@@ -302,6 +302,12 @@ internal sealed class XlsDrawingCollector(
                 Text = entry.Text is { Length: > 0 } ? TextOf(entry) : null,
                 Image = picture.Raster,
                 Vector = picture.Vector,
+
+                // Read here and applied by `SheetPageGraphics`, because the crop needs the box and
+                // a cell anchor is not one yet. Read for every shape rather than only for one
+                // carrying a picture: it costs four property lookups and it means a shape that
+                // gained a picture by some other route cannot silently lose its crop.
+                Crop = EscherPicture.Crop(shape.Properties),
                 Name = NameOf(shape),
 
                 // A form control the file marks unprintable is on the screen and not on the

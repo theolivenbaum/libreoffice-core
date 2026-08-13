@@ -1,3 +1,4 @@
+using Paperless.Core.Geometry;
 using Paperless.Core.Graphics;
 using Paperless.Vector;
 
@@ -40,6 +41,25 @@ namespace Paperless.WordProcessing;
 /// </param>
 public readonly record struct FramePicture(RasterImage? Raster, Lazy<VectorImage>? Vector)
 {
+    /// <summary>
+    /// How much of the picture each edge throws away, or <see cref="PictureCropFractions.None"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Travels with the bytes for the reason the pair itself does: a crop that arrived separately
+    /// could be dropped by a layer that carried the picture. It cannot be applied here, because a
+    /// crop is a rectangle grown around the frame and a frame has no rectangle until
+    /// <c>FrameLayout</c> has placed it — <c>PageDrawing</c> does the arithmetic and takes the
+    /// clip that goes with it.
+    /// </para>
+    /// <para>
+    /// Set from Escher properties 256–259 on the <c>.doc</c> path. DrawingML's <c>a:srcRect</c> and
+    /// ODF's <c>fo:clip</c> say the same thing on the other three front ends and are not read yet,
+    /// so this is <see cref="PictureCropFractions.None"/> there.
+    /// </para>
+    /// </remarks>
+    public PictureCropFractions Crop { get; init; }
+
     /// <summary>A frame with no picture in it.</summary>
     public static FramePicture None => default;
 

@@ -189,9 +189,17 @@ public sealed partial class Ww8DocumentReader
     /// The picture a shape's <c>pib</c> names, or nothing when it names none this library can draw.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// <c>pib</c> is one-based and zero means "no picture", so the lookup and the emptiness test are the
     /// same question. A blip with no bytes leaves a diagnostic and no picture: the frame keeps its room,
     /// which is what stops a missing picture from moving every line after it.
+    /// </para>
+    /// <para>
+    /// The crop rides along with the bytes. It cannot be applied here — <c>EscherPicture.Cropped</c>
+    /// wants the rectangle the visible part of the picture lands in, and a frame has no rectangle
+    /// until <c>FrameLayout</c> has placed it — so the four fractions are read and carried, and
+    /// <c>PageDrawing</c> grows the rectangle and takes the clip that makes it read as a crop.
+    /// </para>
     /// </remarks>
     private FramePicture PictureOf(EscherShape? shape)
     {
@@ -200,9 +208,10 @@ public sealed partial class Ww8DocumentReader
         uint pib = shape.Properties.Value(EscherPropertyIds.Picture);
         if (pib == 0 || !Blips.TryGetValue((int)pib, out EscherBlip blip)) return FramePicture.None;
 
-        return blip.Bytes.IsEmpty
+        return (blip.Bytes.IsEmpty
             ? Declined(blip)
-            : EmbeddedPicture.Read(blip.Bytes, blip.Kind, "blip " + pib, _diagnostics);
+            : EmbeddedPicture.Read(blip.Bytes, blip.Kind, "blip " + pib, _diagnostics))
+            with { Crop = EscherPicture.Crop(shape.Properties) };
     }
 
     /// <summary>Records that a blip was found whose bytes could not be reached.</summary>
@@ -233,11 +242,18 @@ public sealed partial class Ww8DocumentReader
     /// <c>pib</c>.
     /// </para>
     /// <para>
-    /// The rectangle is <c>dxaGoal</c> and <c>dyaGoal</c> scaled by <c>mx</c> and <c>my</c>, which are
-    /// in <strong>tenths of a percent</strong> — <c>WW8_PIC</c>, <c>ww8struc.hxx:457</c>. A reader
-    /// taking them as whole percent draws every picture ten times too large, and one ignoring them
-    /// draws a resized picture at its original size, which is the more common defect because the
-    /// unscaled case is what every hand-made test file has.
+    /// The rectangle is <c>dxaGoal</c> and <c>dyaGoal</c>, less the <c>PICF</c>'s own crop, scaled by
+    /// <c>mx</c> and <c>my</c>, which are in <strong>tenths of a percent</strong> — <c>WW8_PIC</c>,
+    /// <c>ww8struc.hxx:457</c>. A reader taking them as whole percent draws every picture ten times
+    /// too large, and one ignoring them draws a resized picture at its original size, which is the
+    /// more common defect because the unscaled case is what every hand-made test file has.
+    /// </para>
+    /// <para>
+    /// <strong>What comes out of that is the <em>visible</em> rectangle, as on every other path.</strong>
+    /// The crop then grows it back to the whole picture in <c>PageDrawing</c>. Which of the two
+    /// statements of the crop is present depends on who wrote the file — Word puts it in the Escher
+    /// properties and leaves <c>dxaCrop*</c> zero, LibreOffice's own export writes both — and
+    /// subtracting the <c>PICF</c> crop here is what makes the one arithmetic serve both.
     /// </para>
     /// </remarks>
     private Ww8LayoutFrame? InlinePicture(int position, int offset)
@@ -252,11 +268,21 @@ public sealed partial class Ww8DocumentReader
         short mappingMode = BinaryPrimitives.ReadInt16LittleEndian(picture[6..]);
         if (mappingMode is not (InlineShapeMappingMode or NamedInlineShapeMappingMode)) return null;
 
+        // The goal less what the PICF crops off it, which is the *visible* rectangle and is what
+        // `SwWW8ImplReader::ImportGraf` measures — dxaCropLeft and its three siblings are twips of
+        // the goal (`WW8_PIC`, ww8struc.hxx:457). Every one of the 32 cropped inline pictures in
+        // the corpus states these as zero and puts the crop in the Escher properties alone, so
+        // this is a no-op there; a `.doc` that LibreOffice itself exported states both, and
+        // without this its goal is the whole picture and the frame comes out 1/(1-l-r) too large.
         int width = Scaled(
-            BinaryPrimitives.ReadInt16LittleEndian(picture[0x1C..]),
+            BinaryPrimitives.ReadInt16LittleEndian(picture[0x1C..])
+                - BinaryPrimitives.ReadInt16LittleEndian(picture[0x24..])
+                - BinaryPrimitives.ReadInt16LittleEndian(picture[0x28..]),
             BinaryPrimitives.ReadUInt16LittleEndian(picture[0x20..]));
         int height = Scaled(
-            BinaryPrimitives.ReadInt16LittleEndian(picture[0x1E..]),
+            BinaryPrimitives.ReadInt16LittleEndian(picture[0x1E..])
+                - BinaryPrimitives.ReadInt16LittleEndian(picture[0x26..])
+                - BinaryPrimitives.ReadInt16LittleEndian(picture[0x2A..]),
             BinaryPrimitives.ReadUInt16LittleEndian(picture[0x22..]));
 
         if (width <= 0 || height <= 0) return null;
@@ -267,8 +293,7 @@ public sealed partial class Ww8DocumentReader
             shapeAt += 1 + _pictures[shapeAt];
         }
 
-        EscherShape? shape = InlineShape(shapeAt);
-        if (!IsPictureShape(shape)) return null;
+        if (InlineShape(shapeAt) is not { } shape || !IsPictureShape(shape)) return null;
 
         _inlinePictures ??= new DffRecordBuffer(_pictures);
         FramePicture image = PictureOf(shape);
@@ -277,9 +302,13 @@ public sealed partial class Ww8DocumentReader
             && _inlinePictures.TryReadHeader(shapeAt, out DffRecordHeader container)
             && EscherBlips.Inline(_inlinePictures, _inlinePictures.EndOf(container)) is { } own)
         {
-            image = own.Bytes.IsEmpty
+            // The crop is the shape's, not the blip's, so it survives the fall-through: an inline
+            // picture's bytes are inside its own `SpContainer` rather than in the blip store, and
+            // taking them by that route must not lose the four properties beside them.
+            image = (own.Bytes.IsEmpty
                 ? Declined(own)
-                : EmbeddedPicture.Read(own.Bytes, own.Kind, "inline blip", _diagnostics);
+                : EmbeddedPicture.Read(own.Bytes, own.Kind, "inline blip", _diagnostics))
+                with { Crop = EscherPicture.Crop(shape.Properties) };
         }
 
         return new Ww8LayoutFrame(

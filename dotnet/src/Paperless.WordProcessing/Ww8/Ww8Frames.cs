@@ -252,6 +252,7 @@ public static class Ww8Frames
             IsImage = blocks.Count == 0,
             Image = picture.Raster,
             Vector = picture.Vector,
+            Crop = picture.Crop,
             Blocks = blocks,
             Name = shape.Name,
         };

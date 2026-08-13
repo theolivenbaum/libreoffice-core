@@ -42,16 +42,25 @@ public static class EscherPicture
     /// <param name="properties">The shape's property table.</param>
     /// <param name="destination">The rectangle the shape occupies.</param>
     public static DocRect Cropped(EscherPropertyTable properties, DocRect destination)
-    {
-        double left = Fraction(properties, EscherPropertyIds.CropFromLeft);
-        double top = Fraction(properties, EscherPropertyIds.CropFromTop);
-        double right = Fraction(properties, EscherPropertyIds.CropFromRight);
-        double bottom = Fraction(properties, EscherPropertyIds.CropFromBottom);
+        => Crop(properties).Apply(destination);
 
-        if (left == 0 && top == 0 && right == 0 && bottom == 0) return destination;
-
-        return PictureCrop.Uncropped(destination, left, top, right, bottom) ?? destination;
-    }
+    /// <summary>
+    /// The four crop properties as fractions, without a rectangle to apply them to.
+    /// </summary>
+    /// <remarks>
+    /// <b>For the two hosts that cannot do both at once.</b> A slide shape states its own
+    /// rectangle, so <see cref="Cropped"/> reads the properties and finishes; a sheet's drawing
+    /// is anchored to cells and a Word frame is placed by the layout engine, so on those two
+    /// paths the fractions are read here and applied where the rectangle finally exists — see
+    /// <see cref="PictureCropFractions"/>.
+    /// </remarks>
+    /// <param name="properties">The shape's property table.</param>
+    public static PictureCropFractions Crop(EscherPropertyTable properties)
+        => new(
+            Fraction(properties, EscherPropertyIds.CropFromLeft),
+            Fraction(properties, EscherPropertyIds.CropFromTop),
+            Fraction(properties, EscherPropertyIds.CropFromRight),
+            Fraction(properties, EscherPropertyIds.CropFromBottom));
 
     /// <summary>One crop property as a fraction of the picture, from its 16.16 fixed point.</summary>
     private static double Fraction(EscherPropertyTable properties, ushort id)

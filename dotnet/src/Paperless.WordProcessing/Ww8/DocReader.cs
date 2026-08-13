@@ -871,6 +871,7 @@ public sealed class Ww8Document : IWordProcessingDocument, IPaginatedDocument
                     IsImage = true,
                     Image = frame.Picture.Raster,
                     Vector = frame.Picture.Vector,
+                    Crop = frame.Picture.Crop,
                 });
 
                 continue;
@@ -885,6 +886,7 @@ public sealed class Ww8Document : IWordProcessingDocument, IPaginatedDocument
             {
                 Image = frame.Picture.Raster,
                 Vector = frame.Picture.Vector,
+                Crop = frame.Picture.Crop,
             };
             frames.Add(envelope);
 

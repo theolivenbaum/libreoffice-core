@@ -97,6 +97,57 @@ public class EscherPictureCropTests
                 Anchor)
             .ShouldBe(Anchor);
 
+    // ------------------------------------------------------------------ the fractions alone
+
+    /// <summary>
+    /// <c>Crop</c> reads the same four properties <c>Cropped</c> does, for the two hosts that
+    /// cannot apply them where they read them: a sheet's drawing is anchored to cells and a Word
+    /// frame is placed by the layout engine, so neither has a rectangle at read time.
+    /// </summary>
+    [Fact]
+    public void TheFractionsAreTheFourPropertiesInOrder()
+    {
+        PictureCropFractions crop = EscherPicture.Crop(
+            Table(
+                (EscherPropertyIds.CropFromLeft, Fixed(0.10)),
+                (EscherPropertyIds.CropFromTop, Fixed(0.20)),
+                (EscherPropertyIds.CropFromRight, Fixed(0.30)),
+                (EscherPropertyIds.CropFromBottom, Fixed(0.40))));
+
+        crop.Left.ShouldBe(0.10, 0.0001);
+        crop.Top.ShouldBe(0.20, 0.0001);
+        crop.Right.ShouldBe(0.30, 0.0001);
+        crop.Bottom.ShouldBe(0.40, 0.0001);
+    }
+
+    /// <summary>
+    /// And applying them gives what <c>Cropped</c> gives, which is the invariant that stops the
+    /// three hosts drifting into two arithmetics.
+    /// </summary>
+    [Fact]
+    public void ApplyingTheFractionsIsCropped()
+    {
+        EscherPropertyTable table = Table(
+            (EscherPropertyIds.CropFromLeft, Fixed(0.10)),
+            (EscherPropertyIds.CropFromTop, Fixed(0.20)),
+            (EscherPropertyIds.CropFromRight, Fixed(0.30)),
+            (EscherPropertyIds.CropFromBottom, Fixed(0.40)));
+
+        EscherPicture.Crop(table).Apply(Anchor).ShouldBe(EscherPicture.Cropped(table, Anchor));
+    }
+
+    /// <summary>The fractions are signed too, and for the same reason the rectangle is.</summary>
+    [Fact]
+    public void ANegativeFractionIsReadAsNegative()
+        => EscherPicture.Crop(
+                Table((EscherPropertyIds.CropFromLeft, unchecked((uint)-(int)Fixed(0.25)))))
+            .Left.ShouldBe(-0.25, 0.0001);
+
+    /// <summary>A table stating no crop reads as no crop, rather than as four zeroes to divide by.</summary>
+    [Fact]
+    public void AShapeStatingNoCropHasNoFractions()
+        => EscherPicture.Crop(Table((EscherPropertyIds.Picture, 1))).IsNone.ShouldBeTrue();
+
     // ------------------------------------------------------------------ end to end, both paths
 
     [Fact]
