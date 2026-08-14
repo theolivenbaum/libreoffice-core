@@ -59,6 +59,10 @@ gave identical PNGs. But `fse_identification_form.xlsx` converted five times by 
 that LibreOffice draws in about one run in five. See the last section of
 `dotnet/TODO.raster-ceiling.md`. **Render a reference more than once before trusting a
 single-document figure**, and treat a golden image's checksum as a claim about that document
-rather than about the renderer. So golden reference images can be committed and
-checksummed, and a changed checksum is a real signal. The PDFs themselves are *not*
-byte-identical — they embed a timestamp — so checksum the PNGs, never the PDFs.
+rather than about the renderer.
+
+Within that limit the practice still holds: golden reference images can be committed and
+checksummed, and a changed checksum is a real signal — but it is now a signal to re-render and
+check whether the document is one of the unstable ones, not automatically evidence that
+something in the tree changed. The PDFs themselves are *not* byte-identical either way, since
+they embed a timestamp, so checksum the PNGs and never the PDFs.
