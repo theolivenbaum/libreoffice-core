@@ -81,6 +81,12 @@ internal sealed record XlsxRichRun(int Start, int Length, XlsxRunFont? Font);
 /// element in the same order and drop the same things — the phonetic <c>rPh</c> guides above all,
 /// which are shown above the text rather than in it.
 /// </para>
+/// <para>
+/// That is why the lengths here are measured after <see cref="XlsxCellText.Of"/> and not on the
+/// raw <c>t</c> value. Decoding <c>ST_Xstring</c> on one side only would leave every run in a
+/// rich string that holds one <c>_x000D_</c> pointing seven characters too far right, so a fix
+/// aimed at the text would come back as mis-formatted runs.
+/// </para>
 /// </remarks>
 internal static class XlsxRichRuns
 {
@@ -104,12 +110,13 @@ internal static class XlsxRichRuns
         {
             if (Xlsx.Is(child, "t"))
             {
-                at += child.Value.Length;
+                at += XlsxCellText.Of(child.Value).Length;
             }
             else if (Xlsx.Is(child, "r"))
             {
                 int length = 0;
-                foreach (XElement text in Xlsx.Children(child, "t")) length += text.Value.Length;
+                foreach (XElement text in Xlsx.Children(child, "t"))
+                    length += XlsxCellText.Of(text.Value).Length;
                 if (length == 0) continue;
 
                 XlsxRunFont? font = ReadFont(Xlsx.Child(child, "rPr"));

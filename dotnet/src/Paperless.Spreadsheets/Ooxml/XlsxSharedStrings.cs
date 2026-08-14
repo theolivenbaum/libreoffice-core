@@ -74,6 +74,12 @@ public sealed class XlsxSharedStrings
     /// Whitespace is never trimmed. <c>xml:space="preserve"</c> is how SpreadsheetML says a
     /// leading space is real, and it is on nearly every <c>t</c> LibreOffice writes.
     /// </para>
+    /// <para>
+    /// Every <c>t</c> goes through <see cref="XlsxCellText.Of"/> rather than being appended raw,
+    /// because a <c>t</c> is <c>ST_Xstring</c>: its <c>_xHHHH_</c> escapes are text the producer
+    /// could not spell any other way, and the seven characters of <c>_x000D_</c> are a carriage
+    /// return that Calc draws as nothing at all.
+    /// </para>
     /// </remarks>
     public static string ReadRichString(XElement? element)
     {
@@ -84,11 +90,12 @@ public sealed class XlsxSharedStrings
         {
             if (Xlsx.Is(child, "t"))
             {
-                text.Append(child.Value);
+                text.Append(XlsxCellText.Of(child.Value));
             }
             else if (Xlsx.Is(child, "r"))
             {
-                foreach (XElement run in Xlsx.Children(child, "t")) text.Append(run.Value);
+                foreach (XElement run in Xlsx.Children(child, "t"))
+                    text.Append(XlsxCellText.Of(run.Value));
             }
         }
         return text.ToString();

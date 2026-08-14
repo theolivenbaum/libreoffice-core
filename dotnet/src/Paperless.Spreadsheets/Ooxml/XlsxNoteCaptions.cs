@@ -313,7 +313,9 @@ internal static class XlsxNoteCaptions
 
         foreach (XElement run in Xlsx.Children(text, "r"))
         {
-            string content = Xlsx.Child(run, "t")?.Value ?? string.Empty;
+            // ST_Xstring, exactly as in a shared string: a comment's `text` is a CT_Rst too, and
+            // decoding it in two of the three places that read one is how the third drifts.
+            string content = XlsxCellText.Of(Xlsx.Child(run, "t")?.Value);
             if (content.Length == 0) continue;
 
             XElement? properties = Xlsx.Child(run, "rPr");
@@ -337,7 +339,7 @@ internal static class XlsxNoteCaptions
         // A comment stating its text as a bare `t` rather than as runs, which the schema allows
         // and a few producers write.
         if (paragraphs.Count == 0 && current.Count == 0
-            && Xlsx.Child(text, "t")?.Value is { Length: > 0 } plain)
+            && XlsxCellText.Of(Xlsx.Child(text, "t")?.Value) is { Length: > 0 } plain)
         {
             current.Add(new SheetShapeRun(plain, DefaultSize));
         }
