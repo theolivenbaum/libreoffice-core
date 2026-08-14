@@ -13680,3 +13680,44 @@ the briefed failure was a measurement artefact and the real defects were elsewhe
 Both rounds were dispatched with a brief that named the wrong cause, and both agents overturned it
 and said so. Briefs should carry the measurement and the ruled-out list, and should not carry a
 diagnosis dressed as one.
+
+---
+
+## 2026-08-14 — the shape an unknown family name implies comes from fontconfig
+
+The `Century Schoolbook` disagreement recorded above is real and is one of ten. `ClassOf` read
+`VCL.xcu`'s `FontType`; the running binary reads fontconfig's own classification, which is a
+`<default>` chain through concrete families ending — for most names — at `49-sansserif.conf`'s
+sans-serif default. `FontconfigPreferences` now answers it, and `FontSubstitutions.ClassOf` is kept
+for the two things it is still right about: a machine with no fontconfig, and `FontFamilyClass.Symbol`,
+which fontconfig has no generic for.
+
+**Over the 296 families the corpus names, our resolver agreed with the installed 26.2.4.2 on 274 and
+now agrees on 287.** Thirteen moved and all thirteen moved the right way. The hardcoded
+`{helv, sansserif}` chain override is replaced by the rule it was an instance of — *a family
+fontconfig names nowhere never reaches the `SubstFonts` chain* — which also fixes `CG Times`,
+`Times-Roman`, `MS Gothic` and `MS PGothic`.
+
+| | words (200) | slides (163) | sheets (171) |
+|---|---:|---:|---:|
+| gate verdicts moved | 0 | 0 | 0 |
+| page counts moved | 0 | 0 | 0 |
+| **face-set distance to the reference** | **2 closer** | **10 closer** | **1 closer** |
+| further | 0 | 0 | 0 |
+
+`solog_orientation_august_2019.pptx` gains the `DejaVuSans-Bold` it was missing. Five renderings
+reach an exact face-set match. Batches 001–006 re-proved on all three tracks: **words 59/60,
+slides 57/58, sheets 57/60**, unchanged.
+
+**The words track barely moves, and the reason is the useful part.** A DOC or DOCX font table
+declares a family class for nearly every entry and the declared class outranks the name's
+classification, so the rule that landed earlier the same day already answers first for essentially
+the whole word-processing corpus. Reach estimated from which documents *name* a family was wrong by
+an order of magnitude on two tracks; reach is what a request **resolves** to.
+
+One regression the change created and then removed: two decks declaring `Lucida Console` fixed-pitch
+had been getting DejaVu Sans Mono by accident, through `VCL.xcu`'s `Fixed`. `pitchFamily` on
+`<a:latin>` and `lfPitchAndFamily` in a `FontEntityAtom` are now read — the pitch only, not the
+family class, which nothing has measured on a slide.
+
+`dotnet/probes/font-class-01/results.md`.

@@ -418,6 +418,59 @@ public sealed class SlideFonts
     public SlideFonts(SystemFontResolver? fonts = null)
         => _fonts = fonts ?? new SystemFontResolver(SystemFontIndex.Build());
 
+    /// <summary>
+    /// The pitch the deck declares for a typeface, when its format states one.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Both binary formats carry it and neither was read until it was measured to matter: PPTX puts
+    /// it in the low two bits of <c>pitchFamily</c> on <c>&lt;a:latin&gt;</c>, PPT in
+    /// <c>lfPitchAndFamily</c> at the end of each <c>FontEntityAtom</c>. LibreOffice sends it to
+    /// fontconfig, and for a family fontconfig files under no generic it is the only thing that
+    /// says the text is meant to line up in columns.
+    /// </para>
+    /// <para>
+    /// <strong>Measured, on the corpus and then in isolation.</strong>
+    /// <c>airbus-powerpoint-presentation-2019-20…pptx</c> declares <c>Lucida Console</c> with
+    /// <c>pitchFamily="49"</c> — fixed pitch, modern family — and 26.2.4.2 draws it in DejaVu Sans
+    /// Mono. Re-zipping the same deck with that one attribute removed and nothing else changed, it
+    /// draws DejaVu Sans instead, which is fontconfig's answer for a name it files under nothing.
+    /// <c>introduction_to_bea_tuxedo.ppt</c> is the same fact in the binary format:
+    /// <c>lfPitchAndFamily</c> is <c>0x31</c> for Lucida Console and <c>0x12</c> for Times New
+    /// Roman in the same collection.
+    /// </para>
+    /// <para>
+    /// The pitch and not the family class, deliberately. The family bits are in the same byte and
+    /// the word processor's equivalent leaves them alone for the same reason — declaring a family
+    /// class changes the answer for every name in the deck and has never been measured on a slide,
+    /// where a declared *pitch* has now been measured twice.
+    /// </para>
+    /// </remarks>
+    /// <remarks>
+    /// Settable rather than <c>init</c>-only because a PPT's font collection lives inside the
+    /// <c>Environment</c> container, which is not read until layout starts and so is not available
+    /// where the cache is constructed. The delegate is wired once, before any request reaches it.
+    /// </remarks>
+    public Func<string, FontPitch>? DeclaredPitches { get; set; }
+
+    /// <summary>
+    /// The pitch in a Windows <c>LOGFONT.lfPitchAndFamily</c> byte.
+    /// </summary>
+    /// <remarks>
+    /// Shared by both readers because both formats carry the same byte: PPTX writes it as the
+    /// decimal <c>pitchFamily</c> attribute, PPT as the last byte of a <c>FontEntityAtom</c>, and
+    /// the WW8 font table as <c>FFN.prq</c>. The low two bits are the pitch and the high four the
+    /// family; only the pitch is read here.
+    /// </remarks>
+    /// <param name="pitchAndFamily">The byte, as written.</param>
+    public static FontPitch PitchIn(int pitchAndFamily)
+        => (pitchAndFamily & 0x03) switch
+        {
+            1 => FontPitch.Fixed,
+            2 => FontPitch.Variable,
+            _ => FontPitch.Unknown,
+        };
+
     /// <summary>The substitutions made so far, which is the first thing a comparison checks.</summary>
     public IReadOnlyList<FontSubstitution> Substitutions => _fonts.Substitutions;
 
@@ -425,14 +478,20 @@ public sealed class SlideFonts
     public (OpenTypeFace? Face, FontReference? Reference) Resolve(
         string? family, int weight, bool isItalic)
     {
+        // The pitch is a property of the typeface rather than of the request, so it adds nothing to
+        // the key: two requests naming the same family declare the same pitch.
         (string?, int, bool) key = (family, weight, isItalic);
         if (_resolved.TryGetValue(key, out (OpenTypeFace?, FontReference?) cached)) return cached;
+
+        FontPitch pitch = family is { Length: > 0 } named && DeclaredPitches is { } declared
+            ? declared(named)
+            : FontPitch.Unknown;
 
         (OpenTypeFace? Face, FontReference? Reference) resolved = default;
         try
         {
             FontReference reference = _fonts.Resolve(
-                new FontRequest(family ?? string.Empty, weight, isItalic));
+                new FontRequest(family ?? string.Empty, weight, isItalic, pitch));
             resolved = (_fonts.LoadOpenType(reference), reference);
         }
         catch (Exception exception) when (exception is Core.MalformedDocumentException

@@ -1,11 +1,13 @@
 using System.Globalization;
 using System.Xml.Linq;
+using Paperless.Containers;
 using Paperless.Core.Geometry;
 using Paperless.Core.Graphics;
 using Paperless.Core.Units;
 using Paperless.Ooxml;
 using Paperless.Ooxml.DrawingML;
 using Paperless.Presentations.Layout;
+using Paperless.Text.Fonts;
 using Paperless.Text.Layout;
 using Paperless.Vector;
 
@@ -83,6 +85,63 @@ internal sealed partial class PptxSlideLayout
     {
         _file = file;
         _fonts = fonts;
+        _fonts.DeclaredPitches = DeclaredPitchOf;
+    }
+
+    /// <summary>
+    /// The pitch the deck declares for a typeface, from <c>pitchFamily</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A byte in Windows's <c>LOGFONT</c> encoding, written on every <c>&lt;a:latin&gt;</c>,
+    /// <c>&lt;a:ea&gt;</c> and <c>&lt;a:cs&gt;</c> PowerPoint emits: the low two bits are the pitch
+    /// (1 fixed, 2 variable) and the high four the family. Only the pitch is read — see
+    /// <see cref="SlideFonts.DeclaredPitches"/> for the measurement and for why the family is left.
+    /// </para>
+    /// <para>
+    /// Collected across the whole package rather than per slide, because the attribute is usually
+    /// written where the typeface is *introduced* — a theme's <c>a:fontScheme</c>, a master, a
+    /// layout — and the run that uses it names the family with no pitch beside it. Keyed on the
+    /// typeface name for the same reason: by the time the resolver is reached, a family name has
+    /// lost which part it came from.
+    /// </para>
+    /// <para>
+    /// Lazily, and once: a deck that never asks for a face never pays for the scan, and one that
+    /// does pays for it on the first run of the first slide.
+    /// </para>
+    /// </remarks>
+    private FontPitch DeclaredPitchOf(string typeface)
+        => (_declaredPitches ??= ReadDeclaredPitches(_file))
+            .TryGetValue(typeface, out FontPitch pitch)
+            ? pitch
+            : FontPitch.Unknown;
+
+    private Dictionary<string, FontPitch>? _declaredPitches;
+
+    private static Dictionary<string, FontPitch> ReadDeclaredPitches(PptxFile file)
+    {
+        Dictionary<string, FontPitch> pitches = new(StringComparer.OrdinalIgnoreCase);
+
+        foreach (IPackagePart part in file.Package.Parts)
+        {
+            if (!part.Name.EndsWith(".xml", StringComparison.OrdinalIgnoreCase)) continue;
+            if (file.Load(part.Name) is not { } root) continue;
+
+            foreach (XElement element in root.DescendantsAndSelf())
+            {
+                if (element.Attribute("typeface")?.Value is not { Length: > 0 } typeface) continue;
+                if (element.Attribute("pitchFamily")?.Value is not { Length: > 0 } declared) continue;
+                if (!int.TryParse(declared, CultureInfo.InvariantCulture, out int value)) continue;
+
+                FontPitch pitch = SlideFonts.PitchIn(value);
+
+                // A theme's own declaration comes first in part order and a run's repeats it; where
+                // they disagree the file is malformed and the first is as good an answer as any.
+                if (pitch != FontPitch.Unknown) pitches.TryAdd(typeface, pitch);
+            }
+        }
+
+        return pitches;
     }
 
     /// <summary>Lays one slide out.</summary>

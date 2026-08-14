@@ -380,23 +380,54 @@ public class FontResolutionTests
     [InlineData("Helv")]
     [InlineData("SansSerif")]
     [InlineData("Sans-serif")]
+    [InlineData("CG Times")]
+    [InlineData("Times-Roman")]
+    [InlineData("MS Gothic")]
     public void AChainFontconfigOverridesIsNotConsulted(string requested)
     {
         SystemFontResolver resolver = Resolver();
         Assert.SkipUnless(
             resolver.Index.Has("DejaVu Sans") && resolver.Index.Has("Liberation Sans"),
             "both families are needed to tell the two answers apart");
+        Assert.SkipUnless(FontconfigPreferences.Machine.IsConfigured, "no fontconfig on this machine");
 
-        // VCL.xcu sends both of these to Liberation Sans through albanyamt/albany. The running
-        // binary does not: PhysicalFontCollection::FindFontFamily asks the fontconfig pre-match hook
-        // at PhysicalFontCollection.cxx:1142 and returns its answer at :1151, while
-        // ImplFontSubstitute — the .xcu chain — is only reached at :1180. fontconfig has no rule for
-        // either name, so it answers with its default family.
+        // VCL.xcu sends all of these to an installed Liberation face — the first three through
+        // albanyamt/albany, CG Times and Times-Roman through liberationserif, MS Gothic through
+        // ipagothic. The running binary reaches none of them: PhysicalFontCollection::FindFontFamily
+        // asks the fontconfig pre-match hook at PhysicalFontCollection.cxx:1142 and returns its
+        // answer at :1151, while ImplFontSubstitute — the .xcu chain — is only reached at :1180.
+        // fontconfig has no <alias> naming any of these six, so it answers with its default family.
         //
-        // Measured on LibreOffice 24.2.7.2: a flat-ODS probe drawing "Hamburgefonstiv" and
-        // "0123456789" in each comes back 86.45 pt and 63.64 pt, which is DejaVu Sans. Liberation
-        // Sans would be 75.61 and 55.63.
+        // Measured with a flat-ODS probe drawing "Hamburgefonstiv" and "0123456789" in each: 86.45 pt
+        // and 63.64 pt, which is DejaVu Sans, against Liberation Sans's 75.61 and 55.63. On 24.2.7.2
+        // for the first three and re-taken on the installed 26.2.4.2 for all six.
+        //
+        // MS Gothic is the one that looks like it should be exempt, since fontconfig answers by
+        // character and this request carries none. It is not: 26.2.4.2 draws Latin text declared
+        // MS Gothic in DejaVu Sans and *Japanese* text declared MS Gothic in WenQuanYi Zen Hei, and
+        // the chain's IPAGothic is neither. The CJK coverage comes back through glyph fallback.
         resolver.Resolve(new FontRequest(requested)).FamilyName.ShouldBe("DejaVu Sans");
+    }
+
+    [Theory]
+    [InlineData("Wingdings")]
+    [InlineData("Wingdings 2")]
+    [InlineData("Webdings")]
+    public void APiFaceKeepsItsChain(string requested)
+    {
+        SystemFontResolver resolver = Resolver();
+        Assert.SkipUnless(resolver.Index.Has("OpenSymbol"), "OpenSymbol is not installed");
+
+        // The carve-out on the other side of the same rule, and the reason the table's own
+        // classification cannot be deleted along with its use as a shape. A symbol-encoded request
+        // makes the pre-match hook bail at fontsubst.cxx:101 before fontconfig is consulted at all,
+        // so for a pi face the chain is what LibreOffice runs too — and fontconfig has no symbol
+        // generic to have filed these under in any case.
+        //
+        // The 296-row face probe reads all four of these as DejaVu Sans and is the wrong instrument
+        // for them: ODF states no charset, so the probe's own requests were not symbol-encoded. A
+        // DOCX or XLSX font carrying charset="2" is.
+        resolver.Resolve(new FontRequest(requested)).FamilyName.ShouldBe("OpenSymbol");
     }
 
     [Theory]
@@ -419,12 +450,90 @@ public class FontResolutionTests
         SystemFontResolver resolver = Resolver();
         Assert.SkipUnless(resolver.Index.Has(expected), $"{expected} is not installed");
 
-        // The negative half, and the reason the override is a named pair rather than the whole
-        // table: the same probe measured all fourteen of these and every one agrees with what this
-        // resolver already answered. Suppressing the chain wholesale would move all of them —
+        // The negative half, and the reason the chain is suppressed by a rule rather than for
+        // everything: the same probe measured all fourteen of these and every one agrees with what
+        // this resolver already answered. Suppressing the chain wholesale would move all of them —
         // Helvetica and Albany off Liberation Sans in particular, which are the substitutions that
         // preserve a document's line breaks.
+        //
+        // What separates these from the names in AChainFontconfigOverridesIsNotConsulted is exactly
+        // what the rule tests: fontconfig has an <alias> naming every one of them and none naming
+        // any of those, so here its own alias expansion reaches the same face the chain does and
+        // there it has nothing to say but a generic.
         resolver.Resolve(new FontRequest(requested)).FamilyName.ShouldBe(expected);
+    }
+
+    // ----------------------------------- the shape fontconfig files a name under, not the table's
+
+    [Theory]
+    [InlineData("Century Schoolbook", FontFamilyClass.Serif, "DejaVu Sans")]
+    [InlineData("NewCenturySchlbk", FontFamilyClass.Serif, "DejaVu Sans")]
+    [InlineData("Century", FontFamilyClass.Serif, "DejaVu Sans")]
+    [InlineData("Book Antiqua", FontFamilyClass.Serif, "DejaVu Sans")]
+    [InlineData("Bookman Old Style", FontFamilyClass.Serif, "DejaVu Sans")]
+    [InlineData("Lucida Console", FontFamilyClass.Fixed, "DejaVu Sans")]
+    [InlineData("Palatino Linotype", FontFamilyClass.Unknown, "DejaVu Serif")]
+    [InlineData("SimSun", FontFamilyClass.Unknown, "DejaVu Serif")]
+    public void TheShapeThatDecidesIsFontconfigsRatherThanTheTables(
+        string requested, FontFamilyClass tableSays, string expected)
+    {
+        SystemFontResolver resolver = Resolver();
+        Assert.SkipUnless(resolver.Index.Has(expected), $"{expected} is not installed");
+        Assert.SkipUnless(FontconfigPreferences.Machine.IsConfigured, "no fontconfig on this machine");
+
+        // The defect this round is about, in one row each. `VCL.xcu` calls the first five romans and
+        // Lucida Console monospaced, and has never heard of the last two — and on all eight the
+        // running binary follows fontconfig instead. `fc-match "Century Schoolbook"` answers DejaVu
+        // Sans, because 30-metric-aliases.conf defaults it to the concrete New Century Schoolbook and
+        // nothing files *that* under a generic, so 49-sansserif.conf's sans-serif default is what it
+        // gets. Palatino Linotype goes the other way: 45-latin.conf files it under serif.
+        //
+        // Measured on the installed 26.2.4.2 with a 296-row face probe, one row per family the
+        // sample corpus names. The declared-class assertion below is the second half of the same
+        // fact: `tableSays` records what the table's own classification is, so a regression that
+        // quietly restored it would fail here rather than somewhere in the corpus.
+        FontSubstitutions.ClassOf(requested).ShouldBe(tableSays);
+        resolver.Resolve(new FontRequest(requested)).FamilyName.ShouldBe(expected);
+    }
+
+    [Theory]
+    [InlineData("Century Schoolbook", "DejaVu Serif")]
+    [InlineData("Lucida Console", "DejaVu Sans Mono")]
+    public void WithNoFontconfigTheTablesShapeIsStillTheAnswer(string requested, string expected)
+    {
+        SystemFontIndex index = Index();
+        Assert.SkipUnless(index.Has(expected), $"{expected} is not installed");
+
+        // Windows and most macOS installations. There is no pre-match hook there either, so
+        // `ImplFontSubstitute` really is what runs and `VCL.xcu`'s FontType really is the shape —
+        // which is why the table's classification is kept rather than deleted. These are the two
+        // rows above, answered the other way round.
+        SystemFontResolver resolver = new(index, FontconfigPreferences.None);
+
+        resolver.Resolve(new FontRequest(requested)).FamilyName.ShouldBe(expected);
+    }
+
+    [Theory]
+    [InlineData("Century Schoolbook", FontFamilyClass.Serif, "DejaVu Serif")]
+    [InlineData("Book Antiqua", FontFamilyClass.SansSerif, "DejaVu Sans")]
+    [InlineData("Palatino Linotype", FontFamilyClass.SansSerif, "DejaVu Sans")]
+    public void ADeclaredShapeStillBeatsFontconfigsClassificationOfTheName(
+        string requested, FontFamilyClass declared, string expected)
+    {
+        SystemFontResolver resolver = Resolver();
+        Assert.SkipUnless(resolver.Index.Has(expected), $"{expected} is not installed");
+
+        // The two rules compose, and in this order. `FontConfigManager::Substitute` appends the
+        // declared class's generic to the pattern *before* the match runs, so it sits ahead of
+        // whatever generic fontconfig's own <default> rules would append for the name — which is why
+        // a document declaring Century Schoolbook a roman gets DejaVu Serif although fontconfig files
+        // the bare name under nothing, and one declaring Palatino Linotype a grotesque gets DejaVu
+        // Sans although 45-latin.conf files it under serif.
+        //
+        // Written because the classification change could plausibly have made the declared-class
+        // logic redundant, and it does not: these three rows are the only thing separating the two.
+        resolver.Resolve(new FontRequest(requested, DeclaredClass: declared))
+            .FamilyName.ShouldBe(expected);
     }
 
     // ------------------------------------------------- the shape the document itself declares
