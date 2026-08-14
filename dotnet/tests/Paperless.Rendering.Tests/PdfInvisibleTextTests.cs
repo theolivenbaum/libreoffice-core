@@ -178,6 +178,48 @@ public sealed class PdfInvisibleTextTests
             .ShouldNotContain("BT\n");
     }
 
+    [Fact]
+    public void AClipThatKeepsTextWritesTheGlyphsOutsideItAnyway()
+    {
+        Assert.SkipUnless(TestFace.IsAvailable, "no usable font face on this machine");
+
+        // The exception the rule above needs, and it is measured rather than a preference. A
+        // spreadsheet cell whose text overruns the columns its page prints is cut at the block's
+        // edge by LibreOffice too — and every glyph stays in the reference PDF's text layer. On
+        // `Data-Architecture-Tool-Fit-Assessment-Template.xlsx` the two renderings' ink ends at
+        // the same 241.8 pt while `pdftotext` reads all 2230 of the reference's words; dropping
+        // them cost 124 of ours. Those are the document's own words, not a picture's spare corner.
+        string content = ContentOf(sink =>
+        {
+            sink.Save();
+            sink.ClipPathKeepingText(Rectangle(0, 0, 200, 200));
+            sink.DrawGlyphRun(Run("Outside", 400, 500), Paint.Solid(Colour.Black));
+            sink.Restore();
+        });
+
+        content.ShouldContain("W n\n", customMessage: "the ink is still cut");
+        content.ShouldContain("Tj\n", customMessage: "the words are still readable");
+    }
+
+    [Fact]
+    public void AnEnclosingTextHidingClipStillApplies()
+    {
+        Assert.SkipUnless(TestFace.IsAvailable, "no usable font face on this machine");
+
+        // The two kinds nest, and the permissive one must not cancel the strict one — otherwise a
+        // cell drawn inside a picture frame would put the frame's hidden text back in the file.
+        string content = ContentOf(sink =>
+        {
+            sink.Save();
+            sink.ClipPath(Rectangle(0, 0, 200, 200));
+            sink.ClipPathKeepingText(Rectangle(0, 0, 100, 100));
+            sink.DrawGlyphRun(Run("Outside both", 400, 500), Paint.Solid(Colour.Black));
+            sink.Restore();
+        });
+
+        content.ShouldNotContain("BT\n");
+    }
+
     private static GlyphRun Run(string text, double x, double y)
         => TestFace.Run(
             text,

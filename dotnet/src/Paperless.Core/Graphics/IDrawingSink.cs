@@ -72,6 +72,34 @@ public interface IDrawingSink
     /// </summary>
     void ClipPath(GraphicsPath path, FillRule rule = FillRule.NonZero);
 
+    /// <summary>
+    /// The same clip, for the case where the text it covers is still part of the document.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Ink and the text layer are different things and a clip is allowed to separate them. A
+    /// backend that rasterises must treat this exactly as <see cref="ClipPath"/> — the ink is cut
+    /// either way — but one that writes text has to keep the glyphs the clip covers, because they
+    /// are the document's own words rather than a picture's spare corner.
+    /// </para>
+    /// <para>
+    /// The distinction is measured rather than a matter of taste. A spreadsheet cell whose text
+    /// overruns the columns the page prints is cut at the block's edge by LibreOffice's own
+    /// output, and <strong>the glyphs stay in its PDF's text layer</strong>: on
+    /// <c>Data-Architecture-Tool-Fit-Assessment-Template.xlsx</c> the reference's ink ends at
+    /// 241.8 pt, exactly where ours does, while <c>pdftotext</c> reads all 2230 of its words.
+    /// Dropping them instead cost 124 words on that document alone. A metafile drawing far
+    /// outside the frame it is played into is the opposite case, and is what the plain
+    /// <see cref="ClipPath"/> keeps out of the text layer.
+    /// </para>
+    /// <para>
+    /// Defaulted to <see cref="ClipPath"/> so that a backend which draws no text — or which draws
+    /// it all — needs to know nothing about the difference.
+    /// </para>
+    /// </remarks>
+    void ClipPathKeepingText(GraphicsPath path, FillRule rule = FillRule.NonZero)
+        => ClipPath(path, rule);
+
     /// <summary>Fills a path.</summary>
     void FillPath(GraphicsPath path, Paint paint, FillRule rule = FillRule.NonZero);
 
