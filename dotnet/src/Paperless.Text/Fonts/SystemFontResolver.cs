@@ -459,23 +459,18 @@ public sealed class SystemFontResolver : IFontResolver, IGlyphFallbackResolver
         if (_index.Best(request.FamilyName, request.Weight, request.IsItalic) is { } exact)
             return Reference(request, exact, requested: request.FamilyName);
 
-        // The class the document declared beside the name, when it declared one that LibreOffice acts on.
-        // This runs *before* the substitution chain, and that ordering is the point: LibreOffice's
-        // fontconfig pre-match (`FontConfigManager::Substitute`) is consulted before `VCL.xcu`'s table,
-        // and it asks fontconfig for the name plus a generic family — so a name fontconfig aliases only
-        // weakly loses to the generic, and never reaches the chain at all. Measured against 26.2.4.2 with
-        // authored one-paragraph documents: `Times`, `Helvetica`, `Albany` and `Thorndale` all answer
-        // DejaVu once a class is declared, where the chain would answer Liberation.
-        string[]? generic = GenericFamilyFor(request.DeclaredFamily);
-
-        // A pi face is exempt, whatever class the document put beside it. `Symbol` is declared
-        // `roman` by every Word document that uses it and there is no roman equivalent of a font of
-        // arrows and Greek letters — fontconfig knows it too, and binds `Symbol` to OpenSymbol hard
-        // enough to survive a generic: measured, `fc-match "Symbol,serif"` and `fc-match Symbol` both
-        // answer OpenSymbol, and so does 26.2.4.2 on a document declaring Symbol as a roman. Without
-        // this the class sent every Symbol run to DejaVu Serif, which draws the *characters* rather
-        // than the symbols they stand for.
-        if (FontSubstitutions.ClassOf(request.FamilyName) == FontFamilyClass.Symbol) generic = null;
+        // What the *document* declared about the family, when it declared something acted on.
+        //
+        // This runs **before** the substitution chain, and that ordering is the whole point rather than
+        // a detail. `FontConfigManager::Substitute` (`vcl/unx/generic/font/fontconfig.cxx`) is the
+        // *pre-match* substitution: it runs before LibreOffice consults `VCL.xcu` at all, and it asks
+        // fontconfig for the requested name plus a generic family. A name fontconfig aliases only
+        // weakly therefore loses to the generic and never reaches the chain. Measured against 26.2.4.2
+        // with authored one-paragraph documents on the four names that can tell the two orderings
+        // apart, because each has a chain entry that *is* installed: `Times`, `Helvetica`, `Albany`
+        // and `Thorndale` all answer DejaVu once a class is declared, where the chain answers
+        // Liberation.
+        string[]? generic = DeclaredGenericFor(request);
 
         if (generic is not null)
         {
@@ -642,6 +637,11 @@ public sealed class SystemFontResolver : IFontResolver, IGlyphFallbackResolver
         // and only the second one is fontconfig's to answer.
         if (string.IsNullOrWhiteSpace(request.FamilyName)) return DefaultFallbacks;
 
+        // What the *document* says the family is, which beats what the table says the *name* is.
+        // The same helper the pre-match step above uses, so the two cannot drift apart — reaching
+        // here at all means the declared generic named nothing installed either.
+        if (DeclaredGenericFor(request) is { } declared) return declared;
+
         return FontSubstitutions.ClassOf(request.FamilyName) switch
         {
             FontFamilyClass.Fixed => MonoFallbacks,
@@ -654,28 +654,50 @@ public sealed class SystemFontResolver : IFontResolver, IGlyphFallbackResolver
     }
 
     /// <summary>
-    /// The faces the generic family a declared class implies resolves to, or null when it implies none.
+    /// The faces the generic family a document's own declaration implies, or null when it implies none.
     /// </summary>
     /// <remarks>
     /// <para>
-    /// Two values and only two, because that is what LibreOffice sends: <c>"serif"</c> for
-    /// <c>FAMILY_ROMAN</c> and <c>"sans"</c> for <c>FAMILY_SWISS</c>, and nothing for the rest
-    /// (<c>vcl/unx/generic/font/fontconfig.cxx</c>). A monospaced class looks as though it ought to add
-    /// <c>"monospace"</c> and does not — measured, <c>Times</c> declared <c>modern</c> still comes out
-    /// Liberation Serif, which is the plain <c>fc-match Times</c> answer.
+    /// Two classes and only two, because that is what LibreOffice sends: <c>FontConfigManager::Substitute</c>
+    /// (<c>vcl/unx/generic/font/fontconfig.cxx</c>) appends <c>"serif"</c> as a second <c>FC_FAMILY</c>
+    /// for <c>FAMILY_ROMAN</c> and <c>"sans"</c> for <c>FAMILY_SWISS</c>, and nothing at all for any
+    /// other family type. A monospaced class looks as though it ought to add <c>"monospace"</c> and
+    /// does not — measured, <c>Times</c> declared <c>modern</c> still comes out Liberation Serif, which
+    /// is the plain <c>fc-match Times</c> answer. The readers collapse those codes to
+    /// <see cref="FontFamilyClass.Unknown"/> for the same reason.
     /// </para>
     /// <para>
-    /// The lists themselves are the existing shape fallbacks, which are already documented as the answer
-    /// fontconfig's generic families give on this configuration and were measured face by face.
+    /// <strong>A declared fixed pitch wins over a declared family</strong>, because a document relying
+    /// on its columns lining up is making the stronger statement: measured, <c>Garamond</c> declared
+    /// roman <em>and</em> fixed answers DejaVu Sans Mono rather than DejaVu Serif.
+    /// </para>
+    /// <para>
+    /// <strong>A pi face is exempt</strong>, whatever class the document put beside it. Every Word
+    /// document that uses <c>Symbol</c> declares it roman and there is no roman equivalent of a font of
+    /// arrows and Greek letters; fontconfig knows it too and binds the name hard enough to survive a
+    /// generic — <c>fc-match "Symbol,serif"</c> and <c>fc-match Symbol</c> both answer OpenSymbol, and
+    /// so does 26.2.4.2 on a document declaring Symbol as a roman. Without this the declaration sent
+    /// every Symbol run to DejaVu Serif, which draws the characters rather than the symbols they stand
+    /// for — measured on <c>ABCD-FE-01-00 Flight Envelope.docx</c> and its sibling.
+    /// </para>
+    /// <para>
+    /// The lists themselves are the existing shape fallbacks, already documented as the answer
+    /// fontconfig's generic families give on this configuration and measured face by face.
     /// </para>
     /// </remarks>
-    private static string[]? GenericFamilyFor(DeclaredFontFamily declared)
-        => declared switch
+    private static string[]? DeclaredGenericFor(FontRequest request)
+    {
+        if (request.Pitch == FontPitch.Fixed) return MonoFallbacks;
+
+        if (FontSubstitutions.ClassOf(request.FamilyName) == FontFamilyClass.Symbol) return null;
+
+        return request.DeclaredClass switch
         {
-            DeclaredFontFamily.Roman => SerifFallbacks,
-            DeclaredFontFamily.Swiss => SansFallbacks,
+            FontFamilyClass.Serif => SerifFallbacks,
+            FontFamilyClass.SansSerif => SansFallbacks,
             _ => null,
         };
+    }
 
     /// <summary>
     /// True when an installed family declares itself the metric equivalent of the name asked for.

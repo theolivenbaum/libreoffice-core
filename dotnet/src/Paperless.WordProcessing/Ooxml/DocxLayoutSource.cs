@@ -52,9 +52,6 @@ public sealed partial class DocxLayoutSource
 
     private readonly WordStyles _styles;
     private readonly SystemFontResolver _fonts;
-
-    /// <summary>What <c>fontTable.xml</c> declares each family's class to be, by normalised name.</summary>
-    private readonly Dictionary<string, DeclaredFontFamily> _declaredFamilies;
     private readonly Length _defaultTabInterval;
     private readonly int _compatibilityMode;
 
@@ -72,6 +69,17 @@ public sealed partial class DocxLayoutSource
     /// <see cref="Ww8.DocReader"/> already passes.
     /// </remarks>
     private readonly MetricGrid? _metrics;
+
+    /// <summary>
+    /// <c>word/fontTable.xml</c>, for the shape it declares for each family it names.
+    /// </summary>
+    /// <remarks>
+    /// Layout does not measure with it and never asks it for a face. What it settles is the one
+    /// question the family name alone cannot answer — whether a family nobody has installed is a
+    /// roman or a grotesque — and getting that wrong renders a serif document in DejaVu Sans where
+    /// LibreOffice renders it in DejaVu Serif, which moves every line break in it.
+    /// </remarks>
+    private readonly WordFontTable _fontTable;
     private readonly DrawingTheme? _theme;
     private readonly Dictionary<(string? Family, int Weight, bool Italic), OpenTypeFace?> _faces = [];
     private readonly Dictionary<(string? Family, int Weight, bool Italic), FontReference> _references =
@@ -94,8 +102,9 @@ public sealed partial class DocxLayoutSource
     /// caller sharing one instance with the extraction pass must not have the two interleave.
     /// </param>
     /// <param name="fontTable">
-    /// The document's <c>fontTable.xml</c>, or null. Only <c>w:family</c> is taken from it, and only
-    /// for a family that turns out not to be installed — see <see cref="DeclaredFontFamily"/>.
+    /// <c>word/fontTable.xml</c>, or null for a document without one. Nothing is measured with it —
+    /// it settles which shape a family nobody has installed falls back to, which the family name on
+    /// its own cannot say.
     /// </param>
     public DocxLayoutSource(
         WordStyles styles,
@@ -108,9 +117,9 @@ public sealed partial class DocxLayoutSource
         WordNumbering? numbering = null,
         WordFontTable? fontTable = null)
     {
-        _declaredFamilies = DeclaredFamiliesIn(fontTable);
         ArgumentNullException.ThrowIfNull(styles);
         _styles = styles;
+        _fontTable = fontTable ?? WordFontTable.Empty;
         _numbering = numbering ?? new WordNumbering();
         Pictures = pictures;
         _theme = theme;
@@ -1448,50 +1457,6 @@ public sealed partial class DocxLayoutSource
         return -1;
     }
 
-    /// <summary>
-    /// The classes <c>fontTable.xml</c> declares, keyed the way the resolver looks them up.
-    /// </summary>
-    /// <remarks>
-    /// <c>w:family</c> and nothing else from the part. <c>auto</c>, an absent attribute and an
-    /// unrecognised value all mean "the document says nothing", which is the overwhelming majority of
-    /// entries and leaves resolution exactly as it was. LibreOffice's own importer reads the same
-    /// attribute and hands it to the font matcher (<c>writerfilter/dmapper/FontTable.cxx</c> builds an
-    /// <c>SvxFontItem</c> per entry with its family and pitch).
-    /// </remarks>
-    private static Dictionary<string, DeclaredFontFamily> DeclaredFamiliesIn(WordFontTable? table)
-    {
-        Dictionary<string, DeclaredFontFamily> declared = new(StringComparer.Ordinal);
-        if (table is null) return declared;
-
-        foreach (WordFont font in table.Fonts)
-        {
-            DeclaredFontFamily family = font.Family switch
-            {
-                "roman" => DeclaredFontFamily.Roman,
-                "swiss" => DeclaredFontFamily.Swiss,
-                "modern" => DeclaredFontFamily.Modern,
-                "script" => DeclaredFontFamily.Script,
-                "decorative" => DeclaredFontFamily.Decorative,
-                _ => DeclaredFontFamily.Unknown,
-            };
-
-            if (family == DeclaredFontFamily.Unknown) continue;
-
-            string key = FontSubstitutions.Normalise(font.Name);
-            if (key.Length > 0) declared.TryAdd(key, family);
-        }
-
-        return declared;
-    }
-
-    /// <summary>What the document said this family's class was, or unknown when it said nothing.</summary>
-    private DeclaredFontFamily DeclaredFamilyOf(string? family)
-        => _declaredFamilies.Count > 0
-           && _declaredFamilies.TryGetValue(
-               FontSubstitutions.Normalise(family), out DeclaredFontFamily declared)
-            ? declared
-            : DeclaredFontFamily.Unknown;
-
     private OpenTypeFace? Face(WordTextStyle text)
     {
         (string? Family, int Weight, bool Italic) key = text.FaceKey;
@@ -1500,9 +1465,19 @@ public sealed partial class DocxLayoutSource
         OpenTypeFace? face = null;
         try
         {
-            FontReference reference = _fonts.Resolve(new FontRequest(
-                text.FamilyName ?? string.Empty, text.Weight, text.IsItalic,
-                DeclaredFamily: DeclaredFamilyOf(text.FamilyName)));
+            // The declared family only. The table declares a pitch too and LibreOffice's DOCX filter
+            // does not act on it: probed on 26.2.4.2 with a one-run package, `Garamond` declared
+            // `swiss` moves the fallback from DejaVu Serif to DejaVu Sans while `Garamond` declared
+            // `fixed` — and `MS Mincho` declared `modern`+`fixed` — leaves it exactly where it was.
+            // Its ODF filter *does* honour `style:font-pitch`, so this is a difference between the
+            // two importers rather than a property of the resolver, and passing the pitch here put
+            // one corpus document into DejaVu Sans Mono that the reference sets in DejaVu Sans.
+            FontFamilyClass declared = _fontTable.ShapeOf(text.FamilyName).Class;
+
+            FontReference reference = _fonts.Resolve(
+                new FontRequest(
+                    text.FamilyName ?? string.Empty, text.Weight, text.IsItalic,
+                    DeclaredClass: declared));
 
             face = _fonts.LoadOpenType(reference);
             _references[key] = reference;

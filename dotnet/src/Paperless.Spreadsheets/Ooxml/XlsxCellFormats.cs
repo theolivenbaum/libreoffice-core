@@ -3,6 +3,7 @@ using System.Xml.Linq;
 using Paperless.Core.Graphics;
 using Paperless.Core.Units;
 using Paperless.Spreadsheets.Layout;
+using Paperless.Text.Fonts;
 
 namespace Paperless.Spreadsheets.Ooxml;
 
@@ -67,7 +68,8 @@ internal sealed record XlsxCellFormatTable(
     /// the same place for both (<c>StylesBuffer::getDefaultFont</c>).
     /// </remarks>
     public SheetDefaultFont DefaultColumnFont { get; } = new(
-        DefaultFont.FontFamily, DefaultFont.FontSize, DefaultFont.FontWeight, DefaultFont.IsItalic);
+        DefaultFont.FontFamily, DefaultFont.FontSize, DefaultFont.FontWeight, DefaultFont.IsItalic,
+        DefaultFont.DeclaredFontClass);
 }
 
 /// <summary>
@@ -150,6 +152,7 @@ internal static class XlsxCellFormats
             ? new SheetCellFormat
             {
                 FontFamily = fonts[0].Family,
+                DeclaredFontClass = fonts[0].DeclaredClass,
                 FontSize = fonts[0].Size,
                 FontWeight = fonts[0].Weight,
                 IsItalic = fonts[0].Italic,
@@ -177,6 +180,14 @@ internal static class XlsxCellFormats
         return cellFormat with
         {
             FontFamily = font.Family ?? defaultFont.FontFamily,
+
+            // The declaration follows the name it qualifies rather than falling back on its own:
+            // an rPr that renames the face and says nothing about its shape has said the shape is
+            // unknown, and inheriting the cell's would file the new name under the old one's
+            // family. Only a run that renames nothing keeps the cell's declaration.
+            DeclaredFontClass = font.DeclaredFamily is { } code
+                ? SheetDeclaredFonts.FromWindowsCode(code)
+                : font.Family is null ? defaultFont.DeclaredFontClass : FontFamilyClass.Unknown,
             FontSize = font.Points is > 0
                 ? Length.FromPoints(font.Points.Value)
                 : defaultFont.FontSize,
@@ -225,7 +236,8 @@ internal static class XlsxCellFormats
 
     private readonly record struct Font(
         string? Family, Length Size, int Weight, bool Italic, Colour Colour, bool HasColour,
-        SheetUnderline Underline, bool Strike);
+        SheetUnderline Underline, bool Strike,
+        FontFamilyClass DeclaredClass = FontFamilyClass.Unknown);
 
     private static Record ReadRecord(XElement xf)
     {
@@ -301,8 +313,25 @@ internal static class XlsxCellFormats
             colour,
             stated,
             UnderlineOf(Xlsx.Child(font, "u")),
-            Toggle(Xlsx.Child(font, "strike")));
+            Toggle(Xlsx.Child(font, "strike")),
+            DeclaredClassOf(font));
     }
+
+    /// <summary>
+    /// The generic family a <c>&lt;font&gt;</c> declares, for a family nobody has installed.
+    /// </summary>
+    /// <remarks>
+    /// <c>&lt;family val="N"/&gt;</c>, whose N is the Windows <c>FF_*</c> code — the same one BIFF's
+    /// <c>FONT</c> record carries as a byte, which is why both go through
+    /// <see cref="SheetDeclaredFonts.FromWindowsCode"/>. Excel writes it on nearly every font it
+    /// emits and it has no effect at all until the name fails to resolve, at which point it is the
+    /// whole answer.
+    /// </remarks>
+    private static FontFamilyClass DeclaredClassOf(XElement font)
+        => Xlsx.Attribute(Xlsx.Child(font, "family"), "val") is { } stated
+           && int.TryParse(stated, NumberStyles.Integer, CultureInfo.InvariantCulture, out int code)
+            ? SheetDeclaredFonts.FromWindowsCode(code)
+            : FontFamilyClass.Unknown;
 
     /// <summary>
     /// The line under a font, whose <c>val</c> is optional and whose default is not "none".
@@ -470,6 +499,7 @@ internal static class XlsxCellFormats
         SheetCellFormat probe = new()
         {
             FontFamily = first.Family,
+            DeclaredFontClass = first.DeclaredClass,
             FontSize = first.Size,
             FontWeight = first.Weight,
             IsItalic = first.Italic,
@@ -511,6 +541,7 @@ internal static class XlsxCellFormats
         return new SheetCellFormat
         {
             FontFamily = font.Family,
+            DeclaredFontClass = font.DeclaredClass,
             FontSize = font.Size,
             FontWeight = font.Weight,
             IsItalic = font.Italic,

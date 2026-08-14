@@ -157,9 +157,27 @@ separate images answer badly.
   *were* rendered at the same dpi, then the page geometry genuinely differs and that is the
   finding — which is why this warns rather than refuses.
 
-It reduces with **nearest-neighbour, not averaging**, deliberately: averaging is precisely
-what turns a doubled hairline — a defect this project is hunting — into one grey smudge
-indistinguishable from a single line.
+It reduces by taking the **darkest pixel of each block**, and the reason is a scar.
+
+It used to reduce with nearest-neighbour, with a comment claiming that preserved a
+one-pixel hairline. It does not: nearest *samples* one source pixel per destination pixel,
+so a rule thinner than the sampling step falls between samples and disappears. Composing at
+80% silently dropped a real underline — a 245 px solid black run at y=802 in the 150 dpi
+render, present as a fill in the PDF itself — and two independent reviewers then correctly
+reported that the composed image had no underline in it. That was relayed onward as a
+renderer defect. It was a compositor defect.
+
+Averaging is not the fix either: it turns a doubled hairline — a defect this project *is*
+hunting — into one grey smudge indistinguishable from a single line. Darkest-of-block keeps
+any hairline at full strength, keeps two of them distinguishable while a pale row separates
+them, and never invents ink. It biases towards showing marks, which is the right bias when
+the question is "is this drawn or not".
+
+**The general rule, which this file should have taken from `render-comparison` and did
+not:** before believing that a reviewer's "it is absent" is a fact about the document, check
+it is not a fact about the pipeline that built their image. Confirm absence in the PDF's own
+operators — `pdf-ops.py dump`, or a thin-wide-fill scan — not in a downscaled raster. A
+missing mark and a mark your instrument threw away look identical to the reader.
 
 `pair.sh` chains `look.py` and `compose.py` so the two halves cannot be rendered at
 mismatched dpi by hand. About 20 s per document.

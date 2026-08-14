@@ -92,6 +92,35 @@ failing list.
 **It moves no words, so no gate column can see it.** That is the class this round existed to
 find.
 
+**Correction, and it is about this round's own instrument.** Two follow-up commits reported
+that the underline still did not appear on the page, on the strength of two independent
+reviewers who each measured the composed image and found no rule in our half. Both reviewers
+read their image correctly. **The image was wrong.**
+
+`compose.py` reduced with nearest-neighbour, on a comment claiming that preserved a one-pixel
+hairline. It does not — nearest samples one source pixel per destination pixel, so a rule
+thinner than the sampling step falls between samples and vanishes. At 80% it deleted the
+underline.
+
+Measured afterwards, at the same commit the reviewers were shown:
+
+- the PDF holds the rule as a fill, `(50.39, 456.62)-(168.07, 457.06)`, 117.7 pt by 0.44 pt;
+- the 150 dpi render holds a **245 px solid black run at y=802**, the only long dark run on
+  the page;
+- recomposed with a darkest-of-block reducer, both halves show `y=672, run=197 px` — same
+  position, same length, ours and the reference.
+
+So the fix worked on the first commit and two further rounds of doubt were spent on an
+artefact. Three lessons, all of which this project had already written down somewhere else:
+
+- **An instrument can manufacture a defect out of nothing** — `render-comparison` says exactly
+  this, and it applies to an instrument you wrote yourself an hour ago as much as to one you
+  inherited.
+- **Confirm an absence in the PDF's operators, not in a downscaled raster.** A missing mark and
+  a mark the pipeline threw away are indistinguishable to the reader.
+- **Check a new instrument against a known answer before trusting its first result.** The
+  known-answer check here costs one `pdf-ops.py dump` and would have caught it immediately.
+
 Fixed: `Underline` and `StruckThrough` added to `XlsxRunFont`, read in `XlsxRichRuns.ReadFont`,
 applied in `XlsxCellFormats.Apply`. Absent stays **null rather than `None`**, because absent
 means "keep what the run inherits" and an explicit `val="none"` turns an inherited line off;

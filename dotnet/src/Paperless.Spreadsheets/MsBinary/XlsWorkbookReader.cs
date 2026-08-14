@@ -6,6 +6,7 @@ using Paperless.Core.Graphics;
 using Paperless.Core.Units;
 using Paperless.MsBinary.Escher;
 using Paperless.Spreadsheets.Layout;
+using Paperless.Text.Fonts;
 using Paperless.Core.Numbers;
 using Paperless.Text.Encodings;
 
@@ -682,6 +683,7 @@ internal sealed class XlsWorkbookReader
         int weight = (flags & 0x0001) != 0 ? BoldWeight : NormalWeight;
         int colour = AutomaticColourIndex;
         SheetUnderline underline = SheetUnderline.None;
+        FontFamilyClass declared = FontFamilyClass.Unknown;
 
         if (_stream.RecordLeft >= 10)
         {
@@ -689,7 +691,13 @@ internal sealed class XlsWorkbookReader
             weight = _stream.ReadUInt16();
             _stream.Skip(2);                    // escapement
             underline = Underline(_stream.ReadByte());
-            _stream.Skip(3);                    // family, character set, reserved
+
+            // The family byte, which is the Windows FF_* code and the only thing that decides what
+            // an uninstalled family falls back to. LibreOffice reads it into the same field its
+            // SpreadsheetML filter reads <family val="N"/> into
+            // (`nFamily = rStrm.readuChar()`, sc/source/filter/oox/stylesbuffer.cxx:672).
+            declared = SheetDeclaredFonts.FromWindowsCode(_stream.ReadByte());
+            _stream.Skip(2);                    // character set, reserved
         }
 
         string name = _stream.RecordLeft > 0
@@ -705,7 +713,8 @@ internal sealed class XlsWorkbookReader
             italic,
             colour,
             underline,
-            strike));
+            strike,
+            declared));
     }
 
     /// <summary>
@@ -884,6 +893,32 @@ internal sealed class XlsWorkbookReader
         return parsed;
     }
 
+    /// <summary>
+    /// The format a bare <c>ifmt</c> names, or null when it names General or nothing.
+    /// </summary>
+    /// <remarks>
+    /// A chart axis' <c>CHFORMAT</c> record holds an index into the workbook's format table and
+    /// not an <c>XF</c> index, so it skips the style resolution <see cref="FormatOf"/> does and
+    /// reads the table directly — which is what <c>GetNumFmtBuffer().GetScFormat( mnNumFmtIdx )</c>
+    /// does in <c>XclImpChAxis::Convert</c> (<c>sc/source/filter/excel/xichart.cxx:3369</c>). An
+    /// index no <c>FORMAT</c> record defines and no built-in covers is <c>NUMBERFORMAT_ENTRY_NOT_FOUND</c>
+    /// there and null here, and both then fall back to linking the axis to its source.
+    /// </remarks>
+    /// <param name="index">The <c>ifmt</c>.</param>
+    private NumberFormatCode? NumberFormatAt(int index)
+    {
+        if (index < 0) return null;
+
+        string? code = _formatCodes.TryGetValue(index, out string? stated)
+            ? stated
+            : BuiltInNumberFormats.Code(index);
+
+        if (code is null) return null;
+
+        NumberFormatCode parsed = NumberFormatCode.Parse(code);
+        return parsed.IsGeneral ? null : parsed;
+    }
+
     private int NumberFormatIndexOf(int xfIndex)
     {
         int index = xfIndex;
@@ -960,7 +995,7 @@ internal sealed class XlsWorkbookReader
 
         ReadChartRecords(chart);
 
-        ChartPlot? plot = chart.Build(_chartData, _externSheets, index, _cellFormats);
+        ChartPlot? plot = chart.Build(_chartData, _externSheets, index, _cellFormats, NumberFormatAt);
         SheetPrintSetup setup = _page.ToSetup();
         DocRect frame = ChartSheetFrame(setup);
 
@@ -1456,7 +1491,7 @@ internal sealed class XlsWorkbookReader
             if (depth == 0 && BiffChartRecords.IsChartRecord(id)) chart.Read(id, _stream);
         }
 
-        _drawings.AttachChart(chart.Build(_chartData, _externSheets, _sheetIndex, _cellFormats));
+        _drawings.AttachChart(chart.Build(_chartData, _externSheets, _sheetIndex, _cellFormats, NumberFormatAt));
     }
 
     /// <summary>Joins the sheet's <c>NOTE</c> records to the comment objects they name.</summary>
@@ -2207,7 +2242,8 @@ internal sealed class XlsWorkbookReader
                 && chartData.Wants(owner._sheetIndex, row, column))
             {
                 chartData.Offer(
-                    owner._sheetIndex, row, column, cell.Number, cell.DisplayedText(owner));
+                    owner._sheetIndex, row, column, cell.Number, cell.DisplayedText(owner),
+                    owner.FormatOf(cell.Xf));
             }
 
             if (_cellCount >= MaxCellsPerSheet)

@@ -24,6 +24,11 @@ internal readonly record struct XlsxRunColour(uint? Rgb, int? Indexed, int? Them
 /// <param name="Colour">Its colour, unresolved.</param>
 /// <param name="Underline">The line under the run, or null when it states none.</param>
 /// <param name="StruckThrough">Whether the run is struck through.</param>
+/// <param name="DeclaredFamily">
+/// The Windows <c>FF_*</c> code the run's <c>&lt;family val="N"/&gt;</c> states, or null when it
+/// states none. Carried because an <c>rPr</c> may name a face the cell's own font does not, and the
+/// declaration is what decides the fallback when that face is not installed.
+/// </param>
 /// <remarks>
 /// <see cref="Underline"/> and <see cref="StruckThrough"/> were absent from this record for
 /// several rounds while the same two properties were read on the <em>cell</em> path, so an
@@ -34,6 +39,13 @@ internal readonly record struct XlsxRunColour(uint? Rgb, int? Indexed, int? Them
 /// since a shared string no cell references is still in the table.
 ///
 /// It moves no words, so no gate column can see it, which is why it survived.
+///
+/// <see cref="DeclaredFamily"/> arrived by the same route from the other direction: three fields
+/// of a <c>CT_Font</c> were being read and four were not. The pattern is worth naming — this record
+/// is a <em>subset</em> of a schema type, and every field left out of it is silently discarded
+/// rather than failing anywhere. <c>vertAlign</c> is the one still missing, and it is left out
+/// deliberately: a raised run has nowhere to store its magnitude and must also make its line
+/// taller, so it needs a round rather than a field.
 /// </remarks>
 internal sealed record XlsxRunFont(
     string? Family,
@@ -42,7 +54,8 @@ internal sealed record XlsxRunFont(
     bool? Italic,
     XlsxRunColour? Colour,
     SheetUnderline? Underline = null,
-    bool? StruckThrough = null);
+    bool? StruckThrough = null,
+    int? DeclaredFamily = null);
 
 /// <summary>One stretch of a rich string, as character offsets into the flattened text.</summary>
 /// <param name="Start">Its first character.</param>
@@ -121,6 +134,9 @@ internal static class XlsxRichRuns
         bool? bold = Toggle(Xlsx.Child(properties, "b"));
         bool? italic = Toggle(Xlsx.Child(properties, "i"));
         XlsxRunColour? colour = ReadColour(Xlsx.Child(properties, "color"));
+        int? declared = Number(Xlsx.Child(properties, "family"), "val") is { } code
+            ? (int)code
+            : null;
 
         // Null for an absent <u>, which is not the same as SheetUnderline.None: absent means
         // "keep what the run inherits" and an explicit val="none" turns an inherited line off.
@@ -130,10 +146,15 @@ internal static class XlsxRichRuns
             : null;
         bool? struckThrough = Toggle(Xlsx.Child(properties, "strike"));
 
+        // Every field, or a run stating only the one left out is read as stating nothing and is
+        // discarded whole. The merge that brought DeclaredFamily and Underline together in this
+        // record initially dropped `declared` from this guard, which would have lost exactly the
+        // <family>-only run the field exists for.
         return family is null && points is null && bold is null && italic is null && colour is null
-               && underline is null && struckThrough is null
+               && underline is null && struckThrough is null && declared is null
             ? null
-            : new XlsxRunFont(family, points, bold, italic, colour, underline, struckThrough);
+            : new XlsxRunFont(
+                family, points, bold, italic, colour, underline, struckThrough, declared);
     }
 
     /// <summary>

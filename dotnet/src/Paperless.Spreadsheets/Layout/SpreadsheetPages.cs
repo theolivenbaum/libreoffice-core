@@ -240,10 +240,15 @@ public sealed class SpreadsheetPages : IPageSequence
 /// <summary>One run of columns placed together, and where it starts.</summary>
 /// <remarks>
 /// A page has one or two: the repeated columns, when the sheet declares any, and its own. They
-/// are separate because Calc prints them as separate blocks, so each has its own first column —
-/// and it is the first column of a block that decides whose spill reaches into it.
+/// are separate because Calc prints them as separate blocks, so each has its own last column —
+/// and it is the last column of a block that decides whose spill reaches back into it.
 /// </remarks>
-/// <param name="First">The band's first column, hidden or not.</param>
+/// <param name="Last">
+/// The band's last column, hidden or not — Calc's <c>mnX2</c>. Only the cell past <em>this</em>
+/// column can be pulled onto the page, because the lookahead that finds it runs at <c>nX ==
+/// mnX2</c> and the mirror-image walk to the left of <c>mnX1</c> is behind <c>!bTaggedPDF</c>.
+/// See <see cref="SheetPageDrawing"/>.
+/// </param>
 /// <param name="Left">Where the band starts, scaled.</param>
 /// <param name="Right">
 /// Where it ends, scaled — Calc's <c>mnScrX + mnScrW</c> for the block it prints. A cell whose
@@ -253,12 +258,12 @@ public sealed class SpreadsheetPages : IPageSequence
 /// <param name="FirstVisible">
 /// The band's first column that is actually placed — Calc's <c>mnVisX1</c>, which is
 /// <c>mnX1</c> after <c>ScDocument::StripHidden</c> has walked it past any leading hidden
-/// columns (<c>sc/source/ui/view/output.cxx:198-202</c>). It is not the same question as
-/// <see cref="First"/>, and one rule turns on it: a covered cell may reach back to a merge's
-/// origin outside the band only when it is this column. Minus one when the band places nothing.
+/// columns (<c>sc/source/ui/view/output.cxx:198-202</c>). One rule turns on it: a covered cell
+/// may reach back to a merge's origin outside the band only when it is this column. Minus one
+/// when the band places nothing.
 /// </param>
 internal readonly record struct ColumnBand(
-    int First, Length Left, Length Right, int FirstVisible);
+    int Last, Length Left, Length Right, int FirstVisible);
 
 /// <summary>One run of rows placed together, and where it starts.</summary>
 /// <remarks>
@@ -295,6 +300,43 @@ internal readonly record struct RowBand(Length Top, int FirstVisible);
 /// rules ported from Calc's own text output, and none of them needs to know what a page is. What
 /// this class supplies is the cell's rectangle, the print zoom and a way to ask whether the
 /// neighbours are free.
+/// </para>
+/// <para>
+/// <strong>A run that overflows rightwards is painted on the page holding its anchor cell and on
+/// no other, however far its text reaches.</strong> This is the one rule about overflow that a
+/// page decides rather than <see cref="SheetTextLayout"/>, and it is <em>not</em> what reading
+/// <c>ScOutputData::LayoutStrings</c> suggests. That loop starts one column before the block —
+/// <c>if (mnX1 &gt; 0 &amp;&amp; !bTaggedPDF) --nLoopStartX; // start before mnX1 for rest of long
+/// text to the left</c> (<c>sc/source/ui/view/output2.cxx:1541-1543</c>) — and the extra iteration
+/// resolves to the nearest cell with text at or left of <c>mnX1</c>, however many empty columns
+/// away (<c>:1638-1656</c>). The guard is the whole of it: <c>UseTaggedPDF</c>'s default is
+/// <c>true</c> (<c>officecfg/registry/schema/org/openoffice/Office/Common.xcs:4318-4323</c>), so
+/// every PDF <c>soffice --convert-to pdf</c> writes is tagged, <c>bTaggedPDF</c> holds, and the
+/// branch that draws the lead-in is never taken.
+/// </para>
+/// <para>
+/// Measured rather than reasoned, because the C++ tree here is 27.2-alpha and the reference binary
+/// is 26.2.4.2. Rendering <c>essd-16-3433-2024-t02.xlsx</c> twice through the <em>same</em>
+/// 26.2.4.2 with nothing changed but that one filter option gives words per page
+/// <c>439 / 0 / 0 / 0</c> tagged and <c>439 / 315 / 152 / 49</c> untagged — and the untagged
+/// figures are ours to within a word, so the port was faithful to a branch the reference never
+/// takes. Drawing the lead-in anyway put 617 words of another column's spill on five pages of
+/// <c>RCO_VOR_Master_List_082824.xlsx</c> that LibreOffice leaves blank.
+/// </para>
+/// <para>
+/// <strong>The rule is asymmetric, and the other half is still drawn.</strong> Calc's rightward
+/// lookahead — at <c>nX == mnX2</c>, scan right over empty cells for the first cell with content
+/// so that a <em>right-aligned</em> run anchored past the block spills leftwards into it
+/// (<c>output2.cxx:1660-1678</c>) — carries no <c>bTaggedPDF</c> guard, and the probe confirms it
+/// on the binary: a right-aligned string anchored in the last column is painted on all three of
+/// the pages its width covers.
+/// </para>
+/// <para>
+/// None of this touches which pages <em>exist</em>. That is <c>IsPrintEmpty</c>'s question, it is
+/// answered from the print area's overflow extension rather than from the paint, and it is
+/// genuinely independent of tagging — which is why a page whose only content would have been a
+/// lead-in is still printed, and printed blank. See <see cref="SheetEmptyPages"/> and
+/// <see cref="SheetTextOverflow.ExtendedLastColumn"/>.
 /// </para>
 /// </remarks>
 internal sealed class SheetPageDrawing(SheetLayout sheet, SheetPagePlacement placement)
@@ -334,7 +376,10 @@ internal sealed class SheetPageDrawing(SheetLayout sheet, SheetPagePlacement pla
 
             foreach (PlacedRow row in rows)
             {
-                foreach (ColumnBand band in bands) DrawLeadIn(band, row, sink);
+                // No lead-in from the left: a rightward overflow belongs to its anchor's page
+                // alone, because the loop that would draw it here is behind `!bTaggedPDF` and
+                // every reference PDF is tagged. The class remarks carry the measurement.
+                foreach (ColumnBand band in bands) DrawTrailIn(band, row, sink);
 
                 RowBand rowBand = BandOf(rowBands, row);
 
@@ -465,10 +510,10 @@ internal sealed class SheetPageDrawing(SheetLayout sheet, SheetPagePlacement pla
     /// <inheritdoc cref="Columns(Length)"/>
     /// <param name="left">Where the block starts.</param>
     /// <param name="bands">
-    /// Receives where each band of columns begins, which is what a lead-in needs: Calc prints a
+    /// Receives where each band of columns falls, which is what a trail-in needs: Calc prints a
     /// page's repeated columns and its own columns as two separate <c>ScPrintFunc::PrintArea</c>
-    /// calls (<c>printfun.cxx:2312</c> and <c>:2330</c>), each with its own first column, and each
-    /// therefore with its own left-hand neighbour to look back at.
+    /// calls (<c>printfun.cxx:2312</c> and <c>:2330</c>), each with its own <c>mnX2</c>, and each
+    /// therefore with its own right-hand neighbour to look ahead to.
     /// </param>
     private List<PlacedColumn> Columns(Length left, out List<ColumnBand> bands)
     {
@@ -498,7 +543,7 @@ internal sealed class SheetPageDrawing(SheetLayout sheet, SheetPagePlacement pla
                 offset += width;
             }
 
-            starts.Add(new ColumnBand(first, start, left + (offset * _scale), visible));
+            starts.Add(new ColumnBand(last, start, left + (offset * _scale), visible));
         }
     }
 
@@ -600,43 +645,63 @@ internal sealed class SheetPageDrawing(SheetLayout sheet, SheetPagePlacement pla
     }
 
     /// <summary>
-    /// Draws the cell left of a band whose text reaches into it, at the place it really is.
+    /// Draws the cell right of a band whose text reaches back into it, at the place it really is.
     /// </summary>
     /// <remarks>
     /// <para>
-    /// The half of Calc's string output that a page's own columns cannot supply.
-    /// <c>ScOutputData::LayoutStrings</c> starts its column loop <em>one before</em> the block's
-    /// first column — <c>if (mnX1 &gt; 0) --nLoopStartX; // start before mnX1 for rest of long text
-    /// to the left</c> (<c>sc/source/ui/view/output2.cxx:1541-1543</c>) — and that extra iteration
-    /// resolves to the nearest cell with text at or left of <c>mnX1</c>
-    /// (<c>output2.cxx:1638-1656</c>). Without it a sheet whose only content is one column of long
-    /// strings draws <em>nothing at all</em> on its second horizontal page, because no cell on that
-    /// page holds anything: the text there is entirely another column's spill.
+    /// The half of Calc's string output that a page's own columns cannot supply — and, since the
+    /// reference is always a tagged PDF, the <em>only</em> half. At its last column
+    /// <c>ScOutputData::LayoutStrings</c> looks ahead past the block for the first cell with
+    /// content, so that a run anchored beyond the paper can spill leftwards onto it
+    /// (<c>sc/source/ui/view/output2.cxx:1660-1678</c>):
+    /// </para>
+    /// <code>
+    /// if ( bEmpty &amp;&amp; !bMergeEmpty &amp;&amp; nX == mnX2 &amp;&amp; !bOverlapped )
+    /// {
+    ///     SCCOL nTempX=nX;
+    ///     while (nTempX &lt; nLastContentCol &amp;&amp; IsEmptyCellText( pThisRowInfo, nTempX, nY ))
+    ///         ++nTempX;
+    ///     ...
+    /// }
+    /// </code>
+    /// <para>
+    /// <strong>Unlike the mirror-image walk to the left, this one carries no <c>bTaggedPDF</c>
+    /// guard</strong> (contrast <c>:1541-1543</c>), so it survives into every exported PDF. That
+    /// asymmetry is the whole of the difference between the two directions and it is measured, not
+    /// inferred: an authored probe with a right-aligned string anchored in the last of twenty-one
+    /// one-inch columns is drawn by 26.2.4.2 on all three of the pages its width covers — 15, 16
+    /// and 14 of its tokens — while a left-anchored string in the same workbook appears on its own
+    /// page and nowhere else.
     /// </para>
     /// <para>
-    /// The cell is placed at its true position, which is off the left of the block, and the text
-    /// then overflows rightwards under the ordinary rules — <see cref="ContextFor"/> already measures
-    /// that against the document grid rather than against the page, which is what makes the two
-    /// halves of one string line up across the break.
+    /// The cell is placed at its true position, which is off the right of the block, and the text
+    /// then overflows leftwards under the ordinary rules — <see cref="ContextFor"/> already
+    /// measures that against the document grid rather than against the page, which is what makes
+    /// the two halves of one string line up across the break. A left-aligned cell found this way
+    /// spills the other way, so its area never reaches the block and
+    /// <c>SheetTextLayout</c>'s <c>bOutside</c> test drops it — which is why this needs no
+    /// alignment condition of its own, exactly as Calc needs none.
     /// </para>
     /// <para>
-    /// It cannot draw a cell twice on one page. The walk starts at the band's own first column, so
-    /// a band whose first column holds text yields that column and the <c>&lt; first</c> test
-    /// rejects it; only a column strictly left of the band — and therefore not among the band's
-    /// placed columns — is ever drawn this way. A cell in two <em>bands</em> of the same page, or
-    /// on two pages, is Calc's behaviour and not a fault: each page draws the part of the string
-    /// that falls on it.
+    /// It cannot draw a cell twice on one page. The walk starts at the band's own last column, so
+    /// a band whose last column holds text yields that column and the <c>&gt; last</c> test
+    /// rejects it; only a column strictly right of the band — and therefore not among the band's
+    /// placed columns — is ever drawn this way.
     /// </para>
     /// </remarks>
-    private void DrawLeadIn(ColumnBand band, PlacedRow row, IDrawingSink sink)
+    private void DrawTrailIn(ColumnBand band, PlacedRow row, IDrawingSink sink)
     {
-        if (band.First <= 0) return;
+        // `nLastContentCol` (output2.cxx:1534-1539): the walk stops at the sheet's last column
+        // holding anything rather than at the last column that could exist, so an empty row costs
+        // a bounded scan instead of sixteen thousand lookups.
+        int limit = sheet.UsedRange.LastColumn;
+        if (band.Last >= limit) return;
 
-        // Calc walks back from mnX1 itself, so a band whose own first column holds text stops
-        // there and no lead-in is drawn (output2.cxx:1644-1646).
-        int at = band.First;
-        while (at > 0 && SheetTextLayout.IsAvailable(sheet.CellAt(row.Row, at))) at--;
-        if (at >= band.First) return;
+        // Calc walks forward from mnX2 itself, so a band whose own last column holds text stops
+        // there and no trail-in is drawn (output2.cxx:1666-1668).
+        int at = band.Last;
+        while (at < limit && SheetTextLayout.IsAvailable(sheet.CellAt(row.Row, at))) at++;
+        if (at <= band.Last) return;
 
         ContentTableCell? cell = sheet.CellAt(row.Row, at);
         if (cell is null || SheetTextLayout.IsAvailable(cell)) return;
@@ -645,24 +710,24 @@ internal sealed class SheetPageDrawing(SheetLayout sheet, SheetPagePlacement pla
         string text = cell.GetText();
         if (text.Length == 0) return;
 
-        // A merge anywhere between the two suppresses the lead-in: Calc asks
-        // HasAttrib(Merged | Overlapped) over exactly that span (output2.cxx:1652), because a
+        // A merge anywhere between the two suppresses the trail-in: Calc asks
+        // HasAttrib(Merged | Overlapped) over exactly that span (output2.cxx:1675), because a
         // merged block's own origin is what draws its text and it may be neither of these cells.
-        for (int between = at; between <= band.First; between++)
+        for (int between = band.Last; between <= at; between++)
         {
             if (sheet.IsMerged(row.Row, between)) return;
         }
 
-        Length back = Length.Zero;
-        for (int column = at; column < band.First; column++)
-            back += SheetDeviceUnits.Snap(sheet.Grid.Columns.PrintedSizeAt(column));
+        Length ahead = Length.Zero;
+        for (int column = band.Last + 1; column < at; column++)
+            ahead += SheetDeviceUnits.Snap(sheet.Grid.Columns.PrintedSizeAt(column));
 
         DrawCell(
             text,
             cell,
             new PlacedColumn(
                 at,
-                band.Left - (back * _scale),
+                band.Right + (ahead * _scale),
                 SheetDeviceUnits.Snap(sheet.Grid.Columns.PrintedSizeAt(at)) * _scale),
             row,
             sink,

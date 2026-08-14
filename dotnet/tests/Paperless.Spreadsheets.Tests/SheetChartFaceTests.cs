@@ -1,4 +1,7 @@
+using Paperless.Core.Charts;
 using Paperless.Core.Documents;
+using Paperless.Core.Geometry;
+using Paperless.Core.Units;
 using Paperless.Spreadsheets.Layout;
 using Paperless.TestKit;
 using Shouldly;
@@ -67,5 +70,75 @@ public sealed class SheetChartFaceTests
         drawn.ShouldNotBeEmpty();
         drawn.Select(run => run.Run.Font.FamilyName).Distinct().ShouldBe(["Liberation Sans"]);
         drawn.Select(run => run.Run.Font.FamilyName).ShouldNotContain("Caladea");
+    }
+
+    /// <summary>
+    /// A chart's bold text reaches the page in the family's bold face.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>ChartPlot.IsTitleBold</c> arrived by the same route <c>TextFamily</c> did — measured on
+    /// the slides track, handed to this consumer, and dropped by it — and it was dropped one
+    /// round longer, with the comment saying so. The corpus said what that cost plainly: the
+    /// reference draws <c>Template Pilot Logbook JAR-FCL V3.0.xls</c> page 17's chart title and
+    /// both its axis titles in Liberation Sans <em>Bold</em>, marked <c>&lt;b&gt;</c> by
+    /// <c>pdftohtml -xml</c>, and we drew all three regular while the model already said bold.
+    /// </para>
+    /// <para>
+    /// <strong>The weight is asserted, not the family.</strong> Both faces of Liberation Sans
+    /// report the same <c>name</c>-table family, so only <c>FontReference.Weight</c> and the face
+    /// key tell them apart — which is also why the defect survived a face-level test.
+    /// </para>
+    /// <para>
+    /// <strong>Driven through <c>SheetChart</c> directly rather than through a document</strong>,
+    /// because no fixture in the corpus states a bold chart title: <c>chart-bar-sheet.xlsx</c>
+    /// writes <c>b="0"</c> on its own, which is what the case below stands for. Two plots that
+    /// differ in one <c>bool</c> are what separates "the weight is honoured" from "some text on
+    /// this page happens to be bold".
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void ABoldChartTitleIsDrawnInTheBoldFace()
+    {
+        Weights(Bold: true).ShouldContain(700);
+
+        // The axis labels beside it state nothing and stay regular, so this is a weight reaching
+        // the text that carries one rather than the whole chart turning bold.
+        Weights(Bold: true).ShouldContain(400);
+    }
+
+    /// <summary>The same chart with the weight cleared draws nothing bold.</summary>
+    /// <remarks>
+    /// The control for the case above and for the corpus: an OOXML chart that writes
+    /// <c>b="0"</c> means regular, and before this wiring every chart on every sheet was drawn
+    /// that way whatever it said.
+    /// </remarks>
+    [Fact]
+    public void AChartWhoseTitleStatesRegularDrawsNothingBold()
+    {
+        Weights(Bold: false).ShouldNotContain(700);
+    }
+
+    /// <summary>The weights of every glyph run a one-title chart draws.</summary>
+    private static List<int> Weights(bool Bold)
+    {
+        ChartPlot plot = new()
+        {
+            Title = "Regional revenue",
+            Categories = ["North", "South"],
+            Series = [new ChartSeries("Revenue", [1.0, 2.0])],
+            IsTitleBold = Bold,
+        };
+
+        RecordingDrawingSink sink = new();
+        sink.BeginPage(new DocSize(Length.FromPoints(400), Length.FromPoints(300)));
+        SheetChart.Draw(
+            sink,
+            plot,
+            new DocRect(Length.Zero, Length.Zero, Length.FromPoints(400), Length.FromPoints(300)),
+            1.0);
+        sink.EndPage();
+
+        return [.. sink.Pages[0].Runs.Select(run => run.Run.Font.Weight)];
     }
 }

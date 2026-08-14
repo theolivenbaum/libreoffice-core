@@ -1,4 +1,5 @@
 using System.Xml.Linq;
+using Paperless.Text.Fonts;
 
 namespace Paperless.WordProcessing.Ooxml;
 
@@ -132,6 +133,45 @@ public sealed class WordFontTable
     /// <summary>The entry for a family name, or null when the table has none.</summary>
     public WordFont? Find(string? name)
         => name is not null && _byName.TryGetValue(name, out WordFont? font) ? font : null;
+
+    /// <summary>
+    /// The shape this table declares for a family, for the resolver to fall back on.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Only <c>roman</c> and <c>swiss</c> are carried across, because only those two change what
+    /// LibreOffice does. Probed against 26.2.4.2 with the family name held constant and the
+    /// declaration varied: <c>modern</c>, <c>script</c>, <c>decorative</c>, <c>system</c> and
+    /// <c>auto</c> each leave the answer exactly where the undeclared request left it, so mapping
+    /// <c>modern</c> onto a monospaced fallback — which the name invites — would invent a
+    /// divergence rather than remove one. A declared <c>fixed</c> pitch does move it, and that is
+    /// carried across separately because it beats the family in turn.
+    /// </para>
+    /// <para>
+    /// None of this reaches a family that is installed, or whose substitution chain names something
+    /// installed: the chain runs first and this is only consulted once it has come up empty.
+    /// </para>
+    /// </remarks>
+    public DeclaredFontShape ShapeOf(string? name)
+    {
+        if (Find(name) is not { } font) return default;
+
+        FontFamilyClass kind = font.Family switch
+        {
+            "roman" => FontFamilyClass.Serif,
+            "swiss" => FontFamilyClass.SansSerif,
+            _ => FontFamilyClass.Unknown,
+        };
+
+        FontPitch pitch = font.Pitch switch
+        {
+            "fixed" => FontPitch.Fixed,
+            "variable" => FontPitch.Variable,
+            _ => FontPitch.Unknown,
+        };
+
+        return new DeclaredFontShape(kind, pitch);
+    }
 
     /// <summary>Reads a <c>w:fonts</c> root.</summary>
     /// <param name="root">The part's root element, or null when the package has no such part.</param>

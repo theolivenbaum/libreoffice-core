@@ -175,24 +175,47 @@ which is what made a before-and-after reach figure affordable.
 
 ### The whole words track, 200 documents
 
+**Two bases, because the branch was merged with a second round that overlaps it.** The figures below
+the line are the ones that describe what is on the integration branch after this work; the ones above
+it are what this branch did on its own and are kept because they are what the diagnosis was made
+against, not because they are still current.
+
+*Against the pre-merge base (`b8f26134e07`) — this branch alone:*
+
 | | baseline | after |
 |---|---:|---:|
-| match | 155 | **157** |
+| match | 155 | 157 |
 | page-exact | 165 | 166 |
 | total absolute page error | 115 | 113 |
-| renderings changed (byte for byte) | — | 36 |
-| verdicts gained | — | 2 |
-| **verdicts lost** | — | **0** |
+| renderings changed | — | 36 |
+| face-set distance to the reference | — | 29 closer, 5 unchanged, **2 further** |
 
-Gained: `003.doc` (the WW8 rule) and `150_5335_5a.doc` (the family-class rule). Ten rows moved a page
-or word count; the other 26 changed only their type, which is the class of improvement the word gate
-is blind to and the face-set table above is not.
+*Against `claude/paperless-odf-phase-1-rnyzcu` at `7756cd67565` — what merging this adds:*
 
-One page count went backwards and it is worth stating plainly:
+| | integration alone | with this branch |
+|---|---:|---:|
+| match | 156 | **157** |
+| page-exact | 166 | 166 |
+| total absolute page error | 114 | **113** |
+| renderings changed | — | 13 |
+| face-set distance to the reference | — | **8 closer, 5 unchanged, 0 further** |
+| verdicts lost | — | **0** |
+
+The verdict this branch adds on top of the integration branch is `003.doc` — the WW8 empty-paragraph
+rule, which nothing else implements. `150_5335_5a.doc` is gained by *both* rounds independently and
+is counted once, in the integration branch's own 156.
+
+**The two documents that got worse pre-merge got better in the merge.** `ABCD-FE-01-00` and
+`ABCD-WB-08-00` were the only two renderings this branch moved *away* from the reference's face set,
+and both were Symbol runs declared roman being routed to DejaVu Serif. The pi-face carve-out —
+written for them and measured on the binary — is in the reconciled resolver, and neither document
+changes at all now.
+
+One page count still goes backwards and it is the same one as before:
 `May 25 bulletin focus on carers in the workplace.docx` was 4/4 and is now 5/4. Its face set went
 from 4 wrong to **exactly the reference's** — it had been page-exact with the wrong font, which is
-the cancelling-errors shape `TODO.batches.md` warns about. Keeping the correct face and a wrong page
-count is the right trade; the document fails the gate on words either way and always did.
+the cancelling-errors shape `TODO.batches.md` warns about. The document fails the gate on words
+either way and always did.
 
 ### Batch validation, in the order the project requires
 
@@ -206,7 +229,7 @@ untouched — 58/60 before, 59/60 after.
 
 ### Tests
 
-Every project run individually, counts read rather than colours.
+Every project run individually, counts read rather than colours. Figures are the **reconciled** tree.
 
 | project | passed | failed | skipped | total |
 |---|---:|---:|---:|---:|
@@ -216,19 +239,18 @@ Every project run individually, counts read rather than colours.
 | Paperless.OpenDocument.Tests | 125 | 0 | 0 | 125 |
 | Paperless.Presentations.Tests | 631 | 0 | 0 | 631 |
 | Paperless.Rendering.Tests | 148 | 0 | 1 | 149 |
-| Paperless.Spreadsheets.Tests | 695 | 0 | 0 | 695 |
-| Paperless.Text.Tests | 304 | 0 | 0 | 304 |
+| Paperless.Spreadsheets.Tests | 747 | 0 | 0 | 747 |
+| Paperless.Text.Tests | 310 | 0 | 0 | 310 |
 | Paperless.Vector.Tests | 295 | 0 | 0 | 295 |
-| Paperless.WordProcessing.Tests | 801 | 0 | 0 | 801 |
-| Paperless.Fidelity.Tests | 519 | **31** | 0 | 550 |
+| Paperless.WordProcessing.Tests | 818 | 0 | 0 | 818 |
+| Paperless.Fidelity.Tests | 520 | **30** | 0 | 550 |
 
-`Paperless.Fidelity.Tests` had 31 failures on this branch before the round and has exactly 31 after
-— **none added**. The build is warning-free.
+`Paperless.Fidelity.Tests` had **31** failures on the pre-merge base and on this branch before the
+merge, and has **30** now — one fewer, not one more. Which of the two rounds fixed it is recorded
+below rather than guessed at. Nothing added a failure. The build is warning-free.
 
-Fourteen tests are new: eleven in `FontResolutionTests` (the family-class rule, the strong-alias
-exception, the pi-face carve-out and the four inert classes) and five in `DocFontFamilyClassTests`
-(the `FFN.ff` field). `FontTableTests`'s summary said `fontTable.xml` is "read and reported rather
-than acted on", which is no longer true of `w:family`, and has been corrected.
+`Paperless.Rendering.Tests` has skipped 1 on every run measured this session, including the
+pre-merge base — it is not new.
 
 ---
 
@@ -300,3 +322,64 @@ than predicted to the rest of the track without costing anything. Both are the s
 mistake — **treating a font substitution as a pagination fix**. It is a *rendering* fix that
 sometimes moves a page count, which is why the face-set table in §2 is the honest measure of it and
 the gate's two verdicts are not.
+
+---
+
+## 7. Reconciling with the parallel round
+
+A second agent implemented "carry a document's declared font shape into the resolver" independently
+and landed first, on `claude/paperless-odf-phase-1-rnyzcu`. Merging produced 13 conflicts across
+seven files. Which implementation survived, and why:
+
+| piece | kept | why |
+|---|---|---|
+| `FontRequest.DeclaredClass` typed as `FontFamilyClass`, plus `DeclaredFontShape(Class, Pitch)` | **theirs** | It reuses a type that exists and carries the pitch beside the class. My `DeclaredFontFamily` recorded `modern`/`script`/`decorative` faithfully, which is tidier as a record and worth nothing as behaviour: all three are inert and their readers collapse them at the point of reading, which is where the measurement that they are inert belongs. |
+| `Ww8FontTable.ShapeOf`/`ShapeIn`, `WordFontTable.ShapeOf`, `LayoutFonts.DeclaredShapes`, the DOCX and DOC wiring | **theirs** | Same shape as mine and wider: theirs also wires SpreadsheetML `<family val>`, rich-text `rPr`, the BIFF `FONT` family byte, the XLSB `BrtFont` byte and ODF's spreadsheet path. Mine wired DOC and DOCX only. |
+| **Where in the order the declaration is consulted** | **mine** | Theirs reads it inside `GenericFallbacks`, which runs only after the substitution chain has come up empty. Mine runs it *before* the chain. This is the only behavioural disagreement and it is decisive. |
+| The strong-metric-alias exception | **mine** | Required by the ordering above and by nothing else: with the chain first, Arial and Times New Roman are protected by the chain itself; with the declaration first they need an explicit exception or every Word document reflows. |
+| The pi-face exemption | **mine** | Same: only reachable once the declaration outranks the chain. |
+| A declared fixed pitch beating a declared family | **theirs** | Measured by them, absent from mine, and folded into the shared helper. |
+
+### Why the ordering is mine
+
+Theirs is not wrong on any case they measured — `Garamond`, `Georgia`, `Futura`, `Tahoma` and
+`TimesNewRomanPSMT` have no installed chain entry, so chain-first and chain-second give the same
+answer for all five. The two orderings can only be told apart by a name whose chain entry *is*
+installed, and there are four of those in the measurements: `Times` (chain names `liberationserif`),
+`Helvetica` and `Albany` (`liberationsans`), `Thorndale` (`liberationserif`). Under chain-first every
+one of them answers Liberation. Measured against the installed 26.2.4.2 with one authored document
+each, every one of them answers **DejaVu**.
+
+The source says the same thing and says it first: `FontConfigManager::Substitute` is registered as
+the *pre-match* substitution, so it runs before `VCL.xcu` is consulted at all rather than after the
+chain fails. Their remark on
+`ADeclaredShapeCannotDisplaceAFamilyThatIsInstalledOrSubstitutable` — "the declaration is consulted
+only once the chain has come up empty" — was the reasoning, not a measurement, and it has been
+replaced by the mechanism that actually holds those two assertions up.
+
+Concretely: without the ordering, `1447.doc` still renders its body in Liberation Serif, because
+`times` names `liberationserif` and the chain finds it. That is the document the whole font half of
+this round came from.
+
+### Tests
+
+`Ww8FontTableTests` (theirs) is a superset of my `DocFontFamilyClassTests` — every `ff` value, the
+masking trap, the pitch bits, duplicate names and a malformed length. Mine was deleted and the one
+thing it held that theirs did not, the `1447.doc` measurement that says why the field is worth
+reading, moved into their class remark. In `FontResolutionTests` the two duplicated tests were
+collapsed into one theory covering both sets of names, with the remark rewritten to name the
+mechanism; the other four are kept as they were, and my two new ones — the weak-alias ordering and
+the pi face — are added beside them.
+
+### A check the reconciliation happened to make available
+
+The merged tree's 200 gate rows are **byte-identical** to the ones this branch produced on its own,
+and so is the `batch-001`–`006` TSV. That is not a coincidence and it is worth stating as evidence:
+the other round's font reach on the words track is a strict subset of this one's, because the
+pre-match ordering fires everywhere the chain-last ordering does and on four more names besides. It
+also says nothing of theirs was lost in the merge and nothing was applied twice — either would have
+moved a row.
+
+Where the two rounds are *not* redundant is everything outside the words track: their spreadsheet
+wiring (SpreadsheetML `<family val>`, rich-text `rPr`, the BIFF and XLSB font family bytes, ODF's
+spreadsheet path) has no counterpart here and is untouched by this reconciliation.

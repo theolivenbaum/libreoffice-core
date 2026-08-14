@@ -218,22 +218,56 @@ def write_png(path: pathlib.Path, img: Image) -> None:
 
 
 def scale(img: Image, factor: float) -> Image:
-    """Nearest-neighbour box reduction.
+    """Darkest-pixel block reduction: the ink in each source block wins.
 
-    Nearest rather than averaging is deliberate: a one-pixel hairline survives it, and
-    averaging is exactly what turns a doubled hairline — a defect this project is
-    hunting — into one grey smudge indistinguishable from a single line.
+    **This was nearest-neighbour and that was wrong, measurably.** The comment beside it
+    claimed nearest preserved a one-pixel hairline. It does not — nearest *samples* one
+    source pixel per destination pixel, so a rule thinner than the sampling step falls
+    between samples and vanishes outright.
+
+    That is not hypothetical. Composing at 80% dropped a real underline — a 245 px solid
+    black run at y=802 in the 150 dpi render, confirmed as a fill in the PDF itself — and
+    two independent reviewers then reported the underline as absent from the composed
+    image. The defect was in this function, and it was reported upward as a defect in the
+    renderer. An instrument that loses ink while hunting for missing ink is worse than no
+    instrument.
+
+    Averaging is not the answer either: it turns a doubled hairline — a defect this project
+    *is* hunting — into one grey smudge indistinguishable from a single line. Taking the
+    darkest pixel of each block keeps any hairline that exists at full strength, keeps two
+    adjacent ones distinguishable as long as a pale row separates them, and never invents
+    ink that was not there. It biases towards showing marks, which is the right bias for a
+    reviewer being asked "is this drawn or not".
     """
     if factor >= 1.0:
         return img
+
     w, h = max(1, int(img.width * factor)), max(1, int(img.height * factor))
     out = bytearray(w * h * 3)
+    step = 1.0 / factor
+
     for y in range(h):
-        sy = min(img.height - 1, int(y / factor))
-        base = sy * img.width * 3
+        y0 = int(y * step)
+        y1 = max(y0 + 1, min(img.height, int((y + 1) * step)))
         for x in range(w):
-            sx = min(img.width - 1, int(x / factor))
-            out[(y * w + x) * 3:(y * w + x) * 3 + 3] = img.rgb[base + sx * 3:base + sx * 3 + 3]
+            x0 = int(x * step)
+            x1 = max(x0 + 1, min(img.width, int((x + 1) * step)))
+
+            darkest, at = 1 << 30, y0 * img.width * 3 + x0 * 3
+            for sy in range(y0, y1):
+                row = sy * img.width * 3
+                for sx in range(x0, x1):
+                    i = row + sx * 3
+                    # Rec. 601 luma, in integers. Averaging the channels instead would call
+                    # saturated yellow "ink" — the error look.py's ink mask made on its first
+                    # run, where a periwinkle-to-yellow page scored 0.03% different when it
+                    # was 33%.
+                    luma = 299 * img.rgb[i] + 587 * img.rgb[i + 1] + 114 * img.rgb[i + 2]
+                    if luma < darkest:
+                        darkest, at = luma, i
+
+            out[(y * w + x) * 3:(y * w + x) * 3 + 3] = img.rgb[at:at + 3]
+
     return Image(w, h, out)
 
 
