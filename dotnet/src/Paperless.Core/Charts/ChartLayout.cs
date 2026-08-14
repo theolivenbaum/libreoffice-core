@@ -1685,15 +1685,21 @@ public static partial class ChartLayout
                     AxisColour));
         }
 
-        if (categories <= 0) return;
+        if (categories <= 0 && plot.DateAxis is null) return;
 
         // A shifted axis is divided into slots, so n categories give n + 1 boundaries; an
         // unshifted one is marked at n points, the first and last on the plot area's own edges.
-        int ticks = plot.ShiftedCategories ? categories : categories - 1;
+        // A date axis is neither: its ticks are calendar dates on a continuous scale and they are
+        // not evenly spaced, because a month is not a fixed number of days.
+        int ticks = plot.DateAxis is { } dates
+            ? dates.Ticks.Count - 1
+            : plot.ShiftedCategories ? categories : categories - 1;
 
         for (int at = 0; at <= ticks; at++)
         {
-            double along = ticks == 0 ? 0.0 : (double)at / ticks;
+            double along = plot.DateAxis is { } scale
+                ? scale.Fraction(scale.Ticks[at])
+                : ticks == 0 ? 0.0 : (double)at / ticks;
 
             if (columns)
             {
@@ -1749,22 +1755,32 @@ public static partial class ChartLayout
         double cosine = Math.Abs(Math.Cos(layout.Rotation));
         double sine = Math.Abs(Math.Sin(layout.Rotation));
 
-        for (int at = 0; at < categories; at++)
+        int marks = plot.DateAxis is { } stops ? stops.Ticks.Count : categories;
+
+        for (int at = 0; at < marks; at++)
         {
-            if (at >= plot.Categories.Count) continue;
+            string? label;
+            double centre;
 
             // Thinned out: every nth label survives and the rest are simply not drawn, which is
             // removeShapesAtWrongRhythm. Tick zero always survives, so an axis never ends up with
             // no labels at all however crowded it is.
             if (at % rhythm != 0) continue;
 
-            if (ChartDataLabel.WriteCategory(plot.Categories[at], plot.CategoryFormat)
-                is not { Length: > 0 } text)
+            if (plot.DateAxis is { } dated)
             {
-                continue;
+                label = dated.LabelOf(dated.Ticks[at]);
+                centre = dated.Fraction(dated.Ticks[at]);
+            }
+            else
+            {
+                if (at >= plot.Categories.Count) continue;
+
+                label = ChartDataLabel.WriteCategory(plot.Categories[at], plot.CategoryFormat);
+                centre = CategoryAt(plot, at, categories);
             }
 
-            double centre = CategoryAt(plot, at, categories);
+            if (label is not { Length: > 0 } text) continue;
 
             if (!columns)
             {
@@ -1979,6 +1995,24 @@ public static partial class ChartLayout
     private static ChartAxisLabelLayout ArrangeCategories(
         ChartPlot plot, DocRect area, int categories, ChartText measurer)
     {
+        // A date axis' labels are its ticks, not its categories: there are 679 of the first and
+        // 799 of the second on the corpus's one such chart, and they are in different places.
+        if (plot.DateAxis is { } date)
+        {
+            string?[] tickTexts = new string?[date.Ticks.Count];
+            Length[] tickCentres = new Length[date.Ticks.Count];
+
+            for (int at = 0; at < date.Ticks.Count; at++)
+            {
+                tickTexts[at] = date.LabelOf(date.Ticks[at]);
+                tickCentres[at] = area.Left + area.Width * date.Fraction(date.Ticks[at]);
+            }
+
+            return ChartAxisLabels.Resolve(
+                tickTexts, tickCentres, plot.CategoryAxisText, plot.LabelSize, measurer,
+                plot.IsLabelBold);
+        }
+
         string?[] texts = new string?[categories];
         Length[] centres = new Length[categories];
 
@@ -2011,6 +2045,20 @@ public static partial class ChartLayout
         if (plot.ShiftedCategories) return (index + 0.5) / categories;
         return categories == 1 ? 0.5 : (double)index / (categories - 1);
     }
+
+    /// <summary>
+    /// Where a category sits, on either kind of category axis, or null when it has nowhere to be.
+    /// </summary>
+    /// <remarks>
+    /// A date axis is the only thing that can answer null: its categories are dates on a
+    /// continuous scale and one without a date is a break in the series, exactly as a missing
+    /// value is. On an ordinary category axis every index has a slot whether it holds anything or
+    /// not, so this reduces to <see cref="CategoryAt"/>.
+    /// </remarks>
+    private static double? CategoryFraction(ChartPlot plot, int index, int categories)
+        => plot.DateAxis is { } date
+            ? date.FractionOf(index)
+            : CategoryAt(plot, index, categories);
 
     /// <summary>
     /// A line or scatter chart: one polyline per series through its points.
@@ -2111,7 +2159,7 @@ public static partial class ChartLayout
         ChartPlot plot, ChartSeries series, ChartScaleResult? domain, int at, int categories)
     {
         if (domain is not { } across || series.XValues is not { } xs)
-            return at < categories ? CategoryAt(plot, at, categories) : null;
+            return at < categories ? CategoryFraction(plot, at, categories) : null;
 
         if (at >= xs.Count || xs[at] is not { } x || !double.IsFinite(x)) return null;
         return across.Fraction(x);
@@ -2325,7 +2373,8 @@ public static partial class ChartLayout
                 // across the gap rather than stepping down to the axis at it.
                 if (at >= series.Values.Count
                     || series.Values[at] is not { } value
-                    || !double.IsFinite(value))
+                    || !double.IsFinite(value)
+                    || CategoryFraction(plot, at, categories) is not { } across)
                 {
                     Emit(series, upper, lower, shapes);
                     continue;
@@ -2343,7 +2392,6 @@ public static partial class ChartLayout
                     top = scale.Fraction(value);
                 }
 
-                double across = CategoryAt(plot, at, categories);
                 DocPoint vertex = Point(area, across, top, columns);
                 upper.Add(vertex);
                 lower.Add(Point(area, across, plot.IsStacked ? previous[at] : baseline, columns));
@@ -3314,6 +3362,21 @@ public static partial class ChartLayout
         ChartPlot plot, int categories, ChartText measurer)
     {
         Length widest = Length.Zero;
+
+        // A date axis' labels are its ticks. Measuring its categories instead would measure 799
+        // strings none of which is drawn.
+        if (plot.DateAxis is { } date)
+        {
+            foreach (double tick in date.Ticks)
+            {
+                Length ticked =
+                    measurer.Measure(date.LabelOf(tick), plot.LabelSize, plot.IsLabelBold).Width;
+                if (ticked > widest) widest = ticked;
+            }
+
+            return widest;
+        }
+
         for (int at = 0; at < categories && at < plot.Categories.Count; at++)
         {
             if (ChartDataLabel.WriteCategory(plot.Categories[at], plot.CategoryFormat)
@@ -3357,12 +3420,20 @@ public static partial class ChartLayout
         int categories,
         ChartText measurer)
     {
-        if (!plot.CategoryAxisVisible || plot.ShiftedCategories || categories <= 0)
+        if (!plot.CategoryAxisVisible || plot.ShiftedCategories
+            || (categories <= 0 && plot.DateAxis is null))
+        {
             return (Length.Zero, Length.Zero);
+        }
 
         string first, last;
 
-        if (domain is { } across)
+        if (plot.DateAxis is { Ticks.Count: > 0 } date)
+        {
+            first = date.LabelOf(date.Ticks[0]);
+            last = date.LabelOf(date.Ticks[^1]);
+        }
+        else if (domain is { } across)
         {
             double[] ticks = [.. across.MajorTicks()];
             if (ticks.Length == 0) return (Length.Zero, Length.Zero);

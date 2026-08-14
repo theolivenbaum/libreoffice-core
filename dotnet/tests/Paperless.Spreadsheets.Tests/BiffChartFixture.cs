@@ -66,8 +66,14 @@ internal static class BiffChartFixture
     /// is that cell — so this is the only way to state the format such a chart resolves to. The
     /// index is defined by a <c>FORMAT</c> record when it is above the built-in range.
     /// </param>
+    /// <param name="formatCode">
+    /// The code that <c>ifmt</c> names, when it is above the built-in range. A date axis is
+    /// resolved only when the categories' own format is a date one, so a test about one has to
+    /// state a date code here.
+    /// </param>
     public static ChartPlot Chart(
-        byte[] substream, bool withData = false, ushort? cellFormat = null)
+        byte[] substream, bool withData = false, ushort? cellFormat = null,
+        string formatCode = "0.0")
     {
         List<byte> globals = [.. Record(Bof, [0x00, 0x06, 0x05, 0x00, 0, 0, 0, 0])];
         foreach (string name in Fonts) globals.AddRange(FontRecord(name));
@@ -76,7 +82,7 @@ internal static class BiffChartFixture
 
         if (cellFormat is { } ifmt)
         {
-            if (ifmt >= FirstUserFormat) globals.AddRange(FormatRecord(ifmt, "0.0"));
+            if (ifmt >= FirstUserFormat) globals.AddRange(FormatRecord(ifmt, formatCode));
             globals.AddRange(XfRecord(ifmt));
         }
 
@@ -133,6 +139,22 @@ internal static class BiffChartFixture
     public static byte[] SeriesLink() => Record(ChSourceLink,
     [
         1, 2, 0, 0, 0, 0,
+        .. Word(7),
+        0x3A, .. Word(0), .. Word(0), .. Word(0),
+    ]);
+
+    /// <summary>
+    /// A <c>CHSOURCELINK</c> naming cell A1 as a series' <em>categories</em>.
+    /// </summary>
+    /// <remarks>
+    /// The same shape as <see cref="SeriesLink"/> with destination 2,
+    /// <c>EXC_CHSRCLINK_CATEGORY</c>. A date axis is resolved from the cells this names — both
+    /// their numbers and the number format the first of them carries — so a chart with no
+    /// category link has no date axis whatever its <c>CHDATERANGE</c> says.
+    /// </remarks>
+    public static byte[] CategoryLink() => Record(ChSourceLink,
+    [
+        2, 2, 0, 0, 0, 0,
         .. Word(7),
         0x3A, .. Word(0), .. Word(0), .. Word(0),
     ]);
