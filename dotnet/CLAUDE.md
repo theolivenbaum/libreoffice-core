@@ -315,11 +315,38 @@ Comparing against LibreOffice — use the skills, they encode hard-won details:
 and kept as found, mislabelled extensions and malformed markup included — ordered by what
 their LibreOffice rendering demands of a renderer and cut into batches of at most ten:
 
+**The corpus is no longer batched by complexity — it is grouped by what is wrong.** As of
+2026-08-14, with 459 of 534 passing, the old ordering had stopped earning its keep: the 75
+remaining failures were scattered across sixty batches, so a session taking "the next batch"
+got nine documents it could learn nothing from and one it could.
+
 ```
-words/batch-001 … batch-021     doc  docx     200 documents
-slides/batch-001 … batch-017    ppt  pptx     163 documents
-sheets/batch-001 … batch-018    xls  xlsx     171 documents
+<family>/done-NNN/      459 documents that pass the gate
+<family>/<kind>-NNN/     75 that do not, grouped by what is wrong with them
+
+  ceiling 20   pagination 20   metrics 10   extra 9
+  missing 7    table 6         chart 2      unstable 1
 ```
+
+Every failing document was classified by **looking at its rendered page** — six reviewers,
+one fixed vocabulary, each pairing the two renderings with `page-vision` and measuring rather
+than eyeballing. The kinds are defined in `.claude/skills/corpus-batches/` and the regrouping
+is reproducible with `regroup-batches.py`.
+
+Documents keep their complexity score and are ordered by it **within** each group, so
+`pagination-001` is still the cheapest ten pagination failures.
+
+**`MANIFEST.tsv` is the undo.** Batch membership is the directory layout — `batch-check.sh`
+globs directories — so every stored figure naming a batch path stopped resolving when this
+landed, and `dotnet/probes/` is full of archival scripts that name them. The manifest keeps
+`source` untouched and gained `previous_batch`, `status` and `kind`; any old path can be
+followed forward through it.
+
+What the grouping surfaced immediately, and the old layout hid: three `ABCD-*` documents share
+one bug, the two Holdover Tables share one bug and one 13-page gap, three documents share
+rotated cell text drawn upright a glyph per line, two share a background raster emitted after
+the text, and two share a first-page header repeated on every page. Every one of those was
+split across different batches before.
 
 Some of those extensions are **upper-case on disk** — four files are `.DOC`, `.XLS`, `.XLSX`.
 A case-sensitive glob quietly counts 530 instead of 534, which is the same mistake as
