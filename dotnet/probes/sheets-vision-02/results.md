@@ -51,9 +51,7 @@ Measured afterwards, per page:
 **Page 1 agrees to the word.** The entire 514-word failure is text painted onto three pages
 the reference leaves empty.
 
-The important negative: **page counts already match, 4 against 4**, and on page 1 both
-renderers push text past the right page edge by almost exactly the same amount (rightmost text
-`xMax` 617.0 pt ours, 617.7 pt reference, on a 612 pt page). So `SheetTextOverflow`'s
+The important negative: **page counts already match, 4 against 4**. So `SheetTextOverflow`'s
 print-area extension is **correct** and is not the defect — LibreOffice extends the area the
 same way, producing the same four pages, and then simply does not paint the run again on the
 strips after the one holding its anchor cell.
@@ -295,3 +293,30 @@ value.** It is what reduced `fse`'s clipping finding from "text differs" to "the
 the same and only the paint clip differs", and what confined `SIL_TDB605`'s shrink to two blocks
 rather than the page. None of the seven reports is about word counts, and most of the findings
 move no words at all.
+
+
+---
+
+## Correction: a text-layer measurement was used as evidence about paint
+
+This write-up originally argued that page 1's overflow painting was already right, on the
+grounds that "both renderers push text past the right page edge by almost exactly the same
+amount — rightmost text `xMax` 617.0 pt ours, 617.7 pt reference, on a 612 pt page".
+
+**That figure is from `pdftotext -bbox`, and a clip never touches the text layer.** Glyphs a
+clip excludes are still in the content stream and still carry their positions, so measuring
+`xMax` cannot see a clipping difference at all. Measured as *ink*, the same page is 973.9 pt
+against 933.6 — a 40 pt overhang, which is the defect the figure was being used to rule out.
+
+A later round found the same confusion in its own §6(b) and stated the rule this cost:
+
+> **When the question is paint, measure ink.**
+
+The two instruments answer different questions and both are correct at their own. `pdftotext`
+and `pdf-ops.py`'s text records answer "what does the document say and where does it claim to
+say it". A raster, or a fill/stroke census, answers "what is on the page". A clip, a
+background, a merge and an overdraw are all invisible to the first and obvious to the second.
+
+Worth pairing with the compositor correction above: that one was an instrument *losing* ink it
+should have kept, this one is the wrong instrument for the question. Both produced a confident
+figure that pointed the opposite way from the truth.

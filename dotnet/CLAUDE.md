@@ -501,6 +501,14 @@ git -C <worktree> status --short | grep -vE '\.(png|ico)$' | grep -v '\.vsconfig
 git -C <primary> worktree remove --force <worktree>
 ```
 
+**`git stash` is repository-global, and this clone has many worktrees.** Stashing a file in
+one worktree to build a "before" binary, and popping it later, popped *another branch's* stash
+into the wrong worktree — the stash stack is one per repository, not one per worktree. Nothing
+was lost that time (both entries were recovered with `git stash store` and the sweeps either
+side re-checked), but the failure is silent and lands in a tree an agent is mid-measurement in.
+**Copy the file aside instead.** `cp file file.before` costs nothing and cannot reach another
+branch.
+
 **The reference half of the gate can be banked without a build.** `batch-check.sh` refuses to
 start without a CLI, which is right for a round and wrong when the reference binary is what
 changed. `ref-baseline.sh` is the reference-only half, with `batch-check.sh`'s conventions
