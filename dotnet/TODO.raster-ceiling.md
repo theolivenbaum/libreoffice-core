@@ -355,3 +355,50 @@ So this document joins the list from a third direction. The three shapes now rec
 **The common test is the same in all three: compare the whitespace-stripped character streams
 before believing a word count.** If they match, the gate cannot be won on that document and the
 number is about `pdftotext`, not about the renderer.
+
+---
+
+# A fourth shape, and a different kind: **the reference is not deterministic**
+
+Everything above assumes the reference is a fixed answer we are trying to match. On at least one
+document it is not.
+
+**`sheets/batch-005/xlsx/fse_identification_form.xlsx`** — page-exact at 3/3, and its gate row
+has been 440 words against 427 all day. Converted five times by the same `soffice` 26.2.4.2, the
+same file, the same session:
+
+```
+run 1: 430   run 2: 430   run 3: 430   run 4: 430   run 5: 443
+```
+
+(raw `pdftotext` counts; the gate's letter-or-digit counts are the same swing, 427 against 440)
+
+The 13-word difference is one sentence, and it is always the same one:
+
+> *The serial number of the FSE assigned by the Original Equipment Manufacturer (OEM).*
+
+**LibreOffice draws that cell in about one run in five and omits it in the others. We draw it
+every time.** So the direction of the "defect" is the opposite of how the gate reads it: the text
+is in the document, we render it, and the banked reference happens to be one of the runs that
+dropped it.
+
+A blind reviewer had already reported "we draw a sentence the reference leaves blank" and, quite
+properly, listed *"the reference genuinely drops it — least likely given it is the declared ground
+truth"* as its fourth candidate cause. That candidate was the right one. It is worth remembering
+how reasonable it was to rank it last.
+
+## What this costs, and what to do about it
+
+- **This document cannot be scored against a freshly rendered reference.** Its verdict is decided
+  by which run you happen to take. Anyone working it must use the banked PDF and know that the
+  banked PDF is *one sample*, not the answer.
+- **`.claude/skills/README.md`'s "the same input converted twice gives identical output" is
+  qualified by this** and has been annotated. That claim was verified — on the documents it was
+  verified on. It does not hold universally.
+- **Before believing any single-document reference figure, render the reference more than once.**
+  It costs one extra conversion. Two rounds have now spent effort on this document's 13 words:
+  one attributing them to a paint clip, one to a dropped cell.
+
+Whether other documents in the corpus share this is **unmeasured**. The honest position is that
+we have one confirmed case and no idea of the rate. A cheap sweep — convert every document twice
+and diff the extracted text — would settle it and has not been run.

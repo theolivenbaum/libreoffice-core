@@ -52,7 +52,13 @@ verified against LibreOffice 24.2.7.2 on real files.
 **`soffice` exits 0 even when it converts nothing.** Never trust its exit code — always check
 that the output file exists. The scripts here all do.
 
-**Rasterised LibreOffice output is byte-deterministic.** Verified: the same input converted
-twice and rasterised gives identical PNGs. So golden reference images can be committed and
+**Rasterised LibreOffice output is byte-deterministic — on the documents this was verified on,
+and not universally.** The original check stands: the same input converted twice and rasterised
+gave identical PNGs. But `fse_identification_form.xlsx` converted five times by one `soffice`
+26.2.4.2 gives 430, 430, 430, 430 and **443** words, the difference being one cell's sentence
+that LibreOffice draws in about one run in five. See the last section of
+`dotnet/TODO.raster-ceiling.md`. **Render a reference more than once before trusting a
+single-document figure**, and treat a golden image's checksum as a claim about that document
+rather than about the renderer. So golden reference images can be committed and
 checksummed, and a changed checksum is a real signal. The PDFs themselves are *not*
 byte-identical — they embed a timestamp — so checksum the PNGs, never the PDFs.
