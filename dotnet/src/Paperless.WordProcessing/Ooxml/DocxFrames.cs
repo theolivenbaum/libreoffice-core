@@ -151,6 +151,8 @@ internal static class DocxFrames
             ChartFontFamily = chart.Family,
             Name = Child(placed, "docPr")?.Attribute("name")?.Value,
             Blocks = box is not null && content is not null ? content(box) : [],
+            Padding = box is null ? default : Insets(placed),
+            HasFixedHeight = box is not null && !GrowsWithText(placed),
         };
     }
 
@@ -308,6 +310,8 @@ internal static class DocxFrames
             AnchorOffset = anchorOffset,
             Name = Descendant(shape, "cNvPr")?.Attribute("name")?.Value,
             Blocks = box is not null && content is not null ? content(box) : [],
+            Padding = box is null ? default : Insets(shape),
+            HasFixedHeight = box is not null && !GrowsWithText(shape),
         };
     }
 
@@ -537,6 +541,56 @@ internal static class DocxFrames
         => value is not null && long.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out long emu)
             ? Length.FromTwips(Length.FromEmu(emu).Twips)
             : Length.Zero;
+
+    /// <summary>
+    /// The <c>wps:bodyPr</c> governing a shape's text, or null when it states none.
+    /// </summary>
+    /// <remarks>
+    /// Searched as a descendant rather than as a child because the element sits beside
+    /// <c>wps:txbx</c> inside <c>wps:wsp</c>, which is itself three levels below the anchor — and a
+    /// group's leaf carries its own.
+    /// </remarks>
+    private static XElement? BodyProperties(XElement shape) => Descendant(shape, "bodyPr");
+
+    /// <summary>
+    /// The distance between a text box's edge and its text, from <c>wps:bodyPr</c>.
+    /// </summary>
+    /// <remarks>
+    /// The defaults are ECMA-376 §20.1.2.2.9's, and they are not zero: 91440 EMU (0.1 in) left and
+    /// right, 45720 (0.05 in) top and bottom. Reading them matters twice over — they narrow the lines,
+    /// and they are what <see cref="Layout.PageFrame.HasFixedHeight"/> measures the fit against, so a
+    /// box 15 pt tall holds 7.8 pt of text rather than 15.
+    /// </remarks>
+    private static Margins Insets(XElement shape)
+    {
+        XElement? body = BodyProperties(shape);
+        return new Margins(
+            Inset(body, "lIns", DefaultHorizontalInsetEmu),
+            Inset(body, "tIns", DefaultVerticalInsetEmu),
+            Inset(body, "rIns", DefaultHorizontalInsetEmu),
+            Inset(body, "bIns", DefaultVerticalInsetEmu));
+
+        static Length Inset(XElement? body, string name, long fallback)
+            => Emu(body?.Attribute(name)?.Value ?? fallback.ToString(CultureInfo.InvariantCulture));
+    }
+
+    /// <summary>ECMA-376 §20.1.2.2.9's default left and right text inset, in EMUs.</summary>
+    private const long DefaultHorizontalInsetEmu = 91440;
+
+    /// <summary>Its default top and bottom inset.</summary>
+    private const long DefaultVerticalInsetEmu = 45720;
+
+    /// <summary>
+    /// Whether a shape's text body grows to fit its text rather than keeping the stated height.
+    /// </summary>
+    /// <remarks>
+    /// Only <c>a:spAutoFit</c> does. <c>a:noAutofit</c>, <c>a:normAutofit</c> and a body stating
+    /// nothing all keep the height — measured, not assumed: LibreOffice truncates a
+    /// <c>normAutofit</c> box exactly as it truncates a <c>noAutofit</c> one rather than shrinking the
+    /// text to fit. See <see cref="Layout.PageFrame.HasFixedHeight"/>.
+    /// </remarks>
+    private static bool GrowsWithText(XElement shape)
+        => BodyProperties(shape) is { } body && Child(body, "spAutoFit") is not null;
 
     /// <summary>A child by local name, in whichever namespace it was written.</summary>
     /// <remarks>

@@ -364,4 +364,61 @@ public static class FlowLayouter
 
     private static DocRect Shift(DocRect area, Length dy)
         => new(area.X, area.Y + dy, area.Width, area.Height);
+
+    /// <summary>
+    /// A flow cut down to what fits in a shape of a stated height, the way Writer formats one.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A text box whose height the file states rather than grows does not overflow and is not clipped:
+    /// Writer stops formatting when the next line would start below the box, and the lines after that
+    /// are never laid out at all. The difference from clipping is measurable — the text is absent from
+    /// the PDF's text-showing operators, so <c>pdftotext</c> does not find it — and it is why a
+    /// four-paragraph running head 15 pt tall extracts as one line and not four.
+    /// </para>
+    /// <para>
+    /// <strong>The rule is the measured one</strong>, from the 60 authored boxes in
+    /// <c>dotnet/probes/words-extra-01/</c>: keep an item whose top is <em>strictly less</em> than
+    /// <paramref name="height"/>, and always keep the first one however short the box. Keeping only
+    /// items that fit entirely is a different rule and is refuted — a 10 pt box with no insets draws
+    /// two lines of a face taller than 5 pt.
+    /// </para>
+    /// <para>
+    /// Tables are kept or dropped whole. LibreOffice truncates a table in a box by <em>row</em> on this
+    /// same rule, so a table straddling the boundary keeps rows we would drop; no corpus document in
+    /// the group that motivated this has one, and doing it properly means re-running
+    /// <see cref="TableLayouter"/> against a height it does not currently take.
+    /// </para>
+    /// </remarks>
+    /// <param name="flow">The flow as it was laid out with no height limit.</param>
+    /// <param name="height">The shape's content height — its own less its text insets.</param>
+    public static PlacedFlow Truncated(PlacedFlow flow, Length height)
+    {
+        ArgumentNullException.ThrowIfNull(flow);
+
+        List<PlacedLine> lines = [];
+        foreach (PlacedLine line in flow.Lines)
+        {
+            if (line.Top < height) lines.Add(line);
+        }
+
+        List<PlacedTable> tables = [];
+        foreach (PlacedTable table in flow.Tables)
+        {
+            if (table.Area.Y - flow.Area.Y < height) tables.Add(table);
+        }
+
+        // The first thing always survives. Writer formats one line into a box too short for any, which
+        // is what makes a 15 pt head still say "Document reference:" rather than nothing at all.
+        if (lines.Count == 0 && tables.Count == 0)
+        {
+            if (flow.Lines.Count > 0) lines.Add(flow.Lines[0]);
+            else if (flow.Tables.Count > 0) tables.Add(flow.Tables[0]);
+        }
+
+        if (lines.Count == flow.Lines.Count && tables.Count == flow.Tables.Count) return flow;
+
+        PlacedFlow cut = flow with { Lines = lines, Tables = tables };
+        return cut with { Advance = Length.Min(flow.Advance, Extent(cut)) };
+    }
 }
