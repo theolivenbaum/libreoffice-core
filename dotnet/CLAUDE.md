@@ -264,6 +264,21 @@ Run every project before committing anyway. The failure this project cares about
 cascade — one wrong measurement moving every line after it — and it surfaces in projects you had
 no reason to think you had touched.
 
+### A sweep and a rebuild must never overlap
+
+`batch-check.sh` reads `PAPERLESS_CLI` per document, so a rebuild that lands mid-sweep swaps
+the binary under it and the run silently mixes two trees. The output looks entirely normal —
+there is no error, no warning, and the totals are plausible.
+
+It has bitten once: an agent building the "unfixed" binary to check that its new tests fail
+started that build while its own `done-*` sweep was still running, and had to kill and re-run
+the sweep. It noticed. The next one might not.
+
+Two habits: sequence them explicitly rather than backgrounding a sweep and then working, and
+when a fix must be merged while a sweep is in flight, **merge the source but do not rebuild**
+until the sweep finishes — the built binary is what the sweep is measuring, and it is unaffected
+by a source-only merge.
+
 ### A truncated run reports success
 
 **Check the count, not just the colour.** Under heavy load the test host can die part-way and
