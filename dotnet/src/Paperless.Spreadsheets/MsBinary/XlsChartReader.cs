@@ -1,6 +1,7 @@
 using Paperless.Core.Charts;
 using Paperless.Core.Geometry;
 using Paperless.Core.Graphics;
+using Paperless.Core.Numbers;
 using Paperless.Core.Units;
 using Paperless.MsBinary.Escher;
 
@@ -41,6 +42,9 @@ internal static class BiffChartRecords
     public const ushort AxesSet = 0x1041;
     public const ushort SourceLink = 0x1051;
     public const ushort EscherFormat = 0x1066;
+
+    /// <summary>An axis' own number format index — <c>EXC_ID_CHFORMAT</c>, <c>xlchart.hxx:635</c>.</summary>
+    public const ushort NumberFormat = 0x104E;
 
     /// <summary>True for any record this reader acts on or has to track the nesting of.</summary>
     /// <remarks>
@@ -98,6 +102,14 @@ internal sealed class XlsChartBuilder
     private bool _valueGrid;
     private bool _categoryGrid;
 
+    /// <summary>The <c>ifmt</c> the value axis' own <c>CHFORMAT</c> states, or none.</summary>
+    /// <remarks>
+    /// Kept as the index rather than resolved on the spot for the same reason a colour is: the
+    /// workbook's format table is not the chart substream's to reach into, and is handed over
+    /// when the plot is built.
+    /// </remarks>
+    private int _valueFormatIndex = NoNumberFormat;
+
     private ChartPlotKind _kind = ChartPlotKind.Bar;
     private ChartBarDirection _direction = ChartBarDirection.Column;
     private bool _stacked;
@@ -126,6 +138,18 @@ internal sealed class XlsChartBuilder
     private int _globalFont = NoFont;
     private int _axesSetFont = NoFont;
     private int _firstFont = NoFont;
+
+    /// <summary>The <c>CHFONT</c> of the <c>CHTEXT</c> currently open, whatever it turns out to be.</summary>
+    /// <remarks>
+    /// A <c>CHTEXT</c> writes its font before it says what it dresses — the <c>CHOBJECTLINK</c>
+    /// that names it a title or an axis title comes last — so the index has to be held until the
+    /// group closes, exactly as its string already is.
+    /// </remarks>
+    private int _pendingFont = NoFont;
+
+    private int _titleFont = NoFont;
+    private int _axisTitleFont = NoFont;
+    private int _labelFont = NoFont;
 
     private BiffChartColour? _background;
     private BiffChartColour? _plotBackground;
@@ -211,6 +235,7 @@ internal sealed class XlsChartBuilder
             case BiffChartRecords.Text:
                 _pendingText = null;
                 _pendingLink = -1;
+                _pendingFont = NoFont;
                 _openDefaultText = defaultText;
                 break;
 
@@ -247,6 +272,10 @@ internal sealed class XlsChartBuilder
 
             case BiffChartRecords.AxisLine when Inside(BiffChartRecords.Axis):
                 if (stream.ReadUInt16() == MajorGridLine) MarkGrid();
+                break;
+
+            case BiffChartRecords.NumberFormat when Inside(BiffChartRecords.Axis) && _axis == AxisY:
+                _valueFormatIndex = stream.ReadUInt16();
                 break;
 
             case BiffChartRecords.ValueRange:
@@ -341,15 +370,24 @@ internal sealed class XlsChartBuilder
     /// The workbook's <c>FONT</c> buffer, which is where a <c>CHFONT</c>'s index points. Null
     /// leaves the chart with no family, which is what it had before this was read at all.
     /// </param>
+    /// <param name="formats">
+    /// Resolves the workbook's format table, which is where an axis' <c>CHFORMAT</c> index
+    /// points. Null leaves an axis carrying one on the source's format, which is the same answer
+    /// the reference reaches when the index resolves to nothing.
+    /// </param>
     public ChartPlot? Build(
-        XlsChartData? data, XlsExternSheets? sheets, int ownSheet, XlsCellFormats? fonts = null)
+        XlsChartData? data,
+        XlsExternSheets? sheets,
+        int ownSheet,
+        XlsCellFormats? fonts = null,
+        Func<int, NumberFormatCode?>? formats = null)
     {
         if (!HasChart) return null;
 
-        (IReadOnlyList<string?> categories, IReadOnlyList<ChartSeries> series) =
-            BuildSeries(data, sheets, ownSheet, fonts);
+        (IReadOnlyList<string?> categories, IReadOnlyList<ChartSeries> series,
+            NumberFormatCode? sourceFormat) = BuildSeries(data, sheets, ownSheet, fonts);
 
-        return new ChartPlot
+        ChartPlot plot = new()
         {
             Title = _title,
             CategoryAxisTitle = _categoryTitle,
@@ -361,6 +399,7 @@ internal sealed class XlsChartBuilder
             Series = series,
             ValueScale = _valueScale,
             CategoryAxisText = _categoryText,
+            ValueFormat = ValueFormatOf(sourceFormat, formats),
             ValueGrid = _valueGrid ? GridColour : null,
             CategoryGrid = _categoryGrid ? GridColour : null,
             Legend = _hasLegend ? ChartLegendPosition.Right : ChartLegendPosition.None,
@@ -368,6 +407,86 @@ internal sealed class XlsChartBuilder
             Background = _background?.Resolve(fonts),
             PlotBackground = _plotBackground?.Resolve(fonts),
         };
+
+        // Each of the three is overridden only where the substream names a font for it, so a
+        // chart that names none keeps chart2's own defaults — which is what ChartPlot already
+        // holds and what the reference falls back to for the same reason.
+        if (FontOf(_titleFont, GlobalDefaultText, fonts) is { } title)
+            plot = plot with { TitleSize = title.Height, IsTitleBold = title.Weight >= BoldWeight };
+
+        if (FontOf(_axisTitleFont, AxesSetDefaultText, fonts) is { } axisTitle)
+        {
+            plot = plot with
+            {
+                AxisTitleSize = axisTitle.Height,
+                IsAxisTitleBold = axisTitle.Weight >= BoldWeight,
+            };
+        }
+
+        if (FontOf(_labelFont, AxesSetDefaultText, fonts) is { } label)
+            plot = plot with { LabelSize = label.Height, IsLabelBold = label.Weight >= BoldWeight };
+
+        return plot;
+    }
+
+    /// <summary>
+    /// The <c>FONT</c> one piece of chart text is set in, or null when nothing names one.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>XclImpChText::UpdateText</c> (<c>sc/source/filter/excel/xichart.cxx:1042-1057</c>) is the
+    /// whole of the fallback: a text object keeps its own <c>CHFONT</c> and takes the default
+    /// text's when it has none. Which default depends on what the text is —
+    /// <c>XclImpChChart::GetDefaultText</c> (<c>:3956-3970</c>) gives the chart title and the
+    /// legend the <em>global</em> default and gives an axis title, an axis label and a data label
+    /// the <em>axes-set</em> default in BIFF8, the global one in BIFF5.
+    /// </para>
+    /// <para>
+    /// The generation is not tested for here because it does not have to be: BIFF5 writes no
+    /// axes-set default at all, so asking for it and falling through to the global one reaches
+    /// the same font by the same route.
+    /// </para>
+    /// </remarks>
+    /// <param name="stated">The index the object's own <c>CHFONT</c> gave, or <see cref="NoFont"/>.</param>
+    /// <param name="defaultText">Which <c>CHDEFAULTTEXT</c> stands in for it.</param>
+    /// <param name="fonts">The workbook's <c>FONT</c> buffer.</param>
+    private BiffFont? FontOf(int stated, int defaultText, XlsCellFormats? fonts)
+    {
+        int index = stated != NoFont ? stated
+            : defaultText == AxesSetDefaultText && _axesSetFont != NoFont ? _axesSetFont
+            : _globalFont;
+
+        return index == NoFont ? null : fonts?.FontAt(index);
+    }
+
+    /// <summary>
+    /// The format the value axis writes its tick labels through, or null for General.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>XclImpChAxis::Convert</c> (<c>sc/source/filter/excel/xichart.cxx:3363-3377</c>) is two
+    /// lines and an ordering: a <c>CHFORMAT</c> that resolves is set on the axis and turns
+    /// <c>LinkNumberFormatToSource</c> <em>off</em>; anything else leaves it on, and the format
+    /// then comes from the cells the axis plots — see <see cref="XlsChartData.FormatOf"/>.
+    /// </para>
+    /// <para>
+    /// <strong>What is deliberately not read is <c>CHSOURCELINK</c>'s own <c>ifmt</c>.</strong> It
+    /// looks like the answer and is not: it feeds a data label
+    /// (<c>XclImpChText::ConvertNumFmt</c>, <c>xichart.cxx:1684</c>), and on
+    /// <c>Template Pilot Logbook JAR-FCL V3.0.xls</c>' second chart it is 370 — an index no
+    /// <c>FORMAT</c> record in that workbook defines, while the cells it names carry <c>0.0</c>,
+    /// which is what the reference draws.
+    /// </para>
+    /// </remarks>
+    private NumberFormatCode? ValueFormatOf(
+        NumberFormatCode? sourceFormat, Func<int, NumberFormatCode?>? formats)
+    {
+        if (_valueFormatIndex != NoNumberFormat && formats?.Invoke(_valueFormatIndex) is { } stated)
+        {
+            return stated;
+        }
+
+        return sourceFormat;
     }
 
     /// <summary>
@@ -420,14 +539,24 @@ internal sealed class XlsChartBuilder
     /// (<c>XclImpChTypeGroup::CreateDataSeries</c> hands the group's categories to the
     /// diagram once).
     /// </para>
+    /// <para>
+    /// <strong>The value axis' linked format comes from the first series that has one</strong>, and
+    /// not from all of them. <c>AxisHelper::getExplicitNumberFormatKeyForAxis</c> counts the format
+    /// of every series attached to the axis and takes the most frequent
+    /// (<c>chart2/source/tools/AxisHelper.cxx:276-295</c>); the two reduce to the same answer
+    /// whenever the series agree, and every chart substream in the corpus has all of its series in
+    /// one column of one format. Recorded as a simplification rather than as a port.
+    /// </para>
     /// </remarks>
-    private (IReadOnlyList<string?> Categories, IReadOnlyList<ChartSeries> Series) BuildSeries(
+    private (IReadOnlyList<string?> Categories, IReadOnlyList<ChartSeries> Series,
+        NumberFormatCode? ValueFormat) BuildSeries(
         XlsChartData? data, XlsExternSheets? sheets, int ownSheet, XlsCellFormats? fonts)
     {
-        if (data is null || _series.Count == 0) return ([], []);
+        if (data is null || _series.Count == 0) return ([], [], null);
 
         List<string?> categories = [];
         List<ChartSeries> built = [];
+        NumberFormatCode? valueFormat = null;
 
         foreach (SeriesLinks series in _series)
         {
@@ -438,6 +567,8 @@ internal sealed class XlsChartBuilder
 
             List<double?> numbers = data.Numbers(valueSheet, values);
             if (numbers.TrueForAll(number => number is null)) continue;
+
+            valueFormat ??= data.FormatOf(valueSheet, values);
 
             if (categories.Count == 0
                 && series.Categories is { } labels
@@ -463,7 +594,7 @@ internal sealed class XlsChartBuilder
 
         // Categories are indexed by point, so a shorter list than the longest series leaves the
         // tail of that series unlabelled rather than mislabelled.
-        return (categories, built);
+        return (categories, built, valueFormat);
     }
 
     private static int? Resolve(XlsChartRange range, XlsExternSheets? sheets, int ownSheet)
@@ -486,12 +617,32 @@ internal sealed class XlsChartBuilder
     /// path on which a stale one can be read. It was written, found to fail no case under
     /// mutation, and removed rather than left as an untested comfort.
     /// </para>
+    /// <para>
+    /// <strong>BIFF gives each axis its own label font and <see cref="ChartPlot"/> holds one for
+    /// both</strong>, so one of the two has to be picked and the category axis is it: its labels
+    /// are what <see cref="ChartAxisLabels"/> tests for collision, so the size it is measured at
+    /// decides whether the axis is rotated or thinned and therefore how many labels a page shows,
+    /// while the value axis' size only widens a band. Of the corpus's fifteen chart substreams
+    /// <strong>fourteen state the same size on both axes</strong> and the choice is moot;
+    /// <c>2012-GA-Survey-Chapter-6-Tables-16Dec2013-V2.xls</c> is the one that states 8 pt on its
+    /// category axis and 10 pt on its value axis. Recorded rather than resolved — resolving it
+    /// means a second property on the model and a reason from more than one file.
+    /// </para>
     /// </remarks>
     private void ReadFont(ushort index)
     {
         if (_firstFont == NoFont) _firstFont = index;
 
+        // An axis' own CHFONT sits directly inside its CHAXIS and dresses its tick labels.
+        if (InnermostIs(BiffChartRecords.Axis))
+        {
+            if (_axis == AxisX || _labelFont == NoFont) _labelFont = index;
+            return;
+        }
+
         if (!InnermostIs(BiffChartRecords.Text)) return;
+
+        _pendingFont = index;
 
         if (_openDefaultText == GlobalDefaultText && _globalFont == NoFont) _globalFont = index;
         else if (_openDefaultText == AxesSetDefaultText && _axesSetFont == NoFont) _axesSetFont = index;
@@ -692,15 +843,25 @@ internal sealed class XlsChartBuilder
         {
             switch (_pendingLink)
             {
-                case LinkTitle: _title ??= text; break;
-                case LinkValueAxis: _valueTitle ??= text; break;
-                case LinkCategoryAxis: _categoryTitle ??= text; break;
+                case LinkTitle:
+                    _title ??= text;
+                    if (_titleFont == NoFont) _titleFont = _pendingFont;
+                    break;
+                case LinkValueAxis:
+                    _valueTitle ??= text;
+                    if (_axisTitleFont == NoFont) _axisTitleFont = _pendingFont;
+                    break;
+                case LinkCategoryAxis:
+                    _categoryTitle ??= text;
+                    if (_axisTitleFont == NoFont) _axisTitleFont = _pendingFont;
+                    break;
                 default: break;
             }
         }
 
         _pendingText = null;
         _pendingLink = -1;
+        _pendingFont = NoFont;
     }
 
     private void ReadValueRange(BiffRecordReader stream)
@@ -906,6 +1067,19 @@ internal sealed class XlsChartBuilder
 
     /// <summary>No <c>CHFONT</c> was stated — <c>EXC_FONT_NOTFOUND</c>.</summary>
     private const int NoFont = -1;
+
+    /// <summary>No <c>CHFORMAT</c> was stated — <c>EXC_FORMAT_NOTFOUND</c>.</summary>
+    private const int NoNumberFormat = -1;
+
+    /// <summary>
+    /// The weight at which a <c>FONT</c> counts as the family's bold face.
+    /// </summary>
+    /// <remarks>
+    /// <c>XclImpFont::GuessScriptType</c>'s neighbours read the record's <c>nWeight</c> straight
+    /// into a <c>FontWeight</c>, and <c>lclGetApiWeight</c> puts the boundary at
+    /// <c>EXC_FONTWGHT_BOLD</c>, which is 700. Every <c>FONT</c> in the corpus is 400 or 700.
+    /// </remarks>
+    private const int BoldWeight = 700;
 
     /// <summary>A DFF record header: version and instance, type, then a four-byte length.</summary>
     private const int DffHeaderLength = 8;

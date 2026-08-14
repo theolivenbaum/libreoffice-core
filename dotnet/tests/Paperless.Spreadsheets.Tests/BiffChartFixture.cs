@@ -39,6 +39,18 @@ internal static class BiffChartFixture
         ["Liberation Sans", "Caladea", "Carlito", "Liberation Serif", "DejaVu Sans"];
 
     /// <summary>
+    /// Two further <c>FONT</c> records that differ in size and weight rather than in family.
+    /// </summary>
+    /// <remarks>
+    /// Written after <see cref="Fonts"/> so that the indices those tests use do not move. With the
+    /// phantom entry at four they land at 6 and 7 — see <see cref="XlsChartFontTests"/>' constants.
+    /// The families repeat deliberately: a case about a size must not be able to pass because the
+    /// face changed.
+    /// </remarks>
+    public static readonly (string Name, ushort Twips, ushort Weight)[] SizedFonts =
+        [("Liberation Sans", 280, 700), ("Liberation Sans", 160, 400)];
+
+    /// <summary>
     /// Reads a workbook holding one chart sheet whose substream is the bytes given.
     /// </summary>
     /// <param name="substream">A chart substream, <c>BOF</c> to <c>EOF</c>.</param>
@@ -48,10 +60,25 @@ internal static class BiffChartFixture
     /// resolve is dropped rather than drawn empty, so anything asserting about
     /// <see cref="ChartPlot.Series"/> needs this and nothing else does.
     /// </param>
-    public static ChartPlot Chart(byte[] substream, bool withData = false)
+    /// <param name="cellFormat">
+    /// The <c>ifmt</c> the worksheet's one cell is formatted with, or null to leave it General.
+    /// An axis carrying no <c>CHFORMAT</c> links its number format to its source, and the source
+    /// is that cell — so this is the only way to state the format such a chart resolves to. The
+    /// index is defined by a <c>FORMAT</c> record when it is above the built-in range.
+    /// </param>
+    public static ChartPlot Chart(
+        byte[] substream, bool withData = false, ushort? cellFormat = null)
     {
         List<byte> globals = [.. Record(Bof, [0x00, 0x06, 0x05, 0x00, 0, 0, 0, 0])];
         foreach (string name in Fonts) globals.AddRange(FontRecord(name));
+        foreach ((string name, ushort twips, ushort weight) in SizedFonts)
+            globals.AddRange(FontRecord(name, twips, weight));
+
+        if (cellFormat is { } ifmt)
+        {
+            if (ifmt >= FirstUserFormat) globals.AddRange(FormatRecord(ifmt, "0.0"));
+            globals.AddRange(XfRecord(ifmt));
+        }
 
         if (withData)
         {
@@ -195,17 +222,58 @@ internal static class BiffChartFixture
         return Record(ChEscherFormat, payload);
     }
 
-    /// <summary>A BIFF8 <c>FONT</c> record naming one family at ten point.</summary>
-    public static byte[] FontRecord(string name)
+    /// <summary>
+    /// A BIFF8 <c>FORMAT</c> record: an <c>ifmt</c> and the code it names.
+    /// </summary>
+    /// <param name="ifmt">The index, which a cell's <c>XF</c> or an axis' <c>CHFORMAT</c> points at.</param>
+    /// <param name="code">The format code.</param>
+    public static byte[] FormatRecord(ushort ifmt, string code)
+    {
+        ArgumentNullException.ThrowIfNull(code);
+
+        return Record(Format,
+        [
+            .. Word(ifmt),
+            .. Word((ushort)code.Length),
+            0,                   // eight-bit characters
+            .. code.Select(character => (byte)character),
+        ]);
+    }
+
+    /// <summary>
+    /// A BIFF8 cell <c>XF</c> stating one number format and nothing else.
+    /// </summary>
+    /// <remarks>
+    /// The one field that is not obvious is <c>used</c>. In a cell <c>XF</c> a set bit means
+    /// "this <c>XF</c> states the attribute", and bit 10 is the number format — without it the
+    /// reader defers to the parent style and the cell comes out General
+    /// (<c>XclImpXF::SetUsedFlags</c>, <c>sc/source/filter/excel/xistyle.cxx:1466</c>).
+    /// </remarks>
+    /// <param name="ifmt">The number format index.</param>
+    public static byte[] XfRecord(ushort ifmt) => Record(Xf,
+    [
+        .. Word(0),               // font index
+        .. Word(ifmt),
+        .. Word(0),               // type and protection: a cell XF whose parent is 0
+        .. Word(0),               // alignment
+        .. Word(StatesFormat),
+        .. new byte[10],          // borders and area
+    ]);
+
+    /// <summary>A BIFF8 <c>FONT</c> record naming one family, ten point and regular by default.</summary>
+    /// <param name="name">The family.</param>
+    /// <param name="twips">The em size in twentieths of a point, which is how BIFF states it.</param>
+    /// <param name="weight">400 or 700; BIFF's <c>bls</c> field is a full weight.</param>
+    public static byte[] FontRecord(string name, ushort twips = 200, ushort weight = 400)
     {
         ArgumentNullException.ThrowIfNull(name);
 
         byte[] body =
         [
-            .. Word(200),        // height, in twentieths of a point
+            .. Word(twips),      // height, in twentieths of a point
             .. Word(0),          // flags
             .. Word(0x7FFF),     // colour: automatic
-            .. Word(400),        // weight
+            .. Word(weight),
             .. Word(0),          // escapement
             0,                   // underline
             0, 0, 0,             // family, character set, reserved
@@ -264,10 +332,20 @@ internal static class BiffChartFixture
     public const ushort Number = 0x0203;
     public const ushort ExternSheet = 0x0017;
     public const ushort SupBook = 0x01AE;
+    public const ushort Format = 0x041E;
+    public const ushort Xf = 0x00E0;
+
+    /// <summary>The first <c>ifmt</c> a <c>FORMAT</c> record has to define; below it is built in.</summary>
+    public const ushort FirstUserFormat = 164;
+
+    /// <summary>Bit 10 of a cell <c>XF</c>'s used-attribute field: it states its own format.</summary>
+    private const ushort StatesFormat = 0x0400;
 
     public const ushort ChChart = 0x1002;
     public const ushort ChSeries = 0x1003;
     public const ushort ChDataFormat = 0x1006;
+    public const ushort ChString = 0x100D;
+    public const ushort ChObjectLink = 0x1027;
     public const ushort ChLineFormat = 0x1007;
     public const ushort ChAreaFormat = 0x100A;
     public const ushort ChLegend = 0x1015;
@@ -279,6 +357,10 @@ internal static class BiffChartFixture
     public const ushort ChBegin = 0x1033;
     public const ushort ChEnd = 0x1034;
     public const ushort ChAxesSet = 0x1041;
+
+    /// <summary>An axis' own number format index — <c>EXC_ID_CHFORMAT</c>.</summary>
+    public const ushort ChFormat = 0x104E;
+
     public const ushort ChSourceLink = 0x1051;
     public const ushort ChEscherFormat = 0x1066;
 

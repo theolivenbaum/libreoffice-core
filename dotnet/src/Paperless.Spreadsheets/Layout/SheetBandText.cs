@@ -100,12 +100,19 @@ internal static class SheetBandText
     /// back to the default face loses only the face, which is what a substitution is.
     /// </remarks>
     /// <param name="family">The family name, or null for the furniture's own face.</param>
+    /// <param name="bold">
+    /// Whether the family's bold face is wanted. The furniture never asks for one — a header and
+    /// a column heading are drawn in whatever a plain cell would be — but a chart's title does,
+    /// and asking for bold of a family that has no bold face resolves back to its regular one
+    /// rather than to nothing.
+    /// </param>
     private static (OpenTypeFace? Face, FontReference Reference, LineMetrics? Metrics) FaceFor(
-        string? family)
+        string? family, bool bold = false)
     {
-        if (string.IsNullOrWhiteSpace(family)) return (Resolved.Value.Face, Description, Metrics.Value);
+        if (string.IsNullOrWhiteSpace(family) && !bold)
+            return (Resolved.Value.Face, Description, Metrics.Value);
 
-        return SheetFonts.ForFamily(family) is { } named
+        return SheetFonts.ForFamily(family, bold) is { } named
             ? (named.Face, named.Reference, named.Metrics)
             : (Resolved.Value.Face, Description, Metrics.Value);
     }
@@ -128,7 +135,23 @@ internal static class SheetBandText
     /// <param name="size">The em size.</param>
     /// <param name="family">The family name, or null for the furniture's own face.</param>
     public static Length ChartLineHeightAt(Length size, string? family)
-        => FaceFor(family).Metrics is { } metrics ? metrics.ScaledLineHeight(size) : size * 1.15;
+        => ChartLineHeightAt(size, family, bold: false);
+
+    /// <inheritdoc cref="ChartLineHeightAt(Length)"/>
+    /// <param name="size">The em size.</param>
+    /// <param name="family">The family name, or null for the furniture's own face.</param>
+    /// <param name="bold">Whether the family's bold face is wanted.</param>
+    public static Length ChartLineHeightAt(Length size, string? family, bool bold)
+        => FaceFor(family, bold).Metrics is { } metrics
+            ? metrics.ScaledLineHeight(size)
+            : size * 1.15;
+
+    /// <inheritdoc cref="AscentAt(Length)"/>
+    /// <param name="size">The em size.</param>
+    /// <param name="family">The family name, or null for the furniture's own face.</param>
+    /// <param name="bold">Whether the family's bold face is wanted.</param>
+    public static Length AscentAt(Length size, string? family, bool bold)
+        => FaceFor(family, bold).Metrics is { } metrics ? metrics.ScaledAscent(size) : size * 0.9;
 
     /// <summary>Shapes one line, or null when there is no face to shape it with.</summary>
     /// <param name="text">The text.</param>
@@ -140,10 +163,22 @@ internal static class SheetBandText
     /// <param name="size">The em size.</param>
     /// <param name="family">The family name, or null for the furniture's own face.</param>
     public static BandRun? Shape(string text, Length size, string? family)
+        => Shape(text, size, family, bold: false);
+
+    /// <inheritdoc cref="Shape(string, Length)"/>
+    /// <param name="text">The text.</param>
+    /// <param name="size">The em size.</param>
+    /// <param name="family">The family name, or null for the furniture's own face.</param>
+    /// <param name="bold">
+    /// Whether to shape in the family's bold face. It has to be the same decision the measurer
+    /// made or the two come apart — a title measured regular and drawn bold overruns the room it
+    /// reserved — which is why <c>SheetChart</c> passes the same flag to both.
+    /// </param>
+    public static BandRun? Shape(string text, Length size, string? family, bool bold)
     {
         if (text.Length == 0) return null;
 
-        (OpenTypeFace? resolved, FontReference reference, _) = FaceFor(family);
+        (OpenTypeFace? resolved, FontReference reference, _) = FaceFor(family, bold);
         if (resolved is not { } face) return null;
 
         ShapedText shaped = TextShaper.Default.Shape(face, text);
