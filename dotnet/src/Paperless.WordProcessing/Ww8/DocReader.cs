@@ -201,6 +201,10 @@ public sealed class Ww8Document : IWordProcessingDocument, IPaginatedDocument
         LayoutFonts fonts = new()
         {
             Metrics = _reader.DocumentProperties.UsesPrinterMetrics ? MetricGrid.Printer : null,
+
+            // The FFN's own pitch and family bits, which decide the fallback for a family that is
+            // neither installed nor substitutable. See Ww8FontTable.ShapeOf.
+            DeclaredShapes = _reader.Fonts.ShapeOf,
         };
 
         List<PageBlock> blocks = BlocksOf(fonts, _reader.ReadLayoutBlocks(), TextWidths());

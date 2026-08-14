@@ -40,6 +40,18 @@ public sealed class LayoutFonts
     public MetricGrid? Metrics { get; init; }
 
     /// <summary>
+    /// What the document's own font table says the shape of a family is, or null when it has none.
+    /// </summary>
+    /// <remarks>
+    /// The document's answer rather than the resolver's, which is why it lives here beside
+    /// <see cref="Metrics"/>: the font table belongs to one file and the resolver is shared. It only
+    /// matters for a family that is neither installed nor substitutable — but that is the common case
+    /// on a Linux box, and it is the difference between a serif document rendering in DejaVu Serif as
+    /// LibreOffice renders it and in DejaVu Sans, which reflows every line of it.
+    /// </remarks>
+    public Func<string, DeclaredFontShape>? DeclaredShapes { get; init; }
+
+    /// <summary>
     /// Where a paragraph looks for a face when its own has no glyph for a character.
     /// </summary>
     /// <remarks>
@@ -78,8 +90,18 @@ public sealed class LayoutFonts
         Resolved resolved = default;
         try
         {
+            // The declared family, not the declared pitch. Both are in the table and only the first
+            // was measured to move LibreOffice — see DocxLayoutSource.Face for the probe. The DOC
+            // side has not been probed either way, so it follows the measured half rather than the
+            // guessed one.
+            FontFamilyClass declaredClass =
+                family is { Length: > 0 } named && DeclaredShapes is { } declared
+                    ? declared(named).Class
+                    : FontFamilyClass.Unknown;
+
             FontReference reference = _fonts.Resolve(
-                new FontRequest(family ?? string.Empty, weight, isItalic));
+                new FontRequest(
+                    family ?? string.Empty, weight, isItalic, DeclaredClass: declaredClass));
 
             resolved = new Resolved(_fonts.LoadOpenType(reference), reference);
         }
