@@ -642,6 +642,43 @@ internal static class PptxTextBody
         int baseline = First(runProperties, defaults, element => Drawing.Number(element, "baseline"))
                        ?? 0;
 
+        if (Drawing.Child(runProperties, "hlinkClick") is { } hyperlink)
+        {
+            // ---------------------------------------------------------------------------
+            // The formatting of a hyperlink run is supplied by the importer, not stated in the
+            // document. A run carrying an a:hlinkClick becomes a URL text field, and
+            // oox/source/drawingml/textrun.cxx:161-166 then gives that field the theme's hlink
+            // scheme colour and a single underline before pushing the properties. Reading
+            // a:rPr/@u faithfully — which is what this reader did — draws no rule at all,
+            // because there is no `u` in the file to read.
+            //
+            // The colour overrides one the run states for itself, which is the counter-intuitive
+            // half and is measured rather than assumed. Stakeholders-v08052017 - v5.pptx slide 13
+            // has two hyperlink runs stating u="sng" and <a:solidFill><a:srgbClr val="0070C0"/>,
+            // and the reference draws them in the theme's a:hlink, #0000FF. A second deck agrees
+            // on a different colour: 16 - UTM - (NASA).pptx declares a:hlink as #6B9F25 and that
+            // is what its page 3 links are drawn in.
+            //
+            // The one exception is real and is in the same code. The override is guarded by the
+            // hyperlink's own property map not already carrying CharColor, and the only thing
+            // that puts one there is an a:extLst inside the a:hlinkClick
+            // (oox/source/drawingml/hyperlinkcontext.cxx:168) — the extension PowerPoint writes
+            // when the author has coloured a link by hand and meant it. Such a run keeps its own
+            // colour and still gains the underline, which is guarded by nothing.
+            //
+            // Both tests are against the run's own a:rPr rather than the inherited chain, because
+            // maTextCharacterProperties in that function is the run's own properties: a list
+            // style behind the run stating u="none" does not stop the importer supplying a rule.
+            // ---------------------------------------------------------------------------
+
+            if (Drawing.Child(hyperlink, "extLst") is null)
+            {
+                colour = theme?.Colours?[ThemeColourSlot.Hyperlink] ?? colour;
+            }
+
+            if (Drawing.Attribute(runProperties, "u") is null) underline = "sng";
+        }
+
         return new SlideTextRun(
             start,
             length,

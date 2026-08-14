@@ -632,7 +632,7 @@ public static partial class SlideTextLayout
             runs.Add(new FormattedRun(run.Start, run.Length, face, escaped, Tracking: run.Tracking));
             styles.Add(new RunStyle(
                 run.Colour, reference, face, run.IsUnderlined, run.IsStruckThrough,
-                run.Escapement.RiseOf(size), size));
+                run.Escapement.RiseOf(size), size, run.IsShadowed));
         }
 
         if (first is null) return null;
@@ -1221,9 +1221,21 @@ public static partial class SlideTextLayout
             Length advance = Length.Zero;
             foreach (PositionedGlyph glyph in glyphs.Glyphs) advance += glyph.Advance;
 
+            Colour colour = block.ColourAt(run.Start);
+
+            // The shadow is the same glyphs drawn first, down and to the right, and it carries
+            // neither the underline nor the strikethrough — those are drawn once, over the top.
+            if (block.ShadowedAt(run.Start) && ShadowOffset(run.Face, run.EmSize) is { } offset)
+            {
+                placed.Add(new PlacedGlyphRun(
+                    glyphs with { Origin = new DocPoint(pen + offset, pitch + offset) },
+                    ShadowColour(colour),
+                    null));
+            }
+
             placed.Add(new PlacedGlyphRun(
                 glyphs,
-                block.ColourAt(run.Start),
+                colour,
                 Rules(block.DecorationAt(run.Start), run.Face, run.EmSize, pen, pitch, advance)));
 
             // The pen carries across the runs of a line, so the second run starts where the first
@@ -1231,6 +1243,91 @@ public static partial class SlideTextLayout
             pen += advance;
         }
     }
+
+    /// <summary>
+    /// How far down and right a shadowed run's second copy is drawn, or null when the offset
+    /// rounds to nothing.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>vcl/source/outdev/text.cxx:394-407</c> computes it in <em>device units</em> from the
+    /// font instance's line height:
+    /// <c>nOff = 1 + ((mnLineHeight − 24) / 24)</c>, with C's truncating division. PDF export runs
+    /// on a 720 dpi reference device, so one device unit is a tenth of a point and the ladder is
+    /// 0.1 pt wide.
+    /// </para>
+    /// <para>
+    /// <b>Which line height feeds it was the open question, and it is now measured rather than
+    /// read.</b> The three offsets a previous round took from two decks bounded the factor to
+    /// [1.073, 1.122] em, an interval containing both of Liberation Sans's candidate sums — its
+    /// <c>hhea</c> ascent+descent (1.1172) and its <c>OS/2</c> typo sum plus typo gap (1.0884) —
+    /// without separating them. A probe of 171 sizes from 10 to 95 pt in half-point steps,
+    /// authored as a flat ODF document with <c>fo:text-shadow</c> (which reaches this same vcl
+    /// code, the rule living at draw time rather than in any importer) and converted by the
+    /// reference binary, separates them decisively: the <c>hhea</c> sum mismatches 3 of 171 under
+    /// a naive single rounding and <b>0 of 171</b> under the rounding below, where the typo sum
+    /// mismatches 107. Repeated against DejaVu Sans, whose two candidates are further apart
+    /// (1.1641 against 1.2002), it is again 0 of 171 against 133. <b>342 of 342 exact.</b> The
+    /// same ladder reproduces the three <c>.ppt</c> offsets that posed the question — 14, 15 and
+    /// 17 device units at 32.00, 33.99 and 38.01 pt.
+    /// </para>
+    /// <para>
+    /// The rounding is <em>per metric, not on the sum</em>: rounding ascent and descent separately
+    /// is what makes it exact, and rounding their sum once misses 3 of 171 on Liberation Sans and
+    /// 4 on DejaVu. <b>The probe could not see the third rounding</b> — every size on its ladder
+    /// was a whole half-point, so the em was already a whole number of device units and rounding
+    /// it changed nothing. The corpus decided that one; see the comment on <c>perEm</c> below. <see cref="LineSpacing.Resolve(OpenTypeFace, MetricGrid?, bool)"/> is the
+    /// right source because it already implements vcl's own precedence — <c>hhea</c>, then
+    /// <c>OS/2</c>'s Windows metrics, then the typographic ones when the face asks for them by
+    /// name — which is exactly what fills <c>ImplFontMetricData</c>. The line <em>gap</em> is
+    /// excluded: <c>mnLineHeight</c> is ascent plus descent.
+    /// </para>
+    /// </remarks>
+    /// <param name="face">The face the run is drawn in.</param>
+    /// <param name="emSize">The size it is drawn at.</param>
+    private static Length? ShadowOffset(OpenTypeFace face, Length emSize)
+    {
+        LineMetrics metrics = LineSpacing.Resolve(face);
+        if (metrics.UnitsPerEm <= 0) return null;
+
+        // The reference device is 720 dpi, so a point is ten units and the font's size in them is
+        // the pixels-per-em the metric is scaled by. It is rounded to a whole unit first, because
+        // a device font is requested at an integer height and its metrics are scaled to that —
+        // and a slide's autofit routinely asks for a fractional size, so this is the common case
+        // rather than an edge. Thailand17's shadowed body text is drawn at 29.9906 pt, where
+        // rounding the em first gives 300 units and a 1.4 pt offset, which is the reference's, and
+        // not rounding gives 299.906 and 1.3 pt, which is a unit short on 38 runs of one deck.
+        double perEm = Math.Round(emSize.Points * DeviceUnitsPerPoint, MidpointRounding.AwayFromZero);
+        long lineHeight =
+            (long)Math.Round(metrics.Ascent * perEm / metrics.UnitsPerEm, MidpointRounding.AwayFromZero)
+            + (long)Math.Round(metrics.Descent * perEm / metrics.UnitsPerEm, MidpointRounding.AwayFromZero);
+
+        long units = 1 + ((lineHeight - 24) / 24);
+        return units <= 0 ? null : Length.FromPoints(units / DeviceUnitsPerPoint);
+    }
+
+    /// <summary>Device units in a point on the 720 dpi reference device PDF export runs on.</summary>
+    private const double DeviceUnitsPerPoint = 10.0;
+
+    /// <summary>
+    /// The colour a shadow is drawn in, which depends only on how dark the text is.
+    /// </summary>
+    /// <remarks>
+    /// <c>vcl/source/outdev/text.cxx:399-403</c> paints the shadow light grey under black or
+    /// near-black text and black under everything else, so the shadow of a black heading is
+    /// visible rather than invisible. <b>Measured over nineteen text colours</b> against the
+    /// reference binary: the cut is at <c>Color::GetLuminance</c> — <c>(B×29 + G×151 + R×76) >> 8</c>
+    /// — being under 8, which the <c>== COL_BLACK</c> half of the condition is subsumed by. The
+    /// probe pins the boundary on both sides: <c>#050505</c> (luminance 5) takes the grey branch
+    /// and <c>#0A0A0A</c> (luminance 10) the black one, and so do the two colours that separate
+    /// the luminance from a channel maximum — <c>#080000</c> (luminance 2, grey) and
+    /// <c>#001000</c> (luminance 9, black).
+    /// </remarks>
+    /// <param name="text">The colour the run itself is drawn in.</param>
+    private static Colour ShadowColour(Colour text)
+        => ((text.B * 29) + (text.G * 151) + (text.R * 76)) >> 8 < 8
+            ? Colour.FromRgb(0xC0C0C0)
+            : Colour.Black;
 
     /// <summary>
     /// The rectangles a run's underline and strikethrough fill, or null when it has neither.
@@ -1406,6 +1503,11 @@ public static partial class SlideTextLayout
     /// before it asks the font for a metric
     /// (<c>editeng/source/editeng/impedit3.cxx:3121-3126</c>).
     /// </param>
+    /// <param name="IsShadowed">
+    /// Whether the run casts the per-character drop shadow. Travels with the colour and the
+    /// decorations rather than with the measured run, because the shadow is drawn from the same
+    /// glyphs at an offset and so moves no line break.
+    /// </param>
     private readonly record struct RunStyle(
         Colour Colour,
         FontReference? Font,
@@ -1413,7 +1515,8 @@ public static partial class SlideTextLayout
         bool IsUnderlined = false,
         bool IsStruckThrough = false,
         Length Rise = default,
-        Length NominalSize = default);
+        Length NominalSize = default,
+        bool IsShadowed = false);
 
     /// <summary>One paragraph, measured and broken.</summary>
     private sealed record Block(
@@ -1451,6 +1554,9 @@ public static partial class SlideTextLayout
             RunStyle style = StyleAt(index);
             return (style.IsUnderlined, style.IsStruckThrough);
         }
+
+        /// <summary>Whether the character casts the per-character drop shadow.</summary>
+        public bool ShadowedAt(int index) => StyleAt(index).IsShadowed;
 
         /// <summary>
         /// How far above the line's baseline a character is drawn, zero for ordinary text.

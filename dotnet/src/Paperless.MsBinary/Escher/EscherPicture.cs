@@ -1,4 +1,5 @@
 using Paperless.Core.Geometry;
+using Paperless.Core.Graphics;
 
 namespace Paperless.MsBinary.Escher;
 
@@ -61,6 +62,48 @@ public static class EscherPicture
             Fraction(properties, EscherPropertyIds.CropFromTop),
             Fraction(properties, EscherPropertyIds.CropFromRight),
             Fraction(properties, EscherPropertyIds.CropFromBottom));
+
+    /// <summary>
+    /// The colour the shape asks to have knocked out of its picture, or null when it asks for
+    /// none.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Escher property 263, <c>pictureTransparent</c> — PowerPoint's <em>Set Transparent
+    /// Color</em>. <c>SvxMSDffManager::ImportGraphic</c>
+    /// (<c>filter/source/msfilter/msdffimp.cxx:3894-3903</c>) reads it after cropping and before
+    /// the brightness and contrast adjustment, so this is the first of the three recolourings a
+    /// picture can carry and the only one that touches alpha.
+    /// </para>
+    /// <para>
+    /// <b>Presence is the test, not the value.</b> A shape stating <c>0x00000000</c> means "knock
+    /// out black", which is indistinguishable from the property being absent if the value alone is
+    /// consulted — hence <see cref="EscherPropertyTable.Has"/>.
+    /// </para>
+    /// <para>
+    /// The stored value is an <c>MSO_CLR</c>, whose top byte decides whether the other three are a
+    /// literal <c>0x00BBGGRR</c> or an index into a palette this layer cannot see. Only the
+    /// literal form is honoured: a scheme or system reference would need the page's colour scheme,
+    /// which is a host concern, and the corpus states none here. A non-literal value yields null
+    /// rather than a wrong knockout, because knocking out the wrong colour makes a hole in the
+    /// artwork where doing nothing merely leaves the picture as stored.
+    /// </para>
+    /// </remarks>
+    /// <param name="properties">The shape's property table.</param>
+    public static ColourKnockout? TransparentColour(EscherPropertyTable properties)
+    {
+        ArgumentNullException.ThrowIfNull(properties);
+
+        if (!properties.Has(EscherPropertyIds.PictureTransparent)) return null;
+
+        uint value = properties.Value(EscherPropertyIds.PictureTransparent);
+        if ((value & 0xFF000000u) != 0) return null;
+
+        Colour colour = Colour.FromRgb(
+            ((value & 0x000000FFu) << 16) | (value & 0x0000FF00u) | ((value & 0x00FF0000u) >> 16));
+
+        return new ColourKnockout(colour, ColourKnockout.DefaultTolerance);
+    }
 
     /// <summary>One crop property as a fraction of the picture, from its 16.16 fixed point.</summary>
     private static double Fraction(EscherPropertyTable properties, ushort id)
