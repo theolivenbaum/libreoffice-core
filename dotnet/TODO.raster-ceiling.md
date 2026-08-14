@@ -29,6 +29,39 @@ likely to have neighbours just under the bar, and re-measure rather than assumin
 exhaustive. Raising the bar is not the fix — it would start excusing real defects, which this
 file has already done once.
 
+### Why they sit under it, re-measured — and it is not the threshold
+
+Round `slides-b008-01` took that example apart and **the sentence above has the wrong cause.**
+The figure has moved (+32 on 169, 18.9%, not +44 on 180, 24.4%), and the reason page 6 misses
+the bar is not that it is a near-miss. It is that **condition 3 is evaluated on the *net*
+per-page delta, so a defect of ours on the same page subtracts from the ceiling's excess and
+pushes the page under the bar.**
+
+| `8_P-Pavese…pptx` | gross ceiling excess | ref raw words | gross % | our own defect there | net % | flagged |
+|---|---:|---:|---:|---:|---:|---|
+| page 5 | +44 | 70 | 62.9% | 0 | 62.9% | yes |
+| page 6 | +44 | 169 | **26.0%** | −12 | **18.9%** | no |
+| page 16 | +59 | 200 | **29.5%** | −25 | **17.0%** | no |
+
+Both unflagged pages are **over** the bar on gross excess. So the two under-counts are not
+independent — **the flag is suppressed exactly on the pages that are both a ceiling and a
+defect**, which is not a rare combination: two of that document's three ceiling pages are it.
+
+**If this is ever fixed, the fix is to compute condition 3 on the ours-only token count rather
+than on the net delta**, which flags pages 5 and 6 correctly without touching the 25% bar. (Page
+16 would still be missed, for an unrelated reason — see *the reference outlines its glyphs*
+below.)
+
+### Pages under the bar, measured
+
+Recorded here rather than in the main table so the flag's own arithmetic stays reproducible.
+Gross excess is the ours-only token count; net is what condition 3 currently sees.
+
+| Document | Page | gross | net | ref raw | gross % | why it is under |
+|---|---|---:|---:|---:|---:|---|
+| `slides/batch-008/…/8_P-Pavese_AIRBUS-ATB-journee-CRATB.pptx` | 6 | +44 | +32 | 169 | 26.0% | our table row 12 pushed off the page cancels 12 |
+| `slides/batch-008/…/8_P-Pavese_AIRBUS-ATB-journee-CRATB.pptx` | 16 | +59 | +34 | 200 | 29.5% | our unwrapped axis labels cancel 25 — **and it is outlining, not a raster** |
+
 ## How a page earns its flag
 
 Three conditions, on a document whose page count already agrees:
@@ -37,6 +70,13 @@ Three conditions, on a document whose page count already agrees:
 2. **We do not draw that same raster.** Matched on dimensions.
 3. We extract materially more words there than the reference does — at least 8 more and at
    least 25% more, about two-thirds of a line of prose.
+
+**Two known blind spots in that test, both measured, both on the same document.** Condition 1
+asks `pdfimages`, so it cannot see the reference *outlining* glyphs into filled paths — ink with
+no text layer and no image. And condition 3 is computed on the **net** per-page delta, so a
+defect of ours on the same page subtracts from the ceiling's excess and pushes the page under
+the bar. Both are worked out below on `8_P-Pavese…pptx`, which has three ceiling pages and one
+row in the table.
 
 **Condition 2 was missing until an agent disproved four of this file's own rows.** Without it,
 the first condition is satisfied just as well by a logo *both* renderers draw: four pages of
@@ -63,6 +103,16 @@ just under the bar should be checked with `pdfimages` before being treated as a 
 consequence for that document: it fails the word gate at 2240 against 2108, and **excusing only
 its listed page leaves it at 2152, still outside the 2% band** — so a reader working from this
 list alone would conclude the residue is ours when two-thirds of it is not.
+
+> **Re-measured in round `slides-b008-01`, and three of the sentences above are now wrong.**
+> The gate row is **2118 against 2010**, not 2240/2108 (that pair was the `wc -w` metric, before
+> the 2026-08-13 change). Page 6's 24.4% is **18.9% net and 26.0% gross** — it is over the bar
+> and pushed under it by a defect of ours on the same page, not a near-miss; see *Why they sit
+> under it* above. And **page 16 is not "a different defect entirely"** — it is a ceiling too,
+> of a fourth kind that `pdfimages` cannot see at all. Excusing all three ceiling pages leaves
+> the document at 1973 against 2010, **inside** the band. The instinct in the last sentence was
+> right and the arithmetic under it was not: the residue is not two-thirds ours, it is
+> **negative** — we are 40 words *short*. Worked example at the end of this file.
 
 ## The numbers
 
@@ -120,7 +170,7 @@ first, then re-run.
 | `words/batch-020/…/EHEST-SMS-Safety-Management-Manual-V2.docx` | 76 | 97 | 51 | +46 | 6/0 |
 | `slides/batch-012/…/OnTrac_StarCertificationProgram-3Day.pptx` | 9 | 96 | 50 | +46 | 2/0 |
 | `slides/batch-014/…/WiGr_2021W_1_Angebot-Nachfrage-Elastizität-211` | 45 | 50 | 5 | +45 | 0/1 |
-| `slides/batch-008/…/8_P-Pavese_AIRBUS-ATB-journee-CRATB.pptx` | 5 | 114 | 70 | +44 | 3/2 |
+| `slides/batch-008/…/8_P-Pavese_AIRBUS-ATB-journee-CRATB.pptx` | 5 | 114 | 70 | +44 | 3/2 |ᵃ
 | `slides/batch-017/…/Demick_JetBlue.pptx` | 5 | 93 | 54 | +39 | — |
 | `words/batch-015/…/approvals-and-standardisation-organisation-app` | 6 | 161 | 123 | +38 | — |
 | `sheets/batch-010/…/TOGAF9-Tool-ConfReqts-CSQ.xls` | 21 | 69 | 31 | +38 | — |
@@ -139,6 +189,10 @@ first, then re-run.
 | `slides/batch-004/…/ws_prod-g-doc-Events-industrymeeting18112004-E` | 9 | 38 | 29 | +9 | — |
 | `slides/batch-007/…/introduction_to_bea_tuxedo.ppt` | 26 | 30 | 21 | +9 | — |
 | `slides/batch-007/…/introduction_to_bea_tuxedo.ppt` | 39 | 38 | 30 | +8 | — |
+
+ᵃ This document has **three** ceiling pages, not one — 5, 6 and 16. See *Why they sit under it*
+above and *the reference outlines its glyphs* below. Its full accounting is in
+`probes/slides-b008-01/results.md`.
 
 ## What is known about the mechanism, and what is not
 
@@ -417,10 +471,125 @@ So this document joins the list from a third direction. The three shapes now rec
 | the reference rasterises an embedded object | ours | we draw real text where it draws a picture |
 | the reference's tokenisation shatters | the reference | intra-word positioning read as word breaks |
 | the reference splits its own words | the reference | one show per character, plus mid-token URL breaks |
+| **the reference outlines its glyphs** | **ours** | **rotated text drawn as filled paths — ink with no text layer** |
 
 **The common test is the same in all three: compare the whitespace-stripped character streams
 before believing a word count.** If they match, the gate cannot be won on that document and the
 number is about `pdftotext`, not about the renderer.
+
+**Two further shapes were added after that sentence was written and each qualifies it.** The
+outlining shape is immediately below and is a fourth way the gate cannot be won. The one after
+the character-stream section — *we shatter our own line* — is the only shape so far that is ours
+and **winnable**, and is the reason the sentence above is not a general rule. The ordinals in
+the headings below grew by accretion and are not a sequence; read the shape names.
+
+## The reference outlines its glyphs, and `pdfimages` cannot see it
+
+This file's page test asks `pdfimages` whether the reference drew a raster we did not. **There
+is a second way for the reference to put ink on a page and nothing in its text layer, and that
+test is structurally blind to it: it converts the glyphs to filled paths.** No image is
+reported, so the page reads as an ordinary word-count defect of ours.
+
+Measured in round `slides-b008-01` on
+`slides/batch-008/pptx/8_P-Pavese_AIRBUS-ATB-journee-CRATB.pptx` **page 16**, in the band
+beneath its first chart's baseline (x 17–368, PDF-y 154.7–170.7):
+
+| | reference | ours |
+|---|---:|---:|
+| text-showing operators in the band | **0** | 18 |
+| glyphs in the band | **0** | 103 |
+| glyph-sized filled paths (< 12×12 pt), all one colour `#595959` | **120** | — |
+| `pdfimages -list` entries anywhere on the page | **0** | 0 |
+| month tokens from `pdftotext` (`-raw`, `-layout`, `-bbox` alike) | **none** | 59 fragments |
+
+Twenty rotated date-axis labels (`Apr-19` … `Jun-22`) of six characters each is **120 glyphs**.
+Whole-page fill counts are 180 against our 58 — a difference of 122, being those 120 plus two
+bars.
+
+**Two blind reviewers, given the page and a 300 dpi crop with no numbers and no repository
+access, both read the labels as present and legible in the reference**, one describing them as
+"grey … rotated ~45° ascending" — matching `#595959` and the measured bbox slopes. The ink is
+there; the text layer is empty; ours is the better output and the gate scores it +59.
+
+**The within-document control is what makes this a mechanism rather than an anecdote.** On the
+same page of the same PDF, the reference's *horizontal* labels — Figure 2's `lundi…dimanche`,
+Figure 3's `[08 h ; 10 h[` intervals, every value tick — are ordinary text operators that
+`pdftotext` reads fine. Only the rotated run is outlined.
+
+**Established:** the table above. **Not established:** that LibreOffice outlines *all* rotated
+chart tick labels on PDF export. One document, one chart, one good internal control. Do not
+promote it without a second instance.
+
+**It is not the `Template Pilot Logbook JAR-FCL V3.0.xls` shape**, recorded further up, where
+LibreOffice emits one `Tj` per glyph for rotated text. There the rotated text is still text and
+`pdftotext` over-tokenises it. Here it is not text at all and `pdftotext` reads nothing.
+
+### How common — censused, not guessed
+
+`dotnet/probes/slides-b008-01/outline-ceiling-census.py` reads a finished sweep's own output and
+looks for: page-exact document, ≥ 8 more raw words on the page than the reference, ≥ 20
+glyph-sized one-colour fills on the reference page, ≥ 20 more text glyphs from us.
+
+```sh
+python3 dotnet/probes/slides-b008-01/outline-ceiling-census.py <sweepdir> \
+        /c/sandbox/workdir/refpdfs-26.2.4.2-fonts/slides
+```
+
+Over **78 documents and ~2400 pages** (`slides/batch-001` … `008`) it returns **one row** — this
+page. Rare in what has been swept, and worth keeping the script for, because it costs nothing on
+a sweep that already exists and no other instrument the project points at a word-count failure
+can see this class at all.
+
+## `8_P-Pavese…pptx` in full — a worked example where the ceiling exceeds the gap
+
+Kept here because the shape of it is the lesson, and because the next reader must not file its
+remaining pages as ceiling too. Full workings in `probes/slides-b008-01/results.md`.
+
+Gate row `26/26  2118/2010  words`, i.e. **+108**. Only five of twenty-six pages differ at all:
+
+| page | net | ceiling | ours | mechanism |
+|---|---:|---:|---:|---|
+| 3 | +3 | — | +3 | 14 glyphs of **zero-ink** text we emit; the string is in no part of the package. Unexplained |
+| 5 | +43 | +43 | — | raster, 692×240 JPEG + smask, object 207 |
+| 6 | +31 | +43 | −12 | the same object 207; against it, a table row we push off the page |
+| 8 | −7 | — | −7 | `percentStacked` ignored, `chartUserShapes` not read |
+| 16 | +38 | +59 | −21 | outlined glyphs, above; against it, unwrapped category labels |
+| | **+108** | **+145** | **−37** | |
+
+**The ceiling is larger than the gap.** The document only reads +108 because we are
+simultaneously losing 40 words of real content. Both corrections point the same way:
+
+- excuse the ceiling and it reads 1973 against 2010, **−37 against a ±43.2 band — a pass**;
+- fix all three of our own defects and it reads **2158, +148 — further outside than it is now.**
+
+**Every real improvement available on this document makes its gate column worse.** That is this
+file's standing argument in its sharpest form: here the number cannot be driven down at all, only
+up, by drawing content we currently drop.
+
+### Its three defects, so they are not mistaken for ceiling
+
+1. **Page 8, `percentStacked` ignored.** `ppt/charts/chart1.xml` is
+   `<c:grouping val="percentStacked"/>` over raw counts 548/317 and 73/122, with a value axis
+   carrying `formatCode="0%"`. We do not normalise the stack: we auto-scale to the raw total
+   (≈621 → 700) and *then* apply the percent format, so the axis reads
+   **`0%, 10000% … 70000%`** in eight ticks where the reference reads `0% … 100%` in eleven.
+2. **Page 8, `chartUserShapes` not read.** `chart1.xml.rels` carries
+   `Type=…/chartUserShapes Target="../drawings/drawing1.xml"`, and that part's entire text
+   content is `['88%', '72%', '(317/439)', '(548/621)']` — exactly the four tokens missing from
+   our page. The same rels file carries a `themeOverride` whose `minorFont` latin is **Palatino
+   Linotype**, which is why the reference's chart text is serif and ours is sans; a blind
+   reviewer named "a theme major/minor latin font not being applied" as its first candidate
+   cause with no access to any of this. Of the deck's six charts only `chart1` has either
+   relationship.
+3. **Page 6, a table row pushed off the page.** The reference draws twelve body rows and we draw
+   eleven; the twelfth is the twelve tokens of the difference. A blind reviewer found it unled
+   and located the mechanism: the body sits lower in ours by very nearly exactly one row, with
+   identical row pitch, so it is a single fixed offset above the body — and the cell-highlight
+   rectangles sit at the same absolute page positions in both while landing on rows 1/4/8/11 in
+   ours against 2/5/9/12 in the reference.
+4. **Page 16, category labels not wrapped.** The reference wraps Figure 3's nine interval labels
+   onto two lines and draws them all; we measure each as one unbreakable run and drop every
+   second one. Its value axis we tick every 200 to 800 against the reference's 100 to 900.
 
 ## The character-stream test passing does NOT mean the gate cannot be won
 
