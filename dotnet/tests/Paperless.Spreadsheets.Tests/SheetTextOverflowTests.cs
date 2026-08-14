@@ -67,6 +67,47 @@ public sealed class SheetTextOverflowTests
         Sheet(prose, new SheetCellFormat { Horizontal = SheetHorizontalAlignment.Justify })
             .PrintedRange.LastColumn.ShouldBe(0);
     }
+
+    /// <summary>
+    /// Past 7864.32 pt the extension wraps, because Calc's cached width is sixteen bits.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>ScTable::MaybeAddExtraColumn</c> reads <c>ScColumn</c>'s text-width cache rather than
+    /// measuring, and that cache is a <c>sal_uInt16</c> of 600 dpi pixels — 65536 of which are
+    /// 7864.32 pt. A cell wider than that is cached as the remainder, so the print area is
+    /// extended by the remainder.
+    /// </para>
+    /// <para>
+    /// <strong>The evidence that it wraps rather than clamping is that the page count comes back
+    /// down and then goes up again.</strong> A one-cell probe of <em>n</em> repetitions of
+    /// <c>M</c> at ten point in a 2 cm column, rendered through the installed 26.2.4.2, gives 18
+    /// pages at 945 characters, 1 at 950, 18 again at 1890 and 2 at 2000. Neither a clamp nor a
+    /// measurement budget can produce that shape.
+    /// </para>
+    /// <para>
+    /// It is the whole of two corpus documents: <c>grants-2005.xls</c> 219 pages against 201 and
+    /// <c>CIS_Debian_Linux_8_Benchmark_v1.0.0.xls</c> 109 against 88, both of them entirely
+    /// blank trailing pages bought by an over-extended print area.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void APrintAreaExtensionWrapsAtSixteenBitsOfSixHundredDpi()
+    {
+        // 'W' in ten-point Liberation Sans is a shade under 9.5 pt, so 800 characters is about
+        // 7570 pt — under the 7864.32 pt boundary — and 900 is about 8520, which is over it and
+        // wraps back to roughly 660 pt.
+        int under = Sheet(new string('W', 800), SheetCellFormat.Default).PrintedRange.LastColumn;
+        int over = Sheet(new string('W', 900), SheetCellFormat.Default).PrintedRange.LastColumn;
+
+        // Both spill well past their own column, so neither is being suppressed outright.
+        under.ShouldBeGreaterThan(4);
+        over.ShouldBeGreaterThan(0);
+
+        // The longer string extends the print area LESS far than the shorter one. That is the
+        // whole claim, and it is not something a monotone measurement can produce.
+        over.ShouldBeLessThan(under);
+    }
 }
 
 /// <summary>
