@@ -867,7 +867,7 @@ public static class PageDrawing
                 }
 
                 string text = paragraph.Text[run.Start..run.End];
-                ShapedText shaped = TextShaper.Default.Shape(run.Face, text, run.Shaping);
+                ShapedText shaped = TextShaper.Default.Shape(run.Face, text, run.EffectiveShaping);
                 if (shaped.Glyphs.Count == 0) continue;
 
                 // A raised run draws above the baseline and advances along it unchanged, which is why the
@@ -1048,7 +1048,7 @@ public static class PageDrawing
         PageRun at = RunAt(paragraph, segment.Start - 1);
 
         Length unit = TextShaper.Default
-            .Shape(at.Face, segment.Leader.ToString(), at.Shaping)
+            .Shape(at.Face, segment.Leader.ToString(), at.EffectiveShaping)
             .Width(at.EmSize);
         if (unit <= Length.Zero) return null;
 
@@ -1057,7 +1057,7 @@ public static class PageDrawing
         if (count <= 0) return null;
 
         string fill = new(segment.Leader, (int)Math.Min(count, MaxLeaderCharacters));
-        ShapedText shaped = TextShaper.Default.Shape(at.Face, fill, at.Shaping);
+        ShapedText shaped = TextShaper.Default.Shape(at.Face, fill, at.EffectiveShaping);
         if (shaped.Glyphs.Count == 0) return null;
 
         return (
@@ -1419,7 +1419,7 @@ public static class PageDrawing
                      : RunsIn(paragraph, from, to))
         {
             string text = paragraph.Text[run.Start..run.End];
-            total += TextShaper.Default.Shape(run.Face, text, run.Shaping).Width(run.EmSize);
+            total += TextShaper.Default.Shape(run.Face, text, run.EffectiveShaping).Width(run.EmSize);
 
             // One tracking unit per character, which is exactly what the prefix table charges across a
             // range: it puts the gap *before* each character, so a range of n of them carries n. Any other

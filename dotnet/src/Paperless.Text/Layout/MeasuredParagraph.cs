@@ -72,6 +72,18 @@ public readonly record struct FormattedRun(
     /// <summary>One past the run's last character.</summary>
     public int End => Start + Length;
 
+    /// <summary>
+    /// The shaping this run is actually shaped with, once its tracking has had its say.
+    /// </summary>
+    /// <remarks>
+    /// Every path that shapes a run has to use this rather than <see cref="Shaping"/>, because
+    /// measurement and drawing disagreeing about a ligature is worse than either answer: the line
+    /// would be laid out at one width and painted at another. See
+    /// <see cref="ShapingOptions.WithTracking"/> for the rule and for what it cost when it was
+    /// missing.
+    /// </remarks>
+    public ShapingOptions EffectiveShaping => Shaping.WithTracking(Tracking);
+
     /// <summary>The size this run's line metrics are scaled by.</summary>
     public Core.Units.Length LineEmSize
         => MetricEmSize > Core.Units.Length.Zero ? MetricEmSize : EmSize;
@@ -313,7 +325,7 @@ public sealed class MeasuredParagraph
             foreach (FormattedRun part in SubRuns(text, run, items, options))
             {
                 ShapedText shaped = engine.Shape(
-                    part.Face, text.AsSpan(part.Start, part.Length), part.Shaping);
+                    part.Face, text.AsSpan(part.Start, part.Length), part.EffectiveShaping);
 
                 measured.Add(new MeasuredRun(
                     part, shaped, LineSpacing.Resolve(part.Face, grid, leadingAboveText)));

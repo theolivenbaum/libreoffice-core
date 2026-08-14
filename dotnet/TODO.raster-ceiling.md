@@ -402,6 +402,38 @@ So this document joins the list from a third direction. The three shapes now rec
 before believing a word count.** If they match, the gate cannot be won on that document and the
 number is about `pdftotext`, not about the renderer.
 
+## The character-stream test passing does NOT mean the gate cannot be won
+
+**Read this before filing the next identical-streams document as a ceiling.** The sentence above
+was true of the three documents it was written from and is false as a general rule, and the
+counter-example was worked in round `words-b008-01`.
+
+`words/batch-008/docx/FAA-2017-0628-0002_attachment_1.docx` — page-exact at 4/4, **666 words
+against the reference's 638**, whitespace-stripped character streams **byte-identical**, 3750
+characters each side, zero diff blocks. Every symptom of shape 2. It was a real defect in our own
+output and it is now fixed; the document is exact on every column.
+
+**A fourth shape, and the only one so far that is ours and winnable:**
+
+| shape | who over-counts | cause |
+|---|---|---|
+| **we shatter our own line** | **ours** | **a ligature's multi-character `ToUnicode` collapses poppler's gap tolerance** |
+
+We formed Carlito's `t`+`i` ligature on a run carrying `w:spacing="60"`. A ligature is one glyph
+covering two characters, so its `ToUnicode` maps one code to two — and **poppler answers a
+multi-character entry by dropping its intra-word gap tolerance from 0.400 em to 0.100 em**,
+measured by byte-surgery on both PDFs. The tracking's own 0.300 em sits between the two, so all
+45 glyphs on the line extracted as 45 separate words. LibreOffice never forms it: non-zero
+character spacing disables `liga`/`clig` (`vcl/source/outdev/text.cxx:996-998`). That rule is now
+implemented — see `ShapingOptions.WithTracking`.
+
+So the test to add when the character streams match is: **count the one-character tokens on each
+side, and count the multi-character `ToUnicode` entries in each PDF.** Here they were 46 against
+the reference's 12, and 4 against 1. Those two numbers separate "the reference's tokenisation is
+shattered, and we cannot help that" from "ours is, and we can". `|ink|%` does **not** separate
+them — it was 1.16 before the fix and 1.16 after, because the defect lives entirely in the text
+layer and a raster diff cannot read it.
+
 ---
 
 # A fourth shape, and a different kind: **the reference is not deterministic**

@@ -87,6 +87,54 @@ public sealed class CharacterSpacingTests
         paragraph.Runs.Select(run => run.Tracking).ShouldAllBe(tracking => tracking == Length.Zero);
     }
 
+    /// <summary>A tracked run does not ligate, all the way from the markup.</summary>
+    /// <remarks>
+    /// <para>
+    /// The document-level end of <c>Paperless.Text.Tests.TrackingLigatureTests</c>, which has the
+    /// rule and the reasoning. Here because the rule has to survive the whole path — the reader
+    /// putting <c>w:spacing</c> on the run, the run reaching the measurement with its tracking
+    /// intact, and the measurement passing it to the shaper — and each of those three has broken
+    /// independently before.
+    /// </para>
+    /// <para>
+    /// The glyph count is the assertion because it is what a PDF writer turns into
+    /// <c>ToUnicode</c> entries: a ligature is one code mapping to two characters, and poppler
+    /// answers a multi-character entry by shattering the whole line into single-character words.
+    /// That cost <c>words/batch-008/…/FAA-2017-0628-0002_attachment_1.docx</c> 28 words of 638
+    /// on text that was character-for-character identical to the reference's.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void ATrackedRunDoesNotLigate()
+    {
+        // Calibri resolves to Carlito, whose liga lookup maps t+i to one glyph. Named explicitly
+        // rather than left to the default, or the test measures whatever face the machine prefers.
+        const string Text = "Formation";
+
+        int plain = Glyphs(Text, spacing: null);
+        int tracked = Glyphs(Text, spacing: 60);
+
+        Assert.SkipWhen(plain == Text.Length, "the resolved face does not ligate ti");
+
+        plain.ShouldBe(Text.Length - 1, "untracked, ti is one glyph");
+        tracked.ShouldBe(Text.Length, "tracked, every character is its own glyph");
+    }
+
+    private static int Glyphs(string sentence, int? spacing)
+    {
+        string runProperties = spacing is { } twips
+            ? $"<w:rPr><w:rFonts w:ascii=\"Calibri\" w:hAnsi=\"Calibri\"/><w:spacing w:val=\"{twips}\"/></w:rPr>"
+            : "<w:rPr><w:rFonts w:ascii=\"Calibri\" w:hAnsi=\"Calibri\"/></w:rPr>";
+
+        PageParagraph paragraph = Paragraph($"""
+            <w:p>
+              <w:r>{runProperties}<w:t xml:space="preserve">{sentence}</w:t></w:r>
+            </w:p>
+            """);
+
+        return paragraph.Measure().Runs.Sum(run => run.Shaped.Glyphs.Count);
+    }
+
     /// <summary>The corpus fixture is the width LibreOffice makes it.</summary>
     /// <remarks>
     /// <c>character-spacing.docx</c> was rendered by LibreOffice 24.2.7.2, which breaks its tracked
