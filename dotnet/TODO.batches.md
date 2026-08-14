@@ -13629,3 +13629,54 @@ candidate fits — rounding the three components separately misses 19 of 75, cei
 the metric every line of every document in all three tracks is measured with, and changing it on
 evidence that names no mechanism is the fudge-factor trap in a different hat. The 75-point table is
 in `dotnet/probes/words-pages-01/results.md` with the instrument that produced it.
+
+---
+
+## 2026-08-14 — first six batches of all three tracks, measured together
+
+Gated with `batch-check.sh` against the banked 26.2.4.2 references, on the integration branch
+after the day's merges. **172 of 178.**
+
+| track | batches 001–006 | remaining |
+|---|---|---|
+| words | **59/60** | `1447.doc` 3/4 pages |
+| slides | **57/58** | `solog_orientation_august_2019.pptx` 670/685 words |
+| sheets | **56/60** | `fse_identification_form`, `Published_Issuances_2024`, and the two Lease-Transition twins |
+
+**Three of the six cannot be won and are recorded as such** in `TODO.raster-ceiling.md`, which now
+documents three distinct shapes of the same problem. `solog` and both Lease-Transition workbooks
+are page-exact with character streams that match once whitespace is stripped; the word deltas are
+`pdftotext` reading LibreOffice's own positioning as word breaks. Chasing them would mean making
+our text layer worse.
+
+`1447.doc`'s residue is the line-height law above — every line break on page 1 now matches the
+reference word for word, and what remains is 13.95 pt against 14.00, accumulating to the margin by
+which our 37th line fits and the reference's does not.
+
+### What moved, and what the moving cost
+
+| | before | after |
+|---|---:|---:|
+| sheets track match (171) | 146 | **154** |
+| words track match (200) | 155 | **157** |
+| slides verdicts (163) | 144 | 144 |
+| sum of sheets word error | 36 545 | **27 151** |
+| Fidelity failures | 31 | **30** |
+
+**The slides row is the one worth reading twice.** That round changed 50 of 163 renderings, fixed
+hyperlink decoration on 47 documents and a placeholder-inheritance bug on 6, and moved **zero**
+gate verdicts. Every fix in it is invisible to all three gate columns.
+
+### The lesson the day actually taught
+
+**A gate row is a reason to go and look. It is not a description of a defect.** Two rounds running,
+the briefed failure was a measurement artefact and the real defects were elsewhere on the same page:
+
+- slides `solog` — briefed as "15 words short". Nothing was missing. Three blind reviewers, none of
+  whom had been told the numbers, independently ranked *undecorated hyperlinks* first.
+- words `1447.doc` + `003.doc` — briefed as one vertical-budget class. Two unrelated defects, a WW8
+  empty-paragraph rule and a font-substitution ordering, and neither was a vertical budget.
+
+Both rounds were dispatched with a brief that named the wrong cause, and both agents overturned it
+and said so. Briefs should carry the measurement and the ruled-out list, and should not carry a
+diagnosis dressed as one.
