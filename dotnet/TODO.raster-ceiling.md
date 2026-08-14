@@ -288,3 +288,37 @@ output and cost nothing but the reading.
 threshold is this file's own, and the section above records that it under-counts; mechanism 2 is
 exact for `pptx` and blind to `.ppt`, which has no `mc:AlternateContent` to census. So 1031.76 is
 an upper bound on what is winnable, and the ranking is the part to trust rather than the total.
+
+---
+
+# The same ceiling with the sign reversed: the reference's count is inflated
+
+Everything above is about pages where **we** extract more words than the reference and are right
+to. The mirror case exists, was measured on 2026-08-14, and belongs in the same file because a
+round working a word-count failure has to rule out both.
+
+**`2017-04-27-Lease-Transition-Records-Checklist-FINAL-1.xlsx` and its
+`2020-01-29` twin** — page-exact at 5/5, **2323 words against the reference's 2498**, on every
+page. It looks exactly like 175 words of lost content. It is not:
+
+- Strip all whitespace from both extractions and the two character streams are **identical apart
+  from one transposed word** — 13 858 characters each side, two diff blocks.
+- The reference carries **310 single-letter tokens against our 154**.
+
+LibreOffice writes intra-word positioning adjustments, and `pdftotext` reads each reposition as a
+word boundary: `L icense`, `M aintenance`, `CM R`. The words are all there and in the right place
+on both sides; only the reference's tokenisation is shattered.
+
+This is the `Tj`-granularity artefact the render-comparison skill records, seen from the other
+end. There it was *ours* fragmenting (`http://www.` counted 48 times); here it is the
+reference's, and the gate reads it as our deficit.
+
+**So when a page-exact document's word count is short, compare the whitespace-stripped character
+streams before believing content is missing.** If they match, the defect is in tokenisation and
+the gate cannot be won on that document — chasing it would mean making our text layer *worse* to
+match poppler's misreading of theirs.
+
+Note these two documents were worked anyway and the work was not wasted: they also had a genuine
+font defect (a declared `family="1"` we ignored, so we set Bell MT in DejaVu Sans where the
+reference sets DejaVu Serif). That is now fixed and the faces match. **The visible page improved;
+the gate column did not move, and never will.**
