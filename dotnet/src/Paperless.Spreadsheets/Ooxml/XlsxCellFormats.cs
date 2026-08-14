@@ -183,6 +183,8 @@ internal static class XlsxCellFormats
             FontWeight = font.Bold is { } bold ? bold ? 700 : 400 : defaultFont.FontWeight,
             IsItalic = font.Italic ?? defaultFont.IsItalic,
             Colour = Resolve(font.Colour, palette) ?? defaultFont.Colour,
+            Underline = font.Underline ?? defaultFont.Underline,
+            IsStruckThrough = font.StruckThrough ?? defaultFont.IsStruckThrough,
         };
     }
 
@@ -312,7 +314,7 @@ internal static class XlsxCellFormats
     /// an underline turns it off. The two accounting styles differ from the plain ones only in how
     /// wide the line is drawn, which is not reproduced — see <see cref="SheetUnderline"/>.
     /// </remarks>
-    private static SheetUnderline UnderlineOf(XElement? element) => element is null
+    internal static SheetUnderline UnderlineOf(XElement? element) => element is null
         ? SheetUnderline.None
         : Xlsx.Attribute(element, "val") switch
         {

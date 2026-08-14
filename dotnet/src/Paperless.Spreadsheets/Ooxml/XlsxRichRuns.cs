@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Xml.Linq;
+using Paperless.Spreadsheets.Layout;
 
 namespace Paperless.Spreadsheets.Ooxml;
 
@@ -21,8 +22,27 @@ internal readonly record struct XlsxRunColour(uint? Rgb, int? Indexed, int? Them
 /// <param name="Bold">Whether the run is bold.</param>
 /// <param name="Italic">Whether it is italic.</param>
 /// <param name="Colour">Its colour, unresolved.</param>
+/// <param name="Underline">The line under the run, or null when it states none.</param>
+/// <param name="StruckThrough">Whether the run is struck through.</param>
+/// <remarks>
+/// <see cref="Underline"/> and <see cref="StruckThrough"/> were absent from this record for
+/// several rounds while the same two properties were read on the <em>cell</em> path, so an
+/// <c>rPr</c> stating <c>&lt;u/&gt;</c> was parsed, discarded, and drawn as plain text. Found by
+/// looking at a page: a reviewer given a German price table reported one cell's first line
+/// underlined in the reference and not in ours. 13 of the corpus's 109 workbooks with a shared
+/// string table state <c>&lt;u&gt;</c> on a run and 6 state <c>&lt;strike&gt;</c> — an upper bound,
+/// since a shared string no cell references is still in the table.
+///
+/// It moves no words, so no gate column can see it, which is why it survived.
+/// </remarks>
 internal sealed record XlsxRunFont(
-    string? Family, double? Points, bool? Bold, bool? Italic, XlsxRunColour? Colour);
+    string? Family,
+    double? Points,
+    bool? Bold,
+    bool? Italic,
+    XlsxRunColour? Colour,
+    SheetUnderline? Underline = null,
+    bool? StruckThrough = null);
 
 /// <summary>One stretch of a rich string, as character offsets into the flattened text.</summary>
 /// <param name="Start">Its first character.</param>
@@ -102,9 +122,18 @@ internal static class XlsxRichRuns
         bool? italic = Toggle(Xlsx.Child(properties, "i"));
         XlsxRunColour? colour = ReadColour(Xlsx.Child(properties, "color"));
 
+        // Null for an absent <u>, which is not the same as SheetUnderline.None: absent means
+        // "keep what the run inherits" and an explicit val="none" turns an inherited line off.
+        // Collapsing the two would leave every underlined run plain, which is the bug this fixes.
+        SheetUnderline? underline = Xlsx.Child(properties, "u") is { } stated
+            ? XlsxCellFormats.UnderlineOf(stated)
+            : null;
+        bool? struckThrough = Toggle(Xlsx.Child(properties, "strike"));
+
         return family is null && points is null && bold is null && italic is null && colour is null
+               && underline is null && struckThrough is null
             ? null
-            : new XlsxRunFont(family, points, bold, italic, colour);
+            : new XlsxRunFont(family, points, bold, italic, colour, underline, struckThrough);
     }
 
     /// <summary>
