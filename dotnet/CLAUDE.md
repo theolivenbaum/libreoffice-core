@@ -417,6 +417,22 @@ nothing in the harness declares it. Before trusting any figure, check `fc-match 
 resolves to DejaVu rather than a fallback — `fc-match` never fails, it always returns
 *something*, which is why the gap survived a whole pass unnoticed.
 
+**But do not use `fc-match` as ground truth for what LibreOffice resolves.** Measured over the
+296 families the corpus names, it agrees with the installed 26.2.4.2 on 288 — and **all eight
+disagreements are `FcNameParse`**, which reads `-` in a family name as a size and `,` as a family
+separator. LibreOffice does no such parsing, so it and `fc-match` genuinely answer different
+questions for any punctuated name. `fc-match "Century Schoolbook"` is safe; `fc-match
+"Foo-Bar, Inc Sans"` is not. When the answer matters, render a one-cell probe through `soffice`
+and read the face out of the PDF.
+
+**Do not use `fc-match` as ground truth for what LibreOffice resolves.** Measured over the 296
+families the corpus names, it agrees with the installed 26.2.4.2 on 288 — and **all eight
+disagreements are `FcNameParse`**, which reads `-` in a family name as a size and `,` as a family
+separator. LibreOffice does no such parsing, so the two genuinely answer different questions for
+any punctuated name. `fc-match "Century Schoolbook"` is safe; `fc-match "Foo-Bar, Inc Sans"` is
+not. When the answer matters, render a one-cell probe through `soffice` and read the face out of
+the PDF.
+
 **And check it at the start of every session, because the install does not survive.**
 `fonts-dejavu-core` was installed and documented as fixed, and a later session found
 `fc-match "DejaVu Sans"` answering `wqy-zenhei.ttc` again — the package was simply absent
