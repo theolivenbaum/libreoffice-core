@@ -19,6 +19,15 @@ namespace Paperless.Spreadsheets.Layout;
 /// <param name="Text">The characters it covers.</param>
 /// <param name="Offset">How far along the run it starts.</param>
 /// <param name="Width">How far its pen travels.</param>
+/// <param name="Underline">The line under this segment alone.</param>
+/// <param name="StruckThrough">Whether this segment alone is struck through.</param>
+/// <remarks>
+/// <see cref="Underline"/> and <see cref="StruckThrough"/> are per segment because they are the
+/// two properties a rich cell can change part-way through a line and the only ones a rule has to
+/// be placed for. <see cref="Offset"/> and <see cref="Width"/> already say where that rule goes,
+/// which is what makes this cheap: the geometry was always here, and the decorations were being
+/// taken from the cell instead.
+/// </remarks>
 internal sealed record SheetTextSegment(
     List<PositionedGlyph> Glyphs,
     List<int> Clusters,
@@ -27,7 +36,9 @@ internal sealed record SheetTextSegment(
     Colour? Colour,
     string Text,
     Length Offset,
-    Length Width);
+    Length Width,
+    SheetUnderline Underline = SheetUnderline.None,
+    bool StruckThrough = false);
 
 /// <summary>A shaped piece of cell text, positioned once it is placed.</summary>
 /// <remarks>
@@ -149,7 +160,11 @@ internal static class SheetText
 
         List<SheetTextSegment> segments = [];
         Length offset = Length.Zero;
-        Append(segments, text, resolved, size, colour, ref offset);
+
+        // No decorations here: a plain cell's underline is the cell's own and is drawn across the
+        // whole line by SheetTextLayout, which is both correct and cheaper than carrying it on
+        // every segment. Only a rich cell needs the per-segment answer.
+        Append(segments, text, resolved, size, colour, SheetUnderline.None, false, ref offset);
 
         return segments.Count == 0 ? null : new SheetTextRun(segments, offset);
     }
@@ -198,7 +213,9 @@ internal static class SheetText
             Length size = SizeOf(portion.Format.FontSize, scale, percent);
             if (size <= Length.Zero) continue;
 
-            Append(segments, text[from..to], face, size, portion.Format.Colour, ref offset);
+            Append(
+                segments, text[from..to], face, size, portion.Format.Colour,
+                portion.Format.Underline, portion.Format.IsStruckThrough, ref offset);
         }
 
         return segments.Count == 0 ? null : new SheetTextRun(segments, offset);
@@ -227,6 +244,8 @@ internal static class SheetText
         SheetFace face,
         Length size,
         Colour? colour,
+        SheetUnderline underline,
+        bool struckThrough,
         ref Length offset)
     {
         List<FaceRun> runs = FontItemiser.Split(
@@ -246,7 +265,7 @@ internal static class SheetText
 
             segments.Add(Segment(
                 text.Substring(run.Start, run.Length), drawn, size, colour, offset,
-                out Length width));
+                underline, struckThrough, out Length width));
             offset += width;
         }
     }
@@ -270,7 +289,8 @@ internal static class SheetText
     }
 
     private static SheetTextSegment Segment(
-        string text, SheetFace face, Length size, Colour? colour, Length offset, out Length width)
+        string text, SheetFace face, Length size, Colour? colour, Length offset,
+        SheetUnderline underline, bool struckThrough, out Length width)
     {
         ShapedText shaped = TextShaper.Default.Shape(face.Face, text, NoKerning);
 
@@ -292,7 +312,8 @@ internal static class SheetText
         }
 
         width = pen;
-        return new SheetTextSegment(glyphs, clusters, face, size, colour, text, offset, pen);
+        return new SheetTextSegment(
+            glyphs, clusters, face, size, colour, text, offset, pen, underline, struckThrough);
     }
 
     /// <summary>How wide a string is in a face, without keeping the run.</summary>

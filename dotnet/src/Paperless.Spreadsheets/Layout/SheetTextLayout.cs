@@ -210,7 +210,22 @@ internal static class SheetTextLayout
                     sink.DrawGlyphRun(run, Paint.Solid(Ink(colour, fallback, cell.IsField)));
                 }
 
-                Decorate(sink, cell.Format, face, line, Ink(null, fallback, cell.IsField));
+                // A rich cell answers per segment, because a run may underline part of a line and
+                // the segment already knows where it starts and how wide it is. A plain cell keeps
+                // the whole-line rule: it has one format, and one rule across the line is what
+                // Calc draws.
+                if (cell.Portions is { Count: > 0 })
+                {
+                    foreach (SheetTextSegment segment in line.Run.Segments)
+                    {
+                        DecorateSegment(
+                            sink, segment, line, Ink(segment.Colour, fallback, cell.IsField));
+                    }
+                }
+                else
+                {
+                    Decorate(sink, cell.Format, face, line, Ink(null, fallback, cell.IsField));
+                }
             }
         }
         finally
@@ -264,18 +279,46 @@ internal static class SheetTextLayout
     /// underline is as wide as its number. See <see cref="SheetUnderline"/>.
     /// </para>
     /// <para>
-    /// Per line and per cell rather than per portion: a rich cell mixing an underlined run with a
-    /// plain one underlines the whole line. The portions carry the format that would answer
-    /// properly, and the run geometry to place a partial rule with does not exist yet.
+    /// Per line for a plain cell, which has one format, and <strong>per segment for a rich
+    /// one</strong> — see <see cref="DecorateSegment"/>. This used to be per line in both cases,
+    /// on the grounds that "the run geometry to place a partial rule with does not exist yet";
+    /// it did, in <see cref="SheetTextSegment"/>'s <c>Offset</c> and <c>Width</c>, and the
+    /// consequence was that a cell underlining only its first run drew no underline at all
+    /// whenever the cell's own font was not underlined — which is how a German price table came
+    /// to lose the rule under <c>Innereuropäische Flüge</c>.
     /// </para>
     /// </remarks>
     private static void Decorate(
         IDrawingSink sink, SheetCellFormat format, SheetFace face, PlacedLine line, Colour colour)
-    {
-        if (format.Underline == SheetUnderline.None && !format.IsStruckThrough) return;
+        => Rules(sink, format.Underline, format.IsStruckThrough, face, line.Run.Size,
+                 line.X, line.Run.Width, line.Baseline, colour);
 
-        Length size = line.Run.Size;
-        Length width = line.Run.Width;
+    /// <summary>
+    /// The rules one segment of a rich cell asks for, under that segment alone.
+    /// </summary>
+    /// <remarks>
+    /// The segment's own face and size are used rather than the line's, because a rich cell can
+    /// change both at a portion boundary and an underline's thickness and offset are read from the
+    /// face it sits under. Its <c>Offset</c> and <c>Width</c> are the geometry whose absence used
+    /// to be the reason this was done per line.
+    /// </remarks>
+    private static void DecorateSegment(
+        IDrawingSink sink, SheetTextSegment segment, PlacedLine line, Colour colour)
+        => Rules(sink, segment.Underline, segment.StruckThrough, segment.Face, segment.Size,
+                 line.X + segment.Offset, segment.Width, line.Baseline, colour);
+
+    private static void Rules(
+        IDrawingSink sink,
+        SheetUnderline underline,
+        bool struckThrough,
+        SheetFace face,
+        Length size,
+        Length x,
+        Length width,
+        Length baseline,
+        Colour colour)
+    {
+        if (underline == SheetUnderline.None && !struckThrough) return;
         if (size <= Length.Zero || width <= Length.Zero) return;
 
         int unitsPerEm = face.Face.UnitsPerEm > 0 ? face.Face.UnitsPerEm : 1000;
@@ -283,23 +326,22 @@ internal static class SheetTextLayout
 
         Length Scaled(int designUnits) => size * ((double)designUnits / unitsPerEm);
 
-        if (format.Underline != SheetUnderline.None)
+        if (underline != SheetUnderline.None)
         {
             Length thickness = Scaled(metrics.UnderlineThickness);
 
             // The font records the underline's offset as negative below the baseline.
-            Length top = line.Baseline - Scaled(metrics.UnderlinePosition);
-            Rule(sink, line.X, top, width, thickness, colour);
+            Length top = baseline - Scaled(metrics.UnderlinePosition);
+            Rule(sink, x, top, width, thickness, colour);
 
-            if (format.Underline == SheetUnderline.DoubleLine)
-                Rule(sink, line.X, top + (thickness * 2), width, thickness, colour);
+            if (underline == SheetUnderline.DoubleLine)
+                Rule(sink, x, top + (thickness * 2), width, thickness, colour);
         }
 
-        if (format.IsStruckThrough)
+        if (struckThrough)
         {
             Length thickness = Scaled(metrics.StrikeoutThickness);
-            Rule(sink, line.X, line.Baseline - Scaled(metrics.StrikeoutPosition),
-                 width, thickness, colour);
+            Rule(sink, x, baseline - Scaled(metrics.StrikeoutPosition), width, thickness, colour);
         }
     }
 
