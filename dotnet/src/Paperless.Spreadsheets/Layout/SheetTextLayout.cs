@@ -622,8 +622,11 @@ internal static class SheetTextLayout
         // three times as tall, which moves every row under it. The seat is that Calc replaces the
         // *engine text* with the hash string after the paper has been decided
         // (`output2.cxx:3605`, `:3849`, `:4070`), so there is nothing left to break.
+        List<int> paragraphStarts = [0];
         List<SheetTextRun> lines = breaks && !hashed
-            ? Wrap(text, portions, face, size, scale, available, ShapeRange, percent, cell.IsField)
+            ? Wrap(
+                text, portions, face, size, scale, available, ShapeRange, percent,
+                out paragraphStarts, cell.IsField)
             : [run];
         if (lines.Count == 0) return new Placement([]);
 
@@ -648,6 +651,15 @@ internal static class SheetTextLayout
         // was fitted against. See `results.md`.
         bool isField = cell.IsField;   // `cell` is an `in` parameter and cannot be captured.
         Length Pitch(SheetTextRun line) => isField ? line.Ascent : line.LineHeight;
+
+        // The lines a wrapping cell has no room for are never formatted, so they are never drawn
+        // and are not in the reference's PDF text layer either. See `SkipOutsideFormat`; this is
+        // the one rule on this path that moves a word count rather than ink.
+        if (breaks && !format.IsRotated
+            && format.Vertical is SheetVerticalAlignment.Top or SheetVerticalAlignment.Standard)
+        {
+            SkipOutsideFormat(lines, paragraphStarts, cell.Box.Height - (2 * margin), Pitch);
+        }
 
         // The block's height is the sum of its lines rather than a pitch times a count, because a
         // rich cell's lines are not all the same height: EditEngine makes a line as tall as the
@@ -691,8 +703,13 @@ internal static class SheetTextLayout
 
         // Everywhere else the clip never cuts the text vertically. Calc does not clip a printed
         // cell's height unless the row's height was set by hand ("no vertical clipping when
-        // printing cells with optimal height", output2.cxx:2093), and a wrapped cell taller than
-        // its row is exactly the case that would lose a line to it.
+        // printing cells with optimal height", output2.cxx:2093).
+        //
+        // That comment used to continue "and a wrapped cell taller than its row is exactly the
+        // case that would lose a line to it", as though the clip were the only way such a cell
+        // could lose one. It is not, and the other way is upstream of every clip: the lines past
+        // the room are never *formatted*. See `SkipOutsideFormat`, which is where a wrapped cell
+        // taller than its row loses its tail — in the text layer as well as in the ink.
         Length textTop = fieldClip
             ? cell.Box.Y
             : Length.Min(cell.Box.Y, placed[0].Baseline - lines[0].Ascent);
@@ -1184,6 +1201,13 @@ internal static class SheetTextLayout
     /// is what LibreOffice does, and why a hyperlinked URL breaks mid-token where the same string
     /// unlinked breaks after a solidus.
     /// </para>
+    /// <para>
+    /// <c>paragraphStarts</c> receives the index, into the returned list, of each line that begins
+    /// a paragraph — always starting with 0. Only <see cref="SkipOutsideFormat"/> reads it, and it
+    /// needs it because Calc's "format at least a few lines" allowance is counted per paragraph
+    /// rather than per cell: <c>nLine</c> in <c>ImpEditEngine::CreateLines</c> is the index within
+    /// one, and the paragraph after a full cell is dropped whole.
+    /// </para>
     /// </remarks>
     private static List<SheetTextRun> Wrap(
         string text,
@@ -1194,8 +1218,11 @@ internal static class SheetTextLayout
         Length available,
         Func<int, int, long, SheetTextRun?> shape,
         long percent,
+        out List<int> paragraphStarts,
         bool atomic = false)
     {
+        paragraphStarts = [0];
+
         SheetTextRun? whole = shape(0, text.Length, percent);
         if (whole is null) return [];
 
@@ -1247,6 +1274,11 @@ internal static class SheetTextLayout
             int end = full;
             while (end > start && IsHardBreak(text[end - 1])) end--;
 
+            // A field's text is one indivisible paragraph however many break characters its
+            // representation happens to hold, so only the real breaker's lines start one.
+            if (!atomic && start > 0 && start <= text.Length && IsHardBreak(text[start - 1]))
+                paragraphStarts.Add(lines.Count);
+
             // A break on its own is an empty paragraph, and an empty paragraph is still a line
             // with a height. It is shaped from the break — a run's ascent and descent come from
             // its face and size rather than from its glyphs — and then emptied, so that the line
@@ -1262,6 +1294,131 @@ internal static class SheetTextLayout
         }
 
         return lines.Count == 0 ? [whole] : lines;
+    }
+
+    /// <summary>
+    /// How many lines of a paragraph are formatted before the room runs out is allowed to stop it.
+    /// </summary>
+    /// <remarks>
+    /// <c>nLine &gt; 2</c> in the guard quoted on <see cref="SkipOutsideFormat"/>, whose own comment
+    /// says why: "Format at least two lines though, in case something detects whether the text has
+    /// been wrapped or something similar." Counted from the outside — the number of lines that
+    /// survive however short the row is — it is <strong>four</strong>, measured rather than read off
+    /// the increment: a 0.2 cm row and a 1.6 cm row both draw four lines of the same cell through
+    /// 26.2.4.2, and so does a 1 cm row at every vertical alignment that truncates at all.
+    /// </remarks>
+    private const int MinimumFormattedLines = 4;
+
+    /// <summary>
+    /// Drops the lines a wrapping cell has no room to format.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>This is not a clip, and reading it as one is what hid it.</strong> A clip cuts ink
+    /// and leaves every glyph in the PDF's text layer — which is why the horizontal rule
+    /// <see cref="ClipTo"/> reproduces moves no word count in either direction. This rule is
+    /// upstream of drawing: the EditEngine is told not to <em>format</em> the lines past the room
+    /// it was given, so they are never laid out, never drawn, and never reach the text layer.
+    /// It is the only thing on this path that moves a word count.
+    /// </para>
+    /// <para>
+    /// Calc switches it on for every cell it sends to <c>DrawEditStandard</c>:
+    /// </para>
+    /// <code>
+    /// rParam.mpEngine->EnableSkipOutsideFormat(rParam.meVerJust==SvxCellVerJustify::Top
+    ///     || rParam.meVerJust==SvxCellVerJustify::Standard);   // output2.cxx:3115
+    /// </code>
+    /// <para>
+    /// and the engine acts on it while it is building the lines
+    /// (<c>ImpEditEngine::CreateLines</c>, <c>impedit3.cxx:1801-1806</c>):
+    /// </para>
+    /// <code>
+    /// if( mbSkipOutsideFormat &amp;&amp; nLine > 2
+    ///     &amp;&amp; !maStatus.AutoPageHeight() &amp;&amp; maPaperSize.Height() &lt; nCurrentPosY )
+    ///     break;
+    /// </code>
+    /// <para>
+    /// with a second, coarser guard one level up that drops a whole paragraph whose first line
+    /// would start past the room (<c>impedit3.cxx:676-680</c>, <c>nPara != 0</c>).
+    /// </para>
+    /// <para>
+    /// <strong>The room is the cell's, and only a wrapping cell has any.</strong>
+    /// <c>calcPaperSize</c> (<c>output2.cxx:2684-2700</c>) sets the engine's paper to
+    /// <c>rAlignRect.GetHeight() - nTopM - nBottomM</c>, and it is called only under
+    /// <c>if (rParam.mbBreak)</c> — a cell that does not wrap keeps the initial
+    /// <c>Size(1000000, 1000000)</c> and is never truncated however many hard breaks it holds.
+    /// </para>
+    /// <para>
+    /// Measured on 26.2.4.2 with an authored twelve-row sweep — Liberation Sans 10 pt in a 4 cm
+    /// column, row heights 0.4 cm to 3.2 cm, pitch 11.20 pt — against
+    /// <c>max(4, floor(paperHeight / pitch) + 1)</c>: <strong>twelve of twelve exact</strong>. Four
+    /// further cases pin the guard rather than the arithmetic, all read out of the reference's own
+    /// output:
+    /// </para>
+    /// <list type="table">
+    ///   <item><term>vertical <c>bottom</c>, row far too short</term>
+    ///     <description>all sixty words drawn — the guard excludes it</description></item>
+    ///   <item><term>vertical <c>middle</c></term><description>likewise, all sixty</description></item>
+    ///   <item><term>vertical unstated (<c>Standard</c>)</term>
+    ///     <description>truncated to four lines, and still placed from the bottom</description></item>
+    ///   <item><term>no wrap, twenty hard-break paragraphs in a 1 cm row</term>
+    ///     <description>all twenty drawn</description></item>
+    /// </list>
+    /// <para>
+    /// The comparison is strict, so a cell whose room is an exact multiple of its pitch gets one
+    /// line more than the multiple: a 58 pt row at 11.20 pt draws <strong>six</strong>. That is
+    /// why this walks and compares rather than dividing — <c>ceil</c> would answer five.
+    /// </para>
+    /// <para>
+    /// <strong>It is not the optimal-height branch.</strong> The <c>CRFlags::ManualSize</c> test at
+    /// <c>output2.cxx:3255-3261</c> decides only whether a hard clip rectangle is emitted around
+    /// the ink; both sides of it truncate. Measured both ways: an authored manual-height row is
+    /// truncated <em>and</em> carries a clip rectangle, and
+    /// <c>sheets/batch-011/xls/T0A0D0000090006XLSE.xls</c>'s optimal-height rows are truncated with
+    /// <strong>no clip operator on the page at all</strong>.
+    /// </para>
+    /// </remarks>
+    /// <param name="lines">The wrapped lines, truncated in place.</param>
+    /// <param name="paragraphStarts">Which of them begin a paragraph; see <see cref="Wrap"/>.</param>
+    /// <param name="paperHeight">The cell's height less its top and bottom margins.</param>
+    /// <param name="pitch">How far each line advances the next one.</param>
+    private static void SkipOutsideFormat(
+        List<SheetTextRun> lines,
+        List<int> paragraphStarts,
+        Length paperHeight,
+        Func<SheetTextRun, Length> pitch)
+    {
+        Length y = Length.Zero;
+        int nextParagraph = 0;
+        int inParagraph = 0;
+
+        for (int at = 0; at < lines.Count; at++)
+        {
+            if (nextParagraph < paragraphStarts.Count && paragraphStarts[nextParagraph] == at)
+            {
+                // A paragraph after the first is not formatted at all when the ones before it
+                // have already used the room up — no line of it survives, not even the
+                // allowance below.
+                if (nextParagraph > 0 && y > paperHeight)
+                {
+                    lines.RemoveRange(at, lines.Count - at);
+                    return;
+                }
+
+                nextParagraph++;
+                inParagraph = 0;
+            }
+
+            y += pitch(lines[at]);
+
+            if (inParagraph >= MinimumFormattedLines - 1 && y > paperHeight)
+            {
+                lines.RemoveRange(at + 1, lines.Count - at - 1);
+                return;
+            }
+
+            inParagraph++;
+        }
     }
 
     /// <summary>
