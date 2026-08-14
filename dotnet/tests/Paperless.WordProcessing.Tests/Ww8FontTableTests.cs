@@ -9,10 +9,22 @@ namespace Paperless.WordProcessing.Tests;
 /// declares for its family.
 /// </summary>
 /// <remarks>
+/// <para>
 /// The shape is not decoration. A family that is neither installed nor substitutable falls back by
 /// shape, and on a Linux box that is the common case rather than the exception — so an <c>FFN</c>
 /// whose <c>ff</c> field says roman is the difference between a document rendering in DejaVu Serif,
 /// as LibreOffice renders it, and in DejaVu Sans, which moves every line break in it.
+/// </para>
+/// <para>
+/// It also reaches families the substitution chain <em>would</em> have answered, which is what makes
+/// this worth reading rather than merely worth having. <c>words/batch-004/doc/1447.doc</c> sets its
+/// body in a family called <c>Times</c> with <c>ff = FF_ROMAN</c>. `Times` has a chain entry that is
+/// installed — <c>liberationserif</c> — so before the declaration was read at the right point we
+/// answered Liberation Serif, while LibreOffice 26.2.4.2 draws the whole document in DejaVu Serif.
+/// The line advances name the two faces outright, 13.80 pt against 14.00 at 12 pt, and the reference
+/// fits about 11% fewer characters to the line: its first paragraph takes nine lines where ours took
+/// seven. See <c>dotnet/probes/words-pages-01/results.md</c>.
+/// </para>
 /// </remarks>
 public class Ww8FontTableTests
 {

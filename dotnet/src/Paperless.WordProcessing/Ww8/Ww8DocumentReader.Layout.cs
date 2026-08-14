@@ -900,7 +900,7 @@ public sealed partial class Ww8DocumentReader
             Ww8ParagraphFormat format = ResolveParagraphFormat(markPosition);
 
             Ww8LayoutParagraph paragraph =
-                Describe(current.ToString(), positions, body.Start + start, markPosition) with
+                Describe(current.ToString(), positions, body.Start + start, markPosition, body.Start) with
                 {
                     Notes = _pendingNotes.Count == 0 ? null : [.. _pendingNotes],
                     Frames = _pendingFrames.Count == 0 ? null : [.. _pendingFrames],
@@ -1198,15 +1198,17 @@ public sealed partial class Ww8DocumentReader
     /// properties, which is a mistake that produces a document formatted one paragraph out of step.
     /// </remarks>
     private Ww8LayoutParagraph Describe(
-        string text, List<int> positions, int start, int markPosition)
+        string text, List<int> positions, int start, int markPosition, int storyStart = 0)
     {
         Ww8LayoutFormat layout = ResolveLayoutFormat(markPosition);
         Ww8ParagraphFormat paragraph = ResolveParagraphFormat(markPosition);
 
         // The run properties at the paragraph's mark, which is what its mark carries and what an empty
         // paragraph is as tall as. The text's own formatting comes from the runs below.
-        Ww8LayoutFormat character = ResolveCharacterLayout(
-            Math.Min(Math.Max(start, 0), Math.Max(markPosition, 0)));
+        int at = Math.Min(Math.Max(start, 0), Math.Max(markPosition, 0));
+        Ww8LayoutFormat character = text.Length == 0
+            ? EmptyParagraphCharacterLayout(at, storyStart)
+            : ResolveCharacterLayout(at);
 
         Length size = SizeOf(character);
 
@@ -1732,6 +1734,53 @@ public sealed partial class Ww8DocumentReader
         => ApplyCharacterException(
             CharacterStyleFormat(position),
             _characterProperties.Find(_pieces.FileOffsetOf(position)));
+
+    /// <summary>
+    /// The character sprms an <em>empty</em> paragraph is as tall as.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Its own mark's CHPX when the mark carries one, and otherwise <strong>the CHPX in force at the
+    /// position before it</strong> — which is the previous paragraph's mark. That second half is the rule,
+    /// and it is not a guess about intent: a CHPX exception whose FKP range <em>ends</em> at this mark is
+    /// still open when LibreOffice's reader consumes the previous mark, and consuming a mark is what
+    /// appends the next (here empty) node — so the reader closes the attribute at offset 0 of a node that
+    /// has no characters, and a zero-length hint on an empty node covers all of it. The empty paragraph
+    /// comes out as tall as the run that ended just above it.
+    /// </para>
+    /// <para>
+    /// Measured on <c>003.doc</c>, whose CHPX FKP reads (fc ranges, ours to name the CPs):
+    /// <c>[35..62] 14pt</c>, <c>[63..72] none</c>, <c>[73..83] 36pt</c>, <c>[84] none</c>,
+    /// <c>[85] 14pt</c>, <c>[86..] none</c>. LibreOffice draws the empty paragraphs at cp 63, 84 and 86 at
+    /// 14, 36 and 14 pt and the ones at cp 64-72 and cp 87 at the style's 12 pt: every one of the seven
+    /// agrees with this rule, including the five that must <em>not</em> inherit. Reading only the mark's
+    /// own CHPX made three of them 12 pt, 32.20 pt short over one page — enough for two extra empty
+    /// paragraphs to fit at the foot of page 1 and for the document to lose its last page.
+    /// </para>
+    /// <para>
+    /// The inherited half is only the <em>exception</em>. The paragraph style stays this paragraph's own,
+    /// because what LibreOffice carries across the mark is a character attribute and not a style: an empty
+    /// Normal paragraph after a Heading 7 whose CHPX states nothing but bold must come out 12 pt bold, not
+    /// 26 pt.
+    /// </para>
+    /// <para>
+    /// Never across a story boundary. The first paragraph of a header, a footnote or a text box has no
+    /// "position before it" in its own flow, and the character before its start belongs to another story
+    /// entirely.
+    /// </para>
+    /// </remarks>
+    private Ww8LayoutFormat EmptyParagraphCharacterLayout(int position, int storyStart)
+    {
+        Ww8LayoutFormat own = ResolveCharacterLayout(position);
+        if (position <= storyStart) return own;
+
+        if (!_characterProperties.Find(_pieces.FileOffsetOf(position)).IsEmpty) return own;
+
+        ReadOnlyMemory<byte> before = _characterProperties.Find(_pieces.FileOffsetOf(position - 1));
+        return before.IsEmpty
+            ? own
+            : ApplyCharacterException(CharacterStyleFormat(position), before);
+    }
 
     /// <summary>
     /// Applies one CHPX over an inherited format: its character style first, then its own sprms.
