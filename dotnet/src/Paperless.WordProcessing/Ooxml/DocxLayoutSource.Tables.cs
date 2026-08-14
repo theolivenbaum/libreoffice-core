@@ -111,6 +111,8 @@ public sealed partial class DocxLayoutSource
             HeaderRowCount = HeadingRows(rows),
             LeftIndent = LeftEdge(properties, rows, isNested: _tableDepth > 0),
             HorizontalPosition = HorizontalPositionOf(properties),
+            IsPositioned = Word.Child(properties, "tblpPr") is not null,
+            LowerSpacing = Twips(Word.Child(properties, "tblpPr"), "bottomFromText") ?? Length.Zero,
             JoinsBordersLikeWord = true,
         };
     }

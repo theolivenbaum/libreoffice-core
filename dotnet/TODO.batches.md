@@ -13721,3 +13721,44 @@ had been getting DejaVu Sans Mono by accident, through `VCL.xcu`'s `Fixed`. `pit
 family class, which nothing has measured on a slide.
 
 `dotnet/probes/font-class-01/results.md`.
+
+---
+
+## 2026-08-14 — a positioned table in a running head is a frame, and its lower spacing sets the head's height
+
+`words/batch-010/docx/5709.16 ch.40_mgfinal.docx` was 31 pages against 32, and the whole of it was
+**11.00 pt of header height repeated on every page** — one step at the head/body boundary, not a
+per-line deficit. The reference was checked for determinism first (five identical conversions) and
+the line-height residue ruled out by the pitch inside the body being exact.
+
+Writer turns a `w:tblpPr` table into a fly holding a table, and in a *header* the anchor paragraph's
+text does not wrap around it — measured by perturbing the flat ODF and re-rendering on 26.2.4.2:
+
+> **head height = `max(in-flow content height, frame bottom + the frame's lower spacing)`**
+
+The lower spacing is `w:bottomFromText`, which was read nowhere. **Set it to nought in the flat ODF
+and LibreOffice's own rendering becomes 31 pages** — our page count, reproduced in the reference by
+removing the one property we were missing.
+
+| words track (200) | baseline | after |
+|---|---:|---:|
+| match | 158 | **159** |
+| page-exact | 166 | **167** |
+| total absolute page error | 113 | **110** |
+| renderings changed | — | **4** |
+
+The four are exactly the four documents with a positioned table in a header or footer; the other 196
+are byte-identical. `batch-010` is **9/9** and batches 001–010 are **98/99**, the remainder being
+`1447.doc` at 3/4. The body is deliberately untouched — there the fly *does* wrap its anchor's text,
+which in-flow stacking already approximates, and 21 corpus documents hold one in the body against 4
+in a head or foot.
+
+**The blind page reading found a second defect the gate cannot see, and it is now the strongest open
+words lead.** Page 30 was page-exact and still eight lines out of step: our page 7 leaves a
+`keepNext` heading alone at its foot where the reference moves it down. Deleting
+`fo:keep-with-next` from the flat ODF makes LibreOffice produce our page break exactly, so the seat
+is certain — `Paginator`'s keep-with-next asks whether the successor's *first line* fits, and the
+successor here moves for orphan control instead. Left for its own round: it reaches every document
+with a `keepNext` heading.
+
+`dotnet/probes/words-b010-01/results.md`.

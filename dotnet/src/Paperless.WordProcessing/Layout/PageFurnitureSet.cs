@@ -205,7 +205,11 @@ public sealed class PageFurnitureSet
                 : blocks,
             area, offsetFromTop,
             collapsesSpacing: collapsesSpacing,
-            addsCellLineSpacing: addsCellLineSpacing);
+            addsCellLineSpacing: addsCellLineSpacing,
+
+            // A running head or foot is the one flow where a positioned table is a frame its neighbours do
+            // not move out of the way of — see `FlowLayouter.LayOut`, which carries the measurement.
+            floatsPositionedTables: true);
         cache[key] = placed;
         return placed;
     }
