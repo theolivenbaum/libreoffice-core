@@ -185,14 +185,19 @@ internal static class SheetTextLayout
         // region to the same rectangle it aligned in (output2.cxx:2126) and only when it is
         // needed, which is worth keeping: a clip per cell would put two operators around every
         // run in the file.
-        bool clipped = placement.Clipped;
+        //
+        // `ClipPathKeepingText`, because a cell's words are the document's own: LibreOffice cuts
+        // the ink at the same edge and leaves every glyph in its PDF's text layer, and dropping
+        // them instead lost 124 words on one workbook alone. See
+        // <see cref="IDrawingSink.ClipPathKeepingText"/>.
+        (bool clipped, Length clipLeft, Length clipRight) = ClipTo(context, placement);
         if (clipped)
         {
             sink.Save();
-            sink.ClipPath(Rectangle(new DocRect(
-                placement.Left,
+            sink.ClipPathKeepingText(Rectangle(new DocRect(
+                clipLeft,
                 placement.Top,
-                placement.Right - placement.Left,
+                clipRight - clipLeft,
                 placement.Bottom - placement.Top)));
         }
 
@@ -272,6 +277,82 @@ internal static class SheetTextLayout
     private static bool IsOutside(in SheetTextContext context, in Placement placement)
         => context.BlockRight > context.BlockLeft
            && (placement.Right <= context.BlockLeft || placement.Left >= context.BlockRight);
+
+    /// <summary>
+    /// The rectangle the ink is cut to, and whether it has to be cut at all.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>ScOutputData::AdjustAreaParamClipRect</c> (<c>output2.cxx:2928-2954</c>), and it is not
+    /// the clamp its name suggests. It trims the output area to the printed block —
+    /// <c>[mnScrX, mnScrX + mnScrW]</c> — and where it has to trim it <strong>sets
+    /// <c>mbLeftClip</c> or <c>mbRightClip</c></strong>. <c>LayoutStrings</c> computes
+    /// <c>bHClip</c> from those two flags <em>after</em> calling it (<c>:2038-2039</c>), and
+    /// <c>DrawEditStandard</c> ors them into <c>bClip</c> the same way (<c>:3239</c>), so the trim
+    /// does not merely narrow a clip that was going to be set anyway: <strong>it turns one on for
+    /// a cell whose text fitted the room it was given perfectly well.</strong> A merge wider than
+    /// the columns the page prints is the commonest way in; a long string that overflows into free
+    /// neighbours past the block's last column is the other.
+    /// </para>
+    /// <para>
+    /// Measured on 26.2.4.2 with <c>sheet-clip-block.fods</c> — five 3 cm columns to a page, so the
+    /// block runs 56.693–481.890 pt — by reading the reference's own content stream:
+    /// </para>
+    /// <list type="table">
+    ///   <item><term>a long string in A, free neighbours</term>
+    ///     <description><c>56.693..481.890</c>: the area was widened past the block and trimmed
+    ///     back</description></item>
+    ///   <item><term>a long string in E, the page's last column</term>
+    ///     <description><c>396.850..481.889</c>: trimmed at the block, not at column F</description></item>
+    ///   <item><term>a merge C:H centred, straddling the break</term>
+    ///     <description><c>226.772..481.890</c> on page 1 and <c>56.693..311.754</c> on page 2:
+    ///     trimmed at the near edge of the block each time</description></item>
+    ///   <item><term>a long string in C blocked by D</term>
+    ///     <description><c>226.772..311.755</c>: the ordinary case, the cell's own edge</description></item>
+    ///   <item><term>a string that fits</term><description>no clip at all</description></item>
+    /// </list>
+    /// <para>
+    /// <strong>This is what "it is not a clipping rule" missed.</strong> That reading measured a
+    /// rightward overflow reaching 617.63 pt on a 612 pt page and concluded the run was not
+    /// clipped — but it measured the <em>text layer</em>, which a clip region never touches. The
+    /// glyphs stay in the PDF's text and only the ink is cut, which is exactly why this defect
+    /// survived a word-count gate untouched on both documents that showed it.
+    /// </para>
+    /// <para>
+    /// Only the horizontal half is reproduced. Calc trims the vertical to
+    /// <c>[mnScrY, mnScrY + mnScrH]</c> by the same code and widens the unclipped axis to the whole
+    /// block (<c>:2114-2123</c>); nothing measured in the corpus turns on it, our vertical extent
+    /// is deliberately the union of the cell and its text rather than a cut (see
+    /// <see cref="Place"/>), and <see cref="RowBand"/> carries no bottom edge to trim against.
+    /// </para>
+    /// </remarks>
+    private static (bool Clipped, Length Left, Length Right) ClipTo(
+        in SheetTextContext context, in Placement placement)
+    {
+        Length left = placement.Left;
+        Length right = placement.Right;
+
+        // Asked after IsOutside and never before it, which is Calc's order: bOutside is decided
+        // against the untrimmed area (output2.cxx:2036) and would answer "inside" for every cell
+        // once the area had been folded into the block.
+        if (context.BlockRight <= context.BlockLeft)
+            return (placement.Clipped, left, right);
+
+        bool trimmed = false;
+        if (left < context.BlockLeft)
+        {
+            left = context.BlockLeft;
+            trimmed = true;
+        }
+
+        if (right > context.BlockRight)
+        {
+            right = context.BlockRight;
+            trimmed = true;
+        }
+
+        return (placement.Clipped || trimmed, left, right);
+    }
 
     /// <summary>
     /// Draws the rules a font asks for under and through one line of a cell.

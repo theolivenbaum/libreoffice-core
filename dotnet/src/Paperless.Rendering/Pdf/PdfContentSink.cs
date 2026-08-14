@@ -159,6 +159,22 @@ internal sealed class PdfContentSink(
         _clip = _clip is { } existing ? Intersect(existing, box) : box;
     }
 
+    /// <inheritdoc/>
+    /// <remarks>
+    /// The clip reaches the page exactly as <see cref="ClipPath"/>'s does; what it does not do is
+    /// join <c>_clip</c>, which exists for <see cref="Hidden"/> and for nothing else. So the ink
+    /// is cut and the glyphs stay in the text layer — which is what LibreOffice's own PDF does for
+    /// a cell trimmed at the edge of the columns a page prints. Any enclosing text-hiding clip is
+    /// still in <c>_clip</c> and still applies.
+    /// </remarks>
+    public void ClipPathKeepingText(GraphicsPath path, FillRule rule = FillRule.NonZero)
+    {
+        ArgumentNullException.ThrowIfNull(path);
+        if (path.Commands.Count == 0) return;
+
+        AppendClip(path, rule);
+    }
+
     /// <summary>Writes the <c>cm</c> a transform is, without recording it.</summary>
     /// <remarks>
     /// Split out from <see cref="Transform"/> because the fills below state a transform inside
