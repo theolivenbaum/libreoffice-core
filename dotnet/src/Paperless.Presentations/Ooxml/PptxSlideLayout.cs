@@ -1750,7 +1750,7 @@ internal sealed partial class PptxSlideLayout
             width,
             cap,
             Join(line),
-            DashPattern: SlideDashes.Pattern(
+            DashPattern: DashPresets.Pattern(
                 Drawing.Attribute(Drawing.Child(line, "prstDash"), "val"),
                 width,
                 capExtendsDash: cap != LineCap.Butt));

@@ -61,7 +61,8 @@ internal static class SheetChart
         foreach (ChartLine line in drawing.Lines)
         {
             sink.StrokePath(
-                new GraphicsPath().MoveTo(line.From).LineTo(line.To), Pen(line.Colour, line.Width));
+                new GraphicsPath().MoveTo(line.From).LineTo(line.To),
+                Pen(line.Colour, line.Width, line.DashPattern, line.Cap));
         }
 
         // The free-form marks — wedges, polylines, areas — after the axes and before the text.
@@ -70,7 +71,8 @@ internal static class SheetChart
             if (shape.Path.Commands.Count == 0) continue;
 
             if (shape.Fill is { } fill) sink.FillPath(shape.Path, Paint.Solid(fill));
-            if (shape.Line is { } line) sink.StrokePath(shape.Path, Pen(line, shape.LineWidth));
+            if (shape.Line is { } line)
+                sink.StrokePath(shape.Path, Pen(line, shape.LineWidth, shape.DashPattern, shape.Cap));
         }
 
         foreach (ChartLabel label in drawing.Labels) Text(sink, label);
@@ -107,8 +109,10 @@ internal static class SheetChart
     /// thinnest line the device has. Substituting a visible width makes every gridline and every
     /// bar outline heavier than the reference's.
     /// </remarks>
-    private static Stroke Pen(Colour colour, Length width)
-        => new(Paint.Solid(colour), width, LineCap.Butt, LineJoin.Miter);
+    private static Stroke Pen(
+        Colour colour, Length width, IReadOnlyList<Length>? dash = null,
+        LineCap cap = LineCap.Butt)
+        => new(Paint.Solid(colour), width, cap, LineJoin.Miter, DashPattern: dash);
 
     /// <summary>
     /// Draws one label, shaped and placed by its anchor.
