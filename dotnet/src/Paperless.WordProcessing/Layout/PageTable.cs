@@ -250,6 +250,36 @@ public sealed record PageTable : PageBlock
     public FrameHorizontalAlignment? HorizontalPosition { get; init; }
 
     /// <summary>
+    /// True when the table is <em>positioned</em> — it names a place on the page rather than following the
+    /// text, which in Writer makes it a frame holding a table rather than a table in the flow.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Not the same question as <see cref="HorizontalPosition"/>, which is null for a positioned table that
+    /// states no <c>w:tblpXSpec</c> — two of the corpus's four running heads holding one are positioned
+    /// against the page's own edges by <c>w:tblpX</c>, with no spec at all. So the flag is carried
+    /// separately rather than read off the alignment.
+    /// </para>
+    /// <para>
+    /// What it changes is <em>where the flow it sits in has got to</em>, and only in a running head or
+    /// foot — see <see cref="FlowLayouter.LayOut"/>. Everywhere else the table keeps the in-flow placement
+    /// it has always had.
+    /// </para>
+    /// </remarks>
+    public bool IsPositioned { get; init; }
+
+    /// <summary>
+    /// The space a positioned table keeps clear below itself — OOXML's <c>w:bottomFromText</c>.
+    /// </summary>
+    /// <remarks>
+    /// A frame's lower spacing rather than a table's space-after, which is why it is not
+    /// <see cref="SpaceAfter"/>: Writer writes it as the fly's <c>fo:margin-bottom</c>, it belongs to the
+    /// frame rather than to the table inside it, and it is only ever consulted for a table that
+    /// <see cref="IsPositioned"/>.
+    /// </remarks>
+    public Length LowerSpacing { get; init; }
+
+    /// <summary>
     /// Where the table's left edge sits inside an area of a given width, measured from that area's own
     /// left edge.
     /// </summary>
