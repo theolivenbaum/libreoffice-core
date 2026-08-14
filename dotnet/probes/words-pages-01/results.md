@@ -279,3 +279,24 @@ instrument, and a refutation to start from.
   because no reader outside word processing sets `DeclaredFamily`.
 * **`ABCD-FE-01-00` and `ABCD-WB-08-00`** now embed one face more than the reference. A
   `Times-Roman` or `Cambria Math` entry the reference puts no glyph in.
+
+---
+
+## 6. Scoring `prediction.md`
+
+| # | claim | conf | outcome |
+|---|---|---:|---|
+| P1 | The WW8 rule makes `003.doc` 5 pages and a `match`. | 0.85 | **right** |
+| P2 | The family-class rule makes `1447.doc` 4 pages and a `match`. | 0.75 | **wrong** — the faces match the reference exactly and every line break on page 1 does too, and the document is still 3 pages. The one-twip line height finished it, and I had no reason to suspect a second cause behind the first. |
+| P3 | The WW8 rule changes 3-12 renderings, no more than 2 verdicts backwards. | 0.55 | **right** — 3 renderings, 0 backwards. At the very bottom of the interval. |
+| P4 | The family-class rule changes 10-45 renderings. | 0.60 | **right** — 33 (13 `.doc`, 20 `.docx`). The stated failure mode was that it might reach nothing; it did not. |
+| P5 | Net verdicts improve by at least 2 and the page error falls. | 0.60 | **right** — 155 → 157, 115 → 113. Exactly at the boundary, so this is a weak pass. |
+| P6 | Neither rule touches `batch-001`..`batch-003`. | 0.50 | **wrong** — one `batch-003` rendering changed. It kept its verdict. |
+| P7 | 1 to 4 currently-matching documents break. | 0.65 | **wrong, and wrong in the good direction** — none did. One *page-exact* document lost its page-exactness, but it was already failing the gate on words and it gained the reference's exact face set doing it. |
+
+Four of seven. The two misses that matter are P2 and P7, and they miss in opposite directions: the
+font fix did less than predicted to the page count of the document it was derived from, and more
+than predicted to the rest of the track without costing anything. Both are the same underlying
+mistake — **treating a font substitution as a pagination fix**. It is a *rendering* fix that
+sometimes moves a page count, which is why the face-set table in §2 is the honest measure of it and
+the gate's two verdicts are not.
