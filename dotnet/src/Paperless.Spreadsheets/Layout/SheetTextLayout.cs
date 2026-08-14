@@ -414,10 +414,19 @@ internal static class SheetTextLayout
         bool isValue = cell.Value is not null and not string;
         SheetHorizontalAlignment horizontal = Resolve(format.Horizontal, isValue);
 
-        // A field is one indivisible portion, so a cell that is nothing but a hyperlink does not
-        // break however narrow its column is — and the clip `bWrapFields` turns on is what keeps
-        // it from being drawn across its neighbour instead (output2.cxx:2560-2567, :3239).
-        bool breaks = Breaks(format, isValue) && !cell.IsField;
+        // A field cell wraps like any other; what it does *not* have is anywhere to wrap. The
+        // comment beside `rWrapFields` — "Fields aren't wrapped, so clipping is enabled to prevent
+        // a field from being drawn beyond the cell size" (output2.cxx:2560-2567) — describes the
+        // clip it switches on at :3239, not a suppression of breaking: `mbBreak` is untouched, so
+        // the EditEngine paper stays the column's width and the text still has to fit it. Reading
+        // it as "does not break" cost 22 rows of `Published_Issuances_2024.xlsx` their second line.
+        //
+        // The clip is why `breaks` has to be true here rather than only inside `Wrap`: it is what
+        // passes `blocked` to `OutputArea` and stops a field borrowing an empty neighbour.
+        //
+        // Where a field differs is that it is atomic to the *breaker* — see `SheetFieldBreaker`,
+        // which `Wrap` uses instead, and which turns every one of its lines into a chop.
+        bool breaks = Breaks(format, isValue);
         bool fills = format.Horizontal == SheetHorizontalAlignment.Fill && !breaks;
         bool shrinks = format.ShrinksToFit && !breaks && !fills;
 
@@ -533,15 +542,39 @@ internal static class SheetTextLayout
         // *engine text* with the hash string after the paper has been decided
         // (`output2.cxx:3605`, `:3849`, `:4070`), so there is nothing left to break.
         List<SheetTextRun> lines = breaks && !hashed
-            ? Wrap(text, portions, face, size, scale, available, ShapeRange, percent)
+            ? Wrap(text, portions, face, size, scale, available, ShapeRange, percent, cell.IsField)
             : [run];
         if (lines.Count == 0) return new Placement([]);
 
+        // How far down the next line starts. A field's lines are set closer together than any
+        // other cell's, and the gap is not small: LibreOffice advances by the face's **ascent
+        // alone**, where every other cell advances by ascent plus descent.
+        //
+        // Measured, because no reading of the source predicts it. `dotnet/probes/sheets-wrap-01`
+        // holds sixteen single-cell workbooks — Calibri, Arial, DejaVu Sans and Times New Roman at
+        // 8, 10, 14 and 20 pt — each one hyperlinked, wrap-enabled, and holding a run of `X` so
+        // that every line chops at the same glyph and the gap between two lines' bounding boxes is
+        // the pitch exactly. All sixteen line *counts* already agreed; all sixteen pitches came
+        // back at the face's `hhea` ascent, to the tenth of a point the reference's device
+        // quantises to. Carlito reads 9.50 pt at 10 pt against an ascent of 1950/2048 em = 9.52,
+        // where `LineHeightAt` is 12.21; Liberation Sans 9.10 against 1854/2048 em = 9.05;
+        // DejaVu Sans 9.30 against 1901/2048 em = 9.28; Liberation Serif 8.90 against
+        // 1824/2048 em = 8.91.
+        //
+        // **What was measured is fields, and only fields.** Whether the same holds for the other
+        // cells Calc sends to an EditEngine — a rich cell, one holding a hard break — is untested
+        // here and deliberately not assumed: those keep `LineHeight`, which is what the corpus
+        // was fitted against. See `results.md`.
+        bool isField = cell.IsField;   // `cell` is an `in` parameter and cannot be captured.
+        Length Pitch(SheetTextRun line) => isField ? line.Ascent : line.LineHeight;
+
         // The block's height is the sum of its lines rather than a pitch times a count, because a
         // rich cell's lines are not all the same height: EditEngine makes a line as tall as the
-        // tallest portion on it. For a cell in one face the two are the same number.
-        Length textHeight = Length.Zero;
-        foreach (SheetTextRun line in lines) textHeight += line.LineHeight;
+        // tallest portion on it. For a cell in one face the two are the same number. The last line
+        // contributes its whole height whatever the pitch is — there is nothing below it to close
+        // up against.
+        Length textHeight = lines[^1].LineHeight;
+        for (int at = 0; at < lines.Count - 1; at++) textHeight += Pitch(lines[at]);
 
         Length top = VerticalOffset(format.Vertical, cell.Box.Height, textHeight, margin);
         Length y = cell.Box.Y + top;
@@ -555,18 +588,39 @@ internal static class SheetTextLayout
                     horizontal, cell.Box, AlignedWidth(horizontal, line, breaks ? available : Length.Zero),
                     leftTotal, margin + indent, margin),
                 y + line.Ascent));
-            y += line.LineHeight;
+            y += Pitch(line);
         }
 
-        // The clip never cuts the text vertically. Calc does not clip a printed cell's height
-        // either unless the row's height was set by hand ("no vertical clipping when printing
-        // cells with optimal height", output2.cxx:2093), and a wrapped cell taller than its row is
-        // exactly the case that would lose a line to it.
-        Length textTop = Length.Min(cell.Box.Y, placed[0].Baseline - lines[0].Ascent);
-        Length textBottom = Length.Max(
-            cell.Box.Y + cell.Box.Height, placed[^1].Baseline + lines[^1].Descent);
+        // A wrapping field is clipped to its cell, vertically as well as horizontally, and always
+        // — `bWrapFields` is OR'd straight into `bClip` before anything is measured
+        // (`ScOutputData::Clip`, output2.cxx:3442-3445), so the "don't clip for text height when
+        // printing rows with optimal height" branch below it never gets to say otherwise. The clip
+        // rectangle is `aAreaParam.maClipRect`, which the text never grew.
+        //
+        // Read out of the reference's own content stream on `Published_Issuances_2024.xlsx`: 22
+        // clip rectangles, one per link cell, each `402.096..534.824` wide and each exactly as tall
+        // as its row — 19.006, 12.939, 6.872, 28.689 — including the tall rows where nothing
+        // overflows. Ours had grown four of them to 12.671 and 14.087 to fit the text, and two
+        // blind reviewers reading the rendered pair independently reported the consequence: our
+        // second line painted over the row beneath it where the reference's is cut off.
+        //
+        // The `re W* n` these appear as is why an earlier grep found none: LibreOffice writes the
+        // even-odd form, and a pattern written for `W n` reports a reference that never clips.
+        bool fieldClip = breaks && cell.IsField;
 
-        return new Placement(placed, area.IsClipped, area.Left, area.Right, textTop, textBottom);
+        // Everywhere else the clip never cuts the text vertically. Calc does not clip a printed
+        // cell's height unless the row's height was set by hand ("no vertical clipping when
+        // printing cells with optimal height", output2.cxx:2093), and a wrapped cell taller than
+        // its row is exactly the case that would lose a line to it.
+        Length textTop = fieldClip
+            ? cell.Box.Y
+            : Length.Min(cell.Box.Y, placed[0].Baseline - lines[0].Ascent);
+        Length textBottom = fieldClip
+            ? cell.Box.Y + cell.Box.Height
+            : Length.Max(cell.Box.Y + cell.Box.Height, placed[^1].Baseline + lines[^1].Descent);
+
+        return new Placement(
+            placed, area.IsClipped || fieldClip, area.Left, area.Right, textTop, textBottom);
     }
 
     /// <summary>
@@ -1042,6 +1096,13 @@ internal static class SheetTextLayout
     /// are the same in a cell as in a paragraph, and having two implementations of them would mean
     /// two sets of break positions to keep in step. Only the vertical geometry is Calc's own, so
     /// only the line <em>ranges</em> are taken from the result and the pitch is applied here.
+    /// <para>
+    /// <paramref name="atomic"/> is true for a cell that is one EditEngine field. The layouter is
+    /// then given <see cref="SheetFieldBreaker"/> instead of the Unicode one, so the text offers no
+    /// break opportunity and every line it produces is the fill loop's character-level chop — which
+    /// is what LibreOffice does, and why a hyperlinked URL breaks mid-token where the same string
+    /// unlinked breaks after a solidus.
+    /// </para>
     /// </remarks>
     private static List<SheetTextRun> Wrap(
         string text,
@@ -1051,7 +1112,8 @@ internal static class SheetTextLayout
         double scale,
         Length available,
         Func<int, int, long, SheetTextRun?> shape,
-        long percent)
+        long percent,
+        bool atomic = false)
     {
         SheetTextRun? whole = shape(0, text.Length, percent);
         if (whole is null) return [];
@@ -1061,11 +1123,24 @@ internal static class SheetTextLayout
         // shortcut is conditional — a cell with no break in it measures and draws exactly as it
         // did. `LineCount` beside this has always split on the break first, so before this the
         // reserved row height and the drawn lines were computed by two rules that disagreed.
-        if (available <= Length.Zero || (whole.Width <= available && !HoldsHardBreak(text)))
+        //
+        // A field takes the shortcut on width alone: its representation is not in the content
+        // node, so a break character inside one is a character like any other and starts nothing.
+        if (available <= Length.Zero
+            || (whole.Width <= available && (atomic || !HoldsHardBreak(text))))
             return [whole];
 
-        ParagraphLayouter layouter = Layouters.GetOrAdd(
-            face.Reference.FaceKey, _ => new ParagraphLayouter(face.Face, shaper: SheetFonts.Shaper));
+        // Two layouters per face, because the breaker is fixed at construction and the cache is
+        // keyed by string. The prefix cannot collide with a face key, which is what `Ordinal`
+        // comparison on the key makes safe.
+        ParagraphLayouter layouter = atomic
+            ? Layouters.GetOrAdd(
+                " field " + face.Reference.FaceKey,
+                _ => new ParagraphLayouter(
+                    face.Face, breaker: SheetFieldBreaker.Instance, shaper: SheetFonts.Shaper))
+            : Layouters.GetOrAdd(
+                face.Reference.FaceKey,
+                _ => new ParagraphLayouter(face.Face, shaper: SheetFonts.Shaper));
 
         // A rich cell breaks against its own runs rather than against one face, through the
         // layouter's run-aware overload: a bold word is wider than the same characters set
