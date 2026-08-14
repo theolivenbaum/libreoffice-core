@@ -502,21 +502,39 @@ internal sealed class FrameResolution
 
     /// <summary>A text frame's own content, laid out inside it.</summary>
     /// <remarks>
+    /// <para>
     /// Through <see cref="FlowLayouter"/>, which is what makes a frame's paragraphs behave like a header's
     /// or a cell's without a second layout path — a frame containing a table works because a cell already
     /// does. An image frame has no blocks and gets null, since the raster is decoded elsewhere and the
     /// rectangle is all the wrap ever needed.
+    /// </para>
+    /// <para>
+    /// A frame of stated height is then cut to what fits, per
+    /// <see cref="PageFrame.HasFixedHeight"/> — a shape does not overflow the way a running head does.
+    /// The two are opposite on purpose and the distinction is Writer's: a header that cannot hold its
+    /// text draws it past the bottom (see the remarks on <see cref="FlowLayouter.LayOut"/>), while a
+    /// text box that cannot hold its text never formats the rest. Both were measured; a text box in a
+    /// header is the shape that needs them both to be right at once.
+    /// </para>
     /// </remarks>
     private static PlacedFlow? Content(
         PageFrame frame, DocRect area, bool collapsesSpacing, bool addsCellLineSpacing)
-        => frame.Blocks.Count == 0
-            ? null
-            : FlowLayouter.LayOut(
-                frame.Blocks,
-                area.Deflate(frame.Padding),
-                Length.Zero,
-                collapsesSpacing: collapsesSpacing,
-                addsCellLineSpacing: addsCellLineSpacing);
+    {
+        if (frame.Blocks.Count == 0) return null;
+
+        DocRect inside = area.Deflate(frame.Padding);
+
+        PlacedFlow? flow = FlowLayouter.LayOut(
+            frame.Blocks,
+            inside,
+            Length.Zero,
+            collapsesSpacing: collapsesSpacing,
+            addsCellLineSpacing: addsCellLineSpacing);
+
+        return flow is not null && frame.HasFixedHeight
+            ? FlowLayouter.Truncated(flow, inside.Height)
+            : flow;
+    }
 
     /// <param name="Index">Which page the block starts on.</param>
     /// <param name="Page">That page.</param>

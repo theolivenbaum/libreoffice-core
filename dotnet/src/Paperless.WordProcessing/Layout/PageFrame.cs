@@ -249,6 +249,41 @@ public sealed record PageFrame
     /// <summary>The inset between the frame's edge and its text.</summary>
     public Margins Padding { get; init; }
 
+    /// <summary>
+    /// True when the frame's height is stated rather than grown from its text, so content taller than
+    /// the frame is not formatted at all.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A shape's text body either grows to fit its text — DrawingML's <c>a:spAutoFit</c>, VML's
+    /// <c>mso-fit-shape-to-text</c> — or keeps the height the file states. In the second case Writer
+    /// formats only the lines that fit and simply does not lay the rest out: they are absent from the
+    /// PDF's text operators, not merely clipped by a painting rectangle, so <c>pdftotext</c> cannot
+    /// find them either.
+    /// </para>
+    /// <para>
+    /// <strong>Measured on the installed 26.2.4.2</strong>, not inferred — see
+    /// <c>dotnet/probes/words-extra-01/</c>. Sixty authored boxes of stated heights from 1 pt to 100 pt,
+    /// at three inset sizes, holding six paragraphs of 8 pt text, give one rule:
+    /// <em>a line is formatted iff its top offset is strictly less than the box's content height</em>,
+    /// and the first line is always formatted however short the box. The obvious alternative — a line
+    /// is kept when it fits entirely — is refuted by a 10 pt box with zero insets, which draws two
+    /// lines of a ~9.6 pt face.
+    /// </para>
+    /// <para>
+    /// <c>a:normAutofit</c> does <em>not</em> disable it: LibreOffice does not shrink the text, it
+    /// truncates exactly as <c>a:noAutofit</c> does. Neither does <c>bodyPr/@vertOverflow</c>, whose
+    /// <c>overflow</c> and <c>clip</c> values render identically. Only autofit-to-text spares the
+    /// content.
+    /// </para>
+    /// <para>
+    /// False by default, which is the behaviour every format had before this existed. The DOCX reader
+    /// sets it because that is where it was measured; the ODF, WW8 and RTF readers do not, and a round
+    /// wanting it there should measure those importers rather than assume the rule transfers.
+    /// </para>
+    /// </remarks>
+    public bool HasFixedHeight { get; init; }
+
     /// <summary>The frame's background, or null when it has none.</summary>
     public Colour? Fill { get; init; }
 
