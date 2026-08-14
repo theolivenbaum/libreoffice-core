@@ -356,6 +356,7 @@ public sealed partial class DocxLayoutSource
                     ColumnSpan = span,
                     Padding = Padding(Word.Child(cellProperties, "tcMar"), tablePadding),
                     VerticalAlignment = VerticalAlignment(cellProperties),
+                    TextDirection = TextDirection(cellProperties),
                     Shading = Shading(cellProperties),
                 },
                 Merge(cellProperties),
@@ -526,6 +527,31 @@ public sealed partial class DocxLayoutSource
 
         return padding;
     }
+
+    /// <summary>
+    /// Which way a cell's text runs — <c>w:textDirection</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Six values collapsing to three, reproducing LibreOffice's own mapping in
+    /// <c>DomainMapperTableManager.cxx</c>:325-350 rather than the specification's reading of them.
+    /// <c>tbRlV</c> is folded onto <c>tbRl</c> there and <c>tbLrV</c> is dropped with the comment "we
+    /// can't handle these"; both were re-measured against the installed 26.2.4.2 and both hold —
+    /// <c>tbRlV</c> renders identically to <c>tbRl</c>, and <c>tbLrV</c> identically to no attribute at
+    /// all. Following the specification instead would turn text the reference leaves upright.
+    /// </para>
+    /// <para>
+    /// The default when the attribute is absent or unrecognised is upright, which is also what
+    /// <c>w:val="lrTb"</c> asks for explicitly.
+    /// </para>
+    /// </remarks>
+    private static CellTextDirection TextDirection(XElement? properties)
+        => Word.Attribute(Word.Child(properties, "textDirection"), "val") switch
+        {
+            "btLr" => CellTextDirection.BottomToTopLeftToRight,
+            "tbRl" or "tbRlV" => CellTextDirection.TopToBottomRightToLeft,
+            _ => CellTextDirection.LeftToRight,
+        };
 
     private static CellVerticalAlignment VerticalAlignment(XElement? properties)
         => Word.Attribute(Word.Child(properties, "vAlign"), "val") switch

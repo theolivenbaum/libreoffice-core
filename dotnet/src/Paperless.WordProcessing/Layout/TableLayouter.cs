@@ -78,6 +78,17 @@ public static class TableLayouter
                 Length width = WidthOf(cell, lefts);
                 if (width <= Length.Zero) continue;
 
+                int last = Math.Min(row + Math.Max(1, cell.RowSpan), rows) - 1;
+
+                // A turned cell breaks its text at the cell's *height*, which is exactly what this pass is
+                // trying to work out — so it is not measured here at all. It does not have to be: it
+                // contributes nothing to the row's height, so the circle never closes. See `Turned`.
+                if (cell.IsTurned)
+                {
+                    measured.Add(new Measured(row, last, cell, width, null, Length.Zero));
+                    continue;
+                }
+
                 Length inner = width - cell.Padding.Horizontal;
                 PlacedFlow? content = inner > Length.Zero
                     ? FlowLayouter.LayOut(
@@ -98,7 +109,6 @@ public static class TableLayouter
                 // half of the same compatibility rule. See `CellLineSpacing`.
                 if (addsCellLineSpacing) text += CellLineSpacing(cell.Blocks);
 
-                int last = Math.Min(row + Math.Max(1, cell.RowSpan), rows) - 1;
                 measured.Add(new Measured(row, last, cell, width, content, text));
 
                 // A merged cell charges only its last row, and only for what one row's worth of it needs.
@@ -166,15 +176,31 @@ public static class TableLayouter
                 cell.Width,
                 height);
 
+            Length bandAbove = BorderHeight(table.Rows[cell.Row]) / 2;
+            Length bandBelow = BorderHeight(table.Rows[cell.LastRow]) / 2;
+
+            if (cell.Cell.IsTurned)
+            {
+                (PlacedFlow? turned, AffineTransform? onto) = Turned(
+                    cell.Cell, area, bandAbove, bandBelow, nesting, collapsesSpacing, addsCellLineSpacing);
+
+                placed.Add(new PlacedTableCell
+                {
+                    Cell = cell.Cell,
+                    Area = area,
+                    Content = turned,
+                    ContentTransform = onto,
+                    Row = cell.Row,
+                });
+
+                continue;
+            }
+
             placed.Add(new PlacedTableCell
             {
                 Cell = cell.Cell,
                 Area = area,
-                Content = Positioned(
-                    cell,
-                    area,
-                    BorderHeight(table.Rows[cell.Row]) / 2,
-                    BorderHeight(table.Rows[cell.LastRow]) / 2),
+                Content = Positioned(cell, area, bandAbove, bandBelow),
                 Row = cell.Row,
             });
         }
@@ -270,6 +296,9 @@ public static class TableLayouter
         List<Length> candidates = [];
         foreach (PlacedTableCell cell in cells)
         {
+            // A turned cell offers no cuts: its lines run across the row rather than down it, so there is
+            // no depth at which cutting one would divide its text. It rides on the row's first part.
+            if (cell.ContentTransform is not null) continue;
             if (cell.Content is not { } flow) continue;
 
             foreach (PlacedLine line in flow.Lines)
@@ -345,6 +374,8 @@ public static class TableLayouter
 
         foreach (PlacedTableCell cell in cells)
         {
+            // Charges the part nothing, exactly as it charged the row nothing. See `Turned`.
+            if (cell.ContentTransform is not null) continue;
             if (cell.Content is not { } flow) continue;
 
             Length? top = null;
@@ -383,6 +414,25 @@ public static class TableLayouter
 
         foreach (PlacedTableCell cell in cells)
         {
+            // A turned cell goes whole onto the row's first part and is absent from every later one. It
+            // cannot be divided — see `SliceRow` — and drawing it twice would print the label on both
+            // pages. Its own rectangle still becomes the part's, so the borders round it are right.
+            if (cell.ContentTransform is { } onto)
+            {
+                bool isFirstPart = above <= rowTop;
+
+                sliced.Add(cell with
+                {
+                    Area = new DocRect(cell.Area.X, Length.Zero, cell.Area.Width, height),
+                    Content = isFirstPart ? cell.Content : null,
+                    ContentTransform = isFirstPart
+                        ? onto with { F = onto.F - rowTop.Emu }
+                        : null,
+                });
+
+                continue;
+            }
+
             List<PlacedLine> kept = [];
             Length? first = null;
 
@@ -444,6 +494,19 @@ public static class TableLayouter
         List<PlacedTableCell> moved = [];
         foreach (PlacedTableCell cell in cells)
         {
+            // A turned cell's content is in the cell's own coordinates, so moving the cell moves its
+            // *transform* and must not touch the flow: shifting both would move the text twice.
+            if (cell.ContentTransform is { } onto)
+            {
+                moved.Add(cell with
+                {
+                    Area = Shift(cell.Area, dx, dy),
+                    ContentTransform = onto with { E = onto.E + dx.Emu, F = onto.F + dy.Emu },
+                });
+
+                continue;
+            }
+
             moved.Add(cell with
             {
                 Area = Shift(cell.Area, dx, dy),
@@ -603,6 +666,136 @@ public static class TableLayouter
 
         // The height comes from the cell rather than from the content, since the row may be taller.
         return moved with { Area = placed };
+    }
+
+    /// <summary>
+    /// Lays out a turned cell's text and works out the quarter turn that puts it on the page.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Everything here was measured against the installed LibreOffice 26.2.4.2 on generated probes, read
+    /// out of the PDF's own operators. Four facts, each of which the obvious implementation gets wrong:
+    /// </para>
+    /// <para>
+    /// <strong>The line breaks at the cell's inner height, and it is the same inner box an upright cell
+    /// uses</strong> — the height less the two half grid lines and less the <em>vertical</em> padding.
+    /// Horizontal padding does not shorten the line. Pinned by a five-twip sweep of <c>w:trHeight</c>: the
+    /// four-glyph to five-glyph boundary sits at exactly 500 twips in all three of {0.5 pt borders, no
+    /// borders, 10 pt top and bottom cell margin}, whose frames are 25.5, 25.0 and 45.5 pt tall. Reading
+    /// the turn as "swap the padding too" would have moved that boundary in two of the three.
+    /// </para>
+    /// <para>
+    /// <strong>A turned cell contributes nothing to its row's height.</strong> Not one line's worth,
+    /// nothing: a row holding only turned cells collapses to zero and LibreOffice draws neither its text
+    /// nor its borders. That is what makes the apparent circularity — the line length is the cell height,
+    /// the cell height is the tallest cell's line count — not a circle at all, and it is why this runs in
+    /// the second pass with the row heights already settled.
+    /// </para>
+    /// <para>
+    /// <strong>A line that starts outside the cell is not drawn at all.</strong> Dropped rather than
+    /// clipped: there is no text-showing operator for it in the reference's PDF, so it is absent from the
+    /// text layer as well as from the ink. A 50 pt column whose inner width is 38.7 pt draws four lines at
+    /// 11.55 pt each — the fourth overhanging — and not the fifth, which would start past the edge.
+    /// </para>
+    /// <para>
+    /// <strong><c>w:vAlign</c> places the line stack across the cell's width.</strong> Top puts the first
+    /// line against the left edge, bottom the last against the right, centre in the middle — measured at
+    /// 71.20, 148.80 and 110.00 pt on one fixture. It is the same axis in the cell's own frame, which is
+    /// why it is still called a vertical alignment.
+    /// </para>
+    /// <para>
+    /// What this deliberately does not do is measure the cell's <em>width</em> from the text. A turned
+    /// label wants the column to be one line thick and the document says how thick; nothing in Writer
+    /// widens a column to fit turned text either.
+    /// </para>
+    /// </remarks>
+    /// <param name="cell">The cell.</param>
+    /// <param name="area">Its rectangle on the page.</param>
+    /// <param name="bandAbove">Half the grid line above it.</param>
+    /// <param name="bandBelow">Half the grid line below it.</param>
+    /// <param name="nesting">How many tables enclose the one this cell is in.</param>
+    /// <param name="collapsesSpacing">Whether paragraphs collapse their spacing — see <see cref="LayOut"/>.</param>
+    /// <param name="addsCellLineSpacing">Whether a cell grows by its last line spacing — see <see cref="LayOut"/>.</param>
+    private static (PlacedFlow? Content, AffineTransform? Onto) Turned(
+        PageTableCell cell,
+        DocRect area,
+        Length bandAbove,
+        Length bandBelow,
+        int nesting,
+        bool collapsesSpacing,
+        bool addsCellLineSpacing)
+    {
+        CellPadding padding = cell.Padding;
+
+        // Along the text: the cell's inner height, which is what the lines break at.
+        Length along = area.Height - padding.Vertical - bandAbove - bandBelow;
+
+        // Across the stack: the cell's inner width, which is how many lines can be drawn.
+        Length across = area.Width - padding.Horizontal;
+
+        if (along <= Length.Zero || across <= Length.Zero) return (null, null);
+
+        PlacedFlow? flow = FlowLayouter.LayOut(
+            cell.Blocks,
+            new DocRect(Length.Zero, Length.Zero, along, Length.Zero),
+            Length.Zero,
+            nesting,
+            collapsesSpacing,
+            addsCellLineSpacing);
+
+        if (flow is null) return (null, null);
+
+        // The lines that begin inside the cell. A line starting past the edge is not drawn — see above —
+        // and the ones before it are kept whole even where they overhang, which is what the reference does.
+        List<PlacedLine> kept = [];
+        foreach (PlacedLine line in flow.Lines)
+        {
+            if (line.Top < across) kept.Add(line);
+        }
+
+        if (kept.Count == 0) return (null, null);
+
+        // How much of the width the stack actually uses, for the alignment below. The last line's box
+        // rather than the flow's advance: a turned cell has no space-after to charge across its width.
+        Length used = kept[^1].Top + kept[^1].Box.Height;
+        Length spare = across - used;
+
+        Length offset = spare <= Length.Zero
+            ? Length.Zero
+            : cell.VerticalAlignment switch
+            {
+                CellVerticalAlignment.Middle => spare / 2,
+                CellVerticalAlignment.Bottom => spare,
+                _ => Length.Zero,
+            };
+
+        // Where the flow's own origin lands. The text starts at whichever end of the cell it runs *from*:
+        // the bottom for a cell turned anticlockwise, the top for one turned clockwise.
+        Length left = area.X + padding.Left;
+        Length right = area.Right - padding.Right;
+        Length top = area.Y + bandAbove + padding.Top;
+        Length bottom = area.Bottom - bandBelow - padding.Bottom;
+
+        (double radians, Length x, Length y) = cell.TextDirection switch
+        {
+            CellTextDirection.TopToBottomRightToLeft => (Math.PI / 2, right - offset, top),
+            _ => (-Math.PI / 2, left + offset, bottom),
+        };
+
+        AffineTransform onto = AffineTransform.Concat(
+            AffineTransform.Rotation(radians),
+            AffineTransform.Translation(x.Emu, y.Emu));
+
+        // The flow keeps its own coordinates — the transform is what moves it — but it is trimmed to the
+        // lines that are drawn, and its rectangle is the whole inner box so that anything measuring the
+        // flow sees the room it had rather than the room it used.
+        return (
+            flow with
+            {
+                Lines = kept,
+                Area = new DocRect(Length.Zero, Length.Zero, along, across),
+            },
+            onto);
     }
 
     /// <summary>Where each grid column starts, measured from the table's left edge.</summary>

@@ -137,6 +137,36 @@ pictures zlib-compressed inside Escher blip records, so a raw signature search f
 file that plainly contains one. Inflating every plausible stream took the carrier count from 76
 to 100.
 
+## A row struck out: `approvals-and-standardisation-…` page 6 was never a ceiling
+
+Recorded 2026-08-14 by round `words-table-01`, and worth reading as a caution rather than as one
+correction. That row claimed **+38** ours-only words on page 6 and carried an em dash in the
+metafile column — no metafile, which already put it among the sixteen flagged pages that have
+none.
+
+It was not a ceiling at all. Both sides draw the **same 47×90 JPEG** on that page, and neither
+side rasterises anything else there. The whole +38 was **rotated table-cell text drawn upright,
+one glyph per line** — `w:textDirection="btLr"` was unimplemented, so twelve labels that should
+turn a quarter turn were set as vertical stacks of single characters, and `pdftotext` scored each
+character as a word.
+
+Implementing the property closed it exactly:
+
+| page 6 | ours before | ours after | reference |
+|---|---:|---:|---:|
+| words | 157 | **121** | **121** |
+| raw `wc -w` | 160 | 123 | 123 |
+
+Zero excess, not a residue. The document as a whole moved from `words` to `match`.
+
+**The general lesson, which the file's own preamble half-states and this makes concrete.** The
+generator's condition is "our page holds tokens the reference's does not", and *any* defect that
+manufactures tokens satisfies it. A raster ceiling is one cause of that condition; it is not the
+only one, and the flag cannot tell them apart. Sixteen of the thirty-seven flagged pages have no
+metafile, and this was one of them — so **an em dash in the metafile column is a reason to
+re-derive the row, not a reason to trust it.** Confirm the ceiling in the two PDFs' own image
+lists before excusing a page on the strength of this table.
+
 ## Two boundaries worth stating
 
 **A flagged page does not excuse its document, and the two can point opposite ways.** Re-measure
@@ -172,7 +202,7 @@ first, then re-run.
 | `slides/batch-014/…/WiGr_2021W_1_Angebot-Nachfrage-Elastizität-211` | 45 | 50 | 5 | +45 | 0/1 |
 | `slides/batch-008/…/8_P-Pavese_AIRBUS-ATB-journee-CRATB.pptx` | 5 | 114 | 70 | +44 | 3/2 |ᵃ
 | `slides/batch-017/…/Demick_JetBlue.pptx` | 5 | 93 | 54 | +39 | — |
-| `words/batch-015/…/approvals-and-standardisation-organisation-app` | 6 | 161 | 123 | +38 | — |
+| ~~`words/batch-015/…/approvals-and-standardisation-organisation-app`~~ | ~~6~~ | ~~161~~ | ~~123~~ | ~~+38~~ | — | **false positive — see below** |
 | `sheets/batch-010/…/TOGAF9-Tool-ConfReqts-CSQ.xls` | 21 | 69 | 31 | +38 | — |
 | `slides/batch-014/…/Structural Testing.pptx` | 19 | 37 | 5 | +32 | 2/0 |
 | `slides/batch-014/…/WiGr_2021W_1_Angebot-Nachfrage-Elastizität-211` | 44 | 34 | 4 | +30 | 0/1 |
