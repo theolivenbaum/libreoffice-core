@@ -322,3 +322,36 @@ Note these two documents were worked anyway and the work was not wasted: they al
 font defect (a declared `family="1"` we ignored, so we set Bell MT in DejaVu Sans where the
 reference sets DejaVu Serif). That is now fixed and the faces match. **The visible page improved;
 the gate column did not move, and never will.**
+
+## A third shape: the reference splits its own words
+
+`slides/batch-004/pptx/solog_orientation_august_2019.pptx` — page-exact at 15/15, **670 words
+against the reference's 685**, which reads as fifteen words lost.
+
+Nothing is lost. Extracted with the same `pdftotext` and compared per page, character by
+character with whitespace removed: **4758 non-space characters in the reference against our
+4756**, every page's character multiset identical apart from two hyphens — and those are
+`pdftotext` de-hyphenating *our* soft line breaks, with the hyphens confirmed present in our PDF
+by `-bbox`.
+
+All fifteen tokens are the reference splitting words it drew whole:
+
+- **8 of 15** — LibreOffice writes **one show operator per character** on the footer lock-up
+  ("19 glyphs in 18 shows"), and rounded advances leave a 1.26 pt gap after each `M`, so
+  `pdftotext` reads `MIAMI` as `M` `IAM` `I` on pages 1, 2, 3 and 15. Ink spans 171.20–213.43 pt
+  against our 171.09–214.26 — the same width, drawn in the same place.
+- **7 of 15** — LibreOffice fills a line and breaks an over-long URL **mid-token**; we move the
+  whole token to the next line first. A real fidelity difference, worth fixing on its own merits,
+  but it moves zero words in either direction.
+
+So this document joins the list from a third direction. The three shapes now recorded here:
+
+| shape | who over-counts | cause |
+|---|---|---|
+| the reference rasterises an embedded object | ours | we draw real text where it draws a picture |
+| the reference's tokenisation shatters | the reference | intra-word positioning read as word breaks |
+| the reference splits its own words | the reference | one show per character, plus mid-token URL breaks |
+
+**The common test is the same in all three: compare the whitespace-stripped character streams
+before believing a word count.** If they match, the gate cannot be won on that document and the
+number is about `pdftotext`, not about the renderer.
