@@ -399,6 +399,29 @@ how reasonable it was to rank it last.
   It costs one extra conversion. Two rounds have now spent effort on this document's 13 words:
   one attributing them to a paint clip, one to a dropped cell.
 
-Whether other documents in the corpus share this is **unmeasured**. The honest position is that
-we have one confirmed case and no idea of the rate. A cheap sweep — convert every document twice
-and diff the extracted text — would settle it and has not been run.
+## It is not one document — at least four sheets are unstable
+
+The sweep asked for above has now partly been run, as a control inside the tagged-PDF audit
+(`dotnet/probes/sheets-tagged-01/results.md`). Rendering a document twice **in the same mode** and
+comparing it against itself found:
+
+| document | cross-mode difference | **same-mode difference** |
+|---|---|---|
+| `ans_mappings_of_eccairs_terms.xlsx` | 55 pages | **24 pages** |
+| `PBN Matrix NAAs (V01).xlsx` | 8 pages | **7 pages** |
+| `fse_identification_form.xlsx` | 1 page | **1 page** |
+| `SIL_TDB648.xlsx` p56 / p85 | 442 / 271 px | **549 / 634 px** |
+
+`SIL_TDB648` is the instructive one: **its same-mode difference is larger than its cross-mode
+one.** It sets a header cell's `AirbusA350`/`A380AESU` on two lines in one run and four in
+another. It had exactly the signature of a second paint-affecting tagged-PDF site and would have
+been reported as one; the same-mode control is the only reason it was not.
+
+**So the rule generalises past `fse`: before attributing a per-document difference to anything —
+a code change, a flag, a version — render the reference twice in the SAME configuration and check
+the document against itself.** A difference that survives that is real. One that does not is the
+document, and any story told about it will be fiction with evidence attached.
+
+Three of these four are in the failing lists above, which means an unknown share of what those
+rows report is instability rather than defect. The rate over the words and slides tracks is still
+unmeasured.
