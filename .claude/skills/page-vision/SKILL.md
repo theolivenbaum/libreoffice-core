@@ -223,7 +223,7 @@ actually scores.
 ## Look at pages that PASS
 
 Inherited from `render-comparison` and repeated because it is the highest-yield habit here:
-the failing set is picked over, and the gate — page count, words in a 2%+3 band, unembedded
+the failing set is picked over, and the gate — page count, words within max(2%, 3), unembedded
 fonts — is blind to most real defects. A track can be 163 of 163 page-exact while three
 passing pages opened at random yield three findings. Rank the *passing* documents by `|ink|%`
 and send the worst to a reviewer.

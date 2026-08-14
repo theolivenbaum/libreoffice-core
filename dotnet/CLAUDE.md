@@ -154,8 +154,13 @@ drawings to it, so implementing it once buys shapes in all three.
 ### Look at the rendering. Do not chase it through metrics alone.
 
 **This is the standing instruction and it comes before the rest of this section.** The gate is
-page count, extractable words in a 2%+3 band, and unembedded fonts. **It is blind to most real
+page count, extractable words within max(2%, 3), and unembedded fonts. **It is blind to most real
 defects** — a whole track can be 163 of 163 page-exact while the pages are visibly wrong.
+
+*The word band was described here as "2%+3" for several rounds and that is not the rule.
+`batch-check.sh:195` fails a document when `d > b*0.02 && d > 3` — an AND, so the band is
+**max(2%, 3)**, not their sum. It matters at the boundary: a 1299-word document tolerates
+25.98 words and not 28.98, and one regression found on 2026-08-14 sat at exactly 27.*
 
 ```bash
 export PAPERLESS_CLI=<the tree you mean to measure>/dotnet/tools/…/Paperless.Cli
