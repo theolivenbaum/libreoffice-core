@@ -56,24 +56,34 @@ public sealed class SheetHyperlinkColourTests
     {
         List<DrawnGlyphRun> runs = Runs();
 
-        DrawnGlyphRun linked = runs.Single(
-            run => run.Text.Contains("1206", StringComparison.Ordinal));
-
-        linked.Paint.ShouldBe(Paint.Solid(Link));
+        runs.Where(run => run.Text.Contains("1206", StringComparison.Ordinal))
+            .ShouldAllBe(run => run.Paint == Paint.Solid(Link));
 
         runs.Where(run => run.Text.Contains("1205", StringComparison.Ordinal))
             .ShouldAllBe(run => run.Paint != Paint.Solid(Link));
     }
 
-    /// <summary>Nothing else on the page picks the colour up.</summary>
+    /// <summary>Nothing else on the page picks the colour up, and none of the cell misses it.</summary>
     /// <remarks>
-    /// <see cref="SheetLayout.HoldsField"/> covers one cell in this workbook, so exactly one run
-    /// should be navy. A predicate that widened to the whole hyperlink <em>range</em>, or to every
-    /// underlined cell, would repaint more than one.
+    /// <para>
+    /// <see cref="SheetLayout.HoldsField"/> covers one cell in this workbook, so the navy runs
+    /// should be that cell's lines and nothing else. A predicate that widened to the whole
+    /// hyperlink <em>range</em>, or to every underlined cell, would repaint more.
+    /// </para>
+    /// <para>
+    /// Asserted as the concatenation rather than as a count, because the count is not a property of
+    /// the colouring: a wrapping field is chopped into as many runs as it has lines
+    /// (<see cref="SheetFieldChopTests"/>), and this used to read <c>ShouldBe(1)</c> only because a
+    /// field was wrongly drawn on one line. The concatenation pins both halves — every line of the
+    /// cell is navy, and nothing outside it is — without pinning the wrap.
+    /// </para>
     /// </remarks>
     [Fact]
     public void ExactlyTheFieldCellIsRepainted()
     {
-        Runs().Count(run => run.Paint == Paint.Solid(Link)).ShouldBe(1);
+        string navy = string.Concat(
+            Runs().Where(run => run.Paint == Paint.Solid(Link)).Select(run => run.Text));
+
+        navy.ShouldBe("https://www.example.org/regulations/published/images/circular-1206.pdf");
     }
 }

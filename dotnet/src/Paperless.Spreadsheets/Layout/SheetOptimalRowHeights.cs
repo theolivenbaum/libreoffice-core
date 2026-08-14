@@ -423,9 +423,20 @@ internal static class SheetOptimalRowHeights
                 // The same wrap decision the drawing path makes, so that a row is measured exactly
                 // when its text will be broken — including Calc's rule that a plain number never
                 // breaks however the cell is formatted.
-                // A hyperlink cell is one EditEngine field, and a field is never broken across
-                // lines — so it is measured at one line however narrow its column is. Missing
-                // that makes a column of URLs four or five times too tall.
+                // A hyperlink cell is one EditEngine field, and a field is measured at one line
+                // however narrow its column is. Missing that makes a column of URLs four or five
+                // times too tall.
+                //
+                // **This is a rule about the height and not about the breaking, and the two really
+                // do disagree.** The drawing path wraps a field — see `SheetFieldBreaker` — so the
+                // gate here is not the same gate as the one that used to stand in
+                // `SheetTextLayout.Place`, and removing it because that one was wrong would be a
+                // second error. Measured on `dotnet/probes/sheets-wrap-01` under 26.2.4.2, the same
+                // six cells converted to `.fods` with automatic row heights: the plain URL takes
+                // `style:row-height="0.6425in"` (four lines) and the hyperlinked one
+                // `"0.1756in"` (one), while the reference PDF of that very file draws the
+                // hyperlinked cell's *three* wrapped lines straight over the rows beneath it. A
+                // field's lines overflow their row rather than sizing it.
                 //
                 // A hard break in a cell that does *not* wrap reaches neither the height nor the
                 // page, and that is the **format's** decision rather than the text's. Both
