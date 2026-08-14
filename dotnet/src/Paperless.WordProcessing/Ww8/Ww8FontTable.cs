@@ -1,5 +1,6 @@
 using System.Buffers.Binary;
 using System.Text;
+using Paperless.Text.Fonts;
 
 namespace Paperless.WordProcessing.Ww8;
 
@@ -40,14 +41,40 @@ public sealed class Ww8FontTable
     private const int MaxFonts = 4096;
 
     private readonly string[] _names;
+    private readonly Dictionary<string, DeclaredFontShape> _shapes;
 
-    private Ww8FontTable(string[] names) => _names = names;
+    private Ww8FontTable(string[] names, DeclaredFontShape[] shapes)
+    {
+        _names = names;
+
+        // By name rather than by index, because that is how the resolver is asked: a run names its
+        // font through sprmCRgFtc0, but by the time layout has a family it is a string and the
+        // index is gone. First entry wins on a duplicate name, matching the by-name lookup the
+        // DOCX table does.
+        _shapes = new Dictionary<string, DeclaredFontShape>(StringComparer.OrdinalIgnoreCase);
+        for (int at = 0; at < names.Length; at++) _shapes.TryAdd(names[at], shapes[at]);
+    }
 
     /// <summary>An empty table, for a document that declares none.</summary>
-    public static Ww8FontTable Empty { get; } = new([]);
+    public static Ww8FontTable Empty { get; } = new([], []);
 
     /// <summary>How many fonts the table holds.</summary>
     public int Count => _names.Length;
+
+    /// <summary>
+    /// The shape the document declares for a family, or the default when it names no such family.
+    /// </summary>
+    /// <remarks>
+    /// The DOC counterpart of <c>WordFontTable.ShapeOf</c>, and it says the same two things: an
+    /// <c>FFN</c>'s first byte packs the pitch in its low two bits and the font family in bits 4-6,
+    /// which are the <c>prq</c> and <c>ff</c> fields LibreOffice reads at the top of
+    /// <c>WW8Fonts::WW8Fonts</c>. Only <c>FF_ROMAN</c> and <c>FF_SWISS</c> are carried across, for
+    /// the reason recorded there: the other family codes leave LibreOffice's answer unchanged.
+    /// </remarks>
+    public DeclaredFontShape ShapeOf(string? name)
+        => name is not null && _shapes.TryGetValue(name, out DeclaredFontShape shape)
+            ? shape
+            : default;
 
     /// <summary>
     /// The family name at an index, or null when the table has no such entry.
@@ -84,6 +111,7 @@ public sealed class Ww8FontTable
         if (bytes.Length <= HeaderLength) return Empty;
 
         List<string> names = [];
+        List<DeclaredFontShape> shapes = [];
         int at = HeaderLength;
 
         while (at < bytes.Length && names.Count < MaxFonts)
@@ -93,11 +121,43 @@ public sealed class Ww8FontTable
 
             if (payload < MinimumPayload || at + payload > bytes.Length) break;
 
-            names.Add(NameIn(bytes.Slice(at, payload)));
+            ReadOnlySpan<byte> entry = bytes.Slice(at, payload);
+            names.Add(NameIn(entry));
+            shapes.Add(ShapeIn(entry));
             at += payload;
         }
 
-        return names.Count > 0 ? new Ww8FontTable([.. names]) : Empty;
+        return names.Count > 0 ? new Ww8FontTable([.. names], [.. shapes]) : Empty;
+    }
+
+    /// <summary>
+    /// The pitch and family packed into one entry's first byte.
+    /// </summary>
+    /// <remarks>
+    /// <c>prq</c> in bits 0-1 — 1 is fixed, 2 is variable — and <c>ff</c> in bits 4-6, whose values
+    /// are the Windows <c>FF_*</c> constants: 1 roman, 2 swiss, 3 modern, 4 script, 5 decorative.
+    /// Bit 2 is <c>fTrueType</c> and bits 3 and 7 are reserved, so masking matters: reading the
+    /// whole byte as a family finds one on nearly every entry.
+    /// </remarks>
+    private static DeclaredFontShape ShapeIn(ReadOnlySpan<byte> payload)
+    {
+        byte flags = payload[0];
+
+        FontFamilyClass kind = ((flags >> 4) & 0x07) switch
+        {
+            1 => FontFamilyClass.Serif,
+            2 => FontFamilyClass.SansSerif,
+            _ => FontFamilyClass.Unknown,
+        };
+
+        FontPitch pitch = (flags & 0x03) switch
+        {
+            1 => FontPitch.Fixed,
+            2 => FontPitch.Variable,
+            _ => FontPitch.Unknown,
+        };
+
+        return new DeclaredFontShape(kind, pitch);
     }
 
     /// <summary>

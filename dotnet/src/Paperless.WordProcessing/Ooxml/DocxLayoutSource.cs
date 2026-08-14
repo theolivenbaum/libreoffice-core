@@ -69,6 +69,17 @@ public sealed partial class DocxLayoutSource
     /// <see cref="Ww8.DocReader"/> already passes.
     /// </remarks>
     private readonly MetricGrid? _metrics;
+
+    /// <summary>
+    /// <c>word/fontTable.xml</c>, for the shape it declares for each family it names.
+    /// </summary>
+    /// <remarks>
+    /// Layout does not measure with it and never asks it for a face. What it settles is the one
+    /// question the family name alone cannot answer — whether a family nobody has installed is a
+    /// roman or a grotesque — and getting that wrong renders a serif document in DejaVu Sans where
+    /// LibreOffice renders it in DejaVu Serif, which moves every line break in it.
+    /// </remarks>
+    private readonly WordFontTable _fontTable;
     private readonly DrawingTheme? _theme;
     private readonly Dictionary<(string? Family, int Weight, bool Italic), OpenTypeFace?> _faces = [];
     private readonly Dictionary<(string? Family, int Weight, bool Italic), FontReference> _references =
@@ -90,6 +101,11 @@ public sealed partial class DocxLayoutSource
     /// advanced by this walk, which is why <see cref="Read"/> and <see cref="ReadFlow"/> reset them: a
     /// caller sharing one instance with the extraction pass must not have the two interleave.
     /// </param>
+    /// <param name="fontTable">
+    /// <c>word/fontTable.xml</c>, or null for a document without one. Nothing is measured with it —
+    /// it settles which shape a family nobody has installed falls back to, which the family name on
+    /// its own cannot say.
+    /// </param>
     public DocxLayoutSource(
         WordStyles styles,
         XElement? settings = null,
@@ -98,10 +114,12 @@ public sealed partial class DocxLayoutSource
         IReadOnlyDictionary<string, XElement>? endnotes = null,
         DrawingTheme? theme = null,
         DocxPictures? pictures = null,
-        WordNumbering? numbering = null)
+        WordNumbering? numbering = null,
+        WordFontTable? fontTable = null)
     {
         ArgumentNullException.ThrowIfNull(styles);
         _styles = styles;
+        _fontTable = fontTable ?? WordFontTable.Empty;
         _numbering = numbering ?? new WordNumbering();
         Pictures = pictures;
         _theme = theme;
@@ -1447,8 +1465,19 @@ public sealed partial class DocxLayoutSource
         OpenTypeFace? face = null;
         try
         {
+            // The declared family only. The table declares a pitch too and LibreOffice's DOCX filter
+            // does not act on it: probed on 26.2.4.2 with a one-run package, `Garamond` declared
+            // `swiss` moves the fallback from DejaVu Serif to DejaVu Sans while `Garamond` declared
+            // `fixed` — and `MS Mincho` declared `modern`+`fixed` — leaves it exactly where it was.
+            // Its ODF filter *does* honour `style:font-pitch`, so this is a difference between the
+            // two importers rather than a property of the resolver, and passing the pitch here put
+            // one corpus document into DejaVu Sans Mono that the reference sets in DejaVu Sans.
+            FontFamilyClass declared = _fontTable.ShapeOf(text.FamilyName).Class;
+
             FontReference reference = _fonts.Resolve(
-                new FontRequest(text.FamilyName ?? string.Empty, text.Weight, text.IsItalic));
+                new FontRequest(
+                    text.FamilyName ?? string.Empty, text.Weight, text.IsItalic,
+                    DeclaredClass: declared));
 
             face = _fonts.LoadOpenType(reference);
             _references[key] = reference;

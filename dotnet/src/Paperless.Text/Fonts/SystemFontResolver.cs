@@ -598,6 +598,19 @@ public sealed class SystemFontResolver : IFontResolver, IGlyphFallbackResolver
         // and only the second one is fontconfig's to answer.
         if (string.IsNullOrWhiteSpace(request.FamilyName)) return DefaultFallbacks;
 
+        // What the *document* says the family is, which beats what the table says the *name* is.
+        // Measured on 26.2.4.2 in both directions rather than assumed: the same family name flips
+        // between DejaVu Serif and DejaVu Sans as the declaration alone changes, for a name the
+        // table files under serif and for one it files under sans and for one it files under
+        // symbol. Only roman and swiss move the answer — modern, script, decorative and system
+        // leave the name's own class standing, which is why they are not listed here.
+        switch (request.DeclaredClass)
+        {
+            case FontFamilyClass.Serif: return SerifFallbacks;
+            case FontFamilyClass.SansSerif: return SansFallbacks;
+            default: break;
+        }
+
         return FontSubstitutions.ClassOf(request.FamilyName) switch
         {
             FontFamilyClass.Fixed => MonoFallbacks,

@@ -426,4 +426,78 @@ public class FontResolutionTests
         // preserve a document's line breaks.
         resolver.Resolve(new FontRequest(requested)).FamilyName.ShouldBe(expected);
     }
+
+    // ------------------------------------------------- the shape the document itself declares
+
+    [Theory]
+    [InlineData("Garamond", FontFamilyClass.SansSerif, "DejaVu Sans")]
+    [InlineData("Georgia", FontFamilyClass.SansSerif, "DejaVu Sans")]
+    [InlineData("Futura", FontFamilyClass.Serif, "DejaVu Serif")]
+    [InlineData("Tahoma", FontFamilyClass.Serif, "DejaVu Serif")]
+    [InlineData("TimesNewRomanPSMT", FontFamilyClass.Serif, "DejaVu Serif")]
+    public void TheDeclaredShapeBeatsTheShapeTheTableFilesTheNameUnder(
+        string requested, FontFamilyClass declared, string expected)
+    {
+        SystemFontResolver resolver = Resolver();
+        Assert.SkipUnless(resolver.Index.Has(expected), $"{expected} is not installed");
+
+        // A document's font table says what shape each family it names has, and LibreOffice believes
+        // it over its own classification of the name. Measured on 26.2.4.2 by holding the family name
+        // constant and varying only the declaration: Garamond, which the table files as a roman and
+        // which falls back to DejaVu Serif undeclared, falls back to DejaVu Sans declared swiss; and
+        // Futura and Tahoma, both grotesques by name, fall back to DejaVu Serif declared roman. Both
+        // directions matter — a rule that only ever promoted serif would fix the first case and
+        // manufacture the second.
+        resolver.Resolve(new FontRequest(requested, DeclaredClass: declared))
+            .FamilyName.ShouldBe(expected);
+    }
+
+    [Fact]
+    public void ADeclaredShapeCannotDisplaceAFamilyThatIsInstalledOrSubstitutable()
+    {
+        SystemFontResolver resolver = Resolver();
+        Assert.SkipUnless(
+            resolver.Index.Has("Liberation Sans") && resolver.Index.Has("Liberation Serif"),
+            "the Liberation family is not installed");
+
+        // The declaration is consulted only once the chain has come up empty, so it must not reach
+        // the metric-compatible pairs — those are the substitutions that hold a document's line
+        // breaks, and a font table calling Arial a roman must not move it off Liberation Sans.
+        // Measured: LibreOffice answers Liberation Sans and Liberation Serif for these two whatever
+        // the declaration says.
+        resolver.Resolve(new FontRequest("Arial", DeclaredClass: FontFamilyClass.Serif))
+            .FamilyName.ShouldBe("Liberation Sans");
+        resolver.Resolve(new FontRequest("Times New Roman", DeclaredClass: FontFamilyClass.SansSerif))
+            .FamilyName.ShouldBe("Liberation Serif");
+    }
+
+    [Fact]
+    public void ADeclaredFixedPitchBeatsADeclaredFamily()
+    {
+        SystemFontResolver resolver = Resolver();
+        Assert.SkipUnless(resolver.Index.Has("DejaVu Sans Mono"), "DejaVu Sans Mono is not installed");
+
+        // The document says two things about the family and they can disagree. LibreOffice takes the
+        // pitch: a request for Garamond declared roman *and* fixed answers DejaVu Sans Mono, not
+        // DejaVu Serif. A document declaring fixed pitch is relying on its columns lining up.
+        resolver.Resolve(new FontRequest(
+                "Garamond", Pitch: FontPitch.Fixed, DeclaredClass: FontFamilyClass.Serif))
+            .FamilyName.ShouldBe("DejaVu Sans Mono");
+    }
+
+    [Fact]
+    public void AFamilyWithNoDeclaredShapeIsUnaffected()
+    {
+        SystemFontResolver resolver = Resolver();
+        Assert.SkipUnless(
+            resolver.Index.Has("DejaVu Sans") && resolver.Index.Has("DejaVu Serif"),
+            "the DejaVu family is not installed");
+
+        // The common case, and the drift guard for it: most font tables declare nothing useful, and
+        // an unknown declaration must leave the name's own class exactly where it was.
+        resolver.Resolve(new FontRequest("Garamond", DeclaredClass: FontFamilyClass.Unknown))
+            .FamilyName.ShouldBe("DejaVu Serif");
+        resolver.Resolve(new FontRequest("Segoe UI", DeclaredClass: FontFamilyClass.Unknown))
+            .FamilyName.ShouldBe("DejaVu Sans");
+    }
 }

@@ -95,8 +95,19 @@ internal static class SheetFonts
     /// </remarks>
     public const string DefaultFamily = "Liberation Sans";
 
-    private static readonly ConcurrentDictionary<(string Family, int Weight, bool Italic), SheetFace?>
-        Cache = new();
+    /// <summary>
+    /// Every face a workbook has asked for, keyed by everything that can change the answer.
+    /// </summary>
+    /// <remarks>
+    /// The declared class is part of the key rather than a detail of the lookup, because it is part
+    /// of the <em>question</em>: two cells naming the same absent family and declaring different
+    /// shapes for it resolve to two different faces, and a key without it would hand the second
+    /// whichever the first happened to load. Present in almost no workbook, so the extra dimension
+    /// costs nothing in practice.
+    /// </remarks>
+    private static readonly
+        ConcurrentDictionary<(string Family, int Weight, bool Italic, FontFamilyClass Declared),
+                             SheetFace?> Cache = new();
 
     /// <summary>The face a format asks for, or null when no face could be read at all.</summary>
     /// <param name="format">The cell's resolved format.</param>
@@ -108,7 +119,8 @@ internal static class SheetFonts
             ? DefaultFamily
             : format.FontFamily;
 
-        return Cache.GetOrAdd((family, format.FontWeight, format.IsItalic), Load);
+        return Cache.GetOrAdd(
+            (family, format.FontWeight, format.IsItalic, format.DeclaredFontClass), Load);
     }
 
     /// <summary>The upright regular face of one family, or null when none could be read.</summary>
@@ -121,7 +133,9 @@ internal static class SheetFonts
     /// <param name="family">The family name, or null for the default.</param>
     public static SheetFace? ForFamily(string? family)
         => Cache.GetOrAdd(
-            (string.IsNullOrWhiteSpace(family) ? DefaultFamily : family, 400, false), Load);
+            (string.IsNullOrWhiteSpace(family) ? DefaultFamily : family, 400, false,
+             FontFamilyClass.Unknown),
+            Load);
 
     /// <summary>
     /// How much of a twip a digit width has to carry before it is taken as the next one up.
@@ -190,7 +204,7 @@ internal static class SheetFonts
 
         SheetFace? face = Cache.GetOrAdd(
             (string.IsNullOrWhiteSpace(font.Family) ? DefaultFamily : font.Family,
-             font.Weight, font.IsItalic),
+             font.Weight, font.IsItalic, font.DeclaredClass),
             Load);
 
         if (face is null || font.Size <= Length.Zero)
@@ -203,15 +217,21 @@ internal static class SheetFonts
         return twips - whole > DigitWidthCarry ? whole + 1 : whole;
     }
 
-    private static SheetFace? Load((string Family, int Weight, bool Italic) key)
+    private static SheetFace? Load(
+        (string Family, int Weight, bool Italic, FontFamilyClass Declared) key)
     {
         try
         {
             lock (Gate)
             {
                 SystemFontResolver resolver = Shared;
+
+                // The declared family only, not the declared pitch — the same half of the
+                // declaration the DOCX and DOC paths pass, and for the same reason: only roman and
+                // swiss were measured to move LibreOffice's answer.
                 FontReference reference = resolver.Resolve(
-                    new FontRequest(key.Family, key.Weight, key.Italic));
+                    new FontRequest(
+                        key.Family, key.Weight, key.Italic, DeclaredClass: key.Declared));
                 OpenTypeFace face = resolver.LoadOpenType(reference);
 
                 return new SheetFace(face, reference, LineSpacing.Resolve(face));

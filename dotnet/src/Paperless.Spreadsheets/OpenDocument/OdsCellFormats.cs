@@ -6,6 +6,7 @@ using Paperless.Core.Units;
 using Paperless.OpenDocument;
 using Paperless.OpenDocument.Styles;
 using Paperless.Spreadsheets.Layout;
+using Paperless.Text.Fonts;
 
 namespace Paperless.Spreadsheets.OpenDocument;
 
@@ -293,8 +294,9 @@ internal static class OdsCellFormats
         /// </remarks>
         private SheetCellFormat TextStyle(SheetCellFormat cellFormat, string styleName)
         {
-            string? family = Span(styleName, "font-family", OdfNamespaces.FoCompatible)
-                             ?? FontFaceFamily(Span(styleName, "font-name", OdfNamespaces.Style));
+            string? faceName = Span(styleName, "font-name", OdfNamespaces.Style);
+            string? stated = Span(styleName, "font-family", OdfNamespaces.FoCompatible);
+            string? family = stated ?? FontFaceFamily(faceName);
 
             Length? size = Measure(Span(styleName, "font-size", OdfNamespaces.FoCompatible));
             string? weight = Span(styleName, "font-weight", OdfNamespaces.FoCompatible);
@@ -304,6 +306,9 @@ internal static class OdsCellFormats
             return cellFormat with
             {
                 FontFamily = family ?? cellFormat.FontFamily,
+                DeclaredFontClass = family is null
+                    ? cellFormat.DeclaredFontClass
+                    : stated is not null ? FontFamilyClass.Unknown : FontFaceClass(faceName),
                 FontSize = size ?? cellFormat.FontSize,
                 FontWeight = weight is null ? cellFormat.FontWeight : Weight(weight),
                 IsItalic = posture is null
@@ -369,12 +374,15 @@ internal static class OdsCellFormats
 
         private SheetCellFormat Resolve(string styleName)
         {
-            string? family = Text(styleName, "font-family")
-                             ?? FontFaceFamily(Text(styleName, "font-name"));
+            string? faceName = Text(styleName, "font-name");
+            string? stated = Text(styleName, "font-family");
+            string? family = stated ?? FontFaceFamily(faceName);
 
             return new SheetCellFormat
             {
                 FontFamily = family,
+                DeclaredFontClass =
+                    stated is not null ? FontFamilyClass.Unknown : FontFaceClass(faceName),
                 FontSize = Points(Text(styleName, "font-size")) ?? Length.FromPoints(10),
                 FontWeight = Weight(Text(styleName, "font-weight")),
                 IsItalic = Text(styleName, "font-style") is "italic" or "oblique",
@@ -515,6 +523,31 @@ internal static class OdsCellFormats
             => name is not null && styles.FontFaces.TryGetValue(name, out OdfFontFace? face)
                 ? face.FontFamily ?? name
                 : name;
+
+        /// <summary>
+        /// The generic family an <c>office:font-face-decls</c> entry declares for a face.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// Only reachable through <c>style:font-name</c>: <c>fo:font-family</c> states a family
+        /// list directly and carries no generic, which is why this follows the same precedence the
+        /// family itself does and answers nothing when the family came from the <c>fo:</c>
+        /// property.
+        /// </para>
+        /// <para>
+        /// Measured on 26.2.4.2 with a one-cell flat ODS naming <c>Bell MT</c>, which is installed
+        /// nowhere here: <c>style:font-family-generic="roman"</c> renders it in DejaVu Serif and
+        /// the same file without the attribute renders it in DejaVu Sans. The other five values —
+        /// <c>swiss</c>, <c>modern</c>, <c>decorative</c>, <c>script</c>, <c>system</c> — each
+        /// leave it exactly where the undeclared file left it, which is the same result the DOCX
+        /// and DOC probes reached and the reason <see cref="SheetDeclaredFonts"/> carries two of
+        /// the six.
+        /// </para>
+        /// </remarks>
+        private FontFamilyClass FontFaceClass(string? name)
+            => name is not null && styles.FontFaces.TryGetValue(name, out OdfFontFace? face)
+                ? SheetDeclaredFonts.FromOdfGeneric(face.GenericFamily)
+                : FontFamilyClass.Unknown;
 
         private string? Cell(string styleName, string property, string ns)
             => styles.ResolveProperty(

@@ -1,19 +1,22 @@
 using System.Xml.Linq;
 using Paperless.Ooxml;
 using Paperless.TestKit;
+using Paperless.Text.Fonts;
 using Paperless.WordProcessing.Ooxml;
 using Shouldly;
 
 namespace Paperless.WordProcessing.Tests;
 
 /// <summary>
-/// Tests <c>fontTable.xml</c>, which is read and reported rather than acted on.
+/// Tests <c>fontTable.xml</c>: what it holds, and the one thing layout now asks it.
 /// </summary>
 /// <remarks>
-/// Nothing in layout consumes this: <c>w:rFonts</c> names a family outright, so a paragraph is
-/// measured without ever opening the part. What is checked here is that the two things only this
-/// part knows come out intact — the embedded-font relationships, and the PANOSE and pitch a
-/// substitution would match on.
+/// <c>w:rFonts</c> names a family outright, so a paragraph is measured without ever opening the
+/// part — which is why it went unconsumed for so long. What the name cannot say is what shape a
+/// family <em>nobody has installed</em> is, and that decides which face the fallback lands on.
+/// So <c>w:family</c> is now read for real; <c>w:pitch</c>, the embedded-font relationships and
+/// PANOSE are still reported rather than acted on, and the pitch's case is measured rather than
+/// pending — see <see cref="TheDeclaredPitchIsReadButNotActedOnFromThisPart"/>.
 /// </remarks>
 public class FontTableTests
 {
@@ -125,5 +128,70 @@ public class FontTableTests
         WordFontTable.Read(null).Fonts.ShouldBeEmpty();
         WordFontTable.Read(null).HasEmbeddedFonts.ShouldBeFalse();
         WordFontTable.Read(null).Find("Calibri").ShouldBeNull();
+        WordFontTable.Read(null).ShapeOf("Calibri").Class.ShouldBe(FontFamilyClass.Unknown);
+    }
+
+    [Theory]
+    [InlineData("roman", FontFamilyClass.Serif)]
+    [InlineData("swiss", FontFamilyClass.SansSerif)]
+    [InlineData("modern", FontFamilyClass.Unknown)]
+    [InlineData("script", FontFamilyClass.Unknown)]
+    [InlineData("decorative", FontFamilyClass.Unknown)]
+    [InlineData("auto", FontFamilyClass.Unknown)]
+    [InlineData(null, FontFamilyClass.Unknown)]
+    public void OnlyRomanAndSwissBecomeAShapeTheResolverActsOn(string? declared, FontFamilyClass expected)
+    {
+        // Probed against LibreOffice 26.2.4.2 by holding the family name constant and varying only
+        // the declaration: roman and swiss each move the fallback, and modern, script, decorative,
+        // system and auto each leave it exactly where the undeclared request left it. Mapping
+        // "modern" onto a monospaced fallback is the tempting mistake — the name invites it and
+        // LibreOffice does not do it, so it would invent a divergence rather than remove one.
+        WordFontTable.Read(Table("Some Font", declared, pitch: null))
+            .ShapeOf("Some Font").Class.ShouldBe(expected);
+    }
+
+    [Theory]
+    [InlineData("fixed", FontPitch.Fixed)]
+    [InlineData("variable", FontPitch.Variable)]
+    [InlineData("default", FontPitch.Unknown)]
+    [InlineData(null, FontPitch.Unknown)]
+    public void TheDeclaredPitchIsReadButNotActedOnFromThisPart(string? declared, FontPitch expected)
+    {
+        // Read, and deliberately not passed to the resolver from the DOCX path. LibreOffice's own
+        // DOCX filter does not act on it: probed on 26.2.4.2 with a one-run package, `Garamond`
+        // declared `swiss` moves the fallback from DejaVu Serif to DejaVu Sans while the same family
+        // declared `fixed` leaves it exactly where it was, as does `MS Mincho` declared
+        // `modern`+`fixed`. Its *ODF* filter does honour `style:font-pitch` — the same probe run
+        // through a `.fodt` answers DejaVu Sans Mono — so the difference is between the two
+        // importers, not a property of the resolver. Wiring it here put one corpus document into
+        // DejaVu Sans Mono that the reference sets in DejaVu Sans.
+        WordFontTable.Read(Table("Some Font", family: null, pitch: declared))
+            .ShapeOf("Some Font").Pitch.ShouldBe(expected);
+    }
+
+    [Fact]
+    public void AFamilyTheTableDoesNotNameHasNoDeclaredShape()
+    {
+        // The common case for a run: w:rFonts may name a family the table never declared, and the
+        // answer to that is "the document said nothing" rather than a guess.
+        WordFontTable table = WordFontTable.Read(Table("Some Font", "roman", "fixed"));
+
+        table.ShapeOf("Another Font").ShouldBe(default(DeclaredFontShape));
+        table.ShapeOf(null).ShouldBe(default(DeclaredFontShape));
+    }
+
+    /// <summary>A one-entry <c>w:fonts</c> root, with the two attributes under test.</summary>
+    private static XElement Table(string name, string? family, string? pitch)
+    {
+        XNamespace w = OoxmlNamespaces.WordprocessingML;
+        XElement font = new(w + "font", new XAttribute(w + "name", name));
+
+        if (family is not null)
+            font.Add(new XElement(w + "family", new XAttribute(w + "val", family)));
+
+        if (pitch is not null)
+            font.Add(new XElement(w + "pitch", new XAttribute(w + "val", pitch)));
+
+        return new XElement(w + "fonts", font);
     }
 }
