@@ -1641,6 +1641,31 @@ line taking the horizontal path, where Calc *shortens* the string — dropping c
 clip it instead, which keeps every glyph in the text layer. That is the same defect in the other
 axis and would explain an over-count with the row heights agreeing.
 
+#### The skip is now implemented and it is worth 2553 words — "measured to move nothing" was one document
+
+Round `sheets-b011-01`. The half of this section that matters is the **second** one, and the
+sentence above it is right that it is what `wc -w` can see. What "measured to move nothing" meant
+is that one document did not reach the branch; the rule itself moves **13 of the 171 sheets** and
+takes the track's `Σ|ours − ref|` on the word column from 26 964 to 24 411.
+
+Two corrections to the paragraphs above, both measured rather than reasoned:
+
+- **The `ManualSize` test is not a condition on the skip.** It decides only whether a hard clip
+  rectangle is emitted. Both sides of it truncate: an authored manual-height row is truncated *and*
+  carries a `re W* n` as tall as the row, and `T0A0D0000090006XLSE.xls`'s **optimal-height** rows
+  are truncated with no clip operator on the page at all. A port gated on the row flag would have
+  fixed half the cases. That is probably what "move nothing" was.
+- **"A line whose top falls past the bottom is never formatted" is one line too tight.** The
+  engine's test is `maPaperSize.Height() < nCurrentPosY` with `nCurrentPosY` the line's *bottom*
+  and the comparison strict, and there is a minimum of four lines however short the row
+  (`nLine > 2`, impedit3.cxx:1801). A 1 cm row draws four lines of a sixty-word cell; a 58 pt row
+  whose paper is exactly five pitches draws six.
+
+`SkipOutsideFormat` in `SheetTextLayout`, `sheet-vclip-row.fods` and
+`probes/sheets-b011-01/results.md` carry the rule, the eighteen authored cases it was fitted to and
+the reach. **The vertical hard clip — the first half of this section — is still not implemented**,
+and it remains ink-only.
+
 ### `INDEX_Digital_Transformation_Toolkits.xls`: six pages of pictures we never draw *(closed — see above)*
 
 18 pages against 24 with the words matching **exactly** (1982 against 1982), which reads as six
