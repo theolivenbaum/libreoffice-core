@@ -108,13 +108,17 @@ internal static class XlsbStyles
         int height = cursor.ReadUInt16();
         ushort flags = cursor.ReadUInt16();
         int weight = cursor.ReadUInt16();
-        cursor.Skip(FixedBytes - 6);
+        cursor.Skip(2);                          // escapement
+        cursor.Skip(1);                          // underline
+        int family = cursor.ReadByte();
+        cursor.Skip(FixedBytes - 10);            // character set, unused, colour, scheme
         string name = cursor.ReadString();
 
         return new SheetDefaultFont(
             name.Length == 0 ? null : name,
             height > 0 ? Length.FromTwips(height) : Length.FromPoints(10),
             weight is >= 100 and <= 1000 ? weight : 400,
-            (flags & ItalicFlag) != 0);
+            (flags & ItalicFlag) != 0,
+            SheetDeclaredFonts.FromWindowsCode(family));
     }
 }

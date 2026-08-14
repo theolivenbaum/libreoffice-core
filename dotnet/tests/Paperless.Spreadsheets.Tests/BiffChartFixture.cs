@@ -196,7 +196,13 @@ internal static class BiffChartFixture
     }
 
     /// <summary>A BIFF8 <c>FONT</c> record naming one family at ten point.</summary>
-    public static byte[] FontRecord(string name)
+    /// <param name="name">The family name.</param>
+    /// <param name="family">
+    /// The Windows <c>FF_*</c> family code the record declares — 0 dontcare, 1 roman, 2 swiss.
+    /// Zero unless a test is about the family byte, which sits between the underline and the
+    /// character set and is the one field whose offset nothing else in this fixture pins.
+    /// </param>
+    public static byte[] FontRecord(string name, byte family = 0)
     {
         ArgumentNullException.ThrowIfNull(name);
 
@@ -208,7 +214,7 @@ internal static class BiffChartFixture
             .. Word(400),        // weight
             .. Word(0),          // escapement
             0,                   // underline
-            0, 0, 0,             // family, character set, reserved
+            family, 0, 0,        // family, character set, reserved
             (byte)name.Length,
             0,                   // eight-bit characters
             .. name.Select(character => (byte)character),

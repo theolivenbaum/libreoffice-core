@@ -1,4 +1,5 @@
 using Paperless.Core.Units;
+using Paperless.Text.Fonts;
 
 namespace Paperless.Spreadsheets.Layout;
 
@@ -26,8 +27,18 @@ namespace Paperless.Spreadsheets.Layout;
 /// <param name="Size">The em size.</param>
 /// <param name="Weight">The CSS-style weight; 400 unless the font record says otherwise.</param>
 /// <param name="IsItalic">Whether the face is italic.</param>
+/// <param name="DeclaredClass">
+/// The shape the workbook declares for that family — see
+/// <see cref="SheetCellFormat.DeclaredFontClass"/>. It travels with the name for the same reason
+/// the weight does: a digit width is measured off whatever face the name actually resolves to, and
+/// for an uninstalled family the declaration is what decides that.
+/// </param>
 public sealed record SheetDefaultFont(
-    string? Family, Length Size, int Weight = 400, bool IsItalic = false)
+    string? Family,
+    Length Size,
+    int Weight = 400,
+    bool IsItalic = false,
+    FontFamilyClass DeclaredClass = FontFamilyClass.Unknown)
 {
     /// <summary>What a workbook naming no font is measured in: ten-point Liberation Sans.</summary>
     /// <remarks>

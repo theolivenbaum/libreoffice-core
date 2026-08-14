@@ -21,8 +21,14 @@ internal readonly record struct XlsxRunColour(uint? Rgb, int? Indexed, int? Them
 /// <param name="Bold">Whether the run is bold.</param>
 /// <param name="Italic">Whether it is italic.</param>
 /// <param name="Colour">Its colour, unresolved.</param>
+/// <param name="DeclaredFamily">
+/// The Windows <c>FF_*</c> code the run's <c>&lt;family val="N"/&gt;</c> states, or null when it
+/// states none. Carried because an <c>rPr</c> may name a face the cell's own font does not, and the
+/// declaration is what decides the fallback when that face is not installed.
+/// </param>
 internal sealed record XlsxRunFont(
-    string? Family, double? Points, bool? Bold, bool? Italic, XlsxRunColour? Colour);
+    string? Family, double? Points, bool? Bold, bool? Italic, XlsxRunColour? Colour,
+    int? DeclaredFamily = null);
 
 /// <summary>One stretch of a rich string, as character offsets into the flattened text.</summary>
 /// <param name="Start">Its first character.</param>
@@ -101,10 +107,13 @@ internal static class XlsxRichRuns
         bool? bold = Toggle(Xlsx.Child(properties, "b"));
         bool? italic = Toggle(Xlsx.Child(properties, "i"));
         XlsxRunColour? colour = ReadColour(Xlsx.Child(properties, "color"));
+        int? declared = Number(Xlsx.Child(properties, "family"), "val") is { } code
+            ? (int)code
+            : null;
 
         return family is null && points is null && bold is null && italic is null && colour is null
             ? null
-            : new XlsxRunFont(family, points, bold, italic, colour);
+            : new XlsxRunFont(family, points, bold, italic, colour, declared);
     }
 
     /// <summary>

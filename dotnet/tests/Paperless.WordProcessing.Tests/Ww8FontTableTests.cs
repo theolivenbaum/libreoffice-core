@@ -79,10 +79,13 @@ public class Ww8FontTableTests
     [Fact]
     public void TheFamilyBitsAreMaskedOutOfTheByteTheyShareWithThePitchAndTheTrueTypeFlag()
     {
-        // The first byte packs prq in bits 0-1, fTrueType in bit 2 and ff in bits 4-6. A reader that
-        // shifts without masking picks bit 7 up as part of the family; one that does not shift at all
-        // finds a family on nearly every entry. 0xD2 is ff = FF_SWISS with every other bit set.
-        Ww8FontTable.Parse(Table((0xD2, "Some Font")))
+        // The first byte packs prq in bits 0-1, fTrueType in bit 2 and ff in bits 4-6 — mask 0x70,
+        // per WW8_FFN_BASE in sw/source/filter/ww8/ww8struc.hxx, which declares `ff : 3` between two
+        // reserved single bits. A reader that shifts without masking picks bit 7 up as part of the
+        // family; one that does not shift at all finds a family on nearly every entry. 0xAF is
+        // ff = FF_SWISS with every other bit in the byte set, so it catches both mistakes: unmasked
+        // it reads 0xA, unshifted it reads 0xAF, and only (byte >> 4) & 0x07 reads 2.
+        Ww8FontTable.Parse(Table((0xAF, "Some Font")))
             .ShapeOf("Some Font").Class.ShouldBe(FontFamilyClass.SansSerif);
 
         // 0x91 is ff = FF_ROMAN with the reserved high bit set and prq = fixed.

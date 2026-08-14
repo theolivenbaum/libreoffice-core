@@ -2,6 +2,7 @@ using Paperless.Core.Graphics;
 using Paperless.Core.Units;
 using Paperless.Spreadsheets.Layout;
 using Paperless.Core.Numbers;
+using Paperless.Text.Fonts;
 
 namespace Paperless.Spreadsheets.MsBinary;
 
@@ -13,9 +14,16 @@ namespace Paperless.Spreadsheets.MsBinary;
 /// <param name="ColourIndex">An index into the workbook's palette, or 0x7FFF for automatic.</param>
 /// <param name="Underline">The line under the text, from the record's own underline byte.</param>
 /// <param name="IsStruckThrough">Whether a line is drawn through it.</param>
+/// <param name="DeclaredClass">
+/// The shape the record's family byte declares — see
+/// <see cref="SheetCellFormat.DeclaredFontClass"/>. BIFF spells it with the same Windows
+/// <c>FF_*</c> codes SpreadsheetML's <c>&lt;family val="N"/&gt;</c> uses, and LibreOffice reads
+/// both into one field (<c>sc/source/filter/oox/stylesbuffer.cxx:672</c>).
+/// </param>
 internal readonly record struct BiffFont(
     string Name, Length Height, int Weight, bool IsItalic, int ColourIndex,
-    SheetUnderline Underline = SheetUnderline.None, bool IsStruckThrough = false);
+    SheetUnderline Underline = SheetUnderline.None, bool IsStruckThrough = false,
+    FontFamilyClass DeclaredClass = FontFamilyClass.Unknown);
 
 /// <summary>A cell format's alignment half, as an <c>XF</c> record states it.</summary>
 internal readonly record struct BiffAlignment(
@@ -105,7 +113,8 @@ internal sealed class XlsCellFormats
             _fonts[0].Name.Length == 0 ? null : _fonts[0].Name,
             _fonts[0].Height,
             _fonts[0].Weight,
-            _fonts[0].IsItalic)
+            _fonts[0].IsItalic,
+            _fonts[0].DeclaredClass)
         : null;
 
     /// <summary>
@@ -155,6 +164,7 @@ internal sealed class XlsCellFormats
         return new SheetCellFormat
         {
             FontFamily = font.Name.Length == 0 ? null : font.Name,
+            DeclaredFontClass = font.DeclaredClass,
             FontSize = font.Height,
             FontWeight = font.Weight,
             IsItalic = font.IsItalic,
@@ -199,6 +209,12 @@ internal sealed class XlsCellFormats
         return cellFormat with
         {
             FontFamily = font.Name.Length == 0 ? cellFormat.FontFamily : font.Name,
+
+            // The declaration travels with the name, and a run whose FONT record has no name keeps
+            // the cell's whole face — so it keeps the cell's declaration with it.
+            DeclaredFontClass = font.Name.Length == 0
+                ? cellFormat.DeclaredFontClass
+                : font.DeclaredClass,
             FontSize = font.Height,
             FontWeight = font.Weight,
             IsItalic = font.IsItalic,
