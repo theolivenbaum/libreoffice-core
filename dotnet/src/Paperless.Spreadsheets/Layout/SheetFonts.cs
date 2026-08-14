@@ -131,9 +131,24 @@ internal static class SheetFonts
     /// whose text boxes are set in the same face as its cells should resolve it once.
     /// </remarks>
     /// <param name="family">The family name, or null for the default.</param>
-    public static SheetFace? ForFamily(string? family)
+    public static SheetFace? ForFamily(string? family) => ForFamily(family, bold: false);
+
+    /// <summary>The upright face of one family at one of two weights.</summary>
+    /// <remarks>
+    /// The weight is a <c>bool</c> rather than a number because the callers that have one have
+    /// only that: BIFF's <c>bls</c> is 400 or 700 in every file of the corpus, and a chart's
+    /// model carries the answer as <see cref="Paperless.Core.Charts.ChartPlot.IsTitleBold"/>. The
+    /// resolver underneath takes a full weight and the cache is keyed on it, so widening this
+    /// later costs nothing.
+    /// </remarks>
+    /// <param name="family">The family name, or null for the default.</param>
+    /// <param name="bold">Whether the family's bold face is wanted.</param>
+    public static SheetFace? ForFamily(string? family, bool bold)
         => Cache.GetOrAdd(
-            (string.IsNullOrWhiteSpace(family) ? DefaultFamily : family, 400, false,
+            // Unknown class: a chart's font is named directly and carries no generic-family
+            // declaration for a fallback to honour, unlike a cell's, which comes from a
+            // SpreadsheetML <font> that may state <family val="N"/>.
+            (string.IsNullOrWhiteSpace(family) ? DefaultFamily : family, bold ? 700 : 400, false,
              FontFamilyClass.Unknown),
             Load);
 

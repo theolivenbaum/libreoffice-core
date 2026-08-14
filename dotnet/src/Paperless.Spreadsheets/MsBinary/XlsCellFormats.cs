@@ -134,6 +134,20 @@ internal sealed class XlsCellFormats
             ? _fonts[index].Name
             : null;
 
+    /// <summary>
+    /// The whole <c>FONT</c> one index names, or null when the workbook never wrote it.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="FontFamilyAt"/> answers the family alone because that is all a chart used to
+    /// take from here; a chart's title and axis titles need the size and the weight as well, and
+    /// unlike the family those have no "states nothing" value to fall back from — a height of
+    /// zero would be read as a real size. So the record is handed over whole and the caller
+    /// decides, which also keeps the hole at index four in one place.
+    /// </remarks>
+    /// <param name="index">The <c>FONT</c> index, as the file states it — the hole at four included.</param>
+    public BiffFont? FontAt(int index)
+        => index >= 0 && index < _fonts.Count ? _fonts[index] : null;
+
     /// <summary>Replaces the palette from index eight upwards, which is what <c>PALETTE</c> sets.</summary>
     /// <param name="colours">The colours the record listed, in order.</param>
     public void SetPalette(IReadOnlyList<Colour> colours)
