@@ -264,6 +264,23 @@ Run every project before committing anyway. The failure this project cares about
 cascade — one wrong measurement moving every line after it — and it surfaces in projects you had
 no reason to think you had touched.
 
+### Never pipe `batch-check.sh` into `head` or `tail`
+
+It runs its documents in parallel workers writing to stdout. Closing the pipe early sends
+SIGPIPE to a worker, which dies without a word — and the run **silently writes 155 of 156
+rows** while the summary line still looks entirely plausible. There is no error and no warning.
+
+Redirect to a file and read the file:
+
+```sh
+batch-check.sh "$CORPUS" 'sheets/done-*' out 3 > sweep.log 2>&1
+grep '^TOTAL' sweep.log
+```
+
+The `TOTAL` line is computed by the script from what it actually processed, so it is the
+column to check — a run that lost a worker reports a smaller total, not a wrong verdict. But
+that is only a safety net if you read it; a truncated per-document TSV looks fine on its own.
+
 ### A sweep and a rebuild must never overlap
 
 `batch-check.sh` reads `PAPERLESS_CLI` per document, so a rebuild that lands mid-sweep swaps
