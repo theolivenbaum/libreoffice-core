@@ -618,6 +618,16 @@ internal static class PptxTextBody
         Colour? colour = sources.Resolve(
             runProperties, style => style.Colour, element => RunColour(element, theme));
 
+        // A run's own a:hlinkClick redecorates it: see HyperlinkColour and the underline below.
+        // The run's *own* a:rPr is what decides, not the inherited chain, because LibreOffice
+        // tests maTextCharacterProperties — the run's properties before the defaults are merged
+        // in — rather than the merged set (oox/source/drawingml/textrun.cxx:88, :162-168).
+        XElement? hyperlink = Drawing.Child(runProperties, "hlinkClick");
+        if (hyperlink is not null && Drawing.Child(hyperlink, "extLst") is null)
+        {
+            colour = HyperlinkColour(runProperties, sources, theme) ?? colour;
+        }
+
         // a:rPr/@spc, in hundredths of a point, and negative far more often than not: a deck's
         // designer pulls a heading in and PowerPoint records it per run. LibreOffice reads it into
         // CharKerning (oox/source/drawingml/textcharacterproperties.cxx:190) and EditEngine adds it
@@ -651,7 +661,12 @@ internal static class PptxTextBody
             italic,
             colour ?? Colour.Black,
             Length.FromEmu(tracking * Length.EmuPerPoint / 100),
-            IsUnderlined: underline is not null and not "none",
+            // A hyperlink underlines itself unless the run states an underline of its own — and
+            // "of its own" is again the run's a:rPr and not the chain behind it, so a defRPr
+            // saying u="none" above a linked run does not stop the rule
+            // (oox/source/drawingml/textrun.cxx:167-168).
+            IsUnderlined: (hyperlink is not null && Drawing.Attribute(runProperties, "u") is null)
+                          || underline is not null and not "none",
             IsStruckThrough: strike is not null and not "noStrike",
             Escapement: baseline == 0
                 ? SlideEscapement.None
@@ -796,6 +811,71 @@ internal static class PptxTextBody
 
         List<DrawingGradientStop> ordered = [.. gradient.Stops.OrderBy(stop => stop.Position)];
         return ordered[ordered.Count > 2 ? 1 : 0].Colour.Resolve(theme);
+    }
+
+    /// <summary>
+    /// What a run carrying an <c>a:hlinkClick</c> is drawn in: the theme's <c>hlink</c> slot
+    /// under the transforms the run's inherited fill already had.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>The slot is swapped, the transform chain is kept.</b> LibreOffice calls
+    /// <c>maFillColor.setSchemeClr(XML_hlink)</c> on the character properties it has already
+    /// merged (<c>oox/source/drawingml/textrun.cxx:162-166</c>), and <c>Color::setSchemeClr</c>
+    /// assigns only the base — <c>meMode</c> and <c>mnC1</c> — leaving the <c>lumMod</c>,
+    /// <c>tint</c> and <c>alpha</c> already on the object in place
+    /// (<c>oox/source/drawingml/color.cxx:405-413</c>). So a linked run does not simply come out
+    /// the theme's link colour; it comes out the theme's link colour <em>seen through whatever
+    /// the placeholder was doing to the text colour</em>.
+    /// </para>
+    /// <para>
+    /// That distinction is the whole reason this is not two lines. Measured on
+    /// <c>slides/batch-004/pptx/solog_orientation_august_2019.pptx</c> against the banked
+    /// 26.2.4.2 reference: its <c>slideLayout1.xml</c> gives the subtitle placeholder
+    /// <c>schemeClr tx1</c> under <c>tint val="75000"</c>, which draws the body at
+    /// <c>#8B8B8B</c>. The reference draws the three <c>mailto:</c> runs on page 3 at
+    /// <c>#8B8BFF</c> — the theme's <c>hlink</c> <c>#0000FF</c> under that same 75% tint, since
+    /// tinting toward white leaves a saturated blue channel at FF and lifts the other two to 8B.
+    /// Resolving <c>hlink</c> on its own would have drawn them <c>#0000FF</c> and been wrong on
+    /// exactly this page while right on the deck's other five, which is the kind of near-miss
+    /// that survives a whole round.
+    /// </para>
+    /// <para>
+    /// Only <c>a:solidFill</c> is followed, because <c>maFillColor</c> is the solid-fill colour
+    /// and a gradient-filled run leaves it unset — such a run links out as the untransformed
+    /// theme colour, which is what LibreOffice does with it too. The shape's
+    /// <c>p:style/a:fontRef</c> is skipped in the walk for a different reason: it hands back an
+    /// already-resolved <see cref="Colour"/> with no chain left to keep, so there is nothing for
+    /// this to carry over even when it is the layer that would have won.
+    /// </para>
+    /// </remarks>
+    private static Colour? HyperlinkColour(
+        XElement? runProperties, RunSources sources, DrawingTheme? theme)
+    {
+        DrawingColour? inherited = sources.Resolve<DrawingColour>(
+            runProperties, _ => null, RunFillColour);
+
+        return DrawingColour.FromScheme("hlink", inherited?.Transforms).Resolve(theme);
+    }
+
+    /// <summary>
+    /// The unresolved <c>a:solidFill</c> colour one <c>a:rPr</c> or <c>a:defRPr</c> states.
+    /// </summary>
+    /// <remarks>
+    /// The same source <see cref="RunColour"/> reads, stopped one step earlier so the transform
+    /// chain is still on it. Kept separate rather than folded into <c>RunColour</c> because every
+    /// other caller wants the resolved colour and would only have to resolve it again.
+    /// </remarks>
+    private static DrawingColour? RunFillColour(XElement properties)
+    {
+        if (Drawing.Child(properties, "solidFill") is not { } solid) return null;
+
+        foreach (XElement child in solid.Elements())
+        {
+            if (DrawingColour.Read(child) is { } colour) return colour;
+        }
+
+        return null;
     }
 
     private static XElement? LevelStyle(XElement? listStyle, int level)
