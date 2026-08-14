@@ -218,15 +218,23 @@ public class ChartAxisLabelTests
     /// 0.88 of it at ten point and turned an axis two categories early.
     /// </para>
     /// <para>
-    /// Ten labels of ten characters at half an em each are exactly the 50 pt spacing wide, and
-    /// their shapes — 0.36 em wider — are not, so they collide without wrapping. That is the
-    /// state the old rule turned and this one thins.
+    /// Two words of five characters at half an em each fit the 50 pt spacing one at a time and
+    /// the label they make — eleven characters, 55 pt — does not, so the labels collide without
+    /// any of them wrapping. That is the state the old rule turned and this one thins.
+    /// </para>
+    /// <para>
+    /// <strong>It used to be one ten-character word and that boundary has moved</strong>, because
+    /// an axis label's shape is now its text and nothing else: it used to be 0.36 em wider than
+    /// the text, which made a label exactly as wide as the spacing collide with its neighbour.
+    /// Two labels that touch edge to edge do not overlap — <c>doesOverlap</c> clips their
+    /// polygons — so the old answer was an artefact of the invented inset. See
+    /// <see cref="ChartAxisLabels"/>.
     /// </para>
     /// </remarks>
     [Fact]
     public void AWordExactlyAsWideAsTheSpacingDoesNotWrap()
     {
-        (string?[] texts, Length[] centres) = Axis(10, 50.0, "ABCDEFGHIJ");
+        (string?[] texts, Length[] centres) = Axis(10, 50.0, "ABCDE FGHIJ");
 
         ChartAxisLabelLayout layout = ChartAxisLabels.Resolve(
             texts, centres, new ChartAxisText(LineBreakAllowed: true), Size,

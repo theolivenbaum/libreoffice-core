@@ -1,4 +1,5 @@
 using Paperless.Core.Charts;
+using Paperless.Core.Numbers;
 using Shouldly;
 using static Paperless.Spreadsheets.Tests.BiffChartFixture;
 
@@ -116,6 +117,130 @@ public sealed class XlsChartDateAxisTests
         plot.CategoryAxisText.OverlapAllowed.ShouldBeTrue();
     }
 
+    /// <summary>
+    /// A date axis is resolved only when the categories are dates as well as declared.
+    /// </summary>
+    /// <remarks>
+    /// <c>EXC_CHDATERANGE_AUTODATE</c> becomes <c>ScaleData::AutoDateAxis</c>, and
+    /// <c>AxisHelper::checkDateAxis</c> then asks the categories themselves through
+    /// <c>ExplicitCategoriesProvider::isDateAxis</c>, which tests each cell's own number format
+    /// (<c>lcl_fillDateCategories</c>). The corpus's one date-axis workbook states flags
+    /// <c>0x00ff</c> — every automatic bit, <c>AUTODATE</c> among them — so this branch is the
+    /// one that decides it, and a reader that took the <c>DATEAXIS</c> flag alone would put a
+    /// date axis on any chart whose author once tried one.
+    /// </remarks>
+    [Fact]
+    public void AnAutomaticDateAxisNeedsTheCategoriesToCarryADateFormat()
+    {
+        ChartPlot dated = Chart(
+            Substream([.. DatedSeries(), .. CategoryAxis(LabelRange(1), AutoDateRange())]),
+            withData: true, cellFormat: DateFormat, formatCode: "DD/MM/YY");
+
+        dated.DateAxis.ShouldNotBeNull();
+
+        ChartPlot plain = Chart(
+            Substream([.. DatedSeries(), .. CategoryAxis(LabelRange(1), AutoDateRange())]),
+            withData: true, cellFormat: OneDecimal, formatCode: "0.0");
+
+        plain.DateAxis.ShouldBeNull();
+    }
+
+    /// <summary>An axis that does not declare itself a date axis never becomes one.</summary>
+    [Fact]
+    public void AnAxisWithoutTheDateFlagIsNotADateAxisHoweverItsCellsAreFormatted()
+        => Chart(
+            Substream([.. DatedSeries(), .. CategoryAxis(LabelRange(1), DateRange(false))]),
+            withData: true, cellFormat: DateFormat, formatCode: "DD/MM/YY")
+        .DateAxis.ShouldBeNull();
+
+    /// <summary>
+    /// The resolved axis snaps to whole years when one date is all there is to go on.
+    /// </summary>
+    /// <remarks>
+    /// One category cannot put two dates in the same year, so
+    /// <c>calculateTimeResolutionOnXAxis</c> stops at <c>YEAR</c>, both limits snap to 1 January
+    /// and a range shorter than a year is widened to one (<c>ScaleAutomatism.cxx:586-597</c>).
+    /// The fixture's cell holds 42, which is 10 February 1900, so the axis runs from serial 2 to
+    /// serial 367 — 1 January 1900 to 1 January 1901 — and carries a tick at each end.
+    /// </remarks>
+    [Fact]
+    public void OneDateGivesAYearlyAxisSnappedToJanuary()
+    {
+        ChartDateAxis axis = Chart(
+            Substream([.. DatedSeries(), .. CategoryAxis(LabelRange(1), AutoDateRange())]),
+            withData: true, cellFormat: DateFormat, formatCode: "DD/MM/YY").DateAxis!;
+
+        axis.TimeResolution.ShouldBe(ChartTimeUnit.Year);
+        axis.Minimum.ShouldBe(2.0);
+        axis.Maximum.ShouldBe(367.0);
+        axis.MajorInterval.ShouldBe(new ChartTimeInterval(1, ChartTimeUnit.Year));
+        axis.Ticks.ShouldBe([2.0, 367.0]);
+    }
+
+    /// <summary>
+    /// A stated minimum, maximum and step are honoured, and they are counted in the base unit.
+    /// </summary>
+    /// <remarks>
+    /// <c>lclConvertTimeValue</c> and <c>lclConvertTimeInterval</c>
+    /// (<c>xichart.cxx:2960-2988</c>) read every one of those fields as a count of the record's
+    /// own base unit, so a minimum of 2 under base unit <em>years</em> is 30 December 1901 and
+    /// not serial 2. The record here states years for all four and no automatic bits at all.
+    /// </remarks>
+    [Fact]
+    public void AStatedRangeIsCountedInTheRecordsOwnBaseUnit()
+    {
+        ChartDateAxis axis = Chart(
+            Substream(
+            [
+                .. DatedSeries(),
+                .. CategoryAxis(LabelRange(1), StatedDateRange(minimum: 2, maximum: 6, step: 2)),
+            ]),
+            withData: true, cellFormat: DateFormat, formatCode: "DD/MM/YY").DateAxis!;
+
+        axis.TimeResolution.ShouldBe(ChartTimeUnit.Year);
+        axis.MajorInterval.ShouldBe(new ChartTimeInterval(2, ChartTimeUnit.Year));
+
+        // Two and six years from the null date are 30 December 1901 and 1905, which a year
+        // resolution then snaps back to the 1 January before each.
+        axis.Ticks.Count.ShouldBe(3);
+        ChartDateScale.DateOf(axis.Ticks[0], SpreadsheetDateSystem.Date1900)
+            .ShouldBe(new DateOnly(1901, 1, 1));
+        ChartDateScale.DateOf(axis.Ticks[^1], SpreadsheetDateSystem.Date1900)
+            .ShouldBe(new DateOnly(1905, 1, 1));
+    }
+
+    /// <summary>A series naming both its values and its categories.</summary>
+    private static byte[] DatedSeries()
+        => Group(ChSeries, new byte[8], SeriesLink(), CategoryLink());
+
+    /// <summary><c>CHDATERANGE</c> with every automatic bit set, which is what the corpus states.</summary>
+    private static byte[] AutoDateRange() => Record(
+        ChDateRange,
+        [
+            .. Word(0), .. Word(0), .. Word(1), .. Word(0),
+            .. Word(1), .. Word(0), .. Word(0), .. Word(0),
+            .. Word(0x00FF),
+        ]);
+
+    /// <summary>
+    /// <c>CHDATERANGE</c> stating its limits and its step, in years, with no automatic bits.
+    /// </summary>
+    private static byte[] StatedDateRange(ushort minimum, ushort maximum, ushort step) => Record(
+        ChDateRange,
+        [
+            .. Word(minimum), .. Word(maximum), .. Word(step), .. Word(YearsUnit),
+            .. Word(1), .. Word(YearsUnit), .. Word(YearsUnit), .. Word(0),
+            .. Word(0x0010),
+        ]);
+
+    /// <summary>An <c>ifmt</c> the fixture writes a <c>FORMAT</c> record for.</summary>
+    private const ushort DateFormat = 201;
+    private const ushort OneDecimal = 200;
+
+    /// <summary><c>EXC_CHDATERANGE_YEARS</c>.</summary>
+    private const ushort YearsUnit = 2;
+
+    private const ushort ChSeries = 0x1003;
     private const ushort ChLabelRange = 0x1020;
     private const ushort ChDateRange = 0x1062;
 }

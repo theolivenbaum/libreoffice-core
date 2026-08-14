@@ -390,6 +390,26 @@ the page … the footer text is overlapped by the table's body text"*.
 binary `.ppt` was drawn hard black, on 26 of the corpus's `.ppt` decks and 935 glyphs. The word
 column cannot see it and did not move.
 
+### The same shape a fourth time, and here it is *our* tokenisation that shatters
+
+`sheets/batch-010/xls/Template Pilot Logbook JAR-FCL V3.0.xls` — page-exact at 38/38, **1587 words
+against the reference's 1531**, and it reached that number by being *fixed*. Before
+`probes/sheets-dateaxis-01`, the same document read 1327 against 1531 and the 204 missing words
+were real: its three chart pages draw a date axis whose ~72 rotated tick labels we were not
+drawing at all. Drawing them takes the whitespace-stripped character streams from 128/91/19
+against 352/383/55 to 344/363/49, which is the content arriving — and takes the word column
+straight past the band and out the other side.
+
+The cause is the third shape above with the sign reversed. **LibreOffice emits one `Tj` per glyph
+inside a `Tm` for rotated text and we emit one `Tj` for the whole label inside a `cm`**, and
+`pdftotext` fragments the two differently: about **3 gate-words per label for the reference and 4
+for us**. We draw 29/36/3 labels against its 30/38/4 — *fewer* — and still extract more words.
+Drawing the two labels we are still missing would take us to about 1603.
+
+So the gate cannot be won here either, and the direction it would have to be won in is drawing
+*fewer* labels than the reference. The document is now a ceiling; before this round it was a
+defect, and the word column could not tell the two apart.
+
 So this document joins the list from a third direction. The three shapes now recorded here:
 
 | shape | who over-counts | cause |

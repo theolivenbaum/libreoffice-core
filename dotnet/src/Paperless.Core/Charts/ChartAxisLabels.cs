@@ -403,18 +403,32 @@ public static class ChartAxisLabels
         return staggered ? deepest * 2.0 : deepest;
     }
 
-    /// <summary>See <c>ChartLayout</c>'s constant of the same name.</summary>
-    private const double TextShapeInsetX = 0.18;
-
-    /// <summary>See <c>ChartLayout</c>'s constant of the same name.</summary>
-    private const double TextShapeInsetY = 0.30;
-
-    /// <summary>The shape a piece of chart text is drawn in, insets included.</summary>
+    /// <summary>
+    /// The shape an axis label is drawn in, which is its text and nothing else.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>An axis label has no insets, and <c>ChartLayout</c>'s 0.18/0.30 em are a data
+    /// table's.</strong> <c>PropertyMapper::getTextLabelMultiPropertyLists</c>
+    /// (<c>chart2/source/view/main/PropertyMapper.cxx:492-525</c>) — which is what
+    /// <c>VCartesianAxis</c> builds every tick label from — sets auto-grow and the two adjusts and
+    /// <em>no</em> <c>TextLeftDistance</c> or <c>TextUpperDistance</c> at all, and the SDR default
+    /// for both is zero (<c>svx/source/svdraw/svdattr.cxx:247</c>). The two places that do set
+    /// them set them explicitly and for their own reasons:
+    /// <c>DataTableView::setCellCharAndParagraphProperties</c> at 0.18/0.30 of the font height,
+    /// and <c>getPreparedTextShapePropertyLists</c> at a flat 250/125 1/100 mm for a shape that
+    /// may show a border.
+    /// </para>
+    /// <para>
+    /// <strong>It is the label's height that decides the rhythm, so 0.6 em of invented inset is
+    /// worth a third of the labels.</strong> Two 45°-rotated labels clear each other as soon as
+    /// their separation along the axis reaches <c>height × √2</c>, so an inset that inflates a
+    /// 11.6 pt box to 17.6 pt raises the threshold from 16.4 pt to 24.9 pt. Measured on
+    /// <c>Template Pilot Logbook JAR-FCL V3.0.xls</c>, whose date axis carries 679 ticks: the
+    /// reference labels every 23rd and draws 30, and with the insets we labelled every 37th and
+    /// drew 18.
+    /// </para>
+    /// </remarks>
     private static DocSize Shape(ChartText measurer, string text, Length size, bool bold = false)
-    {
-        DocSize measured = measurer.Measure(text, size, bold);
-        return new DocSize(
-            measured.Width + size * (TextShapeInsetX * 2),
-            measured.Height + size * (TextShapeInsetY * 2));
-    }
+        => measurer.Measure(text, size, bold);
 }

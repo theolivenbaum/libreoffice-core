@@ -513,6 +513,17 @@ public sealed partial record ChartPlot
     /// </remarks>
     public NumberFormatCode? CategoryFormat { get; init; }
 
+    /// <summary>
+    /// The category axis resolved as a <em>date</em> axis, or null when it is a run of category
+    /// slots like any other.
+    /// </summary>
+    /// <remarks>
+    /// Set only where the file states a date axis and the categories bear it out. Everything that
+    /// maps a category across the plot area consults it first — see
+    /// <see cref="ChartDateAxis"/> for why the two answers differ by more than a tick label.
+    /// </remarks>
+    public ChartDateAxis? DateAxis { get; init; }
+
     /// <summary>Where the legend goes.</summary>
     public ChartLegendPosition Legend { get; init; } = ChartLegendPosition.None;
 

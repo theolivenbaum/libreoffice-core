@@ -40,6 +40,13 @@ internal static class BiffChartRecords
     public const ushort RadarLine = 0x103E;
     public const ushort RadarArea = 0x1040;
     public const ushort AxesSet = 0x1041;
+
+    /// <summary>
+    /// <c>CHPROPERTIES</c>, whose empty mode decides what a blank cell plots as.
+    /// </summary>
+    /// <remarks><c>EXC_ID_CHPROPERTIES</c>, <c>sc/source/filter/inc/xlchart.hxx:596</c>.</remarks>
+    public const ushort Properties = 0x1044;
+
     public const ushort SourceLink = 0x1051;
     public const ushort EscherFormat = 0x1066;
 
@@ -127,6 +134,35 @@ internal sealed class XlsChartBuilder
 
     /// <summary>Whether <c>CHDATERANGE</c> declared the category axis a date axis.</summary>
     private bool _isDateAxis;
+
+    /// <summary>What <c>CHDATERANGE</c> states, once it has said the axis is a date axis.</summary>
+    private double? _dateMinimum;
+    private double? _dateMaximum;
+    private ChartTimeInterval? _dateInterval;
+    private ChartTimeUnit? _dateResolution;
+
+    /// <summary>
+    /// Whether the axis' date-ness is <em>inferred</em> rather than stated.
+    /// </summary>
+    /// <remarks>
+    /// <c>EXC_CHDATERANGE_AUTODATE</c> becomes <c>ScaleData::AutoDateAxis</c>, and chart2 then
+    /// keeps the axis a plain category axis unless the categories are all dates —
+    /// <c>AxisHelper::checkDateAxis</c> asks <c>ExplicitCategoriesProvider::isDateAxis</c>, which
+    /// is <c>lcl_fillDateCategories</c> testing each cell's own number format
+    /// (<c>chart2/source/tools/ExplicitCategoriesProvider.cxx:409-484</c>).
+    /// </remarks>
+    private bool _autoDateAxis;
+
+    /// <summary>
+    /// Whether a blank cell plots as zero rather than as a gap — <c>CHPROPERTIES</c>' empty mode.
+    /// </summary>
+    /// <remarks>
+    /// <c>XclImpChChart::CreateDiagram</c> (<c>xichart.cxx:4222-4229</c>) maps mode 1 to
+    /// <c>USE_ZERO</c> and everything else to <c>LEAVE_GAP</c> or <c>CONTINUE</c>. It matters to a
+    /// date axis and to nothing else this reader builds, because a blank <em>category</em> on a
+    /// date axis is a serial the axis has to cover.
+    /// </remarks>
+    private bool _blanksAsZero;
     private bool _hasType;
     private bool _hasLegend;
 
@@ -290,6 +326,11 @@ internal sealed class XlsChartBuilder
                 ReadDateRange(stream);
                 break;
 
+            case BiffChartRecords.Properties:
+                stream.Skip(2);
+                _blanksAsZero = stream.ReadByte() == EmptyCellsAsZero;
+                break;
+
             case BiffChartRecords.Legend:
                 _hasLegend = true;
                 break;
@@ -375,20 +416,30 @@ internal sealed class XlsChartBuilder
     /// points. Null leaves an axis carrying one on the source's format, which is the same answer
     /// the reference reaches when the index resolves to nothing.
     /// </param>
+    /// <param name="dates">
+    /// The workbook's date epoch, which decides what serial a date axis' ticks name.
+    /// </param>
     public ChartPlot? Build(
         XlsChartData? data,
         XlsExternSheets? sheets,
         int ownSheet,
         XlsCellFormats? fonts = null,
-        Func<int, NumberFormatCode?>? formats = null)
+        Func<int, NumberFormatCode?>? formats = null,
+        SpreadsheetDateSystem dates = SpreadsheetDateSystem.Date1900)
     {
         if (!HasChart) return null;
 
         (IReadOnlyList<string?> categories, IReadOnlyList<ChartSeries> series,
-            NumberFormatCode? sourceFormat) = BuildSeries(data, sheets, ownSheet, fonts);
+            NumberFormatCode? sourceFormat, IReadOnlyList<double?> categoryValues,
+            NumberFormatCode? categoryFormat) = BuildSeries(data, sheets, ownSheet, fonts);
+
+        ChartDateAxis? dateAxis = DateAxisOf(categoryValues, categoryFormat, dates);
+        if (dateAxis is not null)
+            (dateAxis, categories, series) = SortByDate(dateAxis, categories, series);
 
         ChartPlot plot = new()
         {
+            DateAxis = dateAxis,
             Title = _title,
             CategoryAxisTitle = _categoryTitle,
             ValueAxisTitle = _valueTitle,
@@ -549,12 +600,15 @@ internal sealed class XlsChartBuilder
     /// </para>
     /// </remarks>
     private (IReadOnlyList<string?> Categories, IReadOnlyList<ChartSeries> Series,
-        NumberFormatCode? ValueFormat) BuildSeries(
+        NumberFormatCode? ValueFormat, IReadOnlyList<double?> CategoryValues,
+        NumberFormatCode? CategoryFormat) BuildSeries(
         XlsChartData? data, XlsExternSheets? sheets, int ownSheet, XlsCellFormats? fonts)
     {
-        if (data is null || _series.Count == 0) return ([], [], null);
+        if (data is null || _series.Count == 0) return ([], [], null, [], null);
 
         List<string?> categories = [];
+        List<double?> categoryValues = [];
+        NumberFormatCode? categoryFormat = null;
         List<ChartSeries> built = [];
         NumberFormatCode? valueFormat = null;
 
@@ -568,6 +622,11 @@ internal sealed class XlsChartBuilder
             List<double?> numbers = data.Numbers(valueSheet, values);
             if (numbers.TrueForAll(number => number is null)) continue;
 
+            if (BlanksCountAsZero)
+            {
+                for (int at = 0; at < numbers.Count; at++) numbers[at] ??= 0.0;
+            }
+
             valueFormat ??= data.FormatOf(valueSheet, values);
 
             if (categories.Count == 0
@@ -575,6 +634,11 @@ internal sealed class XlsChartBuilder
                 && Resolve(labels, sheets, ownSheet) is { } labelSheet)
             {
                 categories.AddRange(data.Texts(labelSheet, labels));
+
+                // Kept beside the displayed text because a date axis plots the *number* and
+                // labels its own ticks; a text axis prints the text and never asks for these.
+                categoryValues.AddRange(data.Numbers(labelSheet, labels));
+                categoryFormat = data.FormatOf(labelSheet, labels);
             }
 
             string? name = series.Name;
@@ -594,7 +658,7 @@ internal sealed class XlsChartBuilder
 
         // Categories are indexed by point, so a shorter list than the longest series leaves the
         // tail of that series unlabelled rather than mislabelled.
-        return (categories, built, valueFormat);
+        return (categories, built, valueFormat, categoryValues, categoryFormat);
     }
 
     private static int? Resolve(XlsChartRange range, XlsExternSheets? sheets, int ownSheet)
@@ -943,10 +1007,205 @@ internal sealed class XlsChartBuilder
     /// </remarks>
     private void ReadDateRange(BiffRecordReader stream)
     {
-        stream.Skip(16);
-        _isDateAxis = (stream.ReadUInt16() & DateAxis) != 0;
+        ushort minimum = stream.ReadUInt16();
+        ushort maximum = stream.ReadUInt16();
+        ushort majorStep = stream.ReadUInt16();
+        ushort majorUnit = stream.ReadUInt16();
+        stream.Skip(4);
+        ushort baseUnit = stream.ReadUInt16();
+        stream.Skip(2);
+        ushort flags = stream.ReadUInt16();
+
+        _isDateAxis = (flags & DateAxis) != 0;
+        _autoDateAxis = (flags & AutoDate) != 0;
         _categoryText = CategoryTextOf(_everyLabel, _isDateAxis);
+
+        if (!_isDateAxis) return;
+
+        // Every limit and every step is counted in the base unit, not in days
+        // (lclConvertTimeValue / lclConvertTimeInterval, xichart.cxx:2960-2988), and an "auto"
+        // flag means the field says nothing at all rather than stating what it happens to hold —
+        // the corpus's one date axis states 37935 and 41292 under flags 0x00FF and the reference
+        // ignores both.
+        _dateResolution = (flags & AutoBase) != 0 ? null : UnitOf(baseUnit);
+        _dateMinimum = (flags & AutoMinimum) != 0 ? null : InDays(minimum, baseUnit);
+        _dateMaximum = (flags & AutoMaximum) != 0 ? null : InDays(maximum, baseUnit);
+        _dateInterval = (flags & AutoMajor) != 0 || majorStep == 0
+            ? null
+            : new ChartTimeInterval(majorStep, UnitOf(majorUnit));
     }
+
+    /// <summary>
+    /// The date axis this chart's category axis resolves to, or null when it has none.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Three separate statements have to agree before a category axis becomes a date axis, and
+    /// the middle one is the reason a grep for <c>CHDATERANGE</c> over-counts.
+    /// </para>
+    /// <list type="number">
+    /// <item><description><c>CHDATERANGE</c>' <c>DATEAXIS</c> flag.</description></item>
+    /// <item><description>
+    /// If <c>AUTODATE</c> is also set — which it is on every chart in the corpus that states a
+    /// date axis at all — the categories have to <em>be</em> dates.
+    /// <c>lcl_fillDateCategories</c> asks each cell's own number format and gives up on the whole
+    /// axis at the first cell that has a value and no date format, so the test is the resolved
+    /// category format and it has to be a date one.
+    /// </description></item>
+    /// <item><description>Some category has to hold a number at all.</description></item>
+    /// </list>
+    /// <para>
+    /// <strong>And a blank category is a serial rather than a gap on an area chart.</strong>
+    /// <c>AreaChart::addSeries</c> (<c>chart2/source/view/charttypes/AreaChart.cxx:136-143</c>)
+    /// promotes <c>LEAVE_GAP</c> to <c>USE_ZERO</c> for an area plotter and for no other, so the
+    /// 774 blanks in the corpus's date-axis workbook count as 30 December 1899 and pull the axis
+    /// back to serial zero. Measured rather than assumed: the same categories as a line chart or a
+    /// bar chart take the data minimum instead, and that workbook's own <c>CHPROPERTIES</c> states
+    /// mode 0, which is the gap.
+    /// </para>
+    /// </remarks>
+    private ChartDateAxis? DateAxisOf(
+        IReadOnlyList<double?> values, NumberFormatCode? format, SpreadsheetDateSystem dates)
+    {
+        if (!_isDateAxis || values.Count == 0) return null;
+        if (_autoDateAxis && format is not { IsDateTime: true }) return null;
+
+        IReadOnlyList<double?> resolved = values;
+
+        if (BlanksCountAsZero)
+        {
+            double?[] zeroed = new double?[values.Count];
+            for (int at = 0; at < values.Count; at++) zeroed[at] = values[at] ?? 0.0;
+            resolved = zeroed;
+        }
+
+        return ChartDateScale.Resolve(
+            resolved, format, _dateMinimum, _dateMaximum, _dateInterval, _dateResolution, dates);
+    }
+
+    /// <summary>
+    /// Whether a blank cell counts as zero rather than as a gap, in this chart's values and in
+    /// its categories alike.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Two rules, and the second is not in the file. <c>CHPROPERTIES</c>' empty mode says what the
+    /// author asked for; and then <c>AreaChart::addSeries</c>
+    /// (<c>chart2/source/view/charttypes/AreaChart.cxx:136-143</c>) overrides a
+    /// <c>LEAVE_GAP</c> to <c>USE_ZERO</c> for every <em>area</em> plotter — not for a line, not
+    /// for a bar, and not for a scatter, all three of which go through the same class with
+    /// <c>m_bArea</c> false.
+    /// </para>
+    /// <para>
+    /// <strong>It decides the shape of the drawing and not only the axis.</strong> The corpus's
+    /// area chart on a date axis has values in 25 of its 799 rows; with gaps it draws a hairline
+    /// at the right edge of the plot, and with zeros it draws the wedge the reference draws —
+    /// a run along the baseline from the first date to the last cluster and a spike at the end.
+    /// Both halves of the rule were measured on 26.2.4.2 by rendering the same 799 categories as
+    /// an area, a line and a bar chart and reading where the axis started.
+    /// </para>
+    /// <para>
+    /// Only this reader applies it. <c>ChartLayout</c>'s <c>AddAreas</c> records that neither
+    /// <c>c:dispBlanksAs</c> nor <c>CHPROPERTIES</c> reaches it, and that is still true of the
+    /// OOXML and ODF readers.
+    /// </para>
+    /// </remarks>
+    private bool BlanksCountAsZero => _blanksAsZero || _kind is ChartPlotKind.Area;
+
+    /// <summary>
+    /// Puts a date axis' points in date order, which is not the order the cells are in.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>AreaChart::createShapes</c> calls <c>pSeries-&gt;doSortByXValues()</c> for every series
+    /// on a date category axis (<c>AreaChart.cxx:604-620</c>,
+    /// <c>VDataSeries::doSortByXValues</c>), and it is not a tidiness measure: the polyline joins
+    /// consecutive <em>points</em>, so a series whose cells run 17/11/2003, then 774 blanks that
+    /// count as 30/12/1899, then a cluster in 2012, is drawn as a line that goes to 92% of the
+    /// plot, back to 0%, and out to 100% again. Sorted, the same points draw the run along the
+    /// baseline and the spike at the end that the reference draws.
+    /// </para>
+    /// <para>
+    /// Sorted here rather than in <see cref="ChartLayout"/> because it is a property of the data
+    /// and not of the geometry, and because sorting the categories, their values and every series
+    /// with one permutation keeps the three indexed by the same thing — which is what every
+    /// consumer of <see cref="ChartPlot"/> already assumes.
+    /// </para>
+    /// <para>
+    /// A stable sort, and a category with no value keeps its place at the end, because
+    /// <c>lcl_LessXOfPoint</c> compares with <c>&lt;</c> and a NaN answers false to every
+    /// comparison it is in.
+    /// </para>
+    /// </remarks>
+    private static (ChartDateAxis Axis, IReadOnlyList<string?> Categories,
+        IReadOnlyList<ChartSeries> Series) SortByDate(
+        ChartDateAxis axis, IReadOnlyList<string?> categories, IReadOnlyList<ChartSeries> series)
+    {
+        IReadOnlyList<double?> values = axis.CategoryValues;
+
+        int[] order = [.. Enumerable.Range(0, values.Count)];
+        Array.Sort(
+            [.. values.Select(value => value ?? double.MaxValue)], order);
+
+        bool moved = false;
+        for (int at = 0; at < order.Length; at++)
+        {
+            if (order[at] != at) { moved = true; break; }
+        }
+
+        if (!moved) return (axis, categories, series);
+
+        double?[] sortedValues = new double?[order.Length];
+        string?[] sortedCategories = new string?[order.Length];
+
+        for (int at = 0; at < order.Length; at++)
+        {
+            sortedValues[at] = values[order[at]];
+            sortedCategories[at] =
+                order[at] < categories.Count ? categories[order[at]] : null;
+        }
+
+        List<ChartSeries> sortedSeries = [];
+        foreach (ChartSeries one in series)
+        {
+            double?[] numbers = new double?[order.Length];
+            for (int at = 0; at < order.Length; at++)
+            {
+                numbers[at] = order[at] < one.Values.Count ? one.Values[order[at]] : null;
+            }
+
+            sortedSeries.Add(one with { Values = numbers });
+        }
+
+        return (axis with { CategoryValues = sortedValues }, sortedCategories, sortedSeries);
+    }
+
+    /// <summary>The unit a <c>CHDATERANGE</c> field's <c>0/1/2</c> names.</summary>
+    private static ChartTimeUnit UnitOf(ushort unit) => unit switch
+    {
+        DateRangeMonths => ChartTimeUnit.Month,
+        DateRangeYears => ChartTimeUnit.Year,
+        _ => ChartTimeUnit.Day,
+    };
+
+    /// <summary>
+    /// A stated limit converted from its base unit to a serial number.
+    /// </summary>
+    /// <remarks>
+    /// <c>lclConvertTimeValue</c> counts months and years <em>from the null date</em>, so a limit
+    /// of 24 months is 30 December 1901. Days are already serials.
+    /// </remarks>
+    private static double InDays(ushort value, ushort baseUnit) => baseUnit switch
+    {
+        DateRangeMonths => ChartDateScale.SerialOf(
+            ChartDateScale.AddMonths(NullDate, value), SpreadsheetDateSystem.Date1900),
+        DateRangeYears => ChartDateScale.SerialOf(
+            ChartDateScale.AddYears(NullDate, value), SpreadsheetDateSystem.Date1900),
+        _ => value,
+    };
+
+    /// <summary>Serial zero of the 1900 system, which is what a stated month or year counts from.</summary>
+    private static readonly DateOnly NullDate = new(1899, 12, 30);
 
     /// <summary>What a category axis states about its labels, given the two records that decide it.</summary>
     private static ChartAxisText CategoryTextOf(bool everyLabel, bool dateAxis) => dateAxis
@@ -1132,6 +1391,24 @@ internal sealed class XlsChartBuilder
 
     /// <summary><c>EXC_CHDATERANGE_DATEAXIS</c>, <c>xlchart.hxx:716</c>.</summary>
     private const ushort DateAxis = 0x0010;
+
+    /// <summary>
+    /// <c>EXC_CHDATERANGE_AUTOBASE</c> and <c>AUTODATE</c>, <c>xlchart.hxx:717-719</c>.
+    /// </summary>
+    /// <remarks>
+    /// Its automatic-minimum, -maximum and -major bits are 0x0001, 0x0002 and 0x0004, the same
+    /// three values <c>CHVALUERANGE</c> uses, so <see cref="AutoMinimum"/> and its neighbours
+    /// serve both records rather than being written twice.
+    /// </remarks>
+    private const ushort AutoBase = 0x0020;
+    private const ushort AutoDate = 0x0080;
+
+    /// <summary><c>EXC_CHDATERANGE_DAYS</c>, <c>MONTHS</c>, <c>YEARS</c> — <c>xlchart.hxx:721-723</c>.</summary>
+    private const ushort DateRangeMonths = 1;
+    private const ushort DateRangeYears = 2;
+
+    /// <summary><c>EXC_CHPROPS_EMPTY_ZERO</c>, <c>xlchart.hxx:605</c>.</summary>
+    private const byte EmptyCellsAsZero = 1;
 
     private const ushort AutoMinimum = 0x0001;
     private const ushort AutoMaximum = 0x0002;
