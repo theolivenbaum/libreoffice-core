@@ -165,3 +165,34 @@ cd dotnet && dotnet test tests/Paperless.Spreadsheets.Tests/Paperless.Spreadshee
 A fallback answer from `fc-match` is the tell. `fc-match` never fails — it always returns
 *something*, and here it returned WenQuanYi Zen Hei for a request for DejaVu Sans, which reads
 as success unless you look at what came back.
+
+
+---
+
+## `libreoffice-math` — not installed, and it silently changes the reference
+
+Found 2026-08-14 while working the words `extra` group, and **not installed**, deliberately.
+
+Without it **every reference in this container draws nothing for an OMML equation.** A
+one-equation probe renders as `BEFOREEQUATION  AFTEREQUATION`, with the equation's space
+reserved on the page and no ink in it. `ABCD-FE-01-00 Flight Envelope` holds 33
+`m:oMathPara` elements and that accounts for most of its residual word gap.
+
+This is the same class of problem as the missing `fonts-dejavu-core` above: **an input to the
+gate that nothing in the harness declares.** The difference is that the font affected 267 of
+534 references and this affects only equation-bearing documents — but the failure mode is
+identical, and so is the way it hides. A document whose equations the reference cannot draw
+looks like a document where we draw too much.
+
+**It was not installed on the spot, and that was the right call.** Installing it changes the
+reference for every equation-bearing document, and other agents were mid-round measuring
+against the banked set at `/c/sandbox/workdir/refpdfs-26.2.4.2-fonts/`. Doing it properly
+means: install, re-bank the affected references, and re-baseline — as a deliberate step, when
+no measurement is in flight.
+
+```sh
+apt-get update && apt-get install -y --no-install-recommends libreoffice-math
+```
+
+Until that happens, treat any word-count gap on a document containing `m:oMath` as suspect,
+and check whether the reference drew the equation at all before attributing the gap to us.
