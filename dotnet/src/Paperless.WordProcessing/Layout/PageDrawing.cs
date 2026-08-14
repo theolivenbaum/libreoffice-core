@@ -274,9 +274,41 @@ public static class PageDrawing
             if (cell.Cell.Shading is { } colour) Fill(cell.Area, colour, sink);
         }
 
-        foreach (PlacedTableCell cell in table.Cells) DrawFlow(cell.Content, sink);
+        foreach (PlacedTableCell cell in table.Cells) DrawCellContent(cell, sink);
 
         DrawBorders(table, sink);
+    }
+
+    /// <summary>
+    /// Draws one cell's text, turning it first when the cell says so.
+    /// </summary>
+    /// <remarks>
+    /// The whole of the turned case, and deliberately so: the flow underneath is an ordinary upright one
+    /// in its own coordinates, so every backend draws it through the code it already had and only the
+    /// transform is new. LibreOffice's own PDF does the same thing — a <c>0 1 -1 0 x y</c> text matrix
+    /// and an otherwise unremarkable run — which is why the turned text stays real text in the output
+    /// rather than becoming a picture of itself.
+    /// </remarks>
+    private static void DrawCellContent(PlacedTableCell cell, IDrawingSink sink)
+    {
+        if (cell.ContentTransform is not { } onto)
+        {
+            DrawFlow(cell.Content, sink);
+            return;
+        }
+
+        if (cell.Content is null) return;
+
+        sink.Save();
+        try
+        {
+            sink.Transform(onto);
+            DrawFlow(cell.Content, sink);
+        }
+        finally
+        {
+            sink.Restore();
+        }
     }
 
     /// <summary>

@@ -72,6 +72,45 @@ public readonly record struct CellBorders(
     public bool IsNone => Left.IsNone && Right.IsNone && Top.IsNone && Bottom.IsNone;
 }
 
+/// <summary>
+/// Which way a cell's text runs, when the document turns it out of the ordinary direction.
+/// </summary>
+/// <remarks>
+/// <para>
+/// The three answers LibreOffice's own DOCX importer reduces <c>w:textDirection</c>'s six values to
+/// (<c>sw/source/writerfilter/dmapper/DomainMapperTableManager.cxx</c>:325-350): <c>btLr</c> becomes
+/// <c>WritingMode2::BT_LR</c>, <c>tbRl</c> and <c>tbRlV</c> both become <c>TB_RL</c>, and <c>lrTb</c>,
+/// <c>lrTbV</c> and <c>tbLrV</c> are all upright — the last of those is ignored outright with the comment
+/// "we can't handle these". Measured against the installed 26.2.4.2, which confirms all six.
+/// </para>
+/// <para>
+/// A direction rather than an angle, because what the two turned values change is not only the glyphs'
+/// rotation: the line breaks at the cell's <em>height</em>, successive lines stack across its
+/// <em>width</em>, and <see cref="PageTableCell.VerticalAlignment"/> stops meaning anything vertical. An
+/// angle would carry the first of those and none of the rest.
+/// </para>
+/// </remarks>
+public enum CellTextDirection
+{
+    /// <summary>Upright, left to right — every format's default and almost every cell.</summary>
+    LeftToRight,
+
+    /// <summary>
+    /// Turned a quarter turn anticlockwise: glyphs run up the page and lines stack rightwards.
+    /// </summary>
+    /// <remarks>
+    /// OOXML's <c>btLr</c>, and the only turned direction the sample corpus contains — 111 occurrences
+    /// across ten of its two hundred word-processing documents, all of them DOCX.
+    /// </remarks>
+    BottomToTopLeftToRight,
+
+    /// <summary>
+    /// Turned a quarter turn clockwise: glyphs run down the page and lines stack leftwards.
+    /// </summary>
+    /// <remarks>OOXML's <c>tbRl</c> and <c>tbRlV</c>.</remarks>
+    TopToBottomRightToLeft,
+}
+
 /// <summary>Where a cell's text sits when its content is shorter than its row.</summary>
 public enum CellVerticalAlignment
 {
@@ -399,7 +438,34 @@ public sealed record PageTableCell
     public CellPadding Padding { get; init; }
 
     /// <summary>Where the text sits when the row is taller than the content.</summary>
+    /// <remarks>
+    /// For a turned cell this is still the alignment across the <em>line stack</em>, which is then
+    /// horizontal rather than vertical — the property keeps its name because it is what every format
+    /// spells <c>vAlign</c>, and because it is the same axis in the cell's own frame.
+    /// </remarks>
     public CellVerticalAlignment VerticalAlignment { get; init; }
+
+    /// <summary>
+    /// Which way the cell's text runs; <see cref="CellTextDirection.LeftToRight"/> for almost every cell.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A rotated row-group label down the side of a table — <c>AIRCRAFT</c>, <c>ENGINES</c> — is what this
+    /// is for, and it is the commonest use of it by a distance. Reading it as upright text does not merely
+    /// draw the label the wrong way round: the paragraph then breaks at the <em>column's</em> width, which
+    /// for a label column is a few points, so every line holds one glyph and the cell becomes as tall as
+    /// the label is long. That turned a 7-page form into 9 on <c>A1. EASA Form 2.docx</c>.
+    /// </para>
+    /// <para>
+    /// The layout consequences live in <see cref="TableLayouter"/>; the one worth knowing here is that a
+    /// turned cell contributes <em>nothing</em> to its row's height, measured on the installed 26.2.4.2.
+    /// A row holding only turned cells collapses to nothing and draws neither text nor borders.
+    /// </para>
+    /// </remarks>
+    public CellTextDirection TextDirection { get; init; }
+
+    /// <summary>True when the cell's text is turned out of the upright direction.</summary>
+    public bool IsTurned => TextDirection != CellTextDirection.LeftToRight;
 
     /// <summary>
     /// The colour behind the cell's text, or null when the cell is not shaded.
@@ -476,7 +542,31 @@ public sealed record PlacedTableCell
     public required DocRect Area { get; init; }
 
     /// <summary>Its text, laid out inside the padding, or null when the cell is empty.</summary>
+    /// <remarks>
+    /// In page coordinates for an ordinary cell, and in the cell's <em>own</em> coordinates when
+    /// <see cref="ContentTransform"/> is not null — see there.
+    /// </remarks>
     public PlacedFlow? Content { get; init; }
+
+    /// <summary>
+    /// How to get from <see cref="Content"/>'s coordinates to the page's, or null when the two are the
+    /// same — which they are for every cell but a turned one.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A turned cell's text is laid out in an upright frame of its own, breaking at what is the cell's
+    /// height on the page, and this quarter turn is what puts that frame where it belongs. Carrying the
+    /// turn rather than pre-rotating the lines is what keeps every consumer of <see cref="PlacedFlow"/>
+    /// working on one kind of flow: the line boxes, the glyph runs and the tab stops inside are all
+    /// measured along the text's own direction, which is the only frame they mean anything in.
+    /// </para>
+    /// <para>
+    /// A backend applies it by pushing the transform and drawing the flow exactly as it draws an upright
+    /// one, which is also what LibreOffice does — its PDF writes a <c>0 1 -1 0 x y</c> text matrix per
+    /// glyph and nothing else about the run changes.
+    /// </para>
+    /// </remarks>
+    public AffineTransform? ContentTransform { get; init; }
 
     /// <summary>Which row of the table it starts in.</summary>
     public int Row { get; init; }
