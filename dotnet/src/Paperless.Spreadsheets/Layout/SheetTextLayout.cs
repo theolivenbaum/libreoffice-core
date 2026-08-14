@@ -240,17 +240,29 @@ internal static class SheetTextLayout
     /// <remarks>
     /// <para>
     /// <c>bOutside</c> (<c>output2.cxx:2037</c>), and it is the whole reason a page does not
-    /// carry every neighbour of its own first column. Calc's string loop starts one column
-    /// <em>before</em> the block so that a long string reaching in from the left is drawn — but
+    /// carry every neighbour of its own last column. Calc's string loop looks one cell
+    /// <em>past</em> the block so that a long string reaching in from the right is drawn — but
     /// it then asks of every cell whether what it occupies overlaps the block at all, and draws
     /// nothing when it does not. A short string in that column is therefore skipped and a long
     /// one is not, because only the long one's output area, widened through its empty
     /// neighbours, reaches the paper.
     /// </para>
     /// <para>
+    /// <strong>This is a test of the room the text was given, not of where its anchor is, and it
+    /// is not what keeps a rightward spill off the following page.</strong> That is decided
+    /// before a cell reaches here, by which cells the page offers at all — see
+    /// <see cref="SheetPageDrawing"/>, whose remarks carry the measurement. Reading this test as
+    /// the seat of the "painted on every page it crosses" defect is the natural mistake and the
+    /// wrong one: a run anchored several columns to the left genuinely <em>does</em> overlap the
+    /// next block, so <c>bOutside</c> answers "inside" for it in Calc too, and Calc still does
+    /// not draw it — because in a tagged PDF the loop never visits its anchor column.
+    /// </para>
+    /// <para>
     /// Measured: <c>ExampleWhiteListData.xlsx</c> drew twenty part numbers off the left edge of
     /// its last two pages — <strong>838 words against the reference's 821</strong> — because
     /// every one of them was the nearest cell left of a band and none of them spilled into it.
+    /// That case is now caught twice over, since no cell left of a band is offered to this test
+    /// at all; the test still earns its place on the cell found <em>right</em> of one.
     /// </para>
     /// <para>
     /// Calc's rectangle is inclusive at the right, so a cell ending exactly where the block

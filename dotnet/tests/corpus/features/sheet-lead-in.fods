@@ -1,18 +1,24 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
   A sheet whose columns do not fit one page, so that the cell immediately left of the second
-  page's column band can be asked what it draws there.
+  page's column band can be asked what it draws there. The answer is NOTHING, and that is the
+  point of the fixture.
 
-  Row 2 holds a short string in column C. It fits column C, which is entirely on page 1, so
-  nothing of it reaches page 2 and LibreOffice draws nothing for it there.
+  Row 2 holds a short string in column C and row 3 a long one. Both are drawn on page 1 and
+  neither is drawn on page 2 — the long string is shortened at column C's own right edge and
+  its continuation is simply not painted, however far its output area reaches.
 
-  Row 3 holds a long one in the same column. Its output area runs through the empty cells to
-  its right and into page 2's band, so LibreOffice draws it on page 2 — and on page 3, which
-  exists only because that spill widened the printed block past column D.
+  This was measured, not inferred, because it is not what the source suggests. LayoutStrings
+  starts its column loop one before the block so that a long string reaching in from the left
+  is drawn (output2.cxx:1541-1543) — but only `if (mnX1 > 0 && !bTaggedPDF)`, and UseTaggedPDF
+  defaults to true, so every PDF soffice writes takes the other branch. Rendered through
+  26.2.4.2: three pages, page 1 ending "...that definitely r", page 2 holding DDDD alone and
+  page 3 holding no text at all.
 
-  The two rows differ in nothing but the length of one string, which is what makes the pair a
-  test: a renderer that draws the lead-in unconditionally puts row 2's string off the left edge
-  of page 2, and one that never draws it loses row 3's continuation.
+  Page 3 still exists. Which pages are printed is IsPrintEmpty's question and is answered from
+  the print area's overflow extension rather than from the paint, so the spill that is never
+  drawn still buys the paper it would have been drawn on. See sheet-trail-in.fods for the
+  direction that IS painted across the break.
 -->
 <office:document xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0"
  xmlns:style="urn:oasis:names:tc:opendocument:xmlns:style:1.0"
