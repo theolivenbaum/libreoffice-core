@@ -159,11 +159,17 @@ defects** — a whole track can be 163 of 163 page-exact while the pages are vis
 
 ```bash
 export PAPERLESS_CLI=<the tree you mean to measure>/dotnet/tools/…/Paperless.Cli
-python3 .claude/skills/render-comparison/scripts/look.py "<doc>__pptx" --worst
+python3 .claude/skills/render-comparison/scripts/look.py "<doc>__pptx" --worst   # two PNGs
+.claude/skills/page-vision/scripts/pair.sh "<doc>__pptx" --worst --outdir /abs/pairs  # one labelled image
 ```
 
-It renders the most divergent page both ways and prints two PNG paths. **Open them and read
-them.** Stack them so the same region lands under itself.
+It renders the most divergent page both ways. **Open them and read them.**
+
+**Better: do not read them yourself — hand the pair to a fresh subagent.** You cannot un-see
+a page, so your second look at one is recall rather than observation, and it will agree with
+whatever you already believed. A reviewer that has never seen the document and is forbidden
+to grep the repo is the only reader whose agreement is evidence. The `page-vision` skill has
+the brief to give it, the pixel-budget arithmetic that decides your dpi, and when to crop.
 
 Three things this changes about how a round is run:
 
@@ -299,6 +305,7 @@ Comparing against LibreOffice — use the skills, they encode hard-won details:
 |---|---|
 | `libreoffice-reference` | Generating reference PDFs, page PNGs and text with headless `soffice` |
 | `render-comparison` | Comparing renderings and diagnosing *why* they differ |
+| `page-vision` | Actually looking at a page — resolution, cropping, and getting it read by someone uncontaminated |
 | `extraction-comparison` | Comparing extracted text; also the right first step for a visual bug |
 | `paperless-corpus` | Building and curating test documents |
 
@@ -409,6 +416,25 @@ The lesson generalises past this container. **The gate's inputs include the font
 nothing in the harness declares it. Before trusting any figure, check `fc-match "DejaVu Sans"`
 resolves to DejaVu rather than a fallback — `fc-match` never fails, it always returns
 *something*, which is why the gap survived a whole pass unnoticed.
+
+**And check it at the start of every session, because the install does not survive.**
+`fonts-dejavu-core` was installed and documented as fixed, and a later session found
+`fc-match "DejaVu Sans"` answering `wqy-zenhei.ttc` again — the package was simply absent
+from `dpkg -l` in the new container. Everything else the reference needs (Carlito, Caladea,
+Liberation, OpenSymbol, IPAGothic, WenQuanYi) *was* still installed, so nothing looks wrong
+until you check the one font that decides 267 of 534 reference renderings.
+
+Reinstalling has a trap of its own worth writing down, because it reads as the package having
+been withdrawn:
+
+```sh
+apt-get install -y --no-install-recommends fonts-dejavu-core
+# E: Package 'fonts-dejavu-core' has no installation candidate
+apt-get update && apt-get install -y --no-install-recommends fonts-dejavu-core   # works
+```
+
+The container's package index is stale, not the archive. `apt-get update` first, always, and
+re-check `fc-match` afterwards rather than trusting the installer's exit code.
 
 Canonical reference renderings for this environment, all 534 documents at 26.2.4.2 with the
 correct font set, are kept at `/c/sandbox/workdir/refpdfs-26.2.4.2-fonts/` with a

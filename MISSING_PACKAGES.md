@@ -10,6 +10,18 @@ apt-get update && apt-get install -y fonts-dejavu-core
 
 That is the whole list at present. It is short and it is not trivial.
 
+**Re-check it every session — the install does not survive.** This was installed and written
+up as fixed, and a later session opened with `fc-match "DejaVu Sans"` answering
+`wqy-zenhei.ttc` again and the package absent from `dpkg -l`. Every *other* font the reference
+needs was still present, so nothing looks wrong until you check this one. The `apt-get update`
+in the command above is load-bearing rather than habit: without it the container's stale index
+answers `E: Package 'fonts-dejavu-core' has no installation candidate`, which reads as the
+package having been withdrawn from the archive when it has not.
+
+```sh
+fc-match "DejaVu Sans"      # must say DejaVuSans.ttf, not wqy-zenhei.ttc
+```
+
 ---
 
 ## `fonts-dejavu-core`

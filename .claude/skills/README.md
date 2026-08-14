@@ -1,12 +1,13 @@
 # Skills for developing Paperless
 
-Four skills covering development of the [Paperless](../../dotnet/) C# libraries against
+Six skills covering development of the [Paperless](../../dotnet/) C# libraries against
 headless LibreOffice as the reference implementation.
 
 | Skill | Use it when |
 |---|---|
 | [`libreoffice-reference`](libreoffice-reference/) | You need ground truth: reference PDFs, per-page PNGs, or reference text from a document. Also when `soffice --convert-to` misbehaves. |
 | [`render-comparison`](render-comparison/) | Comparing a Paperless rendering against the reference, and working out *why* it differs. |
+| [`page-vision`](page-vision/) | Actually *looking* at a page: getting it in front of a reader at a resolution where the defect survives, delegating the reading to an uncontaminated reviewer, and knowing what a visual reading can and cannot establish. |
 | [`extraction-comparison`](extraction-comparison/) | Comparing extracted text. Also the right first step for a visual bug — parsing bugs are far cheaper to find in text than in pixels. |
 | [`paperless-corpus`](paperless-corpus/) | Building or curating test documents. |
 | [`corpus-batches`](corpus-batches/) | Driving the 541-document sample corpus to parity, batch by batch — the ordering, the regression rule, and how to dispatch parallel agents across the three tracks. |
