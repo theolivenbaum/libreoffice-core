@@ -384,6 +384,71 @@ public class SlideAutofitTests
         (widest - pitch).ShouldBe(expectedSpaceMm100, $"the space above a paragraph in a {boxHeightPoints} pt box");
     }
 
+    /// <summary>
+    /// A body that overflows its box many times over is drawn at a quarter of its stated size,
+    /// not at whatever the search's interval happens to reach.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>Without the floor this is not "too small" — it is nothing at all.</strong> The
+    /// bisection's interval is <c>[0, 1]</c> and a body that overflows by a factor of twenty
+    /// drives it into the thousandths, where <see cref="SlideTextLayout"/>'s rounding of a scaled
+    /// em to a whole point rounds it to <em>zero</em>: every run is laid out and drawn at an em of
+    /// nothing and the page receives no text-showing operator for the body. Measured on
+    /// <c>NWD-GLA-Community-Outreach-Day-Oct-2025.pptx</c>, whose slides 5, 6 and 12 drew their
+    /// titles and no subtitle whatsoever — 529 extractable words against the reference's 638.
+    /// </para>
+    /// <para>
+    /// Every expected value is read off the banked 26.2.4.2 rendering of that deck rather than
+    /// derived here. Its subtitle placeholders are 1152128 EMU tall — 90.7 pt — and the sizes
+    /// below are the ones they state: 52 and 60 pt on slide 5, 60, 72 and 88 on slide 6, 77 on
+    /// slide 12. The reference draws each at stated × 0.250, the last row of
+    /// <c>constScaleLevels</c>, and lets the text overflow: <c>/F1 18.992 Tf</c> for the 77 pt
+    /// runs, and glyph boxes of 26.8, 22.0, 18.3 and 15.9 units for the 88, 72, 60 and 52 pt ones.
+    /// </para>
+    /// </remarks>
+    [Theory]
+    [InlineData(52, 459)]
+    [InlineData(60, 529)]
+    [InlineData(72, 635)]
+    [InlineData(77, 670)]
+    [InlineData(88, 776)]
+    public void AnOverflowingBodyStopsAtAQuarterAndOverflows(double points, long expectedMm100)
+    {
+        Drawn(Body(points, lines: 17), boxHeightPoints: 90.7).Mm100.ShouldBe(expectedMm100);
+    }
+
+    /// <summary>
+    /// However badly a body overflows, the em it is drawn at is never zero.
+    /// </summary>
+    /// <remarks>
+    /// The invariant the floor exists for, asserted over the whole range rather than at the five
+    /// geometries the corpus happened to hold. A drawn em of zero is not a small rendering of the
+    /// text; it is the silent loss of it, and nothing downstream of the fit can tell the two
+    /// apart — the runs are still there, still shaped, still placed, and draw no ink.
+    /// </remarks>
+    [Fact]
+    public void NoBodyIsEverScaledToNothing()
+    {
+        for (int lines = 1; lines <= 60; lines++)
+        {
+            foreach (double points in new[] { 12.0, 28.0, 44.0, 60.0, 88.0 })
+            {
+                Length drawn = Drawn(Body(points, lines), boxHeightPoints: 90.7);
+
+                drawn.ShouldBeGreaterThan(
+                    Length.Zero, $"{lines} lines of {points} pt in a 90.7 pt box");
+
+                double scale = (double)drawn.Mm100 / Quantised(points);
+                scale.ShouldBeGreaterThan(0.24, $"{lines} lines of {points} pt");
+            }
+        }
+    }
+
+    /// <summary>The draw layer's holding of a whole number of points, as the fit's grid sees it.</summary>
+    private static double Quantised(double points)
+        => (((long)((points * 20.0) + 0.5) * 127) + 36) / 72;
+
     /// <summary>The smallest gap between two distinct baselines, which is one line's height.</summary>
     /// <remarks>
     /// The smallest rather than the first, because a paragraph boundary carries the paragraph's

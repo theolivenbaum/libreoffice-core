@@ -118,8 +118,8 @@ list alone would conclude the residue is ours when two-thirds of it is not.
 
 | | |
 |---|---|
-| pages flagged | **37** across 21 documents |
-| by track | 28 slides, 8 words, 1 sheets |
+| pages flagged | **36** across 20 documents |
+| by track | 27 slides, 8 words, 1 sheets |
 | flagged pages whose document embeds a metafile | 21 |
 | flagged pages whose document embeds **none** | 16 |
 | excess words accounted for | **2706** |
@@ -185,7 +185,6 @@ first, then re-run.
 | `slides/batch-007/…/introduction_to_bea_tuxedo.ppt` | 2 | 38 | 27 | +11 | — |
 | `slides/batch-007/…/introduction_to_bea_tuxedo.ppt` | 13 | 41 | 31 | +10 | — |
 | `slides/batch-007/…/introduction_to_bea_tuxedo.ppt` | 14 | 46 | 36 | +10 | — |
-| `slides/batch-009/…/NWD-GLA-Community-Outreach-Day-Oct-2025.pptx` | 5 | 15 | 5 | +10 | — |
 | `slides/batch-004/…/ws_prod-g-doc-Events-industrymeeting18112004-E` | 9 | 38 | 29 | +9 | — |
 | `slides/batch-007/…/introduction_to_bea_tuxedo.ppt` | 26 | 30 | 21 | +9 | — |
 | `slides/batch-007/…/introduction_to_bea_tuxedo.ppt` | 39 | 38 | 30 | +8 | — |
@@ -193,6 +192,45 @@ first, then re-run.
 ᵃ This document has **three** ceiling pages, not one — 5, 6 and 16. See *Why they sit under it*
 above and *the reference outlines its glyphs* below. Its full accounting is in
 `probes/slides-b008-01/results.md`.
+
+## Audited 2026-08-14 against 26.2.4.2 — one row was inverted, and it was not a near-miss
+
+**Every one of the 37 rows was re-measured**, per page, with the script's own metric
+(`pdftotext -f N -l N | split()`, 1-based pages) against the banked
+`refpdfs-26.2.4.2-fonts/` references. Round `slides-missing-01`; the sweep is in
+`probes/slides-missing-01/results.md`.
+
+**`NWD-GLA-Community-Outreach-Day-Oct-2025.pptx` page 5 was in this table with its sign the
+wrong way round, and has been removed.** The row read *ours 15 / ref 5* — the classic
+over-drawing signature. Measured on the unfixed tree it was **ours 5 / ref 72**: we were not
+over-drawing there, we were drawing an entirely empty subtitle placeholder on three of the
+deck's slides. A real missing-content defect had been filed in the list of pages that cannot be
+won, which is the most expensive possible place to put one. With the fix
+(`SlideAutofit`'s `FitFloor`) the page reads **ours 84 / ref 72** and the document matches the
+gate outright at 644/638 words, so it is no longer a ceiling page under any reading.
+
+The most likely account of how the row got its numbers is that it was measured against
+**24.2.7.2**, whose autofit was the same unbounded search we had ported — so the *reference*
+drew almost nothing there too, and 15/5 was true of a pair of renderings neither of which
+exists any more. That cannot be verified here: the 24.2 binary is not installable in this
+container.
+
+**No other row has flipped sign.** All 36 survivors still have ours ≥ ref. Four, however, no
+longer clear the flagging threshold (≥8 extra words *and* ≥25% of the reference's count) and
+should be re-checked before anyone leans on them:
+
+| document | page | as filed | measured 2026-08-14 |
+|---|---:|---|---|
+| `f2_registro_de_aprovacao_com_pbcs_EN.docx` | 1 | 230 / 181 | 197 / 181 |
+| `EHEST-SMS-Safety-Management-Manual-V2.docx` | 43 | 396 / 229 | 231 / 229 |
+| `introduction_to_bea_tuxedo.ppt` | 26 | 30 / 21 | 23 / 21 |
+| `introduction_to_bea_tuxedo.ppt` | 38 | 84 / 63 | 72 / 63 |
+
+They are left in place rather than removed: below-threshold is not the same claim as
+not-a-ceiling, and none of the four was validated end to end in that round. **The general
+lesson is that this table has a shelf life.** Its inputs are our renderer *and* the reference
+binary, both of which move, and a stale row here does not merely go unused — it actively tells
+the next reader not to look.
 
 ## What is known about the mechanism, and what is not
 
