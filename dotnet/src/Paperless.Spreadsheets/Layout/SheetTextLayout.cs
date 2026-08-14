@@ -551,7 +551,9 @@ internal static class SheetTextLayout
         {
             placed.Add(new PlacedLine(
                 line,
-                Horizontal(horizontal, cell.Box, line.Width, leftTotal, margin + indent, margin),
+                Horizontal(
+                    horizontal, cell.Box, AlignedWidth(horizontal, line, breaks ? available : Length.Zero),
+                    leftTotal, margin + indent, margin),
                 y + line.Ascent));
             y += line.LineHeight;
         }
@@ -1161,13 +1163,18 @@ internal static class SheetTextLayout
         List<FormattedRun> runs = [];
         foreach (SheetTextPortion portion in portions)
         {
-            if (SheetFonts.For(portion.Format) is not { } face) continue;
+            // The same two fallbacks SheetText.ShapeRich takes, and for the same reason: a run
+            // left out here is measured in whatever run precedes it (MeasuredParagraph.Normalise
+            // fills a gap from the run before), so the line breaks in the wrong place and the
+            // drawn segments no longer match the measured ones.
+            SheetFace? face = SheetFonts.For(portion.Format) ?? SheetText.DefaultFace;
+            if (face is null) continue;
 
-            Length size = SheetText.SizeOf(portion.Format.FontSize, scale, 100);
+            Length size = SheetText.SizeOf(SheetText.SizeStatedBy(portion.Format), scale, 100);
             if (device is { } grid) size = grid.ToEmSize(size);
 
             runs.Add(new FormattedRun(
-                portion.Start, portion.Length, face.Face, size, SheetText.NoKerning));
+                portion.Start, portion.Length, face.Value.Face, size, SheetText.NoKerning));
         }
 
         // With the same glyph fallback the single-face path measures through: a rich cell whose
@@ -1180,6 +1187,74 @@ internal static class SheetTextLayout
     }
 
     // ---------------------------------------------------------------------------- placement
+
+    /// <summary>
+    /// The width a centred line is placed by, which is not always the width it draws.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>A centred line whose trailing blanks overflow the room it was broken against
+    /// starts left of the cell, and the cell's clip then takes the word that begins it.</strong>
+    /// Measured on <c>Infotabelle_WLAN im Flugzeug.xlsx</c> page 2, a centred wrapping cell whose
+    /// runs of spaces stand in for tab stops: line two carried 46 trailing spaces worth 151 pt of
+    /// a 436 pt line against 283 pt of room, so it was placed at x = −25.2 pt in a cell clipped
+    /// from 50.4 pt, and the bold word <c>kostenlos</c> was drawn entirely outside it. The word is
+    /// in the file, in <c>paperless extract</c>, in the wrapped line's range and in the shaped
+    /// run; the placement alone lost it, and the PDF held <c>kostenlos</c> five times against the
+    /// reference's six.
+    /// </para>
+    /// <para>
+    /// EditEngine never reaches a negative offset here, and the reason is structural rather than a
+    /// clamp: it keeps only as many trailing blanks as <em>fit</em>, so a wrapped line's width is
+    /// at most the width it was broken against and <c>(nMaxLineWidth - nCenterWidth) / 2</c>
+    /// cannot go below nought (<c>ImpEditEngine::CreateLines</c>,
+    /// <c>editeng/source/editeng/impedit3.cxx:1643-1683</c>). We keep every blank up to the next
+    /// word instead — see <see cref="Wrap"/>, which takes a line to its <c>End</c> because Calc
+    /// draws a line's trailing spaces — so the invariant has to be restored here.
+    /// </para>
+    /// <para>
+    /// Hence the two bounds, and neither alone is right:
+    /// </para>
+    /// <list type="bullet">
+    /// <item><description>
+    /// A line that fits keeps its full width, blanks included, because the reference keeps the
+    /// blanks that fit. Nothing about a cell that was already right moves.
+    /// </description></item>
+    /// <item><description>
+    /// A line that overflows is placed by at most the room it had, which is the reference's
+    /// filled line: it starts at the left margin. That is where the reference puts both of the
+    /// two lines measured — 52.044 pt and 52.611 pt — and where this now puts them, at 51.392 pt.
+    /// The remaining 0.7 pt is the cell margin, and it is the same on every cell in the file.
+    /// </description></item>
+    /// <item><description>
+    /// But never by less than its own visible width, or a centred word longer than its column
+    /// would be pushed flush left instead of overflowing evenly. The reference does let that one
+    /// hang out both sides, since there is no blank in it for the first rule to have caught.
+    /// </description></item>
+    /// </list>
+    /// <para>
+    /// <strong>What this does not fix</strong> is where the overflowing blanks end up. The
+    /// reference carries them onto the <em>next</em> line as leading blanks; we drop them at the
+    /// break. So the third line of that cell is still centred on its visible text alone, at
+    /// 129.9 pt against the reference's 205.9 pt. That is a line-breaking difference in
+    /// <see cref="Wrap"/> and is left alone here.
+    /// </para>
+    /// </remarks>
+    /// <param name="horizontal">The resolved alignment; only centring is affected.</param>
+    /// <param name="line">The line being placed.</param>
+    /// <param name="available">The width the line was broken against, or nought when it was not.</param>
+    private static Length AlignedWidth(
+        SheetHorizontalAlignment horizontal, SheetTextRun line, Length available)
+    {
+        if (horizontal != SheetHorizontalAlignment.Centre
+            || available <= Length.Zero
+            || line.Width <= available)
+        {
+            return line.Width;
+        }
+
+        return Length.Max(line.WithoutTrailingBlanks, available);
+    }
 
     /// <summary>Where a line starts, given its width and the cell's.</summary>
     /// <remarks>
