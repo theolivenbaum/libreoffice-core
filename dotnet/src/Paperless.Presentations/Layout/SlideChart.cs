@@ -82,7 +82,7 @@ public static class SlideChart
                 Name = name,
                 Outline = ShapeTransform.Apply(placement, path),
                 Bounds = DocRect.Empty,
-                Line = Pen(line.Colour, line.Width),
+                Line = Pen(line.Colour, line.Width, line.DashPattern, line.Cap),
             });
         }
 
@@ -98,7 +98,9 @@ public static class SlideChart
                 Outline = ShapeTransform.Apply(placement, shape.Path),
                 Bounds = DocRect.Empty,
                 Fill = shape.Fill is { } fill ? Paint.Solid(fill) : null,
-                Line = shape.Line is { } line ? Pen(line, shape.LineWidth) : null,
+                Line = shape.Line is { } line
+                    ? Pen(line, shape.LineWidth, shape.DashPattern, shape.Cap)
+                    : null,
             });
         }
 
@@ -126,8 +128,10 @@ public static class SlideChart
     /// reader renders that as the thinnest line the device has. Substituting a visible width
     /// here would make every bar outline and every gridline heavier than the reference's.
     /// </remarks>
-    private static Stroke Pen(Colour colour, Length width)
-        => new(Paint.Solid(colour), width, LineCap.Butt, LineJoin.Miter);
+    private static Stroke Pen(
+        Colour colour, Length width, IReadOnlyList<Length>? dash = null,
+        LineCap cap = LineCap.Butt)
+        => new(Paint.Solid(colour), width, cap, LineJoin.Miter, DashPattern: dash);
 
     /// <summary>
     /// Lays one chart label out and returns its glyph runs, placed on the slide.

@@ -189,7 +189,14 @@ public static class OdfChartPlot
             Direction = styles.IsVertical(plotStyle) ? ChartBarDirection.Bar : ChartBarDirection.Column,
             GapWidth = styles.Number(plotStyle, "gap-width") ?? 100.0,
             Overlap = styles.Number(plotStyle, "overlap") ?? 0.0,
-            IsStacked = styles.Flag(plotStyle, "stacked") ?? false,
+            IsStacked = (styles.Flag(plotStyle, "stacked") ?? false)
+                        || (styles.Flag(plotStyle, "percentage") ?? false),
+
+            // chart:percentage is ODF's percentStacked and it is written *instead of*
+            // chart:stacked rather than beside it, which is why the flag above has to admit it
+            // too — a percent stack that is not also a stack draws every series from the
+            // baseline and overlaps them.
+            IsPercentStacked = styles.Flag(plotStyle, "percentage") ?? false,
             ValueScale = ScaleOf(valueAxis, styles),
             ValueFormat = styles.Format(Attribute(valueAxis, OdfNamespaces.Chart, "style-name")),
             CategoryFormat = styles.Format(Attribute(categoryAxis, OdfNamespaces.Chart, "style-name")),

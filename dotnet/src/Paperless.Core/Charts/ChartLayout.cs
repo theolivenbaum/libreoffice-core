@@ -110,8 +110,19 @@ public readonly record struct ChartBox(
 /// <param name="To">Its end.</param>
 /// <param name="Colour">Its colour.</param>
 /// <param name="Width">Its width; zero is a hairline.</param>
+/// <param name="DashPattern">
+/// Alternating ink and gap lengths, or null for a solid line. A legend's line key carries the
+/// series' pattern so that a dotted series is told apart from a solid one in the legend as well
+/// as in the plot.
+/// </param>
+/// <param name="Cap">How its ends, and each of its dashes, are drawn.</param>
 public readonly record struct ChartLine(
-    DocPoint From, DocPoint To, Colour Colour, Length Width = default);
+    DocPoint From,
+    DocPoint To,
+    Colour Colour,
+    Length Width = default,
+    IReadOnlyList<Length>? DashPattern = null,
+    LineCap Cap = LineCap.Butt);
 
 /// <summary>
 /// One free-form mark — a line chart's polyline, an area's filled region, a pie's wedge.
@@ -126,11 +137,18 @@ public readonly record struct ChartLine(
 /// <param name="Fill">Its fill, or null when it is a stroke only — which is a line chart.</param>
 /// <param name="Line">Its outline colour, or null for none.</param>
 /// <param name="LineWidth">The outline's width; zero is a hairline.</param>
+/// <param name="DashPattern">
+/// Alternating ink and gap lengths, or null for a solid outline. See
+/// <c>ChartSeries.DashPattern</c>.
+/// </param>
+/// <param name="Cap">How its ends, and each of its dashes, are drawn.</param>
 public readonly record struct ChartShape(
     GraphicsPath Path,
     Colour? Fill,
     Colour? Line = null,
-    Length LineWidth = default);
+    Length LineWidth = default,
+    IReadOnlyList<Length>? DashPattern = null,
+    LineCap Cap = LineCap.Butt);
 
 /// <summary>
 /// A chart laid out: every mark it draws, in paint order, in the frame's coordinates.
@@ -696,7 +714,7 @@ public static partial class ChartLayout
         // rings and not eleven, and it is measured: radar-chart-labels.docx peaks at 40 and
         // LibreOffice draws rings at 0, 20 and 40.
         ChartScaleResult scale = ChartScale.Resolve(
-            plot.ValueScale,
+            PercentAxis(plot, plot.ValueScale, dataMinimum, dataMaximum),
             dataMinimum,
             dataMaximum,
             maximumIntervals: plot.Kind is ChartPlotKind.Radar
@@ -711,7 +729,10 @@ public static partial class ChartLayout
 
         (double? secondMinimum, double? secondMaximum) = plot.ValueRange(1);
         ChartScaleResult? secondary = plot.HasSecondaryAxis
-            ? ChartScale.Resolve(plot.SecondaryValueScale!.Value, secondMinimum, secondMaximum)
+            ? ChartScale.Resolve(
+                PercentAxis(plot, plot.SecondaryValueScale!.Value, secondMinimum, secondMaximum),
+                secondMinimum,
+                secondMaximum)
             : null;
 
         DocRect area = PlotAreaOf(
@@ -877,7 +898,7 @@ public static partial class ChartLayout
         }
 
         AddTitles(plot, frame, area, DiagramAreaOf(plot, frame, measurer), measurer, labels);
-        AddLegend(plot, frame, area, measurer, boxes, labels);
+        AddLegend(plot, frame, area, measurer, boxes, lines, labels);
 
         return new ChartDrawing(
             area, boxes, lines, labels, shapes, DiagramAreaOf(plot, frame, measurer));
@@ -2128,7 +2149,8 @@ public static partial class ChartLayout
             Colour stroke = series.Line ?? series.Fill ?? Colour.Black;
 
             if (series.HasLine && path.Commands.Count >= 2)
-                shapes.Add(new ChartShape(path, null, stroke, series.LineWidth));
+                shapes.Add(new ChartShape(
+                    path, null, stroke, series.LineWidth, series.DashPattern, series.LineCap));
 
             if (series.Marker != ChartMarker.None)
             {
@@ -2384,7 +2406,9 @@ public static partial class ChartLayout
 
                 if (plot.IsStacked)
                 {
-                    running[at] += value;
+                    // As in AddBars: a percent stack's running total is a fraction of the
+                    // category's own sum.
+                    running[at] += plot.StackTotal(at) is { } total ? value / total : value;
                     top = scale.Fraction(running[at]);
                 }
                 else
@@ -2685,6 +2709,36 @@ public static partial class ChartLayout
     /// positive neighbour draws up from, rather than upwards from the bottom of the plot.
     /// </para>
     /// </remarks>
+    /// <summary>
+    /// The scale a percent stack's value axis asks for, which is fixed rather than automatic.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// chart2 gives a percent-stacked group's axis <c>AxisType::PERCENT</c>, whose scale is 0 to 1
+    /// with a 0.1 increment and is not derived from the data at all
+    /// (<c>chart2/source/view/axes/ScaleAutomatism.cxx</c>'s percent branch). The automatic rule
+    /// would round the normalised maximum of exactly 1 up to 1.2 and step it by 0.2 — six ticks
+    /// reading <c>0% … 120%</c> against the reference's eleven reading <c>0% … 100%</c>, measured
+    /// on <c>8_P-Pavese_AIRBUS-ATB-journee-CRATB.pptx</c>.
+    /// </para>
+    /// <para>
+    /// A stated <c>c:min</c>, <c>c:max</c> or <c>c:majorUnit</c> still wins, because the file
+    /// saying so is the one thing that outranks an axis type.
+    /// </para>
+    /// </remarks>
+    private static ChartScaleRequest PercentAxis(
+        ChartPlot plot, ChartScaleRequest stated, double? minimum, double? maximum)
+    {
+        if (!plot.IsPercentStacked) return stated;
+
+        return stated with
+        {
+            Minimum = stated.Minimum ?? (minimum is { } low and < 0.0 ? -1.0 : 0.0),
+            Maximum = stated.Maximum ?? (maximum is { } high and <= 0.0 ? 0.0 : 1.0),
+            MajorUnit = stated.MajorUnit ?? 0.1,
+        };
+    }
+
     private static void AddBars(
         ChartPlot plot,
         DocRect area,
@@ -2726,9 +2780,14 @@ public static partial class ChartLayout
 
                 if (plot.IsStacked)
                 {
+                    // A percent stack divides each category by its own total, so the running sum
+                    // is a fraction of the column rather than a count. Only the geometry is
+                    // normalised: the label below still names the raw value.
+                    double stacked = plot.StackTotal(at) is { } total ? value / total : value;
+
                     ref double running = ref (value >= 0.0 ? ref positive[at] : ref negative[at]);
                     from = scale.Fraction(running);
-                    running += value;
+                    running += stacked;
                     to = scale.Fraction(running);
                 }
                 else
@@ -2973,11 +3032,12 @@ public static partial class ChartLayout
         DocRect area,
         ChartText measurer,
         List<ChartBox> boxes,
+        List<ChartLine> lines,
         List<ChartLabel> labels)
     {
         if (plot.Legend == ChartLegendPosition.None) return;
 
-        List<(string Name, Colour? Fill, Colour? Line, Length Width)> named = Entries(plot);
+        List<LegendEntry> named = Entries(plot);
         if (named.Count == 0) return;
 
         DocRect space = LegendSpace(plot, frame, measurer);
@@ -3015,7 +3075,8 @@ public static partial class ChartLayout
                 int at = column + (row * box.Columns);
                 if (at >= named.Count) break;
 
-                (string name, Colour? fill, Colour? outline, Length width) = named[at];
+                LegendEntry entry = named[at];
+                string name = entry.Name;
 
                 // A row is its own height and then the gap, which is exactly what the height
                 // reserved for the whole box is a sum of. Stepping by the height alone left the
@@ -3024,15 +3085,34 @@ public static partial class ChartLayout
                 // legend is the difference between the box being centred and its content being.
                 Length rowY = originY + box.PaddingY + ((box.RowHeight + box.RowGap) * row);
 
-                boxes.Add(new ChartBox(
-                    Rectangle(
-                        columnX,
-                        rowY + (box.RowHeight - box.Key.Height) / 2,
-                        box.Key.Width,
-                        box.Key.Height),
-                    fill,
-                    outline,
-                    width));
+                if (entry.IsLine && entry.Line is { } sample)
+                {
+                    // A line series' key is a horizontal sample of the line itself, drawn across
+                    // the middle of the space the box would have occupied — LegendSymbolStyle
+                    // Line against Box. Drawing the box instead leaves a hollow rectangle in a
+                    // key sized for a 22.7 pt rule, which is what the reference does not draw.
+                    Length middle = rowY + (box.RowHeight / 2);
+
+                    lines.Add(new ChartLine(
+                        new DocPoint(columnX, middle),
+                        new DocPoint(columnX + box.Key.Width, middle),
+                        sample,
+                        entry.Width,
+                        entry.Dash,
+                        entry.Cap));
+                }
+                else
+                {
+                    boxes.Add(new ChartBox(
+                        Rectangle(
+                            columnX,
+                            rowY + (box.RowHeight - box.Key.Height) / 2,
+                            box.Key.Width,
+                            box.Key.Height),
+                        entry.Fill,
+                        entry.Line,
+                        entry.Width));
+                }
 
                 // No TextShapeInsetX: a legend entry's name is the one chart text that is not
                 // drawn in a shape carrying one. See Legend.
@@ -3084,10 +3164,9 @@ public static partial class ChartLayout
     /// numbering the blanks inside a stated sequence would invent labels on every sparse pie in
     /// the corpus.
     /// </remarks>
-    private static List<(string Name, Colour? Fill, Colour? Line, Length Width)> Entries(
-        ChartPlot plot)
+    private static List<LegendEntry> Entries(ChartPlot plot)
     {
-        List<(string, Colour?, Colour?, Length)> entries = [];
+        List<LegendEntry> entries = [];
 
         if (plot.Kind is ChartPlotKind.Pie or ChartPlotKind.OfPie)
         {
@@ -3106,7 +3185,9 @@ public static partial class ChartLayout
 
                 if (stated is not { Length: > 0 }) continue;
 
-                entries.Add((stated, first?.FillAt(at), first?.Line, first?.LineWidth ?? Length.Zero));
+                entries.Add(new LegendEntry(
+                    stated, first?.FillAt(at), first?.Line, first?.LineWidth ?? Length.Zero,
+                    IsLine: false, Dash: null));
             }
 
             return entries;
@@ -3115,10 +3196,49 @@ public static partial class ChartLayout
         foreach (ChartSeries series in plot.Series)
         {
             if (series.Name is not { Length: > 0 } name) continue;
-            entries.Add((name, series.Fill, series.Line, series.LineWidth));
+
+            entries.Add(new LegendEntry(
+                name, series.Fill, series.Line, series.LineWidth,
+                DrawsLineKey(plot, series), series.DashPattern, series.LineCap));
         }
 
         return entries;
+    }
+
+    /// <summary>What one legend row draws: a name and the sample beside it.</summary>
+    /// <param name="Name">The series' or category's name.</param>
+    /// <param name="Fill">The sample's fill, or null.</param>
+    /// <param name="Line">The sample's line colour, or null.</param>
+    /// <param name="Width">The sample's line width.</param>
+    /// <param name="IsLine">Whether the sample is a line rather than a filled box.</param>
+    /// <param name="Dash">The sample line's dash array, or null for solid.</param>
+    /// <param name="Cap">The sample line's cap, which is what makes a dotted key dotted.</param>
+    private readonly record struct LegendEntry(
+        string Name,
+        Colour? Fill,
+        Colour? Line,
+        Length Width,
+        bool IsLine,
+        IReadOnlyList<Length>? Dash,
+        LineCap Cap = LineCap.Butt);
+
+    /// <summary>
+    /// Whether a series' legend key is a line sample rather than a filled box.
+    /// </summary>
+    /// <remarks>
+    /// <c>VSeriesPlotter::createLegendEntries</c> asks the plotter for its key shape, and a line,
+    /// scatter or radar plotter answers <c>LegendSymbolStyle::Line</c> where a bar, area or pie
+    /// plotter answers <c>LegendSymbolStyle::Box</c>
+    /// (<c>chart2/source/view/charttypes/*Chart.cxx</c>'s <c>getLegendSymbolStyle</c>). It is the
+    /// same test <see cref="LineKeyWidth"/> already makes to size the key, which is why a line
+    /// chart's legend was 22.7 pt wide with a 4 pt hollow rectangle rattling around inside it.
+    /// </remarks>
+    private static bool DrawsLineKey(ChartPlot plot, ChartSeries series)
+    {
+        ChartPlotKind kind = series.Kind ?? plot.Kind;
+        bool draws = kind is ChartPlotKind.Line or ChartPlotKind.Scatter or ChartPlotKind.Radar;
+
+        return draws && series.HasLine && series.Line is not null;
     }
 
     /// <summary>
@@ -3204,7 +3324,7 @@ public static partial class ChartLayout
     {
         if (plot.Legend == ChartLegendPosition.None) return default;
 
-        List<(string Name, Colour? Fill, Colour? Line, Length Width)> named = Entries(plot);
+        List<LegendEntry> named = Entries(plot);
         if (named.Count == 0) return default;
 
         Length font = plot.LegendFont;
@@ -3221,9 +3341,9 @@ public static partial class ChartLayout
         Length tallest = Length.Zero;
         List<Length> widths = new(named.Count);
 
-        foreach ((string name, _, _, _) in named)
+        foreach (LegendEntry entry in named)
         {
-            DocSize text = MeasureLines(measurer, name, font, plot.LegendBold);
+            DocSize text = MeasureLines(measurer, entry.Name, font, plot.LegendBold);
             widths.Add(text.Width);
             if (text.Width > widest) widest = text.Width;
             if (text.Height > tallest) tallest = text.Height;
@@ -3326,14 +3446,23 @@ public static partial class ChartLayout
     /// </remarks>
     private static Length LineKeyWidth(ChartPlot plot)
     {
+        Length width = Length.Zero;
+
         foreach (ChartSeries series in plot.Series)
         {
-            ChartPlotKind kind = series.Kind ?? plot.Kind;
-            bool draws = kind is ChartPlotKind.Line or ChartPlotKind.Scatter or ChartPlotKind.Radar;
-            if (draws && series.HasLine && series.Line is not null) return Length.FromMm100(800);
+            if (!DrawsLineKey(plot, series)) continue;
+
+            // 1600 where the line is dashed and 800 where it is solid, and the widest wins: the
+            // key is one size for the whole legend, so one dotted series among four widens every
+            // row's key. getPreferredLegendKeyAspectRatio's own two constants.
+            Length one = series.DashPattern is { Count: > 0 }
+                ? Length.FromMm100(1600)
+                : Length.FromMm100(800);
+
+            if (one > width) width = one;
         }
 
-        return Length.Zero;
+        return width;
     }
 
     /// <summary>The larger of two lengths.</summary>

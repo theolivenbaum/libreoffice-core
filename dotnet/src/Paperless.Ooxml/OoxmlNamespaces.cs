@@ -41,6 +41,16 @@ public static class OoxmlNamespaces
     /// </remarks>
     public const string DrawingMLChart = "http://schemas.openxmlformats.org/drawingml/2006/chart";
 
+    /// <summary>DrawingML for the shapes drawn <em>on</em> a chart — <c>cdr:</c>.</summary>
+    /// <remarks>
+    /// The <c>chartUserShapes</c> part's vocabulary. It is a third drawing dialect beside
+    /// <see cref="DrawingMLSpreadsheet"/> and <see cref="DrawingMLWordprocessing"/>, with the same
+    /// shape: three anchor and wrapper elements of its own around ordinary
+    /// <see cref="DrawingML"/> content.
+    /// </remarks>
+    public const string ChartDrawing =
+        "http://schemas.openxmlformats.org/drawingml/2006/chartDrawing";
+
     /// <summary>OPC relationships.</summary>
     public const string Relationships = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
 

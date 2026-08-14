@@ -103,6 +103,7 @@ public static class DrawingChartPlot
 
         List<ChartSeries> series = [];
         string?[] categories = [];
+        double?[] categoryValues = [];
 
         // The automatic-format context, which is a property of the whole chart space rather than
         // of any one group: the style index, and the largest c:ser/c:idx anywhere in the plot
@@ -117,11 +118,16 @@ public static class DrawingChartPlot
 
         for (int at = 0; at < groups.Count; at++)
         {
-            (List<ChartSeries> read, string?[] labels) = ReadSeries(
+            (List<ChartSeries> read, string?[] labels, double?[] numbers) = ReadSeries(
                 groups[at], kinds[at], theme, axes.IndexOf(groups[at]), office2007, automatic,
                 ranges);
 
-            if (categories.Length == 0 && labels.Length > 0) categories = labels;
+            if (categories.Length == 0 && labels.Length > 0)
+            {
+                categories = labels;
+                categoryValues = numbers;
+            }
+
             series.AddRange(read);
         }
 
@@ -162,8 +168,21 @@ public static class DrawingChartPlot
 
         XElement? upDown = Child(stock, "upDownBars");
 
+        // A c:dateAx is a continuous serial scale and not a run of category slots, so it is
+        // resolved here — before the plot is built — and the points are put in date order with it.
+        IReadOnlyList<string?> orderedCategories = categories;
+        IReadOnlyList<ChartSeries> orderedSeries = series;
+
+        ChartDateAxis? dateAxis = DateAxisOf(chartSpace, axes.Category, categoryValues);
+        if (dateAxis is not null)
+        {
+            (dateAxis, orderedCategories, orderedSeries) =
+                ChartDateScale.SortByDate(dateAxis, orderedCategories, orderedSeries);
+        }
+
         return new ChartPlot
         {
+            DateAxis = dateAxis,
             Title = TitleText(Child(chart, "title")),
             // A scatter chart's horizontal axis is its domain and not its category axis, and its
             // title hangs off that element — so reading only c:catAx loses it entirely. The same
@@ -171,8 +190,8 @@ public static class DrawingChartPlot
             // "Dissolved Oxygen (%)" is three words the reference draws and this did not.
             CategoryAxisTitle = TitleText(Child(axes.Domain ?? axes.Category, "title")),
             ValueAxisTitle = TitleText(Child(axes.Value, "title")),
-            Categories = categories,
-            Series = series,
+            Categories = orderedCategories,
+            Series = orderedSeries,
             Kind = kind,
 
             // A doughnut is a pie of concentric rings; the element name is the whole of the file's
@@ -191,6 +210,7 @@ public static class DrawingChartPlot
             GapWidth = Number(Child(group, "gapWidth")) ?? Number(Child(upDown, "gapWidth")) ?? 100.0,
             Overlap = Number(Child(group, "overlap")) ?? 0.0,
             IsStacked = grouping is "stacked" or "percentStacked",
+            IsPercentStacked = grouping is "percentStacked",
             ValueScale = ScaleOf(axes.Value),
             ValueFormat = FormatOf(axes.Value),
             CategoryFormat = FormatOf(axes.Category),
@@ -425,6 +445,84 @@ public static class DrawingChartPlot
     /// </remarks>
     private static bool Labelled(XElement? axis)
         => !string.Equals(Value(Child(axis, "tickLblPos")), "none", StringComparison.Ordinal);
+
+    /// <summary>
+    /// The date axis a <c>c:dateAx</c> asks for, or null when the category axis is an ordinary
+    /// run of slots.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>The element name is not the whole of the statement.</strong>
+    /// <c>AxisConverter::convertFromModel</c> gives a <c>c:dateAx</c> <c>AxisType::DATE</c> and
+    /// copies <c>c:auto</c> onto <c>ScaleData::AutoDateAxis</c>
+    /// (<c>oox/source/drawingml/chart/axisconverter.cxx</c>); chart2 then asks
+    /// <c>ExplicitCategoriesProvider::isDateAxis</c> whether the categories really are dates
+    /// before it uses the scale, and that test is the categories' <em>number format</em>. So an
+    /// automatic date axis over a column of plain numbers is drawn as a category axis, and only a
+    /// <c>c:auto val="0"</c> forces the scale on regardless. This is the same pair of rules
+    /// <c>XlsChartReader</c> applies to <c>CHDATERANGE</c>'s two flags, reached from the other
+    /// vocabulary.
+    /// </para>
+    /// <para>
+    /// <strong>Both stated limits and the tick interval come in as serials.</strong>
+    /// <c>c:scaling/c:min</c> and <c>c:max</c> on a date axis are already serial numbers, unlike
+    /// <c>CHDATERANGE</c>'s, which count their own base unit from the null date. <c>c:majorUnit</c>
+    /// is a count and <c>c:majorTimeUnit</c> the unit it counts, defaulting to days
+    /// (<c>CT_DateAx</c>'s <c>ST_TimeUnit</c> default), and <c>c:baseTimeUnit</c> is the
+    /// resolution — the finest unit the axis distinguishes — which the scale otherwise derives
+    /// from the data.
+    /// </para>
+    /// <para>
+    /// <strong><c>c:date1904</c> decides what a serial names.</strong> It sits on
+    /// <c>c:chartSpace</c> rather than on the axis, and it is four years and a day of error when
+    /// it is missed.
+    /// </para>
+    /// </remarks>
+    /// <param name="chartSpace">The <c>c:chartSpace</c>, for <c>c:date1904</c>.</param>
+    /// <param name="axis">The category axis element, or null when the chart has none.</param>
+    /// <param name="values">The category cells read as numbers.</param>
+    private static ChartDateAxis? DateAxisOf(
+        XElement chartSpace, XElement? axis, double?[] values)
+    {
+        if (axis is null || !Is(axis, "dateAx") || values.Length == 0) return null;
+
+        NumberFormatCode? format = FormatOf(axis);
+
+        // c:auto is absent on plenty of parts and its schema default is true, so an unstated one
+        // takes the checked path rather than forcing the scale on.
+        bool automatic = Flag(axis, "auto") ?? true;
+        if (automatic && format is not { IsDateTime: true }) return null;
+
+        XElement? scaling = Child(axis, "scaling");
+
+        ChartTimeInterval? interval = null;
+        if (Number(Child(axis, "majorUnit")) is { } unit and > 0.0)
+        {
+            interval = new ChartTimeInterval(
+                (int)Math.Clamp(unit, 1.0, int.MaxValue),
+                TimeUnitOf(Value(Child(axis, "majorTimeUnit"))) ?? ChartTimeUnit.Day);
+        }
+
+        return ChartDateScale.Resolve(
+            values,
+            format,
+            Number(Child(scaling, "min")),
+            Number(Child(scaling, "max")),
+            interval,
+            TimeUnitOf(Value(Child(axis, "baseTimeUnit"))),
+            Flag(chartSpace, "date1904") == true
+                ? SpreadsheetDateSystem.Date1904
+                : SpreadsheetDateSystem.Date1900);
+    }
+
+    /// <summary>The three <c>ST_TimeUnit</c> spellings, or null when the element is absent.</summary>
+    private static ChartTimeUnit? TimeUnitOf(string? stated) => stated switch
+    {
+        "days" => ChartTimeUnit.Day,
+        "months" => ChartTimeUnit.Month,
+        "years" => ChartTimeUnit.Year,
+        _ => null,
+    };
 
     private static NumberFormatCode? FormatOf(XElement? axis)
     {
@@ -700,7 +798,8 @@ public static class DrawingChartPlot
         return maximum;
     }
 
-    private static (List<ChartSeries> Series, string?[] Categories) ReadSeries(
+    private static (List<ChartSeries> Series, string?[] Categories, double?[] CategoryValues)
+        ReadSeries(
         XElement group,
         ChartPlotKind kind,
         DrawingTheme? theme,
@@ -711,6 +810,7 @@ public static class DrawingChartPlot
     {
         List<ChartSeries> series = [];
         string?[] categories = [];
+        double?[] categoryValues = [];
 
         // c:scatterStyle decides whether a scatter series draws its line, its markers or both.
         // "marker" alone is the case that matters: drawing the line and not the markers leaves an
@@ -741,9 +841,17 @@ public static class DrawingChartPlot
 
         foreach (XElement element in Children(group, "ser"))
         {
-            (string?[] labels, _) = ReadSequence(
+            (string?[] labels, double?[] labelNumbers) = ReadSequence(
                 Child(element, "cat") ?? Child(element, "xVal"), ranges);
-            if (categories.Length == 0 && labels.Length > 0) categories = labels;
+            if (categories.Length == 0 && labels.Length > 0)
+            {
+                categories = labels;
+
+                // The same cells read as numbers, which is what a c:dateAx scales against. Kept
+                // beside the text rather than instead of it: a date axis labels its *ticks* and
+                // still wants the strings for a chart that turns out not to be one.
+                categoryValues = labelNumbers;
+            }
 
             XElement? valueSource = Child(element, "val") ?? Child(element, "yVal");
             (_, double?[] numbers) = ReadSequence(valueSource, ranges);
@@ -794,7 +902,7 @@ public static class DrawingChartPlot
             series.Add(new ChartSeries(
                 DrawingChartText.Label(Child(element, "tx")),
                 numbers,
-                FillOf(properties, theme) ?? autoFill,
+                SuppressesFill(properties) ? null : FillOf(properties, theme) ?? autoFill,
                 SuppressesLine(properties) ? null : LineOf(properties, theme) ?? autoLine,
                 StatedLineWidth(properties) ?? AutoLineWidth(automatic, frame, theme, seriesIndex),
                 PointFills(
@@ -813,6 +921,8 @@ public static class DrawingChartPlot
                 MarkerFill = MarkerFillOf(element, theme),
                 MarkerLine = LineOf(MarkerProperties(element), theme),
                 HasLine = scatterLine && !SuppressesLine(properties),
+                DashPattern = DashOf(properties),
+                LineCap = CapOf(properties),
                 Label = WithSource(LabelOf(seriesLabels, groupLabel, kind, office2007), sourceFormat),
                 PointLabels = PointLabelsOf(
                     seriesLabels, numbers.Length, groupLabel, kind, sourceFormat, office2007),
@@ -828,7 +938,7 @@ public static class DrawingChartPlot
             if (stockRole >= 0) stockRole++;
         }
 
-        return (series, categories);
+        return (series, categories, categoryValues);
     }
 
     /// <summary>
@@ -1343,6 +1453,51 @@ public static class DrawingChartPlot
     /// replaced by the theme's width. <see cref="LineWidthOf"/> cannot tell the two apart because
     /// it answers with a <c>Length</c>.
     /// </remarks>
+    /// <summary>
+    /// The dash array a series' <c>a:ln</c> asks for, or null for a solid line.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>a:prstDash</c> names one of ten patterns whose lengths are percentages of the pen width,
+    /// so the expansion needs the width — see <see cref="DashPresets"/>. It runs against the
+    /// <em>stated</em> width and not the automatic one, because a series that states a dash states
+    /// a line, and every corpus file that carries one carries <c>a:ln w="…"</c> with it.
+    /// </para>
+    /// <para>
+    /// <c>a:ln/@cap</c> of <c>rnd</c> or <c>sq</c> shortens each ink length and lengthens the gap,
+    /// which is why the cap is read here rather than defaulted: the three threshold lines of
+    /// <c>southern-classic-kennesaw-state-university-final.pptx</c> are <c>cap="rnd"</c> and would
+    /// otherwise be drawn a third longer than the reference's dots.
+    /// </para>
+    /// </remarks>
+    private static IReadOnlyList<Length>? DashOf(XElement? properties)
+    {
+        XElement? line = Drawing.Child(properties, "ln");
+        if (line is null) return null;
+
+        return DashPresets.Pattern(
+            Drawing.Attribute(Drawing.Child(line, "prstDash"), "val"),
+            StatedLineWidth(properties) ?? Length.Zero,
+            CapOf(properties) != LineCap.Butt);
+    }
+
+    /// <summary>
+    /// <c>a:ln/@cap</c>, which decides both how a line ends and what its dashes look like.
+    /// </summary>
+    /// <remarks>
+    /// <c>flat</c> and an absent attribute are butt — <c>ST_LineCap</c>'s default is <c>flat</c>
+    /// and <c>LineProperties::pushToPropMap</c> maps it to <c>DrawingLineCap_BUTT</c>. The other
+    /// two matter because <see cref="DashPresets"/> has already taken 99% off each ink length on
+    /// their account: drawn butt, that array is a row of hairlines where the file asked for dots.
+    /// </remarks>
+    private static LineCap CapOf(XElement? properties) =>
+        Drawing.Attribute(Drawing.Child(properties, "ln"), "cap") switch
+        {
+            "rnd" => LineCap.Round,
+            "sq" => LineCap.Square,
+            _ => LineCap.Butt,
+        };
+
     private static Length? StatedLineWidth(XElement? properties)
         => Drawing.Number(Drawing.Child(properties, "ln"), "w") is { } emu
             ? Length.FromEmu(Math.Max(emu, 0))
@@ -1451,6 +1606,28 @@ public static class DrawingChartPlot
     /// </remarks>
     private static bool SuppressesLine(XElement? properties)
         => Drawing.Child(Drawing.Child(properties, "ln"), "noFill") is not null;
+
+    /// <summary>
+    /// Whether these shape properties state <em>no fill at all</em>, as against stating nothing.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The same distinction <see cref="SuppressesLine"/> draws, one element up.
+    /// <c>c:ser/c:spPr/a:noFill</c> resolves to <c>FillStyle_NONE</c> and must not be replaced by
+    /// the colour the chart's style would otherwise give the series; a <c>c:spPr</c> with no fill
+    /// element at all is the case the automatic table exists for.
+    /// </para>
+    /// <para>
+    /// <strong>Found by a blind reviewer, from the picture alone.</strong> Sent
+    /// <c>8_P-Pavese_AIRBUS-ATB-journee-CRATB.pptx</c>'s page 8 with no access to the package, it
+    /// reported that ours caps each column with a silver block reaching 100% where the reference
+    /// shows only the plot background — and listed "drawn but with a fill equal to the background"
+    /// among the causes it could not separate from "not drawn". The file settles it: that series,
+    /// <c>Non suivi</c>, is <c>&lt;c:spPr&gt;&lt;a:noFill/&gt;&lt;/c:spPr&gt;</c> and nothing else.
+    /// </para>
+    /// </remarks>
+    private static bool SuppressesFill(XElement? properties)
+        => Drawing.Child(properties, "noFill") is not null;
 
     /// <summary>A series' <c>c:marker/c:spPr</c>, or null when it states none.</summary>
     private static XElement? MarkerProperties(XElement? series)

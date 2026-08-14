@@ -55,7 +55,9 @@ public sealed class DrawingStyleMatrix
     /// <param name="theme">The <c>a:theme</c> element, or null.</param>
     public static DrawingStyleMatrix? Read(XElement? theme)
     {
-        XElement? format = Drawing.Child(Drawing.Child(theme, "themeElements"), "fmtScheme");
+        // As DrawingTheme.Read: an a:themeOverride states its a:fmtScheme on the root.
+        XElement? format = Drawing.Child(Drawing.Child(theme, "themeElements"), "fmtScheme")
+                           ?? Drawing.Child(theme, "fmtScheme");
         if (format is null) return null;
 
         DrawingStyleMatrix matrix = new();

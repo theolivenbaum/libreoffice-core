@@ -354,6 +354,89 @@ public static class ChartDateScale
     }
 
     /// <summary>
+    /// Puts a date axis' points in date order, which is not the order the cells are in.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>AreaChart::createShapes</c> calls <c>pSeries-&gt;doSortByXValues()</c> for every series
+    /// on a date category axis (<c>AreaChart.cxx:604-620</c>,
+    /// <c>VDataSeries::doSortByXValues</c>), and it is not a tidiness measure: the polyline joins
+    /// consecutive <em>points</em>, so a series whose categories run newest-first is drawn as a
+    /// mirror image of the reference. Measured on
+    /// <c>southern-classic-kennesaw-state-university-final.pptx</c>, whose 254 daily closes are
+    /// stored 12 January 2017 down to 12 January 2016: the reference's axis reads
+    /// <c>Jan-16 … Jan-17</c> left to right and ours read <c>Jan-17 … Jan-16</c> until this ran.
+    /// </para>
+    /// <para>
+    /// Sorted by the reader rather than by <see cref="ChartLayout"/> because it is a property of
+    /// the data and not of the geometry, and because sorting the categories, their values and
+    /// every series with one permutation keeps the three indexed by the same thing — which is
+    /// what every consumer of <c>ChartPlot</c> already assumes.
+    /// </para>
+    /// <para>
+    /// <strong>Only the numbers move.</strong> A per-point label or fill is looked up on the
+    /// model by index — <c>VDataSeries</c> sorts <c>m_aValues_X</c> and <c>m_aValues_Y</c> and
+    /// asks <c>getDataPointProperties</c> for everything else — so <c>c:dLbl idx="253"</c> lands
+    /// on the last point drawn and not on the point whose cell was 253rd. That is measurable on
+    /// the same document: its three threshold labels sit at the right-hand end of the reference's
+    /// plot, which is where the *newest* date is and where cell 253 is *not*.
+    /// </para>
+    /// <para>
+    /// A category with no value keeps its place at the end, because <c>lcl_LessXOfPoint</c>
+    /// compares with <c>&lt;</c> and a NaN answers false to every comparison it is in.
+    /// </para>
+    /// </remarks>
+    /// <param name="axis">The resolved date axis, whose category values are the sort key.</param>
+    /// <param name="categories">The category labels, permuted with the values.</param>
+    /// <param name="series">Every series, whose values are permuted with them.</param>
+    public static (ChartDateAxis Axis, IReadOnlyList<string?> Categories,
+        IReadOnlyList<ChartSeries> Series) SortByDate(
+        ChartDateAxis axis, IReadOnlyList<string?> categories, IReadOnlyList<ChartSeries> series)
+    {
+        ArgumentNullException.ThrowIfNull(axis);
+        ArgumentNullException.ThrowIfNull(categories);
+        ArgumentNullException.ThrowIfNull(series);
+
+        IReadOnlyList<double?> values = axis.CategoryValues;
+
+        int[] order = [.. Enumerable.Range(0, values.Count)];
+        Array.Sort(
+            [.. values.Select(value => value ?? double.MaxValue)], order);
+
+        bool moved = false;
+        for (int at = 0; at < order.Length; at++)
+        {
+            if (order[at] != at) { moved = true; break; }
+        }
+
+        if (!moved) return (axis, categories, series);
+
+        double?[] sortedValues = new double?[order.Length];
+        string?[] sortedCategories = new string?[order.Length];
+
+        for (int at = 0; at < order.Length; at++)
+        {
+            sortedValues[at] = values[order[at]];
+            sortedCategories[at] =
+                order[at] < categories.Count ? categories[order[at]] : null;
+        }
+
+        List<ChartSeries> sortedSeries = [];
+        foreach (ChartSeries one in series)
+        {
+            double?[] numbers = new double?[order.Length];
+            for (int at = 0; at < order.Length; at++)
+            {
+                numbers[at] = order[at] < one.Values.Count ? one.Values[order[at]] : null;
+            }
+
+            sortedSeries.Add(one with { Values = numbers });
+        }
+
+        return (axis with { CategoryValues = sortedValues }, sortedCategories, sortedSeries);
+    }
+
+    /// <summary>
     /// The distance between major ticks, stated or derived.
     /// </summary>
     /// <remarks>

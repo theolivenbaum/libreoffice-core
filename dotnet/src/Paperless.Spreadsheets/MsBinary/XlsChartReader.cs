@@ -435,7 +435,8 @@ internal sealed class XlsChartBuilder
 
         ChartDateAxis? dateAxis = DateAxisOf(categoryValues, categoryFormat, dates);
         if (dateAxis is not null)
-            (dateAxis, categories, series) = SortByDate(dateAxis, categories, series);
+            (dateAxis, categories, series) =
+                ChartDateScale.SortByDate(dateAxis, categories, series);
 
         ChartPlot plot = new()
         {
@@ -1111,74 +1112,6 @@ internal sealed class XlsChartBuilder
     /// </para>
     /// </remarks>
     private bool BlanksCountAsZero => _blanksAsZero || _kind is ChartPlotKind.Area;
-
-    /// <summary>
-    /// Puts a date axis' points in date order, which is not the order the cells are in.
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// <c>AreaChart::createShapes</c> calls <c>pSeries-&gt;doSortByXValues()</c> for every series
-    /// on a date category axis (<c>AreaChart.cxx:604-620</c>,
-    /// <c>VDataSeries::doSortByXValues</c>), and it is not a tidiness measure: the polyline joins
-    /// consecutive <em>points</em>, so a series whose cells run 17/11/2003, then 774 blanks that
-    /// count as 30/12/1899, then a cluster in 2012, is drawn as a line that goes to 92% of the
-    /// plot, back to 0%, and out to 100% again. Sorted, the same points draw the run along the
-    /// baseline and the spike at the end that the reference draws.
-    /// </para>
-    /// <para>
-    /// Sorted here rather than in <see cref="ChartLayout"/> because it is a property of the data
-    /// and not of the geometry, and because sorting the categories, their values and every series
-    /// with one permutation keeps the three indexed by the same thing — which is what every
-    /// consumer of <see cref="ChartPlot"/> already assumes.
-    /// </para>
-    /// <para>
-    /// A stable sort, and a category with no value keeps its place at the end, because
-    /// <c>lcl_LessXOfPoint</c> compares with <c>&lt;</c> and a NaN answers false to every
-    /// comparison it is in.
-    /// </para>
-    /// </remarks>
-    private static (ChartDateAxis Axis, IReadOnlyList<string?> Categories,
-        IReadOnlyList<ChartSeries> Series) SortByDate(
-        ChartDateAxis axis, IReadOnlyList<string?> categories, IReadOnlyList<ChartSeries> series)
-    {
-        IReadOnlyList<double?> values = axis.CategoryValues;
-
-        int[] order = [.. Enumerable.Range(0, values.Count)];
-        Array.Sort(
-            [.. values.Select(value => value ?? double.MaxValue)], order);
-
-        bool moved = false;
-        for (int at = 0; at < order.Length; at++)
-        {
-            if (order[at] != at) { moved = true; break; }
-        }
-
-        if (!moved) return (axis, categories, series);
-
-        double?[] sortedValues = new double?[order.Length];
-        string?[] sortedCategories = new string?[order.Length];
-
-        for (int at = 0; at < order.Length; at++)
-        {
-            sortedValues[at] = values[order[at]];
-            sortedCategories[at] =
-                order[at] < categories.Count ? categories[order[at]] : null;
-        }
-
-        List<ChartSeries> sortedSeries = [];
-        foreach (ChartSeries one in series)
-        {
-            double?[] numbers = new double?[order.Length];
-            for (int at = 0; at < order.Length; at++)
-            {
-                numbers[at] = order[at] < one.Values.Count ? one.Values[order[at]] : null;
-            }
-
-            sortedSeries.Add(one with { Values = numbers });
-        }
-
-        return (axis with { CategoryValues = sortedValues }, sortedCategories, sortedSeries);
-    }
 
     /// <summary>The unit a <c>CHDATERANGE</c> field's <c>0/1/2</c> names.</summary>
     private static ChartTimeUnit UnitOf(ushort unit) => unit switch

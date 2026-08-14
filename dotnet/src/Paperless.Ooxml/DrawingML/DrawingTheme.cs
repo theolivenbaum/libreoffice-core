@@ -219,7 +219,11 @@ public sealed record DrawingTheme(DrawingColourScheme? Colours, DrawingColourMap
     {
         if (theme is null) return null;
 
-        XElement? elements = Drawing.Child(theme, "themeElements");
+        // An a:themeOverride carries the same three schemes on its root rather than inside an
+        // a:themeElements — a chart part's themeOverride1.xml is exactly that — so the root
+        // itself is the fallback. A real a:theme has no direct a:clrScheme, so nothing else can
+        // match through it.
+        XElement? elements = Drawing.Child(theme, "themeElements") ?? theme;
         return new DrawingTheme(
             DrawingColourScheme.Read(Drawing.Child(elements, "clrScheme")),
             DrawingColourMap.Identity)
