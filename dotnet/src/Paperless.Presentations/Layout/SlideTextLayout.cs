@@ -66,6 +66,10 @@ public static partial class SlideTextLayout
         ArgumentNullException.ThrowIfNull(body);
         ArgumentNullException.ThrowIfNull(fonts);
 
+        // Before anything is measured, because a symbol run's recode changes the glyph and
+        // therefore its advance, and an advance decided after the line break is decided too late.
+        body = SlideSymbolRuns.Normalise(body, fonts);
+
         DocRect area = OnGrid(textRectangle).Deflate(OnGrid(body.Insets));
         List<PlacedGlyphRun> placed = [];
         if (body.Paragraphs.Count == 0) return placed;
@@ -189,6 +193,10 @@ public static partial class SlideTextLayout
     {
         ArgumentNullException.ThrowIfNull(body);
         ArgumentNullException.ThrowIfNull(fonts);
+
+        // The same normalisation Place does, and for the same reason: a cell whose height this
+        // decides must be measured over the glyphs that are actually going to be drawn in it.
+        body = SlideSymbolRuns.Normalise(body, fonts);
 
         return Measure(body, width, fonts, Scaling.Stated(body), body.FontIndependentLineSpacing)
             .Total;
@@ -525,15 +533,11 @@ public static partial class SlideTextLayout
     private static string? Recoded(SlideMarker marker, FontReference? reference)
     {
         if (marker is not { IsSymbol: true, Text.Length: 1 }) return null;
-        if (!SymbolFontRecode.IsRecodeable(marker.Typeface)) return null;
 
-        // The face's own file is present, so its slots are drawable as they stand.
-        if (reference is not null
-            && !reference.IsSubstituted
-            && !SymbolFontRecode.IsSubstituteFamily(reference.FamilyName))
-        {
-            return null;
-        }
+        // The table, and the face's own file being absent. Shared with the run path rather than
+        // restated: `a:rPr/a:sym` reaches the same decision from the other end, and two copies of
+        // a rule whose second clause has already been got wrong once is one copy too many.
+        if (!SlideSymbolRuns.Recodes(marker.Typeface, reference)) return null;
 
         return SymbolFontRecode.TryRecode(marker.Typeface, marker.Text[0], out char recoded)
             ? recoded.ToString()

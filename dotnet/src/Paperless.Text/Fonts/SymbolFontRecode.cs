@@ -81,6 +81,39 @@ public static partial class SymbolFontRecode
         => FontSubstitutions.Normalise(familyName) is "opensymbol" or "starsymbol";
 
     /// <summary>
+    /// Whether <em>ordinary</em> font matching answers this family with the substitute face, so
+    /// the recode applies without the request having been symbol-encoded.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>A symbol-encoded request never reaches fontconfig; anything else does.</strong>
+    /// <c>FcPreMatchSubstitution::FindFontSubstitute</c> returns false outright for a
+    /// Microsoft-symbol-encoded pattern (<c>vcl/unx/generic/font/fontsubst.cxx:100-104</c>), so
+    /// such a request falls to <c>VCL.xcu</c>'s chain, which ends at OpenSymbol for every face
+    /// there is a table for. A request that is <em>not</em> symbol-encoded is answered by
+    /// fontconfig first, and fontconfig does not know the name was meant as a symbol font.
+    /// </para>
+    /// <para>
+    /// One family survives that, and it survives it by name: <c>fonts-opensymbol</c> ships
+    /// <c>/etc/fonts/conf.d/30-opensymbol.conf</c>, whose entire first rule appends
+    /// <c>OpenSymbol</c> to any pattern whose family is <c>Symbol</c>. So wherever OpenSymbol is
+    /// installed that alias is installed with it, and <c>fc-match Symbol</c> answers
+    /// <c>opens___.ttf</c> where <c>fc-match Wingdings</c> answers DejaVu Sans. Measured on this
+    /// machine over all fourteen recodeable families: <c>Symbol</c> is the only one.
+    /// </para>
+    /// <para>
+    /// Its consequence is visible in the corpus and is why this exists rather than being folded
+    /// into <see cref="IsSubstituteFamily"/>: <c>Structural Testing.pptx</c> states
+    /// <c>&lt;a:sym typeface="Symbol" charset="0"/&gt;</c> and the reference recodes all five of
+    /// its slots, while <c>16 - UTM - (NASA).pptx</c> states
+    /// <c>&lt;a:sym typeface="Wingdings"/&gt;</c> and the reference draws that slot in DejaVu
+    /// Sans.
+    /// </para>
+    /// </remarks>
+    public static bool IsAliasedToSubstitute(string? familyName)
+        => IsSubstituteFamily(familyName) || FontSubstitutions.Normalise(familyName) == "symbol";
+
+    /// <summary>
     /// Recodes one symbol slot, reporting whether the face and the code point were both in range.
     /// </summary>
     /// <remarks>
