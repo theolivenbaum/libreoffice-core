@@ -108,6 +108,10 @@ internal sealed class PptSlideLayout
         _diagnostics = diagnostics;
         _escher = new EscherDrawingReader(stream, diagnostics);
         _pictures = pictures ?? [];
+
+        // Through the field rather than through its value: the collection lives in the Environment
+        // container and is not read until `Layout` runs, which is still before any text is measured.
+        _fonts.DeclaredPitches = name => _fontTable.PitchOf(name);
     }
 
     /// <summary>Lays every slide out, in presentation order.</summary>
