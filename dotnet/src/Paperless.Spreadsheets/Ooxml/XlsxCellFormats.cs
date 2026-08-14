@@ -386,21 +386,15 @@ internal static class XlsxCellFormats
     /// Lightens towards white for a positive tint and darkens towards black for a negative one.
     /// </summary>
     /// <remarks>
-    /// The linear form, which is what LibreOffice's OOXML filter applies to a plain RGB value
-    /// (<c>oox/source/helper/graphichelper.cxx</c>). The exact form works in HSL luminance and
-    /// differs by a shade or two on saturated colours.
+    /// <see cref="XlsxTint"/> holds the transform. This used to apply the linear form — blending
+    /// each channel towards white — on the grounds that it is what LibreOffice's OOXML filter
+    /// does. That is not what it does for a <em>SpreadsheetML</em> tint: one <c>XlsColor</c>
+    /// serves fonts, fills and borders alike and every one of its setters calls
+    /// <c>addExcelTintTransformation</c> (<c>sc/source/filter/oox/stylesbuffer.cxx:255-279</c>),
+    /// which is a luminance modulation in HSL. The two agree closely on unsaturated colours,
+    /// which is why the difference went unnoticed here.
     /// </remarks>
-    private static Colour Tint(Colour colour, double tint)
-    {
-        double factor = Math.Clamp(tint, -1.0, 1.0);
-        return new Colour(Channel(colour.R), Channel(colour.G), Channel(colour.B), colour.A);
-
-        byte Channel(byte component) => (byte)Math.Clamp(
-            factor >= 0
-                ? component + ((255 - component) * factor)
-                : component * (1 + factor),
-            0, 255);
-    }
+    private static Colour Tint(Colour colour, double tint) => XlsxTint.Apply(colour, tint);
 
     private static Colour[] ReadPalette(XElement styleSheet)
     {
