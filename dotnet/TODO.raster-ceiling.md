@@ -344,6 +344,52 @@ All fifteen tokens are the reference splitting words it drew whole:
   whole token to the next line first. A real fidelity difference, worth fixing on its own merits,
   but it moves zero words in either direction.
 
+### The same shape at forty times the size: `architecture6.ppt`
+
+`slides/batch-007/ppt/architecture6.ppt` — page-exact at 31/31, **1926 words against the
+reference's 2544**. A 618-word deficit, a quarter of the document, and the largest word gap left
+on the slides track. It is the same shape as the fifteen words above, and nothing is missing.
+
+Whitespace-stripped character streams: **11048 characters ours against the reference's 11038**.
+We draw *ten more* than the reference. Every opcode of the difference is one of four things, and
+none of them is content:
+
+- the bullet PUA code point — `U+E47A`/`U+E46F` ours against `U+F0B2`/`U+F0A7` — because
+  LibreOffice keeps the symbol slot at `0xF000 | code` in its `ToUnicode` while we map it to the
+  OpenSymbol glyph we actually draw. Both are unreadable Private Use Area noise in the text layer
+  and neither counts as a word: the character is glued to the word after it in both;
+- reading order on the five table pages, where `pdftotext` visits the label column and the footer
+  at different points;
+- three hyphens `pdftotext` de-hyphenates out of the **reference's** own line breaks
+  (`lowest-level`, `multi-level`, `batch-`), which we do not break there;
+- **two words the reference loses.** Its page 13 table overruns the page: the last row's
+  `each layer.` is drawn past the bottom edge and its body text runs straight through the footer.
+  We fit the row and draw the words. The deficit is 618 in the reference's favour *despite* this.
+
+All 618 are on five pages — 10, 14, 21, 24 and 27, the pattern-table slides — and all of them are
+the reference positioning table text glyph by glyph. Page 10's description cell is **"65 glyphs in
+64 show(s)"** in the reference against **"74 glyphs in 11 show(s)"** in ours.
+
+**Why LibreOffice does it here is worth recording, because it looks like a metric bug of ours and
+is not.** The reference's `TJ` arrays carry per-glyph corrections of −12 to −164 thousandths of an
+em, all negative, all widening. Solving for the advances they imply gives, on `Description` at
+14 pt: 831, 679, 594, 594, 493, 344, 719, 477, 344, 688 — which is **DejaVu Sans Bold**
+(830, 678, 595, 595, 493, 343, 716, 478, 343, 687), while the glyphs drawn and the `/Widths`
+written are **Liberation Sans Bold** (722, 556, 556, 556, 389, 278, 611, 333, 278, 611).
+LibreOffice measured that text with one face and drew it with another, which inflates the line by
+15% and is what overruns the page. Our own pen is not implicated: the 24 pt title on the same page
+is **157.39 pt ours against 157.28 pt reference**, 0.07% apart.
+
+So the document is unwinnable twice over — the tokenisation is the reference's, and closing the
+gap would mean adopting per-glyph positioning we have no reason to want. A blind reviewer sent the
+page pair with no numbers reported the mechanism independently: *"the bottom half's text is WIDER
+than the top's for identical strings … a wide, splayed m"*, and *"the table overruns the bottom of
+the page … the footer text is overlapped by the table's body text"*.
+
+**What the round found instead is in `probes/slides-arch-01/results.md`:** every bullet on every
+binary `.ppt` was drawn hard black, on 26 of the corpus's `.ppt` decks and 935 glyphs. The word
+column cannot see it and did not move.
+
 So this document joins the list from a third direction. The three shapes now recorded here:
 
 | shape | who over-counts | cause |
