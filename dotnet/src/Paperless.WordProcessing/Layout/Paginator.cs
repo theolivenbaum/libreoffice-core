@@ -594,7 +594,7 @@ public sealed class Paginator
                     width,
                     paragraph.Language,
                     previous,
-                    paragraph.Shaping,
+                    paragraph.EffectiveShaping,
                     obstacles);
 
             laid.Add(new LaidBlock(

@@ -201,6 +201,18 @@ public sealed record PageParagraph : PageBlock
     public Length Tracking { get; init; }
 
     /// <summary>
+    /// How the paragraph's text is shaped where its runs say nothing else, once
+    /// <see cref="Tracking"/> has had its say.
+    /// </summary>
+    /// <remarks>
+    /// The uniform paragraph's own <see cref="PageRun.EffectiveShaping"/>. A paragraph set end to
+    /// end in one tracked style carries no runs at all — it is uniform by every test
+    /// <see cref="Runs"/> makes — so the rule has to be stated here as well or such a paragraph is
+    /// the one kind that escapes it.
+    /// </remarks>
+    public ShapingOptions EffectiveShaping => Shaping.WithTracking(Tracking);
+
+    /// <summary>
     /// The paragraph's runs, when its formatting is not uniform.
     /// </summary>
     /// <remarks>
@@ -735,6 +747,15 @@ public readonly record struct PageRun(
 {
     /// <summary>One past the run's last character.</summary>
     public int End => Start + Length;
+
+    /// <summary>
+    /// The shaping this run is drawn with, once its tracking has had its say.
+    /// </summary>
+    /// <remarks>
+    /// The drawing half of <see cref="FormattedRun.EffectiveShaping"/>, and it has to be the same
+    /// answer: the measurement decided where the line broke on the strength of it.
+    /// </remarks>
+    public ShapingOptions EffectiveShaping => Shaping.WithTracking(Tracking);
 
     /// <summary>True when the run carries a rule under it, through it, or both.</summary>
     public bool IsDecorated => IsUnderlined || IsStruckThrough;

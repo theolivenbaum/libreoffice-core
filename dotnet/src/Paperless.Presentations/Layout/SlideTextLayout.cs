@@ -1203,7 +1203,7 @@ public static partial class SlideTextLayout
         foreach (FormattedRun run in block.Measured.RunsBetween(start, end))
         {
             string text = block.Measured.Text[run.Start..run.End];
-            ShapedText shaped = TextShaper.Default.Shape(run.Face, text, run.Shaping);
+            ShapedText shaped = TextShaper.Default.Shape(run.Face, text, run.EffectiveShaping);
             if (shaped.Glyphs.Count == 0) continue;
 
             // A superscript's own baseline, which the rules under and through it share:

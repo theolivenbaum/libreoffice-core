@@ -158,7 +158,7 @@ public static class FlowLayouter
                     area.Width,
                     paragraph.Language,
                     previous,
-                    paragraph.Shaping);
+                    paragraph.EffectiveShaping);
 
             // Collapsing: the gap between two paragraphs is the larger of the two spacings rather than
             // their sum, so only the part of this paragraph's space-before that exceeds the space-after
