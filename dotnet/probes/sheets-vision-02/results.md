@@ -187,3 +187,82 @@ auto-scaling and theme colour resolution are **not** implicated.
   the page blank" signature appeared on only one of them (`NorwegianXPension…`, 1 blank page, 6
   words). So §1 as stated is a **narrow** variant; the broader "we do not clip at a boundary"
   mechanism needs a detector of its own rather than the blank-page proxy.
+
+---
+
+# Fan-out: four more failing pages, four more independent blind readers
+
+Same method, four more of the 25 sheets failures, each read by a separate subagent that built
+its own pair, had never seen the document, was forbidden the repo and was not told the gate
+numbers.
+
+## The headline: overflow clipping is now named by FIVE independent readers
+
+`essd` (§1), `Infotabelle` (§2's neighbour), and now three more, on unrelated documents, none of
+them in contact with one another:
+
+- **`fse_identification_form.xlsx` p1** — the reference hard-clips description text mid-glyph at
+  exactly x=1483 on four separate lines; we paint on to x=1547. Decisively *not* line breaking:
+  the reviewer measured every wrap point as identical in both, so both renderers agree on the
+  wrap width and only the paint clip differs.
+- **`SIL_TDB605.xls` p6** — the reference's page ends at x=904, which is exactly the right border
+  of the page's table and boxes, i.e. a column boundary; ours keeps drawing at least 93 px past
+  it. The extra strip holds *only* glyph continuation — no gridlines, no new cell content —
+  which argues against "we assigned one more column to this strip".
+- **`RCO_VOR_Master_List_082824.xlsx` p73** — we draw 40 rows of red note text; the reference's
+  page 73 is pure white, zero non-white pixels. **Caveat the reviewer raised themselves:** this
+  may instead be a page-index difference, and they named the measurement that settles it. Not to
+  be counted in the class until that is done.
+
+A class named five times from five blind readings is worth more than one named five times by one
+reader. Dispatched as `wt-sheet-overflow`.
+
+## New findings not previously recorded
+
+**Bullet glyphs are a dot where the reference draws a filled square**
+(`Company_Seniority_Date_Calculator.xlsx` p8). Measured on all five bulleted lines: ours 2-4 ink
+px at x 77-78, the reference 18 ink px at x 77-80, five rows tall — a ~1.3x0.6 pt dot against a
+~2.5x3.1 pt square. The bullet *origin* is identical, so the indent is right and only the mark is
+wrong; the following text then starts 2-3 px further left in ours on every line, which also says
+the run is positioned by advance rather than to a tab stop. This is the sheets counterpart of the
+symbol-bullet recode that closed 81 of 96 documents on the words track.
+
+**A footnote marker is not superscripted** (`SIL_TDB605.xls` p6): `Date and Time1` against the
+reference's `Date and Time¹`, full size and on the baseline. Same omission as §2's underline and
+in the same record — `XlsxRunFont` still has no escapement field, so `<vertAlign>` is parsed and
+discarded exactly as `<u>` was. Routed to the `wt-rich-portion` agent, with the warning that
+`render-comparison` already records escapement as a case where there was nowhere to *store* the
+magnitude, so it may not be a wiring change.
+
+**Text is shrunk where LibreOffice does not shrink it** (`SIL_TDB605.xls` p6). In two lower text
+blocks: cap height ours 11 px against 12, x-height 8 against 9, line pitch **18.75 against 21.9**.
+Local to those blocks — the heading block above matches to the pixel with zero drift across 720 px
+of cross-correlation. The reference plainly does not shrink; it lets the text overflow and clips
+it, which ties this to the clipping class above. Suspect a shrink-to-fit we apply and it does not.
+
+**Two heavy borders are simply absent from ours** (same page): the reference draws a 4 px
+rectangle around each of the two lower text blocks and we draw no top, bottom or left edge for
+either. Not a "we cannot draw thick borders" problem — the `Notes` box on the same page, same 4 px
+weight, we draw correctly. Folds into the border item.
+
+**We draw a sentence the reference does not** (`fse_identification_form.xlsx` p1): the Serial
+number row's description cell is empty in the reference and carries a full sentence in ours. Note
+the *direction* — this is the mirror of §2's dropped word, and the two must not be assumed to
+share a cause.
+
+## A fix confirmed from two independent directions
+
+The `fse` reviewer measured our three blue bands as `#2351A3` against the reference's `#2F5597`
+and observed, unprompted and with no repo access, that `#2F5597` is what an HSL luminance
+modulation of the Office accent `#4472C4` produces while a naive sRGB channel scale gives
+`#33568F`. That is the exact claim `wt-sheets-v` had made from the LibreOffice source and left
+unmerged when the session crashed. Merged. The same reading rules out colour management: the
+page's other three fills are byte-identical between the two renderings.
+
+## Method note
+
+Seven readings in, the pattern holds: **the "what is identical" section carries most of the
+value.** It is what reduced `fse`'s clipping finding from "text differs" to "the wrap points are
+the same and only the paint clip differs", and what confined `SIL_TDB605`'s shrink to two blocks
+rather than the page. None of the seven reports is about word counts, and most of the findings
+move no words at all.
