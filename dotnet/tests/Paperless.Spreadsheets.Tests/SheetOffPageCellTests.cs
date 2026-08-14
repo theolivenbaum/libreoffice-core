@@ -10,23 +10,32 @@ namespace Paperless.Spreadsheets.Tests;
 /// </summary>
 /// <remarks>
 /// <para>
-/// Calc's string output starts one column <em>before</em> the block it is printing, so that a
-/// long string reaching in from the left is drawn on the page its tail falls on
-/// (<c>output2.cxx:1541</c>). Left there, that draws every nearest-left neighbour of every band
-/// whether or not any of it reaches the paper. The second half of the rule is <c>bOutside</c>
-/// (<c>:2037</c>): a cell whose output area — its own column, widened through the empty cells
-/// beside it — does not overlap the block at all is skipped.
+/// <strong>The rule is asymmetric, and both halves are pinned here because the symmetric reading
+/// is the natural mistake.</strong> A run anchored to the <em>left</em> of a page's column band
+/// is not painted on it at all, however far its output area reaches; a run anchored to the
+/// <em>right</em> of the band is. Calc's string output looks one column past <c>mnX2</c>
+/// unconditionally (<c>output2.cxx:1660-1678</c>) but one column before <c>mnX1</c> only
+/// <c>if (mnX1 &gt; 0 &amp;&amp; !bTaggedPDF)</c> (<c>:1541-1543</c>) — and <c>UseTaggedPDF</c>
+/// defaults to <c>true</c>, so the reference never takes that branch.
 /// </para>
 /// <para>
-/// The two rows of the fixture differ in nothing but the length of one string, so a renderer
-/// cannot satisfy both by choosing one side. Measured on
-/// <c>ExampleWhiteListData.xlsx</c>, which drew twenty part numbers off the left edge of its
-/// last two pages: 838 words against LibreOffice's 821.
+/// Measured against 26.2.4.2 rather than read off the source, because the C++ tree beside this
+/// one is a later development version. Rendering <c>essd-16-3433-2024-t02.xlsx</c> through the
+/// same binary twice, changing nothing but that one filter option, gives words per page
+/// <c>439 / 0 / 0 / 0</c> tagged and <c>439 / 315 / 152 / 49</c> untagged. Painting the lead-in
+/// anyway cost 617 surplus words on <c>RCO_VOR_Master_List_082824.xlsx</c>, spread over five
+/// pages the reference leaves blank, and 514 on <c>essd</c> itself.
 /// </para>
 /// <para>
-/// A merged block anchored in a hidden column is the mirror image and is here for the same
-/// reason: nothing that walks the columns a page places can reach its anchor, so Calc reaches
-/// it from the first covered cell whose path back is entirely hidden
+/// The second half of the rule is <c>bOutside</c> (<c>:2037</c>): of the cell found past the
+/// band, one whose output area — its own column, widened through the empty cells beside it —
+/// does not overlap the block at all is skipped. Each fixture's rows differ in nothing but the
+/// length or the neighbours of one string, so a renderer cannot satisfy them by choosing a side.
+/// </para>
+/// <para>
+/// A merged block anchored in a hidden column is a third case and is here for a related reason:
+/// nothing that walks the columns a page places can reach its anchor, so Calc reaches it from
+/// the first covered cell whose path back is entirely hidden
 /// (<c>ScOutputData::GetMergeOrigin</c>, <c>:953</c>).
 /// </para>
 /// </remarks>
@@ -49,23 +58,69 @@ public sealed class SheetOffPageCellTests
         => string.Join(" ", page.Runs.Select(run => run.Text));
 
     [Fact]
-    public void AStringThatNeverReachesThePageIsNotDrawnOnIt()
+    public void AStringSpillingRightwardsIsNotDrawnOnTheNextPage()
     {
         IReadOnlyList<DrawnPage> pages = Draw("sheet-lead-in.fods");
         pages.Count.ShouldBe(3, "the long string widens the printed block past column D");
 
         // Page 1 holds columns A to C, so both strings are on it in their own right.
-        TextOf(pages[0]).ShouldContain("SHORTC2");
+        string first = TextOf(pages[0]);
+        first.ShouldContain("SHORTC2");
+        first.ShouldContain("column C");
 
-        // Page 2 is column D alone. The long string's spill runs through the empty cells beside
-        // it and lands here; the short one stops inside column C and must not.
+        // Page 2 is column D alone, and holds column D and nothing else. The long string's
+        // output area does reach it — that is why page 3 exists at all — and it is still not
+        // painted here, because the loop that would have found its anchor never runs.
         string second = TextOf(pages[1]);
         second.ShouldContain("DDDD");
-        second.ShouldContain("column C");
+        second.ShouldNotContain("column C");
         second.ShouldNotContain("SHORTC2");
 
-        // Page 3 exists only because of that spill, and holds nothing else.
-        TextOf(pages[2]).ShouldContain("beyond");
+        // Page 3 is bought by the spill and then left blank, which is the whole shape of the
+        // rule: what decides the paper and what decides the ink are different questions.
+        TextOf(pages[2]).ShouldNotContain("beyond");
+        TextOf(pages[2]).Trim().ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void AStringSpillingLeftwardsIsDrawnOnThePreviousPage()
+    {
+        IReadOnlyList<DrawnPage> pages = Draw("sheet-trail-in.fods");
+        pages.Count.ShouldBe(2, "a right-aligned overflow costs no columns at the right-hand end");
+
+        string first = TextOf(pages[0]);
+
+        // Row 1's string is anchored in column D, which is page 2, and reaches back into page 1.
+        // This is the direction that carries no bTaggedPDF guard, so it survives into the PDF.
+        first.ShouldContain("long way back");
+
+        // Row 2's short string fits column D and never leaves page 2.
+        first.ShouldNotContain("SHORTD2");
+
+        // Exactly one of the two long strings reaches page 1. Row 3's is the same string, but
+        // GUARDC3 sits in the column beside it, so the leftward walk stops there and its output
+        // area never leaves column D. Counting is what discriminates: the two strings share
+        // every word, so only their number can say whether one or both were painted.
+        first.ShouldContain("GUARDC3");
+        Occurrences(first, "into whatever lies").ShouldBe(1);
+
+        // Both long strings, and the short one, are on the page that owns column D.
+        string second = TextOf(pages[1]);
+        second.ShouldContain("SHORTD2");
+        Occurrences(second, "before it").ShouldBe(2);
+    }
+
+    private static int Occurrences(string text, string needle)
+    {
+        int count = 0;
+        for (int at = text.IndexOf(needle, StringComparison.Ordinal);
+             at >= 0;
+             at = text.IndexOf(needle, at + needle.Length, StringComparison.Ordinal))
+        {
+            count++;
+        }
+
+        return count;
     }
 
     [Fact]
