@@ -246,8 +246,10 @@ Every project run individually, counts read rather than colours. Figures are the
 | Paperless.Fidelity.Tests | 520 | **30** | 0 | 550 |
 
 `Paperless.Fidelity.Tests` had **31** failures on the pre-merge base and on this branch before the
-merge, and has **30** now — one fewer, not one more. Which of the two rounds fixed it is recorded
-below rather than guessed at. Nothing added a failure. The build is warning-free.
+merge, and has **30** now — one fewer, not one more. **The flip is the integration branch's, not this
+reconciliation's**: built and run on its own, `7756cd67565` also reports 30 of 550, and its failing
+set is identical name for name to the merged tree's. Nothing here added a failure and nothing here
+fixed one. The build is warning-free.
 
 `Paperless.Rendering.Tests` has skipped 1 on every run measured this session, including the
 pre-merge base — it is not new.

@@ -13534,18 +13534,30 @@ and that is the next round's first move.
 **under-paginate** class — one page short, word counts exact, font counts equal. They turned out to
 have **nothing in common**, and neither is a line-height, text-area or line-fits error.
 
-Whole track, before and after, measured twice against the banked 26.2.4.2 references:
+Whole track, measured against the banked 26.2.4.2 references. **Two bases, because a parallel round
+implementing the same font datum landed first and this was merged onto it** — the second table is
+what the integration branch gains:
 
-| | before | after |
+| | pre-merge base | this branch alone |
 |---|---:|---:|
-| match | 155 | **157** |
+| match | 155 | 157 |
 | page-exact | 165 | 166 |
 | total absolute page error | 115 | 113 |
 | renderings byte-changed | — | 36 of 200 |
+
+| | integration alone (`7756cd67565`) | merged |
+|---|---:|---:|
+| match | 156 | **157** |
+| page-exact | 166 | 166 |
+| total absolute page error | 114 | **113** |
+| renderings byte-changed | — | 13 of 200 |
+| face-set distance to the reference | — | **8 closer, 5 unchanged, 0 further** |
 | verdicts lost | — | **0** |
 
-`batch-00[1-6]` re-proved with `batch-check.sh`: **59 of 60**, up from 58. The one remaining is
-`1447.doc`.
+`batch-00[1-6]` re-proved with `batch-check.sh` after the merge: **59 of 60**, up from 58. The one
+remaining is `1447.doc`. The merged tree's 200 gate rows are byte-identical to this branch's own,
+which is what says the other round's words-track font reach is a strict subset of this one's and that
+nothing was lost or applied twice in the merge.
 
 ### An empty paragraph takes the CHPX exception that ends at its mark
 
@@ -13572,14 +13584,32 @@ is consulted, which is the ordering the resolver had backwards. Two exceptions, 
 the very name asked for: Liberation Sans of Arial, yes; of Helvetica, no), and a **pi face** is
 exempt, since every Word document declares `Symbol` roman.
 
-Fed from `FFN.ff` for DOC and `w:family` for DOCX. **RTF and ODF declare the same datum and neither
-reader records it; presentations and spreadsheets are untouched.**
+Fed from `FFN.ff` for DOC and `w:family` for DOCX — and, from the parallel round merged in here,
+from SpreadsheetML `<family val>`, rich-text `rPr`, the BIFF and XLSB font family bytes and ODF's
+spreadsheet path. **RTF and ODF's word-processing path declare the same datum and neither reader
+records it; presentations are untouched.**
+
+**Where in the order the declaration is read is the whole of it, and the two rounds disagreed.** The
+parallel round consults it after the substitution chain has come up empty; this one consults it
+before. Only a name whose chain entry *is* installed can tell them apart — `Times` and `Thorndale`
+name `liberationserif`, `Helvetica` and `Albany` name `liberationsans` — and the installed 26.2.4.2
+answers DejaVu for all four where chain-first answers Liberation. The pre-match ordering is also what
+the C++ says: `FontConfigManager::Substitute` is registered as the pre-match substitution and runs
+before `VCL.xcu` is consulted at all. It brings two exceptions with it, both measured and both needed
+only because of it: a strong metric alias bound to the requested name survives the generic, and a pi
+face is exempt (every Word document declares `Symbol` roman).
 
 The word gate barely sees this, so reach was measured on the thing the rule is about — the symmetric
-difference between our face set and the reference's, over the 36 changed renderings: **29 closer, 5
-unchanged, 2 further**. `1447.doc` goes from 4 faces wrong to none, and eleven documents go to an
-exact match. One page count went backwards — `May 25 bulletin…docx` was 4/4 with the wrong font and
-is 5/4 with the reference's exact face set, which is the cancelling-errors shape in miniature.
+difference between our face set and the reference's. Against the **pre-merge** base, over the 36
+changed renderings: 29 closer, 5 unchanged, 2 further. Against the **integration branch**, over the
+13 this adds on top of it: **8 closer, 5 unchanged, 0 further**. `1447.doc` goes from 4 faces wrong
+to none.
+
+The two that went further pre-merge were `ABCD-FE-01-00` and `ABCD-WB-08-00`, both Symbol runs
+declared roman being sent to DejaVu Serif; the pi-face exemption was written for them and they no
+longer change at all. One page count still goes backwards — `May 25 bulletin…docx` was 4/4 with the
+wrong font and is 5/4 with the reference's exact face set, which is the cancelling-errors shape in
+miniature.
 
 ### `1447.doc` is still 3 pages against 4, and the residue is one twip
 
