@@ -257,15 +257,29 @@ internal static class XlsbPrintSetup
         bool hasHeader = headerText is { Length: > 0 };
         bool hasFooter = footerText is { Length: > 0 };
 
-        (Length paperWidth, Length paperHeight) = statedPaper
-            ? ExcelPaperSizes.Portrait(paperSize)
-            : ExcelPaperSizes.A4;
+        // A paper index outside the table leaves the application's own paper standing in
+        // portrait: the stated orientation is discarded with the size rather than applied to
+        // the fallback. See ExcelPaperSizes.Page.
+        //
+        // The `!statedPaper` arm deliberately still turns the fallback, which the OOXML path no
+        // longer does, and the difference is an admission rather than a distinction. On the OOXML
+        // path it is measured: `usePrinterDefaults="1"` with `orientation="landscape"` renders A4
+        // portrait on the installed 26.2.4.2 even for a paper index it resolves perfectly well.
+        // No such measurement is possible here — the corpus holds no XLSB at all, and
+        // LibreOffice cannot write one to make a probe from — so this keeps the behaviour that
+        // was already pinned rather than generalising an OOXML measurement onto a format it was
+        // not taken on. See XlsbReaderTests.TheStatedPaperCountsOnlyWhenTheSettingsAreMarkedInvalid,
+        // whose expectation this preserves, and probes/sheets-pagination-01/results.md.
+        (Length fallbackWidth, Length fallbackHeight) = ExcelPaperSizes.A4;
+        DocSize page = statedPaper
+            ? ExcelPaperSizes.Page(paperSize, landscape)
+            : landscape
+                ? new DocSize(fallbackHeight, fallbackWidth)
+                : new DocSize(fallbackWidth, fallbackHeight);
 
         SheetPrintSetup setup = new()
         {
-            PageSize = landscape
-                ? new DocSize(paperHeight, paperWidth)
-                : new DocSize(paperWidth, paperHeight),
+            PageSize = page,
             IsLandscape = landscape,
             LeftMargin = Length.FromInches(left),
             RightMargin = Length.FromInches(right),

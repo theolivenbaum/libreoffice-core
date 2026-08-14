@@ -54,6 +54,52 @@ internal static class SheetTextOverflow
     /// </remarks>
     private const int MeasurementBudget = 20_000;
 
+    /// <summary>The resolution Calc's text-width cache counts its pixels in.</summary>
+    private const double ReferenceDeviceDpi = 600;
+
+    /// <summary>
+    /// The width as Calc's own cache holds it: sixteen bits of 600 dpi pixels, and it wraps.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>This reproduces an overflow in the reference, deliberately.</strong>
+    /// <c>ScTable::MaybeAddExtraColumn</c> does not measure the cell — it reads the width out of
+    /// <c>ScColumn</c>'s text-width cache, which stores it as a <c>sal_uInt16</c> in pixels of a
+    /// 600 dpi reference device. 65536 of those pixels are 7864.32 pt, so a cell wider than that
+    /// is cached as the <em>remainder</em>, and Calc extends the print area by the remainder
+    /// rather than by the real width.
+    /// </para>
+    /// <para>
+    /// Measured, on an authored one-cell probe of <em>n</em> repetitions of <c>M</c> in a 2 cm
+    /// column at ten point, rendered through the installed 26.2.4.2 — the reference's page count
+    /// is 18 at 945 characters, <strong>1</strong> at 950, back to 18 at 1890 and 2 at 2000,
+    /// while ours runs 18, 18, 35, 37. A count that falls and then rises again cannot be a clamp
+    /// or a budget; it is a modulus, and the period is the 16-bit boundary.
+    /// </para>
+    /// <para>
+    /// It is worth two documents in the corpus and it is the whole of both.
+    /// <c>grants-2005.xls</c> holds a 2831-character string in <c>H1292</c> measuring 12834 pt,
+    /// 1.63 times the limit; wrapped it is 4970 pt, which stops the print area at column CA where
+    /// we reached IB — 18 column bands of empty paper, and exactly the 219-against-201 gap.
+    /// <c>CIS_Debian_Linux_8_Benchmark_v1.0.0.xls</c> is the same cell twice over, at
+    /// <c>Level 1!F95</c> and <c>Level 2!F23</c>, and accounts for all 21 of its extra pages
+    /// (51+37 blanks against 37+30).
+    /// </para>
+    /// <para>
+    /// The extra pages are blank on both sides, so this is not about what is painted. Both
+    /// renderers emit ink-free pages for an over-wide print area — 67 of the reference's 88 CIS
+    /// pages carry no drawing operator at all — which is why the fix belongs here, in the one
+    /// measurement that decides how wide the area is, and not in whatever decides to emit a page.
+    /// </para>
+    /// </remarks>
+    private static Length CachedTextWidth(Length width)
+    {
+        if (width <= Length.Zero) return Length.Zero;
+
+        long pixels = (long)Math.Round(width.Points * ReferenceDeviceDpi / 72.0);
+        return Length.FromPoints((pixels & 0xFFFF) * 72.0 / ReferenceDeviceDpi);
+    }
+
     /// <summary>The cell text margin either side, which counts towards the width needed.</summary>
     /// <remarks>
     /// The cell's own <c>ATTR_MARGIN</c> rather than the pool default, because an <c>.xls</c>
@@ -105,8 +151,9 @@ internal static class SheetTextOverflow
 
                 if (!widths.TryGetValue((text, format), out Length width))
                 {
-                    width = SheetText.Measure(text, SheetFonts.For(format), format.FontSize)
-                            + CellMarginsOf(format) + format.Indent;
+                    width = CachedTextWidth(
+                        SheetText.Measure(text, SheetFonts.For(format), format.FontSize)
+                        + CellMarginsOf(format) + format.Indent);
                     widths[(text, format)] = width;
                 }
 

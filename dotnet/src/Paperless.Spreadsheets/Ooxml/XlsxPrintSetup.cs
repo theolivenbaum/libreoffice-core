@@ -286,34 +286,27 @@ internal static class XlsxPrintSetup
     /// </remarks>
     private static DocSize PaperSize(XElement? setup, bool landscape)
     {
-        if (setup is null || Xlsx.Flag(setup, "usePrinterDefaults"))
-        {
-            (Length defaultWidth, Length defaultHeight) = ExcelPaperSizes.A4;
-            return landscape
-                ? new DocSize(defaultHeight, defaultWidth)
-                : new DocSize(defaultWidth, defaultHeight);
-        }
-
-        Length width;
-        Length height;
+        // No page setup, or one that defers to the printer, leaves the application's own paper
+        // standing — and the orientation with it. See ExcelPaperSizes.Default: measured,
+        // `usePrinterDefaults="1"` with `orientation="landscape"` renders A4 portrait.
+        if (setup is null || Xlsx.Flag(setup, "usePrinterDefaults")) return ExcelPaperSizes.Default;
 
         Length? statedWidth = Measure(Xlsx.Attribute(setup, "paperWidth"));
         Length? statedHeight = Measure(Xlsx.Attribute(setup, "paperHeight"));
 
         if (statedWidth is { } explicitWidth && statedHeight is { } explicitHeight)
         {
-            width = explicitWidth;
-            height = explicitHeight;
-        }
-        else
-        {
-            // Index 9 is A4 and index 1 is Letter; the default is Letter, which is what Excel
-            // writes for an American workbook and what the OOXML importer defaults to
-            // (pagesettings.cxx:103, mnPaperSize(1)).
-            (width, height) = ExcelPaperSizes.Portrait(Xlsx.Integer(setup, "paperSize") ?? 1);
+            // An explicit measure is always honoured, so the orientation applies to it.
+            return landscape
+                ? new DocSize(explicitHeight, explicitWidth)
+                : new DocSize(explicitWidth, explicitHeight);
         }
 
-        return landscape ? new DocSize(height, width) : new DocSize(width, height);
+        // Index 9 is A4 and index 1 is Letter; the default is Letter, which is what Excel
+        // writes for an American workbook and what the OOXML importer defaults to
+        // (pagesettings.cxx:103, mnPaperSize(1)). An index outside the table takes the
+        // application's paper *unrotated* — see ExcelPaperSizes.Page.
+        return ExcelPaperSizes.Page(Xlsx.Integer(setup, "paperSize") ?? 1, landscape);
     }
 
     /// <summary>

@@ -152,19 +152,55 @@ public sealed class SheetColumnDigitsTests
     /// the carry from opposite sides.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// Carlito is 1038/2048 of an em, so eleven point is 111.50 twips exactly and twelve point
-    /// 121.64 — LibreOffice writes 111 and 121, so rounding is wrong, and Carlito is the default
-    /// of 65 of the 171 corpus spreadsheets. DejaVu Sans is 1303/2048, so eleven point is 139.97
-    /// and twelve point 152.70 — LibreOffice writes 140 and 153, so truncating is wrong too. All
-    /// four figures were read out of the <c>style:column-width</c> LibreOffice 24.2.7.2 wrote for
-    /// a one-column probe workbook.
+    /// 121.64 — LibreOffice writes 111 and 122, so neither truncating nor rounding is right on
+    /// its own, and Carlito is the default of 65 of the 171 corpus spreadsheets. DejaVu Sans is
+    /// 1303/2048, so eleven point is 139.97 and twelve point 152.70 — LibreOffice writes 140 and
+    /// 153.
+    /// </para>
+    /// <para>
+    /// <strong>Carlito 12 was 121 and is now 122, because the reference binary moved.</strong>
+    /// These figures were read out of the <c>style:column-width</c> LibreOffice wrote for a
+    /// one-column probe workbook; taken against 24.2.7.2 the answer was 121, and taken against
+    /// the installed 26.2.4.2 — here, off the filled cell's rectangle in its own PDF export, and
+    /// independently off a flat-ODF export, which agree — it is 122. That single twip is
+    /// <c>sectors-defense-and-aerospace.xlsx</c>: 40 columns wide, it is 2 pt per column, and it
+    /// decides whether two columns fit an A4 page or one does. 227 pages against 449.
+    /// </para>
     /// </remarks>
     [Theory]
     [InlineData("Carlito", 11, 111)]
-    [InlineData("Carlito", 12, 121)]
+    [InlineData("Carlito", 12, 122)]
     [InlineData("DejaVu Sans", 11, 140)]
     [InlineData("DejaVu Sans", 12, 153)]
     public void ADigitWidthIsNeitherTruncatedNorRounded(string family, double points, int twips)
+    {
+        SheetFonts.DigitWidthTwips(new SheetDefaultFont(family, Length.FromPoints(points)))
+                  .ShouldBe(twips);
+    }
+
+    /// <summary>
+    /// The carry threshold sits inside the window every corpus default font requires of it.
+    /// </summary>
+    /// <remarks>
+    /// The constant is fitted rather than derived — see <c>SheetFonts.DigitWidthCarry</c> — so
+    /// what pins it is the set of configurations it has to satisfy at once, taken from the
+    /// default font of all 171 corpus spreadsheets and measured one probe workbook at a time
+    /// through the installed 26.2.4.2. Carlito 11 is the tightest constraint from below
+    /// (111.5039 must truncate) and Carlito 12 the tightest from above (121.6406 must carry),
+    /// which leaves only <c>0.5039 &lt;= c &lt; 0.6406</c>. Rounding half up scores better on a
+    /// uniform sweep of sizes and is ruled out by the first of those: it would take 65 documents'
+    /// default font to 112.
+    /// </remarks>
+    [Theory]
+    [InlineData("Liberation Sans", 10, 111)]     // 111.2305, truncates
+    [InlineData("Liberation Sans", 11, 122)]     // 122.3535, truncates
+    [InlineData("Liberation Sans", 12, 133)]     // 133.4766, truncates
+    [InlineData("Liberation Serif", 10, 100)]    // 100.0000, exact
+    [InlineData("DejaVu Sans", 10, 127)]         // 127.2461, truncates
+    public void EveryCorpusDefaultFontAgreesWithTheReference(
+        string family, double points, int twips)
     {
         SheetFonts.DigitWidthTwips(new SheetDefaultFont(family, Length.FromPoints(points)))
                   .ShouldBe(twips);
@@ -187,9 +223,15 @@ public sealed class SheetColumnDigitsTests
         // 40960 / max(fontHeight - 15, 60) + 50 in 256ths of a digit before converting, because
         // "Excel adds space depending on font size". Twelve-point Calibri is 240 twips, so the
         // correction is 40960/225 + 50 = 232.04, and ten characters becomes 2792/256 digits.
-        // At Carlito 12's 121-twip digit that is 1319 twips, which is what LibreOffice's own
-        // flat-ODF export of `aircraft_analysis_2016-04-27.xls` states; ten digits alone give
-        // 1209, nine per cent narrow.
+        // At Carlito 12's 122-twip digit that is 1330 twips, which is what LibreOffice's own
+        // flat-ODF export of `aircraft_analysis_2016-04-27.xls` states — `0.9236in`, re-measured
+        // against the installed 26.2.4.2. Ten digits alone give 1220, nine per cent narrow.
+        //
+        // This figure was 1319 when it was taken against 24.2.7.2, whose digit width for the
+        // same face was 121. It moved with the binary, not with this reader, and it is a second
+        // and independent witness to that move: a BIFF default column width reaches the digit
+        // width by a different path from a SpreadsheetML `<col width>`, and both changed by the
+        // same one twip.
         XlsSheetPrintState state = new()
         {
             DefaultFont = new SheetDefaultFont("Carlito", Length.FromPoints(12)),
@@ -198,7 +240,7 @@ public sealed class SheetColumnDigitsTests
 
         SheetLayout sheet = new() { Name = "S", Grid = state.ToGrid() };
 
-        sheet.Grid.Columns.DefaultSize.Twips.ShouldBe(1319);
+        sheet.Grid.Columns.DefaultSize.Twips.ShouldBe(1330);
     }
 
     [Fact]

@@ -444,14 +444,14 @@ internal sealed class XlsSheetPrintState
         bool hasHeader = !string.IsNullOrEmpty(_header);
         bool hasFooter = !string.IsNullOrEmpty(_footer);
 
-        (Length paperWidth, Length paperHeight) = _setupIsValid
-            ? ExcelPaperSizes.Portrait(_paperSize)
-            : ExcelPaperSizes.A4;
-
         bool landscape = _setupIsValid && !_portrait;
-        DocSize page = landscape
-            ? new DocSize(paperHeight, paperWidth)
-            : new DocSize(paperWidth, paperHeight);
+
+        // An unusable SETUP record, or a paper index outside the table, leaves the application's
+        // own paper standing in portrait — the stated orientation is discarded with the size
+        // rather than applied to the fallback. See ExcelPaperSizes.Page.
+        DocSize page = _setupIsValid
+            ? ExcelPaperSizes.Page(_paperSize, landscape)
+            : ExcelPaperSizes.Default;
 
         return new SheetPrintSetup
         {
