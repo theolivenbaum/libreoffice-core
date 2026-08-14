@@ -44,6 +44,14 @@ internal static class PptxTextBody
     private const int DefaultSizeHundredthsOfPoint = 1800;
 
     /// <summary>
+    /// <c>WINDOWS_CHARSET_SYMBOL</c>, the only <c>a:sym/@charset</c> value that makes the
+    /// request symbol-encoded — <c>oox/inc/drawingml/textfont.hxx</c> and
+    /// <c>TextFont::implGetFontData</c>. Absent means <c>WINDOWS_CHARSET_DEFAULT</c>, which is
+    /// 1 and not this.
+    /// </summary>
+    private const int WindowsCharsetSymbol = 2;
+
+    /// <summary>
     /// The character an <c>a:br</c> becomes.
     /// </summary>
     /// <remarks>
@@ -615,6 +623,37 @@ internal static class PptxTextBody
                 ? fonts.Resolve(Drawing.Attribute(Drawing.Child(element, "latin"), "typeface"))
                 : Literal(Drawing.Attribute(Drawing.Child(element, "latin"), "typeface")));
 
+        // a:rPr/a:sym — the face the run's private-use characters are drawn from, and it inherits
+        // down the same chain everything else here does: TextCharacterProperties::assignUsed takes
+        // maSymbolFont from the source whenever the source states one
+        // (oox/source/drawingml/textcharacterproperties.cxx:55), so a level's a:defRPr can carry
+        // it for every run under it. Theme-resolved for the same reason a:latin is: getFontData
+        // puts the name through Theme::resolveFont before using it (textfont.cxx:80-85), so a
+        // "+mn-lt" here is the minor latin face and not a family of that name.
+        //
+        // The element is taken whole rather than attribute by attribute, because the typeface and
+        // the charset only mean anything together — see SlideSymbolFont. `assignIfUsed` copies the
+        // TextFont as a unit for exactly the same reason.
+        XElement? symbol = First(
+            runProperties, defaults, element => Drawing.Child(element, "sym"));
+
+        SlideSymbolFont? symbolFont = null;
+        if (symbol is not null)
+        {
+            string? family = theme?.Fonts is { } symbolFonts
+                ? symbolFonts.Resolve(Drawing.Attribute(symbol, "typeface"))
+                : Literal(Drawing.Attribute(symbol, "typeface"));
+
+            // getFontData returns false for an empty name and no switch happens at all
+            // (textfont.cxx:87-94), so a nameless a:sym is not an a:sym.
+            if (!string.IsNullOrEmpty(family))
+            {
+                symbolFont = new SlideSymbolFont(
+                    family,
+                    Drawing.Number(symbol, "charset") == WindowsCharsetSymbol);
+            }
+        }
+
         Colour? colour = sources.Resolve(
             runProperties, style => style.Colour, element => RunColour(element, theme));
 
@@ -670,7 +709,8 @@ internal static class PptxTextBody
             IsStruckThrough: strike is not null and not "noStrike",
             Escapement: baseline == 0
                 ? SlideEscapement.None
-                : new SlideEscapement(baseline / 1000, SlideEscapement.AutomaticProportion));
+                : new SlideEscapement(baseline / 1000, SlideEscapement.AutomaticProportion),
+            SymbolFont: symbolFont);
     }
 
     /// <summary>

@@ -315,6 +315,21 @@ public readonly record struct SlideEscapement(int Percent, int Proportion)
 /// a subscript. Unlike the decorations above, this <em>does</em> move line breaks, because the
 /// shrink is what makes the run narrower.
 /// </param>
+/// <param name="SymbolFont">
+/// The face the run's <em>private-use</em> characters are drawn from, or null when it names none.
+/// <para>
+/// DrawingML's <c>a:rPr/a:sym</c>, and a second family rather than a replacement for
+/// <see cref="Typeface"/> because it governs only part of the run: LibreOffice switches the face
+/// over each maximal stretch of characters satisfying <c>(ch &amp; 0xff00) == 0xf000</c> and
+/// restores it after every one (<c>oox/source/drawingml/textrun.cxx:96-135</c>). A run reading
+/// "see &#xF0E0; overleaf" is set in its own face except for the arrow.
+/// </para>
+/// <para>
+/// It is resolved by <c>SlideSymbolRuns</c> before anything is measured, because whether the slot
+/// is drawn as it stands or recoded into OpenSymbol turns on whether the named face is installed
+/// — which a reader cannot know.
+/// </para>
+/// </param>
 public readonly record struct SlideTextRun(
     int Start,
     int Length,
@@ -326,11 +341,62 @@ public readonly record struct SlideTextRun(
     Length Tracking = default,
     bool IsUnderlined = false,
     bool IsStruckThrough = false,
-    SlideEscapement Escapement = default)
+    SlideEscapement Escapement = default,
+    SlideSymbolFont? SymbolFont = null)
 {
     /// <summary>One past the run's last character.</summary>
     public int End => Start + Length;
 }
+
+/// <summary>
+/// The face a run's private-use characters are drawn from — DrawingML's <c>a:rPr/a:sym</c>.
+/// </summary>
+/// <remarks>
+/// <para>
+/// The two halves are one value because the second decides what the first means, and separating
+/// them cost a measurement. <c>a:sym</c>'s <c>@charset</c> is what makes the request a
+/// <em>symbol-encoded</em> one — <c>TextFont::implGetFontData</c> reports
+/// <c>mnCharset == WINDOWS_CHARSET_SYMBOL</c>, which is the value 2, and nothing else
+/// (<c>oox/source/drawingml/textfont.cxx:87-94</c>) — and that flag decides which of two entirely
+/// different resolutions the face gets.
+/// </para>
+/// <para>
+/// <strong>A symbol-encoded request never reaches fontconfig at all.</strong>
+/// <c>FcPreMatchSubstitution::FindFontSubstitute</c> returns false immediately for one
+/// (<c>vcl/unx/generic/font/fontsubst.cxx:100-104</c>), so the request falls to
+/// <c>VCL.xcu</c>'s own chain, which names <c>opensymbol</c> for Wingdings and its relatives —
+/// and the recode follows. A request that is <em>not</em> symbol-encoded is answered by
+/// fontconfig first, and fontconfig has no idea the name meant a symbol font: it answers
+/// <c>Wingdings</c> with DejaVu Sans, and the slot is then drawn from DejaVu Sans as it stands.
+/// </para>
+/// <para>
+/// Measured against the banked 26.2.4.2 references rather than reasoned from the tree, on the
+/// three corpus decks that state the two combinations:
+/// </para>
+/// <list type="bullet">
+/// <item><description><c>Structural Testing.pptx</c> states <c>&lt;a:sym typeface="Symbol"
+/// charset="0"/&gt;</c> — <em>not</em> symbol-encoded — and the reference recodes all five of its
+/// slots anyway, because fontconfig answers the family "Symbol" with OpenSymbol on its own. Its
+/// OpenSymbol glyphs on pages 3, 4, 5, 6 and 26 sit within 0.3 pt of ours.</description></item>
+/// <item><description><c>16 - UTM - (NASA).pptx</c> and
+/// <c>Stakeholders-v08052017 - v5.pptx</c> both state <c>&lt;a:sym typeface="Wingdings"/&gt;</c>
+/// with no charset, and the reference draws those three slots in <b>DejaVu Sans</b> — at
+/// (175.9, 94.3) and (189.2, 29.1) on the latter's page 8, where we had put OpenSymbol.
+/// </description></item>
+/// </list>
+/// <para>
+/// So the rule is not "the charset decides whether to recode". It is "the charset decides
+/// whether fontconfig is consulted", and the recode then follows from where the face actually
+/// landed — which is the same rule the bullet path has always had.
+/// </para>
+/// </remarks>
+/// <param name="Typeface">The family <c>a:sym/@typeface</c> names.</param>
+/// <param name="IsMicrosoftEncoded">
+/// Whether <c>a:sym/@charset</c> is 2, VCL's <c>IsMicrosoftSymbolEncoded</c>. Absent and 0 both
+/// mean false; <c>WINDOWS_CHARSET_DEFAULT</c> is 1, so an unstated charset is not symbol-encoded
+/// either.
+/// </param>
+public readonly record struct SlideSymbolFont(string Typeface, bool IsMicrosoftEncoded);
 
 /// <summary>
 /// Resolves the faces a slide's text needs, once per distinct request.
