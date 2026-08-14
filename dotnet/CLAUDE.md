@@ -264,6 +264,20 @@ Run every project before committing anyway. The failure this project cares about
 cascade — one wrong measurement moving every line after it — and it surfaces in projects you had
 no reason to think you had touched.
 
+### Under load a test run can also report failures that are not there
+
+The truncation above is one half of it. The other half was seen twice on 2026-08-14, in
+`Paperless.Vector.Tests`, on a binary nothing had touched: one run reported **1 failed of 295**
+and nine subsequent runs reported 0; another agent, hours later, saw **16 failed of 295**
+followed by four clean runs. Neither captured a failing name.
+
+So a run under load can drop tests *and* invent failures. Both look like signal.
+
+The habit that survives both: **a failure you cannot reproduce on a second run is not a
+failure yet.** Re-run the project alone before acting on it, and say in the write-up that you
+did — an agent that reports "16 failed, then 0 on four re-runs, nothing here touches Vector"
+has given a far more useful account than one that reports either number on its own.
+
 ### Never pipe `batch-check.sh` into `head` or `tail`
 
 It runs its documents in parallel workers writing to stdout. Closing the pipe early sends
