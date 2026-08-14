@@ -40,6 +40,26 @@ public sealed class LayoutFonts
     public MetricGrid? Metrics { get; init; }
 
     /// <summary>
+    /// The family class the document declared for each font it names, keyed on the normalised name.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// On the cache rather than on every call, because a document states this once — in a font table —
+    /// and every run that names the family inherits it. Passing it through the thousands of
+    /// <see cref="Face(string?, int, bool)"/> calls instead would put the same datum in every reader's
+    /// hands and give five chances to disagree about it.
+    /// </para>
+    /// <para>
+    /// It only matters when the named family is absent: LibreOffice hands the class to fontconfig as a
+    /// second family and the generic then beats every weak alias. See <see cref="DeclaredFontFamily"/>.
+    /// Empty for a reader that has not been wired to its format's font table, which is the same
+    /// behaviour as before this existed.
+    /// </para>
+    /// </remarks>
+    public IReadOnlyDictionary<string, DeclaredFontFamily> DeclaredFamilies { get; init; }
+        = new Dictionary<string, DeclaredFontFamily>(StringComparer.Ordinal);
+
+    /// <summary>
     /// Where a paragraph looks for a face when its own has no glyph for a character.
     /// </summary>
     /// <remarks>
@@ -79,7 +99,9 @@ public sealed class LayoutFonts
         try
         {
             FontReference reference = _fonts.Resolve(
-                new FontRequest(family ?? string.Empty, weight, isItalic));
+                new FontRequest(
+                    family ?? string.Empty, weight, isItalic,
+                    DeclaredFamily: DeclaredFamilyOf(family)));
 
             resolved = new Resolved(_fonts.LoadOpenType(reference), reference);
         }
@@ -94,6 +116,13 @@ public sealed class LayoutFonts
         _resolved[key] = resolved;
         return resolved;
     }
+
+    /// <summary>What the document said this family's class was, or unknown when it said nothing.</summary>
+    private DeclaredFontFamily DeclaredFamilyOf(string? family)
+        => DeclaredFamilies.Count > 0
+           && DeclaredFamilies.TryGetValue(FontSubstitutions.Normalise(family), out DeclaredFontFamily f)
+            ? f
+            : DeclaredFontFamily.Unknown;
 
     private readonly record struct Resolved(OpenTypeFace? Face, FontReference? Reference);
 }

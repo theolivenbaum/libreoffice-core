@@ -7,13 +7,22 @@ using Shouldly;
 namespace Paperless.WordProcessing.Tests;
 
 /// <summary>
-/// Tests <c>fontTable.xml</c>, which is read and reported rather than acted on.
+/// Tests <c>fontTable.xml</c>: <c>w:family</c> reaches font resolution, and the rest is reported.
 /// </summary>
 /// <remarks>
-/// Nothing in layout consumes this: <c>w:rFonts</c> names a family outright, so a paragraph is
-/// measured without ever opening the part. What is checked here is that the two things only this
-/// part knows come out intact — the embedded-font relationships, and the PANOSE and pitch a
-/// substitution would match on.
+/// <para>
+/// <c>w:rFonts</c> names a family outright, so a paragraph whose font is installed is measured without
+/// ever opening this part — which is why it went unread for so long. <strong>One attribute is no longer
+/// inert.</strong> <c>w:family</c> decides the substitute for a family that is <em>not</em> installed,
+/// because LibreOffice hands the class to fontconfig as a second <c>FC_FAMILY</c> and the generic then
+/// beats a weak alias; see <c>DeclaredFontFamily</c> and <see cref="DocFontFamilyClassTests"/>, which
+/// hold the measurement.
+/// </para>
+/// <para>
+/// The rest is still read and reported rather than acted on, and what is checked here is that the
+/// things only this part knows come out intact — the embedded-font relationships, and the PANOSE and
+/// pitch a substitution would match on.
+/// </para>
 /// </remarks>
 public class FontTableTests
 {

@@ -201,6 +201,12 @@ public sealed class Ww8Document : IWordProcessingDocument, IPaginatedDocument
         LayoutFonts fonts = new()
         {
             Metrics = _reader.DocumentProperties.UsesPrinterMetrics ? MetricGrid.Printer : null,
+
+            // The `ff` field of every FFN in the document's own font table. It decides nothing while the
+            // named family is installed and decides the substitute when it is not — see
+            // DeclaredFontFamily, and `1447.doc`, which names `Times` as a roman and which LibreOffice
+            // therefore draws in DejaVu Serif rather than in Liberation Serif.
+            DeclaredFamilies = _reader.Fonts.DeclaredFamilies(),
         };
 
         List<PageBlock> blocks = BlocksOf(fonts, _reader.ReadLayoutBlocks(), TextWidths());

@@ -13526,3 +13526,76 @@ typo sum without separating them**. Shipping would mean a device-unit rounding r
 unresolved metric — *"how a fixture passes and the corpus fails"*, which has happened twice this
 session already. One authored probe at a size where the two straddle a 24-unit boundary settles it,
 and that is the next round's first move.
+
+## Words: the two documents the ±1 cluster was worked from, and neither was a vertical budget
+
+`words-pages-01`. The round's brief nominated `words/batch-004/doc/1447.doc` (3 pages against 4) and
+`words/batch-006/doc/003.doc` (4 against 5) as the cleanest instances of the standing
+**under-paginate** class — one page short, word counts exact, font counts equal. They turned out to
+have **nothing in common**, and neither is a line-height, text-area or line-fits error.
+
+Whole track, before and after, measured twice against the banked 26.2.4.2 references:
+
+| | before | after |
+|---|---:|---:|
+| match | 155 | **157** |
+| page-exact | 165 | 166 |
+| total absolute page error | 115 | 113 |
+| renderings byte-changed | — | 36 of 200 |
+| verdicts lost | — | **0** |
+
+`batch-00[1-6]` re-proved with `batch-check.sh`: **59 of 60**, up from 58. The one remaining is
+`1447.doc`.
+
+### An empty paragraph takes the CHPX exception that ends at its mark
+
+`003.doc` lost **32.20 pt** on page 1 — three empty paragraphs measured at the style's 12 pt where
+LibreOffice measures them at 14, 36 and 14. All three marks carry *no CHPX exception at all*; each
+is the first paragraph after a run that did. LibreOffice's reader closes such an attribute at offset
+0 of the node that mark has already opened, and a zero-length hint on an empty node covers all of
+it. **The rule is: an empty paragraph whose own mark states nothing takes the exception in force at
+the position before it** — the paragraph style stays its own, and it never crosses a story boundary.
+Seven points on the document agree, the four that must *not* inherit included.
+
+Four of the 66 corpus `.doc` carry the pattern; three renderings moved and `003.doc` matches. **No
+committable fixture exists**: all 46 authored `.doc` in the test corpus are LibreOffice exports and
+its DOC writer emits an explicit CHPX at every mark.
+
+### The family class a document declares beside a font name decides the substitute
+
+`1447.doc` names its body font `Times` and declares it roman. LibreOffice draws it in **DejaVu
+Serif**; we drew Liberation Serif, which is 11% narrower to the line. `FontConfigManager::Substitute`
+adds the requested name as `FC_FAMILY` and then **appends a second one** — `"serif"` for
+`FAMILY_ROMAN`, `"sans"` for `FAMILY_SWISS`, nothing for the rest — and it runs *before* `VCL.xcu`
+is consulted, which is the ordering the resolver had backwards. Two exceptions, both measured: a
+**strong** metric alias survives the generic (an installed face declaring itself the equivalent of
+the very name asked for: Liberation Sans of Arial, yes; of Helvetica, no), and a **pi face** is
+exempt, since every Word document declares `Symbol` roman.
+
+Fed from `FFN.ff` for DOC and `w:family` for DOCX. **RTF and ODF declare the same datum and neither
+reader records it; presentations and spreadsheets are untouched.**
+
+The word gate barely sees this, so reach was measured on the thing the rule is about — the symmetric
+difference between our face set and the reference's, over the 36 changed renderings: **29 closer, 5
+unchanged, 2 further**. `1447.doc` goes from 4 faces wrong to none, and eleven documents go to an
+exact match. One page count went backwards — `May 25 bulletin…docx` was 4/4 with the wrong font and
+is 5/4 with the reference's exact face set, which is the cancelling-errors shape in miniature.
+
+### `1447.doc` is still 3 pages against 4, and the residue is one twip
+
+Every line break on its page 1 now matches the reference word for word — confirmed blind by a
+`page-vision` reviewer who saw only the image. What is left is that our DejaVu Serif line is
+**13.95 pt against LibreOffice's 14.00**; by line 35 the accumulated 0.91 pt is exactly the margin by
+which our 37th line fits and the reference's does not, and its orphan control then moves the whole
+next paragraph.
+
+**The line-height law is measurably not what we implement, and it was deliberately left alone.**
+Pitch read from the `Td`/`Tm` operators of LibreOffice's own PDFs for five faces at fifteen sizes:
+our "round `(asc + desc + gap) / upem × size` once" is right on **70 of 75** points and each of the
+five misses is exactly **+1 twip** (Carlito 18, DejaVu 12, Liberation Sans 13 and 16, Liberation
+Serif 10). *"Sum then round" is refuted outright*: Liberation Serif and Liberation Sans have the
+identical 2355-unit total and measurably differ at 10, 13 and 16 pt, so the split decides. No
+candidate fits — rounding the three components separately misses 19 of 75, ceiling misses 13. It is
+the metric every line of every document in all three tracks is measured with, and changing it on
+evidence that names no mechanism is the fudge-factor trap in a different hat. The 75-point table is
+in `dotnet/probes/words-pages-01/results.md` with the instrument that produced it.

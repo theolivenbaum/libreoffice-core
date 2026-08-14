@@ -426,4 +426,87 @@ public class FontResolutionTests
         // preserve a document's line breaks.
         resolver.Resolve(new FontRequest(requested)).FamilyName.ShouldBe(expected);
     }
+
+    // ------------------------------------------------- the family class the document declared
+
+    [Theory]
+    [InlineData("Times", DeclaredFontFamily.Roman, "DejaVu Serif")]
+    [InlineData("Times", DeclaredFontFamily.Swiss, "DejaVu Sans")]
+    [InlineData("Helvetica", DeclaredFontFamily.Swiss, "DejaVu Sans")]
+    [InlineData("Albany", DeclaredFontFamily.Swiss, "DejaVu Sans")]
+    [InlineData("Thorndale", DeclaredFontFamily.Roman, "DejaVu Serif")]
+    public void ADeclaredClassBeatsAWeakAlias(
+        string requested, DeclaredFontFamily declared, string expected)
+    {
+        SystemFontResolver resolver = Resolver();
+        Assert.SkipUnless(resolver.Index.Has(expected), $"{expected} is not installed");
+
+        // LibreOffice asks fontconfig before it consults VCL.xcu, and hands it the declared class as
+        // a *second* FC_FAMILY -- "serif" for roman, "sans" for swiss
+        // (`FontConfigManager::Substitute`, vcl/unx/generic/font/fontconfig.cxx). fontconfig then
+        // answers with the generic's own preferred face, because none of these four names carries a
+        // strong metric alias: `fc-match "Times,serif"` is DejaVu Serif where `fc-match Times` is
+        // Liberation Serif. Measured against the installed 26.2.4.2 with one authored document per
+        // row, and it is worth 11% of the characters on a line -- `1447.doc` sets its body in Times
+        // declared roman and the reference draws every paragraph of it in DejaVu Serif.
+        resolver.Resolve(new FontRequest(requested, DeclaredFamily: declared)).FamilyName
+            .ShouldBe(expected);
+    }
+
+    [Theory]
+    [InlineData("Times New Roman", DeclaredFontFamily.Roman, "Liberation Serif")]
+    [InlineData("Arial", DeclaredFontFamily.Swiss, "Liberation Sans")]
+    [InlineData("Calibri", DeclaredFontFamily.Swiss, "Carlito")]
+    [InlineData("Cambria", DeclaredFontFamily.Roman, "Caladea")]
+    public void AStrongMetricAliasBeatsTheDeclaredClass(
+        string requested, DeclaredFontFamily declared, string expected)
+    {
+        SystemFontResolver resolver = Resolver();
+        Assert.SkipUnless(resolver.Index.Has(expected), $"{expected} is not installed");
+
+        // The half that makes the rule safe, and the reason it is not "a class always wins". These
+        // four names are bound in fontconfig's own 30-metric-aliases.conf hard enough to beat a
+        // generic family, and they are the substitutions that preserve a document's line breaks --
+        // routing them to DejaVu would reflow essentially every Word document in the corpus.
+        // Measured the same way: all four answer Liberation/Carlito/Caladea with the class declared.
+        resolver.Resolve(new FontRequest(requested, DeclaredFamily: declared)).FamilyName
+            .ShouldBe(expected);
+    }
+
+    [Theory]
+    [InlineData(DeclaredFontFamily.Modern)]
+    [InlineData(DeclaredFontFamily.Script)]
+    [InlineData(DeclaredFontFamily.Decorative)]
+    [InlineData(DeclaredFontFamily.Unknown)]
+    public void OnlyRomanAndSwissAreActedOn(DeclaredFontFamily declared)
+    {
+        SystemFontResolver resolver = Resolver();
+        Assert.SkipUnless(resolver.Index.Has("Liberation Serif"), "Liberation Serif is not installed");
+
+        // LibreOffice appends a generic family for FAMILY_ROMAN and FAMILY_SWISS and for nothing
+        // else, so `modern` does *not* mean monospace here however much it looks as though it should.
+        // Measured: a document naming Times as `modern` renders in Liberation Serif, which is the
+        // plain `fc-match Times` answer, and one naming it `swiss` renders in DejaVu Sans.
+        resolver.Resolve(new FontRequest("Times", DeclaredFamily: declared)).FamilyName
+            .ShouldBe("Liberation Serif");
+    }
+
+    [Theory]
+    [InlineData("Symbol", DeclaredFontFamily.Roman, "OpenSymbol")]
+    [InlineData("Symbol", DeclaredFontFamily.Swiss, "OpenSymbol")]
+    public void APiFaceIsExemptFromTheDeclaredClass(
+        string requested, DeclaredFontFamily declared, string expected)
+    {
+        SystemFontResolver resolver = Resolver();
+        Assert.SkipUnless(resolver.Index.Has(expected), $"{expected} is not installed");
+
+        // Every Word document that uses Symbol declares it `roman`, and there is no roman equivalent
+        // of a font of arrows and Greek letters. fontconfig agrees and binds the name hard enough to
+        // survive a generic -- `fc-match "Symbol,serif"` and `fc-match Symbol` both answer OpenSymbol,
+        // and so does 26.2.4.2 on an authored document declaring Symbol as a roman. This is the carve-
+        // out that stopped `ABCD-FE-01-00 Flight Envelope.docx` drawing its Symbol runs in DejaVu
+        // Serif, which renders the characters rather than the symbols they stand for.
+        resolver.Resolve(new FontRequest(requested, DeclaredFamily: declared)).FamilyName
+            .ShouldBe(expected);
+    }
 }

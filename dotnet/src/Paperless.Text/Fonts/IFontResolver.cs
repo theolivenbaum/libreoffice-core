@@ -44,12 +44,62 @@ public interface IFontResolver
 /// A key into the document's own embedded fonts, when it embeds one for this request.
 /// Embedded faces always win: they are what the author saw.
 /// </param>
+/// <param name="DeclaredFamily">
+/// The family class the document stated beside the name, which decides the substitute when the name
+/// itself is not installed. See <see cref="DeclaredFontFamily"/>.
+/// </param>
 public readonly record struct FontRequest(
     string FamilyName,
     int Weight = 400,
     bool IsItalic = false,
     FontPitch Pitch = FontPitch.Unknown,
-    string? EmbeddedFaceKey = null);
+    string? EmbeddedFaceKey = null,
+    DeclaredFontFamily DeclaredFamily = DeclaredFontFamily.Unknown);
+
+/// <summary>
+/// The family class a document states beside a font's name.
+/// </summary>
+/// <remarks>
+/// <para>
+/// Every format carries it — WW8's <c>FFN.ff</c>, OOXML's <c>w:font/w:family</c>, ODF's
+/// <c>style:font-family-generic</c>, RTF's <c>\froman</c> and friends — and it is not decoration. It is
+/// what LibreOffice hands fontconfig as a <em>second</em> family when the named one is absent:
+/// <c>FontConfigManager::Substitute</c> (<c>vcl/unx/generic/font/fontconfig.cxx</c>) adds the requested
+/// name as <c>FC_FAMILY</c> and then appends <c>"serif"</c> for <see cref="Roman"/> and <c>"sans"</c> for
+/// <see cref="Swiss"/> — and nothing at all for any other value, which is why the rest are distinguished
+/// here but behave alike.
+/// </para>
+/// <para>
+/// The consequence is measurable and large: a document naming <c>Times</c> with no class renders in
+/// Liberation Serif, and the same document naming <c>Times</c> as a roman renders in DejaVu Serif, whose
+/// glyphs are wider — about 11% fewer characters to the line, and a page more over four pages.
+/// </para>
+/// </remarks>
+public enum DeclaredFontFamily
+{
+    /// <summary>The document states no class, or states one this reader does not recognise.</summary>
+    Unknown = 0,
+
+    /// <summary>A serif face: WW8 <c>FF_ROMAN</c>, ODF <c>roman</c>, RTF <c>\froman</c>.</summary>
+    Roman,
+
+    /// <summary>A grotesque: WW8 <c>FF_SWISS</c>, ODF <c>swiss</c>, RTF <c>\fswiss</c>.</summary>
+    Swiss,
+
+    /// <summary>A monospaced face: WW8 <c>FF_MODERN</c>, ODF <c>modern</c>, RTF <c>\fmodern</c>.</summary>
+    /// <remarks>
+    /// Recorded and deliberately inert. LibreOffice appends no generic family for it — measured, a
+    /// document naming <c>Times</c> as <c>modern</c> still renders in Liberation Serif — so treating it
+    /// as monospaced would invent a substitution the reference does not make.
+    /// </remarks>
+    Modern,
+
+    /// <summary>A script face: WW8 <c>FF_SCRIPT</c>, ODF <c>script</c>. Inert, as <see cref="Modern"/>.</summary>
+    Script,
+
+    /// <summary>A display face: WW8 <c>FF_DECORATIVE</c>. Inert, as <see cref="Modern"/>.</summary>
+    Decorative,
+}
 
 /// <summary>Whether a font is proportional or fixed-width.</summary>
 public enum FontPitch

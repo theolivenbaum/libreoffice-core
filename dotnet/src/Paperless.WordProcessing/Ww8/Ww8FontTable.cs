@@ -1,5 +1,6 @@
 using System.Buffers.Binary;
 using System.Text;
+using Paperless.Text.Fonts;
 
 namespace Paperless.WordProcessing.Ww8;
 
@@ -40,11 +41,16 @@ public sealed class Ww8FontTable
     private const int MaxFonts = 4096;
 
     private readonly string[] _names;
+    private readonly DeclaredFontFamily[] _families;
 
-    private Ww8FontTable(string[] names) => _names = names;
+    private Ww8FontTable(string[] names, DeclaredFontFamily[] families)
+    {
+        _names = names;
+        _families = families;
+    }
 
     /// <summary>An empty table, for a document that declares none.</summary>
-    public static Ww8FontTable Empty { get; } = new([]);
+    public static Ww8FontTable Empty { get; } = new([], []);
 
     /// <summary>How many fonts the table holds.</summary>
     public int Count => _names.Length;
@@ -59,6 +65,38 @@ public sealed class Ww8FontTable
     /// </remarks>
     public string? Name(int index)
         => index >= 0 && index < _names.Length ? _names[index] : null;
+
+    /// <summary>
+    /// The family class an entry declares, or unknown when it declares none.
+    /// </summary>
+    /// <remarks>
+    /// The <c>ff</c> field of the <c>FFN</c>'s first byte, bits 4 to 6 — beside the <c>prq</c> pitch in
+    /// bits 0 and 1 and the <c>fTrueType</c> flag in bit 2. It is what decides the substitute when the
+    /// named family is not installed, because LibreOffice passes it to fontconfig as a second family;
+    /// see <see cref="DeclaredFontFamily"/>.
+    /// </remarks>
+    public DeclaredFontFamily Family(int index)
+        => index >= 0 && index < _families.Length ? _families[index] : DeclaredFontFamily.Unknown;
+
+    /// <summary>Every family this table names, with the class declared for it.</summary>
+    /// <remarks>
+    /// Normalised keys, since that is what the resolver looks up on, and first entry wins: a table that
+    /// names one family twice with two classes is malformed, and taking the later would make the answer
+    /// depend on how far the walk got before a bad length stopped it.
+    /// </remarks>
+    public IReadOnlyDictionary<string, DeclaredFontFamily> DeclaredFamilies()
+    {
+        Dictionary<string, DeclaredFontFamily> declared = new(StringComparer.Ordinal);
+        for (int i = 0; i < _names.Length; i++)
+        {
+            if (_families[i] == DeclaredFontFamily.Unknown) continue;
+
+            string key = FontSubstitutions.Normalise(_names[i]);
+            if (key.Length > 0) declared.TryAdd(key, _families[i]);
+        }
+
+        return declared;
+    }
 
     /// <summary>
     /// How much of the header comes before the first entry.
@@ -84,6 +122,7 @@ public sealed class Ww8FontTable
         if (bytes.Length <= HeaderLength) return Empty;
 
         List<string> names = [];
+        List<DeclaredFontFamily> families = [];
         int at = HeaderLength;
 
         while (at < bytes.Length && names.Count < MaxFonts)
@@ -94,10 +133,11 @@ public sealed class Ww8FontTable
             if (payload < MinimumPayload || at + payload > bytes.Length) break;
 
             names.Add(NameIn(bytes.Slice(at, payload)));
+            families.Add(FamilyIn(bytes[at]));
             at += payload;
         }
 
-        return names.Count > 0 ? new Ww8FontTable([.. names]) : Empty;
+        return names.Count > 0 ? new Ww8FontTable([.. names], [.. families]) : Empty;
     }
 
     /// <summary>
@@ -120,4 +160,20 @@ public sealed class Ww8FontTable
 
         return units == 0 ? string.Empty : Encoding.Unicode.GetString(name[..(units * 2)]);
     }
+
+    /// <summary>The family class in an entry's first byte.</summary>
+    /// <remarks>
+    /// <c>ff</c> is bits 4 to 6, so <c>(first &gt;&gt; 4) &amp; 7</c>, and the values are the Windows
+    /// <c>FF_*</c> constants: 0 don't care, 1 roman, 2 swiss, 3 modern, 4 script, 5 decorative.
+    /// </remarks>
+    private static DeclaredFontFamily FamilyIn(byte first)
+        => ((first >> 4) & 0x7) switch
+        {
+            1 => DeclaredFontFamily.Roman,
+            2 => DeclaredFontFamily.Swiss,
+            3 => DeclaredFontFamily.Modern,
+            4 => DeclaredFontFamily.Script,
+            5 => DeclaredFontFamily.Decorative,
+            _ => DeclaredFontFamily.Unknown,
+        };
 }
