@@ -31,11 +31,43 @@ format (Paperless reads), macro execution (never — Paperless only reports that
    at the top of `Directory.Packages.props`.
 
    **"So advance widths agree by construction" used to stand here and is measurably false.**
-   Shared shaper or not, the two stacks do not agree: a Fidelity round measured a real ~0.1%
-   advance divergence, and located it precisely — tab stops are exact to **0.0000 pt**, so the
-   pen is right, and the drift accumulates *between* them. Both sides start from the same
-   unkerned sum and **LibreOffice kerns 19% harder** on the line measured. It underlies 8 of
-   the 40 Fidelity failures.
+   Shared shaper or not, the two stacks do not agree: there is a real ~0.1% advance divergence,
+   and tab stops are exact to **0.0000 pt**, so the pen is right and the drift accumulates
+   *between* them. It underlies 8 of the Fidelity failures.
+
+   **It is not kerning, and the "LibreOffice kerns 19% harder" line that stood here was wrong.**
+   That claim came from one line of one document. Measured 2026-08-15 on a probe built to
+   separate the two — the same string set three ways, pair-kerned, with `w:kern w:val="0"`, and
+   with a space between every letter so no pair can form — across two faces and two sizes:
+
+   | | ref | ours | ours/ref |
+   |---|---:|---:|---:|
+   | kerning's own contribution, Liberation Serif 12 pt | 16.500 pt | 16.588 pt | **1.0053** |
+   | Liberation Serif 24 pt | 32.904 | 33.176 | 1.0083 |
+   | Carlito 12 pt | 10.344 | 10.412 | 1.0066 |
+   | Carlito 24 pt | 20.616 | 20.825 | 1.0101 |
+
+   **Kerning agrees to better than 1%, and we kern very slightly *harder*, not softer.** The
+   divergence is still there with kerning switched off (+0.041% on Liberation Serif, +0.113% on
+   Carlito) and with every pair broken by a space, so it lives in the *base advances*.
+
+   What it actually is, per-glyph from the PDFs' own geometry:
+
+   - **It is face-dependent by an order of magnitude.** On the space-separated line the total is
+     **+0.011% for Liberation Serif and +0.115% for Carlito**.
+   - **Liberation Serif does not accumulate.** Its pen offset stays within 0.06–0.10 pt of the
+     reference's across the line — a constant, which is the text origin, not a drift.
+   - **Carlito accumulates**, about **+0.0125 pt per glyph** at 12 pt: the pen starts 0.100 pt
+     behind the reference's and is 0.063 pt ahead by the fourteenth glyph.
+   - Per-glyph *ink* widths differ by at most 0.010 pt and do not accumulate, so the ink is not
+     the driver — the advances are.
+
+   So the seat is the advance of a **metric-compatible substitute face**, not the shaper and not
+   the kern table. Carlito exists to match Calibri's advances at whatever quantisation the
+   consumer uses, which is exactly where a rounding rule would show up; Liberation Serif, whose
+   advances are its own, barely moves. Anyone opening this should start by asking what
+   quantisation LibreOffice applies to an advance on the 8640 dpi Writer reference device, and
+   should **not** re-derive the kerning question — the probe above settles it.
 
    Treat it as a real open defect with a known seat, not as a rounding artefact — and do not
    re-derive "our pen is off", because the declared-margin probe already refuted that.
