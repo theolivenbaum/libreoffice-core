@@ -175,8 +175,22 @@ Found 2026-08-14 while working the words `extra` group, and **not installed**, d
 
 Without it **every reference in this container draws nothing for an OMML equation.** A
 one-equation probe renders as `BEFOREEQUATION  AFTEREQUATION`, with the equation's space
-reserved on the page and no ink in it. `ABCD-FE-01-00 Flight Envelope` holds 33
-`m:oMathPara` elements and that accounts for most of its residual word gap.
+reserved on the page and no ink in it.
+
+**`ABCD-FE-01-00 Flight Envelope - v1 08.03.16.docx` is the corpus document this decides, and
+it is not a defect of ours — it is this missing package.** Measured 2026-08-15: the document
+holds **54 `m:oMath` elements** (the figure of 33 recorded here earlier counted `m:oMathPara`,
+which is the wrapper and undercounts) carrying **121 whitespace-split tokens**. Against a word
+delta of **+111**, and — the decisive test rather than the arithmetic — of the 45 *distinct*
+equation strings, **we draw more occurrences than the reference for 37**, the other 8 being
+strings that also occur in ordinary body text. So the reference is drawing essentially none of
+them.
+
+That makes it the same shape as a raster ceiling: **our output is the better one and the word
+gate scores it as a failure.** It should be read as an environment ceiling for as long as
+`libreoffice-math` is absent, and it is the one corpus document whose verdict would change if
+the package were installed — which is the concrete argument for eventually taking that step, at
+the cost of re-banking every equation-bearing reference.
 
 This is the same class of problem as the missing `fonts-dejavu-core` above: **an input to the
 gate that nothing in the harness declares.** The difference is that the font affected 267 of
