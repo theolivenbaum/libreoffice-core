@@ -13816,3 +13816,61 @@ Found this session, and worth expecting rather than being surprised by: `Sample_
 `airbus-pdf-information-package`, `afn-afn-20250801`, `redac-sas-201403`, and
 `words/batch-008`'s ligature document. In each case a correct fix made the gate column *worse*
 by removing an error that had been offsetting another. **A pass is not evidence of correctness.**
+
+## 2026-08-15 (later) — 483 of 534, and the line-height law solved
+
+Words 173/200, slides 147/163, sheets 163/171. **20 of the 51 remaining failures are
+documented ceilings and 1 is the unstable document**, so 30 real defects remain — 26 of them
+on words. Slides and sheets have two each.
+
+### The line-height law, solved after two failed rounds
+
+It is not a rounding rule. **Writer formats against a `VirtualDevice` at 8640 dpi in twips**
+(`RefDevMode::MSO1`), six device pixels to the twip — outside the 72-6000 dpi range the
+previous round swept and declared exhausted:
+
+```
+H      = size_twips * 6                    the em, exact
+a,d,g  = round(metric * H / upem)          each to a whole pixel, separately
+height = round((a+d)/6) + round(g/6)       the sum converted once, the gap alone
+ascent = round(a/6)     + round(g/6)       leading is charged to the ascent
+```
+
+Halves away from zero. **195/195 pairs**, and 234/234 more on faces no prior round touched.
+Two roundings of a three-term sum grouped 2+1 — which is why "round once" and "round three
+separately" both failed, and why the split between ascent and descent decides rather than
+their sum.
+
+Then per application, all measured on the binary rather than read from the tree:
+
+| application | device | map unit | fit |
+|---|---|---|---|
+| Writer | 8640 dpi | twip | 195/195 |
+| Impress / Draw | 600 dpi | 1/100 mm | 507/507 |
+| **Calc** | **720 dpi** | 1/100 mm | 663/663 and 468/468 |
+
+**Calc is 720, not the 8640 the tree says** — `ScOutputData` formats against the *output*
+device, `RefDevMode::PDF1`. Reading the tree scores 105 of 273; measuring the binary scores
+273 of 273. And EditEngine keeps **`max(round(a)+round(d), round(a+d))`** — the two disagree in
+both directions, so neither could have been found by refining the other.
+
+### Three corrections to the record, each found by the next round
+
+- **A "39/39 exact" fit proved nothing.** The CJK 127% scale was verified on IPAGothic, whose
+  line gap is **zero** — so those pairs cannot distinguish "the scale includes the leading"
+  from "the leading is added afterwards". WenQuanYi can, and over 117 pairs the corrected rule
+  fits 117/117 against the original's 78/117 and 0/39.
+- **`dotnet/probes/lineheight-01/words-after.tsv` is wrong in the tree.** Four rows carry
+  post-fix numbers on a tree that cannot contain the fix — the shape of a sweep that overlapped
+  a rebuild. Annotated in §4; the TSV stays as the record of what that round ran.
+- **A git auto-merge left two metric rules able to meet.** `ScaledDescent = height - ascent`, so
+  a grid scaling the ascent while the height took EditEngine's branch returns a **negative
+  descent**. Now exclusive by construction with tests pinning it.
+
+### The lesson worth keeping
+
+An agent caught a Fidelity baseline truncated by piping into `tail`, rebuilt a true "before"
+binary — and then trusted a stored TSV as a baseline on its very next measurement, reporting a
+reach of 4 that was really 2. Its own summary:
+
+> **Catching a trap is not the same as having a habit.**
