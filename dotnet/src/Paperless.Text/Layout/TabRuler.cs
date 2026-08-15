@@ -231,6 +231,13 @@ public static class TabRuler
     /// page 36 that was enough to push a figure's caption onto a page of its own.
     /// </para>
     /// <para>
+    /// <strong>The rescue is that tab's alone.</strong> <c>PreFormat</c> runs once per tab portion and
+    /// <c>bAtParaEnd</c> is a statement about <em>that</em> tab, so a line ending in six tabs is six
+    /// separate decisions and only the sixth can be forgiven. An earlier one that reached the line's
+    /// boundary has already ended the line — see <see cref="BreakAt"/>, which is the other half of this
+    /// rule and the half that decides where.
+    /// </para>
+    /// <para>
     /// Only the <em>fitting</em> width, never the placed one. Writer sets the tab portion's width to
     /// <c>GetTabPos() - rInf.X()</c> before it decides <c>bFull</c> and does not take it back with the
     /// break, so the line really is that wide once drawn — it simply is not a reason to break. The
@@ -259,6 +266,93 @@ public static class TabRuler
 
         // The stops are stated from the paragraph's tab origin and the stretch from the line's own start.
         return last.Left + format.TabLineOffset(isFirstLine) >= edge;
+    }
+
+    /// <summary>
+    /// The index of the tab a line starting at a position has to end before, or null when no tab ends it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>A tab ends a line at itself, not at the nearest break opportunity behind it.</strong>
+    /// Writer builds a line as a chain of portions in document order, and a tab portion that finds
+    /// itself at or past the line's boundary sets <c>bFull</c>, zeroes its own width and length and
+    /// drops the rest of the chain (<c>SwTabPortion::PreFormat</c>,
+    /// <c>sw/source/core/text/txttab.cxx</c>:462-476) — so the line ends immediately in front of the
+    /// tab and the tab itself opens the next one. A width-driven filler cannot express that: it asks
+    /// the break iterator where a line may end, and between <c>Chap 2</c> and six tabs the only
+    /// opportunity is the space, so the whole overrun is charged to the one word in front of it.
+    /// </para>
+    /// <para>
+    /// Measured on <c>150_5300_13_chg12.doc</c> (words/pagination-002), whose <c>Chap 2</c> footer is
+    /// exactly that line: stops at 3 in centred and 6 in right, a 0.25 in default interval, a 7 in text
+    /// area with 0.25 in of end indent, so the six tabs land at 216, 432, 450, 468, 486 and 504 pt
+    /// against a line boundary of 486. The fifth reaches it — <c>bFull</c> is
+    /// <c>rInf.Width() &lt;= rInf.X() + PrtWidth()</c>, inclusive — and is not the paragraph's last
+    /// character, so Writer ends the line there and the foot is two lines high. Breaking at the space
+    /// instead gave three lines and <c>Chap</c> alone on the first.
+    /// </para>
+    /// <para>
+    /// The boundary is the <em>line's</em>, <c>rInf.Width()</c>, and not the frame's — the two differ
+    /// by the paragraph's end indent, and the frame's is what <paramref name="rightEdge"/> carries for
+    /// <see cref="Place"/>'s benefit.
+    /// </para>
+    /// <para>
+    /// A tab at the line's own start never breaks it: <c>PreFormat</c>'s <c>bFull</c> arm fills the
+    /// line with it rather than opening an empty one (<c>txttab.cxx</c>:464-471), and a rule that
+    /// broke there would not terminate. Past that tab <c>rInf.X()</c> is the line's whole width, which
+    /// is the case <c>txttab.cxx</c>:428 hands to <c>PostFormat</c> — so nothing after it breaks the
+    /// line either, and this returns null for such a line.
+    /// </para>
+    /// </remarks>
+    /// <param name="text">The paragraph's text.</param>
+    /// <param name="start">Where the line starts.</param>
+    /// <param name="format">The paragraph's stops and default interval.</param>
+    /// <param name="widthBetween">Measures a range of the text, tabs excluded.</param>
+    /// <param name="isFirstLine">As <see cref="Segments"/>'s.</param>
+    /// <param name="lineEdge">
+    /// The line's own right boundary, in the coordinates the stops are stated in.
+    /// </param>
+    /// <param name="rightEdge">As <see cref="Segments"/>'s: the frame's edge, for the aligned stops.</param>
+    public static int? BreakAt(
+        string text,
+        int start,
+        ParagraphFormat format,
+        Func<int, int, Length> widthBetween,
+        bool isFirstLine,
+        Length lineEdge,
+        Length? rightEdge)
+    {
+        ArgumentNullException.ThrowIfNull(text);
+        ArgumentNullException.ThrowIfNull(format);
+
+        List<TabbedSegment> segments =
+            Segments(text, start, text.Length, format, widthBetween, isFirstLine, rightEdge);
+        Length origin = format.TabLineOffset(isFirstLine);
+
+        for (int index = 1; index < segments.Count; index++)
+        {
+            TabbedSegment segment = segments[index];
+
+            // A right, centred or decimal stop is settled in PostFormat, with the text after it already
+            // fitted to the line, and never sets bFull.
+            if (segment.Deferred || segment.Left + origin < lineEdge) continue;
+
+            // The tab that opened the stretch. One at the line's own start is forced onto it.
+            int tab = segment.Start - 1;
+            if (tab <= start) return null;
+
+            // The paragraph's final tab, which TAB_COMPAT forgives for a document writerfilter did
+            // not read.
+            if (index == segments.Count - 1
+                && ForgivesTrailingTab(segments, text, format, isFirstLine, rightEdge))
+            {
+                return null;
+            }
+
+            return tab;
+        }
+
+        return null;
     }
 
     /// <summary>True when a range holds a tab, and so needs any of this.</summary>

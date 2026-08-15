@@ -54,13 +54,19 @@ public static class TableLayouter
     /// The cells with page-coordinate rectangles, and each row's height in order — the caller needs the
     /// heights to decide where the table ends and which rows fit on the page.
     /// </returns>
+    /// <param name="anchored">
+    /// The frames the flow's own paragraphs anchor, with the page coordinates its origin corresponds to,
+    /// or null when the caller does not know where the flow sits — which is every caller but a table
+    /// cell's. See <see cref="AnchoredObstacles"/> for why a cell needs its own route to them.
+    /// </param>
     public static (List<PlacedTableCell> Cells, List<Length> RowHeights) LayOut(
         PageTable table,
         DocPoint origin,
         int nesting = 0,
         Length? available = null,
         bool collapsesSpacing = false,
-        bool addsCellLineSpacing = false)
+        bool addsCellLineSpacing = false,
+        AnchoredObstacles? anchored = null)
     {
         ArgumentNullException.ThrowIfNull(table);
 
@@ -70,6 +76,12 @@ public static class TableLayouter
         // Pass one: every cell's text, laid out at its own width, with the row it charges its height to.
         List<Measured> measured = [];
         List<Length> heights = [.. Enumerable.Repeat(Length.Zero, rows)];
+
+        // Where the row about to be measured starts, in the table's own coordinates — the same running
+        // sum pass two makes into `tops`, kept here because a cell that has to flow round a frame it
+        // anchors needs to know where on the page it is *while* it is being measured. Only the rows above
+        // it are needed and they are already settled, so nothing is being read before it is written.
+        Length measuredRowTop = rows > 0 ? BorderHeight(table.Rows[0]) / 2 : Length.Zero;
 
         for (int row = 0; row < rows; row++)
         {
@@ -97,7 +109,12 @@ public static class TableLayouter
                         Length.Zero,
                         nesting,
                         collapsesSpacing,
-                        addsCellLineSpacing)
+                        addsCellLineSpacing,
+                        anchored: anchored?.Below(new DocPoint(
+                            table.LeftWithin(available ?? table.Width)
+                            + lefts[cell.Column] + cell.Padding.Left,
+                            measuredRowTop + (BorderHeight(table.Rows[row]) / 2)
+                            + cell.Padding.Top)))
                     : null;
 
                 // The advance rather than the ink: a cell is as tall as its content plus the space after
@@ -187,6 +204,8 @@ public static class TableLayouter
                 ? Length.Max(Length.Zero, table.Rows[row].MinHeight + bottomInset)
                 : Length.Max(heights[row], table.Rows[row].MinHeight + topInset + bottomInset)
                   + BorderHeight(table.Rows[row]);
+
+            measuredRowTop += heights[row];
         }
 
         // A merged cell may still need more room than the rows it covers add up to, so the last row it

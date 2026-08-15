@@ -131,17 +131,21 @@ internal sealed class FrameResolution
 {
     private readonly Dictionary<int, List<PlacedFrame>> _byPage;
     private readonly Dictionary<int, FrameObstacles> _byBlock;
+    private readonly Dictionary<PageParagraph, List<WrapObstacle>> _byAnchor;
+
     private readonly List<long> _signature;
     private readonly int _frames;
 
     private FrameResolution(
         Dictionary<int, List<PlacedFrame>> byPage,
         Dictionary<int, FrameObstacles> byBlock,
+        Dictionary<PageParagraph, List<WrapObstacle>> byAnchor,
         List<long> signature,
         int frames)
     {
         _byPage = byPage;
         _byBlock = byBlock;
+        _byAnchor = byAnchor;
         _signature = signature;
         _frames = frames;
     }
@@ -194,6 +198,12 @@ internal sealed class FrameResolution
 
         Dictionary<int, List<PlacedFrame>> byPage = [];
         Dictionary<int, List<WrapObstacle>> obstaclesByPage = [];
+        // By identity, not by value. A `PageParagraph` is a record, so two empty cells hold two equal
+        // paragraphs — and the banner table that made this necessary has exactly that shape, one empty
+        // anchor paragraph per masthead cell. Keyed by value they would share one entry and each cell
+        // would flow round the other's logo.
+        Dictionary<PageParagraph, List<WrapObstacle>> byAnchor =
+            new(ReferenceEqualityComparer.Instance);
         List<long> signature = [];
         int frames = 0;
 
@@ -249,7 +259,15 @@ internal sealed class FrameResolution
                     obstaclesByPage[pageIndex] = list = [];
                 }
 
-                list.Add(new WrapObstacle(Widened(area, frame.Spacing), frame.Wrap));
+                WrapObstacle obstacle = new(Widened(area, frame.Spacing), frame.Wrap);
+                list.Add(obstacle);
+
+                if (!byAnchor.TryGetValue(paragraph, out List<WrapObstacle>? mine))
+                {
+                    byAnchor[paragraph] = mine = [];
+                }
+
+                mine.Add(obstacle);
             }
         }
 
@@ -392,12 +410,34 @@ internal sealed class FrameResolution
             signature.Add(placement.Top.Emu);
         }
 
-        return new FrameResolution(byPage, byBlock, signature, frames);
+        return new FrameResolution(byPage, byBlock, byAnchor, signature, frames);
     }
 
     /// <summary>The obstacles one block's lines must flow around, or null when it has none.</summary>
     public ILineObstacles? ObstaclesFor(int block)
         => _byBlock.TryGetValue(block, out FrameObstacles? obstacles) ? obstacles : null;
+
+    /// <summary>
+    /// The frames one paragraph anchors, in page coordinates, or null when it anchors none that wrap.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Keyed by the paragraph rather than by a block index, which is the whole point of it: a frame
+    /// anchored inside a table cell has no top-level block to be keyed by, so
+    /// <see cref="ObstaclesFor(int)"/> answers null for every one of them and the frame is drawn while
+    /// obstructing nobody — the cell's own anchor paragraph included. Writer draws no such distinction:
+    /// <c>SwTextFly</c> is a property of the text frame being formatted, and a cell is a text frame.
+    /// </para>
+    /// <para>
+    /// Only the paragraph's <em>own</em> frames, not every frame overlapping the cell. Writer would take
+    /// the page's whole sorted object list, so a body frame lying across a table narrows its cells too;
+    /// this is the half that a cell cannot reach any other way, and it is the half that cannot change a
+    /// document holding no frame anchored in a cell.
+    /// </para>
+    /// </remarks>
+    /// <param name="anchor">The paragraph the frames are anchored to.</param>
+    public IReadOnlyList<WrapObstacle>? AnchoredIn(PageParagraph anchor)
+        => _byAnchor.TryGetValue(anchor, out List<WrapObstacle>? obstacles) ? obstacles : null;
 
     /// <summary>The same pages with their frames attached.</summary>
     public List<LaidOutPage> AttachedTo(List<LaidOutPage> pages)
@@ -553,8 +593,51 @@ internal sealed class FrameResolution
 /// </summary>
 /// <param name="Area">The rectangle, spacing already added.</param>
 /// <param name="Wrap">Which side text may pass on.</param>
-internal readonly record struct WrapObstacle(DocRect Area, TextWrap Wrap);
+public readonly record struct WrapObstacle(DocRect Area, TextWrap Wrap);
 
+/// <summary>
+/// A flow's own anchored frames, and where the flow sits on the page, so its paragraphs can be
+/// obstructed by them.
+/// </summary>
+/// <remarks>
+/// <para>
+/// The body's paragraphs reach their obstacles by block index — see
+/// <see cref="FrameResolution.ObstaclesFor(int)"/> — and a paragraph inside a table cell has no block
+/// index to be reached by. This is the same information carried the other way round: a lookup by the
+/// anchoring paragraph, plus the page coordinates the flow's own origin corresponds to, since
+/// <see cref="FrameObstacles"/> works in page coordinates and a cell is laid out at its own zero.
+/// </para>
+/// <para>
+/// <see cref="Below"/> is how the origin follows a nested flow down: a table inside a cell, and a cell
+/// inside that table, each shift the origin without changing the lookup.
+/// </para>
+/// </remarks>
+/// <param name="lookup">The frames a paragraph anchors, or null when it anchors none that wrap.</param>
+/// <param name="origin">Where the flow's own (0, 0) sits on the page.</param>
+public sealed class AnchoredObstacles(
+    Func<PageParagraph, IReadOnlyList<WrapObstacle>?> lookup, DocPoint origin)
+{
+    /// <summary>The obstacles a paragraph at an offset down the flow sees, or null when it sees none.</summary>
+    /// <remarks>
+    /// The offset is where the flow has reached rather than where the paragraph's text starts, so a
+    /// paragraph with space above it is measured against the frame from a hair too high. Writer has the
+    /// same ordering problem — the space above is part of the layout being computed — and the difference
+    /// can only matter for a frame whose edge falls inside that gap.
+    /// </remarks>
+    /// <param name="paragraph">The paragraph being laid out.</param>
+    /// <param name="top">How far down the flow it starts.</param>
+    public ILineObstacles? For(PageParagraph paragraph, Length top)
+        => lookup(paragraph) is { Count: > 0 } list
+            ? new FrameObstacles([.. list], origin.Y + top, origin.X)
+            : null;
+
+    /// <summary>The same lookup, with the origin moved to a nested flow's own top-left.</summary>
+    /// <param name="offset">Where the nested flow starts, in this flow's coordinates.</param>
+    public AnchoredObstacles Below(DocPoint offset)
+        => new(lookup, new DocPoint(origin.X + offset.X, origin.Y + offset.Y));
+}
+
+/// <summary>The obstacles one flow's own anchored frames make, positioned on the page.</summary>
 /// <summary>
 /// What a page's frames do to one paragraph's lines: the port of Writer's <c>SwTextFly</c>.
 /// </summary>

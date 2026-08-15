@@ -441,10 +441,17 @@ public sealed record ParagraphFormat
     /// <remarks>
     /// <para>
     /// Word 2013 and later, and so every file <c>writerfilter</c> reads: it is set unconditionally in
-    /// <c>sw/source/writerfilter/filter/WriterFilter.cxx</c>:325, which serves DOCX and RTF. Nothing sets
-    /// it for a binary <c>.doc</c> — <c>sw/source/filter/ww8</c> sets <c>TAB_COMPAT</c>
-    /// (<c>ww8par.cxx</c>:1949) and no more — and ODF only carries it when a settings file states it, so
-    /// both leave it off.
+    /// <c>sw/source/writerfilter/filter/WriterFilter.cxx</c>:325, which serves DOCX and RTF. A binary
+    /// <c>.doc</c> does not carry it, and ODF carries it only when a settings file states it.
+    /// </para>
+    /// <para>
+    /// <strong>What a <c>.doc</c> carries instead is <c>TAB_OVER_MARGIN</c></strong>, the older and wider
+    /// setting — <c>ww8par.cxx</c>:2047, beside the <c>TAB_COMPAT</c> at :1949 — and WriterFilter's own
+    /// comment says why the two are not the same thing: <em>"TabOverSpacing … is a subset of
+    /// TabOverMargin. TabOverMargin looks at tabs beyond the normal text area, while TabOverSpacing only
+    /// refers to a tab beyond the paragraph margin"</em> (:321-324). So the three word-processing formats
+    /// take three different branches of <c>PreFormat</c>, not two, and this flag names only one of them.
+    /// An earlier note here said the WW8 filter sets <c>TAB_COMPAT</c> "and no more", which is wrong.
     /// </para>
     /// <para>
     /// It decides what a <em>left</em> stop past the frame does to the line, and the two answers are

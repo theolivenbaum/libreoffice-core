@@ -324,6 +324,27 @@ public sealed class Paginator
     /// </remarks>
     private Func<int, ILineObstacles?>? _obstacles;
 
+    /// <summary>
+    /// The frames a paragraph anchors, for the paragraphs inside a table cell, or null on the first pass.
+    /// </summary>
+    /// <remarks>
+    /// The cell half of <see cref="_obstacles"/>, and it has to be a second lookup because a cell's
+    /// paragraphs are not blocks and have no index — see <see cref="FrameResolution.AnchoredIn"/>.
+    /// </remarks>
+    private Func<PageParagraph, IReadOnlyList<WrapObstacle>?>? _anchored;
+
+    /// <summary>Where each table block's own top-left landed last pass, in page coordinates.</summary>
+    /// <remarks>
+    /// A table is laid out at its own zero and shifted onto the page afterwards, so at the moment its
+    /// cells are measured nothing knows where it is. The previous pass does, and that is enough: the loop
+    /// that settles the frames runs the whole layout again until nothing moves, so a table that has moved
+    /// since is measured again with the newer figure.
+    /// </remarks>
+    private Dictionary<int, DocPoint>? _tableOrigins;
+
+    /// <summary>The same, being collected for the pass after this one.</summary>
+    private Dictionary<int, DocPoint> _nextTableOrigins = [];
+
     /// <summary>Creates a paginator.</summary>
     /// <param name="options">The compatibility choices, or null for Writer's.</param>
     public Paginator(PaginationOptions? options = null)
@@ -464,6 +485,7 @@ public sealed class Paginator
         for (int pass = 0; pass < MaxFramePasses; pass++)
         {
             _obstacles = resolution.ObstaclesFor;
+            _anchored = resolution.AnchoredIn;
             List<LaidOutPage> next;
             try
             {
@@ -472,6 +494,7 @@ public sealed class Paginator
             finally
             {
                 _obstacles = null;
+                _anchored = null;
             }
 
             FrameResolution settled = FrameResolution.Of(
@@ -544,6 +567,10 @@ public sealed class Paginator
         WasTruncated = false;
         _noteHeights.Clear();
 
+        // This pass's table positions replace the last one's when the pass finishes; until then the last
+        // one's are what a cell measures its own frames against. See `_tableOrigins`.
+        _nextTableOrigins = [];
+
         List<PaginatedSection> resolved =
             sections.Count > 0 ? [.. sections] : [new PaginatedSection(new WritingSection())];
 
@@ -598,6 +625,15 @@ public sealed class Paginator
             {
                 // The section's own breaking width is also what a table stating no widths of its own is
                 // fitted to. A table that declares its grid is laid out exactly as it was before.
+                // Where this table was on the page last pass, which is what a cell's own anchored frame
+                // has to be measured against — the table itself is laid out at its own zero. Absent on
+                // the first pass, when no frame has been placed anywhere either.
+                AnchoredObstacles? anchored =
+                    _anchored is { } lookup
+                    && _tableOrigins?.TryGetValue(i, out DocPoint at) == true
+                        ? new AnchoredObstacles(lookup, at)
+                        : null;
+
                 (List<PlacedTableCell> cells, List<Length> rowHeights) =
                     TableLayouter.LayOut(
                         table,
@@ -605,7 +641,8 @@ public sealed class Paginator
                         0,
                         width,
                         _options.CollapsesSpacing,
-                        _options.AddsCellLineSpacing);
+                        _options.AddsCellLineSpacing,
+                        anchored);
 
                 return new LaidBlock(null, cells, rowHeights);
             }
@@ -1064,6 +1101,15 @@ public sealed class Paginator
                 // note area a paragraph above it had already reserved.
                 Length tableRoom = columnBottom - NoteHeight(notes) - (used + before);
 
+                // Where the table's own zero lands on the page, for the pass after this one — see
+                // `_tableOrigins`. Its first part only: a continuation's rows are already measured.
+                if (lineIndex == 0 && rowDrawn == Length.Zero)
+                {
+                    DocRect columnArea = body.ColumnArea(column);
+                    _nextTableOrigins[paragraphIndex] =
+                        new DocPoint(columnArea.X, columnArea.Y + used + before);
+                }
+
                 TablePart part = PlaceTablePart(
                     table, Laid(paragraphIndex), lineIndex, rowDrawn, body.ColumnArea(column),
                     used + before, column, tableRoom, columnIsEmpty);
@@ -1358,6 +1404,8 @@ public sealed class Paginator
         pages.AddRange(
             EndnotePages(blocks, resolved[^1], pageNumber, pages.Count));
 
+        _tableOrigins = _nextTableOrigins;
+
         return pages;
 
         // Moves on when the current column is full: to the next column of the same page if there is one,
@@ -1420,8 +1468,19 @@ public sealed class Paginator
             AdoptSection();
 
             // The head and foot a page draws depend on which side of the sheet its number puts it on and
-            // on whether it is the descriptor's first, so the body it leaves has to be measured again.
+            // on whether it is the descriptor's first, so the body it leaves has to be measured again —
+            // and the column the lines are fitted into has to follow it down. `columnBottom` is the
+            // figure `Fit` measures against, and `EmitPage` set it from the *previous* page's body a
+            // moment ago; leaving it there fills this page against a body it does not have. It is the
+            // only one of the four places that measures a body which does not restate it, and the gap is
+            // silent — the page reports the right area and holds one line too many. Measured on
+            // `150_5300_13_chg12.doc`, where the first page of the `Chap 2` descriptor carries a
+            // two-line foot and was filled against the one-line body of the page before it: the third of
+            // the trailing empty paragraphs after `Figure 2-3` overran by 1.40 pt and was kept, which is
+            // the page the document is short. A page break here starts at the top of the sheet, so there
+            // is no column top to preserve.
             MeasureBody();
+            columnBottom = bodyHeight;
         }
 
         // Whether the block here begins a page whatever precedes it: a page break of its own, or the

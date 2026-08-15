@@ -337,6 +337,12 @@ public sealed class LineFiller
             int chosenVisibleEnd = lineStart;
             Length chosenAllowance = Length.Zero;
 
+            // Where a tab ends the line whatever the break iterator offered, or the text's end when
+            // none does. Writer's portions are built in document order and a tab that reaches the
+            // line's boundary ends it in front of itself — see <see cref="TabRuler.BreakAt"/>. Only
+            // for a paragraph that clamps its stops, which is what says the text is a Writer frame's.
+            int tabEnd = TabEnd(text, lineStart, widthBetween, tabs, lines.Count == 0, limit);
+
             // Walk the opportunities after the line's start, keeping the last that fits.
             int probe = nextOpportunity;
             while (probe < opportunities.Count)
@@ -347,6 +353,9 @@ public sealed class LineFiller
                     probe++;
                     continue;
                 }
+
+                // Nothing past the tab is on this line, so nothing past it is a candidate for its end.
+                if (end > tabEnd) break;
 
                 int visibleEnd = TrimTrailingSpaces(text, lineStart, end);
                 Length width = Measure(
@@ -374,6 +383,27 @@ public sealed class LineFiller
                 // The first opportunity is taken whatever it measures, and chopped below if it does
                 // not fit: an empty line followed by the same problem is not an option.
                 if (width > limit + allowance) break;
+            }
+
+            // The tab's own cut, which is not a break opportunity and so was never a candidate above.
+            // It wins whenever the text in front of it fits, because that is where Writer's line
+            // ended; when it does not fit the line breaks earlier and the tab stays on the next one.
+            if (tabEnd < text.Length && chosen < tabEnd)
+            {
+                int visibleEnd = TrimTrailingSpaces(text, lineStart, tabEnd);
+                Length width = Measure(
+                    text, lineStart, visibleEnd, widthBetween, tabs, lines.Count == 0, limit);
+                Length allowance = shrinks
+                    ? JustificationShrink.AllowanceFor(text, lineStart, visibleEnd, widthBetween)
+                    : Length.Zero;
+
+                if (chosen <= lineStart || width <= limit + allowance)
+                {
+                    chosen = tabEnd;
+                    chosenVisibleEnd = visibleEnd;
+                    chosenWidth = width;
+                    chosenAllowance = allowance;
+                }
             }
 
             if (chosen <= lineStart)
@@ -745,6 +775,40 @@ public sealed class LineFiller
                 RightEdge(tabs, isFirstLine, lineWidth),
                 countsDeferredStretch: placed || !tabs.ClampsTabsAtLineEdge)
             : widthBetween(start, end);
+
+    /// <summary>
+    /// Where a tab ends the line whatever the break iterator offered, or the text's end when none does.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <see cref="TabRuler.BreakAt"/> is the rule and this is its guard: it is asked only of a paragraph
+    /// that clamps its stops — which is what says the text belongs to a Writer text frame rather than to
+    /// a slide's text body or a spreadsheet cell, both of which lay tabs out through other code — and
+    /// only when the line actually holds one, since nearly none do and the walk costs a measurement per
+    /// tab.
+    /// </para>
+    /// <para>
+    /// The line's boundary is <paramref name="lineWidth"/> converted into the coordinates the stops are
+    /// stated in, which is the same conversion <see cref="RightEdge"/> makes without the end indent
+    /// added back on: the break is decided against <c>rInf.Width()</c> and a stop is clamped against the
+    /// frame's edge, and those two differ by exactly that indent.
+    /// </para>
+    /// </remarks>
+    private static int TabEnd(
+        string text,
+        int lineStart,
+        Func<int, int, Length> widthBetween,
+        ParagraphFormat? tabs,
+        bool isFirstLine,
+        Length? lineWidth)
+        => tabs is { ClampsTabsAtLineEdge: true } && lineWidth is { } width
+           && TabRuler.HasTab(text, lineStart, text.Length)
+            ? TabRuler.BreakAt(
+                  text, lineStart, tabs, widthBetween, isFirstLine,
+                  tabs.TabLineOffset(isFirstLine) + width,
+                  RightEdge(tabs, isFirstLine, width))
+              ?? text.Length
+            : text.Length;
 
     /// <summary>
     /// The text frame's right boundary in the coordinates the tab stops are stated in, or null when the

@@ -287,4 +287,51 @@ public sealed class TabRulerTests
                 countsDeferredStretch: false)
             .ShouldBe(Length.FromPoints(30));
     }
+
+    [Fact]
+    public void ATabReachingTheLineEdgeEndsTheLineAtItself()
+    {
+        // `SwTabPortion::PreFormat` runs once per tab portion, and a tab that finds itself at or past
+        // the line's boundary sets bFull, zeroes itself and drops the rest of the chain
+        // (txttab.cxx:462-476) — so the line ends in front of the tab and not at the last break
+        // opportunity behind it. "ab" ends at 2, the tabs take 10, 20 and 30; the one landing on 20
+        // reaches the edge and is not the paragraph's last character.
+        TabRuler.BreakAt(
+                "ab\t\t\t", 0, With(), Measure, isFirstLine: true,
+                lineEdge: Length.FromPoints(20), rightEdge: Length.FromPoints(20))
+            .ShouldBe(3);
+    }
+
+    [Fact]
+    public void TheLastTabOfTheParagraphStillEndsNoLine()
+    {
+        // The same three tabs against a wider line: only the last of them reaches the edge, and
+        // `bAtParaEnd` forgives exactly that one.
+        TabRuler.BreakAt(
+                "ab\t\t\t", 0, With(), Measure, isFirstLine: true,
+                lineEdge: Length.FromPoints(30), rightEdge: Length.FromPoints(30))
+            .ShouldBeNull();
+    }
+
+    [Fact]
+    public void AnAlignedStopNeverEndsTheLine()
+    {
+        // A right, centred or decimal stop is settled in PostFormat with the text after it already
+        // fitted, and never sets bFull.
+        TabRuler.BreakAt(
+                "ab\tcd", 0, With(new TabStop(Length.FromPoints(20), TabAlignment.Right)), Measure,
+                isFirstLine: true, lineEdge: Length.FromPoints(20), rightEdge: Length.FromPoints(20))
+            .ShouldBeNull();
+    }
+
+    [Fact]
+    public void ATabAtTheLineStartIsFilledRatherThanBrokenFor()
+    {
+        // `if (rInf.GetIdx() == rInf.GetLineStart())` — PreFormat fills the line with the tab instead
+        // of opening an empty one, and a rule that broke there would not terminate.
+        TabRuler.BreakAt(
+                "ab\t\t\t", 3, With(), Measure, isFirstLine: false,
+                lineEdge: Length.FromPoints(10), rightEdge: Length.FromPoints(10))
+            .ShouldBeNull();
+    }
 }

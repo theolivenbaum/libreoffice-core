@@ -97,6 +97,11 @@ public static class FlowLayouter
     /// header or foot.
     /// </para>
     /// </remarks>
+    /// <param name="anchored">
+    /// The frames the flow's own paragraphs anchor, with the page coordinates its origin corresponds to,
+    /// or null when the caller does not know where the flow sits — which is every caller but a table
+    /// cell's. See <see cref="AnchoredObstacles"/> for why a cell needs its own route to them.
+    /// </param>
     public static PlacedFlow? LayOut(
         IReadOnlyList<PageBlock> blocks,
         DocRect area,
@@ -104,7 +109,8 @@ public static class FlowLayouter
         int nesting = 0,
         bool collapsesSpacing = false,
         bool addsCellLineSpacing = false,
-        bool floatsPositionedTables = false)
+        bool floatsPositionedTables = false,
+        AnchoredObstacles? anchored = null)
     {
         ArgumentNullException.ThrowIfNull(blocks);
 
@@ -155,7 +161,8 @@ public static class FlowLayouter
                     nesting + 1,
                     area.Width,
                     collapsesSpacing,
-                    addsCellLineSpacing);
+                    addsCellLineSpacing,
+                    anchored?.Below(new DocPoint(Length.Zero, top)));
 
                 Length height = Length.Zero;
                 foreach (Length row in rowHeights) height += row;
@@ -203,6 +210,11 @@ public static class FlowLayouter
             // same places. `NeedsGlyphFallback` is the one that is not about height: it says the
             // paragraph's own face cannot draw its own text, so only the per-run path measures it in the
             // face the drawing pass will actually use.
+            // The frames this paragraph itself anchors, which for a flow is the only way it can meet
+            // one: a cell's obstacles are keyed by nothing the paginator can look a cell paragraph up
+            // by. Null for every flow but a table cell's, and for every cell holding no floating frame.
+            ILineObstacles? obstacles = anchored?.For(paragraph, top);
+
             LaidOutParagraph layout =
                 paragraph.HasRuns || paragraph.HasInlineObjects || paragraph.LabelRaisesFirstLine
                 || paragraph.NeedsGlyphFallback || paragraph.HasScriptSpace
@@ -212,7 +224,7 @@ public static class FlowLayouter
                     area.Width,
                     paragraph.Language,
                     previous,
-                    obstacles: null,
+                    obstacles,
                     emSize: paragraph.EmSize)
                 : layouter.Layout(
                     paragraph.Text,
@@ -221,7 +233,8 @@ public static class FlowLayouter
                     area.Width,
                     paragraph.Language,
                     previous,
-                    paragraph.EffectiveShaping);
+                    paragraph.EffectiveShaping,
+                    obstacles);
 
             // Collapsing: the gap between two paragraphs is the larger of the two spacings rather than
             // their sum, so only the part of this paragraph's space-before that exceeds the space-after
