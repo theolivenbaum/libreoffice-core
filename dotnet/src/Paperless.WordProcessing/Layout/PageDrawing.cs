@@ -1153,6 +1153,48 @@ public static class PageDrawing
     /// This paints inside space the tab had already reserved, so it moves no line break and no page
     /// break: a paragraph measures exactly as it did before the leader existed.
     /// </para>
+    /// <para>
+    /// <b>The fill character's width is a whole twip, and that is not a rounding nicety — it is worth
+    /// one or two dots on every contents line.</b> <c>nCharWidth</c> is a <c>SwTwips</c> and so is the
+    /// portion's <c>Width()</c>, so Writer's count is an integer division of two integer-twip lengths.
+    /// Carlito's full stop at 12 pt is 60.586 twips; Writer measures 60 and fits 134 dots into the
+    /// 8051-twip blank of <c>system_design__technical_architecture_template.docx</c>, where dividing by
+    /// the exact advance fits 132. The two missing dots leave a 2.51 pt hole in front of the page
+    /// number, and poppler — which is what the corpus gate scores — reads a hole that wide as a word
+    /// break, so <c>Revision History………4</c> extracts as three tokens against the reference's two. A
+    /// leader that stops a character short of its stop and a spurious extracted word are therefore the
+    /// same defect measured two ways — but <em>only</em> this one. A leader can also stop short because
+    /// the stop itself is in the wrong place, which is the <c>TabOverSpacing</c> clamp recorded in
+    /// <c>TODO.batches.md</c> and is not this: measured over the 28 corpus documents that draw a dot
+    /// leader, the page number's right edge agrees with the reference to 0.10 pt on 25 of them and is
+    /// 18 to 28 pt short on the other three.
+    /// </para>
+    /// <para>
+    /// <b>The count is taken at the whole twip and the fill is then drawn back down onto the blank</b>,
+    /// which is the <c>bKern</c> argument <c>SwTabPortion::Paint</c> passes to
+    /// <c>SwTextPaintInfo::DrawText</c>: it selects <c>SwFont::DrawStretchText_</c>, so the run is laid
+    /// out against the portion's width rather than its own. Counting at 60 twips and setting at 60.586
+    /// would put 134 dots into 132 dots' worth of blank, so the surplus is taken back off every
+    /// character and the last one lands at the stop.
+    /// </para>
+    /// <para>
+    /// <b>It compresses and it does not expand</b>, and that asymmetry is measured rather than assumed
+    /// — VCL's <c>GenericSalLayout::Justify</c> spreads a widening across the blanks in the string, and
+    /// a run of dots has none. Both halves are visible in the reference's own PDFs. In
+    /// <c>system_design__technical_architecture_template.docx</c>, where Carlito's 60.586 twips
+    /// truncates, the per-dot advance comes out 3.0002, 3.0121 or 3.0240 pt line by line — never the
+    /// font's own 3.0293 — and each run ends flush against its page number. In
+    /// <c>Agile_Arc_SysDes.docx</c>, where Liberation Serif's full stop is 55 twips exactly and nothing
+    /// truncates, the dots are written as one unadjusted show at their natural width and stop 2.05 to
+    /// 2.35 pt short of the number, which is just the division's remainder left where it fell.
+    /// </para>
+    /// <para>
+    /// The extracted word count turns on that trailing gap rather than on the dot count, because
+    /// poppler starts a new word at a gap of about a tenth of the em: a leader ending 1.5 pt short of a
+    /// 12 pt page number extracts as a separate token and one ending 0.3 pt short does not. Correcting
+    /// the count alone moved 24 of one document's 33 contents lines and left its token count exactly
+    /// where it was; the two together took it to the reference's, word for word.
+    /// </para>
     /// </remarks>
     private static (GlyphRun Run, Colour Colour)? Leader(
         PageParagraph paragraph, TabbedSegment segment, Length lineLeft, Length baseline)
@@ -1161,14 +1203,29 @@ public static class PageDrawing
 
         PageRun at = RunAt(paragraph, segment.Start - 1);
 
-        Length unit = TextShaper.Default
+        Length exact = TextShaper.Default
             .Shape(at.Face, segment.Leader.ToString(), at.EffectiveShaping)
             .Width(at.EmSize);
+        if (exact <= Length.Zero) return null;
+
+        // Truncated, not rounded: 60.586 twips has to become 60 for the reference's 134 dots, and
+        // rounding it to 61 fits 131.
+        Length unit = Length.FromTwips(exact.Emu / Length.EmuPerTwip);
         if (unit <= Length.Zero) return null;
 
         long count = segment.GapWidth.Emu / unit.Emu;
         if (segment.Leader == '_') count++;
         if (count <= 0) return null;
+
+        // Compressed to fit, never expanded to fill, and the clamp is not symmetry for its own sake —
+        // it is what the reference does, measured. A count taken at the truncated width can ask for
+        // more room than the blank has, and then the run is squeezed onto it; when it asks for less,
+        // the remainder is simply left. `MaxLeaderCharacters` is excluded because a clamped count is a
+        // guess at what a hostile document meant, and dividing the blank by it would set one character
+        // per page rather than refuse.
+        Length pitch = count <= MaxLeaderCharacters
+            ? Length.FromEmu(Math.Min(exact.Emu, segment.GapWidth.Emu / count))
+            : exact;
 
         string fill = new(segment.Leader, (int)Math.Min(count, MaxLeaderCharacters));
         ShapedText shaped = TextShaper.Default.Shape(at.Face, fill, at.EffectiveShaping);
@@ -1181,7 +1238,8 @@ public static class PageDrawing
                 at.EmSize,
                 at.Font ?? Reference(paragraph, at.Face),
                 new DocPoint(lineLeft + segment.GapLeft, baseline - at.Rise),
-                Length.Zero),
+                Length.Zero,
+                pitch - exact),
             at.EffectiveColour);
     }
 
