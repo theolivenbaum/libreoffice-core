@@ -702,7 +702,7 @@ public sealed partial class DocxLayoutSource
         _pageBreakPending = false;
 
         RunWalker walker = new(
-            CitationOf, Symbol, _constants, _footnoteNumber, _endnoteNumber);
+            CitationOf, Symbol, _constants, _footnoteNumber, _endnoteNumber, StyleReferenceText);
         walker.Walk(element, citation);
 
         // Where the note's own number landed, for a renumbering pass that has to find it again. A field
@@ -789,7 +789,58 @@ public sealed partial class DocxLayoutSource
         // own answer, so a break inside a caption cannot push the paragraph after the caption's frame.
         _pageBreakPending = walker.BreaksPage;
 
+        // After the walk, so a STYLEREF in *this* paragraph still quotes the one before it. Word's own
+        // search runs backwards from the field, and a heading whose own text is what a caption inside it
+        // would quote does not arise.
+        if (mapped.Length > 0 && Word.Value(properties, "pStyle") is { Length: > 0 } styled)
+        {
+            _styleText[styled] = mapped;
+        }
+
         return read;
+    }
+
+    /// <summary>
+    /// The text last read in each paragraph style, which is what a <c>STYLEREF</c> quotes.
+    /// </summary>
+    /// <remarks>
+    /// The most recent one rather than all of them, because the search is backwards from the field —
+    /// <c>SwGetRefFieldType::FindAnchorRefStyleOther</c> scans from the field's own node towards the
+    /// start and takes the first match. Keeping the last text seen per style answers that in one lookup
+    /// and costs one dictionary entry per style the document actually uses.
+    /// </remarks>
+    private readonly Dictionary<string, string> _styleText = [];
+
+    /// <summary>
+    /// What a <c>STYLEREF</c> naming a style quotes, or null when nothing in that style has been read.
+    /// </summary>
+    /// <remarks>
+    /// The name a field states is a style <em>name</em> — or Word's undocumented bare digit for a
+    /// built-in heading level — while a paragraph names a style <em>id</em>, so the two are matched
+    /// through the style table rather than directly. Null when the style is unknown or nothing precedes
+    /// the field in it, which leaves the producer's cached result in place: a wrong substitution is
+    /// worse than a stale one.
+    /// </remarks>
+    /// <param name="name">The style the field named.</param>
+    private string? StyleReferenceText(string name)
+    {
+        if (_styleText.Count == 0) return null;
+        if (_styleText.TryGetValue(name, out string? byId)) return byId;
+
+        // "1" through "9" mean the built-in heading of that level, which is a style whose *name* is
+        // "heading N" whatever the document calls its id.
+        string wanted = name.Length == 1 && name[0] is >= '1' and <= '9'
+            ? "heading " + name
+            : name;
+
+        foreach (WordStyle style in _styles.All)
+        {
+            if (style.Type != WordStyleType.Paragraph) continue;
+            if (!string.Equals(style.Name, wanted, StringComparison.OrdinalIgnoreCase)) continue;
+            if (_styleText.TryGetValue(style.StyleId, out string? byName)) return byName;
+        }
+
+        return null;
     }
 
     /// <summary>Whether the paragraph read next begins a page, because the one before ended with a break.</summary>
@@ -1127,19 +1178,28 @@ public sealed partial class DocxLayoutSource
         /// </param>
         /// <param name="endnote">How many endnotes came before it, counted separately.</param>
         /// <param name="constants">What a <c>FILENAME</c> or <c>TITLE</c> field evaluates to.</param>
+        /// <param name="styleReference">
+        /// What a <c>STYLEREF</c> naming a style quotes, or null when nothing has been read in that
+        /// style yet. Supplied by the source because the answer is a paragraph this walker never sees.
+        /// </param>
         internal RunWalker(
             Func<bool, int, string> citation,
             Func<string?, char, (string Text, OpenTypeFace Face, FontReference? Font)?> symbol,
             ConstantFields constants = default,
             int footnote = 0,
-            int endnote = 0)
+            int endnote = 0,
+            Func<string, string?>? styleReference = null)
         {
             _citationOf = citation;
             _symbolOf = symbol;
             _constants = constants;
             _footnote = footnote;
             _endnote = endnote;
+            _styleReference = styleReference;
         }
+
+        /// <summary>What a <c>STYLEREF</c> quotes, or null when the source cannot answer.</summary>
+        private readonly Func<string, string?>? _styleReference;
 
         /// <summary>What a <c>FILENAME</c> or <c>TITLE</c> field evaluates to.</summary>
         private readonly ConstantFields _constants;
@@ -1259,12 +1319,19 @@ public sealed partial class DocxLayoutSource
 
         /// <summary>The value a constant field evaluates to, or null when nothing can be computed.</summary>
         private string? ValueOf(string instruction)
-            => FieldInstructions.ConstantFieldOf(instruction) switch
+        {
+            if (FieldInstructions.StyleReferenceName(instruction) is { } style)
+            {
+                return _styleReference?.Invoke(style) is { Length: > 0 } quoted ? quoted : null;
+            }
+
+            return FieldInstructions.ConstantFieldOf(instruction) switch
             {
                 ConstantField.FileName => _constants.FileName is { Length: > 0 } name ? name : null,
                 ConstantField.Title => _constants.Title is { Length: > 0 } title ? title : null,
                 _ => null,
             };
+        }
 
         /// <summary>Writes a constant field's value in place of its cached result.</summary>
         /// <param name="field">The field, whose instruction has been read in full.</param>

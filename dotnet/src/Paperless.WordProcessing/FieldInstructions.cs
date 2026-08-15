@@ -146,6 +146,71 @@ public static class FieldInstructions
             _ => null,
         };
 
+    /// <summary>
+    /// The style a <c>STYLEREF</c> field names, when LibreOffice would substitute that style's text.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>STYLEREF</c> quotes the nearest paragraph in a named style. Word can quote several parts of it
+    /// — <c>\n</c>, <c>\r</c> and <c>\w</c> ask for the paragraph's <em>number</em> in three widths,
+    /// <c>\p</c> for "above"/"below", and <c>\s</c> for the complete number — and LibreOffice implements
+    /// four of the five: <c>DomainMapper_Impl.cxx</c>:8600 maps <c>p</c>, <c>r</c>, <c>n</c> and
+    /// <c>w</c> onto <c>ReferenceFieldPart</c> and has no branch for <c>s</c> at all, so a
+    /// <c>STYLEREF … \s</c> keeps the default part, <c>TEXT</c>, and draws the heading's <em>text</em>
+    /// where Word drew its number.
+    /// </para>
+    /// <para>
+    /// That divergence is the whole of <c>report-template.docx</c>: its seven captions read
+    /// <c>Table 1.2</c> from Word's cache and <c>Table Main body (Heading 2).2</c> in the reference,
+    /// which is 43 words and wraps every caption onto a second line. Matching the reference means
+    /// reproducing the same substitution, so this returns the style for the cases LibreOffice treats as
+    /// <c>TEXT</c> and null for the four it computes differently — a part switch we do not model is
+    /// better served by the producer's cached result.
+    /// </para>
+    /// <para>
+    /// A bare digit is Word's undocumented shorthand for the built-in heading of that level, which
+    /// LibreOffice reproduces in as many words (<c>reffld.cxx</c>:1682, "undocumented Word feature: 1 =
+    /// <c>Heading 1</c>"). The digit is returned as written; mapping it onto a style is the caller's,
+    /// since only the reader knows what the document calls its headings.
+    /// </para>
+    /// </remarks>
+    /// <param name="instruction">The instruction, verbatim.</param>
+    public static string? StyleReferenceName(string? instruction)
+    {
+        if (!string.Equals(Name(instruction), "STYLEREF", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        // `\l` only changes which end the search starts from, but the four part switches change what is
+        // quoted — and for those LibreOffice does compute something this does not model.
+        foreach (char part in "prnwtl")
+        {
+            if (HasSwitch(instruction, part)) return null;
+        }
+
+        ReadOnlySpan<char> arguments = instruction.AsSpan().Trim();
+        int after = arguments.IndexOfAny(' ', '\t', '\n');
+        if (after < 0) return null;
+
+        arguments = arguments[after..].TrimStart();
+
+        if (arguments.Length > 0 && arguments[0] == '"')
+        {
+            int close = arguments[1..].IndexOf('"');
+            return close < 0 ? null : Named(arguments.Slice(1, close));
+        }
+
+        int end = arguments.IndexOfAny(' ', '\t', '\n');
+        return Named(end < 0 ? arguments : arguments[..end]);
+
+        static string? Named(ReadOnlySpan<char> name)
+        {
+            name = name.Trim();
+            return name.Length == 0 || name[0] == '\\' ? null : name.ToString();
+        }
+    }
+
     /// <summary>Whether the instruction carries a given single-letter switch.</summary>
     private static bool HasSwitch(string? instruction, char letter)
     {
