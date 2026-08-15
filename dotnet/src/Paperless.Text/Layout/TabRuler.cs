@@ -87,7 +87,7 @@ public static class TabRuler
     /// <param name="isFirstLine">
     /// True for the paragraph's first line. It decides where the line's left edge sits relative to the
     /// stops, which differs by the first-line indent — and a hanging one puts the edge <em>before</em> the
-    /// stops' own origin, which is the case <see cref="ParagraphFormat.NextTabStop"/> treats specially.
+    /// stops' own origin, which is the case <see cref="ParagraphFormat.NextTabStop(Length)"/> treats specially.
     /// </param>
     /// <param name="rightEdge">
     /// Where the text frame's right boundary is, in the same coordinates as the stops, or null to let a

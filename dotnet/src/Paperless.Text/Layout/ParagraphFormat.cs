@@ -485,18 +485,72 @@ public sealed record ParagraphFormat
     /// </para>
     /// </remarks>
     /// <param name="position">Where the tab is, measured from <see cref="TabOrigin"/>.</param>
-    public TabStop NextTabStop(Length position)
+    public TabStop NextTabStop(Length position) => NextTabStop(position, null);
+
+    /// <summary>
+    /// The stop a tab at a position advances to, with a list level's own stop in the search.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The tab that follows a numbering label is an ordinary tab, and the ruler it searches is the
+    /// paragraph's with the level's stop <em>merged into it</em> — Writer inserts it into the line's own
+    /// copy of the paragraph's <c>SvxTabStopItem</c> in <c>SwLineInfo::InitLineInfo</c>
+    /// (<c>sw/source/core/text/inftxt.cxx</c>:124-137) and then runs the same
+    /// <c>SwTextFormatter::GetTabStop</c> over it as for any other tab. So the level's stop competes with
+    /// the paragraph's rather than pre-empting them: a paragraph stop nearer the pen wins.
+    /// </para>
+    /// <para>
+    /// That is not a nicety. The pen after a label sits inside the hanging indent, so the search position
+    /// is <em>behind</em> the paragraph's stops and every one of them is still ahead — including one
+    /// declared at the indent itself, which is exactly where a Word bullet list puts its text. Measured on
+    /// <c>info-bulletin-601.doc</c> (words/extra-001), whose level states a 36 pt list tab while the
+    /// paragraph declares a stop at its own 21.30 pt indent: LibreOffice sets the item's text at 21.30 pt
+    /// and preferring the level's stop set it at 36 pt, shortening every bulleted first line by 14.7 pt.
+    /// </para>
+    /// <para>
+    /// The one thing the merge does not do is let the hanging-indent rule below overrule the level's own
+    /// stop. Writer guards it with <c>nNextPos != GetListTabStopPosition()</c>
+    /// (<c>txttab.cxx</c>:269-272), so a level whose stop is the nearest one ahead keeps it even though
+    /// the pen is inside the indent.
+    /// </para>
+    /// </remarks>
+    /// <param name="position">Where the tab is, measured from <see cref="TabOrigin"/>.</param>
+    /// <param name="listTabStop">
+    /// The level's own stop, in the same coordinates, or null for a tab that is not a label's follower.
+    /// </param>
+    public TabStop NextTabStop(Length position, Length? listTabStop)
     {
         // The paragraph's own indent, in the same coordinates as the stops. A tab before it is inside the
         // hanging indent, and only the first line of a paragraph with a negative first-line indent has
         // anything before it at all.
         Length indent = TabsRelativeToIndent ? Length.Zero : StartIndent;
 
+        TabStop? nearest = null;
+
         foreach (TabStop stop in TabStops)
         {
             if (stop.Position <= position) continue;
 
-            return position < indent && stop.Position > indent ? new TabStop(indent) : stop;
+            nearest = stop;
+            break;
+        }
+
+        // The level's stop takes its place in the ruler by position, so it wins only where it is the
+        // first one past the pen.
+        bool tookListStop = false;
+
+        if (listTabStop is { } list && list > position
+            && (nearest is not { } found || list < found.Position))
+        {
+            nearest = new TabStop(list);
+            tookListStop = true;
+        }
+
+        if (nearest is { } hit)
+        {
+            return !tookListStop && position < indent && hit.Position > indent
+                ? new TabStop(indent)
+                : hit;
         }
 
         if (position < indent) return new TabStop(indent);

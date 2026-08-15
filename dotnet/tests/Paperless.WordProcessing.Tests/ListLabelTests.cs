@@ -252,6 +252,80 @@ public sealed class ListLabelTests
     }
 
     /// <summary>
+    /// A paragraph stop nearer the pen than the level's own beats the level's, even where the level's
+    /// is still ahead.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Writer does not consult the level's stop first and the paragraph's second. It inserts the
+    /// level's into the line's copy of the paragraph's ruler — <c>SwLineInfo::InitLineInfo</c>,
+    /// <c>sw/source/core/text/inftxt.cxx</c>:124-137 — and runs one search over the merged list, so
+    /// whichever stop is nearest the pen wins. The pen after a label sits inside the hanging indent, so
+    /// every paragraph stop is still ahead of it, including one at the paragraph's own indent.
+    /// </para>
+    /// <para>
+    /// Measured on <c>info-bulletin-601.doc</c> (words/extra-001), whose bullet level states a 36 pt
+    /// list tab while its paragraphs declare a stop at their own 21.30 pt indent: LibreOffice sets the
+    /// item's text at 21.30 pt. Preferring the level's stop set it at 36 pt, which shortened every
+    /// bulleted first line by 14.7 pt, cost the document a line, and through that a page — 7 against
+    /// the reference's 6.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void AParagraphStopNearerThanTheLevelsBeatsIt()
+    {
+        PageParagraph paragraph = Item("•", start: 21.3, firstLine: -21.3, adjust: measured =>
+            measured with
+            {
+                Follow = LabelFollow.ListTab,
+                TabStop = Length.FromPoints(36),
+            }) with
+        {
+            Format = new ParagraphFormat
+            {
+                StartIndent = Length.FromPoints(21.3),
+                FirstLineIndent = Length.FromPoints(-21.3),
+                TabsRelativeToIndent = false,
+                TabStops = [new TabStop(Length.FromPoints(21.3))],
+            },
+        };
+
+        paragraph.Label!.Width.ShouldBeLessThan(Length.FromPoints(21.3));
+        paragraph.Format.LineStart(isFirstLine: true).ShouldBe(Length.FromPoints(21.3));
+    }
+
+    /// <summary>
+    /// The level's stop still wins where nothing of the paragraph's is nearer.
+    /// </summary>
+    /// <remarks>
+    /// The control on the rule above: the same shape with the paragraph's only stop moved out past the
+    /// level's, which is the case the merge must not disturb. Writer keeps the level's stop here even
+    /// though the pen is inside the hanging indent, because the left-margin override is guarded by
+    /// <c>nNextPos != GetListTabStopPosition()</c> (<c>txttab.cxx</c>:269-272).
+    /// </remarks>
+    [Fact]
+    public void TheLevelsStopWinsWhenNoParagraphStopIsNearer()
+    {
+        PageParagraph paragraph = Item("•", start: 21.3, firstLine: -21.3, adjust: measured =>
+            measured with
+            {
+                Follow = LabelFollow.ListTab,
+                TabStop = Length.FromPoints(36),
+            }) with
+        {
+            Format = new ParagraphFormat
+            {
+                StartIndent = Length.FromPoints(21.3),
+                FirstLineIndent = Length.FromPoints(-21.3),
+                TabsRelativeToIndent = false,
+                TabStops = [new TabStop(Length.FromPoints(72))],
+            },
+        };
+
+        paragraph.Format.LineStart(isFirstLine: true).ShouldBe(Length.FromPoints(36));
+    }
+
+    /// <summary>
     /// A label that fits the room set aside for it still stops at that room's edge.
     /// </summary>
     /// <remarks>

@@ -206,10 +206,15 @@ public sealed record PageLabel
     /// <c>w:defaultTabStop</c> — where we started it at 23.0.
     /// </para>
     /// <para>
-    /// The order is the search's own. The level's stop first, when it is still ahead; then the
-    /// paragraph's left margin, which is where Writer sends a tab that is still inside the hanging
-    /// indent (<c>bNewTabPortionInsideHangingIndent</c>, <c>txttab.cxx:257</c>); and only then the
-    /// ordinary stops.
+    /// <strong>There is no separate order: it is one search over one ruler.</strong> Writer inserts the
+    /// level's stop into the line's copy of the paragraph's stops
+    /// (<c>SwLineInfo::InitLineInfo</c>, <c>sw/source/core/text/inftxt.cxx</c>:124-137) and then searches
+    /// that, so the level's stop wins only where it is the nearest one ahead of the pen. Preferring it
+    /// unconditionally — which is what stood here — moved every bulleted first line in
+    /// <c>info-bulletin-601.doc</c> (words/extra-001) 14.7 pt to the right, because its level states a
+    /// 36 pt stop while its paragraphs declare one at their own 21.30 pt indent, and the pen inside the
+    /// hanging indent is behind both. See <see cref="ParagraphFormat.NextTabStop(Length, Length?)"/>,
+    /// which is where the merge and the hanging-indent rule now live together.
     /// </para>
     /// </remarks>
     /// <param name="labelEnd">Where the label ends, measured from its own pen.</param>
@@ -221,13 +226,15 @@ public sealed record PageLabel
     {
         Length listStop = TabStop - lineStart;
 
-        if (listStop > labelEnd) return Max(listStop, hangingIndent);
-        if (hangingIndent > labelEnd || format is null) return hangingIndent;
+        // Nothing to search: the level's stop is all there is, and past it the label butts against the
+        // paragraph's own margin.
+        if (format is null) return listStop > labelEnd ? Max(listStop, hangingIndent) : hangingIndent;
 
         // The stops are stated from the paragraph's own tab origin rather than from the text area, so the
         // pen has to be moved into their frame of reference and the answer moved back out of it.
         Length pen = lineStart + labelEnd - format.TabOrigin;
-        Length next = format.NextTabStop(pen).Position + format.TabOrigin - lineStart;
+        Length next = format.NextTabStop(pen, TabStop - format.TabOrigin).Position
+                      + format.TabOrigin - lineStart;
 
         return Max(next, hangingIndent);
     }
