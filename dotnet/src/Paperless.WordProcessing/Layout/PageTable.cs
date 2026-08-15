@@ -174,6 +174,29 @@ public sealed record PageTable : PageBlock
     /// </remarks>
     public TableColumnFit? ColumnFit { get; init; }
 
+    /// <summary>
+    /// The table's width as a percentage of the area it sits in, or null when it is an absolute width.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// OOXML's <c>w:tblW w:type="pct"</c>, whose unit is fiftieths of a percent, and which
+    /// <c>DomainMapperTableManager::sprm</c>
+    /// (<c>sw/source/writerfilter/dmapper/DomainMapperTableManager.cxx</c>:191) turns into
+    /// <c>SizeType::VARIABLE</c> with a percentage <em>clamped to 100</em> — a table stating 102.24% is
+    /// laid out at 100%, not at 102.24%. The grid is then restated in the same proportions at that
+    /// width, which is what <see cref="WidthsWithin"/> does.
+    /// </para>
+    /// <para>
+    /// Not a nicety: <c>ESPN-R - MCF - RA - Ed1.docx</c>'s running header holds a
+    /// <c>w:tblW w:w="5000" w:type="pct"</c> over a grid summing to 9633 twips, so ignoring the
+    /// percentage drew that table 481.65 pt wide where Writer draws it 714.35 pt — the whole landscape
+    /// text width — and <c>Page 26/58</c> then broke across two lines in a cell that should hold it on
+    /// one. Scaling the grid to the stated percentage reproduces all four of the reference's column
+    /// boundaries to within 0.04 pt.
+    /// </para>
+    /// </remarks>
+    public int? RelativeWidth { get; init; }
+
     /// <summary>The rows, top to bottom.</summary>
     public required IReadOnlyList<PageTableRow> Rows { get; init; }
 
@@ -298,17 +321,52 @@ public sealed record PageTable : PageBlock
     /// </remarks>
     /// <param name="available">The width of the area the table sits in.</param>
     public IReadOnlyList<Length> WidthsWithin(Length available)
-        => ColumnFit is null ? ColumnWidths : ColumnFit.Resolve(ColumnWidths, available);
+    {
+        if (RelativeWidth is { } percent)
+        {
+            Length target = Length.FromTwips(Math.Max(1, available.Twips * percent / 100));
+            return ColumnFit is null ? Scaled(ColumnWidths, target) : ColumnFit.Resolve(ColumnWidths, target);
+        }
+
+        return ColumnFit is null ? ColumnWidths : ColumnFit.Resolve(ColumnWidths, available);
+    }
 
     /// <summary>How wide the table is inside an area of a given width.</summary>
     /// <param name="available">The width of the area the table sits in.</param>
     public Length WidthWithin(Length available)
     {
-        if (ColumnFit is null) return Width;
+        if (ColumnFit is null && RelativeWidth is null) return Width;
 
         Length total = Length.Zero;
         foreach (Length column in WidthsWithin(available)) total += column;
         return total;
+    }
+
+    /// <summary>
+    /// The declared grid restated in the same proportions at a given total width.
+    /// </summary>
+    /// <remarks>
+    /// Twips, and the last column takes the remainder, so the parts add back up to the total exactly — the
+    /// same arithmetic <see cref="TableColumnFit"/> does, for the same reason.
+    /// </remarks>
+    private static IReadOnlyList<Length> Scaled(IReadOnlyList<Length> columns, Length target)
+    {
+        long grid = 0;
+        foreach (Length column in columns) grid += Math.Max(0, column.Twips);
+
+        if (grid <= 0 || columns.Count == 0) return columns;
+
+        Length[] scaled = new Length[columns.Count];
+        long used = 0;
+        for (int i = 0; i < columns.Count - 1; i++)
+        {
+            long share = Math.Max(0, columns[i].Twips) * target.Twips / grid;
+            scaled[i] = Length.FromTwips(share);
+            used += share;
+        }
+
+        scaled[^1] = Length.FromTwips(Math.Max(0, target.Twips - used));
+        return scaled;
     }
 
     /// <summary>
