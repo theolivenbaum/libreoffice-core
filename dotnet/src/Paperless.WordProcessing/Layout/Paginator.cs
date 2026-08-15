@@ -585,19 +585,7 @@ public sealed class Paginator
         PageGeometry body = page;
         Length bodyHeight = body.TextHeight;
 
-        // How much room the fitting has already taken out of this page for its notes. The note area is
-        // never given less than this, because the body was placed against exactly this reservation —
-        // recomputing the room from `used` instead subtracts the last paragraph's space-after a second
-        // time, and a note short by that much spills along with every note after it.
-        //
-        // It is the reservation as it stood when a block was fitted, so it covers the notes already on
-        // the page and NOT the ones that block goes on to cite. That distinction is the whole rule: a
-        // note the page was shortened for must be drawn, and a note nothing was reserved for may spill.
-        //
-        // Measured on `EHEST-SMS-Safety-Management-Manual-V2.docx` page 17, whose two notes want
-        // 79.4 pt and were offered 78.0 — so both spilled and the page kept 176 pt of blank where the
-        // reference draws them, while its page count improved and no gate column saw it.
-        Length reservedNoteRoom = Length.Zero;
+
         Length bodyWidth = page.ColumnWidth;
 
         // A note breaks at the body's full width rather than a column's, which is what LibreOffice's own
@@ -1113,10 +1101,7 @@ public sealed class Paginator
                 // which is the paragraph arm's rule applied to the other kind of block. Before this, a
                 // table was placed against the bare column bottom and could be drawn straight over the
                 // note area a paragraph above it had already reserved.
-                Length reservedForTable = NoteHeight(notes);
-                reservedNoteRoom = Length.Max(reservedNoteRoom, reservedForTable);
-
-                Length tableRoom = columnBottom - reservedForTable - (used + before);
+                Length tableRoom = columnBottom - NoteHeight(notes) - (used + before);
 
                 // Where the table's own zero lands on the page, for the pass after this one — see
                 // `_tableOrigins`. Its first part only: a continuation's rows are already measured.
@@ -1242,11 +1227,8 @@ public sealed class Paginator
             // (`probes/footnote-deferral/footnote-deferral.py`) leaves **49** of the note's 59 words on
             // the citing page at one body length and **17** at the next, which is a cut at the room left
             // and cannot be a whole move — that predicts nought or fifty-nine and never seventeen.
-            Length reservedHere = NoteHeight(notes);
-            reservedNoteRoom = Length.Max(reservedNoteRoom, reservedHere);
-
             int fitted = Fit(
-                layout, lineIndex, used + spaceAbove, columnBottom - reservedHere,
+                layout, lineIndex, used + spaceAbove, columnBottom - NoteHeight(notes),
                 atTopOfPage: columnIsEmpty, borderBelow: paragraph.BorderBelow);
 
             int allowed = Allowed(
@@ -1555,7 +1537,7 @@ public sealed class Paginator
             // which errs towards placing a note here instead of carrying it, and so cannot start a
             // spill that would not otherwise happen.
             (PlacedFlow? noteArea, List<PageNote> carriedNotes) =
-                NoteArea(notes, body, Length.Max(bodyHeight - used, reservedNoteRoom));
+                NoteArea(notes, body, bodyHeight - BodyInk(placed, tables));
 
             pages.Add(Page(
                 pages.Count,
@@ -1586,7 +1568,6 @@ public sealed class Paginator
             // The notes this page could not take start the next page's, ahead of anything it cites
             // itself, so their order across the two pages is the order they were cited in.
             notes = carriedNotes;
-            reservedNoteRoom = Length.Zero;
             used = Length.Zero;
             lineUsed = Length.Zero;
             MeasureBody();
@@ -2401,6 +2382,40 @@ public sealed class Paginator
     /// call a Word footer makes — a flow with no stated offset — and the notes take their room out of the
     /// body's, which is what makes a page with notes hold less text.
     /// </remarks>
+    /// <summary>How far down the column the body's last ink reaches.</summary>
+    /// <remarks>
+    /// <para>
+    /// The room a page's notes have is what is left below the body's <em>ink</em>, not below `used`.
+    /// The two differ by the last paragraph's space-after, which `used` carries and which the notes are
+    /// perfectly entitled to sit in — Writer's footnote container is positioned from the page bottom
+    /// rather than from where the body's spacing ends, so it never sees that gap at all.
+    /// </para>
+    /// <para>
+    /// Measuring from `used` instead subtracts it a second time, because the fitting already placed the
+    /// body against `columnBottom - NoteHeight(notes)`. On
+    /// <c>EHEST-SMS-Safety-Management-Manual-V2.docx</c> page 17 that was 1.4 pt: two notes wanting
+    /// 79.4 pt were offered 78.0, both spilled — order is preserved, so one short note takes the rest
+    /// with it — and the page kept 176 pt of blank where the reference draws them, at 44 lines to our
+    /// 37. The page count improved at the same time, so no gate column saw it.
+    /// </para>
+    /// <para>
+    /// A floor of "never less than what the fitting reserved" fixes that case too and is the wrong
+    /// shape: it restores room rather than measuring it, so anything that later draws *up to* the room
+    /// available — a note cut at the last line that fits, say — fills to the reservation and overruns
+    /// the page. This is the quantity itself, and it stays right whatever consumes it.
+    /// </para>
+    /// </remarks>
+    private static Length BodyInk(
+        IReadOnlyList<PlacedLine> lines, IReadOnlyList<PlacedTable> tables)
+    {
+        Length ink = Length.Zero;
+
+        foreach (PlacedLine line in lines) ink = Length.Max(ink, line.Top + line.Box.Height);
+        foreach (PlacedTable table in tables) ink = Length.Max(ink, table.Area.Bottom);
+
+        return ink;
+    }
+
     /// <summary>
     /// The notes that fit beneath the body, and the ones that must go to the next page.
     /// </summary>
@@ -2413,13 +2428,9 @@ public sealed class Paginator
     /// citing paragraph instead and ran to 15 pages where the reference took 14.
     /// </para>
     /// <para>
-    /// A note is carried <em>whole</em> here rather than cut at the last line that fits. That is the
-    /// boundary case of Writer's rule rather than the rule — the probe's 49 and 17 are a genuine split —
-    /// and it is what the corpus needs: on
-    /// <c>template---tpr-technical-progress-report-with-guidance.docx</c> the note area was already
-    /// filled by an earlier footnote, so nothing of the second one fitted and a split would have left
-    /// nothing behind either. Splitting a note across the boundary is recorded as the remaining half of
-    /// this work; doing it needs a note to be layable from a line offset, which nothing here can do yet.
+    /// A note is carried <em>whole</em>. Cutting it at the last line that fits is what the reference
+    /// does — the probe measures 49 words of a 59-word note left behind at one body length and 17 at
+    /// the next — and implementing it needs the reservation to shrink with the note; see task #63.
     /// </para>
     /// <para>
     /// Order is preserved strictly: once one note has spilled every later note spills too, whatever the
