@@ -1740,13 +1740,27 @@ public sealed partial class Ww8DocumentReader
     /// </summary>
     /// <remarks>
     /// <para>
-    /// Its own mark's CHPX when the mark carries one, and otherwise <strong>the CHPX in force at the
-    /// position before it</strong> — which is the previous paragraph's mark. That second half is the rule,
-    /// and it is not a guess about intent: a CHPX exception whose FKP range <em>ends</em> at this mark is
+    /// <strong>The CHPX in force at the position before it</strong> — which is the previous paragraph's
+    /// mark — with the mark's <em>own</em> CHPX laid over the top. The inherited half is the rule, and it
+    /// is not a guess about intent: a CHPX exception whose FKP range <em>ends</em> at this mark is
     /// still open when LibreOffice's reader consumes the previous mark, and consuming a mark is what
     /// appends the next (here empty) node — so the reader closes the attribute at offset 0 of a node that
     /// has no characters, and a zero-length hint on an empty node covers all of it. The empty paragraph
     /// comes out as tall as the run that ended just above it.
+    /// </para>
+    /// <para>
+    /// <strong>Both halves apply, sprm by sprm, and the mark's own does not displace the inherited one.</strong>
+    /// This read "its own mark's CHPX when the mark carries one, and otherwise the inherited one" for two
+    /// rounds, which is right whenever the mark carries nothing and wrong the moment it carries anything at
+    /// all — and a mark that states only a *complex-script* size states something. Measured on
+    /// <c>info-bulletin-601.doc</c>: the empty paragraph at cp 41 carries a CHPX of
+    /// <c>sprmCHpsBi 0x16</c> and four font-index sprms and <em>no</em> <c>sprmCHps</c>, while cp 40 —
+    /// the previous mark, whose run ends here — states <c>sprmCHps 0x2C</c> and <c>sprmCFBold</c>.
+    /// LibreOffice's own import writes that paragraph out as <c>fo:font-size="22pt"
+    /// fo:font-weight="bold" style:font-size-complex="11pt"</c>: the Latin size and the weight from the
+    /// run that ended above, the complex size from the mark's own CHPX. Taking the mark's own alone left
+    /// it at the style's 11 pt and cost 27.6 pt over three such paragraphs on page 1 — one page of the
+    /// document.
     /// </para>
     /// <para>
     /// Measured on <c>003.doc</c>, whose CHPX FKP reads (fc ranges, ours to name the CPs):
@@ -1774,12 +1788,12 @@ public sealed partial class Ww8DocumentReader
         Ww8LayoutFormat own = ResolveCharacterLayout(position);
         if (position <= storyStart) return own;
 
-        if (!_characterProperties.Find(_pieces.FileOffsetOf(position)).IsEmpty) return own;
-
         ReadOnlyMemory<byte> before = _characterProperties.Find(_pieces.FileOffsetOf(position - 1));
-        return before.IsEmpty
-            ? own
-            : ApplyCharacterException(CharacterStyleFormat(position), before);
+        if (before.IsEmpty) return own;
+
+        return ApplyCharacterException(
+            ApplyCharacterException(CharacterStyleFormat(position), before),
+            _characterProperties.Find(_pieces.FileOffsetOf(position)));
     }
 
     /// <summary>
