@@ -299,6 +299,18 @@ public static class EscherPropertyIds
     /// <inheritdoc cref="HorizontalPosition"/>
     public const ushort VerticalRelation = 914;
 
+    /// <summary>
+    /// <c>fLayoutInCell</c> and its fifteen neighbours: MS-ODRAW 2.3.4.44's "Group Shape Boolean
+    /// Properties", sixteen flags and sixteen "is this one stated" bits above them.
+    /// </summary>
+    /// <remarks>
+    /// In the <em>tertiary</em> table beside the four position properties, under 0x03BF
+    /// (<c>ww8par.cxx</c>:682). Bit 15 is <c>fLayoutInCell</c> and bit 31 says whether it was set at
+    /// all; the property being absent altogether means the writing application decides, which is why
+    /// the WW8 reader's <c>Ww8Frames.LaysOutInTableCell</c> needs the FIB as well as the shape.
+    /// </remarks>
+    public const ushort GroupShapeBooleans = 959;
+
     /// <summary>The kind of shadow, an <c>MSO_SHADOWTYPE</c>; 0 is a plain offset.</summary>
     public const ushort ShadowType = 512;
 

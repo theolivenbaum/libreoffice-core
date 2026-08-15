@@ -252,6 +252,18 @@ public sealed partial class Ww8DocumentReader
     private Ww8Drawings? _drawings;
 
     /// <summary>
+    /// True when Word 97 itself wrote the file, rather than any later version.
+    /// </summary>
+    /// <remarks>
+    /// <c>SwWW8ImplReader::IsObjectLayoutInTableCell</c> (<c>ww8graf.cxx</c>:2554) takes the top three
+    /// bits of <c>nProduct</c> as the version and treats a zero there as Word 97 — <em>unless</em>
+    /// <c>cswNew</c> is non-zero, because "0 nProduct can happen for Word &gt;97 as well". Both halves
+    /// are needed: the corpus holds files written by Word 2000 and later whose <c>nProduct</c> is
+    /// nought, and reading them as Word 97 puts every in-cell shape a top margin too high.
+    /// </remarks>
+    private bool WrittenByWord97 => (_fib.Product & 0xE000) == 0 && _fib.CswNew == 0;
+
+    /// <summary>
     /// The character-position extents of each subdocument.
     /// </summary>
     /// <remarks>

@@ -313,6 +313,11 @@ public static class FlowLayouter
             Tables = tables,
             Area = area,
             Advance = reach,
+
+            // Whatever the last paragraph would have handed down. `leading` holds it because the loop
+            // leaves it there for a paragraph that never came; see PlacedFlow.TrailingLineSpacing for
+            // why it is reported rather than added.
+            TrailingLineSpacing = leading,
         };
     }
 

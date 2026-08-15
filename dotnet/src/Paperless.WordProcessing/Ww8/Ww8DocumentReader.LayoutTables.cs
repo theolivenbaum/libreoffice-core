@@ -582,6 +582,17 @@ public sealed record Ww8LayoutFrame(
     /// </remarks>
     public bool IsSetInLine { get; init; }
 
+    /// <summary>
+    /// True when the FIB names Word 97 as the writing application.
+    /// </summary>
+    /// <remarks>
+    /// Carried on the frame because it decides one thing about the frame and nothing else: whether a
+    /// shape anchored in a table cell is laid out inside that cell when it does not say. Word 97 never
+    /// does and every later version does, and the flag <em>is</em> the version rather than anything in
+    /// the shape — see <see cref="Ww8Frames.LaysOutInTableCell"/>.
+    /// </remarks>
+    public bool WrittenByWord97 { get; init; }
+
     /// <summary>The picture the shape's <c>pib</c> names, or nothing when it names none.</summary>
     public FramePicture Picture { get; init; }
 

@@ -665,6 +665,43 @@ public sealed class MeasuredParagraph
         Length textAscent = ascent;
         Length textDescent = descent;
 
+        // A blank or tab run is transparent to the line's *height* and opaque to the height
+        // proportional line spacing takes its percentage of. The two exclusions are separate rules in
+        // Writer and they do not have the same membership: the blanks-and-tabs rule decides
+        // `SwLineLayout::Height`, and `m_nLineSpacingBaseHeight` is a second maximum with its own test.
+        //
+        // Measured against the installed 26.2.4.2 by `probes/words-w-pitch/mk.py`, six paragraphs per
+        // group of a 10 pt Arial style at `w:line="288" w:lineRule="auto"` with `w:contextualSpacing`,
+        // so the pitch is the line height plus the proportional gap and nothing else. A run holding one
+        // tab, or one space, in a face and size of its own:
+        //
+        //   | the blank run       | line height | LibreOffice's pitch | base it implies |
+        //   |---------------------|------------:|--------------------:|----------------:|
+        //   | none                |       11.50 |               13.80 |           11.50 |
+        //   | Calibri 11 pt tab   |       11.50 |               14.15 |           13.43 |
+        //   | Calibri 11 pt space |       11.50 |               14.15 |           13.43 |
+        //   | Calibri 22 pt tab   |       11.50 |               16.85 |           26.86 |
+        //   | Arial 20 pt tab     |       11.50 |               16.10 |           23.00 |
+        //
+        // Every implied base is the blank run's own line height to the twip, and the line height never
+        // moves — so the blank run is in one maximum and out of the other. Scaling the line instead, or
+        // leaving the blank run out of both, gives 13.80 for all five.
+        //
+        // This is what a contents entry costs: `OM template for non-complex NCC operators` sets each
+        // `TOC4` line with a `minorHAnsi` 11 pt run holding the tab between the number and the title,
+        // and drawing those at 13.80 rather than 14.15 fitted 83 entries where the reference fits 79.
+        if (_blanksAreTransparentToHeight)
+        {
+            Length blankHeight = Length.Zero;
+            Length blankAscent = Length.Zero;
+            Length blankDescent = Length.Zero;
+
+            Fold(start, end, skipBlankRuns: false, ref blankHeight, ref blankAscent, ref blankDescent);
+
+            textHeight = Length.Max(
+                textHeight, Length.Max(blankHeight, blankAscent + blankDescent));
+        }
+
         // A line holding no text has nothing to hang below its baseline. Writer builds a line's descent
         // out of the portions that carry text and a fly-in-content is not one of them, so a picture
         // alone on its line makes a line exactly as tall as the picture — floored at the paragraph

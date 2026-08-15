@@ -1380,6 +1380,15 @@ public sealed class Paginator
         {
             balance = null;
 
+            // Every column of a section that begins part way down a page begins there too — balanced or
+            // not, and this is the half that is not about balancing at all. Writer gives a continuous
+            // multi-column section a `SwSectionFrame` of its own whose top is where the section starts,
+            // and the `SwColumnFrame`s live inside it; balancing decides only how far down that frame
+            // reaches. Filling column two from the top of the *page* instead hands it everything the
+            // section is below on the sheet — on `absrc-pac-01-info-note-en.doc` that was 215 pt of
+            // room the reference does not have, and it swallowed a whole page of contents entries.
+            if (page.Columns > 1 && column == 0 && used > Length.Zero) columnTop = used;
+
             // Only from the first column. A balanced section beginning half way through *another* section's
             // columns would need a second column index — Writer gives it a section frame of its own — and
             // no corpus document does it, so it is left filling in order rather than modelled wrongly.
@@ -1947,7 +1956,7 @@ public sealed class Paginator
     {
         if (header is null || header.IsEmpty) return page;
 
-        Length needed = page.HeaderDistance + header.Advance;
+        Length needed = page.HeaderDistance + header.Advance + header.TrailingLineSpacing;
         if (needed <= page.Margins.Top) return page;
 
         // A head that would leave no body at all is not honoured. Writer would let the frame keep growing,
@@ -1992,7 +2001,7 @@ public sealed class Paginator
     {
         if (footer is null || footer.IsEmpty) return body;
 
-        Length needed = stated.FooterDistance + footer.Advance;
+        Length needed = stated.FooterDistance + footer.Advance + footer.TrailingLineSpacing;
         if (needed <= stated.Margins.Bottom) return body;
 
         // As with a running head, a foot that would leave no body at all is not honoured: a body of no

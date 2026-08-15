@@ -983,6 +983,7 @@ public sealed partial class Ww8DocumentReader
                 {
                     Picture = PictureOf(shape),
                     Members = GroupMembers(shape, anchor),
+                    WrittenByWord97 = WrittenByWord97,
 
                     // SwWW8ImplReader::IsInlineEscherHack, ww8par.hxx:1737 — the innermost open field
                     // being a SHAPE is the whole of the test, and ww8graf.cxx:2355 then anchors the

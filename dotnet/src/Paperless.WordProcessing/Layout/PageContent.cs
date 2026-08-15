@@ -970,6 +970,42 @@ public sealed record PlacedFlow
     /// </remarks>
     public Length Advance { get; init; }
 
+    /// <summary>
+    /// The proportional line spacing the flow's last paragraph would have handed to a paragraph after
+    /// it, which nothing collected because there is no paragraph after it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Held apart from <see cref="Advance"/> rather than folded into it because only some callers want
+    /// it. Inside a flow the gap is unambiguous — <see cref="ParagraphLeading"/> gives it to the line
+    /// below, Writer's newer builds keep it under the line above, and both put the same distance in the
+    /// same place — but at the flow's <em>end</em> the two answers differ by the whole gap, and which is
+    /// right depends on the frame: a running head grows by it, and a body's last paragraph on a page
+    /// does not, since the space belongs to the page break.
+    /// </para>
+    /// <para>
+    /// Measured against the installed 26.2.4.2 by <c>probes/words-w-pitch/mkhdr.py</c>, a two-paragraph
+    /// header whose second paragraph is empty, at <c>w:top</c> 720 and <c>w:header</c> 709, with the
+    /// body's first baseline reporting the header band:
+    /// </para>
+    /// <code>
+    ///   mark rPr   w:line       reference   this engine before
+    ///   10 pt      240 (100%)      774.04   774.05
+    ///   10 pt      480 (200%)      762.54   774.05
+    ///   12 pt      240 (100%)      771.74   771.75
+    ///   12 pt      360 (150%)      764.89   771.75
+    ///   12 pt      480 (200%)      757.99   771.75
+    ///   20 pt      480 (200%)      739.54   762.55
+    /// </code>
+    /// <para>
+    /// Every reference row is the header plus the last paragraph's own proportional gap; every "before"
+    /// row is the header without it, and moves with the size but not with the spacing. It is 13.75 pt on
+    /// <c>OM template for non-complex NCC operators</c>, whose running head ends with an empty 12 pt
+    /// paragraph at <c>w:line="480"</c> — enough to take one contents entry per page.
+    /// </para>
+    /// </remarks>
+    public Length TrailingLineSpacing { get; init; }
+
     /// <summary>True when nothing was laid out.</summary>
     public bool IsEmpty => Lines.Count == 0 && Tables.Count == 0;
 }

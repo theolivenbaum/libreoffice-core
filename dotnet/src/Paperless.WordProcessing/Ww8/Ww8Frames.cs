@@ -70,12 +70,23 @@ public static class Ww8Frames
     /// wrap and nothing else, because that is all <c>ProcessEscherAlign</c> changes: the size, the
     /// insets, the fill and the line all still come from the same two records.
     /// </param>
+    /// <param name="inTableCell">
+    /// True when the anchoring paragraph is inside a table cell — <c>SwWW8ImplReader</c>'s
+    /// <c>m_nInTable</c>. It changes what a page-relative vertical origin means; see
+    /// <see cref="LaysOutInTableCell"/>.
+    /// </param>
+    /// <param name="writtenByWord97">
+    /// True when the FIB says Word 97 wrote the file, which is the one version that never lays a
+    /// shape out inside the cell it is anchored in.
+    /// </param>
     public static PageFrame? Build(
         Ww8ShapeAnchor anchor,
         EscherShape? shape,
         int offset,
         IReadOnlyList<PageBlock> blocks,
-        bool setInLine = false)
+        bool setInLine = false,
+        bool inTableCell = false,
+        bool writtenByWord97 = false)
     {
         if (anchor.Width <= 0 || anchor.Height <= 0) return null;
         if (shape is not null && (shape.IsDeleted || shape.Properties.Boolean(EscherPropertyIds.Hidden)))
@@ -101,6 +112,36 @@ public static class Ww8Frames
             // (ww8graf.cxx:2856).
             horizontal = Ww8ShapeOrigin.Page;
             vertical = Ww8ShapeOrigin.Page;
+        }
+
+        FrameVerticalAlignment verticalAlignment = host.Value(EscherPropertyIds.VerticalPosition) switch
+        {
+            1 or 4 => FrameVerticalAlignment.Top,
+            2 => FrameVerticalAlignment.Middle,
+            3 or 5 => FrameVerticalAlignment.Bottom,
+            _ => FrameVerticalAlignment.Offset,
+        };
+
+        // A shape anchored in a table cell and laid out inside it reads its own vertical origin
+        // differently, and both halves of the correction are ProcessEscherAlign's
+        // (`ww8graf.cxx`:2516-2527), under the comment "Microsoft is buggy and inconsistent in how
+        // they handle layoutInCell":
+        //
+        //   * an origin of *the page* is honoured as *the page's printable area* — Word implements it
+        //     against the cell's spacing rather than against the paper's edge; and
+        //   * every alignment but "at the stated offset" is implemented as "top".
+        //
+        // The first is worth a third of an inch on a letterhead: a logo stated 180 twips below the
+        // page lands 180 twips below the *top margin*, and every row under it moves down by the
+        // margin. Word's own layout is what the file was authored against, so following the field
+        // rather than the application puts the whole first page too high.
+        if (!setInLine && LaysOutInTableCell(inTableCell, host, vertical, horizontal, writtenByWord97))
+        {
+            if (vertical == Ww8ShapeOrigin.Page) vertical = Ww8ShapeOrigin.PageMargin;
+            if (verticalAlignment != FrameVerticalAlignment.Offset)
+            {
+                verticalAlignment = FrameVerticalAlignment.Top;
+            }
         }
 
         // A group draws nothing of its own — an SdrObjGroup has no fill and no line, and its first
@@ -157,13 +198,7 @@ public static class Ww8Frames
                 Ww8ShapeOrigin.Character => FrameVerticalOrigin.Line,
                 _ => FrameVerticalOrigin.Paragraph,
             },
-            VerticalAlignment = host.Value(EscherPropertyIds.VerticalPosition) switch
-            {
-                1 or 4 => FrameVerticalAlignment.Top,
-                2 => FrameVerticalAlignment.Middle,
-                3 or 5 => FrameVerticalAlignment.Bottom,
-                _ => FrameVerticalAlignment.Offset,
-            },
+            VerticalAlignment = verticalAlignment,
             VerticalOffset = Length.FromTwips(anchor.Top),
             InlineAscent = setInLine ? InlineAscent(anchor, vertical, host) : null,
             Spacing = WrapSpacing(properties, lineWidth),
@@ -295,6 +330,61 @@ public static class Ww8Frames
     {
         uint id = shape?.Properties.Value(EscherPropertyIds.TextId) ?? 0;
         return id == 0 ? -1 : (int)((id >> 16) & 0xFFFF) - 1;
+    }
+
+    /// <summary>
+    /// Whether a shape anchored inside a table cell is laid out <em>in</em> that cell.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>SwWW8ImplReader::IsObjectLayoutInTableCell</c> (<c>ww8graf.cxx</c>:2554) plus the forcing
+    /// rule beside its caller. The flag lives in the tertiary table's <c>fLayoutInCell</c>, and the
+    /// interesting case is the one where it is not stated at all — then the answer comes from
+    /// <em>which Word wrote the file</em>: Word 97 never lays out in the cell, and every later
+    /// version does. That is why <see cref="Ww8Fib.Product"/> and <see cref="Ww8Fib.CswNew"/> are
+    /// parsed; <c>nProduct</c> is nought on some post-97 writers too, and a non-empty
+    /// <c>FibRgCswNew</c> is what tells those apart from a genuine Word 97 file.
+    /// </para>
+    /// <para>
+    /// The forcing rule is the second half and is not optional: Word behaves as though
+    /// <c>fLayoutInCell</c> were set whenever the shape's horizontal origin is the anchoring
+    /// character or its vertical origin is the anchoring line, so the reader makes it explicit
+    /// "instead of trying to hack in tons of adjustments" (<c>ww8graf.cxx</c>:2421).
+    /// </para>
+    /// </remarks>
+    /// <param name="inTableCell">Whether the anchoring paragraph is inside a table at all.</param>
+    /// <param name="host">The shape's tertiary property table.</param>
+    /// <param name="vertical">The vertical origin, after the <c>FSPA</c> fallback.</param>
+    /// <param name="horizontal">The horizontal origin, after the same fallback.</param>
+    /// <param name="writtenByWord97">Whether the FIB names Word 97 as the writer.</param>
+    internal static bool LaysOutInTableCell(
+        bool inTableCell,
+        EscherPropertyTable host,
+        Ww8ShapeOrigin vertical,
+        Ww8ShapeOrigin horizontal,
+        bool writtenByWord97)
+    {
+        if (!inTableCell) return false;
+
+        if (StatedLayoutInCell(host, writtenByWord97)) return true;
+
+        // Microsoft forces the behaviour for these two origins whatever the flag says.
+        return vertical == Ww8ShapeOrigin.Character || horizontal == Ww8ShapeOrigin.Character;
+    }
+
+    /// <summary>What the <c>fLayoutInCell</c> flag comes to, before the forcing rule.</summary>
+    private static bool StatedLayoutInCell(EscherPropertyTable host, bool writtenByWord97)
+    {
+        // Word 97 wrote no group-shape booleans and does not implement the behaviour, so the
+        // property is not even consulted — the C++ asserts that it is nought.
+        if (writtenByWord97) return false;
+
+        uint booleans = host.Value(EscherPropertyIds.GroupShapeBooleans);
+        bool statesIt = (booleans & 0x8000_0000) != 0;
+        bool set = (booleans & 0x0000_8000) != 0;
+
+        // "If unspecified, defaults to true."
+        return !statesIt || set;
     }
 
     /// <summary>The origin a property states, falling back on the one the <c>FSPA</c> states.</summary>

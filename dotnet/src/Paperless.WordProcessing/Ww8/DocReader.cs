@@ -685,7 +685,9 @@ public sealed class Ww8Document : IWordProcessingDocument, IPaginatedDocument
                 Runs = runs,
                 Fields = paragraph.Fields ?? [],
                 Notes = NotesOf(fonts, paragraph.Notes),
-                Frames = FramesOf(fonts, paragraph.Frames, paragraph.TextFrames, WidthFor(paragraph)),
+                Frames = FramesOf(
+                    fonts, paragraph.Frames, paragraph.TextFrames, WidthFor(paragraph),
+                    paragraph.IsInTable),
             });
         }
 
@@ -915,11 +917,16 @@ public sealed class Ww8Document : IWordProcessingDocument, IPaginatedDocument
     /// converted together and the layout engine sees one list.
     /// </param>
     /// <param name="textWidth">The section's text width, for an auto-width text frame.</param>
+    /// <param name="inTableCell">
+    /// True when the anchoring paragraph is inside a table cell, which is the one thing about the
+    /// paragraph a shape's own position depends on — see <see cref="Ww8Frames.LaysOutInTableCell"/>.
+    /// </param>
     private static List<PageFrame> FramesOf(
         LayoutFonts fonts,
         IReadOnlyList<Ww8LayoutFrame>? stated,
         IReadOnlyList<Ww8LayoutTextFrame>? textFrames = null,
-        Length textWidth = default)
+        Length textWidth = default,
+        bool inTableCell = false)
     {
         if ((stated is null || stated.Count == 0)
             && (textFrames is null || textFrames.Count == 0))
@@ -962,7 +969,7 @@ public sealed class Ww8Document : IWordProcessingDocument, IPaginatedDocument
 
             PageFrame? built = Ww8Frames.Build(
                 frame.Anchor, frame.Shape, frame.Offset, BlocksOf(fonts, frame.Blocks),
-                frame.IsSetInLine);
+                frame.IsSetInLine, inTableCell, frame.WrittenByWord97);
             if (built is null) continue;
 
             PageFrame envelope = built with
