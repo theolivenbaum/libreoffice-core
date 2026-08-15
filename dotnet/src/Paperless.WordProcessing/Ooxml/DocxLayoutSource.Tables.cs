@@ -90,17 +90,24 @@ public sealed partial class DocxLayoutSource
         // sets `w:spacing w:after="0" w:line="240"`. Saved and restored so a nested table's style applies
         // only inside it.
         IReadOnlyList<XElement>? enclosing = _tableStyle;
+        IReadOnlyList<XElement>? enclosingRun = _tableStyleRun;
         _tableStyle = _styles.TableStyleParagraphProperties(styleId);
+
+        // Which conditional layers this table asked for, and how many rows there are — the second
+        // because `lastRow` cannot be decided while the rows are still being read.
+        WordTableLook look = WordTableLook.Read(properties);
+        int rowCount = CountRows(element, depth: 0);
 
         _tableDepth++;
         try
         {
-            ReadRows(element, rows, tablePadding, properties, depth: 0);
+            ReadRows(element, rows, tablePadding, properties, depth: 0, styleId, look, rowCount);
         }
         finally
         {
             _tableDepth--;
             _tableStyle = enclosing;
+            _tableStyleRun = enclosingRun;
         }
 
         if (rows.Count == 0) return null;
@@ -318,7 +325,10 @@ public sealed partial class DocxLayoutSource
         List<PendingRow> rows,
         CellPadding tablePadding,
         XElement? tableProperties,
-        int depth)
+        int depth,
+        string? styleId,
+        WordTableLook look,
+        int rowCount)
     {
         if (depth > 8) return;
 
@@ -328,7 +338,7 @@ public sealed partial class DocxLayoutSource
 
             if (Word.Is(child, "tr"))
             {
-                rows.Add(Row(child, tablePadding, tableProperties));
+                rows.Add(Row(child, tablePadding, tableProperties, styleId, look, rows.Count, rowCount));
                 continue;
             }
 
@@ -337,23 +347,75 @@ public sealed partial class DocxLayoutSource
             if (Word.Is(child, "sdt") || Word.Is(child, "sdtContent")
                 || Word.Is(child, "customXml") || Word.Is(child, "ins"))
             {
-                ReadRows(child, rows, tablePadding, tableProperties, depth + 1);
+                ReadRows(child, rows, tablePadding, tableProperties, depth + 1, styleId, look, rowCount);
             }
         }
     }
 
-    private PendingRow Row(XElement element, CellPadding tablePadding, XElement? tableProperties)
+    /// <summary>
+    /// How many <c>w:tr</c> the table holds, counted before any of them is read.
+    /// </summary>
+    /// <remarks>
+    /// Only <c>lastRow</c> needs this, and it needs it before the first row is read: a cell's
+    /// conditional formatting decides how its text is measured, so it cannot be settled afterwards.
+    /// Follows the same wrappers <see cref="ReadRows"/> does, since a row inside a tracked insertion is
+    /// still a row and miscounting by one puts <c>lastRow</c> on the wrong one.
+    /// </remarks>
+    private static int CountRows(XElement element, int depth)
+    {
+        if (depth > 8) return 0;
+
+        int count = 0;
+        foreach (XElement child in element.Elements())
+        {
+            if (Word.Is(child, "tr")) count++;
+            else if (Word.Is(child, "sdt") || Word.Is(child, "sdtContent")
+                     || Word.Is(child, "customXml") || Word.Is(child, "ins"))
+            {
+                count += CountRows(child, depth + 1);
+            }
+        }
+
+        return count;
+    }
+
+    private PendingRow Row(
+        XElement element,
+        CellPadding tablePadding,
+        XElement? tableProperties,
+        string? styleId,
+        WordTableLook look,
+        int rowIndex,
+        int rowCount)
     {
         XElement? properties = Word.Child(element, "trPr");
         List<PendingCell> cells = [];
         int column = SkippedBefore(properties);
 
-        foreach (XElement child in Cells(element, 0))
+        // The row's own cells, so that `lastCol` names the last one this row actually has rather than the
+        // grid's width — a row ending in a `w:gridSpan` reaches the grid's edge with fewer cells.
+        List<XElement> children = [.. Cells(element, 0)];
+        int lastIndex = children.Count - 1;
+        int index = -1;
+
+        foreach (XElement child in children)
         {
             if (column >= PageTable.MaxColumns) break;
 
+            index++;
             XElement? cellProperties = Word.Child(child, "tcPr");
             int span = Math.Max(1, Number(Word.Child(cellProperties, "gridSpan")) ?? 1);
+
+            // Set around `ReadCell` alone: the cell's paragraphs are read inside it, and a nested table
+            // there restores its own on the way out.
+            _tableStyleRun = _styles.TableStyleRunProperties(
+                styleId,
+                new WordTableStyleConditions(
+                    look,
+                    IsFirstRow: rowIndex == 0,
+                    IsLastRow: rowCount > 0 && rowIndex == rowCount - 1,
+                    IsFirstColumn: index == 0,
+                    IsLastColumn: index == lastIndex));
 
             cells.Add(new PendingCell(
                 new PageTableCell

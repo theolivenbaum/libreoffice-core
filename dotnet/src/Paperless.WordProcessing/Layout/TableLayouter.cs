@@ -376,6 +376,11 @@ public static class TableLayouter
     /// <c>f445896eb008d14c1746fc37d412dc22.docx</c>, where 205.8 pt of a page went empty because the row
     /// was 211.8 pt tall and its lines measured 202.5.
     /// </para>
+    /// <para>
+    /// A <em>follow</em> part starts at the top of the block its first line belongs to and not at the top
+    /// of that line — see <see cref="UpperSpaceAbove"/>. That is one line of arithmetic and it is the
+    /// difference between a split row's parts adding up to the row and adding up to a point or two less.
+    /// </para>
     /// </remarks>
     private static Length HeightAt(
         IReadOnlyList<PlacedTableCell> cells, Length rowTop, Length above, Length cut, Length border)
@@ -393,23 +398,40 @@ public static class TableLayouter
 
             Length? top = null;
             Length bottom = Length.Zero;
+            PlacedLine? following = null;
 
             foreach (PlacedLine line in flow.Lines)
             {
                 Length end = flow.Area.Y + line.Top + line.Box.Height;
-                if (end <= above || end > cut) continue;
+                if (end <= above) continue;
 
-                top ??= isFirst ? flow.Area.Y : flow.Area.Y + line.Top;
+                if (end > cut)
+                {
+                    following ??= line;
+                    continue;
+                }
+
+                top ??= isFirst
+                    ? flow.Area.Y
+                    : flow.Area.Y + line.Top - UpperSpaceAbove(flow, line);
                 bottom = end;
             }
 
             if (top is not { } start) continue;
 
-            // Nothing of this cell is left over, so its part is as tall as the cell — the trailing
-            // spacing included, which is what `LayOut` charged the row for.
-            if (flow.Lines.Count > 0
-                && flow.Area.Y + flow.Lines[^1].Top + flow.Lines[^1].Box.Height <= cut)
+            if (following is { } next)
             {
+                // A part ends where the next block begins, not where its own last line does — so a part
+                // whose last line completes a paragraph is charged that paragraph's space-after, the same
+                // way `Advance` charges the cell for its final one. Within a paragraph the next line's
+                // block top *is* this line's bottom and this changes nothing.
+                bottom = Length.Max(bottom, flow.Area.Y + next.Top - next.UpperSpace);
+            }
+            else if (flow.Lines.Count > 0
+                     && flow.Area.Y + flow.Lines[^1].Top + flow.Lines[^1].Box.Height <= cut)
+            {
+                // Nothing of this cell is left over, so its part is as tall as the cell — the trailing
+                // spacing included, which is what `LayOut` charged the row for.
                 bottom = Length.Max(bottom, flow.Area.Y + flow.Advance);
             }
 
@@ -417,6 +439,50 @@ public static class TableLayouter
         }
 
         return text + border;
+    }
+
+    /// <summary>
+    /// The upper spacing a follow part re-applies above its first line.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A part of a split row that is not the row's first begins at the top of the <em>block</em> its first
+    /// line belongs to, which is one paragraph's space-before above the line. So a paragraph cut in half
+    /// by a page break pays its space-before twice — once on each part — and a paragraph that merely
+    /// starts a follow part pays it there rather than losing it.
+    /// </para>
+    /// <para>
+    /// Both halves of that are measured rather than reasoned, on 12 authored probes rendered through
+    /// LibreOffice 26.2.4.2 (<c>dotnet/probes/words-regress-01/probe-rowsplit-spacing.py</c> and
+    /// <c>probe-rowsplit-paras.py</c>). Sweeping <c>w:spacing w:before</c> and <c>w:after</c>
+    /// independently over a row cut across a page, the reference's follow part is
+    /// <c>before + remaining lines + after + border</c> in every combination, and the sum of a split
+    /// row's two parts therefore exceeds the unsplit row by exactly <c>before</c>. This is Writer's
+    /// <c>AddParaSpacingToTableCells</c> compatibility setting seen from the other end:
+    /// <see cref="PlacedFlow.Advance"/> already charges a cell for its last paragraph's space-after
+    /// because of it, and <c>SwFlowFrame::CalcUpperSpace</c> is why a follow keeps its upper space in a
+    /// table cell where an ordinary body paragraph would drop it.
+    /// </para>
+    /// <para>
+    /// Only a follow part is affected: the row's own first part starts at the flow's top, which already
+    /// holds the first paragraph's space-before.
+    /// </para>
+    /// </remarks>
+    /// <param name="flow">The cell's flow, for the paragraph the line belongs to.</param>
+    /// <param name="line">The first line the part holds.</param>
+    private static Length UpperSpaceAbove(PlacedFlow flow, PlacedLine line)
+    {
+        // Only a paragraph's first line carries it, so a line cut out of the middle of one has to be
+        // traced back to the line that does.
+        if (line.StartsParagraph) return line.UpperSpace;
+
+        foreach (PlacedLine other in flow.Lines)
+        {
+            if (other.ParagraphIndex != line.ParagraphIndex || !other.StartsParagraph) continue;
+            return other.UpperSpace;
+        }
+
+        return Length.Zero;
     }
 
     /// <summary>The cells of one part, holding its lines and positioned from the part's own top.</summary>
@@ -456,7 +522,9 @@ public static class TableLayouter
                     Length end = flow.Area.Y + line.Top + line.Box.Height;
                     if (end <= above || end > cut) continue;
 
-                    first ??= line.Top;
+                    // Less the space the part is charged for above it, so the text lands where the height
+                    // `HeightAt` reported puts it. See `UpperSpaceAbove`.
+                    first ??= line.Top - UpperSpaceAbove(flow, line);
                     kept.Add(line);
                 }
             }

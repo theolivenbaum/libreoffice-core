@@ -504,6 +504,17 @@ public sealed partial class DocxLayoutSource
     private IReadOnlyList<XElement>? _tableStyle;
 
     /// <summary>
+    /// The table style's <c>w:rPr</c> layers for the cell being read, most specific first, or null in
+    /// the body.
+    /// </summary>
+    /// <remarks>
+    /// The companion of <see cref="_tableStyle"/> and a field for the same reason, but it changes per
+    /// <em>cell</em> rather than per table: conditional formatting is a property of where the cell sits.
+    /// See <see cref="WordTableStyleConditions"/>.
+    /// </remarks>
+    private IReadOnlyList<XElement>? _tableStyleRun;
+
+    /// <summary>
     /// Walks the body's block-level children.
     /// </summary>
     /// <remarks>
@@ -592,8 +603,10 @@ public sealed partial class DocxLayoutSource
         // `mark` is not dead weight: an empty paragraph has nothing *but* its mark, and its height
         // is the mark's. Same probe: the mark alone carrying `w:sz w:val="72"` gives the empty
         // paragraph 36 pt of height in the reference.
-        WordTextStyle mark = WordParagraphFormats.ResolveText(_styles, properties, _theme);
-        WordTextStyle body = WordParagraphFormats.ResolveRun(_styles, properties, null, _theme);
+        WordTextStyle mark =
+            WordParagraphFormats.ResolveText(_styles, properties, _theme, _tableStyleRun);
+        WordTextStyle body =
+            WordParagraphFormats.ResolveRun(_styles, properties, null, _theme, _tableStyleRun);
 
         // Both are resolved, not only the one this paragraph draws its text in, because `Face` is
         // also what fills `_references` — and a `FontReference` is the only thing a PDF can turn
@@ -824,7 +837,7 @@ public sealed partial class DocxLayoutSource
             WordTextStyle style = range.RunProperties is null
                 ? paragraph
                 : WordParagraphFormats.ResolveRun(
-                    _styles, paragraphProperties, range.RunProperties, _theme);
+                    _styles, paragraphProperties, range.RunProperties, _theme, _tableStyleRun);
 
             if (range.IsCitation) style = AsCitation(style);
 
