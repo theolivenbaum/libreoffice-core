@@ -472,6 +472,10 @@ public sealed partial class Ww8DocumentReader
                     format = format with { RowHeightTwips = sprm.SignedWord };
                     break;
 
+                case Ww8SprmReader.Ids.RowAlignment:
+                    format = format with { RowAlignment = sprm.Word & 3 };
+                    break;
+
                 case Ww8SprmReader.Ids.TableDefinition:
                     format = format with { TableDefinition = ReadTableDefinition(sprm.Operand) };
                     break;
@@ -782,6 +786,17 @@ public readonly record struct Ww8ParagraphFormat
     /// rather than anywhere a row begins.
     /// </remarks>
     public int RowHeightTwips { get; init; }
+
+    /// <summary>
+    /// <c>sprmTJc90</c>'s low two bits: 0 left, 1 centre, 2 right, 3 centre again.
+    /// </summary>
+    /// <remarks>
+    /// Zero when the document states nothing, which is the same answer as a stated left — WW8's own
+    /// default, and <c>WW8TabDesc</c> initialises <c>m_eOri</c> to <c>HoriOrientation::LEFT</c> for it.
+    /// On the paragraph format because it is a row property, and WW8 states those on the mark that ends
+    /// the row.
+    /// </remarks>
+    public int RowAlignment { get; init; }
 
     /// <summary>
     /// The cell padding the row declares, as the entries the document stated.

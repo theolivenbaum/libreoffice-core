@@ -161,9 +161,38 @@ public static class TableLayouter
             // `exact` is the other branch and measured the other way: at w:sz="16" both sides read 24.00, so a
             // clipped row's height really is the whole of it, borders included. Applying the border there too
             // would be the obvious symmetry and is wrong.
+            //
+            // **The cell margins go on top of the floor as well**, and that probe could not see it because its
+            // cells had none. `lcl_CalcMinRowHeight` (`sw/source/core/layout/tabfrm.cxx`:5087-5097) is the
+            // whole rule, under `MIN_ROW_HEIGHT_INCL_BORDER` — which both Word filters turn on and neither ODF
+            // nor the Writer default does (`ww8par.cxx`:1966, `DomainMapper.cxx`:156, comment "handle MS Word
+            // 'atLeast' oddities"):
+            //
+            //     nHeight  = trHeight
+            //     nHeight += lcl_GetTopSpace(row)        // top border width *and* top margin
+            //     nHeight += lcl_GetBottomLineDist(row)  // the bottom margin, and not the bottom border
+            //
+            // and `lcl_GetFixedRowHeight` (:5058) does the second of those two for an `exact` row.
+            // Both maxima are over the row's cells, since one tall margin governs the row.
+            //
+            // `MIN_ROW_HEIGHT_INCL_BORDER` is a per-document setting and the three Word filters set it
+            // while the ODF one does not, so this is gated on `PageTable.MinHeightIncludesInsets` rather
+            // than applied to every table — measured, not assumed: applying it to all five formats fixed
+            // the `table-exact-row` fidelity fixture's `.doc`, `.docx` and `.rtf` and broke its `.odt`
+            // and `.fodt`, which is the setting's own split exactly.
+            //
+            // Measured on `FAA 2025-26 Holdover Tables.docx`, whose Table 54 rows state `w:trHeight
+            // w:val="397"` and `w:tcMar` top 23, bottom 0, under a `w:sz="8"` grid: 397 + (20 + 23) + 0 = 440
+            // twips = 22.00 pt, which is the reference's row pitch to the hundredth. Without the margins we
+            // read 417 twips = 20.85, and eleven rows of 1.15 pt is the 12.7 pt that lets a three-line
+            // paragraph onto a page the reference had to break before.
+            Length topInset = table.MinHeightIncludesInsets ? TopInset(table.Rows[row]) : Length.Zero;
+            Length bottomInset =
+                table.MinHeightIncludesInsets ? BottomInset(table.Rows[row]) : Length.Zero;
+
             heights[row] = table.Rows[row].HasExactHeight
-                ? Length.Max(Length.Zero, table.Rows[row].MinHeight)
-                : Length.Max(heights[row], table.Rows[row].MinHeight)
+                ? Length.Max(Length.Zero, table.Rows[row].MinHeight + bottomInset)
+                : Length.Max(heights[row], table.Rows[row].MinHeight + topInset + bottomInset)
                   + BorderHeight(table.Rows[row]);
         }
 
@@ -666,6 +695,39 @@ public static class TableLayouter
         }
 
         return (top + bottom) / 2;
+    }
+
+    /// <summary>
+    /// The top margin a row's declared height is raised by, which is its cells' thickest.
+    /// </summary>
+    /// <remarks>
+    /// <c>lcl_GetTopSpace</c> (<c>sw/source/core/layout/tabfrm.cxx</c>:5175) takes the maximum over the
+    /// row's cells of the top border's <em>line space</em> — its width plus its distance — and adds the whole
+    /// of it to a <c>w:trHeight</c> floor. The border half of that is already
+    /// <see cref="BorderHeight"/>'s, which is added outside the floor and comes to the same total, so what is
+    /// left to charge here is the distance: the cell's top margin.
+    /// </remarks>
+    private static Length TopInset(PageTableRow row)
+    {
+        Length top = Length.Zero;
+        foreach (PageTableCell cell in row.Cells) top = Length.Max(top, cell.Padding.Top);
+        return top;
+    }
+
+    /// <summary>
+    /// The bottom margin a row's declared height is raised by, which is its cells' thickest.
+    /// </summary>
+    /// <remarks>
+    /// <c>lcl_GetBottomLineDist</c> (<c>tabfrm.cxx</c>:5245) — the distance alone, with no part of the bottom
+    /// border, which is the asymmetry the LibreOffice comment calls out: <em>"MS Word also adds the bottom
+    /// border padding (but not the bottom border line)"</em>. It is charged for an <c>exact</c> row as well
+    /// as for an <c>atLeast</c> one, which is the one thing <c>lcl_GetFixedRowHeight</c> does.
+    /// </remarks>
+    private static Length BottomInset(PageTableRow row)
+    {
+        Length bottom = Length.Zero;
+        foreach (PageTableCell cell in row.Cells) bottom = Length.Max(bottom, cell.Padding.Bottom);
+        return bottom;
     }
 
     /// <summary>

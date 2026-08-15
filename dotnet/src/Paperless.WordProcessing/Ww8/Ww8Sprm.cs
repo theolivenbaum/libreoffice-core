@@ -127,6 +127,18 @@ public static class Ww8SprmReader
         public const ushort RowHeight = 0x9407;
 
         /// <summary>
+        /// <c>sprmTJc90</c>: how the row sits across the text area — left, centred or right.
+        /// </summary>
+        /// <remarks>
+        /// Two bytes, of which only the low two bits are read: <c>WW8TabDesc</c>'s <c>aOriArr</c>
+        /// (<c>sw/source/filter/ww8/ww8par2.cxx</c>:1769) maps 0-3 onto left, centre, right and centre
+        /// again. LibreOffice reads <em>this</em> id for a WW8 document and the identically named
+        /// <c>sprmTJc</c> (0x548A) not at all — <c>GetTableSprm</c> lists only <c>NS_sprm::TJc90</c> in
+        /// its <c>eWW8</c> arm.
+        /// </remarks>
+        public const ushort RowAlignment = 0x5400;
+
+        /// <summary>
         /// The row's geometry: its column edges and its cells' merge flags.
         /// </summary>
         /// <remarks>

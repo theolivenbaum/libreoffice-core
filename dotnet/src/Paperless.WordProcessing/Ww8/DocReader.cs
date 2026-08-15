@@ -623,12 +623,14 @@ public sealed class Ww8Document : IWordProcessingDocument, IPaginatedDocument
             Rows = rows,
             HeaderRowCount = table.HeaderRowCount,
             LeftIndent = table.LeftIndent,
+            HorizontalPosition = table.HorizontalPosition,
 
             // Every DOC is a Word document by definition, so the flag is not read from anything: it is
             // what LibreOffice's own filter sets on import, and it changes where the inner grid lines
             // stop. Measured on the corpus table — the reference's inner horizontals run 56.95 to 538.35
             // where the same table in ODF runs 56.45 to 538.85.
             JoinsBordersLikeWord = true,
+            MinHeightIncludesInsets = true,
         };
     }
 
@@ -672,6 +674,7 @@ public sealed class Ww8Document : IWordProcessingDocument, IPaginatedDocument
                 Language = paragraph.Language,
                 Shaping = new Text.Shaping.ShapingOptions(
                     Language: paragraph.Language, DisableKerning: !paragraph.AutoKerning),
+                Tracking = paragraph.Tracking,
                 Metrics = fonts.Metrics,
                 Fallback = fonts.Fallback,
                 AddsScriptSpace = true,
@@ -1087,6 +1090,9 @@ public sealed class Ww8Document : IWordProcessingDocument, IPaginatedDocument
                 // inside a paragraph that does not has to survive the shortcut or its width is the
                 // paragraph's answer rather than its own.
                 || run.AutoKerning != paragraph.AutoKerning
+                // And tracking for the same reason again, read the other way: a run condensed inside a
+                // paragraph that is not would otherwise be measured at the paragraph's own spacing.
+                || run.Tracking != paragraph.Tracking
                 // A symbol's face is its own even when it happens to equal the paragraph's: losing the
                 // runs here would draw its slot out of whatever the paragraph is set in.
                 || run.SymbolSlot is not null)
@@ -1109,7 +1115,8 @@ public sealed class Ww8Document : IWordProcessingDocument, IPaginatedDocument
                 run.CaseMap,
                 Highlight: run.Highlight ?? default,
                 IsUnderlined: run.IsUnderlined,
-                IsStruckThrough: run.IsStruckThrough));
+                IsStruckThrough: run.IsStruckThrough,
+                Tracking: run.Tracking));
         }
 
         return varies ? runs : [];

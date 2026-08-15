@@ -1040,14 +1040,15 @@ public sealed class Paginator
             // each step removes a line and so can only remove notes.
             int fitted = Fit(
                 layout, lineIndex, used + spaceAbove, columnBottom - NoteHeight(notes),
-                atTopOfPage: columnIsEmpty);
+                atTopOfPage: columnIsEmpty, borderBelow: paragraph.BorderBelow);
 
             while (fitted > 0)
             {
                 Length room = columnBottom - NoteHeight(
                     notes, NotesIn(paragraph, layout, lineIndex, fitted));
 
-                if (Fit(layout, lineIndex, used + spaceAbove, room, columnIsEmpty) >= fitted) break;
+                if (Fit(layout, lineIndex, used + spaceAbove, room, columnIsEmpty,
+                        paragraph.BorderBelow) >= fitted) break;
 
                 fitted--;
             }
@@ -1383,8 +1384,31 @@ public sealed class Paginator
     /// page one line fewer than Writer allows at every spacing above single, and a page one line short
     /// moves every break after it.
     /// </remarks>
+    /// <param name="layout">The paragraph as it was laid out.</param>
+    /// <param name="from">The first line still to place.</param>
+    /// <param name="used">How much of the column is already spent.</param>
+    /// <param name="available">Where the column ends.</param>
+    /// <param name="atTopOfPage">True when nothing is on the column yet.</param>
+    /// <param name="borderBelow">
+    /// The room the paragraph's bottom border takes, charged only against a count that reaches the
+    /// paragraph's <em>last</em> line — a paragraph broken across the page does not draw one here.
+    /// <para>
+    /// It has to be charged during the fit rather than after it, because Writer's frame is the text
+    /// <em>and</em> its lower border: <c>SwBorderAttrs::CalcBottomLine</c> feeds
+    /// <c>SwTextFrame::CalcLowerSpace</c>, so a paragraph whose last line lands on the margin with the
+    /// rule below it hanging over does not fit and splits. Measured on
+    /// <c>FAA 2025-26 Holdover Tables.docx</c> page 71, whose bordered three-line note ends 0.55 pt past
+    /// the body — we drew the rule at 555.0 on a body ending at 554.45 and kept the paragraph; the
+    /// reference moved it to a page of its own, which is the page the document is short.
+    /// </para>
+    /// </param>
     private static int Fit(
-        LaidOutParagraph layout, int from, Length used, Length available, bool atTopOfPage)
+        LaidOutParagraph layout,
+        int from,
+        Length used,
+        Length available,
+        bool atTopOfPage,
+        Length borderBelow = default)
     {
         Length room = available - used;
         int count = 0;
@@ -1407,6 +1431,10 @@ public sealed class Paginator
             count += last - i + 1;
             i = last + 1;
         }
+
+        // One step is enough: dropping a line means the paragraph no longer ends here, so the rule is
+        // drawn on the next page and nothing is owed on this one.
+        if (count > 0 && from + count >= layout.Lines.Count && room < borderBelow) count--;
 
         return count;
     }

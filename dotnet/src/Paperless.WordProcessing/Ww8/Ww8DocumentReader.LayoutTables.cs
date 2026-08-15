@@ -194,6 +194,7 @@ public sealed partial class Ww8DocumentReader
                 IsHeader = format.IsTableHeaderRow,
                 CannotSplit = format.RowCannotSplit,
                 HeightTwips = format.RowHeightTwips,
+                Alignment = format.RowAlignment,
                 DefaultBorders = format.TableBorders,
             };
             row.Cells.AddRange(level.RowCells);
@@ -264,6 +265,18 @@ public sealed partial class Ww8DocumentReader
     /// margin. A row indented from it carries that in its own first edge, so the table's indent is the
     /// first row's left edge and the column widths are the gaps after it.
     /// </para>
+    /// <para>
+    /// <strong>Unless <c>sprmTJc90</c> says the table is centred or right-aligned, in which case that first
+    /// edge is discarded.</strong> Word writes an absolute position there even for a table it centres, and
+    /// LibreOffice throws it away outright: <c>WW8TabDesc::CalcDefaults</c>
+    /// (<c>sw/source/filter/ww8/ww8par2.cxx</c>:2134) subtracts <c>nCenter[0]</c> from every edge of every
+    /// band the moment the orientation is <c>CENTER</c>, and the format then gets
+    /// <c>HoriOrientation::CENTER</c>. Measured on <c>150_5300_13_chg8.doc</c>, whose Table 3-1 states a
+    /// first edge of 6768 twips under a 512 pt text area: read as an indent it puts a 468 pt table at
+    /// x = 388.8 on a 612 pt page, so five of its seven columns fall off the paper and
+    /// <c>250 ft</c> — a value that appears once in the reference — is absent from our whole document.
+    /// The reference centres it at 72.5.
+    /// </para>
     /// </remarks>
     private static Ww8LayoutTable? LayoutTableOf(List<Ww8RowDraft> rows, int section)
     {
@@ -315,12 +328,24 @@ public sealed partial class Ww8DocumentReader
                 CanSplit: !row.CannotSplit));
         }
 
+        // `sprmTJc90` on the first row, which is where WW8TabDesc reads it: the whole table takes the
+        // alignment of the first row-end paragraph that states one.
+        Layout.FrameHorizontalAlignment? aligned = rows.Count > 0
+            ? rows[0].Alignment switch
+            {
+                1 or 3 => Layout.FrameHorizontalAlignment.Centre,
+                2 => Layout.FrameHorizontalAlignment.Right,
+                _ => null,
+            }
+            : null;
+
         return new Ww8LayoutTable(
             widths,
             layoutRows,
             rows.TakeWhile(r => r.IsHeader).Count(),
-            Length.FromTwips(left),
-            section);
+            aligned is null ? Length.FromTwips(left) : Length.Zero,
+            section,
+            aligned);
     }
 
     /// <summary>
@@ -599,14 +624,21 @@ public sealed record Ww8LayoutFrameMember(
 /// <param name="ColumnWidths">The grid's column widths, left to right.</param>
 /// <param name="Rows">The rows, top to bottom.</param>
 /// <param name="HeaderRowCount">How many rows at the top repeat across a page break.</param>
-/// <param name="LeftIndent">How far the table's left edge sits from the text area's.</param>
+/// <param name="LeftIndent">
+/// How far the table's left edge sits from the text area's. Nought for a table that
+/// <paramref name="HorizontalPosition"/> places, since such a table names an edge instead.
+/// </param>
 /// <param name="SectionIndex">Which of the document's sections the table sits in.</param>
+/// <param name="HorizontalPosition">
+/// Which edge of the text area the table aligns against, or null for the ordinary indented table.
+/// </param>
 public sealed record Ww8LayoutTable(
     IReadOnlyList<Length> ColumnWidths,
     IReadOnlyList<Ww8LayoutRow> Rows,
     int HeaderRowCount,
     Length LeftIndent,
-    int SectionIndex = 0);
+    int SectionIndex = 0,
+    Layout.FrameHorizontalAlignment? HorizontalPosition = null);
 
 /// <summary>One row of a DOC table.</summary>
 /// <param name="Cells">Its cells, left to right; one covered by a merge above is absent.</param>

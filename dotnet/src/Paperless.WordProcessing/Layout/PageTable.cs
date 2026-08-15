@@ -228,6 +228,27 @@ public sealed record PageTable : PageBlock
     public bool JoinsBordersLikeWord { get; init; }
 
     /// <summary>
+    /// True when a row's declared height is a floor on its <em>content</em> rather than on the whole row,
+    /// so the cells' margins and the top border are added to it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The second thing a table's provenance still decides, and unlike <see cref="JoinsBordersLikeWord"/>
+    /// it changes the layout. LibreOffice calls it <c>DocumentSettingId::MIN_ROW_HEIGHT_INCL_BORDER</c>,
+    /// its own comment calls it "MS Word 'atLeast' oddities", and the DOC, DOCX and RTF filters set it
+    /// (<c>ww8par.cxx</c>:1966 and <c>DomainMapper.cxx</c>:156) while the ODF filter never does — the same
+    /// three-against-one split, and reached the same way, as the flag above.
+    /// </para>
+    /// <para>
+    /// It is not a nicety either way round. Off, the FAA Holdover Tables' 397-twip rows come out 20.85 pt
+    /// against the reference's 22.00. On, the <c>table-exact-row</c> fixture's ODF forms come out a
+    /// margin too tall — which is how the split was found, since applying it to all five formats fixed
+    /// <c>.doc</c>, <c>.docx</c> and <c>.rtf</c> and broke <c>.odt</c> and <c>.fodt</c>.
+    /// </para>
+    /// </remarks>
+    public bool MinHeightIncludesInsets { get; init; }
+
+    /// <summary>
     /// Whether the table begins a page, the way
     /// <see cref="Paperless.Text.Layout.ParagraphFormat.StartsNewPage"/> does for a paragraph.
     /// </summary>

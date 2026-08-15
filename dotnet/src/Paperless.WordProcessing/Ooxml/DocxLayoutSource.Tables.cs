@@ -127,6 +127,7 @@ public sealed partial class DocxLayoutSource
             IsPositioned = Word.Child(properties, "tblpPr") is not null,
             LowerSpacing = Twips(Word.Child(properties, "tblpPr"), "bottomFromText") ?? Length.Zero,
             JoinsBordersLikeWord = true,
+            MinHeightIncludesInsets = true,
             StartsNewPage = breaksPage,
         };
     }
