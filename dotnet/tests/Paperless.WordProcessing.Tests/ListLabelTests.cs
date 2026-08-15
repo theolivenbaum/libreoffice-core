@@ -529,7 +529,8 @@ public sealed class ListLabelTests
     /// <summary>The paragraph's lines, laid out the way the paginator lays a block out.</summary>
     private static List<LineBox> Lines(PageParagraph paragraph)
     {
-        ParagraphLayouter layouter = new(paragraph.Face, breaker: null, paragraph.Metrics);
+        ParagraphLayouter layouter = new(
+            paragraph.Face, breaker: null, paragraph.Metrics, WriterLineBox.LeadingAboveText);
 
         LaidOutParagraph laidOut =
             paragraph.HasRuns || paragraph.HasInlineObjects || paragraph.LabelRaisesFirstLine

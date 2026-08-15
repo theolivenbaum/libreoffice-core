@@ -71,7 +71,11 @@ public sealed class HighlightTests
 
         // On the reference grid, because that is what a Writer layout measures through — the band is the
         // line's own height and so carries the same quantisation. See MetricGrid.Reference.
-        LineMetrics metrics = LineSpacing.Resolve(Face, MetricGrid.Reference);
+        // `leadingAboveText` is Writer's rule and it is not decoration: it is which text engine these
+        // metrics belong to, and on a grid it decides the grouping of the conversion as well as where
+        // the leading sits. Omitting it here gave EditEngine's height, 13.3 pt against Writer's 13.8.
+        LineMetrics metrics = LineSpacing.Resolve(
+            Face, MetricGrid.Reference, WriterLineBox.LeadingAboveText);
         bands[0].Area.Height.ShouldBe(metrics.ScaledLineHeight(Size));
     }
 

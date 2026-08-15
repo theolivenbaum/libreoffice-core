@@ -405,7 +405,7 @@ public static partial class SlideTextLayout
 
         if (marker.IsSymbol)
         {
-            LineMetrics metrics = LineSpacing.Resolve(face);
+            LineMetrics metrics = LineSpacing.Resolve(face, MetricGrid.Presentation);
             Length ascent = Rounded(metrics.ScaledAscent(size));
             Length descent = Rounded(metrics.ScaledDescent(size));
 
@@ -689,6 +689,15 @@ public static partial class SlideTextLayout
                 // one that needs finer units — see Spacing.
                 Length faceLine = paragraph.LineSpacing.Apply(faceHeight);
 
+                // …but a rule that changes nothing must not change the *unit* either. `Apply`
+                // works in whole twips and this branch's height is a whole hundredth of a
+                // millimetre, which is 0.567 of a twip — so single spacing, which is what nearly
+                // every paragraph asks for, would round the device's own answer off its own grid.
+                // Measured against LibreOffice on the 195-pair table: with the round trip 113 of
+                // 195 line heights are exact and the other 82 are out by one unit in both
+                // directions; without it, 195 of 195.
+                if (faceLine.Twips == faceHeight.Twips) faceLine = faceHeight;
+
                 lines.Add(Spaced(
                     new PlacedLine(
                         box,
@@ -822,7 +831,7 @@ public static partial class SlideTextLayout
             bool contains = start == end && run.Covers(start);
             if (!touches && !contains) continue;
 
-            LineMetrics metrics = LineSpacing.Resolve(run.Face);
+            LineMetrics metrics = LineSpacing.Resolve(run.Face, MetricGrid.Presentation);
             Length up = Rounded(metrics.ScaledAscent(run.EmSize));
             Length down = Rounded(metrics.ScaledDescent(run.EmSize));
 
@@ -846,6 +855,15 @@ public static partial class SlideTextLayout
     /// reference device is in 1/100 mm — so an 18 pt Liberation Sans line is 575 + 135 units and
     /// not 574.79 + 134.55. Worth a tenth of a point over four lines, which is the difference
     /// between agreeing with the reference and not.
+    /// <para>
+    /// <b>Idempotent since <see cref="MetricGrid.Presentation"/> landed, and kept for that
+    /// reason rather than removed.</b> The grid already returns whole hundredths of a millimetre,
+    /// so this rounds nothing; what it still does is state the unit at the point the value is
+    /// consumed, and catch a caller that reaches this arithmetic without a grid. The rounding it
+    /// used to do on its own was the right unit and the wrong order — it rounded an exactly
+    /// scaled metric, where the device rounds the em to whole pixels first and then the metric,
+    /// which is worth a unit on 425 of 507 measured (face, size) pairs.
+    /// </para>
     /// </remarks>
     private static Length Rounded(Length metric)
         => Length.FromMm100((long)Math.Round((double)metric.Emu / Length.EmuPerMm100));
