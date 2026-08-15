@@ -1114,31 +1114,15 @@ public sealed class Paginator
                     table, Laid(paragraphIndex), lineIndex, rowDrawn, body.ColumnArea(column),
                     used + before, column, tableRoom, columnIsEmpty);
 
-                // The notes the placed part itself cites take room out of the same column, so the part may
-                // no longer fit once they are counted — the paragraph arm's feedback loop, one step of it.
-                // One step rather than a loop to a fixed point: a cell's cut points are its line bottoms
-                // and there is no guarantee a second retry removes anything, whereas Writer damps the same
-                // circularity in `txtftn.cxx`:560 with the comment "We break the oscillation". Progress is
-                // required — a retry that places at least as much of the table as the first attempt is
-                // discarded — so this cannot loop or make the page worse.
-                if (part.Placed is { } first)
-                {
-                    Length withCited = NoteHeight(notes, PlacedNotes.In(first));
-
-                    if (withCited > NoteHeight(notes))
-                    {
-                        Length shortened = columnBottom - withCited - (used + before);
-                        TablePart retry = PlaceTablePart(
-                            table, Laid(paragraphIndex), lineIndex, rowDrawn, body.ColumnArea(column),
-                            used + before, column, shortened, columnIsEmpty);
-
-                        if (retry.Placed is not null
-                            && (retry.NextRow, retry.NextDrawn) != (part.NextRow, part.NextDrawn))
-                        {
-                            part = retry;
-                        }
-                    }
-                }
+                // The notes the placed part itself cites do *not* shorten it. This used to retry the
+                // placement with them charged, which is the paragraph arm's old feedback loop applied to
+                // the other kind of block, and it is wrong for the same reason: a note may never push the
+                // row that cites it off the page. What will not fit spills — see `NoteArea`.
+                //
+                // The retry also had to guard against oscillation, since a cell's cut points are its line
+                // bottoms and a second attempt is not guaranteed to remove anything; Writer damps the same
+                // circularity in `txtftn.cxx`:560 with the comment "We break the oscillation". Removing
+                // the feedback removes the oscillation with it, so there is nothing left to damp.
 
                 // Nothing of the table may go here, and the column already holds something — so the page
                 // ends and the table starts again at the top of the next one.
@@ -1224,24 +1208,26 @@ public sealed class Paginator
                     keepsSpacingAtTop: keepsSpaceHere, own: out ownSpaceAbove)
                 : Length.Zero;
 
-            // The notes those lines would anchor take their room out of the body's, so how many lines fit
-            // depends on which notes they cite — and which notes they cite depends on how many fit. Resolved
-            // by trying the unconstrained answer and shortening until it holds, which terminates because
-            // each step removes a line and so can only remove notes.
+            // The notes *already* on the page take their room out of the body's. The notes these lines
+            // would newly cite do not: **a note may never push the line that cites it off the page.**
+            // What will not fit beneath the body spills to the next page instead — see `NoteArea`.
+            //
+            // This used to shorten the line count until the newly cited notes fitted too, and that is
+            // what made `template---tpr-technical-progress-report-with-guidance.docx` 8 pages against 7.
+            // Its page 2 cites a footnote from the third line of a bullet; charging that footnote left no
+            // room for the bullet, so the bullet went to page 3 and the `Heading2` above it — `keepNext`,
+            // `keepLines` — followed. The reference draws the superscript on page 2 at y=659.1 and the
+            // note's own text on page 3 at y=675.3.
+            //
+            // Measured directly rather than reasoned about, because two rules produce that output and
+            // they are not the same: Writer might move the note whole or split it. A probe citing a
+            // 60-word note from a controlled body depth
+            // (`probes/footnote-deferral/footnote-deferral.py`) leaves **49** of the note's 59 words on
+            // the citing page at one body length and **17** at the next, which is a cut at the room left
+            // and cannot be a whole move — that predicts nought or fifty-nine and never seventeen.
             int fitted = Fit(
                 layout, lineIndex, used + spaceAbove, columnBottom - NoteHeight(notes),
                 atTopOfPage: columnIsEmpty, borderBelow: paragraph.BorderBelow);
-
-            while (fitted > 0)
-            {
-                Length room = columnBottom - NoteHeight(
-                    notes, NotesIn(paragraph, layout, lineIndex, fitted));
-
-                if (Fit(layout, lineIndex, used + spaceAbove, room, columnIsEmpty,
-                        paragraph.BorderBelow) >= fitted) break;
-
-                fitted--;
-            }
 
             int allowed = Allowed(
                 paragraph.Format, layout.Lines.Count, lineIndex, fitted, columnIsEmpty);
@@ -1398,6 +1384,16 @@ public sealed class Paginator
         // column one of a two-column section would advance to column two and never write the page at all.
         if (placed.Count > 0 || tables.Count > 0 || pages.Count == 0) FinishPage();
 
+        // A note that spilled off the *last* page has nowhere to go, and without this it is silently
+        // dropped — a worse defect than the one spilling fixes, and one no page count can see. Writer's own
+        // output shows the extra sheets: the footnote-deferral probe's reference runs to 14 pages for ten
+        // cases, because a note pushed past the foot of a page takes one of its own.
+        //
+        // A loop rather than a single page, since the carried notes may not all fit on one either, and
+        // `EmitPage` clears them to whatever it could not take. It cannot spin: `NoteArea` always places
+        // the first note whatever the room, so every pass removes at least one.
+        while (notes.Count > 0 && pages.Count < _options.MaxPages) FinishPage();
+
         // The endnotes, which are the one flow that is not part of any page's body: they collect *after* the
         // last of them, on pages of their own. Measured — LibreOffice puts a two-endnote document's notes at
         // the top of a fresh second page, in the body's own text area, and takes nothing off page one.
@@ -1533,7 +1529,13 @@ public sealed class Paginator
                 return;
             }
 
-            PlacedFlow? noteArea = NoteArea(notes, body);
+            // What is left beneath the body is what the notes may have; the rest goes to the next page.
+            // `used` is this column's consumption, so on a multi-column page this is the room under the
+            // column that ended the page rather than under all of them — generous rather than tight,
+            // which errs towards placing a note here instead of carrying it, and so cannot start a
+            // spill that would not otherwise happen.
+            (PlacedFlow? noteArea, List<PageNote> carriedNotes) =
+                NoteArea(notes, body, bodyHeight - used);
 
             pages.Add(Page(
                 pages.Count,
@@ -1560,7 +1562,10 @@ public sealed class Paginator
             column = 0;
             placed = [];
             tables = [];
-            notes = [];
+
+            // The notes this page could not take start the next page's, ahead of anything it cites
+            // itself, so their order across the two pages is the order they were cited in.
+            notes = carriedNotes;
             used = Length.Zero;
             lineUsed = Length.Zero;
             MeasureBody();
@@ -2375,17 +2380,80 @@ public sealed class Paginator
     /// call a Word footer makes — a flow with no stated offset — and the notes take their room out of the
     /// body's, which is what makes a page with notes hold less text.
     /// </remarks>
-    private PlacedFlow? NoteArea(List<PageNote> notes, PageGeometry page)
+    /// <summary>
+    /// The notes that fit beneath the body, and the ones that must go to the next page.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>A note that will not fit moves; the text citing it does not.</strong> Writer places the
+    /// citing line and lets the note flow onward — measured on a probe that cites a 60-word note from a
+    /// controlled body depth, which leaves 49 of the note's 59 words on the citing page at one body
+    /// length and 17 at the next (<c>probes/footnote-deferral/footnote-deferral.py</c>). Ours moved the
+    /// citing paragraph instead and ran to 15 pages where the reference took 14.
+    /// </para>
+    /// <para>
+    /// A note is carried <em>whole</em> here rather than cut at the last line that fits. That is the
+    /// boundary case of Writer's rule rather than the rule — the probe's 49 and 17 are a genuine split —
+    /// and it is what the corpus needs: on
+    /// <c>template---tpr-technical-progress-report-with-guidance.docx</c> the note area was already
+    /// filled by an earlier footnote, so nothing of the second one fitted and a split would have left
+    /// nothing behind either. Splitting a note across the boundary is recorded as the remaining half of
+    /// this work; doing it needs a note to be layable from a line offset, which nothing here can do yet.
+    /// </para>
+    /// <para>
+    /// Order is preserved strictly: once one note has spilled every later note spills too, whatever the
+    /// room. Letting a short note jump ahead of a long one would renumber the page's notes.
+    /// </para>
+    /// <para>
+    /// A note is placed regardless only when a page of its own would not hold it either, which is what
+    /// stops one being handed from page to page for ever. That is the same guard the body flow uses for a
+    /// paragraph too tall for a column of its own, and it has to be that narrow: the weaker "place the
+    /// first note whatever the room" makes a page carrying a single note never spill at all — which still
+    /// passes on <c>tpr</c>, where an earlier footnote had already taken the area, and fails on every page
+    /// whose only note is the one too big for it.
+    /// </para>
+    /// </remarks>
+    /// <param name="notes">The notes owed by this page, in citation order.</param>
+    /// <param name="page">The page's geometry.</param>
+    /// <param name="available">The room left beneath the body, which may be nought or less.</param>
+    private (PlacedFlow? Area, List<PageNote> Spilled) NoteArea(
+        List<PageNote> notes, PageGeometry page, Length available)
     {
-        if (notes.Count == 0) return null;
+        if (notes.Count == 0) return (null, []);
 
         List<PageBlock> blocks = [];
-        foreach (PageNote note in notes) blocks.AddRange(note.Blocks);
+        List<PageNote> spilled = [];
+        Length taken = _options.NoteSeparatorHeight;
+        int placed = 0;
 
-        return FlowLayouter.LayOut(
-            blocks, page.TextArea, offsetFromTop: null,
-            collapsesSpacing: _options.CollapsesSpacing,
-            addsCellLineSpacing: _options.AddsCellLineSpacing);
+        foreach (PageNote note in notes)
+        {
+            Length height = HeightOfNote(note);
+
+            // A note is placed regardless only when a page of its own would not hold it either. Anything
+            // weaker keeps a note that simply does not fit *here* — the whole point of spilling — and
+            // "place the first note whatever the room" is exactly that mistake: it makes a page carrying
+            // one note never spill at all, which passes on `tpr`, where an earlier footnote had already
+            // taken the area, and fails on every page whose only note is the one too big for it.
+            bool cannotFitAnywhere = taken + height > page.TextHeight;
+
+            if (!cannotFitAnywhere && (spilled.Count > 0 || taken + height > available))
+            {
+                spilled.Add(note);
+                continue;
+            }
+
+            taken += height;
+            placed++;
+            blocks.AddRange(note.Blocks);
+        }
+
+        return (
+            FlowLayouter.LayOut(
+                blocks, page.TextArea, offsetFromTop: null,
+                collapsesSpacing: _options.CollapsesSpacing,
+                addsCellLineSpacing: _options.AddsCellLineSpacing),
+            spilled);
     }
 
     /// <summary>
