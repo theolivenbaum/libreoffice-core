@@ -660,6 +660,36 @@ git -C <worktree> status --short | grep -vE '\.(png|ico)$' | grep -v '\.vsconfig
 git -C <primary> worktree remove --force <worktree>
 ```
 
+### Three worktree branches hold commits that must NOT be merged
+
+Triaged 2026-08-15. `wt-paint-b` (2 commits), `wt-slides-chart` (4) and `wt-slides-text` (5) each
+carry work that never reached this branch, and merging any of them **reverts newer work**. They
+are survivors of the round that crashed, and the fixes in them were subsequently re-derived and
+landed by another route — better, in at least the autofit case.
+
+The tell is in the diff direction. Against this branch they show large *deletions*:
+`ChartLayout.cs` −251, `SlideAutofit.cs` −213, `SlideText.cs` −207, `PptxTextBody.cs` −155. That
+is not work to recover, it is an older file. Confirmed by content rather than by inference —
+`percentStacked` is already in `Charts/ChartPlot.cs` and `DrawingML/DrawingChartPlot.cs`, the
+twelve `constScaleLevels` autofit rows are already in `SlideAutofit.cs:32-116` with the 0.250
+floor, and `a:noFill` suppression is already at `DrawingChartPlot.cs:405,1583`.
+
+**Keep the branches; do not merge them, and do not delete them without reading this.** The one
+thing they hold that this branch does not is *test coverage*: `wt-slides-chart` has
+`ChartStackingTests.cs` (288 lines) and `DrawingChartStackingTests.cs` (252). They do not compile
+here — they are written against a `ChartPlot.CategoryTotal` / `ChartPlot.CategoriesReversed` API
+this branch never adopted. Most of what they assert is covered under other names
+(`APercentStackIsDrawnZeroToOneHundredInTenSteps`,
+`EveryPercentStackedColumnIsTheSameHeightAndSplitByRatio`,
+`AReversedAxisRunsFromTheMaximumDownwards`), but four assertions appear to have no counterpart:
+a reversed *category* axis putting the first category at the top, moving its labels with the
+bars, and swapping series within a category; and a series with `a:noFill` still holding its place
+in a stack. Adapting those four is worth a round; merging the branch to get them is not.
+
+The general point, which is the reason this is written down at all: **a branch that is behind is
+indistinguishable from a branch that is ahead until you look at which side the deletions are
+on.** `git log --oneline main..branch` shows commits either way and says nothing about it.
+
 **`git stash` is repository-global, and this clone has many worktrees.** Stashing a file in
 one worktree to build a "before" binary, and popping it later, popped *another branch's* stash
 into the wrong worktree — the stash stack is one per repository, not one per worktree. Nothing
