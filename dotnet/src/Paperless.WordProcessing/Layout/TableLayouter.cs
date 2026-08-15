@@ -113,9 +113,30 @@ public static class TableLayouter
 
                 // A merged cell charges only its last row, and only for what one row's worth of it needs.
                 // Charging the whole height there would make that row as tall as the merge.
+                //
+                // The declared floor is applied to the *text* and the cell's vertical padding is then added
+                // on top of the result, rather than the floor being compared against the two together.
+                // Writer's minimum is a `SwFormatFrameSize` on the row and a cell's top and bottom margins
+                // are border distances *inside* it, so a row resting on its floor is its floor plus its
+                // margins tall. Measured on `template---tpr…docx`, whose rows declare
+                // `w:trHeight w:val="460" w:hRule="atLeast"` (23.00 pt) and `w:tcMar` top and bottom of 100
+                // twips (5.00 pt each): the reference's one-line rows are 33.00 pt — 23.00 + 10.00 — where
+                // comparing the floor against text-plus-padding leaves them at the content's own 25.80.
+                // Its two-line rows are 41.60 pt on both readings and on both sides, because their text
+                // clears the floor either way, which is why this was invisible on every table whose rows
+                // are full.
+                //
+                // Consistent with `probes/words-pagination-01/row-min-height-border.py`, which read a floor
+                // back exactly: that fixture states no `w:tcMar`, and Word's default top and bottom cell
+                // margin is nought.
                 if (last == row)
                 {
-                    heights[row] = Length.Max(heights[row], text + cell.Padding.Vertical);
+                    Length floor = table.Rows[row].HasExactHeight
+                        ? Length.Zero
+                        : table.Rows[row].MinHeight;
+
+                    heights[row] = Length.Max(
+                        heights[row], Length.Max(text, floor) + cell.Padding.Vertical);
                 }
             }
 

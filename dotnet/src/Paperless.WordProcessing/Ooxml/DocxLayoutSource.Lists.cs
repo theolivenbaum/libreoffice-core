@@ -130,35 +130,51 @@ public sealed partial class DocxLayoutSource
     /// style-linked list that names the style rather than the other way round — the last is how numbered
     /// headings are usually written. A <c>w:numId</c> of zero means "not numbered", which is how Word
     /// writes a continuation paragraph inside a list item, and must not be read as the first list.
+    /// <para>
+    /// <strong><c>w:numPr</c> is a bag of properties and not one value, so <c>w:numId</c> and
+    /// <c>w:ilvl</c> inherit separately.</strong> This is <see cref="WordStyles.ParagraphPropertyLayers"/>'s
+    /// rule, already stated there for <c>w:spacing</c> and <c>w:ind</c>, and <c>w:numPr</c> is the third
+    /// element it applies to: Word maps the two children to separate properties, so the nearest layer
+    /// stating each one wins independently.
+    /// </para>
+    /// <para>
+    /// Taking the innermost <c>w:numPr</c> whole is how an outline-numbered heading loses its number
+    /// entirely, which is the ordinary shape of a Word heading chain rather than an exotic one. Measured on
+    /// <c>report-template.docx</c>: <c>Heading2</c> states <c>&lt;w:numPr&gt;&lt;w:numId w:val="9"/&gt;</c>
+    /// with no level, <c>Heading3</c> and <c>Heading4</c> each restate only <c>&lt;w:ilvl&gt;</c>, and a
+    /// paragraph styled <c>Heading4</c> carries no <c>w:numPr</c> of its own. Stopping at the first
+    /// <c>w:numPr</c> in the chain finds <c>Heading4</c>'s, reads no <c>w:numId</c> from it and answers
+    /// "not numbered" — so every heading from level 3 down drew unnumbered where the reference draws
+    /// <c>1.1.1</c>.
+    /// </para>
     /// </remarks>
     private (string NumId, int Level)? ResolveNumbering(XElement? properties)
     {
-        XElement? numbering = Word.Child(properties, "numPr");
-        string? numId = Word.Value(numbering, "numId");
-        int level = int.TryParse(Word.Value(numbering, "ilvl"), out int parsed) ? parsed : 0;
-
         string? styleId = Word.Attribute(Word.Child(properties, "pStyle"), "val");
 
-        if (numId is null && styleId is not null)
-        {
-            WordProperty fromStyle = _styles.ResolveInStyleChain(
-                styleId, WordStyleType.Paragraph, runProperty: false, "numPr");
+        string? numId = null;
+        int? level = null;
 
-            if (fromStyle.HasValue)
+        foreach (XElement layer in _styles.ParagraphPropertyLayers("numPr", properties, styleId))
+        {
+            numId ??= Word.Value(layer, "numId");
+
+            if (level is null && int.TryParse(Word.Value(layer, "ilvl"), out int stated))
             {
-                numId = Word.Value(fromStyle.Element, "numId");
-                level = int.TryParse(Word.Value(fromStyle.Element, "ilvl"), out int fromStyleLevel)
-                    ? fromStyleLevel
-                    : 0;
+                level = stated;
             }
-            else if (_numbering.FindInstanceForStyle(styleId) is { } styleLinked)
-            {
-                numId = styleLinked;
-            }
+
+            if (numId is not null && level is not null) break;
+        }
+
+        if (numId is null && styleId is not null
+            && _numbering.FindInstanceForStyle(styleId) is { } styleLinked)
+        {
+            numId = styleLinked;
         }
 
         if (numId is null or "0") return null;
-        return (numId, Math.Clamp(level, 0, WordNumbering.LevelCount - 1));
+        return (numId, Math.Clamp(level ?? 0, 0, WordNumbering.LevelCount - 1));
     }
 
     /// <summary>
