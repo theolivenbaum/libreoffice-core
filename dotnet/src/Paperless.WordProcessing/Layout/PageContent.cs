@@ -5,6 +5,7 @@ using Paperless.Text.Fonts;
 using Paperless.Text.Itemisation;
 using Paperless.Text.Layout;
 using Paperless.Text.Shaping;
+using Paperless.WordProcessing.Model;
 
 namespace Paperless.WordProcessing.Layout;
 
@@ -870,6 +871,10 @@ public readonly record struct PageRun(
 /// <paramref name="ColumnGap"/> the gap between them.
 /// </param>
 /// <param name="ColumnGap"><inheritdoc cref="Columns" path="/summary"/></param>
+/// <param name="ColumnRuler">
+/// The stated widths of those columns, already fitted to the body's measure, for a section that does not
+/// space them evenly; null for the ordinary case.
+/// </param>
 /// <remarks>
 /// <see cref="UpperSpace"/> is carried because a frame anchored to the paragraph is positioned from a
 /// point above the line: Writer's <c>SwAnchoredObjectPosition::GetTopForObjPos</c>
@@ -895,7 +900,8 @@ public readonly record struct PlacedLine(
     int Column = 0,
     Length UpperSpace = default,
     int Columns = 1,
-    Length ColumnGap = default)
+    Length ColumnGap = default,
+    ColumnRuler? ColumnRuler = null)
 {
     /// <summary>Where a frame anchored to this line's paragraph measures its offset from.</summary>
     /// <remarks>
@@ -1020,6 +1026,16 @@ public sealed record LaidOutPage
     public Length ColumnGap { get; init; }
 
     /// <summary>
+    /// The columns' own widths for a section that stated them one by one, already fitted to
+    /// <see cref="BodyArea"/>; null when the columns are even.
+    /// </summary>
+    /// <remarks>
+    /// Carried on the page for the reason <see cref="ColumnArea(int)"/> is: a renderer is handed a page,
+    /// and recomputing the ruler would mean giving it the section too.
+    /// </remarks>
+    public ColumnRuler? ColumnRuler { get; init; }
+
+    /// <summary>
     /// True when the page's section reads right to left, so that its first column is the rightmost.
     /// </summary>
     /// <remarks>
@@ -1039,21 +1055,7 @@ public sealed record LaidOutPage
     /// </remarks>
     /// <param name="column">The column, counted from zero at the leading edge.</param>
     public DocRect ColumnArea(int column)
-    {
-        int columns = Math.Max(1, ColumnCount);
-        int at = Math.Clamp(column, 0, columns - 1);
-
-        Length gaps = ColumnGap * (columns - 1);
-        Length width = BodyArea.Width - gaps;
-        width = width > Length.Zero ? width / columns : BodyArea.Width;
-
-        // The leading edge is the right one in a right-to-left section, so its first column is the
-        // rightmost — see PageGeometry.IsRightToLeft, where it is measured.
-        if (IsRightToLeft) at = columns - 1 - at;
-
-        return new DocRect(
-            BodyArea.X + ((width + ColumnGap) * at), BodyArea.Y, width, BodyArea.Height);
-    }
+        => Area(ColumnCount, ColumnGap, ColumnRuler, column);
 
     /// <summary>
     /// The rectangle one line's own coordinates are relative to.
@@ -1069,15 +1071,38 @@ public sealed record LaidOutPage
         if (line.Columns <= 1 && ColumnCount > 1) return ColumnArea(line.Column);
         if (line.Columns <= 1) return BodyArea;
 
-        int at = Math.Clamp(line.Column, 0, line.Columns - 1);
-        Length gaps = line.ColumnGap * (line.Columns - 1);
+        return Area(line.Columns, line.ColumnGap, line.ColumnRuler, line.Column);
+    }
+
+    /// <summary>
+    /// One column's rectangle inside <see cref="BodyArea"/>, from either description of the columns.
+    /// </summary>
+    /// <remarks>
+    /// The page and a line each state their own count, gap and ruler — a page can hold sections that
+    /// disagree about all three — and the arithmetic below is the same for both, so it lives here rather
+    /// than twice. A ruler whose count does not match is ignored, which is the lenient reading a section
+    /// that states widths for columns it does not have needs.
+    /// </remarks>
+    private DocRect Area(int count, Length gap, ColumnRuler? ruler, int column)
+    {
+        int columns = Math.Max(1, count);
+        int at = Math.Clamp(column, 0, columns - 1);
+
+        // The leading edge is the right one in a right-to-left section, so its first column is the
+        // rightmost — see PageGeometry.IsRightToLeft, where it is measured.
+        if (IsRightToLeft) at = columns - 1 - at;
+
+        if (ruler is { } stated && stated.Count == columns)
+        {
+            return new DocRect(
+                BodyArea.X + stated.OffsetOf(at), BodyArea.Y, stated.WidthAt(at), BodyArea.Height);
+        }
+
+        Length gaps = gap * (columns - 1);
         Length width = BodyArea.Width - gaps;
-        width = width > Length.Zero ? width / line.Columns : BodyArea.Width;
+        width = width > Length.Zero ? width / columns : BodyArea.Width;
 
-        if (IsRightToLeft) at = line.Columns - 1 - at;
-
-        return new DocRect(
-            BodyArea.X + ((width + line.ColumnGap) * at), BodyArea.Y, width, BodyArea.Height);
+        return new DocRect(BodyArea.X + ((width + gap) * at), BodyArea.Y, width, BodyArea.Height);
     }
 
     /// <summary>The lines on the page, in order.</summary>

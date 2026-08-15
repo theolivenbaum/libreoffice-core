@@ -561,6 +561,7 @@ public sealed class Paginator
         // laying out is where the shaping cost is. That matters most for a table: a long one crossing
         // several page breaks would otherwise shape all of its cells once per page it touches.
         List<LaidBlock> laid = new(blocks.Count);
+        List<Length> laidAt = new(blocks.Count);
         for (int i = 0; i < blocks.Count; i++)
         {
             // The block's own section's width, not the first section's: a paragraph in a landscape section
@@ -568,6 +569,15 @@ public sealed class Paginator
             Length width = resolved[SectionOf(blocks[i], resolved.Count)].Section.Page.ColumnWidth;
             if (width <= Length.Zero) width = bodyWidth;
 
+            laidAt.Add(width);
+            laid.Add(LayOutBlock(i, width));
+        }
+
+        // Lays one block out at a given breaking width. A local function rather than the body of the loop
+        // above, because a section whose columns are *not* all the same width has to lay a block out again
+        // when it lands in a column of a different measure — see `Laid`.
+        LaidBlock LayOutBlock(int i, Length width)
+        {
             if (blocks[i] is PageTable table)
             {
                 // The section's own breaking width is also what a table stating no widths of its own is
@@ -581,8 +591,7 @@ public sealed class Paginator
                         _options.CollapsesSpacing,
                         _options.AddsCellLineSpacing);
 
-                laid.Add(new LaidBlock(null, cells, rowHeights));
-                continue;
+                return new LaidBlock(null, cells, rowHeights);
             }
 
             PageParagraph paragraph = (PageParagraph)blocks[i];
@@ -625,10 +634,10 @@ public sealed class Paginator
                     paragraph.EffectiveShaping,
                     obstacles);
 
-            laid.Add(new LaidBlock(
+            return new LaidBlock(
                 _options.JustifiesLinesEndedByBreak
                     ? laidOut
-                    : ManualBreakJustification.Suppress(laidOut, paragraph.Text)));
+                    : ManualBreakJustification.Suppress(laidOut, paragraph.Text));
         }
 
         int pageNumber = geometry.RestartPageNumberAt ?? startingNumber;
@@ -719,6 +728,25 @@ public sealed class Paginator
         // section by exactly that gap. Measured at 10 pt on `150_5300_13_chg8.doc`.
         Length balanceReach = Length.Zero;
 
+        // The same, counting only as far as the last line or table row a column actually drew — the
+        // trailing space-after left off. Both are needed and they answer different questions. *Whether* a
+        // candidate height holds the section is a question about the content: a column that took every line
+        // it was offered has fitted, even when the paragraph's space-after then runs past the band, because
+        // Writer's own fitting rules never test that gap against the column bottom either. *How tall* the
+        // section then is includes the gap, which is what `balanceReach` is for.
+        //
+        // Conflating the two is what made the search settle far too tall. Testing the gap against the band
+        // rejects nearly every candidate — the gap only fits when the content happens to end flush — so the
+        // bisection's lower bound is raised by the first such rejection and it converges on the highest
+        // band it tried rather than the shortest that works. Measured on `150_5300_13_chg10.doc`, whose
+        // page-one section settled at 278.58 pt against a content minimum of 232.35: the section ran 46 pt
+        // long and pushed the last row of its PAGE CONTROL CHART onto a page of its own.
+        Length balanceLineReach = Length.Zero;
+
+        // How far the current column's lines reach, which is `used` before the last paragraph's space-after
+        // was added to it. See `balanceLineReach`.
+        Length lineUsed = Length.Zero;
+
         // Set by EmitPage when a balanced trial's content will not fit the candidate height. Read at the
         // top of the loop, because EmitPage is called from a dozen places and each of them expects to
         // continue; the loop is where the trial can be restarted.
@@ -728,6 +756,61 @@ public sealed class Paginator
         // across the break. Nought for every row of every table that did not — which, since a row only
         // splits when it has to, is nearly all of them.
         Length rowDrawn = Length.Zero;
+
+        // Blocks laid out a second time because they landed in a column narrower or wider than the one the
+        // pass above assumed. Empty for every document whose columns are even, which is nearly all of them.
+        Dictionary<(int Index, long Width), LaidBlock> reLaid = [];
+
+        // The block whose placement is in flight and the layout it was cut from, so that the rest of it is
+        // taken from the same list of lines when it crosses into a column of another width.
+        int startedBlock = -1;
+        LaidBlock startedLayout = default;
+
+        // The block at `index` broken to the width of the column it is going into. The same object as
+        // `laid[index]` unless the section states a width per column and this one differs from the width
+        // that pass used, which is the first column's.
+        //
+        // Writer has no equivalent because it does not pre-break: a text frame is formatted inside the
+        // column frame it sits in, so moving to a column of another width reformats it as a matter of
+        // course. Pre-breaking is what buys the shaping cost back on the ordinary document, so the answer
+        // here is to keep it and re-break only where a column disagrees.
+        LaidBlock Laid(int index)
+        {
+            if (page.Ruler is not { } ruler) return laid[index];
+
+            // A block that is already part-placed keeps the layout it was cut from, whichever column the
+            // rest of it lands in. `lineIndex` counts into that particular list of lines, so handing back a
+            // list broken to another width indexes a different line — or, when the wider column needed
+            // fewer of them, no line at all. Writer has the same split to make and makes it the other way,
+            // reformatting the follow frame at its own width; doing that here would mean recutting the
+            // remainder rather than indexing into it, which is a change to how a paragraph is carried
+            // across a break rather than to how it is broken.
+            if (index == startedBlock && (lineIndex > 0 || rowDrawn > Length.Zero))
+            {
+                return startedLayout;
+            }
+
+            Length width = ruler.WidthAt(column);
+            LaidBlock chosen;
+
+            if (width <= Length.Zero || width == laidAt[index])
+            {
+                chosen = laid[index];
+            }
+            else if (reLaid.TryGetValue((index, width.Emu), out LaidBlock cached))
+            {
+                chosen = cached;
+            }
+            else
+            {
+                chosen = LayOutBlock(index, width);
+                reLaid[(index, width.Emu)] = chosen;
+            }
+
+            startedBlock = index;
+            startedLayout = chosen;
+            return chosen;
+        }
 
         BeginBalance();
 
@@ -869,6 +952,7 @@ public sealed class Paginator
                     {
                         Columns = geometry.Page.Columns,
                         ColumnGap = geometry.Page.ColumnGap,
+                        ColumnRuler = geometry.Page.ColumnRuler,
                     }
                     : geometry.Page;
 
@@ -942,7 +1026,7 @@ public sealed class Paginator
                 Length tableRoom = columnBottom - NoteHeight(notes) - (used + before);
 
                 TablePart part = PlaceTablePart(
-                    table, laid[paragraphIndex], lineIndex, rowDrawn, body.ColumnArea(column),
+                    table, Laid(paragraphIndex), lineIndex, rowDrawn, body.ColumnArea(column),
                     used + before, column, tableRoom, columnIsEmpty);
 
                 // The notes the placed part itself cites take room out of the same column, so the part may
@@ -960,7 +1044,7 @@ public sealed class Paginator
                     {
                         Length shortened = columnBottom - withCited - (used + before);
                         TablePart retry = PlaceTablePart(
-                            table, laid[paragraphIndex], lineIndex, rowDrawn, body.ColumnArea(column),
+                            table, Laid(paragraphIndex), lineIndex, rowDrawn, body.ColumnArea(column),
                             used + before, column, shortened, columnIsEmpty);
 
                         if (retry.Placed is not null
@@ -987,10 +1071,11 @@ public sealed class Paginator
                 notes.AddRange(PlacedNotes.In(part.Placed));
 
                 used += before + part.Height;
+                lineUsed = used;
                 lineIndex = part.NextRow;
                 rowDrawn = part.NextDrawn;
 
-                if (lineIndex < laid[paragraphIndex].RowHeights.Count || rowDrawn > Length.Zero)
+                if (lineIndex < Laid(paragraphIndex).RowHeights.Count || rowDrawn > Length.Zero)
                 {
                     // The table is split: the rest goes on the next page, with its headings repeated.
                     EmitPage();
@@ -1005,7 +1090,7 @@ public sealed class Paginator
             }
 
             PageParagraph paragraph = (PageParagraph)blocks[paragraphIndex];
-            LaidOutParagraph layout = laid[paragraphIndex].Paragraph!;
+            LaidOutParagraph layout = Laid(paragraphIndex).Paragraph!;
 
             // A page break before a paragraph that is not already at the top of a page.
             if (lineIndex == 0 && paragraph.Format.StartsNewPage && !pageIsEmpty)
@@ -1107,7 +1192,8 @@ public sealed class Paginator
                     // — a two-column stretch between two continuous breaks leaves the page single-column
                     // again below it, and the page is written with whatever is current when it is emitted.
                     Math.Max(1, page.Columns),
-                    page.ColumnGap));
+                    page.ColumnGap,
+                    page.Ruler));
 
                 // A stretch that shares its line with the next one leaves the pen where it is: the box
                 // after it is more of the same line, at the same top.
@@ -1122,6 +1208,7 @@ public sealed class Paginator
             notes.AddRange(NotesIn(paragraph, layout, lineIndex, allowed));
 
             used = top;
+            lineUsed = used;
             lineIndex += allowed;
 
             if (lineIndex < layout.Lines.Count)
@@ -1143,7 +1230,7 @@ public sealed class Paginator
             // after placing it, because whether the successor fits is only knowable once this one has.
             if (paragraph.Format.KeepWithNext
                 && paragraphIndex < blocks.Count
-                && laid[paragraphIndex].Paragraph is { } next
+                && Laid(paragraphIndex).Paragraph is { } next
                 && !FirstLineFits(next, (PageParagraph)blocks[paragraphIndex], used, columnBottom))
             {
                 MoveTrailingGroupToNextPage(
@@ -1202,10 +1289,15 @@ public sealed class Paginator
                 // they are — each carries its own column — and the running height starts again at the top
                 // of the band, which is the page's top for ordinary columns and the section's own top for a
                 // balanced one.
-                if (balance is not null && used > balanceReach) balanceReach = used;
+                if (balance is not null)
+                {
+                    if (used > balanceReach) balanceReach = used;
+                    if (lineUsed > balanceLineReach) balanceLineReach = lineUsed;
+                }
 
                 column++;
                 used = columnTop;
+                lineUsed = columnTop;
                 return;
             }
 
@@ -1247,6 +1339,7 @@ public sealed class Paginator
             tables = [];
             notes = [];
             used = Length.Zero;
+            lineUsed = Length.Zero;
             MeasureBody();
             columnTop = Length.Zero;
             columnBottom = bodyHeight;
@@ -1276,8 +1369,11 @@ public sealed class Paginator
                 used, band, paragraphIndex, lineIndex, rowDrawn, column, placed, tables, notes);
 
             balanceReach = used;
+            balanceLineReach = used;
+            lineUsed = used;
             columnTop = used;
             columnBottom = used + band;
+
         }
 
         // Puts the fill back where the section started, so the same content can be laid out again at a
@@ -1294,6 +1390,8 @@ public sealed class Paginator
             tables = [.. state.Tables];
             notes = [.. state.Notes];
             balanceReach = state.Top;
+            balanceLineReach = state.Top;
+            lineUsed = state.Top;
             columnTop = state.Top;
             columnBottom = state.Top + state.Candidate;
         }
@@ -1304,13 +1402,15 @@ public sealed class Paginator
         {
             BalanceSearch state = balance!;
 
-            // What the trial actually needed, spacing included, against what it was given. A band that
-            // holds every line can still be shorter than the content, because the last paragraph's
-            // space-after is added to the running height after the last fitting test rather than before.
+            // What the trial actually needed, against what it was given — twice over, because the two
+            // questions want different answers. `lines` stops at the last line a column drew, and decides
+            // whether the candidate held the section; `reach` adds the trailing space-after, and decides
+            // how tall the section then is. See `balanceLineReach` for what conflating them cost.
             Length reach = (used > balanceReach ? used : balanceReach) - state.Top;
+            Length lines = (lineUsed > balanceLineReach ? lineUsed : balanceLineReach) - state.Top;
             Length band = columnBottom - columnTop;
 
-            if (reach > band)
+            if (lines > band)
             {
                 // Every line of the section went into the columns and the content still reaches past the
                 // band it was given. When that band is the tallest there is — the section's whole
@@ -1343,7 +1443,12 @@ public sealed class Paginator
 
             if (state.Settled)
             {
-                used = state.Top + state.Candidate;
+                // The section box is as tall as the band it settled on, or as the content if the last
+                // paragraph's space-after runs past it. Writer's section frame sums its columns' areas and
+                // a text frame's area includes its lower margin, so a gap left hanging off the bottom of
+                // the deepest column still lifts everything below the section by that much. Measured at
+                // 10 pt on `150_5300_13_chg8.doc`.
+                used = state.Top + (reach > state.Candidate ? reach : state.Candidate);
                 column = 0;
                 balance = null;
                 columnTop = Length.Zero;
@@ -1713,6 +1818,7 @@ public sealed class Paginator
             BodyArea = geometry.TextArea,
             ColumnCount = geometry.Columns,
             ColumnGap = geometry.ColumnGap,
+            ColumnRuler = geometry.Ruler,
             IsRightToLeft = geometry.IsRightToLeft,
             Lines = [.. lines],
             Tables = [.. tables],
@@ -1735,6 +1841,7 @@ public sealed class Paginator
             BodyArea = geometry.TextArea,
             ColumnCount = geometry.Columns,
             ColumnGap = geometry.ColumnGap,
+            ColumnRuler = geometry.Ruler,
             IsRightToLeft = geometry.IsRightToLeft,
             Lines = [],
             Header = furniture.Header,
