@@ -2,6 +2,7 @@ path	added	era	libreoffice	dejavu	risk	cited_by
 dotnet/probes/PROVENANCE.tsv	2026-08-15	current	26.2.4.2	present	current	dotnet/CLAUDE.md;dotnet/TODO.batches.md;dotnet/TODO.raster-ceiling.md
 dotnet/probes/crop-wiring-01/prediction.md	2026-08-13	current	26.2.4.2	present	current	-
 dotnet/probes/crop-wiring-01/results.md	2026-08-13	current	26.2.4.2	present	current	-
+dotnet/probes/emptypage-01/results.md	2026-08-15	current	26.2.4.2	present	current	-
 dotnet/probes/fidelity-01/overrun-deltas.tsv	2026-08-13	current	26.2.4.2	present	current	-
 dotnet/probes/fidelity-01/pagedrawing-deltas.tsv	2026-08-13	current	26.2.4.2	present	current	-
 dotnet/probes/fidelity-01/prediction.md	2026-08-13	current	26.2.4.2	present	current	-
@@ -51,7 +52,7 @@ dotnet/probes/refdev-01/words-before.tsv	2026-08-15	current	26.2.4.2	present	cur
 dotnet/probes/sheets-b-01/prediction.md	2026-08-13	current	26.2.4.2	present	current	-
 dotnet/probes/sheets-b-01/results.md	2026-08-13	current	26.2.4.2	present	current	-
 dotnet/probes/sheets-b011-01/prediction.md	2026-08-14	current	26.2.4.2	present	current	-
-dotnet/probes/sheets-b011-01/results.md	2026-08-14	current	26.2.4.2	present	current	dotnet/src/Paperless.Spreadsheets/TODO.md
+dotnet/probes/sheets-b011-01/results.md	2026-08-14	current	26.2.4.2	present	current	dotnet/src/Paperless.Spreadsheets/TODO.md;dotnet/src/paperless.spreadsheets/TODO.md
 dotnet/probes/sheets-c-01/prediction.md	2026-08-13	current	26.2.4.2	present	current	-
 dotnet/probes/sheets-c-01/results.md	2026-08-13	current	26.2.4.2	present	current	-
 dotnet/probes/sheets-chart-01/prediction.md	2026-08-14	current	26.2.4.2	present	current	-
@@ -87,7 +88,7 @@ dotnet/probes/sheets-r23/README.md	2026-08-08	pre-container	24.2.7.2	unverified	
 dotnet/probes/sheets-r23/after-fontsize-whole-track.tsv	2026-08-08	pre-container	24.2.7.2	unverified	archival	-
 dotnet/probes/sheets-r23/base-whole-track.tsv	2026-08-08	pre-container	24.2.7.2	unverified	archival	-
 dotnet/probes/sheets-r23/ref-font-sizes.tsv	2026-08-08	pre-container	24.2.7.2	unverified	archival	-
-dotnet/probes/sheets-r24/README.md	2026-08-08	pre-container	24.2.7.2	unverified	CITED-STALE	dotnet/src/Paperless.Spreadsheets/TODO.md
+dotnet/probes/sheets-r24/README.md	2026-08-08	pre-container	24.2.7.2	unverified	CITED-STALE	dotnet/src/Paperless.Spreadsheets/TODO.md;dotnet/src/paperless.spreadsheets/TODO.md
 dotnet/probes/sheets-r24/after-charts-whole-track.tsv	2026-08-08	pre-container	24.2.7.2	unverified	archival	-
 dotnet/probes/sheets-r24/base-whole-track.tsv	2026-08-08	pre-container	24.2.7.2	unverified	archival	-
 dotnet/probes/sheets-r25/README.md	2026-08-08	pre-container	24.2.7.2	unverified	archival	-
@@ -166,7 +167,7 @@ dotnet/probes/sheets-rebase-02/results.md	2026-08-13	current	26.2.4.2	present	cu
 dotnet/probes/sheets-rest-01/after.tsv	2026-08-15	current	26.2.4.2	present	current	-
 dotnet/probes/sheets-rest-01/before.tsv	2026-08-15	current	26.2.4.2	present	current	-
 dotnet/probes/sheets-rest-01/prediction.md	2026-08-15	current	26.2.4.2	present	current	-
-dotnet/probes/sheets-rest-01/results.md	2026-08-15	current	26.2.4.2	present	current	-
+dotnet/probes/sheets-rest-01/results.md	2026-08-15	current	26.2.4.2	present	current	.claude/skills/render-comparison/SKILL.md
 dotnet/probes/sheets-sil-01/README.md	2026-08-15	current	26.2.4.2	present	current	-
 dotnet/probes/sheets-tagged-01/inkdiff-detail.tsv	2026-08-14	current	26.2.4.2	present	current	-
 dotnet/probes/sheets-tagged-01/inkdiff.tsv	2026-08-14	current	26.2.4.2	present	current	-
@@ -361,6 +362,7 @@ dotnet/probes/words-table-01/prediction.md	2026-08-15	current	26.2.4.2	present	c
 dotnet/probes/words-table-01/results.md	2026-08-15	current	26.2.4.2	present	current	-
 dotnet/probes/words-vision-01/prediction.md	2026-08-13	current	26.2.4.2	present	current	-
 dotnet/probes/words-vision-01/results.md	2026-08-14	current	26.2.4.2	present	current	-
+dotnet/probes/words-w-pitch/results.md	2026-08-15	current	26.2.4.2	present	current	-
 dotnet/research/probes/sheets-r17/README.md	2026-08-07	pre-container	24.2.7.2	unverified	archival	-
 dotnet/research/probes/sheets-r17/lo-faces.tsv	2026-08-07	pre-container	24.2.7.2	unverified	CITED-STALE	dotnet/TODO.batches.md
 dotnet/research/probes/sheets-r17/our-faces.tsv	2026-08-07	pre-container	24.2.7.2	unverified	archival	-
@@ -378,7 +380,7 @@ dotnet/research/probes/slides-r18/after-ink.tsv	2026-08-07	pre-container	24.2.7.
 dotnet/research/probes/slides-r18/after-parity.tsv	2026-08-07	pre-container	24.2.7.2	unverified	archival	-
 dotnet/research/probes/slides-r18/base-ink.tsv	2026-08-07	pre-container	24.2.7.2	unverified	archival	-
 dotnet/research/probes/slides-r18/base-parity.tsv	2026-08-07	pre-container	24.2.7.2	unverified	archival	-
-dotnet/research/probes/slides-r19/NOTES.md	2026-08-07	pre-container	24.2.7.2	unverified	CITED-STALE	dotnet/src/Paperless.Presentations/TODO.md
+dotnet/research/probes/slides-r19/NOTES.md	2026-08-07	pre-container	24.2.7.2	unverified	CITED-STALE	dotnet/src/Paperless.Presentations/TODO.md;dotnet/src/paperless.presentations/TODO.md
 dotnet/research/probes/slides-r19/after-ink.tsv	2026-08-07	pre-container	24.2.7.2	unverified	archival	-
 dotnet/research/probes/slides-r19/after-parity.tsv	2026-08-07	pre-container	24.2.7.2	unverified	archival	-
 dotnet/research/probes/slides-r19/base-ink.tsv	2026-08-07	pre-container	24.2.7.2	unverified	archival	-
