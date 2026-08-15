@@ -609,8 +609,18 @@ internal static class SheetTextLayout
         // neighbours, the same ### for a value that will not fit — so the only thing to skip is
         // the shortening. A cell whose whole content is a hyperlink field is on the same path,
         // for the same reason: it is an EditTextObject rather than a string.
+        //
+        // **And so is every cell the importers stored as one**, which is the larger set and the
+        // one the character list above kept hiding. `LayoutStrings` reaches for the EditEngine
+        // before it looks at a single character: `else if (aCell.getType() == CELLTYPE_EDIT)
+        // bUseEditEngine = true` (`sc/source/ui/view/output2.cxx:1710-1712`). Both importers
+        // build such a cell from a string that carries formatting runs or a hard break —
+        // `putRichString` on the OOXML side (`sheetdatabuffer.cxx:125-133`) and
+        // `XclImpString::SetToDocument` on the BIFF side (`xihelper.cxx:246-256`).
+        // See <see cref="IsEditCell"/>.
         if (!isValue && !breaks && area.IsClipped
-            && !cell.IsField && !HasEditCharacters(text, fillAt))
+            && !cell.IsField && !HasEditCharacters(text, fillAt)
+            && !IsEditCell(text, portions))
         {
             run = Shorten(run, text, ShapeRange, percent, horizontal, area);
         }
@@ -837,7 +847,9 @@ internal static class SheetTextLayout
             }
 
             layouter ??= Layouters.GetOrAdd(
-                face.Reference.FaceKey, _ => new ParagraphLayouter(face.Face, shaper: SheetFonts.Shaper));
+                face.Reference.FaceKey,
+                _ => new ParagraphLayouter(
+                    face.Face, shaper: SheetFonts.Shaper, breaksOverflowingBlanks: true));
 
             LaidOutParagraph laid = layouter.Layout(
                 paragraph, emSize: size, textAreaWidth: available, options: SheetText.NoKerning);
@@ -880,7 +892,9 @@ internal static class SheetTextLayout
         if (text.Length == 0) return [];
 
         ParagraphLayouter layouter = Layouters.GetOrAdd(
-            face.Reference.FaceKey, _ => new ParagraphLayouter(face.Face, shaper: SheetFonts.Shaper));
+            face.Reference.FaceKey,
+            _ => new ParagraphLayouter(
+                face.Face, shaper: SheetFonts.Shaper, breaksOverflowingBlanks: true));
 
         LaidOutParagraph laid = layouter.Layout(
             Measured(text, portions, scale: 1.0, device), textAreaWidth: available);
@@ -1245,10 +1259,12 @@ internal static class SheetTextLayout
             ? Layouters.GetOrAdd(
                 " field " + face.Reference.FaceKey,
                 _ => new ParagraphLayouter(
-                    face.Face, breaker: SheetFieldBreaker.Instance, shaper: SheetFonts.Shaper))
+                    face.Face, breaker: SheetFieldBreaker.Instance, shaper: SheetFonts.Shaper,
+                    breaksOverflowingBlanks: true))
             : Layouters.GetOrAdd(
                 face.Reference.FaceKey,
-                _ => new ParagraphLayouter(face.Face, shaper: SheetFonts.Shaper));
+                _ => new ParagraphLayouter(
+                    face.Face, shaper: SheetFonts.Shaper, breaksOverflowingBlanks: true));
 
         // A rich cell breaks against its own runs rather than against one face, through the
         // layouter's run-aware overload: a bold word is wider than the same characters set
@@ -1465,6 +1481,40 @@ internal static class SheetTextLayout
 
         return false;
     }
+
+    /// <summary>
+    /// Whether the importers would have stored this cell as an <c>EditTextObject</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The distinction decides one thing here and it is not a small one: a cell Calc drew through
+    /// <c>DrawStrings</c> loses the characters that will not fit — <c>ScDrawStringsVars</c> shortens
+    /// the string before it is shown — and a cell it drew through <c>DrawEdit</c> keeps every one of
+    /// them behind a clip. Only the second leaves the hidden tail in the PDF's text layer, which is
+    /// the half a word count scores.
+    /// </para>
+    /// <para>
+    /// Two things make such a cell, and both importers agree on them. A shared string carrying
+    /// formatting runs becomes rich text (<c>putRichString</c>,
+    /// <c>sc/source/filter/oox/sheetdatabuffer.cxx:125-133</c>;
+    /// <c>XclImpString::SetToDocument</c>, <c>sc/source/filter/excel/xihelper.cxx:246-256</c>), and
+    /// so does one holding a hard break, whether or not the cell wraps — the break makes it an edit
+    /// cell even where <c>SetSingleLine</c> stops it from starting a line.
+    /// </para>
+    /// <para>
+    /// Measured on <c>dotnet/probes/sheets-rest-01/mkclipprobe.py</c> under the installed 26.2.4.2,
+    /// five rows differing in one property each, all in a column too narrow for their text with the
+    /// neighbour occupied so that nothing may spill: the plain row's text layer holds
+    /// <strong>22</strong> of its 130 characters, and the rich, hard-break and rich-plus-break rows
+    /// hold all <strong>130</strong>. It is the whole of
+    /// <c>CIS_Debian_Linux_8_Benchmark_v1.0.0.xls</c>'s 1440-word deficit: its remediation and audit
+    /// columns hold exactly this shape, a paragraph with blank lines between its parts.
+    /// </para>
+    /// </remarks>
+    /// <param name="text">The cell's display text.</param>
+    /// <param name="portions">Its formatting runs, or null when it has none.</param>
+    private static bool IsEditCell(string text, IReadOnlyList<SheetTextPortion>? portions)
+        => portions is { Count: > 0 } || HoldsHardBreak(text);
 
     /// <summary>A rich cell's text, shaped run by run so that it can be broken into lines.</summary>
     private static MeasuredParagraph Measured(

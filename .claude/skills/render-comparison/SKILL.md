@@ -243,7 +243,7 @@ Once a page differs, narrow it down before theorising:
    | `TabStop.Leader` | 51 of 136 corpus DOCX | every dotted table-of-contents line blank |
    | `IsCapitalised` (`w:caps`/`w:smallCaps`) | — | wrong advance widths, so wrong line breaks |
    | `a:rPr/@baseline` | 29 of 112 corpus PPTX | superscripts on the baseline at full size |
-   | `SheetGrid.IsOptimalSize` (`ht` without `customHeight`) | every XLSX with a height hint | row pitch 15.735 pt against 15.0 |
+   | `SheetGrid.IsOptimalSize` (`ht` without `customHeight`) | ~~every XLSX with a height hint~~ | **fixed — see below** |
    | `WritingFieldKind.PageNumber` (`PAGE`) | every DOC/DOCX with a page-number field | footers print the producer's last cached result — `9` on all nine pages |
 
    Grep for the property name: **if the only hits are the readers and the model, it does
@@ -252,9 +252,18 @@ Once a page differs, narrow it down before theorising:
 
    Note the last two entries are also a warning about *why* these survive. Escapement had
    nowhere to be stored (`SlideTextRun` carried a flag, not a magnitude) and the row-height flag
-   has nothing behind it to call (`ScColumn::GetNeededSize` is a feature, not a line). A field
+   had nothing behind it to call (`ScColumn::GetNeededSize` is a feature, not a line). A field
    read and never used is often blocked on something real rather than merely forgotten, so
    budget for the feature rather than expecting a wiring change.
+
+   **`SheetGrid.IsOptimalSize` is no longer an example of this and the row is kept only so that a
+   round briefed from it is not sent hunting.** The feature it was blocked on was built:
+   `SheetOptimalRowHeights` consults the property three times and exists to honour it. A round
+   dispatched in 2026-08-15 was told this document's page-count gap *was* the unwired flag, spent
+   its first hour looking for the missing consumer, and found the real seat somewhere else
+   entirely — a run of trailing blanks that EditEngine breaks inside and a word processor lets
+   hang (`dotnet/probes/sheets-rest-01/results.md` §1). **Re-run the grep before believing any
+   row of this table**; that is the whole method, and it applies to the table itself.
 
 ## Naming the element that differs: `pdf-ops.py`
 

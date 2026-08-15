@@ -145,16 +145,22 @@ public sealed class ParagraphLayouter
     /// measuring text its face may not cover — see <see cref="FallbackShaper"/>, whose advances are
     /// usable and whose glyph identifiers are not.
     /// </param>
+    /// <param name="breaksOverflowingBlanks">
+    /// Whether a run of blanks wider than the line breaks inside rather than hanging past it. False
+    /// is Writer's rule and the default; EditEngine's is true, so a Calc cell sets it. See
+    /// <see cref="LineFiller.BreaksOverflowingBlanks"/>.
+    /// </param>
     public ParagraphLayouter(
         OpenTypeFace face,
         ILineBreaker? breaker = null,
         MetricGrid? grid = null,
         bool leadingAboveText = false,
-        ITextShaper? shaper = null)
+        ITextShaper? shaper = null,
+        bool breaksOverflowingBlanks = false)
     {
         ArgumentNullException.ThrowIfNull(face);
         _measurer = shaper is null ? new TextMeasurer(face) : new TextMeasurer(face, shaper);
-        _filler = new LineFiller(_measurer, breaker);
+        _filler = new LineFiller(_measurer, breaker, breaksOverflowingBlanks);
         _metrics = LineSpacing.Resolve(face, grid, leadingAboveText);
     }
 

@@ -478,7 +478,15 @@ internal static class SheetOptimalRowHeights
                               && text.AsSpan().IndexOfAny('\n', '\r') < 0;
                 bool opaque = (format.IsStacked || turned) && !direct;
 
-                if (!breaks && !turned && !opaque) continue;
+                // A cell carrying formatting runs or a hard break is an `EditTextObject` however
+                // narrow or wide its column is, so Calc measures it through the EditEngine branch
+                // even when it does not wrap — and one EditEngine line is not the same number as
+                // the arithmetic height. See <see cref="StandingEditLine"/>.
+                bool standing = !breaks && !turned && !opaque
+                                && (portions is { Count: > 0 }
+                                    || text.AsSpan().IndexOfAny('\n', '\r') >= 0);
+
+                if (!breaks && !turned && !opaque && !standing) continue;
 
                 rows.TryGetValue(cell.Row, out RowState state);
 
@@ -486,7 +494,10 @@ internal static class SheetOptimalRowHeights
                     ? 0
                     : direct
                         ? RotatedHeight(format, text, breaks)
-                        : WrappedHeight(cell, format, text, portions, columns, sheet.MergedRanges);
+                        : standing
+                            ? StandingEditLine(format, portions)
+                            : WrappedHeight(
+                                cell, format, text, portions, columns, sheet.MergedRanges);
 
                 rows[cell.Row] = state with
                 {
@@ -723,6 +734,83 @@ internal static class SheetOptimalRowHeights
         }
 
         return total;
+    }
+
+    /// <summary>
+    /// The height an edit cell that does <em>not</em> wrap asks for, in twips.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A cell whose string carries formatting runs or a hard break is stored as an
+    /// <c>EditTextObject</c> by both importers, and <c>ScColumn::GetOptimalHeight</c> clears
+    /// <c>bStdOnly</c> for one (<c>column2.cxx:930-935</c>), so it is measured through
+    /// <c>GetNeededSize</c>'s EditEngine branch whatever its wrap flag says. Nothing is broken
+    /// there — the cell is in single-line mode, which is why a hard break inside it starts no
+    /// line — so the answer is one EditEngine line: the largest ascent and the largest descent
+    /// over its portions, each quantised to whole device pixels, plus a pixel of margin either
+    /// side. That is <see cref="RichPixels"/> over a single range, written out here rather than
+    /// routed through <see cref="WrappedHeight"/> because there is no paper to compute and no
+    /// line to find.
+    /// </para>
+    /// <para>
+    /// It is not the arithmetic height and the gap is not small. Measured on
+    /// <c>dotnet/probes/sheets-rest-01/mkclipprobe.py</c>'s auto-height workbook under the
+    /// installed 26.2.4.2, one string in a non-wrapping Calibri 11 cell: plain it takes
+    /// <strong>276</strong> twips — <c>trunc(220 × 1.18) + 40 − 23</c>, the arithmetic answer
+    /// exactly — and rich, hard-broken or both it takes <strong>298</strong>.
+    /// <c>SIL_TDB648.xlsx</c>'s "TerrDB Verification" sheet is the corpus case: 285 twips a row
+    /// for its plain rows and 298 for its rich footnote rows, and getting the second wrong by
+    /// 13 twips a row is enough to fit two extra rows on a page.
+    /// </para>
+    /// <para>
+    /// <strong>Two earlier cuts of that probe measured nothing, in two different ways, and both
+    /// are worth knowing.</strong> The first was set in Arial 9, whose line is shorter than
+    /// <c>ScGlobal::nStdRowHeight</c>, so every row came back at the 256-twip floor and plain and
+    /// rich looked identical — a probe for a height needs a font tall enough that the floor does
+    /// not bind. The second stated <c>fontId="0"</c> with no <c>applyFont</c> and no
+    /// <c>cellStyles</c>, so LibreOffice drew the plain rows in its own application default while
+    /// the rich rows took the face their <c>rPr</c> named; that one said a hard break did
+    /// <em>not</em> reach this path, which is the opposite of the truth.
+    /// </para>
+    /// </remarks>
+    /// <param name="format">The cell's format, for its face, size and margins.</param>
+    /// <param name="portions">Its formatting runs, or null when the break alone made it an edit cell.</param>
+    private static int StandingEditLine(
+        SheetCellFormat format, IReadOnlyList<SheetTextPortion>? portions)
+    {
+        MetricGrid grid = new(ScreenDpi);
+        long ascent = 0;
+        long descent = 0;
+
+        foreach (SheetCellFormat run in Faces(format, portions))
+        {
+            if (SheetFonts.For(run) is not { } face) return 0;
+            if (face.Metrics.UnitsPerEm <= 0) return 0;
+
+            Length size = run.FontSize;
+            if (size <= Length.Zero) return 0;
+
+            ascent = Math.Max(ascent, grid.ToPixels(face.Metrics.Ascent, face.Metrics.UnitsPerEm, size));
+            descent = Math.Max(
+                descent, grid.ToPixels(face.Metrics.Descent, face.Metrics.UnitsPerEm, size));
+        }
+
+        long pixels = ascent + descent;
+        return pixels <= 0 ? 0 : (int)((pixels + (2 * MarginPixelsOf(format))) / PixelsPerTwip);
+    }
+
+    /// <summary>
+    /// The formats the one line is measured over: the portions when there are any, else the cell's.
+    /// </summary>
+    /// <remarks>
+    /// EditEngine gives a paragraph with no portion of its own the cell's font, which is what a
+    /// hard-broken but singly formatted cell is.
+    /// </remarks>
+    private static IEnumerable<SheetCellFormat> Faces(
+        SheetCellFormat format, IReadOnlyList<SheetTextPortion>? portions)
+    {
+        if (portions is not { Count: > 0 }) return [format];
+        return portions.Select(portion => portion.Format);
     }
 
     /// <summary>One line of a face at a size, in whole device pixels.</summary>

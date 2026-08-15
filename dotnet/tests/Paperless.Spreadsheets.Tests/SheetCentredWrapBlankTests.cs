@@ -37,6 +37,22 @@ namespace Paperless.Spreadsheets.Tests;
 /// wrapping cell holding <c>WESTERLY</c>, 44 spaces and <c>EASTERLY</c>, which is enough to make
 /// the first line overflow by more than the width of the word on it.
 /// </para>
+/// <para>
+/// <strong>The placement guard is still here and is no longer what makes this fixture right.</strong>
+/// This class used to assert that the first line was the word plus all 44 of its blanks, 177.37 pt
+/// of it on a 110 pt line, and that the guard then pulled it back to the cell's left margin. That
+/// was the symptom clamped rather than the cause removed, and the class's own remark said so:
+/// "EditEngine keeps only the blanks that fit". It now does — <see cref="Paperless.Text.Layout.LineFiller"/>
+/// breaks behind the blank that overflows — so the same fixture breaks into three lines where it
+/// used to break into two, and the guard has nothing left to correct.
+/// </para>
+/// <para>
+/// Re-measured against LibreOffice 26.2.4.2's own PDF of this fixture, which is what the counts
+/// below are: the reference draws <strong>29</strong> glyphs at x = 171.47, then <strong>23</strong>
+/// blanks at x = 196.19, then <strong>8</strong> at x = 200.64. We draw 29, 23 and 8 at 171.07,
+/// 194.80 and 200.63. Before the break rule changed we drew 52 glyphs and then 8, so the line
+/// structure disagreed with the reference's even where the placement had been corrected to agree.
+/// </para>
 /// </remarks>
 public sealed class SheetCentredWrapBlankTests
 {
@@ -50,17 +66,34 @@ public sealed class SheetCentredWrapBlankTests
 
         DrawnGlyphRun first = runs.First(run => run.Text.StartsWith("WESTERLY", StringComparison.Ordinal));
 
-        // The run is the word plus all 44 of its trailing spaces: 177.37 pt against the 110 pt
-        // the cell had. Centring against the whole of that put it at 138.088 pt — 31.99 pt left
-        // of the cell itself — so 32 of the word's 52.27 pt fell outside the clip.
-        first.Width.Points.ShouldBe(177.37, 0.05, "the line keeps its trailing blanks");
+        // Eight letters and the twenty-one blanks that fit, the last of them the one that
+        // overflowed and is compressed away — which is why 113.43 pt may exceed the 110 pt the
+        // cell has and the line is still not over-full.
+        first.Text.Length.ShouldBe(29, "the word and the blanks that fit, and no more");
+        first.Width.Points.ShouldBe(113.43, 0.05, "the line keeps the blanks it broke after");
+
         first.Origin.X.Points.ShouldBeGreaterThanOrEqualTo(
             CellLeftPoints, "a centred line never begins left of the cell it is in");
 
-        // The reference places it at 171.468 pt, which is its left margin: EditEngine keeps only
-        // the blanks that fit, so its line fills the width and (nMaxLineWidth - nCenterWidth) / 2
-        // is nought. Ours is the same placement reached the other way round.
+        // The reference places it at 171.468 pt, which is its left margin: its line fills the
+        // width, so (nMaxLineWidth - nCenterWidth) / 2 is nought. Ours is now the same line.
         first.Origin.X.Points.ShouldBe(171.07, 0.05, "at the cell's left margin, as the reference");
+    }
+
+    [Fact]
+    public void TheBlanksThatDidNotFitTakeALineOfTheirOwn()
+    {
+        List<DrawnGlyphRun> runs = Draw();
+
+        int first = runs.FindIndex(run => run.Text.StartsWith("WESTERLY", StringComparison.Ordinal));
+        int last = runs.FindIndex(run => run.Text.StartsWith("EASTERLY", StringComparison.Ordinal));
+
+        // Three lines, not two: 44 blanks do not fit beside an eight-letter word in 110 pt, and
+        // EditEngine cuts a run of them into line-fuls rather than letting it hang. The reference
+        // draws 23 blanks on this line; a renderer that lets them hang draws none of it at all.
+        last.ShouldBe(first + 2, "a line of blanks stands between the two words");
+        runs[first + 1].Text.ShouldAllBe(character => character == ' ', "and holds nothing else");
+        runs[first + 1].Text.Length.ShouldBe(23, "as many blanks as the reference draws there");
     }
 
     [Fact]
