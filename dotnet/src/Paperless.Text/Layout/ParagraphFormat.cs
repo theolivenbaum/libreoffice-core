@@ -436,6 +436,33 @@ public sealed record ParagraphFormat
     public bool ClampsTabsAtLineEdge { get; init; }
 
     /// <summary>
+    /// Whether the document carries LibreOffice's <c>TabOverSpacing</c> compatibility setting.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Word 2013 and later, and so every file <c>writerfilter</c> reads: it is set unconditionally in
+    /// <c>sw/source/writerfilter/filter/WriterFilter.cxx</c>:325, which serves DOCX and RTF. Nothing sets
+    /// it for a binary <c>.doc</c> — <c>sw/source/filter/ww8</c> sets <c>TAB_COMPAT</c>
+    /// (<c>ww8par.cxx</c>:1949) and no more — and ODF only carries it when a settings file states it, so
+    /// both leave it off.
+    /// </para>
+    /// <para>
+    /// It decides what a <em>left</em> stop past the frame does to the line, and the two answers are
+    /// opposite. With it, <c>SwTabPortion::PreFormat</c> sets <c>bFull</c> and the line breaks at the tab
+    /// (<c>sw/source/core/text/txttab.cxx</c>:429-440). Without it, the same tab reaches the
+    /// <c>TAB_COMPAT</c> rescue below, which takes the break back where the tab is the paragraph's last
+    /// character (<c>txttab.cxx</c>:448-458). So the same footer keeps its page number on one line in a
+    /// <c>.doc</c> and does not in a <c>.docx</c>. See <see cref="TabRuler.WidthOf"/>.
+    /// </para>
+    /// <para>
+    /// Distinct from <see cref="ClampsTabsAtLineEdge"/>, which every word-processing reader turns on:
+    /// that one is about where an <em>aligned</em> stop past the frame is honoured, and Writer answers
+    /// that the same way for both settings bar the boundary it measures against.
+    /// </para>
+    /// </remarks>
+    public bool TabsOverSpacing { get; init; }
+
+    /// <summary>
     /// Whether a justified line may squeeze its blanks below their natural width to fit another word.
     /// </summary>
     /// <remarks>

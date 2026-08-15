@@ -181,6 +181,18 @@ false positive entirely.
 counts disagree, so those are an honest **unknown** rather than a pass. Fix their pagination
 first, then re-run.
 
+### One of those eighty-three has since been decided: `150_5300_13_chg10.doc`
+
+`raster-ceiling-pages.tsv` carries it as `pagination-differs`. Round `words-tabs-01` closed that
+pagination (78 pages against 77, now 77/77), which makes the per-page comparison legal, and it is
+**ceiling**: `pdfimages -list` shows the reference drawing a full-page 300 dpi JPEG on pages 27,
+29, 30, 31 and 32 — the taxiway-geometry figures — where we play the embedded metafile and emit
+its labels as real text. Pages 1–28 measured together are **142 words short**; the whole document
+is **494 over**, so every word of the excess and more is on those five pages. `words` is the only
+column it still fails and it cannot be won. Its neighbour `150_5300_13_chg8.doc` has the same
+figures but is not decidable yet — its pagination still differs, for an unrelated reason (a
+tracked-changes duplication worth about 190 words).
+
 ## The flagged pages
 
 | Document | Page | ours | ref | excess | metafile |

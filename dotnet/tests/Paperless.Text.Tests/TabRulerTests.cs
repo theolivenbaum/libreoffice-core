@@ -234,4 +234,57 @@ public sealed class TabRulerTests
         TabRuler.Segments("ab\tcd", 0, 5, format, Measure, rightEdge: Length.FromPoints(20))[1]
             .Left.ShouldBe(Length.FromPoints(30));
     }
+
+    [Fact]
+    public void ATabEndingTheParagraphPastTheEdgeDoesNotWidenTheLineItIsFittedBy()
+    {
+        // `bFull = false` where `bTabCompat && bAtParaEnd && GetTabPos() >= nTextFrameWidth` —
+        // SwTabPortion::PreFormat, sw/source/core/text/txttab.cxx:448-458. The tab is the paragraph's
+        // last character, so nothing follows it that a second line could hold, and Writer keeps the line.
+        // Measured on 150_5300_13_chg10.doc, whose footer "Chap 4\t\t<page>\t" broke after its second tab
+        // and put the page number on a line of its own at the left margin.
+        ParagraphFormat format = With(new TabStop(Length.FromPoints(20), TabAlignment.Right));
+
+        // "ab" ends at 2, the tab takes the right stop at the edge and "cd" ends on it at 20. The trailing
+        // tab has no stop left, takes the next default interval at 30, and overruns.
+        TabRuler.WidthOf(
+                "ab\tcd\t", 0, 6, format, Measure, rightEdge: Length.FromPoints(20),
+                countsDeferredStretch: false)
+            .ShouldBe(Length.FromPoints(20));
+
+        // The drawn width is Writer's own: PreFormat sets the portion's width before it takes the break
+        // back and does not take that back with it.
+        TabRuler.WidthOf("ab\tcd\t", 0, 6, format, Measure, rightEdge: Length.FromPoints(20))
+            .ShouldBe(Length.FromPoints(30));
+    }
+
+    [Fact]
+    public void ATabInsideTheParagraphPastTheEdgeStillBreaksTheLine()
+    {
+        // The other half of `bAtParaEnd`: a tab with text after it has somewhere to break to, so the
+        // forgiveness must not reach it. "ef" follows the trailing tab here and the line is full.
+        ParagraphFormat format = With(new TabStop(Length.FromPoints(20), TabAlignment.Right));
+
+        TabRuler.WidthOf(
+                "ab\tcd\tef", 0, 8, format, Measure, rightEdge: Length.FromPoints(20),
+                countsDeferredStretch: false)
+            .ShouldBe(Length.FromPoints(32));
+    }
+
+    [Fact]
+    public void TabOverSpacingBreaksTheLineAtThatTabInstead()
+    {
+        // The branch above the rescue — txttab.cxx:429-440 — returns `bFull = true` for a left stop at
+        // or past the frame and never falls through, so a file writerfilter read never reaches it. The
+        // same footer therefore keeps its page number on one line in a .doc and not in a .docx.
+        ParagraphFormat format = With(new TabStop(Length.FromPoints(20), TabAlignment.Right)) with
+        {
+            TabsOverSpacing = true,
+        };
+
+        TabRuler.WidthOf(
+                "ab\tcd\t", 0, 6, format, Measure, rightEdge: Length.FromPoints(20),
+                countsDeferredStretch: false)
+            .ShouldBe(Length.FromPoints(30));
+    }
 }

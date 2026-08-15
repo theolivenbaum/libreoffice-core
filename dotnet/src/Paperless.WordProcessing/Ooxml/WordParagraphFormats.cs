@@ -249,6 +249,9 @@ internal static class WordParagraphFormats
             TabsRelativeToIndent = false,
             ClampsTabsAtLineEdge = true,
 
+            // WriterFilter.cxx:325 sets TabOverSpacing on every document it reads, unconditionally.
+            TabsOverSpacing = true,
+
             ShrinksJustifiedBlanks = shrinksJustifiedBlanks,
         };
     }

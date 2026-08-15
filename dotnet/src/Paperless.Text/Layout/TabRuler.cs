@@ -186,7 +186,79 @@ public static class TabRuler
         if (segments.Count == 0) return Length.Zero;
 
         TabbedSegment last = segments[^1];
+
+        if (!countsDeferredStretch
+            && ForgivesTrailingTab(segments, text, format, isFirstLine, rightEdge))
+        {
+            return last.GapLeft;
+        }
+
         return countsDeferredStretch || !last.Deferred ? last.Right : last.GapLeft + last.Width;
+    }
+
+    /// <summary>
+    /// True when the line ends on a tab the paragraph's last character, landing past the frame's edge —
+    /// the one tab Writer refuses to break a line for.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A left or default stop past the frame <em>does</em> break the line, and
+    /// <see cref="Place"/> deliberately leaves it unclamped for that reason. <c>SwTabPortion::PreFormat</c>
+    /// then takes the break back for exactly one case: <c>bFull = false</c> where
+    /// <c>bTabCompat &amp;&amp; bAtParaEnd &amp;&amp; GetTabPos() &gt;= nTextFrameWidth</c>
+    /// (<c>sw/source/core/text/txttab.cxx</c>:448-458). <c>bAtParaEnd</c> is
+    /// <c>rInf.GetIdx() + GetLen() == rInf.GetText().getLength()</c>: the tab is the paragraph's final
+    /// character, so nothing follows it that a second line could hold. Every Word document has
+    /// <c>TAB_COMPAT</c> — the WW8 filter sets it at <c>sw/source/filter/ww8/ww8par.cxx</c>:1949 and
+    /// writerfilter with it — so for word processing the compatibility half is always satisfied.
+    /// </para>
+    /// <para>
+    /// <strong>The rescue is unreachable for a file writerfilter read</strong>, and that is
+    /// <see cref="ParagraphFormat.TabsOverSpacing"/>: the branch above it returns <c>bFull = true</c> for
+    /// a left stop at or past the frame and never falls through (<c>txttab.cxx</c>:429-440). So this is a
+    /// <c>.doc</c> and <c>.odt</c> rule, not a <c>.docx</c> one — measured, and the measurement is what
+    /// found it. Applying it to every word-processing document instead took
+    /// <c>19-06 Assistive Technology TAB Final - 508.docx</c> (words/done-012) from 8 pages to 7, by
+    /// keeping a row of form-field checkboxes over stops at 1980 to 9936 twips on one line.
+    /// </para>
+    /// <para>
+    /// Measured on <c>150_5300_13_chg10.doc</c> (words/table-001), whose figure-page footer reads
+    /// <c>Chap 4</c>, tab, tab, the page-number field, tab, over stops at 3 in centred and 7 in right in a
+    /// text area exactly 7 in wide. The second tab lands the number on the right stop at the frame's edge;
+    /// the third has no stop left to find, takes the next default interval at 7.5 in, and overran the line.
+    /// We broke there and put the page number on a second line at the left margin — 4 pages of 78 —
+    /// where LibreOffice keeps the footer one line high. A two-line footer is a shorter body, and on
+    /// page 36 that was enough to push a figure's caption onto a page of its own.
+    /// </para>
+    /// <para>
+    /// Only the <em>fitting</em> width, never the placed one. Writer sets the tab portion's width to
+    /// <c>GetTabPos() - rInf.X()</c> before it decides <c>bFull</c> and does not take it back with the
+    /// break, so the line really is that wide once drawn — it simply is not a reason to break. The
+    /// stretch the tab opened holds no characters, so nothing is drawn out there either way.
+    /// </para>
+    /// </remarks>
+    private static bool ForgivesTrailingTab(
+        List<TabbedSegment> segments,
+        string text,
+        ParagraphFormat format,
+        bool isFirstLine,
+        Length? rightEdge)
+    {
+        // Two at least: the first stretch is the line's own start, which no tab introduced.
+        if (segments.Count < 2 || rightEdge is not { } edge) return false;
+
+        // A document Word 2013 or later wrote never reaches the rescue: PreFormat's TabOverSpacing
+        // branch has already set bFull and broken out.
+        if (format.TabsOverSpacing) return false;
+
+        TabbedSegment last = segments[^1];
+
+        // A right, centred or decimal stop is settled in PostFormat and is already forgiven above; this
+        // is the left and default case, which PreFormat breaks for.
+        if (last.Deferred || !last.IsEmpty || last.Start < text.Length) return false;
+
+        // The stops are stated from the paragraph's tab origin and the stretch from the line's own start.
+        return last.Left + format.TabLineOffset(isFirstLine) >= edge;
     }
 
     /// <summary>True when a range holds a tab, and so needs any of this.</summary>
