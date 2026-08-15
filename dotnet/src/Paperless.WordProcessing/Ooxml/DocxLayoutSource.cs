@@ -64,7 +64,7 @@ public sealed partial class DocxLayoutSource
     /// virtual device Writer formats against by default. <c>w:usePrinterMetrics</c> swaps it for a real
     /// printer's — writerfilter turns that flag into <c>PrinterIndependentLayout::DISABLED</c> at
     /// <c>sw/source/writerfilter/dmapper/DomainMapper_Impl.cxx:10173</c>, the same state
-    /// <c>WW8Dop::fUsePrinterMetrics</c> puts a DOC into, and the same 300 dpi grid
+    /// <c>WW8Dop::fUsePrinterMetrics</c> puts a DOC into, and the same printer grid
     /// <see cref="Ww8.DocReader"/> already passes.
     /// </remarks>
     private readonly MetricGrid _metrics;

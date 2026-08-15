@@ -198,7 +198,7 @@ public sealed class Ww8Document : IWordProcessingDocument, IPaginatedDocument
     {
         // Every document is measured on a device's pixel grid; the flag only chooses which. A document
         // asking for printer metrics gets the printer's, which rounds every font metric and is worth up to
-        // 2.8% of a line's height; everything else gets Writer's 8640 dpi virtual reference device, worth
+        // 1.5% of a line's height; everything else gets Writer's 8640 dpi virtual reference device, worth
         // one twip. See Ww8DocumentProperties.UsesPrinterMetrics and MetricGrid.
         LayoutFonts fonts = new()
         {

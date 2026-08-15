@@ -79,8 +79,11 @@ public readonly record struct Ww8DocumentProperties
     /// calls "use printer metrics to lay out document". LibreOffice honours it literally —
     /// <c>USE_VIRTUAL_DEVICE</c> becomes its negation (<c>ww8par.cxx</c>:2008) and the layout then formats
     /// against an <c>SfxPrinter</c>, whose pixel grid rounds every font metric. Eight of sixty-six DOC
-    /// files in the sample corpus set it, and on those the line pitch is up to 2.8% taller than the
-    /// design units alone give.
+    /// files in the sample corpus set it, and on those the line pitch differs from what the design
+    /// units alone give — by up to 1.5% of a line on the 600 dpi printer this container has, which is
+    /// what <c>A_320.doc</c>'s twenty-three spurious pages were made of. See
+    /// <see cref="Paperless.Text.Fonts.MetricGrid.Printer"/>: the resolution is a measurement of the
+    /// installed binary and not a property of the file.
     /// </remarks>
     public bool UsesPrinterMetrics { get; init; }
 

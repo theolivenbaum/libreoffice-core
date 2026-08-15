@@ -477,11 +477,73 @@ public sealed class WordStyles
                 Word.Name(before ? "after" : "before"),
                 (before ? below : above).ToString(System.Globalization.CultureInfo.InvariantCulture));
 
+            // Which half this synthesised, so that the one path that must not see it can tell it
+            // from a value the file states. See PoolCompletedSide.
+            replacementSpacing.SetAttributeValue(PoolCompleted, before ? "after" : "before");
+
             XElement replacement = new(style.ParagraphProperties!);
             replacement.Element(Word.Name("spacing"))?.ReplaceWith(replacementSpacing);
             style.ReplaceParagraphProperties(replacement);
         }
     }
+
+    /// <summary>
+    /// Marks the half of a <c>w:spacing</c> that <see cref="CompleteOneSidedSpacing"/> supplied
+    /// rather than the file stating.
+    /// </summary>
+    /// <remarks>
+    /// A private namespace on a detached copy of the style's <c>w:pPr</c>, so nothing that reads
+    /// <c>w:</c> attributes can see it and the loaded part is untouched. It exists because the
+    /// completion is a property of the <em>style</em> and one caller — a paragraph that triggers
+    /// tdf#118521 — has to resolve the same attribute as though the completion had never happened.
+    /// See <see cref="PoolCompletedSide"/>.
+    /// </remarks>
+    private static readonly XName PoolCompleted =
+        XName.Get("poolCompleted", "urn:paperless:word-styles");
+
+    /// <summary>
+    /// Which half of a <c>w:spacing</c> layer is Writer's pool default rather than a stated value —
+    /// <c>"before"</c>, <c>"after"</c>, or null when the layer states both halves itself.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>A paragraph that sets one of its two margins directly does not see this
+    /// completion at all.</strong> writerfilter's <c>tdf#118521</c> block
+    /// (<c>sw/source/writerfilter/dmapper/DomainMapper_Impl.cxx</c>:3110-3138) fires when the
+    /// paragraph's own <c>w:pPr</c> sets an unequal subset of {top margin, bottom margin,
+    /// contextual spacing}, and fills each unset margin <em>as direct formatting</em> from
+    /// <c>GetPropertyFromParaStyleSheet</c> — which walks the DOCX <c>w:basedOn</c> chain and then
+    /// <c>w:docDefaults</c> (<c>DomainMapper_Impl.cxx</c>:1556-1628) and never consults Writer's
+    /// pool. The pool completion lives on the Writer style, so that walk cannot reach it.
+    /// </para>
+    /// <para>
+    /// Measured on the installed 26.2.4.2 by
+    /// <c>dotnet/probes/words-p1-01/direct-one-sided-spacing.py</c>, which authors the chain both
+    /// declaration orders round because only one of them can answer the question — with the parent
+    /// declared first the completion never fires and every variant reads the same number whatever
+    /// the rule is. Child declared first, which is the arrangement the corpus document has:
+    /// </para>
+    /// <code>
+    ///   paragraph states               top   bottom
+    ///   nothing                        120      120     the completion
+    ///   w:spacing w:line only          120      120     an element is not a setting
+    ///   w:spacing w:before="80"         80       60     the DOCX chain, not the pool
+    ///   w:spacing w:before="0"           0       60     stated, not non-zero, is the trigger
+    ///   w:spacing before and after      80       40
+    ///   w:contextualSpacing only       120       60     no w:spacing at all, and it still fires
+    /// </code>
+    /// <para>
+    /// The bottom column is the whole of it: 120 is Writer's <c>Heading 4</c> pool row and 60 is
+    /// the parent style's own <c>w:after</c>, three points apart. In
+    /// <c>FAA 2025-26 Holdover Tables.docx</c> 31 of the 113 <c>NOTES</c> headings carry a direct
+    /// <c>w:spacing w:before="80"</c> and the other 76 carry nothing, and LibreOffice puts the
+    /// first note 3.00 pt closer on exactly those 31 — twenty pages' worth, because each of those
+    /// pages is one line from full.
+    /// </para>
+    /// </remarks>
+    /// <param name="spacing">A <c>w:spacing</c> layer.</param>
+    internal static string? PoolCompletedSide(XElement spacing)
+        => spacing?.Attribute(PoolCompleted)?.Value;
 
     /// <summary>The style with this id and type, or null.</summary>
     public WordStyle? Find(string? styleId, WordStyleType type)
