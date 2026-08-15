@@ -76,7 +76,8 @@ public static class DocxReader
                 marks = reader.Marks;
             }
 
-            return new OoxmlWordDocument(format, file, content, diagnostics, sections, marks);
+            return new OoxmlWordDocument(
+                format, file, content, diagnostics, sections, marks, source.FileName);
         }
         catch
         {
@@ -242,14 +243,21 @@ public sealed class OoxmlWordDocument : IWordProcessingDocument, IPaginatedDocum
     /// </remarks>
     private readonly List<Diagnostic> _laidOut = [];
 
+    /// <summary>The file the document was read from, for a <c>FILENAME</c> field.</summary>
+    private readonly string? _fileName;
+
+    // `fileName` is the leaf name of the file the document was read from, or null when it came from a
+    // stream. Only a FILENAME field wants it — see ConstantFields.
     internal OoxmlWordDocument(
         DocumentFormat format,
         DocxFile file,
         ContentDocument content,
         IReadOnlyList<Diagnostic> diagnostics,
         IReadOnlyList<WritingSection> sections,
-        WritingMarks marks)
+        WritingMarks marks,
+        string? fileName = null)
     {
+        _fileName = fileName;
         Format = format;
         _file = file;
         Content = content;
@@ -309,7 +317,8 @@ public sealed class OoxmlWordDocument : IWordProcessingDocument, IPaginatedDocum
         DocxLayoutSource source = new(
             _file.Styles, _file.Settings, footnotes: _file.Footnotes, endnotes: _file.Endnotes,
             theme: _file.Theme, pictures: new DocxPictures(_file, _laidOut),
-            numbering: _file.Numbering, fontTable: _file.FontTable);
+            numbering: _file.Numbering, fontTable: _file.FontTable,
+            constants: new ConstantFields(_fileName, Content.Metadata.Title));
         List<PageBlock> blocks = source.Read(body);
 
         // The compatibility options, of which two reach pagination. Which ones those are was

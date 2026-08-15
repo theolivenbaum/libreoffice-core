@@ -117,6 +117,54 @@ public static class FieldInstructions
     }
 
     /// <summary>
+    /// The document-constant field an instruction names, or null when its cached result is worth keeping.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The same argument <see cref="PageFieldOf"/> makes about <c>PAGE</c>, one step out: a cached
+    /// result is what the field said when the producer last saved, and for these two it is a statement
+    /// about a file that no longer exists. LibreOffice re-evaluates both on load — a <c>FILENAME</c>
+    /// becomes <c>SwFileNameField</c> and a <c>TITLE</c> a <c>SwDocInfoField</c> over the package's
+    /// <c>dc:title</c> — so the reference draws today's answer where the cache holds yesterday's.
+    /// Measured on <c>CRIF - Sp…cification technique - Socle applicatif.docx</c>, whose footer caches
+    /// <c>SPECTECH-socle-applicatif.doc</c> and whose header caches <c>ENT</c>: the two together are 13
+    /// words a page against 27 pages, which is 351 of that document's 363-word gap.
+    /// </para>
+    /// <para>
+    /// A <c>FILENAME</c> carrying <c>\p</c> asks for the full path
+    /// (<c>DomainMapper_Impl.cxx</c>:8296, <c>FilenameDisplayFormat::FULL</c>) and is deliberately left
+    /// at its cache: Paperless reads streams as readily as files and keeps only the leaf name, so
+    /// substituting there would draw a shorter string than the reference rather than a different one.
+    /// </para>
+    /// </remarks>
+    /// <param name="instruction">The instruction, verbatim.</param>
+    public static ConstantField? ConstantFieldOf(string? instruction) =>
+        Name(instruction)?.ToUpperInvariant() switch
+        {
+            "FILENAME" => HasSwitch(instruction, 'p') ? null : ConstantField.FileName,
+            "TITLE" => ConstantField.Title,
+            _ => null,
+        };
+
+    /// <summary>Whether the instruction carries a given single-letter switch.</summary>
+    private static bool HasSwitch(string? instruction, char letter)
+    {
+        if (instruction is null) return false;
+
+        ReadOnlySpan<char> text = instruction.AsSpan();
+        for (int at = text.IndexOf('\\'); at >= 0 && at + 1 < text.Length;)
+        {
+            if (text[at + 1] == letter) return true;
+
+            int next = text[(at + 1)..].IndexOf('\\');
+            if (next < 0) break;
+            at += 1 + next;
+        }
+
+        return false;
+    }
+
+    /// <summary>
     /// The sequence a <c>\*</c> switch names, or null when the instruction carries none this models.
     /// </summary>
     private static Layout.NoteNumberFormat? NumberPicture(string? instruction)
@@ -200,4 +248,22 @@ public static class FieldInstructions
         "NUMWORDS" => WritingFieldKind.WordCount,
         _ => WritingFieldKind.Unknown,
     };
+}
+
+/// <summary>
+/// A field whose value is a constant of the document rather than of the page it lands on.
+/// </summary>
+/// <remarks>
+/// Two members rather than the whole <see cref="WritingFieldKind"/> vocabulary, for the same reason
+/// <see cref="Layout.PageFieldKind"/> has two: these are the fields a layout can compute and so the
+/// only ones whose cached result it is entitled to discard. Everything else — a <c>DOCPROPERTY</c>, a
+/// <c>REF</c>, a merge field — is better served by what the producer last wrote.
+/// </remarks>
+public enum ConstantField
+{
+    /// <summary>The name of the file the document was read from, extension included.</summary>
+    FileName,
+
+    /// <summary>The document's title, from its package metadata.</summary>
+    Title,
 }
