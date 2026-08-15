@@ -194,6 +194,49 @@ internal sealed class XlsSheetPrintState
     /// <summary>Records the <c>WSBOOL</c> fit-to-pages flag.</summary>
     public void SetFitsToPages(bool fits) => _fitsToPages = fits;
 
+    /// <summary>
+    /// Applies Calc's own <em>Default</em> page style, for a sheet the importer generates rather
+    /// than reads.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The margin defaults above are Excel's, and they are right for every sheet that came out of
+    /// a <c>SETUP</c> record. A sheet the filter <em>creates</em> — the <c>DPCache</c> sheet a
+    /// pivot cache generates — never goes through the page-settings importer at all, so it keeps
+    /// the page style Calc gives a new table: two centimetres of margin all round, and a header
+    /// and footer band of half a centimetre of text over a quarter of a centimetre of gap.
+    /// </para>
+    /// <para>
+    /// The band contents are not empty either, and this is the part that is easy to miss. Calc's
+    /// Default page style carries a centred sheet-name field in its header and a centred
+    /// "Page&#160;<em>n</em>" in its footer — <c>ScStyleSheetPool::CreateStandardStyles</c> puts
+    /// an <c>SvxTableField</c> in one and <c>STR_PAGE</c> plus an <c>SvxPageField</c> in the other
+    /// (<c>sc/source/core/data/stlpool.cxx</c>). Measured on this corpus's generated sheet, the
+    /// two bands are what move its first printed row from 70.5 pt down to 77.6 pt and cost it one
+    /// row a page.
+    /// </para>
+    /// </remarks>
+    public void UseDefaultPageStyle()
+    {
+        const double centimetre = 1.0 / 2.54;
+        const double margin = 2.0 * centimetre;
+        const double band = 0.75 * centimetre;
+
+        _leftMargin = margin;
+        _rightMargin = margin;
+
+        // The margins are stated as BIFF states them: the header's own margin is the distance to
+        // the top of the band, and the page margin is the distance to the first row, so the band
+        // is the difference. See ToSetup.
+        _headerMargin = margin;
+        _footerMargin = margin;
+        _topMargin = margin + band;
+        _bottomMargin = margin + band;
+
+        _header = "&C&A";
+        _footer = "&CPage &P";
+    }
+
     /// <summary>Records a header or footer string, in Excel's own field syntax.</summary>
     public void SetFurniture(ushort record, string text)
     {
