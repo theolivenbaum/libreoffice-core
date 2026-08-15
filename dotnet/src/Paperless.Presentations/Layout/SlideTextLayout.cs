@@ -3,6 +3,7 @@ using Paperless.Core.Graphics;
 using Paperless.Core.Numbering;
 using Paperless.Core.Units;
 using Paperless.Text.Fonts;
+using Paperless.Text.Itemisation;
 using Paperless.Text.Layout;
 using Paperless.Text.Shaping;
 
@@ -658,7 +659,13 @@ public static partial class SlideTextLayout
             DefaultTabInterval = paragraph.DefaultTabInterval,
         };
 
-        MeasuredParagraph measured = MeasuredParagraph.Measure(paragraph.Text, runs);
+        // Itemised by face, so a character the run's own face cannot draw is measured and drawn
+        // from a face that can. It has to be stated here rather than left to the default, because
+        // the default is deliberately no fallback at all — see `ItemisationOptions`. Everything
+        // else about the cut is unchanged: a paragraph whose face covers its own text comes back
+        // as the same single sub-run per formatting run it did before, in the same shaping call.
+        MeasuredParagraph measured = MeasuredParagraph.Measure(
+            paragraph.Text, runs, itemisation: new ItemisationOptions { GlyphFallback = fonts.Fallback });
         ParagraphLayouter layouter = new(first);
         LaidOutParagraph laid = layouter.Layout(
             measured, format, width, paragraph.Language);
@@ -758,7 +765,7 @@ public static partial class SlideTextLayout
             paragraph, measured, styles, lines,
             total + ScaledSpace(paragraph.SpaceBefore, scaling)
                   + ScaledSpace(paragraph.SpaceAfter, scaling),
-            scaling, format);
+            scaling, format, fonts.Fallback);
     }
 
     /// <summary>
@@ -1445,7 +1452,8 @@ public static partial class SlideTextLayout
         IReadOnlyList<PlacedLine> Lines,
         Length Height,
         Scaling Scaling,
-        ParagraphFormat Format)
+        ParagraphFormat Format,
+        IGlyphFallbackResolver? Fallback = null)
     {
         /// <summary>The space above the paragraph, after the fit's spacing scale.</summary>
         /// <remarks>
@@ -1495,8 +1503,16 @@ public static partial class SlideTextLayout
         /// <para>
         /// Reference equality is the right test because the face cache hands back one instance
         /// per resolved request, and <c>FontItemiser</c> passes the primary face straight through
-        /// when it does not substitute. Nothing in this library turns glyph fallback on today, so
-        /// the guard costs a pointer comparison and buys the invariant outright.
+        /// when it does not substitute, so the guard costs a pointer comparison.
+        /// </para>
+        /// <para>
+        /// When the faces <em>do</em> differ the sub-run was substituted, and the resolver that
+        /// found the substitute is the only thing that can name the file it came from — an
+        /// <see cref="OpenTypeFace"/> is a parsed table directory with no memory of its own path,
+        /// so a reference built from the face alone reaches the PDF writer with no font program
+        /// behind it and is announced without being embedded, which the corpus gate scores as a
+        /// failure and rightly: a reader without that font installed sees nothing. This is the
+        /// same route <c>PageDrawing.ByFace</c> takes in the word processor.
         /// </para>
         /// </remarks>
         /// <param name="index">A character the sub-run covers.</param>
@@ -1504,7 +1520,7 @@ public static partial class SlideTextLayout
         public FontReference? FontFor(int index, OpenTypeFace face)
         {
             RunStyle style = StyleAt(index);
-            return ReferenceEquals(style.Face, face) ? style.Font : null;
+            return ReferenceEquals(style.Face, face) ? style.Font : Fallback?.ReferenceFor(face);
         }
 
         private RunStyle StyleAt(int index)

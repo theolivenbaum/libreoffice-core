@@ -547,6 +547,38 @@ public sealed class SlideFonts
     /// <summary>The substitutions made so far, which is the first thing a comparison checks.</summary>
     public IReadOnlyList<FontSubstitution> Substitutions => _fonts.Substitutions;
 
+    /// <summary>
+    /// Where a run looks for a face when the one it named has no glyph for a character.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The resolver that chose the run's face in the first place, which is what
+    /// <see cref="IGlyphFallbackResolver"/> asks for: a fallback decided by a second index could
+    /// name a face this one would not have chosen, and the face decides the advance. The word
+    /// processor exposes the same thing off its own cache for the same reason
+    /// (<c>LayoutFonts.Fallback</c>).
+    /// </para>
+    /// <para>
+    /// Without it a character the run's face cannot draw is shaped to <c>.notdef</c> and drawn as
+    /// that face's missing-glyph box — which for a face that declines to draw one is nothing at
+    /// all, so the text is <em>invisible</em> and no gate column sees it: the code point still
+    /// reaches the PDF with a correct <c>ToUnicode</c>, so <c>pdftotext</c> extracts it and the
+    /// word count is unmoved. Measured on
+    /// <c>southern-classic-kennesaw-state-university-final.pptx</c>, whose body text holds 132
+    /// U+25D8 inverse bullets: LibreOffice falls back to DejaVu Sans and embeds it, and we kept
+    /// Carlito and drew 132 blanks. The one column that showed it was <c>fonts</c>, at 6/7.
+    /// </para>
+    /// </remarks>
+    public IGlyphFallbackResolver Fallback => _fonts;
+
+    /// <summary>The mid-run fallbacks made so far, resolved or not.</summary>
+    /// <remarks>
+    /// Beside <see cref="Substitutions"/> and for the same reason: a fallback face is almost never
+    /// metric-compatible with the one it replaces, so it moves the line breaks after it, and a
+    /// comparison against a reference renderer otherwise cannot tell that from a layout bug.
+    /// </remarks>
+    public IReadOnlyList<GlyphFallback> GlyphFallbacks => _fonts.GlyphFallbacks;
+
     /// <summary>The face and reference a request resolves to, both null when nothing could be read.</summary>
     public (OpenTypeFace? Face, FontReference? Reference) Resolve(
         string? family, int weight, bool isItalic)
