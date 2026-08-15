@@ -58,17 +58,16 @@ public sealed partial class DocxLayoutSource
     /// <summary>What <c>w:beforeAutospacing</c> and <c>w:afterAutospacing</c> stand for here.</summary>
     private readonly Length _autoSpacing;
 
-    /// <summary>
-    /// The device grid every font metric is rounded onto, or null for printer-independent layout.
-    /// </summary>
+    /// <summary>The device grid every font metric is rounded onto.</summary>
     /// <remarks>
-    /// Set by <c>w:usePrinterMetrics</c>, which writerfilter turns into
-    /// <c>PrinterIndependentLayout::DISABLED</c> at
-    /// <c>sw/source/writerfilter/dmapper/DomainMapper_Impl.cxx:10173</c> — the same state
+    /// Always one or the other, never nothing: <see cref="MetricGrid.Reference"/> is the 8640 dpi
+    /// virtual device Writer formats against by default. <c>w:usePrinterMetrics</c> swaps it for a real
+    /// printer's — writerfilter turns that flag into <c>PrinterIndependentLayout::DISABLED</c> at
+    /// <c>sw/source/writerfilter/dmapper/DomainMapper_Impl.cxx:10173</c>, the same state
     /// <c>WW8Dop::fUsePrinterMetrics</c> puts a DOC into, and the same 300 dpi grid
     /// <see cref="Ww8.DocReader"/> already passes.
     /// </remarks>
-    private readonly MetricGrid? _metrics;
+    private readonly MetricGrid _metrics;
 
     /// <summary>
     /// <c>word/fontTable.xml</c>, for the shape it declares for each family it names.
@@ -130,7 +129,7 @@ public sealed partial class DocxLayoutSource
         _autoSpacing = compatibility.DoNotUseHtmlParagraphAutoSpacing
             ? WordParagraphFormats.WordAutoSpacing
             : WordParagraphFormats.HtmlAutoSpacing;
-        _metrics = compatibility.UsesPrinterMetrics ? MetricGrid.Printer : null;
+        _metrics = compatibility.UsesPrinterMetrics ? MetricGrid.Printer : MetricGrid.Reference;
         _footnotes = footnotes ?? new Dictionary<string, XElement>(StringComparer.Ordinal);
         _endnotes = endnotes ?? new Dictionary<string, XElement>(StringComparer.Ordinal);
         _footnoteNumbering = NumberingIn(settings, "footnotePr", NoteNumbering.Footnotes);
