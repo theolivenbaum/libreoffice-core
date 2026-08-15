@@ -178,6 +178,15 @@ The two that moved:
 | `Sample_SQMS_Program.docx` | `done-015` | `pages` 60/61 | **`match`**, 61/61 |
 | `1447.doc` | `pagination-001` | `pages` 3/4 | **`match`**, 4/4, words 959/959 |
 
+> **Correction, 2026-08-15, from `probes/words-metrics-01` §4: `words-after.tsv` is wrong on four
+> rows and its 169 should be 171.** `TE.CAO.00125 … OJT Logbook.docx`,
+> `xx_SETIS_PWS_template_10.19.22.docx`, `FO.FCTOA.00010 …docx` and `EHEST-SMS-…docx` are all
+> recorded here with worse word counts than the tree at this commit actually produces; the first two
+> are recorded as failing and in fact match. Two independent measurements agree against this file —
+> `refdev-01`'s own baseline, and a 200-document render made with a binary built from this commit's
+> behaviour. The cause is not established from here, but the shape fits a sweep that overlapped a
+> rebuild. **Measure a baseline; do not inherit this one.**
+
 **159 renderings changed and only six documents' error changed at all.** That is the shape a
 correct sub-line refinement makes: every page moves a fraction of a twip and almost nothing crosses
 a boundary.

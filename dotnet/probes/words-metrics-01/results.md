@@ -3,8 +3,15 @@
 Branch `wt-w-metrics`, from `ea37e4214b6` (the line-height law merged an hour earlier).
 
 **Group `words/metrics-001`: 2 of 8 matching before, 4 of 8 after.**
-**Whole words track: 169 of 200 before, 173 after — 4 won, 0 lost.**
+**Whole words track: 171 of 200 before, 173 after — 2 won, 0 lost, and only those two
+renderings changed at all.**
 **`done-*`: words 158/159, slides 144/144, sheets 156/156 — nothing lost in any track.**
+
+Measured on the tree with `refdev-01` merged in (§11), which is the tree that will be integrated.
+
+> **This round first reported 4 won, and that was wrong.** It came from using
+> `lineheight-01/words-after.tsv` as the "before" instead of measuring one. §4 records how the
+> error was caught and what it cost; it is the more useful part of this document.
 
 ---
 
@@ -159,40 +166,76 @@ That alone moved the document from 41 pages to **42**.
 | `src/Paperless.WordProcessing/Ooxml/DocxLayoutSource.cs` | Word grid, `AddsScriptSpace` |
 | `src/Paperless.WordProcessing/Ww8/DocReader.cs` | the same, plus `LevelLabel` |
 
-## 4. Reach, all 534 documents
+The merge with `refdev-01` (§11) then reconciled `LineSpacing.cs` once more: `MetricGrid` carries
+both rounds' new fields, and both application-specific rules were moved onto the same
+`LeadingAboveText` branch so they cannot combine.
+
+## 4. Reach, all 534 documents — and a baseline that was not measured
 
 Ours re-rendered with `SOURCE_DATE_EPOCH` set and verdicted against the banked references at
 `/c/sandbox/workdir/refpdfs-26.2.4.2-fonts/`, using `lineheight-01`'s `render-track.py` and
-`verdict.py` — `batch-check.sh`'s three checks column for column. The "before" is
-`lineheight-01/words-after.tsv`, taken at this branch's own base commit by the same harness.
+`verdict.py` — `batch-check.sh`'s three checks column for column.
 
-| track | before | after | won | lost | renderings changed |
+| track | before | after | won | lost | renderings whose verdict row moved |
 |---|---:|---:|---:|---:|---:|
-| words | 169 | **173** | 4 | **0** | — |
-| slides | 147 | 147 | 0 | 0 | **0 rows differ** |
-| sheets | 163 | 163 | 0 | 0 | **0 rows differ** |
-
-The four won:
+| words | 171 | **173** | 2 | **0** | **2** |
+| slides | 147 | 147 | 0 | 0 | 0 |
+| sheets | 163 | 163 | 0 | 0 | 0 |
 
 | document | group | before | after |
 |---|---|---|---|
 | `A320SimNotes.doc` | `metrics-001` | `pages` 41/42 | **`match`** 42/42 |
 | `手机免提系统TSB.doc` | `metrics-001` | `pages,words` 2/3, 74/95 | **`match`** 3/3, 98/95 |
-| `TE.CAO.00125 … OJT Logbook.docx` | `done-*` | `words` 2675/2793 | **`match`** 2793/2793 |
-| `xx_SETIS_PWS_template_10.19.22.docx` | `done-*` | `words` 4375/4923 | **`match`** 4920/4923 |
 
-The last two are seat (a) reaching outside the group: two `done-*` documents that were **already
-failing** and are now exact. Two more improved without changing class —
-`FO.FCTOA.00010 …docx` 4492 → 4514 words against 4513, and `EHEST-SMS-…docx` 19182 → 19199 against
-19222. Nothing else in the words track moved at all.
+**Nothing else in the words track moved a verdict row at all** — not a page, not a word. For a
+change that touches how every uniform paragraph is routed, that is the shape it should have: the
+new path is only entered where the old one was measuring the wrong face.
 
-**Slides and sheets did not move a single verdict row**, which is the falsification test that
-mattered: `ScalesEastAsianFaces` and `AddsScriptSpace` both default to false and only the two Word
-readers turn them on, so Impress's and Calc's devices are untouched.
+### The claim this section first made was wrong, and how it was caught
+
+The first version of this document reported **4 won**, adding
+`TE.CAO.00125 … OJT Logbook.docx` and `xx_SETIS_PWS_template_10.19.22.docx`, and described them as
+`done-*` documents. **Both halves of that were wrong**, and one mistake produced both.
+
+I did not measure a "before". I used `lineheight-01/words-after.tsv` — a stored figure from the
+round this branch starts at — on the reasoning that it was taken at my own base commit by the same
+harness. Every other baseline in this round was measured; this one was inherited.
+
+It was caught by the merge in §11. `refdev-01` measured its own words baseline independently and got
+**171**, not 169, differing from the stored file on exactly four rows — and those four rows carried
+*my* post-fix numbers on a tree that cannot contain my fix. That is not something to reason about,
+so I built the unfixed binary and rendered the four documents twice:
+
+| document | unfixed, run 1 | unfixed, run 2 | reference |
+|---|---:|---:|---:|
+| `TE.CAO.00125 … OJT Logbook.docx` | 2793 | 2793 | 2793 |
+| `xx_SETIS_PWS_template_10.19.22.docx` | 4920 | 4920 | 4923 |
+| `FO.FCTOA.00010 …docx` | 4514 | 4514 | 4513 |
+| `EHEST-SMS-…docx` | 19199 | 19199 | 19222 |
+
+All four already correct without the fix, and stable. So the fix never moved them, the stored
+baseline was stale on those rows, and `refdev-01`'s independently measured 171 is the right number.
+A full 200-document render with the unfixed binary then confirmed it: **171 of 200**, and the diff
+against the fixed run is the two rows above and nothing else. `words-before.tsv` is that run.
+
+Two lessons, and the second is the one worth keeping:
+
+1. **A stored TSV is not a baseline.** `dotnet/CLAUDE.md` says to stop when a baseline sweep does not
+   reproduce the briefed numbers; it does not occur to say "and do not skip the sweep", because that
+   reads as obvious. It was not obvious while doing it — the file was from my own base commit, by the
+   same harness, and inheriting it looked like reuse rather than a shortcut.
+2. **The same session caught this trap once and fell into it twice.** §6 records noticing that the
+   Fidelity baseline had been truncated by piping through `tail`, and rebuilding a true "before"
+   binary rather than trusting the capture. That was the correct instinct applied to one baseline out
+   of two, on the same afternoon. Catching a trap is not the same as having a habit.
+
+The `done-*` mislabelling had the same root: I wrote the group column from memory instead of from
+`manifest.tsv`. All four documents are in `missing-001`, `pagination-001` and `pagination-002`.
+**None of them is a `done-*` document**, so this round never won one.
 
 ## 5. The `done-*` tracks
 
-Taken twice, by two harnesses, because the brief says it is not optional.
+Taken twice, by two harnesses, on the merged tree.
 
 | track | documents | before | after |
 |---|---:|---:|---:|
@@ -203,14 +246,15 @@ Taken twice, by two harnesses, because the brief says it is not optional.
 And independently with the real thing, re-rendering the reference through `soffice`:
 
 ```
-$ batch-check.sh … 'words/done-*' … 6
-TOTAL 159  MATCH 158  MISMATCH 1  REF-CANNOT-RENDER 0
-words/done-015/docx/airbus-pdf-information-package_v1-4.docx  9/9  1272/1299  words
+words/done-*:   TOTAL 159  MATCH 158  MISMATCH 1  REF-CANNOT-RENDER 0
+slides/done-*:  TOTAL 144  MATCH 144  MISMATCH 0  REF-CANNOT-RENDER 0
+sheets/done-*:  TOTAL 156  MATCH 156  MISMATCH 0  REF-CANNOT-RENDER 0
 ```
 
-The single mismatch is the known one the brief warns about, unchanged, and `words-regress-01` §2
-established it is a missing repeat of a header row worth about thirty words rather than a metric.
-**No `done-*` document lost its verdict in any track.**
+The single mismatch is `words/done-015/docx/airbus-pdf-information-package_v1-4.docx` at 1272 words
+against 1299 — the known one the brief warns about, unchanged, and `words-regress-01` §2 established
+it is a missing repeat of a header row worth about thirty words rather than a metric.
+**No `done-*` document lost its verdict in any track**, and none was won either.
 
 ## 6. Tests
 
@@ -245,26 +289,31 @@ measured width that gets recorded. They now assert the line *count* and walk the
 `CoverageAndSplittingAgree` also failed as first written and was right to: the invariant holds one
 way only, and the file now says which way and why.
 
-### Counts, every project run individually
+### Counts, every project run individually, on the merged tree
 
 | project | result |
 |---|---|
 | `Paperless.Core.Tests` | 337 passed |
 | `Paperless.Containers.Tests` | 109 passed |
-| `Paperless.Text.Tests` | 485 passed |
+| `Paperless.Text.Tests` | 563 passed |
 | `Paperless.Vector.Tests` | 295 passed |
 | `Paperless.Rendering.Tests` | 150 passed, 1 skipped |
 | `Paperless.Markup.Tests` | 259 passed |
 | `Paperless.OpenDocument.Tests` | 125 passed |
-| `Paperless.Spreadsheets.Tests` | 847 passed |
-| `Paperless.Presentations.Tests` | 710 passed |
+| `Paperless.Spreadsheets.Tests` | 853 passed |
+| `Paperless.Presentations.Tests` | 717 passed |
 | `Paperless.WordProcessing.Tests` | 903 passed |
 | `Paperless.Fidelity.Tests` | 520 passed, **30 failed**, 0 skipped, 550 total |
 
 **The Fidelity baseline was established first, at 30 of 550, and it is the same 30 afterwards — the
-names, not merely the count.** The first capture of that baseline was truncated by piping the run
-through `tail`, which made the comparison worthless; a true "before" binary was built and the two
-lists diff clean. Nothing here is flaky-looking; no failure needed a re-run.
+names, not merely the count**, before the merge and after it. The first capture of that baseline was
+truncated by piping the run through `tail`, which made the comparison worthless; a true "before"
+binary was built and the two lists diff clean.
+
+**`Paperless.Presentations.Tests` produced no summary line at all** on the first pass of the
+per-project loop. Per `dotnet/CLAUDE.md` that is a truncated run rather than a result, so it was
+re-run alone three times: 717, 717, 717, against **717 discovered** by `--list-tests`. Recorded
+because a missing summary in a loop is easy to read past.
 
 ### The mtime trap, guarded
 
@@ -304,7 +353,11 @@ instructive direction: I under-rated the CJK document throughout.
 | P5 | `A320SimNotes.doc` is a font-resolution failure, not a metrics one | **right**, and the 6/10 font column was the whole clue |
 | P6 | `OM template` is the cheapest of the six and closes | **wrong.** Not attempted; §9 |
 | P7 | `AWR OPS-AOC 044` is the most expensive and I leave it open | **right** |
-| P8 | two closed, between one and three | **right** — two closed, and two more won outside the group |
+| P8 | two closed, between one and three | **right, and for a while I thought it was more right than it was** — two closed. The "two more won outside the group" I first claimed were never won; see §4 |
+
+A ninth item, unscored because I did not think to predict it: **the baseline itself.** Nothing in
+`prediction.md` says how the "before" would be obtained, and that is the one number this round got
+wrong (§4). A prediction that named its own instruments would have caught it.
 
 The lesson I would carry forward: **P3 and P4 were both reasoning from the brief's description of a
 document rather than from the document.** "Lines never wrap" and "the leading is too small" read as
@@ -361,9 +414,66 @@ Also left, on documents that now pass:
 5. **"One document to gain and three to risk" was the wrong shape of bet.** The three at risk were
    never at risk; one extraction scan over 200 documents established that only this document has CJK
    letters adjacent to Latin ones, and it cost less than re-rendering the track would have.
-6. **The CJK document needed three fixes, not one.** The brief's two symptoms — lines running off
+6. **`lineheight-01/words-after.tsv` is wrong on four rows**, and it is committed in the tree where
+   the next round will reach for it exactly as I did. Two independent measurements at that commit —
+   `refdev-01`'s baseline and my own unfixed-binary render — agree with each other and disagree with
+   it on `TE.CAO.00125`, `xx_SETIS_PWS_template_10.19.22`, `FO.FCTOA.00010` and `EHEST-SMS-…`. Its
+   headline count is 169 where both measurements say 171. I have annotated the file's own §4 rather
+   than editing the TSV, since it is the record of what that round ran. I cannot say from here *why*
+   it is wrong; the shape fits a sweep that overlapped a rebuild, which `dotnet/CLAUDE.md` warns
+   about and which produces exactly this — plausible totals, a handful of rows from the other binary.
+7. **The CJK document needed three fixes, not one.** The brief's two symptoms — lines running off
    the page, and leading of ~28 px against ~40 — were a cascade: the second was invisible until the
    first was fixed, and a third (the script gap) was invisible until the second was.
+
+## 11. The merge with `refdev-01`, and why the two rules do not interact
+
+`refdev-01` landed the Calc and Impress reference devices while this round was running. Both rounds
+gave `MetricGrid` a new field and both changed how a line height is composed, so they conflicted in
+three places, all in `LineSpacing.cs` and all the same disagreement.
+
+**The two rules are orthogonal, and that is verified from three directions rather than assumed:**
+
+1. **From the C++.** All four callers of `lcl_ApplyCjkHeightAdjustment` are in
+   `sw/source/core/txtnode/fntcache.cxx` — `SwFntObj::GetFontAscent` and `GetFontHeight`. EditEngine
+   has no equivalent, and `MS_WORD_COMP_GRID_METRICS` occurs nowhere outside `sw/`. Writer's scale
+   cannot reach Impress or Calc.
+2. **From `refdev-01`'s own measurements, taken before either round knew of the other.** IPAGothic
+   declares CP932 and is one of their `extra` faces: it fits **39 of 39 on Impress's device and 39 of
+   39 on Calc's, with no scale at all**. Had the 127% applied there, every one of those 78 rows would
+   be out by 27%.
+3. **From the merged tree, re-measured end to end.** Both fits were taken again after reconciling,
+   because each had been measured against the other's absence:
+
+| fit | before the merge | after |
+|---|---|---|
+| Impress, 507 pairs | 507/507 ascent, 507/507 height | **507/507, 507/507** |
+| Calc, line heights | 468/468 | **468/468** (195 + 273) |
+| Calc, ascent end to end | a constant 35-unit offset, `refdev-01` §6(b) | unchanged — pre-existing and deliberately deferred, not a merge regression |
+| Writer, 117 pairs | `TWIPS` 117/117, `WHOLE` 78/117 | **unchanged** |
+
+**The reconciliation is structural, not incidental.** Both application rules now hang off
+`LeadingAboveText` and are written on the *same branch* of `ScaledLineHeight` and `ScaledAscent`, so
+they are mutually exclusive by construction. Git's automatic merge of `ScaledAscent` had left them
+merely unlikely to meet, which is a real hazard: `ScaledDescent` is `height − ascent`, so a grid that
+scaled the ascent while the height took EditEngine's branch could return a **negative descent**.
+Three tests pin it, using `refdev-01`'s own measured hundredths of a millimetre.
+
+`EastAsianScaled` also now goes through the grid's logical unit rather than hardcoding twips —
+identical for Writer, which is the only grid that ever sets the flag.
+
+**The merged tree is exactly the union of the two rounds**, measured rather than asserted: its words
+verdicts are row-for-row identical to this round's, and its slides and sheets verdicts are
+row-for-row identical to `refdev-01`'s. No document responds to both changes.
+
+### A citation the merge turned up, replacing an inference
+
+`sw/source/filter/ww8/ww8par.cxx`:1968 sets `MS_WORD_COMP_GRID_METRICS` outright, with the comment
+*"use Word-compatible CJK text grid metrics"*. §2(b) had established the DOC and DOCX scoping by
+measurement alone — 406 twips out of a `.docx` against 325 out of a `.fodt` — because the flag could
+not be found in the filters. It is there for DOC; the DOCX side genuinely does come from the
+`officecfg` Compatibility defaults rather than from `writerfilter`, so that half still rests on the
+measurement, which is the stronger evidence anyway.
 
 ## Files
 
@@ -372,5 +482,6 @@ Also left, on documents that now pass:
 | `prediction.md` | written after the baseline, before diagnosis |
 | `baseline.tsv` | `words/metrics-001` at `ea37e4214b6` |
 | `final.tsv` | the same group after |
-| `words-after.tsv` | all 200 words documents against the banked references |
+| `words-before.tsv` | all 200, rendered with the unfixed binary on the merged tree — a measured baseline, not an inherited one |
+| `words-after.tsv` | the same 200 with the fix |
 | `probe-cjk127.py` | 117 measured pairs over three faces, scoring three candidate rules |
