@@ -65,7 +65,7 @@ public sealed class RecordingDrawingSink : IDrawingSink
     {
         ArgumentNullException.ThrowIfNull(image);
         _current?.Images.Add(destination);
-        _current?.Pictures.Add(new DrawnPicture(image, destination));
+        _current?.Pictures.Add(new DrawnPicture(image, destination, opacity));
     }
 
     /// <inheritdoc/>
@@ -175,7 +175,14 @@ public sealed class RecordingDrawingSink : IDrawingSink
 /// <summary>A picture placement: what was drawn as well as where.</summary>
 /// <param name="Image">The raster handed to the sink.</param>
 /// <param name="Destination">The rectangle it was drawn into.</param>
-public readonly record struct DrawnPicture(RasterImage Image, DocRect Destination);
+/// <param name="Opacity">
+/// How opaque it was asked to be painted, as a fraction of one. Defaulted so that the many
+/// assertions that only care about placement keep constructing a picture with two arguments —
+/// and recorded at all because a picture drawn at the wrong opacity is invisible to every other
+/// column a test can assert on, including its rectangle.
+/// </param>
+public readonly record struct DrawnPicture(
+    RasterImage Image, DocRect Destination, double Opacity = 1);
 
 /// <summary>One page's worth of recorded drawing.</summary>
 /// <param name="Size">The page size the drawing path declared.</param>
