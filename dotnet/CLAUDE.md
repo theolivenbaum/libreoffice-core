@@ -62,12 +62,35 @@ format (Paperless reads), macro execution (never — Paperless only reports that
    - Per-glyph *ink* widths differ by at most 0.010 pt and do not accumulate, so the ink is not
      the driver — the advances are.
 
-   So the seat is the advance of a **metric-compatible substitute face**, not the shaper and not
-   the kern table. Carlito exists to match Calibri's advances at whatever quantisation the
-   consumer uses, which is exactly where a rounding rule would show up; Liberation Serif, whose
-   advances are its own, barely moves. Anyone opening this should start by asking what
-   quantisation LibreOffice applies to an advance on the 8640 dpi Writer reference device, and
-   should **not** re-derive the kerning question — the probe above settles it.
+   **The seat, isolated one glyph at a time.** Rendering one character 10 times and 60 times and
+   differencing the two widths gives an advance with the trailing side-bearing cancelled exactly.
+   Against the faces' own `hmtx`, at 12 pt:
+
+   | face | ch | hmtx | exact `hmtx·size/upem` | ours | ref | ref/exact |
+   |---|---|---:|---:|---:|---:|---:|
+   | Liberation Serif | `o` | 1024 | 6.000000 | 6.000000 | 6.000000 | 1.000000 |
+   | Liberation Serif | `.` | 512 | 3.000000 | 3.000000 | 3.000000 | 1.000000 |
+   | Liberation Serif | `A` | 1479 | 8.666016 | 8.666016 | 8.663520 | 0.999712 |
+   | Liberation Serif | `i` | 569 | 3.333984 | 3.333984 | 3.324480 | 0.997149 |
+   | Carlito | `A` | 1185 | 6.943359 | 6.943360 | 6.931680 | 0.998318 |
+   | Carlito | `.` | 517 | 3.029297 | 3.029297 | 3.020880 | 0.997222 |
+
+   **Ours is exactly `hmtx × size / upem` on every glyph tested — the unhinted design advance.
+   The reference's is not, and differs per glyph by up to 0.3%.** Where it agrees exactly, the
+   design advance is a clean fraction of the em: `o` and `n` are 1024 = upem/2, `.` is 512 =
+   upem/4. Carlito, whose advances are drawn to match Calibri rather than to sit on round
+   fractions, agrees on none of its six.
+
+   That last observation suggests a quantisation grid, and **the grid hypothesis is refuted**:
+   searching every N from 16 to 4000 units per em for one that reproduces all twelve reference
+   advances from `hmtx` leaves a best-case maximum error of **0.007 pt**, the same order as the
+   defect. No single grid fits, so the reference is not rounding the design advance — it is
+   **grid-fitting the outline**, which is per-glyph and cannot be derived from `hmtx` at all.
+
+   So closing this means reproducing FreeType's hinted advance at LibreOffice's ppem, which is a
+   real architectural question for a stack that reads its own OpenType tables, not a rounding
+   patch. Do **not** re-derive the kerning question or the grid question — both probes above
+   settle them, and both are in `probes/advance-divergence/`.
 
    Treat it as a real open defect with a known seat, not as a rounding artefact — and do not
    re-derive "our pen is off", because the declared-margin probe already refuted that.
