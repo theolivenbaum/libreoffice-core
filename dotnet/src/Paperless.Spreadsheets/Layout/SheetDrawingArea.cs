@@ -66,7 +66,8 @@ internal static class SheetDrawingArea
             // page break, which is what `sc/qa/unit/data/xlsb/universal-content.xlsb` shows: its
             // only drawing is a hidden comment shape spanning to column 12, and LibreOffice prints
             // four pages for it where we printed one.
-            (long edgeRight, long edgeBottom) = Edges(drawing, grid);
+            (long _, long _, long edgeRight, long edgeBottom) =
+                SheetDrawingBounds.Of(drawing, grid);
             if (edgeRight > right) right = edgeRight;
             if (edgeBottom > bottom) bottom = edgeBottom;
         }
@@ -81,39 +82,6 @@ internal static class SheetDrawingArea
         // maximum is then taken against those zeroes rather than against "no area".
         return new SheetRange(0, 0, lastColumn, lastRow);
     }
-
-    /// <summary>
-    /// A drawing's right and bottom edges, in twips from the sheet's origin.
-    /// </summary>
-    /// <remarks>
-    /// Whole twips because that is the unit the comparison is made in — Calc converts the object's
-    /// hundredth-of-a-millimetre bound rect back to twips before walking the columns
-    /// (<c>o3tl::toTwips</c>, <c>drwlayer.cxx:1439</c>) — and because pagination's own arithmetic
-    /// is in twips for the same reason. The offsets are not snapped through
-    /// <see cref="SheetDeviceUnits"/>: this decides which cell an edge falls in, not where a pen
-    /// goes, and a hundredth of a millimetre never moves a cell boundary.
-    /// </remarks>
-    private static (long Right, long Bottom) Edges(SheetDrawing drawing, SheetGrid grid)
-    {
-        if (drawing.Anchor == SheetAnchorKind.Absolute)
-        {
-            return (drawing.Position.X.Twips + drawing.Extent.Width.Twips,
-                    drawing.Position.Y.Twips + drawing.Extent.Height.Twips);
-        }
-
-        long left = Start(drawing.From.Column, grid.Columns) + drawing.From.ColumnOffset.Twips;
-        long top = Start(drawing.From.Row, grid.Rows) + drawing.From.RowOffset.Twips;
-
-        if (drawing.Anchor == SheetAnchorKind.OneCell)
-            return (left + drawing.Extent.Width.Twips, top + drawing.Extent.Height.Twips);
-
-        return (Math.Max(left, Start(drawing.To.Column, grid.Columns) + drawing.To.ColumnOffset.Twips),
-                Math.Max(top, Start(drawing.To.Row, grid.Rows) + drawing.To.RowOffset.Twips));
-    }
-
-    /// <summary>Where a column or row starts, in twips, hidden ones contributing nothing.</summary>
-    private static long Start(int index, SheetAxis axis)
-        => index <= 0 ? 0 : axis.TotalPrintedSize(0, index - 1).Twips;
 
     /// <summary>
     /// Which column or row an edge falls in: the first whose accumulated size passes it.

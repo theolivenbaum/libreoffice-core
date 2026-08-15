@@ -232,7 +232,38 @@ public sealed record SheetDrawing
     /// </para>
     /// </remarks>
     public (int Column, int Row)? NoteCell { get; init; }
+
+    /// <summary>
+    /// The shapes inside the drawing, in fractions of its own rectangle, or empty.
+    /// </summary>
+    /// <remarks>
+    /// Only <see cref="SheetDrawingBounds"/> reads this, and only to answer the one question the
+    /// anchor cannot: how far the drawing's <em>bounding</em> rectangle reaches. See that class
+    /// for why a turned shape inside a group makes the two differ, and why the parts have to be
+    /// carried rather than folded into a fixed inset at read time.
+    /// </remarks>
+    public IReadOnlyList<SheetDrawingPart> Parts { get; init; } = [];
 }
+
+/// <summary>
+/// One leaf shape inside a drawing, stated as fractions of the drawing's own rectangle.
+/// </summary>
+/// <remarks>
+/// Fractions rather than lengths because a two-cell anchor has no rectangle until the grid is
+/// known: the reader sees the DrawingML tree and the layout sees the columns, and this is what
+/// passes between them. A group's <c>a:chOff</c>/<c>a:chExt</c> mapping is already applied, so a
+/// part is positioned in the anchored shape's own frame however deeply it was nested.
+/// </remarks>
+/// <param name="X">Its left edge, as a fraction of the drawing's width from the drawing's left.</param>
+/// <param name="Y">Its top edge, as a fraction of the drawing's height.</param>
+/// <param name="Width">Its width, as a fraction of the drawing's.</param>
+/// <param name="Height">Its height, as a fraction of the drawing's.</param>
+/// <param name="Degrees">
+/// How far it is turned clockwise, in degrees. The one thing the fractions cannot express, and
+/// the reason a part is carried at all.
+/// </param>
+public readonly record struct SheetDrawingPart(
+    double X, double Y, double Width, double Height, double Degrees);
 
 /// <summary>
 /// The drawings anchored on one sheet, in the order the file lists them.

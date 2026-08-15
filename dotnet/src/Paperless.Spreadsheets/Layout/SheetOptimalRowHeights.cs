@@ -204,8 +204,29 @@ internal static class SheetOptimalRowHeights
     {
         if (grid.RowHeightsAreManual) return grid;
 
-        SheetRange range = SheetDecorationArea.Extend(
-            sheet.UsedRange, sheet.Formatting, sheet.LastDataRowByColumn);
+        // The drawings are part of the range, and this is the one place it is easy to miss.
+        // `ScDocRowHeightUpdater::updateAll` is called with `bOnlyUsedRows`, which reads as "the
+        // cells" and is not: it takes its last row from `ScDocument::GetPrintArea`
+        // (`sc/source/core/data/dociter.cxx:1731-1734`), and that is the *document's* print area,
+        // maxed against the drawing layer's bounding box (`documen2.cxx:644-664`). So a sheet whose
+        // watermark hangs a hundred rows below its last cell has all hundred of those empty rows
+        // measured and resized, and every page boundary below the cells moves with them.
+        //
+        // Measured on `SIL_TDB648.xlsx`: its `RAAS` sheet ends at row 33 and its watermark reaches
+        // row 148, and LibreOffice's own flat-ODF export gives every row from 53 to 148 a height of
+        // 0.1756in — 253 twips, the arithmetic height of the sheet's 10 pt default — where we kept
+        // the file's stated default of 12.6 pt, snapped to 240. Thirteen twips a row over a hundred
+        // rows is a whole band of pages: LibreOffice prints four bands of that sheet and we printed
+        // three.
+        //
+        // The drawing extension is measured against the grid as *stated*, which is the grid Calc
+        // has when it asks: the print area is found before the heights are recomputed, and this is
+        // the routine that recomputes them.
+        SheetRange range = SheetDrawingArea.Extend(
+            SheetDecorationArea.Extend(
+                sheet.UsedRange, sheet.Formatting, sheet.LastDataRowByColumn),
+            sheet.Drawings,
+            grid);
         if (!range.IsValid) return grid;
 
         int lastRow = range.LastRow;
