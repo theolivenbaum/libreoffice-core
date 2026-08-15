@@ -120,6 +120,7 @@ public sealed partial class DocxLayoutSource
             SectionIndex = _sectionIndex,
             ColumnWidths = columns,
             ColumnFit = Fit(declared, properties),
+            RelativeWidth = Percentage(Word.Child(properties, "tblW")),
             Rows = Resolved(rows),
             HeaderRowCount = HeadingRows(rows),
             LeftIndent = LeftEdge(properties, rows, isNested: _tableDepth > 0),
@@ -303,6 +304,20 @@ public sealed partial class DocxLayoutSource
     private static TableColumnFit? Fit(List<Length?> declared, XElement? properties)
     {
         if (declared.All(width => width is not null)) return null;
+
+        // A percentage width is not a width the fit can honour, and it must not fall through to the grid
+        // sum either: the area it is handed has already been scaled to the stated percentage, so leaving
+        // the table's own width unstated is what makes it fill exactly that. See
+        // <see cref="PageTable.RelativeWidth"/>.
+        if (Percentage(Word.Child(properties, "tblW")) is not null)
+        {
+            return new TableColumnFit
+            {
+                IsAuto = [.. declared.Select(column => column is null)],
+                TableWidth = null,
+                Rule = TableWidthRule.Word,
+            };
+        }
 
         Length? width = Twips(Word.Child(properties, "tblW"));
         if (width is null || width <= Length.Zero)
@@ -1071,6 +1086,32 @@ public sealed partial class DocxLayoutSource
                && Word.Integer(text, out int twips)
             ? Length.FromTwips(twips)
             : null;
+    }
+
+    /// <summary>
+    /// A <c>w:tblW</c> stated as a percentage of the area the table sits in, or null when it is not one.
+    /// </summary>
+    /// <remarks>
+    /// The unit is fiftieths of a percent, so <c>5000</c> is 100%, and the result is clamped there:
+    /// <c>nPercent = pMeasureHandler-&gt;getValue() / 50; if (nPercent &gt; 100) nPercent = 100;</c>
+    /// (<c>DomainMapperTableManager.cxx</c>:193). A file writing <c>50%</c> instead of <c>2500</c> is
+    /// legal under <c>ST_MeasurementOrPercent</c> and read as the percentage it says. Zero is not a
+    /// width at all — <c>w:tblW w:w="0" w:type="pct"</c> is how a table says it has none — and a
+    /// negative one is nonsense, so both read as absent.
+    /// </remarks>
+    private static int? Percentage(XElement? element)
+    {
+        if (element is null || Word.Attribute(element, "type") is not "pct") return null;
+        if (Word.Attribute(element, "w") is not { } text) return null;
+
+        string trimmed = text.Trim();
+        bool literal = trimmed.EndsWith('%');
+        if (literal) trimmed = trimmed[..^1];
+
+        if (!Word.Integer(trimmed, out int stated)) return null;
+
+        int percent = literal ? stated : stated / 50;
+        return percent <= 0 ? null : Math.Min(percent, 100);
     }
 
     private static int? Number(XElement? element)

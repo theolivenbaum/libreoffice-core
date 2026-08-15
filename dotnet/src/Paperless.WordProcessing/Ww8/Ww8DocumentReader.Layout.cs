@@ -685,6 +685,13 @@ public sealed partial class Ww8DocumentReader
             switch (character)
             {
                 case ParagraphMark or Special.SectionMark:
+                    // Inside a table a U+000C is not a break at all and not a paragraph either:
+                    // `HandlePageBreakChar` does nothing whatever under `if (!m_nInTable)`, so the
+                    // character simply vanishes and the text either side of it stays one paragraph.
+                    // Closing here instead adds an empty paragraph per occurrence — see
+                    // <see cref="IsInATable"/> for what that cost `A_320.doc`.
+                    if (character == Special.SectionMark && IsInATable(position)) continue;
+
                     // A U+000C ends a paragraph only when one is under way. `HandlePageBreakChar`
                     // (`ww8par.cxx`:3438) adds a paragraph end exactly when the character before it was
                     // not one — `if (!m_bWasParaEnd && IsTemp)` — and otherwise lets the break settle on

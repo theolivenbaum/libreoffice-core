@@ -326,8 +326,16 @@ public static class TableLayouter
     /// <param name="cells">Its cells as <see cref="LayOut"/> placed them.</param>
     /// <param name="drawn">How far into the row an earlier page already reached; nought at its first part.</param>
     /// <param name="room">How much height is left on this page.</param>
+    /// <param name="acrossRowSpans">
+    /// Whether a cell merged down past this row may be cut as well. False everywhere but the one case
+    /// where declining hides content — see the remark on the row-span test below.
+    /// </param>
     public static RowSlice? SliceRow(
-        PageTableRow row, IReadOnlyList<PlacedTableCell> cells, Length drawn, Length room)
+        PageTableRow row,
+        IReadOnlyList<PlacedTableCell> cells,
+        Length drawn,
+        Length room,
+        bool acrossRowSpans = false)
     {
         ArgumentNullException.ThrowIfNull(row);
         ArgumentNullException.ThrowIfNull(cells);
@@ -337,9 +345,19 @@ public static class TableLayouter
         Length rowTop = cells[0].Area.Y;
         foreach (PlacedTableCell cell in cells)
         {
-            // A cell covering more than this row cannot be cut here: its text belongs to a row further
-            // down, and half of its rectangle would be drawn on each of two pages.
-            if (Math.Max(1, cell.Cell.RowSpan) > 1) return null;
+            // A cell covering more than this row is normally not cut here: its text belongs to a row
+            // further down, and half of its rectangle would be drawn on each of two pages.
+            //
+            // The exception is the row that is taller than a whole column, where declining is worse than
+            // the artefact. Writer allows that row to split "regardless of setting, otherwise it has
+            // hidden content and that makes no sense" (`SwTabFrame::Split`, `tabfrm.cxx`:1161) and
+            // re-formats the spanned cells with `lcl_AdjustRowSpanCells`; declining leaves the row to be
+            // placed whole on a page it cannot fit, which draws it past the bottom of the paper and
+            // wastes the page before it. Measured on `ESPN-R - MCF - RA - Ed1.docx`, whose "Engine -
+            // Flight" row is 440.5 pt under a 422.2 pt landscape body and whose first cell is merged
+            // down into the rows after it: about 356 pt of page 27 went blank and the row was then drawn
+            // to y = 30.6 on a page whose bottom margin is at 56.7.
+            if (Math.Max(1, cell.Cell.RowSpan) > 1 && !acrossRowSpans) return null;
             rowTop = Length.Min(rowTop, cell.Area.Y);
         }
 
