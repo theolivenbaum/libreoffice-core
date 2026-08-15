@@ -14,12 +14,31 @@ namespace Paperless.Text.Tests;
 /// is tested without the test depending on a font being present.
 /// </para>
 /// <para>
-/// The expectations are measurements rather than derivations. LibreOffice's PDF of
-/// <c>words/batch-018/doc/A_320.doc</c>, whose <c>Dop</c> sets <c>fUsePrinterMetrics</c>, puts
-/// consecutive lines of an 11 pt paragraph 13.00 pt apart — 260 twips — and of a 12 pt paragraph
-/// 13.95 pt apart, where the design units alone give 12.65 and 13.80. Its PDF of
-/// <c>words/batch-020/doc/150_5300_13_chg10.doc</c> gives the Liberation Serif figures the third case
-/// checks: 10.60, 11.30 and 11.55 pt at 9, 9.5 and 10 pt.
+/// The expectations are measurements rather than derivations, and <strong>they were all re-measured
+/// on 2026-08-15 against the installed 26.2.4.2 because the stored ones no longer reproduce.</strong>
+/// They had been taken when the printer device was 300 dpi; it is 600 here, so every figure that
+/// discriminates the two moved. Three independent sources agree and are quoted below rather than one:
+/// </para>
+/// <list type="bullet">
+/// <item><description>
+/// <c>probes/printer-metric-advance.py</c>, which varies <c>fUsePrinterMetrics</c> on one authored
+/// body and reads both baseline pitches out of the content stream — Liberation Serif at 9/10/11/12 pt
+/// gives 10.300/11.550/12.750/13.800 and Liberation Sans 10.350/11.500/12.600/13.800.
+/// </description></item>
+/// <item><description>
+/// the banked reference rendering of <c>words/pagination-001/doc/A_320.doc</c>, whose <c>Dop</c> sets
+/// the flag: consecutive lines of an 11 pt Liberation Sans paragraph 12.60 pt apart, 252 twips.
+/// </description></item>
+/// <item><description>
+/// the banked reference rendering of <c>words/table-001/doc/150_5300_13_chg10.doc</c>: Liberation
+/// Serif at 9, 9.5 and 10 pt gives 10.30, 10.80 and 11.55 pt.
+/// </description></item>
+/// </list>
+/// <para>
+/// The superseded figures — 13.00 and 13.95 pt for Liberation Sans at 11 and 12, and 10.60/11.30/11.55
+/// for Liberation Serif — are exactly what a 300 dpi grid produces, so what moved is the headless
+/// default printer and not anyone's reading of the rule. Nothing about the document decides it, which
+/// is why it has to be re-measured rather than inherited.
 /// </para>
 /// </remarks>
 public class MetricGridTests
@@ -38,17 +57,22 @@ public class MetricGridTests
     public void WithoutAGridAFaceScalesExactly(double points, long expected)
         => LiberationSans().ScaledLineHeight(Length.FromPoints(points)).Twips.ShouldBe(expected);
 
+    // 11 pt is the size that discriminates for this face: ungridded it is 253 and the printer draws
+    // 252. At 12 pt the two devices agree at 276, which is why 12 is stated in the case above and not
+    // here — a size where a broken grid gives the right answer is not a test of the grid.
     [Theory]
-    [InlineData(11, 260)]
-    [InlineData(12, 279)]
-    public void OnAPrinterGridTheSameFaceRoundsUpToLibreOfficesAnswer(double points, long expected)
+    [InlineData(11, 252)]
+    [InlineData(9, 207)]
+    [InlineData(10, 230)]
+    public void OnAPrinterGridTheSameFaceIsLibreOfficesAnswerAndNotTheDesignUnits(
+        double points, long expected)
         => LiberationSans(MetricGrid.Printer, leadingAbove: true)
             .ScaledLineHeight(Length.FromPoints(points))
             .Twips.ShouldBe(expected);
 
     [Theory]
-    [InlineData(9, 212)]
-    [InlineData(9.5, 226)]
+    [InlineData(9, 206)]
+    [InlineData(9.5, 216)]
     [InlineData(10, 231)]
     public void TheGridIsNotAScaleFactor(double points, long expected)
     {
@@ -74,8 +98,8 @@ public class MetricGridTests
         Length descent = gridded.ScaledDescent(em);
 
         (ascent + descent).ShouldBe(gridded.ScaledLineHeight(em));
-        ascent.Twips.ShouldBe(212);
-        descent.Twips.ShouldBe(48);
+        ascent.Twips.ShouldBe(206);
+        descent.Twips.ShouldBe(46);
     }
 
     [Fact]
@@ -154,76 +178,104 @@ public class MetricGridTests
     // Every expectation below is a width LibreOffice itself drew, read out of the content stream of
     // an authored pair that differs in one bit — `dotnet/probes/printer-metric-advance.py`, which
     // writes one body through LibreOffice's DOC export and then patches WW8Dop's fUsePrinterMetrics
-    // both ways. The rule they pin is
+    // both ways. **Re-measured 2026-08-15 on 26.2.4.2 and every figure moved**, for the reason the
+    // class remark gives: the device is 600 dpi and the stored figures were 300 dpi's.
     //
-    //     floor( N . advance . round(size/72 . 300) / upem ) device pixels, then to twips
+    // The rule is
     //
-    // and it is exact on all 96 of the probe's rows. Three alternatives are stated in code below so
-    // that adopting any of them fails here rather than being re-proposed:
+    //     floor( N . advance . round(size/72 . 600) / upem ) device pixels, then to twips
+    //
+    // and unlike the vertical rule it is **not** exact: it reproduces 37 of the probe's 96 rows and
+    // the other 59 are out by one or two twips. That is a real open residual and it is recorded as a
+    // test below rather than left in a write-up. It is also a hundredfold improvement — at 300 dpi
+    // the same rule is out by as much as 137 twips, 6.85 pt on a 64-glyph run.
+    //
+    // Dropping the truncation, which fits 52 of 96, was considered and not done: it is better on 36
+    // rows and *worse* on 17, so the evidence does not choose between them and adopting it would be
+    // fitting rather than reading. The floor is what the C++ says.
+    //
+    // Two alternatives are still stated in code so that adopting either fails here rather than being
+    // re-proposed:
     //
     //   * scaling exactly, with no device in it at all      — fails ExactScalingIsNotWhatAPrinterMeasures
     //   * rounding *each glyph's* advance to a whole pixel  — fails RoundingEachGlyphIsNotTheRule
-    //   * rounding the total instead of truncating it       — fails TheTotalIsTruncatedAndNotRounded
     //
-    // The middle one matters most: it is what GenericSalLayout::LayoutText appears to say
+    // The second matters most: it is what GenericSalLayout::LayoutText appears to say
     // (vcl/source/gdi/CommonSalLayout.cxx:826-831) and it is not what the binary does, because a
     // mapped device turns subpixel positioning on.
 
     private const int Upem = 2048;
 
-    // Liberation Serif 'n' 1024, 'i' 569, 'M' 1821; Liberation Sans 'n' 1139, 'M' 1706. Stated, so
-    // the test does not depend on a font file being installed.
+    // Liberation Serif 'n' 1024, 'i' 569, 'M' 1821; Liberation Sans 'n' 1139, 'i' 455, 'M' 1706.
+    // Stated, so the test does not depend on a font file being installed. Every row here is one the
+    // probe measured *and* this rule reproduces exactly; the rows it does not are the subject of
+    // TheAdvanceRuleIsNotExactAndTheResidueIsRecordedRatherThanHidden.
     [Theory]
-    [InlineData(1024, 9.0, 1, 91)]      // Serif 'n': 19.0 px exactly, and still floored
-    [InlineData(1024, 9.0, 64, 5837)]
-    [InlineData(569, 9.0, 1, 48)]       // Serif 'i': 10.5576 px -> 10
-    [InlineData(569, 9.0, 16, 806)]
-    [InlineData(569, 9.0, 64, 3240)]
-    [InlineData(1821, 9.0, 1, 158)]     // Serif 'M'
-    [InlineData(1821, 9.0, 64, 10378)]
-    [InlineData(1139, 9.0, 16, 1622)]   // Sans 'n', the row that separates total from per glyph
-    [InlineData(1139, 9.0, 64, 6490)]
-    [InlineData(1706, 10.0, 1, 163)]    // Sans 'M' at a size whose em rounds up by a third of a pixel
-    [InlineData(1024, 12.0, 64, 7680)]  // 12 pt sets 50 px exactly, so nothing moves
+    [InlineData(1024, 9.0, 64, 5760)]    // Serif 'n': 9 pt sets 75 px exactly, so nothing moves
+    [InlineData(1024, 10.0, 64, 6374)]   // 10 pt wants 83.33 px and gets 83, so advances shrink
+    [InlineData(569, 10.0, 4, 221)]      // Serif 'i' at the same size
+    [InlineData(1821, 10.0, 64, 11335)]  // Serif 'M'
+    [InlineData(1024, 11.0, 16, 1766)]   // 11 pt wants 91.67 px and gets 92, so advances grow
+    [InlineData(1821, 11.0, 64, 12564)]
+    [InlineData(1024, 12.0, 64, 7680)]   // 12 pt sets 100 px exactly, so nothing moves
     public void APrinterMeasuresAnAdvanceOnItsPixelGrid(int advance, double points, int count, long twips)
         => MetricGrid.Printer
             .ToAdvance((long)advance * count, Upem, Length.FromPoints(points))
             .Twips.ShouldBe(twips);
 
+    [Theory]
+    [InlineData(1139, 9.0, 64, 6406)]    // Sans 'n'
+    [InlineData(1139, 10.0, 64, 7090)]
+    [InlineData(455, 11.0, 64, 3139)]    // Sans 'i'
+    [InlineData(1706, 10.0, 16, 2654)]   // Sans 'M'
+    [InlineData(1139, 12.0, 64, 8542)]
+    public void TheSameRuleHoldsForTheOtherFace(int advance, double points, int count, long twips)
+        => MetricGrid.Printer
+            .ToAdvance((long)advance * count, Upem, Length.FromPoints(points))
+            .Twips.ShouldBe(twips);
+
+    [Fact]
+    public void TheAdvanceRuleIsNotExactAndTheResidueIsRecordedRatherThanHidden()
+    {
+        // Four rows the probe measured and this rule misses, in both directions, so that a change
+        // that fixes them shows up here as a *failure* to update rather than as silence. Sixteen
+        // Liberation Serif 'i' at 10 pt: LibreOffice draws 885 twips and the truncation gives 883.
+        // Four Liberation Serif 'n' at 11 pt: LibreOffice draws 441 and this gives 442, the other
+        // way. Neither is more than a tenth of a point, and at 300 dpi the same rows were out by up
+        // to 137 twips.
+        MetricGrid.Printer.ToAdvance(569L * 16, Upem, Length.FromPoints(10)).Twips.ShouldBe(883);
+        MetricGrid.Printer.ToAdvance(1821L, Upem, Length.FromPoints(10)).Twips.ShouldBe(175);
+        MetricGrid.Printer.ToAdvance(1024L * 4, Upem, Length.FromPoints(11)).Twips.ShouldBe(442);
+        MetricGrid.Printer.ToAdvance(569L * 64, Upem, Length.FromPoints(11)).Twips.ShouldBe(3924);
+    }
+
     [Fact]
     public void ExactScalingIsNotWhatAPrinterMeasures()
     {
-        // 64 Liberation Serif 'n' at 9 pt: the design units alone give 288 pt, and the device draws
-        // 291.85. The em is 37.5 px and the device can only set 38, so every advance is 1.33% wider.
-        Length em = Length.FromPoints(9);
+        // 64 Liberation Serif 'n' at 10 pt: the design units alone give 320 pt, and the device draws
+        // 318.70. The em is 83.33 px and the device can only set 83, so every advance is 0.4%
+        // narrower. 9 and 12 pt are the wrong sizes to ask this at, because 600 dpi sets both of
+        // them exactly and the two answers coincide — which is what the stored version of this test,
+        // written when the device was 300 dpi, did not have to worry about.
+        Length em = Length.FromPoints(10);
         long exact = (long)Math.Round(1024L * 64 * em.Emu / (double)Upem);
 
-        Length.FromEmu(exact).Twips.ShouldBe(5760);
-        MetricGrid.Printer.ToAdvance(1024L * 64, Upem, em).Twips.ShouldBe(5837);
+        Length.FromEmu(exact).Twips.ShouldBe(6400);
+        MetricGrid.Printer.ToAdvance(1024L * 64, Upem, em).Twips.ShouldBe(6374);
     }
 
     [Fact]
     public void RoundingEachGlyphIsNotTheRule()
     {
-        // Liberation Sans 'n' at 9 pt is 21.1338 px. Rounding each glyph gives 21 px, so sixteen of
-        // them measure 336 px = 1613 twips; the device measures the sixteen together and truncates
-        // once, 338 px = 1622. Nine twips on one word, and it compounds along a line.
-        Length em = Length.FromPoints(9);
-        long perGlyph = 16 * (long)Math.Round(1139 * 38.0 / Upem);
+        // Liberation Sans 'M' at 11 pt is 76.6406 px. Rounding each glyph gives 77 px, so sixteen of
+        // them measure 1232 px = 2957 twips; the device measures the sixteen together, 1226.25 px,
+        // and truncates once — 2942, which is what LibreOffice draws. Fifteen twips on one word, and
+        // it compounds along a line.
+        Length em = Length.FromPoints(11);
+        long perGlyph = 16 * (long)Math.Round(1706 * 92.0 / Upem);
 
-        MetricGrid.Printer.ToLength(perGlyph).Twips.ShouldBe(1613);
-        MetricGrid.Printer.ToAdvance(1139L * 16, Upem, em).Twips.ShouldBe(1622);
-    }
-
-    [Fact]
-    public void TheTotalIsTruncatedAndNotRounded()
-    {
-        // Sixteen Liberation Serif 'i' at 9 pt come to 168.9219 px. Rounded that is 169 px = 811
-        // twips; LibreOffice draws 806, which is 168.
-        Length em = Length.FromPoints(9);
-
-        MetricGrid.Printer.ToLength((long)Math.Round(569 * 16 * 38.0 / Upem)).Twips.ShouldBe(811);
-        MetricGrid.Printer.ToAdvance(569L * 16, Upem, em).Twips.ShouldBe(806);
+        MetricGrid.Printer.ToLength(perGlyph).Twips.ShouldBe(2957);
+        MetricGrid.Printer.ToAdvance(1706L * 16, Upem, em).Twips.ShouldBe(2942);
     }
 
     [Fact]

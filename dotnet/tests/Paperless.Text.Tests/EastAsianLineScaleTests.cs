@@ -154,7 +154,7 @@ public class EastAsianLineScaleTests
         // document for the flag separately — so a Word document laid out against a printer keeps both.
         MetricGrid printer = MetricGrid.Printer.AsWordDocument();
 
-        printer.Dpi.ShouldBe(300);
+        printer.Dpi.ShouldBe(600);
         printer.QuantisesAdvances.ShouldBeTrue();
         printer.ScalesEastAsianFaces.ShouldBeTrue();
     }

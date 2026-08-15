@@ -209,15 +209,24 @@ public class ReferenceGridTests
     public void APrintersGridIsStillTheOtherAnswer()
     {
         // The two grids are not interchangeable and the difference is not a rounding. An 11 pt
-        // Liberation Sans line is 253 twips on the reference device and 260 on a 300 dpi printer —
-        // 2.8%, which over a long document is many pages, against the one twip the reference device
-        // is worth. Both numbers are LibreOffice's own; the printer one comes from its PDF of
-        // `A_320.doc`, whose Dop sets fUsePrinterMetrics. Kept so that collapsing the two grids into
-        // one fails here.
+        // Liberation Sans line is 253 twips on the reference device and 252 on the 600 dpi printer,
+        // and a 9.5 pt Liberation Serif line is 219 against 216 — which is the pair that shows the
+        // printer is a coarser grid rather than a smaller number, because it moves in both
+        // directions. Every figure is LibreOffice's own; the printer ones come from its renderings
+        // of `A_320.doc` and `150_5300_13_chg10.doc`, whose Dops set fUsePrinterMetrics, and agree
+        // with `probes/printer-metric-advance.py`'s authored pair. Kept so that collapsing the two
+        // grids into one fails here.
+        //
+        // 260 stood on the second line until 2026-08-15 and was 300 dpi's answer; see
+        // MetricGridTests' class remark for the three sources that replaced it.
         Length em = Length.FromPoints(11);
 
         Sans(MetricGrid.Reference).ScaledLineHeight(em).Twips.ShouldBe(253);
-        Sans(MetricGrid.Printer).ScaledLineHeight(em).Twips.ShouldBe(260);
+        Sans(MetricGrid.Printer).ScaledLineHeight(em).Twips.ShouldBe(252);
+
+        Length small = Length.FromPoints(9.5);
+        Serif(MetricGrid.Reference).ScaledLineHeight(small).Twips.ShouldBe(219);
+        Serif(MetricGrid.Printer).ScaledLineHeight(small).Twips.ShouldBe(216);
     }
 
     private static LineMetrics Face(string name, MetricGrid grid) => name switch

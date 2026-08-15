@@ -154,8 +154,9 @@ internal static class WordParagraphFormats
         // Attribute by attribute rather than element by element: see WordStyles.ParagraphPropertyLayers.
         List<XElement> indent =
             styles.ParagraphPropertyLayers("ind", paragraphProperties, styleId, tableStyle);
-        List<XElement> spacings =
-            styles.ParagraphPropertyLayers("spacing", paragraphProperties, styleId, tableStyle);
+        List<XElement> spacings = GroupedMargins(
+            styles.ParagraphPropertyLayers("spacing", paragraphProperties, styleId, tableStyle),
+            paragraphProperties);
 
         Length auto = autoSpacing ?? HtmlAutoSpacing;
 
@@ -827,9 +828,72 @@ internal static class WordParagraphFormats
                           ?? styles.DefaultStyleId(WordStyleType.Paragraph);
 
         return IsAuto(
-            styles.ParagraphPropertyLayers("spacing", paragraphProperties, styleId, tableStyle),
+            GroupedMargins(
+                styles.ParagraphPropertyLayers("spacing", paragraphProperties, styleId, tableStyle),
+                paragraphProperties),
             before ? "beforeAutospacing" : "afterAutospacing",
             before ? "before" : "after");
+    }
+
+    /// <summary>
+    /// The <c>w:spacing</c> layers as a paragraph that sets one of its two margins directly sees
+    /// them — which is without the pool completion its style may carry.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// writerfilter's <c>tdf#118521</c> block, <c>DomainMapper_Impl.cxx</c>:3110-3138: <em>"set
+    /// paragraph top or bottom margin based on the paragraph style if we already set the other
+    /// margin with direct formatting"</em>. The two margins are one <c>SvxULSpaceItem</c>, so
+    /// setting either directly forces both to be written directly, and the one the file did not
+    /// state is fetched from <c>GetPropertyFromParaStyleSheet</c> — the DOCX <c>w:basedOn</c> chain
+    /// and then <c>w:docDefaults</c>, never Writer's pool.
+    /// </para>
+    /// <para>
+    /// So the completion <see cref="WordStyles.PoolCompletedSide"/> marks is invisible on exactly
+    /// these paragraphs, and dropping the marked attribute from the layer list is the whole of the
+    /// difference: everything below it in the chain is already the DOCX inheritance the C++ walks.
+    /// </para>
+    /// <para>
+    /// The condition is three-way and not two — <c>bTopSet != bBottomSet || bBottomSet !=
+    /// bContextSet</c> — so a paragraph stating <em>only</em> <c>w:contextualSpacing</c> and no
+    /// <c>w:spacing</c> at all triggers it and loses the completion on both margins. That arm is
+    /// measured rather than assumed: `direct-one-sided-spacing.py`'s <c>ctx-only</c> row reads 60
+    /// below where <c>style-only</c> reads 120.
+    /// </para>
+    /// <para>
+    /// What counts as "set" is the attribute being present, not its value and not the element's:
+    /// <c>w:before="0"</c> triggers it and a <c>w:spacing</c> carrying only <c>w:line</c> does not.
+    /// Both are rows in that probe.
+    /// </para>
+    /// </remarks>
+    /// <param name="layers">The <c>w:spacing</c> layers, innermost first.</param>
+    /// <param name="paragraphProperties">The paragraph's own <c>w:pPr</c>, or null.</param>
+    private static List<XElement> GroupedMargins(
+        List<XElement> layers, XElement? paragraphProperties)
+    {
+        XElement? direct = Word.Child(paragraphProperties, "spacing");
+        bool top = Word.Attribute(direct, "before") is not null
+                   || Word.Attribute(direct, "beforeAutospacing") is not null;
+        bool bottom = Word.Attribute(direct, "after") is not null
+                      || Word.Attribute(direct, "afterAutospacing") is not null;
+        bool context = Word.Child(paragraphProperties, "contextualSpacing") is not null;
+
+        if (top == bottom && bottom == context) return layers;
+
+        List<XElement>? rewritten = null;
+        for (int i = 0; i < layers.Count; i++)
+        {
+            string? completed = WordStyles.PoolCompletedSide(layers[i]);
+            if (completed is null) continue;
+            if (completed == "before" ? top : bottom) continue;
+
+            rewritten ??= [.. layers];
+            XElement without = new(layers[i]);
+            without.Attribute(Word.Name(completed))?.Remove();
+            rewritten[i] = without;
+        }
+
+        return rewritten ?? layers;
     }
 
     /// <summary>An OOXML on/off attribute, which real files spell three ways.</summary>

@@ -84,7 +84,7 @@ namespace Paperless.WordProcessing.Ooxml;
 ///     (<c>sw/source/writerfilter/dmapper/DomainMapper_Impl.cxx</c>:10173) sets
 ///     <c>PrinterIndependentLayout::DISABLED</c> from it, which is the same state
 ///     <c>WW8Dop::fUsePrinterMetrics</c> puts a DOC into. So the metrics are rounded onto a
-///     300 dpi grid, exactly as <c>DocReader</c> already does for the binary format.
+///     printer's pixel grid, exactly as <c>DocReader</c> already does for the binary format.
 ///     </description>
 ///   </item>
 ///   <item>
@@ -123,7 +123,9 @@ namespace Paperless.WordProcessing.Ooxml;
 /// </param>
 /// <param name="UsesPrinterMetrics">
 /// True when the document asks to be measured on a printer's pixel grid rather than
-/// printer-independently, so every font metric is rounded to a 300 dpi step.
+/// printer-independently, so every font metric is rounded to the printer's step — 600 dpi here, and
+/// see <see cref="Paperless.Text.Fonts.MetricGrid.Printer"/> for why that is a measurement rather
+/// than a constant.
 /// </param>
 /// <param name="HasSettingsPart">
 /// True when the package actually carried a <c>word/settings.xml</c>. Distinct from every flag

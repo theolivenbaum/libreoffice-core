@@ -74,21 +74,24 @@ public enum MetricUnit
 /// </list>
 /// <para>
 /// The difference between the two is only the coarseness, and on the printer it is not small: at
-/// 300 dpi a pixel is 4.8 twips, so Liberation Sans at 11 pt measures 13.00 pt per line rather than
-/// the 12.65 pt its design units give — 2.8%, which over a long document is many pages. On the
-/// virtual device a pixel is a sixth of a twip and the effect is worth exactly one twip, in either
-/// direction, on about one line height in nine. That one twip is what
+/// 600 dpi a pixel is 2.4 twips, so Liberation Serif at 9.5 pt measures 10.80 pt per line rather
+/// than the 10.95 pt its design units give, and Liberation Sans at 11 pt measures 12.60 against
+/// 12.65. On the virtual device a pixel is a sixth of a twip and the effect is worth exactly one
+/// twip, in either direction, on about one line height in nine. That one twip is what
 /// <c>dotnet/probes/lineheight-01/</c> is about: it moved 22 of 195 measured (face, size) pairs and
 /// two earlier rounds could not reconstruct it because they swept 72–6000 dpi and the answer is
 /// 8640.
 /// </para>
 /// <para>
-/// 300 dpi for the printer because that is what a headless LibreOffice's printer reports:
-/// <c>PPDParser</c> defaults both axes to 300 when the queue names no resolution and when there is no
-/// PPD at all (<c>vcl/unx/generic/printer/ppdparser.cxx</c>:1500 and :1524). The resolution is the
-/// whole of what the device contributes there, so a machine whose default queue says otherwise would
-/// need a different number — which is the honest cost of a document asking to be laid out against
-/// hardware.
+/// <b>The printer's resolution has to be measured, not read.</b> This said 300 dpi and cited
+/// <c>PPDParser</c> defaulting both axes to 300 when the queue names no resolution and when there is
+/// no PPD at all (<c>vcl/unx/generic/printer/ppdparser.cxx</c>:1500 and :1524). That reading is not
+/// what the installed 26.2.4.2 does here: an authored pair differing only in
+/// <c>fUsePrinterMetrics</c> gives eight (face, size) line heights that 600 dpi reproduces on 8 of 8
+/// and 300 dpi on 3, and two corpus documents' banked references agree. The resolution is the whole
+/// of what the device contributes, nothing in the file decides it, and a machine whose default queue
+/// says otherwise would need a different number again — which is the honest cost of a document
+/// asking to be laid out against hardware. See <see cref="Printer"/> for the table.
 /// </para>
 /// <para>
 /// <b>Writer's logical unit is the twip and the other two applications' is the hundredth of a
@@ -103,11 +106,19 @@ public enum MetricUnit
 /// Whether horizontal advances go through the grid as well as the vertical metrics.
 /// <para>
 /// True only for a real printer, and measured rather than assumed: <c>probes/printer-metric-advance.py</c>
-/// sweeps 96 authored rows with <c>fUsePrinterMetrics</c> varied on one body, and the quantised rule is
-/// exact on all 96 with the flag set and out by 6.73 pt with it clear, where unquantised scaling is exact
-/// on all 96. The dominant term is the em rounding, which a 300 dpi device makes worth 1.3% of every
-/// advance and an 8640 dpi device makes exactly nothing — so on the virtual reference device the two
-/// rules differ by less than a twip and the evidence says to take the one that was measured.
+/// sweeps 96 authored rows with <c>fUsePrinterMetrics</c> varied on one body. Re-run on 26.2.4.2 at the
+/// 600 dpi the same probe establishes, the quantised rule reproduces 37 of the 96 exactly and the rest
+/// within two twips, where at 300 dpi it was out by as much as 137; with the flag clear, unquantised
+/// scaling is the right answer and this rule is not. The dominant term is the em rounding, which a
+/// 600 dpi device makes worth up to 0.4% of every advance and an 8640 dpi device makes exactly
+/// nothing — so on the virtual reference device the two rules differ by less than a twip and the
+/// evidence says to take the one that was measured.
+/// </para>
+/// <para>
+/// The two-twip residue is real and open: it is pinned by
+/// <c>MetricGridTests.TheAdvanceRuleIsNotExactAndTheResidueIsRecordedRatherThanHidden</c>. Dropping
+/// the truncation fits 52 of 96 rather than 37 but is <em>worse</em> on 17 of them, so the evidence
+/// does not choose between the two and the floor stays because it is what the C++ says.
 /// </para>
 /// </param>
 /// <param name="ScalesEastAsianFaces">
@@ -133,7 +144,41 @@ public readonly record struct MetricGrid(
         : this(dpi, quantisesAdvances, MetricUnit.Twip) { }
 
     /// <summary>The grid a document asking for printer metrics is laid out on.</summary>
-    public static MetricGrid Printer { get; } = new(300, quantisesAdvances: true);
+    /// <remarks>
+    /// <para>
+    /// <b>600 dpi, and it was 300 until it was measured against this container's binary rather
+    /// than inherited.</b> `probes/printer-metric-advance.py` varies <c>fUsePrinterMetrics</c> on
+    /// one authored body and reads the baseline pitch off both renderings; run against the
+    /// installed 26.2.4.2 it gives eight (face, size) pairs that 600 dpi reproduces on **8 of 8**
+    /// and 300 dpi on 3:
+    /// </para>
+    /// <code>
+    ///   face              pt   printer   600 dpi   300 dpi
+    ///   Liberation Serif   9    10.300    10.30     10.60
+    ///   Liberation Serif  10    11.550    11.55     11.55
+    ///   Liberation Serif  11    12.750    12.75     12.75
+    ///   Liberation Serif  12    13.800    13.80     13.95
+    ///   Liberation Sans    9    10.350    10.35     10.35
+    ///   Liberation Sans   10    11.500    11.50     11.55
+    ///   Liberation Sans   11    12.600    12.60     13.00
+    ///   Liberation Sans   12    13.800    13.80     13.95
+    /// </code>
+    /// <para>
+    /// The 300 dpi figures are exactly what that probe's own write-up records as measured, so this
+    /// is a stored figure that no longer reproduces rather than a rule anyone read wrong — the
+    /// headless default printer is what decides it and it is not a property of the file. The same
+    /// re-run moves the probe's advance verdict the same way: <c>exact-em@600</c> is the best
+    /// rule at 0.022 pt mean error where every 300 dpi rule is above 0.68.
+    /// </para>
+    /// <para>
+    /// The correction is worth 2.8% of a line at 11 pt in Liberation Sans — 13.00 pt against 12.60 —
+    /// which is
+    /// what put 23 spurious pages into <c>A_320.doc</c>: its MMEL tables are padded to exactly one
+    /// page each, so a table 16.8 pt too tall no longer fits under the empty page-break paragraph
+    /// in front of it and every one of them was pushed onto a page of its own.
+    /// </para>
+    /// </remarks>
+    public static MetricGrid Printer { get; } = new(600, quantisesAdvances: true);
 
     /// <summary>
     /// The virtual reference device Writer formats every other document against: 8640 dpi, six
@@ -284,8 +329,9 @@ public readonly record struct MetricGrid(
     /// <para>
     /// Two quantisations, and the first is much the larger. The em is rounded to whole device
     /// pixels before any advance is scaled through it — <see cref="ToEmSize"/>'s rounding — so at
-    /// 9 pt on a 300 dpi grid the device sets 38 pixels for 37.5 and <em>every</em> advance comes
-    /// out 1.33% wider than the size the document asked for. The truncation that follows is worth
+    /// 11 pt on a 600 dpi grid the device sets 92 pixels for 91.67 and <em>every</em> advance comes
+    /// out 0.36% wider than the size the document asked for, while at 10 pt it sets 83 for 83.33 and
+    /// they come out 0.4% narrower. The truncation that follows is worth
     /// at most one pixel, 0.24 pt, on a whole portion, and pulls the other way.
     /// </para>
     /// <para>
