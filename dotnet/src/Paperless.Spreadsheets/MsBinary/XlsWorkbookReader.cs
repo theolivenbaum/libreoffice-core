@@ -79,6 +79,8 @@ internal sealed class XlsWorkbookReader
     private readonly Dictionary<int, string> _formatCodes = [];
     private readonly Dictionary<int, NumberFormatCode> _parsedFormats = [];
     private readonly List<SheetLayout> _layouts = [];
+    private readonly List<XlsPivotCacheSource> _pivotCaches = [];
+    private readonly List<string> _generatedSheets = [];
     private readonly Dictionary<int, List<SheetRange>> _printAreas = [];
     private readonly Dictionary<int, SheetRange> _repeatColumns = [];
     private readonly Dictionary<int, SheetRange> _repeatRows = [];
@@ -104,7 +106,22 @@ internal sealed class XlsWorkbookReader
     }
 
     /// <summary>How many sheets the workbook declares, hidden ones included.</summary>
-    public int SheetCount => _sheets.Count;
+    /// <remarks>
+    /// A sheet generated from a pivot cache counts, because it is a sheet of the document the
+    /// importer produces — Calc's own <c>meta:table-count</c> includes it too.
+    /// </remarks>
+    public int SheetCount => _sheets.Count + _generatedSheets.Count;
+
+    /// <summary>
+    /// Opens a stream inside the compound file the workbook came from, by path.
+    /// </summary>
+    /// <remarks>
+    /// The workbook stream is not the whole file. A pivot cache lives in the <c>_SX_DB_CUR</c>
+    /// storage beside it, and that storage is the only copy of the source data when the pivot
+    /// table's source range is in another file — see <see cref="XlsPivotCacheReader"/>. Left null
+    /// by a caller that has only the record stream, in which case no cache is read.
+    /// </remarks>
+    public Func<string, byte[]?>? OpenStorageStream { get; set; }
 
     /// <summary>The document's own file name, for the <c>&amp;F</c> header field.</summary>
     public string FileName { get; set; } = string.Empty;
@@ -150,6 +167,7 @@ internal sealed class XlsWorkbookReader
             index++;
         }
 
+        sections.AddRange(ReadPivotCaches(index));
         return sections;
     }
 
@@ -373,6 +391,26 @@ internal sealed class XlsWorkbookReader
 
                 case BiffRecords.ExternSheet:
                     _externSheets.ReadExternSheet(_stream);
+                    break;
+
+                // Where each pivot cache's data is. An SXIDSTM opens a cache and the three
+                // records after it describe it, which is the grouping
+                // XclImpPivotTableManager makes (xipivot.cxx:1657-1680).
+                case BiffPivotRecords.SxIdStm:
+                    _pivotCaches.Add(new XlsPivotCacheSource());
+                    _pivotCaches[^1].ReadStreamId(_stream);
+                    break;
+
+                case BiffPivotRecords.Sxvs:
+                    if (_pivotCaches.Count > 0) _pivotCaches[^1].ReadSourceType(_stream);
+                    break;
+
+                case BiffPivotRecords.DconRef:
+                    if (_pivotCaches.Count > 0) _pivotCaches[^1].ReadSourceReference(_stream);
+                    break;
+
+                case BiffPivotRecords.DconName:
+                    if (_pivotCaches.Count > 0) _pivotCaches[^1].ReadSourceName(_stream);
                     break;
 
                 default:
@@ -1273,6 +1311,281 @@ internal sealed class XlsWorkbookReader
         });
 
         return section;
+    }
+
+    /// <summary>The OLE storage a workbook keeps its pivot caches in.</summary>
+    /// <remarks><c>EXC_STORAGE_PTCACHE</c>, <c>sc/source/filter/inc/xlpivot.hxx:37</c>.</remarks>
+    private const string PivotCacheStorage = "_SX_DB_CUR";
+
+    /// <summary>
+    /// Generates a sheet for every pivot cache whose source data is not in this workbook.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The last thing the import does, and the last sheets the document has, which is where
+    /// <c>XclImpPivotCache::ReadPivotCacheStream</c> puts them: it takes
+    /// <c>rDoc.GetTableCount()</c> as the new sheet's index, and by the time the caches are read
+    /// every sheet the directory declared already exists
+    /// (<c>sc/source/filter/excel/xipivot.cxx:748</c>).
+    /// </para>
+    /// <para>
+    /// <strong>The generated sheet is visible and it prints.</strong> The current C++ tree calls
+    /// <c>SetVisible(nScTab, false)</c> on it (<c>xipivot.cxx:731</c>); the 26.2 release this
+    /// project measures against does not, and its own <c>.ods</c> conversion of a workbook with a
+    /// cache carries the sheet with <c>table:display="true"</c>. The conversion is the ground
+    /// truth here, not the newer source.
+    /// </para>
+    /// </remarks>
+    /// <param name="index">The index the next sheet takes.</param>
+    private List<ContentSection> ReadPivotCaches(int index)
+    {
+        List<ContentSection> sections = [];
+        if (_pivotCaches.Count == 0 || OpenStorageStream is null) return sections;
+
+        // Two lists, because they answer different questions. A cache's source sheet is looked
+        // for among the sheets the file declares — a generated sheet is not one of them and must
+        // not make a second cache think its source has turned up — while a new sheet's name has
+        // to be unique against everything the document will hold.
+        List<string> declared = [.. _sheets.Select(sheet => sheet.Name)];
+        List<string> taken = [.. declared];
+
+        foreach (XlsPivotCacheSource source in _pivotCaches)
+        {
+            if (XlsPivotCacheReader.GeneratedSheetName(source, declared) is not { } wanted) continue;
+
+            byte[]? cacheStream = OpenStorageStream(
+                $"{PivotCacheStorage}/{source.StreamId:X4}");
+            if (cacheStream is null || cacheStream.Length == 0) continue;
+
+            string name = UniqueSheetName(wanted, taken);
+            XlsPivotCacheSheet? cache = XlsPivotCacheReader.Read(
+                cacheStream, name, _stream.Version, _stream.Encoding, _diagnostics);
+            if (cache is null) continue;
+
+            taken.Add(name);
+            _generatedSheets.Add(name);
+            sections.Add(BuildPivotSheet(cache, index++));
+        }
+
+        return sections;
+    }
+
+    /// <summary>Makes a sheet name unique, as <c>ScDocument::CreateValidTabName</c> does.</summary>
+    /// <remarks>
+    /// A collision gains an <c>_2</c>, then an <c>_3</c>, and so on
+    /// (<c>sc/source/core/data/document.cxx:414-425</c>).
+    /// </remarks>
+    private static string UniqueSheetName(string name, List<string> taken)
+    {
+        if (!taken.Contains(name, StringComparer.Ordinal)) return name;
+
+        for (int at = 2; at < 1000; at++)
+        {
+            string candidate = $"{name}_{at}";
+            if (!taken.Contains(candidate, StringComparer.Ordinal)) return candidate;
+        }
+
+        return name;
+    }
+
+    /// <summary>Lays a decoded pivot cache out as a sheet of the document.</summary>
+    /// <remarks>
+    /// The tail of this is <see cref="ReadSheet"/>'s, and deliberately so: a generated sheet goes
+    /// through the same grid, formatting and layout construction as a read one, so it paginates,
+    /// overflows and prints by the same rules. What it does not have is a page setup of its own,
+    /// so it takes Calc's Default page style — see
+    /// <see cref="XlsSheetPrintState.UseDefaultPageStyle"/>, which is not the same thing as
+    /// leaving the setup empty.
+    /// </remarks>
+    private ContentSection BuildPivotSheet(XlsPivotCacheSheet cache, int index)
+    {
+        _sheetIndex = index;
+        SheetBuilder builder = new(this, cache.Name);
+        _page = new XlsSheetPrintState
+        {
+            DefaultFont = _cellFormats.DefaultFont,
+            RowHeightsAreManual = _stream.Version == BiffVersion.Biff8,
+        };
+        _page.UseDefaultPageStyle();
+        _sheetDecoration = new XlsSheetDecoration();
+        _drawings = new XlsDrawingCollector(_diagnostics, Blips);
+        _inDrawingBlock = false;
+        _rowFormats.Clear();
+        _columnFormats.Clear();
+        _richCells.Clear();
+        _notes.Clear();
+
+        foreach (((int row, int column), XlsPivotItem item) in cache.Cells)
+        {
+            WritePivotCell(builder, row, column, item);
+        }
+
+        ContentSection section = new()
+        {
+            Kind = SectionKind.Sheet,
+            Index = index,
+            Name = cache.Name,
+        };
+
+        ContentTable table = builder.Build();
+        section.Children.Add(table);
+
+        SheetGrid grid = _page.ToGrid();
+        SheetFormatting formatting = _sheetDecoration.Resolve(_decoration);
+
+        _layouts.Add(new SheetLayout
+        {
+            Name = cache.Name,
+            Index = index,
+            Setup = _page.ToSetup(),
+            Grid = grid,
+            Cells = table,
+            StatedMerges = builder.StatedMerges,
+            HyperlinkRanges = builder.HyperlinkRanges,
+            Formatting = formatting,
+            Formats = BuildFormats(builder),
+            RichText = SheetRichText.Empty,
+            Drawings = SheetDrawings.Empty,
+            Notes = SheetNotes.Empty,
+            FileName = FileName,
+        });
+
+        return section;
+    }
+
+    /// <summary>
+    /// Writes one cached value into the generated sheet, typed as
+    /// <c>XclImpPCItem::WriteToSource</c> types it.
+    /// </summary>
+    /// <remarks>
+    /// The three number formats are the reason this is not simply a value assignment. A Boolean,
+    /// a date and a time are all doubles in a cell, and the C++ applies a standard format of the
+    /// right kind to each so that the cell reads as what it is
+    /// (<c>sc/source/filter/excel/xipivot.cxx:95</c>). Text and plain numbers take the default
+    /// pattern, which is what an XF index of -1 resolves to here.
+    /// </remarks>
+    /// <remarks>
+    /// <strong>A known deviation, small and located.</strong> A cached string may hold a hard
+    /// line break, and a generated cell holding one is <em>not</em> an edit cell:
+    /// <c>ScDocumentImport::setStringCell</c> interns a plain shared string whatever is in it
+    /// (<c>sc/source/core/data/documentimport.cxx:276</c>), where the BIFF <c>LABEL</c> path goes
+    /// through <c>XclImpString::SetToDocument</c> and builds an <c>EditTextObject</c>. Calc
+    /// therefore draws it with <c>DrawStrings</c> and drops the characters that will not fit,
+    /// while <see cref="Layout.SheetTextLayout"/> decides the same question from the text alone
+    /// and clips instead of shortening. Measured on
+    /// <c>sheets/missing-001/xls/orbus_togaf_tool_csq.xls</c>: 7 cells of 5448 hold a break, and
+    /// they are the whole of that document's 57-word overshoot. Fixing it needs a per-cell signal
+    /// through the content tree, which is a wider change than the defect.
+    /// </remarks>
+    private void WritePivotCell(SheetBuilder builder, int row, int column, XlsPivotItem item)
+    {
+        const int noFormat = -1;
+
+        switch (item.Kind)
+        {
+            case XlsPivotItemKind.Text:
+                builder.SetText(row, column, noFormat, item.Text ?? string.Empty);
+                break;
+
+            case XlsPivotItemKind.Double:
+            case XlsPivotItemKind.Integer:
+                builder.SetNumber(row, column, noFormat, item.Number);
+                break;
+
+            case XlsPivotItemKind.Boolean:
+                builder.SetBoolean(row, column, noFormat, item.Number != 0);
+                break;
+
+            case XlsPivotItemKind.Error:
+                builder.SetError(row, column, noFormat, BiffErrors.ToCellError(item.ErrorCode));
+                break;
+
+            case XlsPivotItemKind.DateTime:
+                WritePivotDate(builder, row, column, item);
+                break;
+
+            default:
+                break;
+        }
+    }
+
+    /// <summary>Writes a cached date, time or timestamp as a serial under a standard format.</summary>
+    private void WritePivotDate(SheetBuilder builder, int row, int column, XlsPivotItem item)
+    {
+        (int year, int month, int day, int hour, int minute, int second) = item.When;
+        if (year is < 1 or > 9999 || month is < 1 or > 12 || day < 1) return;
+
+        DateTime when;
+        try
+        {
+            if (day > DateTime.DaysInMonth(year, month)) return;
+            when = new DateTime(year, month, day, Math.Min(hour, 23), Math.Min(minute, 59),
+                                Math.Min(second, 59), DateTimeKind.Unspecified);
+        }
+        catch (ArgumentOutOfRangeException)
+        {
+            return;
+        }
+
+        double serial = SerialFromDateTime(when);
+        double whole = Math.Truncate(serial);
+
+        // Which of the three standard formats applies is decided by the value rather than by the
+        // record, exactly as WriteToSource decides it: a whole non-zero number is a date, a pure
+        // fraction is a time, and anything else is both.
+        int format = serial - whole == 0.0 && whole != 0.0 ? BuiltInDateFormat
+            : whole == 0.0 ? BuiltInTimeFormat
+            : BuiltInDateTimeFormat;
+
+        builder.SetNumber(row, column, SyntheticFormatXf(format), serial);
+    }
+
+    // The built-in number formats a generated date cell takes: "M/D/YY", "h:mm:ss" and
+    // "M/D/YY h:mm", which are what Calc's standard DATE, TIME and DATETIME formats resolve to.
+    private const int BuiltInDateFormat = 14;
+    private const int BuiltInTimeFormat = 21;
+    private const int BuiltInDateTimeFormat = 22;
+
+    /// <summary>
+    /// An XF index naming one number format and nothing else, created on demand.
+    /// </summary>
+    /// <remarks>
+    /// A generated cell has no <c>XF</c> record to point at, and the pivot importer applies a
+    /// number format to it directly rather than a cell style. Appending an entry to the format
+    /// table is how that reaches the rest of the pipeline: the decoration table is indexed by the
+    /// same numbers and answers "no decoration" for anything past its end, which is right —
+    /// a generated cell has no border, fill or font of its own.
+    /// </remarks>
+    private int SyntheticFormatXf(int numberFormat)
+    {
+        if (_syntheticFormats.TryGetValue(numberFormat, out int index)) return index;
+
+        index = _formats.Count;
+        _formats.Add(new XfRecord
+        {
+            NumberFormatIndex = (ushort)numberFormat,
+            IsCellXf = true,
+            StatesNumberFormat = true,
+            ParentIndex = (ushort)index,
+        });
+
+        _syntheticFormats[numberFormat] = index;
+        return index;
+    }
+
+    private readonly Dictionary<int, int> _syntheticFormats = [];
+
+    /// <summary>The serial number a date and time is stored as, the inverse of
+    /// <see cref="SerialToDateTime"/>.</summary>
+    private double SerialFromDateTime(DateTime when)
+    {
+        if (Uses1904Epoch) return (when - new DateTime(1904, 1, 1)).TotalDays;
+
+        double serial = (when - new DateTime(1899, 12, 30)).TotalDays;
+
+        // The phantom 29 February 1900 the 1900 system counts: everything before 1 March 1900
+        // is one day ahead of the naive arithmetic. See SpreadsheetDate.FromSerial.
+        return serial < 61 ? serial - 1 : serial;
     }
 
     /// <summary>
