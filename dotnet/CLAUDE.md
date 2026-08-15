@@ -541,6 +541,45 @@ The largest single movers were `sectors-defense-and-aerospace.xlsx` (reference 2
 pages), `CIS_Debian_Linux_8_Benchmark_v1.0.0.xls` (109 → 88), `A_320.doc` (150 → 118) and
 `grants-2005.xls` (220 → 201).
 
+### Stored evidence decays silently, and the prose knows it while the data does not
+
+Three cases surfaced in a single day: a `words-after.tsv` carrying numbers from a sweep that
+had overlapped a rebuild; a "39/39 exact" CJK fit measured on a face whose line gap is zero,
+so it could not have discriminated between the hypotheses it was cited for; and a
+`printer-metric-advance.py` whose "exact on all 96" is 16 of 96 against this container's
+binary. None of the three announced itself. Each stayed quotable.
+
+Censused over all 410 stored figures under `probes/` and `research/probes/`, the pattern is
+sharp:
+
+| | records the environment it was measured in |
+|---|---|
+| prose write-ups | **122 of 154** |
+| stored TSVs | **3 of 256** |
+
+**The write-up says what it was measured against; the data does not — and the data is what a
+later round greps, pastes into a brief, and acts on.** A TSV is a grid of numbers with no way
+to tell its reader that the reference bank behind it no longer exists. 215 of the 410 predate
+the 2026-08-13 container move, and **35 of those are still cited by live guidance**.
+
+`probes/PROVENANCE.tsv` is the index — path, date added, era, which LibreOffice, whether
+DejaVu was present, and which live documents cite it. Regenerate it after adding probe output:
+
+```sh
+python3 dotnet/probes/provenance-index.py          # rewrite the index
+python3 dotnet/probes/provenance-index.py --check  # exit 1 if stale
+```
+
+It deliberately does **not** stamp the probe files themselves. They are the record of what a
+round actually ran; rewriting them would falsify it, and a `#` header would break every
+consumer that reads line 1 as the column names. A sidecar records provenance without touching
+the record.
+
+The rule that follows, and it is the one to carry: **a stored figure is evidence about an
+environment, not about the code.** Before quoting one, check which era produced it. What
+survives a reference change is the *mechanism* a round identified; what does not survive is
+every number attached to it.
+
 **The package feed was firewalled and is now open; the build works.** `dotnet restore`
 succeeds for all 26 projects and `dotnet build -v q -nologo` gives **0 warnings, 0 errors**.
 Recorded because the diagnosis cost a round and the shape of it recurs:

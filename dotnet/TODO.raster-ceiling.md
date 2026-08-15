@@ -398,6 +398,21 @@ rest of that census as suspect.
 163-document slides track, from the sweep's own kept comparison reports and its two sets of
 rendered PDFs — no re-rendering, so it can be reproduced from any sweep's output:
 
+> **Provenance: this table is from the pre-container era and its absolute numbers no longer
+> reproduce.** `2ced17655` and `dotnet/probes/slides-ink-ranking.tsv` (2026-08-09) both predate
+> the 2026-08-13 move to LibreOffice 26.2.4.2 with `fonts-dejavu-core` present. The version
+> change alone moved 160 of 163 slides' word counts, and ink moves with them, so **every
+> figure in the table below and every row of the ranking was measured against a reference bank
+> this container cannot reproduce.**
+>
+> What survives the change is the part that matters: the *mechanisms* — the reference
+> rasterises, and the reference takes an `mc:Choice` it cannot resolve — are properties of the
+> documents and of LibreOffice's importer, not of a particular build, and a sweep on
+> 2026-08-15 still finds all 16 open slides failures to be words-only on exact slide counts,
+> which is the signature those mechanisms predict. **Trust the classification; re-measure
+> before quoting a number.** `dotnet/probes/PROVENANCE.tsv` records the era of every stored
+> figure on the project.
+
 ```sh
 python3 dotnet/probes/slides-r22/alternate-content-oleobj-census.py /c/sandbox/workdir/sample-files/slides > altcontent.tsv
 python3 dotnet/probes/slides-r22/raster-pages-from-renderings.py <sweepdir> > raster-pages.tsv

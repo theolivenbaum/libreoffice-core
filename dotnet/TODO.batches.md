@@ -7,6 +7,17 @@ The method, the reasoning behind it and the dispatch rules live in the
 [`corpus-batches`](../.claude/skills/corpus-batches/SKILL.md) skill. This file is only the
 scoreboard.
 
+> **This file is a log, not a statement about today.** It cites 32 stored figures that were
+> measured before the 2026-08-13 move to LibreOffice 26.2.4.2 with `fonts-dejavu-core` present
+> — across that boundary 63 of 534 reference page counts moved and 210 of 534 word counts left
+> the gate's own band, so a round number recorded here may simply not be reproducible now. Each
+> entry is correct *as the record of what that round measured*, which is what makes it worth
+> keeping and what makes it dangerous to quote.
+>
+> Before citing any figure from this file, check its row in
+> [`probes/PROVENANCE.tsv`](probes/PROVENANCE.tsv), which records the era of all 410 stored
+> figures on the project and flags the ones live guidance still rests on.
+
 ## The rule
 
 A batch is **done** when it matches *and* every earlier batch in its track still matches.
