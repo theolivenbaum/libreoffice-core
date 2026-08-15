@@ -116,9 +116,9 @@ internal sealed class SheetPageGraphics(SheetLayout sheet, double scale)
             // onto the box and clips to it — the same stretch `DrawImage` gives a raster, and not the
             // extent of the picture's ink, which would put a logo with margins outside its anchor.
             if (drawing.Vector is { } vector && !vector.Value.IsEmpty)
-                DrawPicture(sink, box, drawing.Crop, vector, null);
+                DrawPicture(sink, box, drawing.Crop, vector, null, drawing.Opacity);
             else if (drawing.Image is { } image)
-                DrawPicture(sink, box, drawing.Crop, null, image);
+                DrawPicture(sink, box, drawing.Crop, null, image, drawing.Opacity);
             else if (drawing.Chart is { } chart) SheetChart.Draw(sink, chart, box, scale);
 
             // Not an `else`: a shape may carry both a picture and a caption, and the text goes
@@ -152,13 +152,14 @@ internal sealed class SheetPageGraphics(SheetLayout sheet, double scale)
         DocRect box,
         PictureCropFractions crop,
         Lazy<VectorImage>? vector,
-        RasterImage? image)
+        RasterImage? image,
+        double opacity)
     {
         DocRect destination = crop.Apply(box);
 
         if (destination == box)
         {
-            PaintPicture(sink, box, vector, image);
+            PaintPicture(sink, box, vector, image, opacity);
             return;
         }
 
@@ -166,7 +167,7 @@ internal sealed class SheetPageGraphics(SheetLayout sheet, double scale)
         try
         {
             sink.ClipPath(GraphicsPath.Rectangle(box));
-            PaintPicture(sink, destination, vector, image);
+            PaintPicture(sink, destination, vector, image, opacity);
         }
         finally
         {
@@ -175,11 +176,39 @@ internal sealed class SheetPageGraphics(SheetLayout sheet, double scale)
     }
 
     /// <summary>Puts whichever of the two pictures there is into a rectangle.</summary>
+    /// <remarks>
+    /// A raster takes the opacity on the draw itself, which is one <c>gs</c> and no group; a
+    /// display list has to be composited as a whole, because a constant alpha applied to each of
+    /// its members would show every overlap inside the picture at full strength. That is the same
+    /// distinction <c>IDrawingSink.BeginTransparencyGroup</c> exists for, and the group is opened
+    /// only when there is something to fade — an unconditional one would put a form XObject round
+    /// every metafile in the corpus.
+    /// </remarks>
     private static void PaintPicture(
-        IDrawingSink sink, DocRect where, Lazy<VectorImage>? vector, RasterImage? image)
+        IDrawingSink sink, DocRect where, Lazy<VectorImage>? vector, RasterImage? image,
+        double opacity)
     {
-        if (vector is not null) vector.Value.Draw(sink, where);
-        else if (image is not null) sink.DrawImage(image, where);
+        if (vector is null)
+        {
+            if (image is not null) sink.DrawImage(image, where, opacity);
+            return;
+        }
+
+        if (opacity >= 1)
+        {
+            vector.Value.Draw(sink, where);
+            return;
+        }
+
+        sink.BeginTransparencyGroup(opacity);
+        try
+        {
+            vector.Value.Draw(sink, where);
+        }
+        finally
+        {
+            sink.EndTransparencyGroup();
+        }
     }
 
     /// <summary>Whether any part of a placed rectangle falls inside the page's own cell block.</summary>

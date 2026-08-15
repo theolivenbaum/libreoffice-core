@@ -114,6 +114,38 @@ public sealed record SheetDrawing
     /// </remarks>
     public PictureCropFractions Crop { get; init; }
 
+    /// <summary>
+    /// How opaque the picture is painted, as a fraction of one; 1 when the file states nothing.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>A picture on a sheet may be a watermark, and a watermark drawn opaque erases the
+    /// page.</strong> SpreadsheetML states it as <c>xdr:blipFill/a:blip/a:alphaModFix/@amt</c>, the
+    /// same element a slide's <c>p:blipFill</c> uses, and <c>oox</c> puts it on the graphic as
+    /// <c>FillTransparence</c> without caring which family read it
+    /// (<c>oox/source/drawingml/fillproperties.cxx</c>, <c>moAlphaModFix</c>).
+    /// </para>
+    /// <para>
+    /// Measured on <c>SIL_TDB648.xlsx</c>, whose <c>General Info</c> sheet anchors a full-width
+    /// product photograph at <c>amt="20000"</c> over eighteen rows of text: LibreOffice paints it
+    /// as a pale ghost the type reads straight across, and painting it at full strength hides
+    /// about 85% of the body copy. **No gate column moves for it** — the words stay in the PDF's
+    /// text layer underneath, so the document's word count is right to two words while the page is
+    /// unreadable. The reference's faded pixels confirm the number rather than merely the fact:
+    /// its bluish areas sample at RGB 217/222/234 against our opaque 74/97/157, and
+    /// <c>0.2·74 + 0.8·255 = 219</c>, <c>0.2·97 + 0.8·255 = 223</c>, <c>0.2·157 + 0.8·255 = 235</c>.
+    /// </para>
+    /// <para>
+    /// It is <em>not</em> a paint-order defect, which is what it looks like: Calc prints
+    /// <c>SC_LAYER_BACK</c> before the cell text and <c>SC_LAYER_FRONT</c> after
+    /// (<c>printfun.cxx:1651</c> and <c>:1699</c>), a sheet picture is on the front layer, and
+    /// <see cref="SheetPageGraphics"/> already draws after the strings for that reason. Moving it
+    /// behind the text would have hidden the defect on this document and been wrong on every
+    /// other one.
+    /// </para>
+    /// </remarks>
+    public double Opacity { get; init; } = 1;
+
     /// <summary>The shape's name, as the file records it.</summary>
     public string? Name { get; init; }
 

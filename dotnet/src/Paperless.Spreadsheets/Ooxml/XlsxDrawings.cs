@@ -211,8 +211,15 @@ internal static class XlsxDrawings
         // one `a:blip` may name an SVG in an `asvg:svgBlip` extension beside the raster, and the
         // vector is the one to draw. The raster is kept beside it, so a decode that comes back empty
         // still leaves the picture the file put there for exactly that.
-        XElement? blip = Child(Child(picture, DrawingNamespace, "blipFill"), MainNamespace, "blip");
+        XElement? blipFill = Child(picture, DrawingNamespace, "blipFill");
+        XElement? blip = Child(blipFill, MainNamespace, "blip");
         BlipReference.Choice choice = BlipReference.Choose(blip);
+
+        // `a:alphaModFix` is the whole of what makes a sheet picture a watermark, and it is read
+        // through the shared blip reader rather than off the attribute here because that reader is
+        // already the one place the element's three wrappers — `a:`, `p:` and `xdr:blipFill` — are
+        // known to carry identical content. See `SheetDrawing.Opacity`.
+        drawing = drawing with { Opacity = DrawingFill.ReadBlip(blipFill)?.Opacity ?? 1 };
 
         (RasterImage? raster, Lazy<VectorImage>? vector) = Load(package, images, choice.RelationshipId);
 
