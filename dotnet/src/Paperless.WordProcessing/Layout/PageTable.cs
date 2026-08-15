@@ -227,6 +227,29 @@ public sealed record PageTable : PageBlock
     /// </remarks>
     public bool JoinsBordersLikeWord { get; init; }
 
+    /// <summary>
+    /// Whether the table begins a page, the way
+    /// <see cref="Paperless.Text.Layout.ParagraphFormat.StartsNewPage"/> does for a paragraph.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A DOCX has no "page break before this table": it puts the break on the empty paragraph in front of
+    /// it, as <c>&lt;w:br w:type="page"/&gt;</c>, and the importer has to carry it forward onto whatever
+    /// block comes next. That is easy to miss because the flag is only ever *read* where a paragraph is
+    /// read, so a break landing in front of a table was consumed by the first paragraph inside the
+    /// table's first cell, where it means nothing at all — the table went on drawing where it was.
+    /// </para>
+    /// <para>
+    /// LibreOffice does carry it, and says so in its own import: <c>ESPN-R - MCF - Manual</c> has two such
+    /// paragraphs, one before its "Section 2" form table and one before its "Post-flight briefing" table,
+    /// and no <c>w:pageBreakBefore</c> anywhere in the document — yet the flat XML from
+    /// <c>--convert-to fodt</c> carries <c>fo:break-before="page"</c> on <c>Table12</c> and
+    /// <c>Table13</c>, the only two in the file. The reference leaves 255 pt of page 31 empty and opens
+    /// the table on page 32; we filled it, and the document came out a page short.
+    /// </para>
+    /// </remarks>
+    public bool StartsNewPage { get; init; }
+
     /// <summary>How wide the table is, which is its columns added up.</summary>
     /// <remarks>
     /// The declared columns, so a table whose grid the file left blank answers with what it declared rather

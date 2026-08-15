@@ -350,6 +350,59 @@ public sealed class WordStyles
     /// zero, which is a suppression rather than a no-op for exactly the same reason.
     /// </para>
     /// <para>
+    /// <strong>An unrecognised parent is not the end of it.</strong> "Nought when Writer knows no
+    /// style of the parent's name" was fitted to a case that cannot test it — that probe's child
+    /// was a <c>heading 1</c> and its parent a <c>heading 2</c>, so the parent always answered —
+    /// and it is wrong wherever the child is itself one of Writer's headings. Then the style is
+    /// <em>found</em> in Writer's pool rather than created, with Writer's own hierarchy still
+    /// under it, and what it reads is its <c>Heading</c> base: 12 pt above, 6 pt below.
+    /// </para>
+    /// <para>
+    /// So the order is parent first, the style's own name only as a fallback. Measured on the
+    /// installed 26.2.4.2 by
+    /// <c>dotnet/probes/words-pagination-01/one-sided-spacing-source.py</c>, over four name
+    /// pairings times both declaration orders, reading <c>fo:margin-bottom</c> straight out of
+    /// <c>--convert-to fodt</c>. The child states <c>w:before="480"</c>, so "mirror the stated
+    /// value" would read 480 and is refuted outright:
+    /// </para>
+    /// <code>
+    ///   child          parent         child declared first    parent declared first
+    ///   heading 4      heading 2      120  (6 pt)             360  (the parent's own w:after)
+    ///   heading 4      Custom Par     120                     360
+    ///   Custom Kid     heading 2      120                     360
+    ///   Custom Kid     Custom Par       0                     360
+    /// </code>
+    /// <para>
+    /// The one cell that moves is row two, and it is the one four corpus documents sit in — both
+    /// FAA Holdover Tables and <c>EHEST-SMS-Safety-Management-Manual-V2</c> have a
+    /// <c>heading 4</c> based on a custom parent declared far later and stating only
+    /// <c>w:before</c>, and <c>03_Technical_Report_(progress)_template</c> has a <c>heading 1</c>
+    /// based on a <c>Body Text 2</c>, which Writer has no pool style for either. LibreOffice
+    /// resolves all four to 6 pt below where we resolved nought. For the Holdover pair that 6 pt
+    /// per NOTES heading, 214 of them, is the whole of their shared 13-page deficit.
+    /// </para>
+    /// <para>
+    /// <strong>Which names answer from the style's own end is narrower than which answer from the
+    /// parent's</strong>, and the same probe measures it over fifteen: only Heading 1-9, Title
+    /// and Subtitle do. <c>Caption</c>, <c>List</c>, <c>Quote</c> and <c>Body Text</c> read
+    /// nought from that end while still reading 120, 140 and 140 as a parent — see
+    /// <see cref="WriterPoolSpacing.TryForOwnName"/>. That asymmetry is why the two ends need two
+    /// tables rather than one.
+    /// </para>
+    /// <para>
+    /// The whole change is therefore <em>additive</em>: it fires only where the old reading
+    /// produced nought, so every document whose parent Writer does recognise —
+    /// <c>Press release_EUREKA labels ITEA 3 Cluster</c> and that same
+    /// <c>03_Technical_Report</c>'s <c>heading 2</c>, both over a <c>Body Text</c> — keeps the
+    /// answer it had, and LibreOffice's own import agrees with both of those at nought above and
+    /// 140 below respectively.
+    /// </para>
+    /// <para>
+    /// What is <em>not</em> measured here is a chain longer than one link — a custom child based
+    /// on a custom parent based on a <c>heading 2</c>. No corpus document takes that path and the
+    /// probe does not cover it, so the walk stops at the immediate parent.
+    /// </para>
+    /// <para>
     /// This is what puts a 12 pt space above every <c>Heading1</c> of
     /// <c>final-technical-report-template.docx</c>, whose style states only <c>w:after="240"</c>
     /// and is based on its own <c>Heading2</c> — five headings' worth of page, and the sixth page
@@ -388,7 +441,12 @@ public sealed class WordStyles
             // Not handled here; no corpus document takes that path.
             if (!byId.TryGetValue(parentId, out WordStyle? parent)) continue;
 
-            (int above, int below) = WriterPoolSpacing.For(parent.Name);
+            // The parent still answers whenever Writer has a style of the parent's name. Only
+            // where it has none — where the old reading fell through to nought — does the style's
+            // own Writer hierarchy show through, and then only for the heading family.
+            if (!WriterPoolSpacing.TryFor(parent.Name, out (int Above, int Below) pool))
+                WriterPoolSpacing.TryForOwnName(style.Name, out pool);
+            (int above, int below) = pool;
 
             XElement replacementSpacing = new(spacing);
             replacementSpacing.SetAttributeValue(
