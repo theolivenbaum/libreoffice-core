@@ -245,6 +245,7 @@ public sealed class RtfDocument : IWordProcessingDocument, IPaginatedDocument
             HeaderRowCount = table.HeaderRowCount,
             LeftIndent = table.LeftIndent,
             JoinsBordersLikeWord = true,
+            MinHeightIncludesInsets = true,
         };
     }
 

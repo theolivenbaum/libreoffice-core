@@ -288,6 +288,27 @@ public readonly record struct Ww8LayoutFormat
     /// </remarks>
     public bool? AutoKerning { get; init; }
 
+    /// <summary>
+    /// The fixed distance put between the run's characters, in twips, from <c>sprmCDxaSpace</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Signed: a negative operand condenses and a positive one expands. LibreOffice reads it as
+    /// <c>SvxKerningItem(nKern, RES_CHRATR_KERNING)</c> straight from the two-byte operand in twips
+    /// (<c>SwWW8ImplReader::Read_Kern</c>, <c>sw/source/filter/ww8/ww8par6.cxx:4165-4174</c>) — the same
+    /// item OOXML's <c>w:spacing</c> and ODF's <c>fo:letter-spacing</c> land in, so it is
+    /// <see cref="Layout.PageRun.Tracking"/> on our side too.
+    /// </para>
+    /// <para>
+    /// It is not a nicety. <c>150_5300_13_chg8.doc</c> condenses 69 of its character styles by
+    /// −0.0016 in, which is 2.3 % of the advance of a run of digits: measured on its page 4, the
+    /// reference sets <c>150/5300-13</c> in 49.95 pt where the nominal Liberation Serif advances make
+    /// 51.11 pt. Ignoring it makes every line break early, which lengthens every paragraph, which
+    /// overflows the columns and moves the tables below them onto pages of their own.
+    /// </para>
+    /// </remarks>
+    public int? CharacterSpacing { get; init; }
+
     /// <summary>The Windows language id, from <c>sprmCRgLid0</c>.</summary>
     public int? LanguageId { get; init; }
 

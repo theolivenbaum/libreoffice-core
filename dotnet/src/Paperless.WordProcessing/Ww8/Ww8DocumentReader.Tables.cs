@@ -382,6 +382,9 @@ public sealed partial class Ww8DocumentReader
         /// <summary>True when <c>sprmTFCantSplit</c> forbade breaking it across a page.</summary>
         public bool CannotSplit { get; init; }
 
+        /// <summary><c>sprmTJc90</c>'s low two bits — see <c>Ww8ParagraphFormat.RowAlignment</c>.</summary>
+        public int Alignment { get; init; }
+
         /// <summary>The table's six default borders, as this row's sprms stated them.</summary>
         /// <remarks>
         /// Per row because that is where WW8 states them — every row-end paragraph carries the whole

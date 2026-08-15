@@ -152,6 +152,16 @@ public sealed partial class Ww8DocumentReader
         public bool AutoKerning { get; init; }
 
         /// <summary>
+        /// The distance the paragraph mark's own formatting puts between characters, nought for none.
+        /// </summary>
+        /// <remarks>
+        /// The mark's, for the same reason as <see cref="AutoKerning"/> beside it: a paragraph set end to
+        /// end in one condensed style carries no runs at all — it is uniform by every test
+        /// <c>RunsOf</c> makes — so without this it would be measured at the face's nominal advances.
+        /// </remarks>
+        public Length Tracking { get; init; }
+
+        /// <summary>
         /// The text frame this paragraph asks to be part of, empty when it asks for none.
         /// </summary>
         /// <remarks>
@@ -218,6 +228,12 @@ public sealed partial class Ww8DocumentReader
     /// this position is a placeholder and this is what stands in its place; <see cref="FamilyName"/> is
     /// already the face the same sprm named, since a slot means nothing without one.
     /// </param>
+    /// <param name="Tracking">
+    /// The distance <c>sprmCDxaSpace</c> puts between the run's characters, negative for a condensed
+    /// run. Unlike the two rules it changes the run's width, so
+    /// <see cref="MatchesFormatting"/> compares it and a run carrying it survives the
+    /// uniform-paragraph shortcut — see <see cref="Ww8LayoutFormat.CharacterSpacing"/>.
+    /// </param>
     public readonly record struct Ww8LayoutRun(
         int Start,
         int Length,
@@ -233,7 +249,8 @@ public sealed partial class Ww8DocumentReader
         bool IsUnderlined = false,
         bool IsStruckThrough = false,
         bool AutoKerning = false,
-        char? SymbolSlot = null)
+        char? SymbolSlot = null,
+        Length Tracking = default)
     {
         /// <summary>One past the run's last character.</summary>
         public int End => Start + Length;
@@ -1257,6 +1274,7 @@ public sealed partial class Ww8DocumentReader
             HasAutoSpaceAfter = layout.HasAutoSpaceAfter ?? false,
             ListRule = paragraph.ListNumber,
             AutoKerning = character.AutoKerning ?? false,
+            Tracking = TrackingOf(character),
             Borders = layout.ToParagraphBorders(),
 
             // Not for a paragraph in a table: Word applies a frame to a whole row or to nothing, and
@@ -1359,7 +1377,8 @@ public sealed partial class Ww8DocumentReader
                 format.IsUnderlined ?? false,
                 format.IsStruckThrough ?? false,
                 format.AutoKerning ?? false,
-                format.SymbolSlot);
+                format.SymbolSlot,
+                TrackingOf(format));
 
             if (runs.Count > 0 && MatchesFormatting(runs[^1], run))
             {
@@ -1386,7 +1405,21 @@ public sealed partial class Ww8DocumentReader
            && a.Highlight == b.Highlight
            && a.IsUnderlined == b.IsUnderlined
            && a.IsStruckThrough == b.IsStruckThrough
-           && a.AutoKerning == b.AutoKerning;
+           && a.AutoKerning == b.AutoKerning
+           && a.Tracking == b.Tracking;
+
+    /// <summary>
+    /// The distance a character format puts between its characters, nought when it states none.
+    /// </summary>
+    /// <remarks>
+    /// The bound rejects the absurd rather than the merely large, as <see cref="SizeOf"/>'s does: a
+    /// two-byte operand read out of a malformed CHPX can name a whole page of tracking, and a line whose
+    /// every gap is an inch wide never breaks.
+    /// </remarks>
+    private static Length TrackingOf(Ww8LayoutFormat format)
+        => format.CharacterSpacing is { } twips and >= -1440 and <= 1440
+            ? Length.FromTwips(twips)
+            : Length.Zero;
 
     /// <summary>
     /// The em size a character format states, defaulting to ten points.
@@ -2089,6 +2122,9 @@ public sealed partial class Ww8DocumentReader
                 case LayoutSprms.FontKern:
                     format = format with { AutoKerning = sprm.Word != 0 };
                     break;
+                case LayoutSprms.CharacterSpacing:
+                    format = format with { CharacterSpacing = sprm.SignedWord };
+                    break;
                 case LayoutSprms.Language or LayoutSprms.Language80:
                     format = format with { LanguageId = sprm.Word };
                     break;
@@ -2280,6 +2316,16 @@ public sealed partial class Ww8DocumentReader
         /// because that is all Writer can hold — see <see cref="Ww8LayoutFormat.AutoKerning"/>.
         /// </remarks>
         internal const ushort FontKern = 0x484B;
+
+        /// <summary>
+        /// <c>sprmCDxaSpace</c>: a fixed distance added between the run's characters.
+        /// </summary>
+        /// <remarks>
+        /// Two bytes of <em>signed</em> twips, so a condensed run states a negative operand
+        /// (<c>SwWW8ImplReader::Read_Kern</c>, <c>sw/source/filter/ww8/ww8par6.cxx:4165</c>). Reading it
+        /// unsigned would expand by 65 000 twips exactly where the document meant to condense.
+        /// </remarks>
+        internal const ushort CharacterSpacing = 0x8840;
 
         internal const ushort FontSize = 0x4A43;
         internal const ushort FontIndex = 0x4A4F;
