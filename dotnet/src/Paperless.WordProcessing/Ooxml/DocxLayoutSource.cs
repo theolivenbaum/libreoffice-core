@@ -1030,6 +1030,18 @@ public sealed partial class DocxLayoutSource
     private int _frameDepth;
 
     /// <summary>
+    /// Whether the walk is inside a header or a footer part.
+    /// </summary>
+    /// <remarks>
+    /// Set by the reader around its <see cref="ReadFlow"/> call and restored afterwards, the same shape
+    /// as <c>DocxPictures.Scope</c> beside it and for the same reason: the part is what knows, and the
+    /// walk cannot tell — a header's body is an ordinary block sequence. It decides one thing, the paint
+    /// order of the drawings it anchors (<see cref="PageFrame.BehindText"/>), so a caller that forgets
+    /// to set it gets the body's answer rather than a wrong one.
+    /// </remarks>
+    public bool InHeaderFooter { get; set; }
+
+    /// <summary>
     /// Reads the frames a paragraph anchors, with their own text laid out inside them.
     /// </summary>
     /// <remarks>
@@ -1048,7 +1060,9 @@ public sealed partial class DocxLayoutSource
             Func<XElement, IReadOnlyList<PageBlock>>? content =
                 _frameDepth < MaxFrameNesting ? Content : null;
 
-            frames.AddRange(DocxFrames.ReadAll(anchor.Element, content, anchor.Offset, Pictures));
+            frames.AddRange(DocxFrames.ReadAll(
+                anchor.Element, content, anchor.Offset, Pictures,
+                new DocxFrameContext(_theme, InHeaderFooter, _compatibilityMode)));
         }
 
         return frames;

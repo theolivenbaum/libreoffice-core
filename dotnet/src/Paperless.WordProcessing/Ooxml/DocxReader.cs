@@ -445,12 +445,14 @@ public sealed class OoxmlWordDocument : IWordProcessingDocument, IPaginatedDocum
             }
 
             List<PageBlock> blocks;
+            source.InHeaderFooter = true;
             try
             {
                 blocks = source.ReadFlow(part);
             }
             finally
             {
+                source.InHeaderFooter = false;
                 if (source.Pictures is { } restore && scope is not null) restore.Scope = scope;
             }
 
