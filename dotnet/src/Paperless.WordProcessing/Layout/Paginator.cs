@@ -34,6 +34,7 @@ public sealed record PaginationOptions
         KeepsSpacingAtTopOfPage = true,
         CollapsesSpacing = true,
         AddsCellLineSpacing = true,
+        KeepsTableRowsWithNext = true,
     };
 
     /// <summary>
@@ -125,6 +126,27 @@ public sealed record PaginationOptions
     /// measured line height.
     /// </remarks>
     public bool AddsCellLineSpacing { get; init; }
+
+    /// <summary>
+    /// Whether a table row whose first cell begins with a keep-with-next paragraph must stay on the
+    /// same page as the row below it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Writer's <c>TABLE_ROW_KEEP</c>, and it splits the same way the other two flags here do: the DOCX
+    /// filter sets it (<c>sw/source/writerfilter/dmapper/SettingsTable.cxx</c>:677), the DOC filter sets
+    /// it (<c>sw/source/filter/ww8/ww8par.cxx</c>:2039), and a native ODF document leaves it at the
+    /// <c>false</c> its constructor gives it (<c>DocumentSettingManager.cxx</c>:75).
+    /// </para>
+    /// <para>
+    /// It does <em>not</em> only stop a row splitting internally. Its larger effect is on whether the
+    /// table may be split at all: <c>SwTabFrame::MakeAll</c>
+    /// (<c>sw/source/core/layout/tabfrm.cxx</c>:3061-3092) counts a minimum number of rows that must fit
+    /// before a split is even attempted, and this flag is what extends that count over the run of rows
+    /// that keep with the next one. See <c>MinimumRowsBeforeASplit</c>.
+    /// </para>
+    /// </remarks>
+    public bool KeepsTableRowsWithNext { get; init; }
 
     /// <summary>
     /// Whether a justified line ended by a manual break is stretched to the margin.
@@ -1130,6 +1152,37 @@ public sealed class Paginator
                 // ends and the table starts again at the top of the next one.
                 if (part.Placed is null)
                 {
+                    // A keep-with-next paragraph in front of it goes too. Writer's keep is a property of
+                    // the paragraph and asks only that its successor share its page; the successor being a
+                    // table rather than another paragraph changes nothing, and a table that places no row
+                    // here has not started on this page.
+                    //
+                    // Measured on `AC-150-5370-10G-updated-201604.docx`, whose `Requirements for Gradation
+                    // of Mixture` table is preceded by a `Caption`-styled line — the built-in style, whose
+                    // `pPr` is `<w:keepNext/><w:jc w:val="center"/>`. Ablating that one flag out of
+                    // `styles.xml` moves the reference's last body line from 583.5 to 602.2, and 602.2 is
+                    // exactly where we put the caption without this. See `probes/caption-keepnext-table/`.
+                    //
+                    // Only in front of the table's *first* part: a continuation starts at the top of a page
+                    // already, so there is no paragraph above it on that page to keep it with.
+                    if (lineIndex == 0
+                        && rowDrawn == Length.Zero
+                        && paragraphIndex > 0
+                        && blocks[paragraphIndex - 1] is PageParagraph { Format.KeepWithNext: true })
+                    {
+                        MoveTrailingGroupToNextPage(
+                            blocks, placed, out List<PlacedLine> movedAbove, out int movedAboveFrom);
+
+                        if (movedAbove.Count > 0 && movedAboveFrom > 0)
+                        {
+                            EmitPage();
+                            paragraphIndex = movedAboveFrom;
+                            lineIndex = 0;
+                            rowDrawn = Length.Zero;
+                            continue;
+                        }
+                    }
+
                     EmitPage();
                     continue;
                 }
@@ -2598,7 +2651,7 @@ public sealed class Paginator
     /// True when nothing else is on the column yet, which is what makes overflowing the right answer: a
     /// row too tall for a column of its own has nowhere better to go, and moving it would not terminate.
     /// </param>
-    private static TablePart PlaceTablePart(
+    private TablePart PlaceTablePart(
         PageTable table,
         LaidBlock laid,
         int from,
@@ -2669,6 +2722,19 @@ public sealed class Paginator
             end++;
         }
 
+        // A table is not split just because *something* fits. Writer requires a minimum number of its
+        // rows to fit before it will split at all, and moves the whole table on when they do not — see
+        // `MinimumRowsBeforeASplit`. Only on the table's own first part, and only when the column already
+        // holds something: a continuation is at the top of a page by construction and has no `pIndPrev`,
+        // which is the same escape Writer takes, and an empty column has nowhere better to send it.
+        if (from == 0
+            && drawn <= Length.Zero
+            && !columnIsEmpty
+            && end < MinimumRowsBeforeASplit(table, laid))
+        {
+            return new TablePart(null, Length.Zero, from, drawn);
+        }
+
         if (end > start)
         {
             Length skipped = Length.Zero;
@@ -2725,6 +2791,76 @@ public sealed class Paginator
         return new TablePart(
             Part(table, cells, body, top, column, placed, from, end), placed, end, Length.Zero);
     }
+
+    /// <summary>
+    /// How many of a table's rows must fit on a page before it may be split there at all.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Writer counts this before it decides whether to call <c>SwTabFrame::Split</c>
+    /// (<c>sw/source/core/layout/tabfrm.cxx</c>:3061-3092), and moves the whole table on when the count
+    /// does not fit:
+    /// </para>
+    /// <code>
+    /// sal_uInt16 nMinNumOfLines = nRepeat;               // GetRowsToRepeat(), the w:tblHeader count
+    /// if ( bTableRowKeep ) {
+    ///     const SwRowFrame* pTmpRow = GetFirstNonHeadlineRow();
+    ///     if (pTmpRow &amp;&amp; pTmpRow-&gt;IsRowSpanLine()) { ++nMinNumOfLines; pTmpRow = next; }
+    ///     while ( pTmpRow &amp;&amp; pTmpRow-&gt;ShouldRowKeepWithNext() ) { ++nMinNumOfLines; pTmpRow = next; }
+    /// }
+    /// if ( !bTryToSplit ) ++nMinNumOfLines;
+    /// const SwTwips nBreakLine = ... + lcl_GetHeightOfRows( GetLower(), nMinNumOfLines );
+    /// if ( aRectFnSet.YDiff(nDeadLine, nBreakLine) &gt;= 0 || !pIndPrev || ... ) bSplit = true;
+    /// </code>
+    /// <para>
+    /// <c>ShouldRowKeepWithNext</c> (<c>tabfrm.cxx</c>:5801) reads one paragraph only — the <em>first</em>
+    /// cell's first text frame — and takes its keep attribute, so a row of eight cells keeps or does not
+    /// keep by what is in the first of them. That is followed here exactly rather than generalised.
+    /// </para>
+    /// <para>
+    /// <strong>Measured, and it is what decides AC-150-5370-10G's first lost page.</strong> Its
+    /// `Requirements for Gradation of Mixture` table has two <c>w:tblHeader</c> rows and a direct
+    /// <c>w:keepNext</c> on the first-cell paragraph of every row but the last, so the count is 2 + 7 = 9
+    /// of 10 rows. Those cannot fit in the ~94 pt left, so LibreOffice moves the table whole and leaves
+    /// the page ending at y=583.0; we split it after two data rows and gained a page. See
+    /// <c>probes/caption-keepnext-table/</c>, whose thirteen-block reproducer also shows that with the
+    /// table fitting we agree with the reference to 0.1 pt on all nine of its cases.
+    /// </para>
+    /// <para>
+    /// The <c>!bTryToSplit</c> increment is Writer's <em>second</em> attempt, made only after the first
+    /// reported a split error; a single pass here is the <c>bTryToSplit == true</c> one, so that term is
+    /// deliberately absent.
+    /// </para>
+    /// </remarks>
+    private int MinimumRowsBeforeASplit(PageTable table, LaidBlock laid)
+    {
+        int minimum = Math.Min(Math.Max(table.HeaderRowCount, 0), table.Rows.Count);
+
+        if (!_options.KeepsTableRowsWithNext) return minimum;
+
+        // The row-span line, which Writer counts before it starts the keep chain: a row the cell above
+        // reaches into cannot be the first on a page of its own.
+        if (minimum < table.Rows.Count && IsCoveredByAMerge(laid, minimum)) minimum++;
+
+        while (minimum < table.Rows.Count && KeepsWithTheRowBelow(table.Rows[minimum])) minimum++;
+
+        return minimum;
+    }
+
+    /// <summary>
+    /// Whether a row's first cell begins with a keep-with-next paragraph, which is all Writer asks.
+    /// </summary>
+    /// <remarks>
+    /// <c>SwRowFrame::ShouldRowKeepWithNext</c> declines outright for a row nested in another table
+    /// ("No KeepWithNext if nested in another table"). Nothing is needed for that here: this is only
+    /// reached for a top-level table, since a nested one is laid out inside its cell by
+    /// <see cref="TableLayouter"/> and never reaches the paginator's own row loop.
+    /// </remarks>
+    private static bool KeepsWithTheRowBelow(PageTableRow row)
+        => row.Cells.Count > 0
+           && row.Cells[0].Blocks.Count > 0
+           && row.Cells[0].Blocks[0] is PageParagraph paragraph
+           && paragraph.Format.KeepWithNext;
 
     /// <summary>The cells of one row, as the table's own layout left them.</summary>
     private static List<PlacedTableCell> RowCells(LaidBlock laid, int row)
