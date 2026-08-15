@@ -1,7 +1,9 @@
 using System.Globalization;
 using System.Xml.Linq;
 using Paperless.Core.Geometry;
+using Paperless.Core.Graphics;
 using Paperless.Core.Units;
+using Paperless.Ooxml.DrawingML;
 using Paperless.WordProcessing.Layout;
 
 namespace Paperless.WordProcessing.Ooxml;
@@ -77,11 +79,17 @@ internal static class DocxFrames
     /// <param name="content">How to read a text frame's own paragraphs, or null to skip them.</param>
     /// <param name="anchorOffset">Where in the paragraph's text the drawing sits.</param>
     /// <param name="pictures">How to resolve an <c>a:blip</c>'s <c>r:embed</c> into bytes, or null.</param>
+    /// <param name="context">
+    /// What the drawing's surroundings decide about it — the theme its colours resolve against, whether
+    /// it sits in a header or a footer, and the file's compatibility mode. Default for a caller that has
+    /// none of it, which costs a scheme-coloured fill and the header rule and nothing else.
+    /// </param>
     public static IReadOnlyList<PageFrame> ReadAll(
         XElement drawing,
         Func<XElement, IReadOnlyList<PageBlock>>? content,
         int anchorOffset,
-        DocxPictures? pictures = null)
+        DocxPictures? pictures = null,
+        DocxFrameContext context = default)
     {
         ArgumentNullException.ThrowIfNull(drawing);
 
@@ -100,12 +108,71 @@ internal static class DocxFrames
         if (Group(placed) is { } group)
         {
             return Members(group, placed, anchor, new DocSize(width, height), content, anchorOffset,
-                           pictures);
+                           pictures, context);
         }
 
         PageFrame? single = One(placed, anchor, new DocSize(width, height), content, anchorOffset,
-                                pictures);
+                                pictures, context);
         return single is null ? [] : [single];
+    }
+
+    /// <summary>
+    /// Whether an anchored drawing belongs on the layer Writer paints before the text.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>m_bOpaque</c> in <c>sw/source/writerfilter/dmapper/GraphicImport.cxx</c>, reproduced in the
+    /// order that file assigns it, because the order is the rule:
+    /// </para>
+    /// <list type="number">
+    ///   <item><description>
+    ///   it starts as <c>!IsInHeaderFooter()</c> (:342), so <strong>every drawing in a header or a
+    ///   footer is behind the text</strong> whether or not it says so;
+    ///   </description></item>
+    ///   <item><description><c>behindDoc="1"</c> clears it (:698-702);</description></item>
+    ///   <item><description>
+    ///   and for <c>wrapSquare</c>, <c>wrapThrough</c>, <c>wrapTight</c> and <c>wrapTopAndBottom</c>, a
+    ///   file whose <c>compatibilityMode</c> is 15 or more puts it back (:1589, :1697) — tdf#137850,
+    ///   "Word >= 2013 seems to ignore bBehindDoc except for wrapNone, but older versions honour it".
+    ///   </description></item>
+    /// </list>
+    /// <para>
+    /// The resulting item is <c>SvxOpaqueItem</c>, and false is the hell layer.
+    /// </para>
+    /// <para>
+    /// Only an anchored drawing is asked. A <c>wp:inline</c> takes room on its line rather than floating
+    /// over anything, so its layer decides nothing that is visible; LibreOffice does still push it to the
+    /// bottom of the z-order (:242-246), and following that here would move as-character pictures in
+    /// every header in the corpus to buy nothing measurable.
+    /// </para>
+    /// </remarks>
+    private static bool BehindText(XElement? anchor, DocxFrameContext context)
+    {
+        if (anchor is null) return false;
+
+        bool opaque = !context.InHeaderFooter;
+
+        if (anchor.Attribute("behindDoc")?.Value is not ("1" or "true" or "on")) return !opaque;
+
+        opaque = false;
+        if (context.CompatibilityMode >= 15 && WrapsAside(anchor)) opaque = !context.InHeaderFooter;
+
+        return !opaque;
+    }
+
+    /// <summary>Whether the anchor asks for one of the four wraps that leave a hole in the text.</summary>
+    private static bool WrapsAside(XElement anchor)
+    {
+        foreach (XElement child in anchor.Elements())
+        {
+            if (child.Name.LocalName
+                is "wrapSquare" or "wrapThrough" or "wrapTight" or "wrapTopAndBottom")
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>The one frame an ordinary drawing holds.</summary>
@@ -115,7 +182,8 @@ internal static class DocxFrames
         DocSize size,
         Func<XElement, IReadOnlyList<PageBlock>>? content,
         int anchorOffset,
-        DocxPictures? pictures)
+        DocxPictures? pictures,
+        DocxFrameContext context)
     {
         Length width = size.Width;
         Length height = size.Height;
@@ -130,10 +198,16 @@ internal static class DocxFrames
 
         (Length x, FrameHorizontalOrigin horigin, FrameHorizontalAlignment halign) = Horizontal(anchor);
         (Length y, FrameVerticalOrigin vorigin, FrameVerticalAlignment valign) = Vertical(anchor);
+        (Colour? fill, Colour? line, Length lineWidth) =
+            Appearance(ShapeProperties(placed), context.Theme);
 
         return new PageFrame
         {
             Size = new DocSize(width, height),
+            Fill = fill,
+            BorderColour = line,
+            BorderWidth = lineWidth,
+            BehindText = BehindText(anchor, context),
             Anchor = anchor is null ? FrameAnchor.AsCharacter : FrameAnchor.Paragraph,
             AnchorOffset = anchorOffset,
             Wrap = anchor is null ? TextWrap.Through : WrapOf(anchor),
@@ -197,14 +271,18 @@ internal static class DocxFrames
         DocSize size,
         Func<XElement, IReadOnlyList<PageBlock>>? content,
         int anchorOffset,
-        DocxPictures? pictures)
+        DocxPictures? pictures,
+        DocxFrameContext context)
     {
         (Length x, FrameHorizontalOrigin horigin, FrameHorizontalAlignment halign) = Horizontal(anchor);
         (Length y, FrameVerticalOrigin vorigin, FrameVerticalAlignment valign) = Vertical(anchor);
 
+        // The envelope of a group paints nothing of its own — an `SdrObjGroup` has no fill and no line —
+        // so it takes no appearance here, only the paint order its members inherit.
         PageFrame envelope = new()
         {
             Size = size,
+            BehindText = BehindText(anchor, context),
             Anchor = anchor is null ? FrameAnchor.AsCharacter : FrameAnchor.Paragraph,
             AnchorOffset = anchorOffset,
             Wrap = anchor is null ? TextWrap.Through : WrapOf(anchor),
@@ -240,7 +318,8 @@ internal static class DocxFrames
 
                     case "wsp" or "pic" or "sp":
                     {
-                        if (Leaf(child, transform, envelope, size, content, anchorOffset, pictures)
+                        if (Leaf(child, transform, envelope, size, content, anchorOffset, pictures,
+                                 context)
                             is { } leaf)
                         {
                             frames.Add(leaf);
@@ -271,7 +350,8 @@ internal static class DocxFrames
         DocSize size,
         Func<XElement, IReadOnlyList<PageBlock>>? content,
         int anchorOffset,
-        DocxPictures? pictures)
+        DocxPictures? pictures,
+        DocxFrameContext context)
     {
         XElement? properties = shape.Elements()
             .FirstOrDefault(child => child.Name.LocalName is "spPr");
@@ -292,9 +372,14 @@ internal static class DocxFrames
             ? pictures.Read(shape)
             : FramePicture.None;
 
+        (Colour? fill, Colour? line, Length lineWidth) = Appearance(properties, context.Theme);
+
         return envelope with
         {
             Size = new DocSize(within.Width, within.Height),
+            Fill = fill,
+            BorderColour = line,
+            BorderWidth = lineWidth,
             GroupSize = size,
             GroupOffset = new DocPoint(within.X, within.Y),
 
@@ -603,4 +688,90 @@ internal static class DocxFrames
 
     private static XElement? Descendant(XElement parent, string name)
         => parent.Descendants().FirstOrDefault(child => child.Name.LocalName == name);
+
+    /// <summary>
+    /// How a shape is painted: its fill, its outline colour, and how thick that outline is.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>We drew neither of these on a DrawingML shape until this existed</strong>, which is a
+    /// defect no column of the gate can see and two rounds of blind reviewers found by looking. On
+    /// <c>ABCD-WB-08-00</c> and <c>ABCD-SDE-23-00</c> the reference draws a grey header panel, a
+    /// bordered box round a logo placeholder and a solid grey bar behind "Document reference:"; we drew
+    /// none of them, so that bar's white text landed on white paper and was invisible. Confirmed in the
+    /// reference's operators rather than in a raster — its page 2 carries nine transparency-group
+    /// XObjects and six strokes against our none and four — because the fills carry
+    /// <c>a:alpha</c> and LibreOffice's PDF export writes an alpha fill as a transparency group rather
+    /// than as a plain <c>re f</c>, so grepping the content stream for a fill finds nothing.
+    /// </para>
+    /// <para>
+    /// Only <c>a:solidFill</c> is read, on both the area and the line. A gradient, a pattern or a
+    /// picture fill is a real fill this cannot yet draw, and painting its first stop as a flat colour
+    /// would be a confident wrong answer rather than an absent one; each leaves the frame as it was.
+    /// </para>
+    /// <para>
+    /// A shape stating no fill element at all is left unfilled rather than given the theme's default.
+    /// DrawingML says a shape with no <c>a:*Fill</c> takes the fill its <c>wps:style/a:fillRef</c>
+    /// names out of the theme's format scheme, which is a whole style matrix and is what
+    /// <c>oox/source/drawingml/shape.cxx</c> implements; reading only what the shape itself states is
+    /// the conservative half of that and never invents ink. <c>a:noFill</c> is honoured explicitly, so
+    /// "stated none" and "said nothing" already differ here for the case the corpus exercises.
+    /// </para>
+    /// </remarks>
+    /// <param name="properties">The shape's own <c>spPr</c>, or null.</param>
+    /// <param name="theme">The theme its colours resolve against, or null.</param>
+    private static (Colour? Fill, Colour? Line, Length Width) Appearance(
+        XElement? properties, DrawingTheme? theme)
+    {
+        if (properties is null) return (null, null, Length.Zero);
+
+        Colour? fill = Solid(Child(properties, "solidFill"), theme);
+
+        XElement? line = Child(properties, "ln");
+        if (line is null) return (fill, null, Length.Zero);
+
+        Colour? stroke = Solid(Child(line, "solidFill"), theme);
+        return stroke is null
+            ? (fill, null, Length.Zero)
+            : (fill, stroke, Emu(line.Attribute("w")?.Value));
+
+        static Colour? Solid(XElement? solidFill, DrawingTheme? palette)
+            => solidFill is null
+                ? null
+                : DrawingColour.Read(solidFill.Elements().FirstOrDefault())?.Resolve(palette);
+    }
+
+    /// <summary>
+    /// The <c>spPr</c> of the shape a drawing holds, or null when it holds none.
+    /// </summary>
+    /// <remarks>
+    /// A descendant rather than a child, for the reason <see cref="BodyProperties"/> is: the element
+    /// sits three levels below the anchor, under <c>wps:wsp</c> or <c>pic:pic</c>. The first in document
+    /// order is the outermost shape's — a <c>wps:spPr</c> precedes the <c>wps:txbx</c> that could hold a
+    /// nested drawing of its own — so this reads the shape asked about and not one inside its text.
+    /// </remarks>
+    private static XElement? ShapeProperties(XElement placed) => Descendant(placed, "spPr");
 }
+
+/// <summary>
+/// What a drawing's surroundings decide about it, which the drawing itself does not state.
+/// </summary>
+/// <remarks>
+/// A parameter object rather than three arguments because all three are inherited context: they are the
+/// same for every frame in a walk and are threaded through the group recursion unchanged. The default —
+/// no theme, not in a header, compatibility mode 0 — is what a caller that has none of it gets, and it
+/// reproduces the behaviour every caller had before the type existed.
+/// </remarks>
+/// <param name="Theme">The theme a <c>a:schemeClr</c> resolves against, or null when there is none.</param>
+/// <param name="InHeaderFooter">
+/// Whether the drawing is anchored in a header or a footer, which decides its paint order on its own —
+/// see <see cref="Layout.PageFrame.BehindText"/>.
+/// </param>
+/// <param name="CompatibilityMode">
+/// The <c>compatibilityMode</c> compatibility setting, or 0 when the file states none. 15 and above is
+/// Word 2013 and later, which changes what <c>behindDoc</c> means.
+/// </param>
+internal readonly record struct DocxFrameContext(
+    DrawingTheme? Theme = null,
+    bool InHeaderFooter = false,
+    int CompatibilityMode = 0);

@@ -183,9 +183,34 @@ public static class Ww8Frames
                     != shape.Flags.HasFlag(EscherShapeAttributes.FlipVertical),
             IsImage = blocks.Count == 0,
             Blocks = blocks,
+            BehindText = BehindText(anchor, properties),
             Name = shape?.Name,
         };
     }
+
+    /// <summary>Whether the shape belongs on the layer Writer paints before the text.</summary>
+    /// <remarks>
+    /// <para>
+    /// <c>SwWW8ImplReader::MatchSdrItemsIntoFlySet</c>'s <c>bMoveToBackground</c>, copied rather than
+    /// re-derived (<c>sw/source/filter/ww8/ww8graf.cxx</c>:2831-2836):
+    /// <c>pRecord-&gt;bDrawHell || ((m_bIsHeader || m_bIsFooter) &amp;&amp; aFSFA.nwr == 3)</c>. It is the
+    /// second half that carries the corpus: a Word letterhead is a full-page picture anchored in the
+    /// header story with wrap 3, and it states no <c>fBehindDocument</c> of its own.
+    /// </para>
+    /// <para>
+    /// The <c>FSPA</c>'s own <c>fBelowText</c> bit is <strong>not</strong> part of the test, however
+    /// exactly it names the thing. The comment above the C++ says both flags were once required and
+    /// that "#i46794 — it reveals that value of flag &lt;bBelowText&gt; can be neglected"; the
+    /// field is still parsed into <see cref="Ww8ShapeAnchor.IsBelowText"/> because it is in the record,
+    /// and reading it here would follow the format rather than the reference.
+    /// </para>
+    /// </remarks>
+    private static bool BehindText(Ww8ShapeAnchor anchor, EscherPropertyTable properties)
+        => properties.Boolean(EscherPropertyIds.BehindDocument)
+           || (anchor.IsHeaderAnchor && anchor.Wrap == WrapNone);
+
+    /// <summary>The <c>FSPA</c>'s <c>nwr</c> for "the text runs straight through the shape".</summary>
+    private const int WrapNone = 3;
 
     /// <summary>
     /// Builds the frame one member of a group stands for, placed inside the group's rectangle.

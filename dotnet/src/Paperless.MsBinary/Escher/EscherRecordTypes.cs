@@ -317,6 +317,19 @@ public static class EscherPropertyIds
 
     /// <summary>Whether the shape is hidden. A boolean property; see <see cref="Filled"/>.</summary>
     public const ushort Hidden = 958;
+
+    /// <summary>
+    /// Whether the shape is painted behind the document's text. A boolean property; see
+    /// <see cref="Filled"/>.
+    /// </summary>
+    /// <remarks>
+    /// Bit 5 of the same group <see cref="Hidden"/> is bit 1 of — <c>DFF_Prop_fPrint</c>, 959 — so its
+    /// own identifier is 954. LibreOffice spells the test as
+    /// <c>GetPropertyValue(DFF_Prop_fPrint, 0) &amp; 0x20</c> with the comment "Means that
+    /// fBehindDocument is set" (<c>filter/source/msfilter/msdffimp.cxx</c>:5546-5549), which is the
+    /// same bit reached from the group end instead of from the member.
+    /// </remarks>
+    public const ushort BehindDocument = 954;
 }
 
 /// <summary>

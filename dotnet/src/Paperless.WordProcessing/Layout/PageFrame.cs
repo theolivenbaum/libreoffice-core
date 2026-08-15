@@ -284,6 +284,51 @@ public sealed record PageFrame
     /// </remarks>
     public bool HasFixedHeight { get; init; }
 
+    /// <summary>
+    /// True when the frame is painted <em>behind</em> the document's text rather than over it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Z-order, not layout: nothing about where a line breaks or where the frame sits depends on this,
+    /// and the layouters never read it. It decides one thing — whether
+    /// <see cref="PageDrawing.Draw"/> emits the frame before the header and body or after them.
+    /// </para>
+    /// <para>
+    /// In Writer this is the <c>SvxOpaqueItem</c>: false puts the fly on the <em>hell</em> layer and
+    /// true on <em>heaven</em> (<c>sw/source/core/layout/fly.cxx</c>:1129-1138), and every importer
+    /// reaches paint order by setting that one item. The two readers derive it differently because the
+    /// two formats state it differently, and both rules are LibreOffice's own:
+    /// </para>
+    /// <list type="bullet">
+    ///   <item>
+    ///     <description>
+    ///     <strong>WW8</strong> — <c>bMoveToBackground = bDrawHell || ((header||footer) &amp;&amp; nwr == 3)</c>
+    ///     (<c>sw/source/filter/ww8/ww8graf.cxx</c>:2833). <c>bDrawHell</c> is the Escher
+    ///     <c>DFF_Prop_fPrint</c> group's <c>fBehindDocument</c> bit
+    ///     (<c>filter/source/msfilter/msdffimp.cxx</c>:5547). The <c>FSPA</c>'s own <c>fBelowText</c>
+    ///     is deliberately <em>not</em> consulted — the comment beside the C++ says in terms that its
+    ///     value "can be neglected" (#i46794), and a reader that trusts it instead gets a different
+    ///     answer on exactly the documents this matters for.
+    ///     </description>
+    ///   </item>
+    ///   <item>
+    ///     <description>
+    ///     <strong>DOCX</strong> — <c>m_bOpaque</c> in
+    ///     <c>sw/source/writerfilter/dmapper/GraphicImport.cxx</c>. It starts as
+    ///     <c>!IsInHeaderFooter()</c> (:342), so a drawing anchored in a header or footer is behind the
+    ///     text whatever else it says; <c>behindDoc="1"</c> clears it (:698-702); and for
+    ///     <c>wrapSquare</c>, <c>wrapThrough</c>, <c>wrapTight</c> and <c>wrapTopAndBottom</c> a file
+    ///     targeting Word 2013 or later restores it (:1589, :1697, tdf#137850) — so under a modern
+    ///     compatibility mode <c>behindDoc</c> is honoured for <c>wrapNone</c> alone.
+    ///     </description>
+    ///   </item>
+    /// </list>
+    /// <para>
+    /// False by default, which is what every reader did before this existed.
+    /// </para>
+    /// </remarks>
+    public bool BehindText { get; init; }
+
     /// <summary>The frame's background, or null when it has none.</summary>
     public Colour? Fill { get; init; }
 

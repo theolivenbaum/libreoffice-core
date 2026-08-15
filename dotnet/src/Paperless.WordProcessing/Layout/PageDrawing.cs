@@ -43,6 +43,19 @@ public static class PageDrawing
     /// already been shortened to keep clear of it — so a frame drawn first would be painted over by
     /// whatever ran under it.
     /// </para>
+    /// <para>
+    /// <strong>Except the ones the document puts behind its text</strong>, which go first —
+    /// <see cref="PageFrame.BehindText"/>. Writer keeps these on the <em>hell</em> layer and paints that
+    /// layer before the text; a letterhead or a watermark is the whole of the case, and it is not a
+    /// nuance. Measured on <c>info-bulletin-601.doc</c>, whose every page carries one full-page opaque
+    /// raster anchored in the header story: emitted after the text it covers the text, and the document
+    /// renders as five blank sheets while its extractable word count reads 1298 of 1302 — a defect no
+    /// gate column can see, because the words are all still in the PDF's text layer underneath.
+    /// </para>
+    /// <para>
+    /// The footer stays last, and that is deliberate rather than left over: it is what kept the page
+    /// numbers legible on that document while everything above them was buried.
+    /// </para>
     /// </remarks>
     /// <param name="page">The page to draw.</param>
     /// <param name="blocks">The blocks the page's body lines index into.</param>
@@ -57,13 +70,23 @@ public static class PageDrawing
         sink.BeginPage(page.Size);
         try
         {
+            foreach (PlacedFrame frame in page.Frames)
+            {
+                if (frame.Frame.BehindText) DrawFrame(frame, sink);
+            }
+
             DrawFlow(page.Header, sink);
             DrawBody(page, blocks, sink);
             DrawLineNumbers(page, sink);
             foreach (PlacedTable table in page.Tables) DrawTable(table, sink);
             DrawSeparator(page.NoteSeparator, sink);
             DrawFlow(page.Notes, sink);
-            foreach (PlacedFrame frame in page.Frames) DrawFrame(frame, sink);
+
+            foreach (PlacedFrame frame in page.Frames)
+            {
+                if (!frame.Frame.BehindText) DrawFrame(frame, sink);
+            }
+
             DrawFlow(page.Footer, sink);
         }
         finally
