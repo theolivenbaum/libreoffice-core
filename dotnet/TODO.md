@@ -1591,3 +1591,31 @@ Each of these should be resolved with a spike, not by guessing.
 Writing/export of any format. Macro execution. Editing. Draw, Math, Base. A UI.
 Bug-for-bug reproduction of LibreOffice's own import defects — where LibreOffice renders a
 document wrongly, record a known deviation rather than copying the bug.
+
+**That last one now has exactly one deliberate exception, and it should stay countable.**
+A section that inherits a header whose `w:hdr` contains only tables gets *no* header, because
+`copyHeaderFooterTextProperty` copies a header's **content** rather than linking the part, and a
+body that begins and ends with a table copies as nothing
+(`sw/source/writerfilter/dmapper/PropertyMap.cxx`). **Word draws that header; LibreOffice loses
+it; we now lose it too.** Established by five minimal probes on 26.2.4.2 — table alone, two
+tables, table plus a trailing `<w:p/>`, a leading `<w:p/>` plus table, paragraph alone — which
+are all-or-nothing on the presence of one top-level `w:p`.
+
+Round `words-r43` found the same mechanism, declined it under the non-goal above, and pinned the
+refusal in `SectionInheritedHeaderTests` so that a later round would have to delete a test to
+change it. Round `words-ug-01` deleted it. Two things justify that and both are worth stating,
+because the next such case should be argued the same way rather than waved through:
+
+- **The cost had been measured wrong.** Round 43 recorded the deviation as worth one verdict and
+  some words. It is worth two: `UG.CAO.00133` 18/18 3895→3674 against 3667, and
+  `UG.CAO.00006` **29/29** 7390 against 7399 — the phantom head was costing that document a whole
+  *page*, which is check one of the gate, not a word count.
+- **The non-goal and the project's goal genuinely conflict here.** The corpus gate scores against
+  LibreOffice, so a document where we deliberately differ from LibreOffice can never pass it. Held
+  strictly, the non-goal makes "parity across the corpus" unreachable by construction on those
+  documents. The goal was chosen over the convention.
+
+The cost, stated: `docs-quality-MA.IMS.00001` moves to a worse word error (11973 against 12213)
+and keeps its verdict, failing on pages at 43/44 either way. And our rendering of these documents
+is now, by choice, **less faithful to the author's document than it was** — the running head is
+gone. Reverting is one class (`FurnitureCarry` in `DocxReader.cs`) plus two test files.
