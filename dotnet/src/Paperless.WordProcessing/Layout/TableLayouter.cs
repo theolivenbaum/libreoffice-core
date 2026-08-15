@@ -340,15 +340,25 @@ public static class TableLayouter
             // A cell covering more than this row cannot be cut here: its text belongs to a row further
             // down, and half of its rectangle would be drawn on each of two pages.
             if (Math.Max(1, cell.Cell.RowSpan) > 1) return null;
-            if (cell.Content is { Tables.Count: > 0 }) return null;
             rowTop = Length.Min(rowTop, cell.Area.Y);
         }
 
         Length border = BorderHeight(row);
         Length above = rowTop + drawn;
 
+        // The spans a cut may not fall inside: a table nested in a cell is placed as one rectangle and
+        // this function has no machinery to divide one, so a cut through it would draw the top half on
+        // one page and nothing on the other. See `Nested`.
+        List<(Length Top, Length Bottom)> whole = [];
+        foreach (PlacedTableCell cell in cells)
+        {
+            if (cell.ContentTransform is not null || cell.Content is not { } flow) continue;
+            foreach (PlacedTable nested in flow.Tables) whole.Add((nested.Area.Y, nested.Area.Bottom));
+        }
+
         // Every line that is not yet drawn, as the depth its bottom sits at. These are the only places the
-        // row may be cut, since a cut between two of them would draw half a line.
+        // row may be cut, since a cut between two of them would draw half a line — plus the bottom of each
+        // nested table, which is a legal cut and often the only one a densely nested cell offers.
         List<Length> candidates = [];
         foreach (PlacedTableCell cell in cells)
         {
@@ -362,7 +372,14 @@ public static class TableLayouter
                 Length bottom = flow.Area.Y + line.Top + line.Box.Height;
                 if (bottom > above) candidates.Add(bottom);
             }
+
+            foreach (PlacedTable nested in flow.Tables)
+            {
+                if (nested.Area.Bottom > above) candidates.Add(nested.Area.Bottom);
+            }
         }
+
+        candidates.RemoveAll(cut => Crosses(whole, cut));
 
         if (candidates.Count == 0) return null;
 
@@ -386,7 +403,23 @@ public static class TableLayouter
 
         if (chosen is not { } cut) return null;
 
-        bool complete = candidates[^1] <= cut;
+        // Whether anything is left over, asked of the content rather than of the candidate list: a cut a
+        // nested table forbade is absent from that list, and reading the deepest *legal* cut as the
+        // deepest content would report a part complete while a whole nested table still waited below it.
+        Length last = Length.Zero;
+        foreach (PlacedTableCell cell in cells)
+        {
+            if (cell.ContentTransform is not null || cell.Content is not { } flow) continue;
+
+            foreach (PlacedLine line in flow.Lines)
+            {
+                last = Length.Max(last, flow.Area.Y + line.Top + line.Box.Height);
+            }
+
+            foreach (PlacedTable nested in flow.Tables) last = Length.Max(last, nested.Area.Bottom);
+        }
+
+        bool complete = last <= cut;
 
         // A part holding every remaining line is not a split at all; the caller places the whole row.
         if (complete && drawn <= Length.Zero) return null;
@@ -460,6 +493,25 @@ public static class TableLayouter
                 bottom = end;
             }
 
+            // A nested table this part holds whole is as much of the cell's height as a line is, and it
+            // can be the *only* thing in the part — a cell that opens with a picture in a one-cell table
+            // has no line above it at all, so the part would otherwise measure nothing and be rejected.
+            bool tableBelow = false;
+            foreach (PlacedTable nested in flow.Tables)
+            {
+                if (nested.Area.Bottom > cut)
+                {
+                    tableBelow = true;
+                    continue;
+                }
+
+                if (nested.Area.Y < above) continue;
+
+                Length nestedTop = isFirst ? flow.Area.Y : nested.Area.Y;
+                top = top is { } already ? Length.Min(already, nestedTop) : nestedTop;
+                bottom = Length.Max(bottom, nested.Area.Bottom);
+            }
+
             if (top is not { } start) continue;
 
             if (following is { } next)
@@ -470,11 +522,15 @@ public static class TableLayouter
                 // block top *is* this line's bottom and this changes nothing.
                 bottom = Length.Max(bottom, flow.Area.Y + next.Top - next.UpperSpace);
             }
-            else if (flow.Lines.Count > 0
+            else if (!tableBelow
+                     && flow.Lines.Count > 0
                      && flow.Area.Y + flow.Lines[^1].Top + flow.Lines[^1].Box.Height <= cut)
             {
                 // Nothing of this cell is left over, so its part is as tall as the cell — the trailing
-                // spacing included, which is what `LayOut` charged the row for.
+                // spacing included, which is what `LayOut` charged the row for. `tableBelow` is what
+                // keeps that from firing on a cell whose *lines* all fit while a nested table below them
+                // does not: charging the whole cell's advance there makes the part as tall as the row
+                // and nothing ever fits.
                 bottom = Length.Max(bottom, flow.Area.Y + flow.Advance);
             }
 
@@ -528,6 +584,37 @@ public static class TableLayouter
         return Length.Zero;
     }
 
+    /// <summary>
+    /// Whether a cut would fall strictly inside one of the spans that must not be divided.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Writer's <c>bTableLayoutTooComplex</c> refuses to split a row holding a nested table at all; this
+    /// refuses only the cuts that would go <em>through</em> one, which is the same guarantee with the
+    /// rest of the row still available. Strict at both ends on purpose: a cut exactly at a nested
+    /// table's bottom leaves it whole on the part above, and one exactly at its top leaves it whole on
+    /// the part below, so both are legal and one of them is frequently the only cut a nested cell has.
+    /// </para>
+    /// <para>
+    /// It is not the whole of the follow-flow story. Writer builds a follow frame for the nested table
+    /// too and divides it in turn, so a document whose *one* nested table is taller than a page still
+    /// paginates differently from us. What this removes is the case where content vanished: a row that
+    /// cannot be cut anywhere is placed whole on a page of its own and everything past the page bottom
+    /// is never drawn. Measured on a two-file probe differing in one nested table — 90 body paragraphs
+    /// in a one-cell table render 2 pages and 90 lines both ways without it, and 1 page and 64 lines
+    /// with it, the last paragraph gone.
+    /// </para>
+    /// </remarks>
+    private static bool Crosses(List<(Length Top, Length Bottom)> spans, Length cut)
+    {
+        foreach ((Length top, Length bottom) in spans)
+        {
+            if (cut > top && cut < bottom) return true;
+        }
+
+        return false;
+    }
+
     /// <summary>The cells of one part, holding its lines and positioned from the part's own top.</summary>
     private static List<PlacedTableCell> Sliced(
         IReadOnlyList<PlacedTableCell> cells, Length rowTop, Length above, Length cut, Length height)
@@ -556,6 +643,7 @@ public static class TableLayouter
             }
 
             List<PlacedLine> kept = [];
+            List<PlacedTable> keptTables = [];
             Length? first = null;
 
             if (cell.Content is { } flow)
@@ -570,12 +658,24 @@ public static class TableLayouter
                     first ??= line.Top - UpperSpaceAbove(flow, line);
                     kept.Add(line);
                 }
+
+                // A nested table belongs to exactly one part — the one whose span holds it whole. `SliceRow`
+                // never chooses a cut that crosses one, so every nested table is above the cut or below it
+                // and none is drawn twice or lost between the two.
+                foreach (PlacedTable nested in flow.Tables)
+                {
+                    if (nested.Area.Y < above || nested.Area.Bottom > cut) continue;
+
+                    keptTables.Add(nested);
+                    Length start = nested.Area.Y - flow.Area.Y;
+                    first = first is { } already ? Length.Min(already, start) : start;
+                }
             }
 
             DocRect area = new(cell.Area.X, Length.Zero, cell.Area.Width, height);
             PlacedFlow? content = null;
 
-            if (cell.Content is { } text && kept.Count > 0)
+            if (cell.Content is { } text && (kept.Count > 0 || keptTables.Count > 0))
             {
                 // The remaining text starts at the top of the part rather than where it was measured, which
                 // is what a follow flow line is: the cell begins again on the next page. The first part
@@ -585,10 +685,23 @@ public static class TableLayouter
                     ? text.Area.Y - rowTop
                     : cell.Cell.Padding.Top - first!.Value;
 
+                // A line is positioned relative to the flow's rectangle and a nested table is not — its
+                // cells carry page coordinates, exactly as `ShiftFlow` records — so moving the flow's top
+                // takes the lines along and leaves the tables where the pre-layout pass put them. They are
+                // shifted by the same amount explicitly.
+                Length dy = top - text.Area.Y;
+
                 content = text with
                 {
                     Area = new DocRect(text.Area.X, top, text.Area.Width, height),
                     Lines = kept,
+                    Tables = keptTables.Count == 0
+                        ? []
+                        : [.. keptTables.Select(nested => nested with
+                        {
+                            Area = Shift(nested.Area, Length.Zero, dy),
+                            Cells = Offset(nested.Cells, Length.Zero, dy),
+                        })],
                 };
             }
 
