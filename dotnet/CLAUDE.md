@@ -595,6 +595,10 @@ correct font set, are kept at `/c/sandbox/workdir/refpdfs-26.2.4.2-fonts/` with 
 Individual claims calibrated to 24.2.7.2 behaviour — "the document-level `w:widowControl` is
 inert", the 720 dpi device round trip, the reference's own table-only-header import defect —
 are now claims about a superseded binary and each needs one re-check before it is relied on.
+*The table-only-header one has now had its re-check (2026-08-15, round `words-ug-01`): the
+mechanism survives the version move unchanged on 26.2.4.2, and re-measuring the **cost** of not
+reproducing it is what reversed the standing decision — it was a page count as well as words. See
+`SectionInheritedHeaderTests`, which asserted the opposite until that round.*
 The largest single movers were `sectors-defense-and-aerospace.xlsx` (reference 227 → 449
 pages), `CIS_Debian_Linux_8_Benchmark_v1.0.0.xls` (109 → 88), `A_320.doc` (150 → 118) and
 `grants-2005.xls` (220 → 201).

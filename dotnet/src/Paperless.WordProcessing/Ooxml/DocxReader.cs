@@ -382,8 +382,8 @@ public sealed class OoxmlWordDocument : IWordProcessingDocument, IPaginatedDocum
         // inherited from the previous section" — and it is what "link to previous" writes, so a document
         // with one running head over several sections states it once. Losing it leaves every section
         // after the first with no running head, and a page with no header holds more lines than it should.
-        Dictionary<PageFurnitureSlot, IReadOnlyList<PageBlock>> headers = [];
-        Dictionary<PageFurnitureSlot, IReadOnlyList<PageBlock>> footers = [];
+        FurnitureCarry headers = new();
+        FurnitureCarry footers = new();
 
         for (int i = 0; i < Sections.Count; i++)
         {
@@ -423,9 +423,14 @@ public sealed class OoxmlWordDocument : IWordProcessingDocument, IPaginatedDocum
     private PageFurnitureSet? Furniture(
         DocxLayoutSource source,
         XElement sectionProperties,
-        Dictionary<PageFurnitureSlot, IReadOnlyList<PageBlock>> headers,
-        Dictionary<PageFurnitureSlot, IReadOnlyList<PageBlock>> footers)
+        FurnitureCarry headers,
+        FurnitureCarry footers)
     {
+        // Before this section names anything of its own, drop the slots the section above cannot pass
+        // down — see <see cref="FurnitureCarry"/> for which those are and how the rule was measured.
+        headers.DropUninheritable();
+        footers.DropUninheritable();
+
         foreach (XElement reference in sectionProperties.Elements())
         {
             bool isHeader = Word.Is(reference, "headerReference");
@@ -459,13 +464,83 @@ public sealed class OoxmlWordDocument : IWordProcessingDocument, IPaginatedDocum
             // A reference settles the slot even when the part it names is empty: "link to previous" is
             // the *absence* of a reference, so a section pointing at an empty header is saying it has
             // none rather than asking for the one above.
-            Dictionary<PageFurnitureSlot, IReadOnlyList<PageBlock>> into = isHeader ? headers : footers;
-            if (blocks.Count == 0) into.Remove(slot);
-            else into[slot] = blocks;
+            FurnitureCarry into = isHeader ? headers : footers;
+            if (blocks.Count == 0) into.Clear(slot);
+            else into.Set(slot, blocks);
         }
 
-        PageFurnitureSet set = new(headers, footers);
+        PageFurnitureSet set = new(headers.InForce, footers.InForce);
         return set.IsEmpty ? null : set;
+    }
+
+    /// <summary>
+    /// The headers — or footers — in force as the sections are walked, and which of them the next
+    /// section may inherit.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// §17.10.1 says a section naming no reference for a slot keeps the one above it, and Word does
+    /// exactly that. <b>LibreOffice does not, when the part it would pass down holds no paragraph of its
+    /// own</b> — a <c>w:hdr</c> whose only children are <c>w:tbl</c>. It copies the previous section's
+    /// header *content* between page styles rather than linking the two
+    /// (<c>sw/source/writerfilter/dmapper/PropertyMap.cxx</c>, <c>copyHeaderFooterTextProperty</c>), and
+    /// a body of text that begins and ends with a table copies as nothing at all, so the inheriting
+    /// section is left with no running head and reserves no space for one.
+    /// </para>
+    /// <para>
+    /// Measured against 26.2.4.2 on a two-section probe, varying only the header part's own children:
+    /// one table alone and two tables alone are not passed down; the same table with an empty
+    /// <c>w:p</c> before it, the same table with one after it, and a bare paragraph all are. Round 43
+    /// had established the same rule against 24.2.7.2 from both ends —
+    /// <c>probes/words-r43/header-inherit-bisect.py</c> and <c>header-inherit-content-shape.py</c> —
+    /// and chose not to reproduce it. That decision and its reversal are written out on
+    /// <c>SectionInheritedHeaderTests</c>, which asserted the opposite until 2026-08-15 and is the place
+    /// to read before turning this off again. The document it was found on is
+    /// <c>words/extra-001/docx/UG.CAO.00133 Foreign Part 145 approvals - Language.docx</c>, whose
+    /// header part is one nested table ending <c>&lt;/w:tbl&gt;&lt;/w:hdr&gt;</c>: the reference draws
+    /// its running head on the five pages whose own section names it and on none of the other thirteen.
+    /// </para>
+    /// <para>
+    /// It is all-or-nothing on the presence of a paragraph rather than a filter on the blocks: where a
+    /// paragraph is there, the tables beside it travel with it.
+    /// </para>
+    /// </remarks>
+    private sealed class FurnitureCarry
+    {
+        private readonly HashSet<PageFurnitureSlot> _uninheritable = [];
+
+        /// <summary>What each slot holds for the section being read.</summary>
+        public Dictionary<PageFurnitureSlot, IReadOnlyList<PageBlock>> InForce { get; } = [];
+
+        /// <summary>Records the part a section names for one slot.</summary>
+        public void Set(PageFurnitureSlot slot, IReadOnlyList<PageBlock> blocks)
+        {
+            InForce[slot] = blocks;
+            bool inheritable = false;
+            foreach (PageBlock block in blocks)
+            {
+                if (block is not PageParagraph) continue;
+                inheritable = true;
+                break;
+            }
+
+            if (inheritable) _uninheritable.Remove(slot);
+            else _uninheritable.Add(slot);
+        }
+
+        /// <summary>Records that a section named an empty part for one slot, so it has none.</summary>
+        public void Clear(PageFurnitureSlot slot)
+        {
+            InForce.Remove(slot);
+            _uninheritable.Remove(slot);
+        }
+
+        /// <summary>Drops the slots the section above cannot pass down. Called once per section.</summary>
+        public void DropUninheritable()
+        {
+            foreach (PageFurnitureSlot slot in _uninheritable) InForce.Remove(slot);
+            _uninheritable.Clear();
+        }
     }
 
     /// <summary>
