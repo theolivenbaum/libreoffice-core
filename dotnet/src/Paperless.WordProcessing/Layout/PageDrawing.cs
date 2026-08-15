@@ -1666,17 +1666,43 @@ public static class PageDrawing
         List<int> clusters = new(shaped.Glyphs.Count);
 
         Length pen = Length.Zero;
-        int remaining = shaped.Glyphs.Count;
 
         foreach (ShapedGlyph glyph in shaped.Glyphs)
         {
             Length advance = shaped.Scale(glyph.Advance, emSize);
 
-            // Tracking is the gap *between* characters, so the run's last glyph does not carry one —
-            // which is what the reference draws (`SvxFont::QuickGetTextSize` adds one per advance and
-            // then takes the trailing one back off) and what keeps the drawn pen within one tracking
-            // unit of the width the measurement charged.
-            if (tracking != Length.Zero && --remaining > 0) advance += tracking;
+            // Every glyph carries its tracking, the run's last included, so the text after a tracked
+            // run starts one tracking unit further on.
+            //
+            // This used to exempt the last glyph, citing `SvxFont::QuickGetTextSize`
+            // (`editeng/source/items/svxfont.cxx`:481-500) — "adds one per advance and then takes the
+            // trailing one back off". That is a text-*size* query, and `editeng` is Draw and Impress's
+            // engine rather than Writer's, so it was worth measuring what the reference actually draws.
+            // Against a tracked run of three characters followed by an untracked one at a declared
+            // 2.25 pt (`probes/tracking-trailing-gap/`):
+            //
+            //     Writer   (w:spacing)    A->A 2.20, 2.24    A->BBB 2.29
+            //     Impress  (a:rPr/@spc)   A->A 2.24, 2.26    A->ABB 2.29
+            //
+            // The gap into the untracked run is the same as the gaps inside the tracked one, in both
+            // engines — so the last glyph carries its tracking and the two families agree.
+            //
+            // **The asymmetry this leaves is LibreOffice's own and is deliberate.** The measurement
+            // side stays at n − 1 — `MeasuredParagraph`'s prefix table and the tests in
+            // `CharacterTrackingTests`, which cite `QuickGetTextSize` for exactly that count — because
+            // that citation is about a text *size* query and is right for what it describes. The pen
+            // is a different question and the probe measures it directly. So LibreOffice measures a
+            // tracked run one unit narrower than it draws it, and reproducing that means reproducing
+            // both numbers rather than picking one and making them agree.
+            //
+            // Making the measurement charge n as well was tried and reverted: it breaks the five
+            // `CharacterTrackingTests` that pin the editeng count, and it moves line breaking for
+            // every tracked run in the corpus to buy internal tidiness the reference does not have.
+            //
+            // Visible on `OM template for non-complex NCC operators`, whose header is `Rev.` + a space
+            // run + `X` + `of` with no space between the last two: the `X` run's 45 twentieths open a
+            // 2.25 pt gap the reference draws, so `pdftotext` reads `X of` there and read `Xof` here.
+            if (tracking != Length.Zero) advance += tracking;
 
             // A blank on a justified line is wider than the font says. Tested on the character the
             // cluster names rather than on the glyph id, because a glyph id means nothing without the

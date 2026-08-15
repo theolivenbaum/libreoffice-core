@@ -1,7 +1,10 @@
 using System.IO.Compression;
 using System.Text;
 using Paperless.Core.Documents;
+using Paperless.Core.Geometry;
+using Paperless.Core.Graphics;
 using Paperless.Core.Units;
+using Paperless.WordProcessing.Model;
 using Paperless.TestKit;
 using Paperless.WordProcessing.Layout;
 using Shouldly;
@@ -51,6 +54,114 @@ public sealed class CharacterSpacingTests
         // The measurement charges the gap before each character and the first pays nothing, so a
         // paragraph of n characters carries n − 1. See FormattedRun.Tracking.
         (tracked - bare).ShouldBe(Length.FromTwips(twips) * (Sentence.Length - 1));
+    }
+
+    /// <summary>
+    /// The drawn pen advances every glyph by the tracking, a run's last included, so the text after a
+    /// tracked run starts one unit further on.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>This is one unit more than the measurement charges, and the difference is
+    /// LibreOffice's own.</strong> <c>SvxFont::QuickGetTextSize</c> takes the trailing kern back off —
+    /// which <c>Paperless.Text.Tests</c>' <c>CharacterTrackingTests</c> pins and which is right
+    /// for the text-size query it describes — while the pen keeps it. Measured on both engines with a
+    /// tracked run of three characters followed by an untracked one at a declared 2.25 pt
+    /// (<c>probes/tracking-trailing-gap/</c>): Writer gives gaps of 2.20, 2.24 and then 2.29 into the
+    /// untracked run, Impress 2.24, 2.26 and 2.29. The gap into the next run is the same as the gaps
+    /// inside the tracked one.
+    /// </para>
+    /// <para>
+    /// Worth a word on nearly every page of <c>OM template for non-complex NCC operators</c>, whose
+    /// header is <c>Rev.</c> then a space run then <c>X</c> then <c>of</c> with no space between the
+    /// last two: the <c>X</c> run's 45 twentieths open a 2.25 pt gap, so the reference's text layer
+    /// reads <c>X of</c> where ours read <c>Xof</c>.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void TheDrawnPenCarriesATrackedRunsTrailingUnit()
+    {
+        const int Twips = 45;
+
+        Length tracked = DrawnAdvance("AAA", Twips);
+        Length bare = DrawnAdvance("AAA", spacing: null);
+
+        (tracked - bare).ShouldBe(
+            Length.FromTwips(Twips) * 3,
+            "three glyphs each carry the tracking, the last included");
+    }
+
+    /// <summary>How far the pen advances across a run as it is actually drawn.</summary>
+    /// <remarks>
+    /// Summed from the emitted glyphs rather than asked of the measurement, because the two answers
+    /// differ by design here and it is the drawn one this pins.
+    /// </remarks>
+    private static Length DrawnAdvance(string text, int? spacing)
+    {
+        string runProperties = spacing is { } twips
+            ? $"<w:rPr><w:spacing w:val=\"{twips}\"/></w:rPr>"
+            : string.Empty;
+
+        PageParagraph paragraph = Paragraph($"""
+            <w:p>
+              <w:r>{runProperties}<w:t xml:space="preserve">{text}</w:t></w:r>
+            </w:p>
+            """);
+
+        List<PageBlock> blocks = [paragraph];
+        List<LaidOutPage> pages = new Paginator(PaginationOptions.Word).Paginate(
+            blocks, new WritingSection { Page = DrawGeometry });
+
+        GlyphCollector collector = new();
+        foreach (LaidOutPage page in pages) PageDrawing.Draw(page, blocks, collector);
+
+        return collector.Advance;
+    }
+
+    /// <summary>An A4 page, wide enough that the run is never broken.</summary>
+    private static PageGeometry DrawGeometry { get; } = new()
+    {
+        Size = new DocSize(Length.FromTwips(11906), Length.FromTwips(16838)),
+        Margins = PageMargins.Uniform(Length.FromTwips(567)),
+    };
+
+    /// <summary>Adds up every glyph advance the page draws and ignores everything else.</summary>
+    /// <remarks>
+    /// The whole sink rather than a base class, because there is no no-op one to derive from — the
+    /// interface has thirteen members and no default implementations.
+    /// </remarks>
+    private sealed class GlyphCollector : IDrawingSink
+    {
+        public Length Advance { get; private set; }
+
+        public void DrawGlyphRun(GlyphRun run, Paint paint)
+        {
+            ArgumentNullException.ThrowIfNull(run);
+
+            foreach (PositionedGlyph glyph in run.Glyphs) Advance += glyph.Advance;
+        }
+
+        public void BeginPage(DocSize size) { }
+
+        public void EndPage() { }
+
+        public void Save() { }
+
+        public void Restore() { }
+
+        public void Transform(AffineTransform transform) { }
+
+        public void ClipPath(GraphicsPath path, FillRule rule = FillRule.NonZero) { }
+
+        public void FillPath(GraphicsPath path, Paint paint, FillRule rule = FillRule.NonZero) { }
+
+        public void StrokePath(GraphicsPath path, Stroke stroke) { }
+
+        public void DrawImage(RasterImage image, DocRect destination, double opacity = 1.0) { }
+
+        public void BeginTransparencyGroup(double opacity) { }
+
+        public void EndTransparencyGroup() { }
     }
 
     /// <summary>A run's own tracking survives the uniform-paragraph shortcut.</summary>
