@@ -94,11 +94,32 @@ The percentage itself is `round(w:line * 100.0 / 240)` at
 round, half away from zero, which is why 99.58% returns the 100% answer and
 takes neither branch.
 
-**What is still open.** Composing those gives 126 twips at 50% (matching), but
-131 at 52.5% requires the percentage to arrive as 52 where `round()` gives 53.
-So one conversion step between `w:line` and `GetPropLineSpace()` is still
-unaccounted for. That is a short, targeted question against the source rather
-than another sweep.
+**What is still open, and a trap to not fall into on the way.** Composing the
+above into `trunc(253 * p / 100)` and solving for the `p` that reproduces each
+of the twenty-one reference heights gives a unique `p` for every one — which
+looks like a fit and is worth nothing, because it is twenty-one free parameters
+against twenty-one points. The model is only evidence if some *single* rule
+predicts `p` from `w:line`, and none does:
+
+    pct   50.0  52.5  55.0  57.5  60.0  62.5  65.0  67.5  70.0  72.5
+    p       50    52    55    57    60    63    65    68    70    73
+    p-pct  0.0  -0.5   0.0  -0.5   0.0  +0.5   0.0  +0.5   0.0  +0.5
+
+    pct   77.5  80.0  82.5  85.0  87.5  90.0  92.5  95.0  97.5 100.0
+    p       78    80    83    85    87    90    93    95    98   100
+    p-pct +0.5   0.0  +0.5   0.0  -0.5   0.0  +0.5   0.0  +0.5   0.0
+
+52.5 rounds **down**, 62.5 rounds **up**, 87.5 rounds **down** again. That is
+not round-half-up, round-half-even, floor or ceil. So `trunc(253 * p / 100)` is
+**not** the mechanism either, and the three sub-unity halves that go the wrong
+way are the same three the residuals always flag.
+
+What that means for the next round: the open question is not "which rounding
+converts the percentage" but **what quantity `nLineHeight` actually holds at
+that point in `CalcRealHeight`**. 253 twips is what the reference *reports* at
+100%, and the round-trip through the 600 dpi reference device means the value
+being scaled need not be the value emitted. Answer that from the source before
+composing anything, and do not solve for a per-point parameter again.
 
 Where it matters
 ----------------
