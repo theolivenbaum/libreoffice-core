@@ -350,6 +350,10 @@ public sealed class OoxmlWordDocument : IWordProcessingDocument, IPaginatedDocum
             MaxPages = options?.MaxPages is > 0
                 ? options.MaxPages
                 : PaginationOptions.Word.MaxPages,
+
+            // Null for all but one document in the words corpus, and the read is one pass over the
+            // `w:sectPr` elements — see `DocxLayoutSource.LineNumbers` for why the last one wins.
+            LineNumbers = source.LineNumbers(body),
         };
 
         Paginator paginator = new(pagination);

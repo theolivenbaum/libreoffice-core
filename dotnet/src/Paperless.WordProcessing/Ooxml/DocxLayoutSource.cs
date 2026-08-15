@@ -250,6 +250,74 @@ public sealed partial class DocxLayoutSource
         }
     }
 
+    /// <summary>
+    /// The document's margin line numbering, or null when it asks for none.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Word states this per section and Writer holds one per document, so the <em>last</em>
+    /// <c>w:lnNumType</c> in document order is the one that stands: the importer writes each into the
+    /// global settings as it meets it (<c>sw/source/writerfilter/dmapper/DomainMapper.cxx</c>:1213 and
+    /// :2795), and a section that says nothing does not put the previous one back. A <c>w:countBy</c> of
+    /// nought is how a later section turns numbering off, which is the same rule read the other way —
+    /// <c>if (aSettings.nInterval == 0) … PROP_IS_ON false</c>.
+    /// </para>
+    /// <para>
+    /// The numbers take the document's <em>default</em> character formatting rather than any paragraph's,
+    /// because Writer's <c>Line Numbering</c> character style declares nothing at all; see
+    /// <see cref="LineNumbering"/>, where the four probes that establish it are recorded.
+    /// </para>
+    /// </remarks>
+    /// <param name="body">The <c>w:body</c> element.</param>
+    public LineNumbering? LineNumbers(XElement body)
+    {
+        ArgumentNullException.ThrowIfNull(body);
+
+        XElement? stated = body
+            .Descendants(Word.Name("sectPr"))
+            .Select(section => Word.Child(section, "lnNumType"))
+            .LastOrDefault(numbering => numbering is not null);
+
+        if (stated is null) return null;
+
+        if (!Word.Integer(Word.Attribute(stated, "countBy"), out int countBy) || countBy <= 0)
+        {
+            return null;
+        }
+
+        WordProperty size = _styles.ResolveInDocumentDefaults(runProperty: true, "sz");
+        WordProperty fonts = _styles.ResolveInDocumentDefaults(runProperty: true, "rFonts");
+
+        Length emSize = size.IntegerValue is { } halfPoints && halfPoints > 0
+            ? Length.FromPoints(halfPoints / 2.0)
+            : LineNumbering.DefaultEmSize;
+
+        WordTextStyle style = new(
+            Word.Attribute(fonts.Element, "ascii"), emSize, Weight: 400, IsItalic: false, Language: null);
+
+        if (Face(style) is not { } face) return null;
+
+        return new LineNumbering
+        {
+            Face = face,
+            Font = _references.GetValueOrDefault(style.FaceKey),
+            EmSize = emSize,
+            CountBy = countBy,
+            Start = Word.Integer(Word.Attribute(stated, "start"), out int start) && start > 0
+                ? start
+                : 1,
+            Distance = Word.Integer(Word.Attribute(stated, "distance"), out int distance)
+                       && distance > 0
+                ? Length.FromTwips(distance)
+                : LineNumbering.DefaultDistance,
+
+            // `newSection` maps to false beside `continuous`, because Writer has no per-section restart
+            // to map it onto — see the importer's own line, cited above.
+            RestartsEachPage =
+                string.Equals(Word.Attribute(stated, "restart"), "newPage", StringComparison.Ordinal),
+        };
+    }
+
     /// <summary>Reads the body's blocks — its paragraphs and its tables — in document order.</summary>
     /// <param name="body">The <c>w:body</c> element.</param>
     public List<PageBlock> Read(XElement body)
@@ -676,6 +744,15 @@ public sealed partial class DocxLayoutSource
             // #i3952#: a tab or a run of spaces does not raise a line's height in a Word document, and a
             // DOCX imports with the setting on. See PageParagraph.BlanksAreTransparentToHeight.
             BlanksAreTransparentToHeight = true,
+
+            // A toggle in the schema, so `<w:suppressLineNumbers/>` and `w:val="1"` both mean on and
+            // `w:val="0"` — which a style commonly writes to undo an inherited one — means off.
+            SuppressesLineNumbers = _styles
+                .ResolveParagraphProperty(
+                    "suppressLineNumbers",
+                    properties,
+                    Word.Value(properties, "pStyle") ?? _styles.DefaultStyleId(WordStyleType.Paragraph))
+                .IsOn,
             Metrics = _metrics,
             Fallback = _fonts,
             EmSize = text.Size,

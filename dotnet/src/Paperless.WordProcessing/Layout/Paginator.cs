@@ -148,6 +148,15 @@ public sealed record PaginationOptions
     public int MaxPages { get; init; } = 20000;
 
     /// <summary>
+    /// The document's margin line numbering, or null when it asks for none — which is nearly every one.
+    /// </summary>
+    /// <remarks>
+    /// Here rather than on a section because Writer holds it per document however the file states it; see
+    /// <see cref="LineNumbering"/> for the citation and for what is numbered.
+    /// </remarks>
+    public LineNumbering? LineNumbers { get; init; }
+
+    /// <summary>
     /// How much room the footnote separator takes above the notes.
     /// </summary>
     /// <remarks>
@@ -434,7 +443,7 @@ public sealed class Paginator
         // the blocks instead returned early on exactly those documents and left their frames unplaced.
         FrameResolution resolution = FrameResolution.Of(
             blocks, withFrames, pages, _options.CollapsesSpacing, _options.AddsCellLineSpacing);
-        if (resolution.IsEmpty) return pages;
+        if (resolution.IsEmpty) return Numbered(pages, blocks);
 
         for (int pass = 0; pass < MaxFramePasses; pass++)
         {
@@ -458,8 +467,21 @@ public sealed class Paginator
             if (converged) break;
         }
 
-        return resolution.AttachedTo(pages);
+        return Numbered(resolution.AttachedTo(pages), blocks);
     }
+
+    /// <summary>
+    /// The pages with their margin line numbers, or exactly the pages given when there are none.
+    /// </summary>
+    /// <remarks>
+    /// Last, after the frame passes, because every earlier pass replaces the page list wholesale and would
+    /// throw the numbers away. It can be last because a margin number is drawn outside the text area and
+    /// so changes nothing about where the text went — see <see cref="LineNumbering"/>.
+    /// </remarks>
+    private List<LaidOutPage> Numbered(List<LaidOutPage> pages, IReadOnlyList<PageBlock> blocks)
+        => _options.LineNumbers is { } numbering
+            ? [.. numbering.Applied(pages, Blocks ?? blocks)]
+            : pages;
 
     /// <summary>
     /// How many times the document may be laid out again to settle its frames' positions.
@@ -907,9 +929,41 @@ public sealed class Paginator
                     ? Length.Zero
                     : table.SpaceBefore;
 
+                // The notes already on the page take their room out of the same column the table goes in,
+                // which is the paragraph arm's rule applied to the other kind of block. Before this, a
+                // table was placed against the bare column bottom and could be drawn straight over the
+                // note area a paragraph above it had already reserved.
+                Length tableRoom = columnBottom - NoteHeight(notes) - (used + before);
+
                 TablePart part = PlaceTablePart(
                     table, laid[paragraphIndex], lineIndex, rowDrawn, body.ColumnArea(column),
-                    used + before, column, columnBottom - (used + before), columnIsEmpty);
+                    used + before, column, tableRoom, columnIsEmpty);
+
+                // The notes the placed part itself cites take room out of the same column, so the part may
+                // no longer fit once they are counted — the paragraph arm's feedback loop, one step of it.
+                // One step rather than a loop to a fixed point: a cell's cut points are its line bottoms
+                // and there is no guarantee a second retry removes anything, whereas Writer damps the same
+                // circularity in `txtftn.cxx`:560 with the comment "We break the oscillation". Progress is
+                // required — a retry that places at least as much of the table as the first attempt is
+                // discarded — so this cannot loop or make the page worse.
+                if (part.Placed is { } first)
+                {
+                    Length withCited = NoteHeight(notes, PlacedNotes.In(first));
+
+                    if (withCited > NoteHeight(notes))
+                    {
+                        Length shortened = columnBottom - withCited - (used + before);
+                        TablePart retry = PlaceTablePart(
+                            table, laid[paragraphIndex], lineIndex, rowDrawn, body.ColumnArea(column),
+                            used + before, column, shortened, columnIsEmpty);
+
+                        if (retry.Placed is not null
+                            && (retry.NextRow, retry.NextDrawn) != (part.NextRow, part.NextDrawn))
+                        {
+                            part = retry;
+                        }
+                    }
+                }
 
                 // Nothing of the table may go here, and the column already holds something — so the page
                 // ends and the table starts again at the top of the next one.
@@ -920,6 +974,12 @@ public sealed class Paginator
                 }
 
                 tables.Add(part.Placed);
+
+                // A footnote cited from a cell is a footnote: it belongs at the foot of the page the cell
+                // was drawn on. Collected from the part rather than from the table, so a split row charges
+                // each of its pages for the notes that page actually drew.
+                notes.AddRange(PlacedNotes.In(part.Placed));
+
                 used += before + part.Height;
                 lineIndex = part.NextRow;
                 rowDrawn = part.NextDrawn;
