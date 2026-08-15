@@ -18,11 +18,33 @@ file; we always give 29.400.** The step between them is 0.120 pt, which is
 exactly one pixel at 600 dpi — the printer reference device this container
 resolves (see `CLAUDE.md`, and `LineSpacing.cs`'s `RefDevMode`).
 
-So LibreOffice is snapping row *boundaries* to whole device pixels while
-carrying the exact height forward, and we are snapping each row *height*
-independently. Rounding boundaries keeps the cumulative error inside half a
-pixel; rounding heights accumulates it. Ours grows monotonically to **+1.080 pt
-over 24 rows**.
+**CORRECTION, made before anything was built on the first reading.** The
+paragraph that stood here said LibreOffice snaps row *boundaries* while we snap
+each row *height*, and that the rounding order was the defect. Half of that is
+right and the half that matters is not.
+
+The reference does snap boundaries — every one is a whole number of 600 dpi
+pixels (58.080/0.12 = 484, 87.360/0.12 = 728, 706.560/0.12 = 5888). But
+**rounding order alone oscillates; it cannot accumulate monotonically.** Ours
+grows in one direction to +1.080 pt over 24 rows, and that is only possible if
+the height itself differs.
+
+Averaging the reference's sixteen uniform body rows gives its exact height:
+
+    reference mean pitch   29.3475 pt   (alternating 29.280 and 29.400)
+    our pitch              29.4000 pt
+    per-row excess         +0.0525 pt   ->  +1.26 pt over 24 rows
+
+29.3475 pt is **244.56** pixels at 600 dpi, which is exactly why the reference
+alternates between 244 and 245 while ours is 245 every time.
+
+So **our auto row height is about 0.05 pt too tall**, and the quantisation makes
+that visible rather than causing it. These rows carry `w:spacing w:line="233"
+w:lineRule="auto"` — proportional spacing at 97.08%, *below* 100 — so the seat is
+a line height under sub-unity proportional spacing, adjacent to the
+base-membership rule fixed the same day but not the same bug. Only 12 of the
+document's 305 rows declare a `w:trHeight`; the rest are auto, so the line height
+is the whole of it.
 
 Two things make this worth chasing rather than filing as cosmetic:
 
