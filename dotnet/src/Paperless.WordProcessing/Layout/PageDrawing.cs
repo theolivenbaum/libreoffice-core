@@ -59,6 +59,7 @@ public static class PageDrawing
         {
             DrawFlow(page.Header, sink);
             DrawBody(page, blocks, sink);
+            DrawLineNumbers(page, sink);
             foreach (PlacedTable table in page.Tables) DrawTable(table, sink);
             DrawSeparator(page.NoteSeparator, sink);
             DrawFlow(page.Notes, sink);
@@ -96,6 +97,39 @@ public static class PageDrawing
                  page.Lines.GroupBy(line => (line.Columns, line.Column)))
         {
             DrawLines(page.ColumnArea(band.First()), [.. band], blocks, sink);
+        }
+    }
+
+    /// <summary>
+    /// Draws a page's margin line numbers, right-aligned against the text edge.
+    /// </summary>
+    /// <remarks>
+    /// Right-aligned here rather than in <see cref="LineNumbering"/> because aligning means measuring, and
+    /// measuring means shaping: the model carries the right edge and this shapes the digits once, to draw
+    /// them and to know how far left of that edge to start. Measured on the reference, whose one-, two-
+    /// and three-digit numbers sit at three different left edges and one right one.
+    /// </remarks>
+    private static void DrawLineNumbers(LaidOutPage page, IDrawingSink sink)
+    {
+        if (page.LineNumbers.Count == 0) return;
+        if (page.Numbering is not { } numbering) return;
+
+        FontReference font = numbering.Font ?? Reference(numbering.Face);
+
+        foreach (PageLineNumber mark in page.LineNumbers)
+        {
+            ShapedText shaped = TextShaper.Default.Shape(numbering.Face, mark.Text, numbering.Shaping);
+            Length width = shaped.Width(numbering.EmSize);
+
+            sink.DrawGlyphRun(
+                Build(
+                    shaped,
+                    mark.Text,
+                    numbering.EmSize,
+                    font,
+                    new DocPoint(mark.RightBaseline.X - width, mark.RightBaseline.Y),
+                    Length.Zero),
+                Paint.Solid(Colour.Black));
         }
     }
 

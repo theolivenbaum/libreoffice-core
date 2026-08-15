@@ -284,6 +284,18 @@ public sealed record PageParagraph : PageBlock
     public bool BlanksAreTransparentToHeight { get; init; }
 
     /// <summary>
+    /// True when this paragraph's lines carry no margin line number and do not advance the count.
+    /// </summary>
+    /// <remarks>
+    /// <c>w:pPr/w:suppressLineNumbers</c>, and Writer's <c>SwFormatLineNumber::IsCount</c>. Both halves
+    /// matter and only one of them is obvious: a suppressed paragraph is skipped by the counter as well as
+    /// by the pen, so the line after it takes the number the line before it would have led to. On the
+    /// paragraph rather than in <see cref="LineNumbering"/> because it is stated per paragraph, and false
+    /// on all but a handful — see <see cref="LineNumbering"/> for the rest of the rule.
+    /// </remarks>
+    public bool SuppressesLineNumbers { get; init; }
+
+    /// <summary>
     /// The direction its bidi resolution takes as its base.
     /// </summary>
     /// <remarks>
@@ -1026,6 +1038,25 @@ public sealed record LaidOutPage
     /// touches, each time with the rows that fit and its headings repeated.
     /// </remarks>
     public IReadOnlyList<PlacedTable> Tables { get; init; } = [];
+
+    /// <summary>
+    /// The margin line numbers beside the body's lines, empty for a document that asks for none.
+    /// </summary>
+    /// <remarks>
+    /// Filled by a pass over the finished pages rather than during the fill, because a margin number is
+    /// drawn outside the text area and so cannot move a line — see <see cref="LineNumbering"/>.
+    /// </remarks>
+    public IReadOnlyList<PageLineNumber> LineNumbers { get; init; } = [];
+
+    /// <summary>
+    /// The rule <see cref="LineNumbers"/> were produced by, or null when the page carries none.
+    /// </summary>
+    /// <remarks>
+    /// Beside them rather than folded into each, because the face, the size and the shaping are the same
+    /// for every number on every page of the document and a backend needs them once — a page carrying
+    /// forty-five numbers would otherwise carry forty-five copies of one font reference.
+    /// </remarks>
+    public LineNumbering? Numbering { get; init; }
 
     /// <summary>Which section's geometry the page was laid on.</summary>
     public int SectionIndex { get; init; }
