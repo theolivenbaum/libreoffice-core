@@ -364,6 +364,13 @@ public readonly record struct SlideEscapement(int Percent, int Proportion)
 /// break and is drawn from the face's own <c>post</c> metrics after the text is placed.
 /// </param>
 /// <param name="IsStruckThrough">Whether a rule is drawn through it.</param>
+/// <param name="IsShadowed">
+/// Whether the characters cast the legacy per-character drop shadow — bit 4 of a PPT
+/// character-property mask. Like the decorations above it moves no line break, because the
+/// shadow is the same glyphs drawn a second time at an offset derived from the font's line
+/// height rather than from anything the paragraph measured. See
+/// <see cref="SlideTextLayout"/>'s <c>ShadowOffset</c> for the rule and the probe behind it.
+/// </param>
 /// <param name="Escapement">
 /// How far off its baseline the run sits and how much it shrinks to sit there — a superscript or
 /// a subscript. Unlike the decorations above, this <em>does</em> move line breaks, because the
@@ -395,6 +402,7 @@ public readonly record struct SlideTextRun(
     Length Tracking = default,
     bool IsUnderlined = false,
     bool IsStruckThrough = false,
+    bool IsShadowed = false,
     SlideEscapement Escapement = default,
     SlideSymbolFont? SymbolFont = null)
 {

@@ -1699,9 +1699,10 @@ internal sealed partial class PptxSlideLayout
         public bool IsEmpty => Raster is null && Vector is null;
     }
 
-    private static Paint? SolidFill(XElement parent, DrawingTheme? theme, Colour? placeholder)
+    private static Paint? SolidFill(
+        XElement parent, DrawingTheme? theme, Colour? placeholder, string wrapper = "solidFill")
     {
-        XElement? solid = Drawing.Child(parent, "solidFill");
+        XElement? solid = Drawing.Child(parent, wrapper);
         if (solid is null) return null;
 
         foreach (XElement child in solid.Elements())
@@ -1756,7 +1757,7 @@ internal sealed partial class PptxSlideLayout
     /// </remarks>
     private static Stroke? Pen(XElement line, DrawingTheme? theme)
     {
-        if (SolidFill(line, theme, placeholder: null) is not { } paint) return null;
+        if (BestSolidLinePaint(line, theme) is not { } paint) return null;
 
         // The width rounds into the drawing layer's own unit before anything is drawn with
         // it: a stated 38100 EMU — three points — comes out of the reference's PDF as a
@@ -1774,6 +1775,66 @@ internal sealed partial class PptxSlideLayout
                 Drawing.Attribute(Drawing.Child(line, "prstDash"), "val"),
                 width,
                 capExtendsDash: cap != LineCap.Butt));
+    }
+
+    /// <summary>
+    /// The one colour a line is stroked in, whichever kind of fill states it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>A line's paint is always one colour, whatever the file wraps it in.</b> LibreOffice's
+    /// core has no gradient-stroked line, so <c>LineProperties::pushToPropMap</c>
+    /// (<c>oox/source/drawingml/lineproperties.cxx:495</c>) reduces the <c>a:ln</c>'s fill to a
+    /// single colour through <c>FillProperties::getBestSolidColor</c>
+    /// (<c>oox/source/drawingml/fillproperties.cxx:402-425</c>) and strokes with that. Reading
+    /// only <c>a:solidFill</c> — which is what this did — threw the whole <c>a:ln</c> away when
+    /// its paint was anything else, taking the <em>width, cap and dash with it</em>, because they
+    /// are all carried on the one <see cref="Stroke"/> this returns. In the C++ they are set
+    /// before the colour is even looked at and survive a colour that cannot be resolved.
+    /// </para>
+    /// <para>
+    /// The visible cost was a 3 pt master connector on <c>16 - UTM - (NASA).pptx</c>, whose
+    /// <c>a:ln w="38100"</c> carries an <c>a:gradFill</c>. The shape's body is 1 588 EMU tall —
+    /// 0.125 pt — so with the stroke discarded all that survived was a sliver under a fifth of a
+    /// pixel at 300 dpi, in the shape's own <c>accent1</c> rather than the line's colour. The rule
+    /// is in the master, so it is on all thirty of that deck's pages.
+    /// </para>
+    /// <para>
+    /// <b>The stop it picks is the second, not the first</b>, and only when there are more than
+    /// two: <c>getBestSolidColor</c> takes <c>maGradientStops.begin()</c> and advances it once if
+    /// the map holds three or more. The map is keyed by position, so "second" means second-lowest
+    /// <c>pos</c> rather than second in document order. Note this is <em>not</em> the
+    /// nearest-the-middle rule <c>DrawingChartPlot.FillOf</c> uses; that one is a chart's own
+    /// approximation for a model that holds one colour per series, measured on its own deck, and
+    /// the two are left to differ rather than being merged onto one wrong answer.
+    /// </para>
+    /// <para>
+    /// A pattern fill resolves to its background colour, or its foreground when it states no
+    /// background — the same function, same order.
+    /// </para>
+    /// </remarks>
+    /// <param name="line">The resolved <c>a:ln</c>.</param>
+    /// <param name="theme">The theme its colour references resolve against.</param>
+    private static Paint? BestSolidLinePaint(XElement line, DrawingTheme? theme)
+    {
+        if (SolidFill(line, theme, placeholder: null) is { } solid) return solid;
+
+        if (DrawingFill.ReadGradient(Drawing.Child(line, "gradFill")) is { Stops.Count: > 0 } gradient)
+        {
+            IReadOnlyList<DrawingGradientStop> stops =
+                [.. gradient.Stops.OrderBy(stop => stop.Position)];
+
+            DrawingGradientStop chosen = stops[stops.Count > 2 ? 1 : 0];
+            if (chosen.Colour.Resolve(theme) is { } resolved) return Paint.Solid(resolved);
+        }
+
+        if (Drawing.Child(line, "pattFill") is { } pattern)
+        {
+            return SolidFill(pattern, theme, placeholder: null, wrapper: "bgClr")
+                   ?? SolidFill(pattern, theme, placeholder: null, wrapper: "fgClr");
+        }
+
+        return null;
     }
 
     /// <summary>The marker one end of a line carries, from its own <c>a:ln</c> or its placeholder's.</summary>

@@ -724,6 +724,7 @@ internal static class PptxTextBody
         int baseline = First(runProperties, defaults, element => Drawing.Number(element, "baseline"))
                        ?? 0;
 
+
         return new SlideTextRun(
             start,
             length,

@@ -211,6 +211,23 @@ public static class EscherPropertyIds
     /// <summary>The picture's original file name.</summary>
     public const ushort PictureName = 261;
 
+    /// <summary>
+    /// A colour in the picture to be made transparent — PowerPoint's <em>Set Transparent
+    /// Color</em>, as an <c>MSO_CLR</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// It is a property of the <em>shape</em>, not of the blip, so two shapes may show the same
+    /// stored picture with different colours knocked out and a reader caching decoded blips by
+    /// <c>pib</c> must attach this after the cache rather than inside it.
+    /// </para>
+    /// <para>
+    /// Absent and "black is transparent" are both zero, so this needs
+    /// <see cref="EscherPropertyTable.Has"/> to tell them apart rather than a zero test.
+    /// </para>
+    /// </remarks>
+    public const ushort PictureTransparent = 263;
+
     /// <summary>The shape's foreground fill colour.</summary>
     public const ushort FillColour = 385;
 

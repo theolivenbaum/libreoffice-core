@@ -188,25 +188,34 @@ public static class SlideDrawing
     /// runs into the PDF as real text at real positions.
     /// </para>
     /// <para>
-    /// A picture casts a shadow of its <em>frame</em> and only when its bytes are a JPEG. What
-    /// LibreOffice casts is the picture's own silhouette — the bitmap with every colour replaced
-    /// and its alpha kept — which needs pixels this layer deliberately does not have. A JPEG has
-    /// no alpha channel at all, so its silhouette <em>is</em> its frame and the approximation is
-    /// exact; a PNG's is not, and a logo with a transparent background would gain a black
-    /// rectangle behind it. Skipping those loses a shadow; drawing them would invent one.
+    /// <b>A picture casts the silhouette of its own pixels, not of its frame.</b> That is what
+    /// LibreOffice casts — the bitmap with every colour replaced and its alpha kept — and it is
+    /// expressible here without this layer gaining a codec, because a
+    /// <see cref="DuotoneRecolour"/> whose two ends are the same colour <em>is</em> "every colour
+    /// replaced by one", and the decoder that carries it out already leaves alpha untouched.
+    /// </para>
+    /// <para>
+    /// This used to be approximated by filling the shape's frame, and only for a picture whose
+    /// bytes began with a JPEG start-of-image marker — on the grounds that a JPEG has no alpha, so
+    /// its silhouette is its frame, while a PNG's is not and a cut-out logo would gain a black
+    /// rectangle behind it. The approximation was exact where it applied and cast no shadow at all
+    /// anywhere else. Measured on <c>1-secretariat.PPT</c> page 1, whose winged logo is a PNG: the
+    /// reference draws the picture <em>twice</em>, once as itself and once as a flat <c>#808080</c>
+    /// copy carrying the same 852-byte soft mask, offset by the shape's 6 pt shadow. Recolouring
+    /// the picture reproduces that and retires the JPEG special case, which it subsumes — for an
+    /// opaque raster the silhouette and the frame are the same pixels.
     /// </para>
     /// </remarks>
     private static void DrawShadow(PlacedShape shape, SlideShadow shadow, IDrawingSink sink)
     {
         if (shadow.IsInvisible) return;
 
-        bool silhouette =
-            (shape.Fill is not null && FillReachesThePage(shape.Picture))
-            || IsOpaqueRaster(shape.Picture);
+        bool silhouette = shape.Fill is not null && FillReachesThePage(shape.Picture);
+        bool picture = shape.Picture is { Vector: null, Image: not null, Destination.IsEmpty: false };
         bool outline = shape.Line is not null;
         bool text = shadow.CarriesText && shape.Text is { Runs.Count: > 0 };
 
-        if (!silhouette && !outline && !text) return;
+        if (!silhouette && !picture && !outline && !text) return;
 
         Paint paint = Paint.Solid(shadow.Colour);
         bool grouped = shadow.Opacity < 1.0;
@@ -225,6 +234,8 @@ public static class SlideDrawing
                         shape.Outline,
                         shape.Fill is { } fill ? Recoloured(fill, shadow.Colour) : paint);
                 }
+
+                if (picture) DrawPictureSilhouette(shape, shape.Picture!, shadow.Colour, sink);
 
                 if (shape.Line is { } line)
                 {
@@ -437,6 +448,41 @@ public static class SlideDrawing
     /// exactly on the boundary rather than half under it.
     /// </para>
     /// </remarks>
+    /// <summary>
+    /// Draws a picture as a flat silhouette of one colour, keeping its alpha — the shadow a
+    /// picture casts.
+    /// </summary>
+    /// <remarks>
+    /// The same geometry as <see cref="DrawPicture"/>, deliberately: the clip, the destination and
+    /// the opacity all come from the same places, so the shadow cannot drift away from the shape
+    /// it belongs to. Only the pixels differ, and they differ by a
+    /// <see cref="DuotoneRecolour"/> whose two ends are the shadow's colour — which maps every
+    /// luminance onto that one colour and leaves the alpha channel alone.
+    /// </remarks>
+    /// <param name="shape">The shape whose outline clips the picture.</param>
+    /// <param name="picture">The picture to cast.</param>
+    /// <param name="colour">The shadow's colour.</param>
+    /// <param name="sink">Where to draw.</param>
+    private static void DrawPictureSilhouette(
+        PlacedShape shape, PlacedPicture picture, Colour colour, IDrawingSink sink)
+    {
+        if (picture.Image is not { } image) return;
+
+        sink.Save();
+        try
+        {
+            sink.ClipPath(shape.Outline);
+            sink.DrawImage(
+                image with { Duotone = new DuotoneRecolour(colour, colour) },
+                picture.Destination,
+                picture.Opacity);
+        }
+        finally
+        {
+            sink.Restore();
+        }
+    }
+
     private static void DrawPicture(PlacedShape shape, PlacedPicture picture, IDrawingSink sink)
     {
         if (picture.Destination.IsEmpty) return;

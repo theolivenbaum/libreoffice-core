@@ -144,6 +144,7 @@ public static class RasterImageDecoder
                   // branch at all.
                   Duotone = image.Duotone,
                   Luminance = image.Luminance,
+                  Knockout = image.Knockout,
               });
     }
 
@@ -170,11 +171,24 @@ public static class RasterImageDecoder
 
         bool duotoned = image.Duotone is not null;
         bool adjusted = image.Luminance is { IsIdentity: false };
-        if (!duotoned && !adjusted) return image;
+        bool knockedOut = image.Knockout is not null;
+        if (!duotoned && !adjusted && !knockedOut) return image;
 
         ReadOnlySpan<byte> source = image.Pixels.Span;
         byte[] pixels = new byte[source.Length];
         source.CopyTo(pixels);
+
+        // First, because the colour it matches is the one the file stored — the reference knocks
+        // the colour out at import and adjusts brightness and contrast afterwards
+        // (msdffimp.cxx:3894-3903, then :3906). The alpha it writes is binary and is OR-combined
+        // with whatever the picture already had, so a pixel already transparent stays so.
+        if (image.Knockout is { } knockout)
+        {
+            for (int i = 0; i + 3 < pixels.Length; i += 4)
+            {
+                if (knockout.Matches(pixels[i], pixels[i + 1], pixels[i + 2])) pixels[i + 3] = 0;
+            }
+        }
 
         if (image.Duotone is { } duotone)
         {
@@ -205,6 +219,7 @@ public static class RasterImageDecoder
             EncodedBytes = default,
             Duotone = null,
             Luminance = null,
+            Knockout = null,
         };
     }
 

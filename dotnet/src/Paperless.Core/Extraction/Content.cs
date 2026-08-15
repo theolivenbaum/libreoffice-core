@@ -196,6 +196,18 @@ public enum RunEmphasis
 
     /// <summary>Subscript.</summary>
     Subscript = 1 << 5,
+
+    /// <summary>
+    /// A drop shadow cast by the characters themselves.
+    /// </summary>
+    /// <remarks>
+    /// The legacy per-character shadow the binary Office formats carry as a single bit — bit 4 of
+    /// a PPT character-property mask, <c>fo:text-shadow</c> in ODF — and <em>not</em> DrawingML's
+    /// <c>a:effectLst/a:outerShdw</c>, which states an offset, a blur, a colour and an alpha of
+    /// its own and so cannot be reduced to a flag. It is also not the shape shadow a drawing
+    /// object casts: this one belongs to the run and moves with it.
+    /// </remarks>
+    Shadow = 1 << 6,
 }
 
 /// <summary>A table. Children are <see cref="ContentTableRow"/> nodes.</summary>

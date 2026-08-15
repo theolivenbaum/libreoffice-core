@@ -373,6 +373,7 @@ internal static class PptTextBody
             PptColour.ResolveText(colour, scheme) ?? Colour.Black,
             IsUnderlined: emphasis.HasFlag(RunEmphasis.Underline),
             IsStruckThrough: emphasis.HasFlag(RunEmphasis.Strikethrough),
+            IsShadowed: emphasis.HasFlag(RunEmphasis.Shadow),
             Escapement: escapement == 0
                 ? SlideEscapement.None
                 : new SlideEscapement(escapement, SlideEscapement.AutomaticProportion));

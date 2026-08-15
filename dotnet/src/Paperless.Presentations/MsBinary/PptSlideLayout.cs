@@ -1046,9 +1046,22 @@ internal sealed class PptSlideLayout
     private PlacedPicture? Picture(EscherShape shape, DocRect bounds)
     {
         PptPicture picture = PictureOf(shape);
-        return picture.IsEmpty
-            ? null
-            : new PlacedPicture(picture.Raster, EscherPicture.Cropped(shape.Properties, bounds))
+        if (picture.IsEmpty) return null;
+
+        // Attached here rather than in PictureAt, because the knockout is a property of the
+        // *shape* and that cache is keyed by pib: two shapes may display one stored blip with
+        // different colours knocked out, and folding it into the cache would give the second
+        // shape the first shape's transparency. Vectors are excluded for the reason
+        // ColourKnockout records — the reference applies it only to a Bitmap graphic.
+        RasterImage? raster = picture.Raster;
+        if (raster is not null
+            && picture.Vector is null
+            && EscherPicture.TransparentColour(shape.Properties) is { } knockout)
+        {
+            raster = raster with { Knockout = knockout };
+        }
+
+        return new PlacedPicture(raster, EscherPicture.Cropped(shape.Properties, bounds))
             {
                 Vector = picture.Vector,
 
