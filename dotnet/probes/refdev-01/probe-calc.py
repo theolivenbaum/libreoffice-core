@@ -157,7 +157,12 @@ def render(src, who):
     d = os.path.join(OUT, who)
     os.makedirs(d, exist_ok=True)
     pdf = os.path.join(d, os.path.splitext(os.path.basename(src))[0] + '.pdf')
-    if not os.path.exists(pdf):
+    if os.path.exists(pdf):
+        return pdf
+    if who == 'ours':
+        subprocess.run([os.environ['PAPERLESS_CLI'], "render", src, "--format", "pdf",
+                        "--outdir", d], capture_output=True)
+    else:
         subprocess.run(["soffice", "-env:UserInstallation=file://" + os.path.abspath(OUT) + "/prof",
                         "--headless", "--convert-to", "pdf", "--outdir", d, src],
                        capture_output=True)
@@ -181,6 +186,7 @@ def measure(pdf, key):
 src = os.path.join(OUT, 'calc-%s-%s.fods' % (SET, MODE))
 key = build(src)
 ref = measure(render(src, 'ref'), key)
+ours = measure(render(src, 'ours'), key) if os.environ.get('PAPERLESS_CLI') else {}
 
 print('%18s %5s | %8s %6s | %s' % ('face', 'pt', 'ref asc', 'ref h',
                                    '  '.join('%s' % m for m in MODELS)))
@@ -198,6 +204,12 @@ for k in key:
         score[m][1] += (mh == rh)
         cells.append('%+d/%+d' % (ma - ra, mh - rh))
     print('%18s %5.1f | %8d %6d | %s' % (k[0], k[1], ra, rh, '  '.join(cells)))
+
+if ours:
+    oa = sum(1 for k in ref if k in ours and ours[k][0] == ref[k][0])
+    oh = sum(1 for k in ref if k in ours and ours[k][1] == ref[k][1])
+    print('  %-18s ascent %3d/%d   line height %3d/%d'
+          % ('TREE', oa, len(ref), oh, len(ref)))
 
 print('\nmeasured %d of %d pairs, mode=%s' % (n, len(key), MODE))
 for m in MODELS:

@@ -29,6 +29,25 @@ public enum LineMetricSource
 }
 
 /// <summary>
+/// The logical unit a reference device's map mode is set to.
+/// </summary>
+/// <remarks>
+/// <b>A resolution alone does not describe a device.</b> The quantisation a grid applies is the
+/// size of one device pixel expressed in the unit the application measures in, and that is the
+/// resolution <em>and</em> the map unit together: 8640 dpi in twips is six pixels to the unit,
+/// 8640 dpi in hundredths of a millimetre is 3.4, and 600 dpi in hundredths of a millimetre is
+/// 0.236 — a pixel worth 4.23 units, eighteen times the coarsest thing Writer ever sees.
+/// </remarks>
+public enum MetricUnit
+{
+    /// <summary>A twentieth of a point, 1440 to the inch. Writer's map mode.</summary>
+    Twip,
+
+    /// <summary>A hundredth of a millimetre, 2540 to the inch. The draw layer's, Calc's and Impress's.</summary>
+    Mm100,
+}
+
+/// <summary>
 /// The device a font's metrics are quantised through before layout sees them.
 /// </summary>
 /// <remarks>
@@ -72,12 +91,14 @@ public enum LineMetricSource
 /// hardware.
 /// </para>
 /// <para>
-/// <b>The logical unit is the twip</b>, because that is the map mode Writer's reference device is set
-/// to. Calc's and Impress's reference devices are in 1/100 mm and Impress's is 600 dpi rather than
-/// 8640, so neither is this grid; both still scale exactly here and each would need its own.
+/// <b>Writer's logical unit is the twip and the other two applications' is the hundredth of a
+/// millimetre</b>, which is why this carries a <see cref="MetricUnit"/> as well as a resolution.
+/// See <see cref="Presentation"/> and <see cref="Spreadsheet"/>; both were measured on the
+/// installed binary rather than read out of the C++, and for Calc the two answers differ.
 /// </para>
 /// </remarks>
 /// <param name="Dpi">The device resolution the metrics are rounded onto.</param>
+/// <param name="Unit">The logical unit the device's map mode is set to.</param>
 /// <param name="QuantisesAdvances">
 /// Whether horizontal advances go through the grid as well as the vertical metrics.
 /// <para>
@@ -89,22 +110,82 @@ public enum LineMetricSource
 /// rules differ by less than a twip and the evidence says to take the one that was measured.
 /// </para>
 /// </param>
-public readonly record struct MetricGrid(int Dpi, bool QuantisesAdvances)
+public readonly record struct MetricGrid(int Dpi, bool QuantisesAdvances, MetricUnit Unit)
 {
-    /// <summary>A grid at a resolution, quantising advances as a real device does.</summary>
-    public MetricGrid(int dpi) : this(dpi, true) { }
+    /// <summary>A grid at a resolution in twips, quantising advances as a real device does.</summary>
+    public MetricGrid(int dpi) : this(dpi, true, MetricUnit.Twip) { }
+
+    /// <summary>A grid at a resolution in twips.</summary>
+    /// <param name="dpi">The device resolution.</param>
+    /// <param name="quantisesAdvances">Whether horizontal advances go through it too.</param>
+    public MetricGrid(int dpi, bool quantisesAdvances)
+        : this(dpi, quantisesAdvances, MetricUnit.Twip) { }
 
     /// <summary>The grid a document asking for printer metrics is laid out on.</summary>
-    public static MetricGrid Printer { get; } = new(300, QuantisesAdvances: true);
+    public static MetricGrid Printer { get; } = new(300, quantisesAdvances: true);
 
     /// <summary>
     /// The virtual reference device Writer formats every other document against: 8640 dpi, six
     /// device pixels to the twip.
     /// </summary>
-    public static MetricGrid Reference { get; } = new(6 * 1440, QuantisesAdvances: false);
+    public static MetricGrid Reference { get; } = new(6 * 1440, quantisesAdvances: false);
 
-    /// <summary>Twips per device pixel on this grid.</summary>
-    private double TwipsPerPixel => 1440.0 / Dpi;
+    /// <summary>
+    /// The reference device Impress and Draw format against: <b>600 dpi in 1/100 mm</b>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>SdModule::SdModule</c> creates one <c>VirtualDevice</c> for the whole application, sets
+    /// its map mode to <c>MapUnit::Map100thMM</c> and then
+    /// <c>VirtualDevice::RefDevMode::Dpi600</c> — <c>sd/source/ui/app/sdmod.cxx</c>:83-85, whose
+    /// comment says it is for "a visually better formatting of text in small sizes". A device
+    /// pixel is therefore <b>4.233 hundredths of a millimetre</b>, 2.4 twips, where Writer's is a
+    /// sixth of a twip: the same class of quantisation worth eighteen times as much.
+    /// </para>
+    /// <para>
+    /// Measured, not read. <c>probes/refdev-01/probe-impress.py</c> puts six baselines on each of
+    /// 507 (face, size) slides and reads them out of the reference PDF's own text matrices: this
+    /// grid is exact on <b>507 of 507</b> ascents and 507 of 507 line heights, where 720 dpi
+    /// manages 75 and 8640 dpi 89, and exact scaling — what the tree did before — 82.
+    /// </para>
+    /// </remarks>
+    public static MetricGrid Presentation { get; } = new(600, false, MetricUnit.Mm100);
+
+    /// <summary>
+    /// The device a printed or exported Calc cell is formatted against: <b>720 dpi in 1/100 mm</b>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>This is not <c>ScDocument</c>'s own reference device and that is the whole point.</b>
+    /// <c>ScDocument::GetVirtualDevice_100th_mm</c> really is <c>RefDevMode::MSO1</c>, 8640 dpi
+    /// (<c>sc/source/core/data/documen8.cxx</c>:182-193), and it is not what draws a cell:
+    /// <c>ScOutputData</c> formats against the <em>output</em> device, which on a PDF export is
+    /// the PDF writer's own reference device, <c>RefDevMode::PDF1</c> = 720 dpi
+    /// (<c>vcl/source/gdi/virdev.cxx</c>:410). Reading the tree gives 8640 and the binary draws
+    /// 720; <c>probes/refdev-01/probe-calc.py</c> scores 92 of 273 for the first and
+    /// <b>273 of 273</b> for the second, and 468 of 468 ascents across both the multi-paragraph
+    /// <c>EditCell</c> path and the single-line <c>ScOutputData::LayoutStrings</c> one.
+    /// </para>
+    /// <para>
+    /// 720 dpi in 1/100 mm is the same device <c>SheetDeviceUnits.ReferenceDpi</c> already
+    /// carried for the font-size round trip. That it turned up independently from the line
+    /// metrics is a check on both.
+    /// </para>
+    /// </remarks>
+    public static MetricGrid Spreadsheet { get; } = new(720, false, MetricUnit.Mm100);
+
+    /// <summary>Logical units to the inch, for this grid's map unit.</summary>
+    private int UnitsPerInch => Unit == MetricUnit.Mm100 ? 2540 : 1440;
+
+    /// <summary>Logical units per device pixel on this grid.</summary>
+    private double UnitsPerPixel => (double)UnitsPerInch / Dpi;
+
+    /// <summary>A length in this grid's whole logical units.</summary>
+    private long ToLogical(Length value) => Unit == MetricUnit.Mm100 ? value.Mm100 : value.Twips;
+
+    /// <summary>Whole logical units back as a length.</summary>
+    private Length FromLogical(long units)
+        => Unit == MetricUnit.Mm100 ? Length.FromMm100(units) : Length.FromTwips(units);
 
     /// <summary>
     /// A design-unit measurement in whole device pixels at an em size.
@@ -119,7 +200,7 @@ public readonly record struct MetricGrid(int Dpi, bool QuantisesAdvances)
     {
         if (unitsPerEm <= 0 || Dpi <= 0) return 0;
 
-        double em = Math.Round(emSize.Twips / TwipsPerPixel, MidpointRounding.AwayFromZero);
+        double em = Math.Round(ToLogical(emSize) / UnitsPerPixel, MidpointRounding.AwayFromZero);
         return (long)Math.Round(designUnits * em / unitsPerEm, MidpointRounding.AwayFromZero);
     }
 
@@ -131,7 +212,7 @@ public readonly record struct MetricGrid(int Dpi, bool QuantisesAdvances)
     public Length ToLength(long pixels)
         => Dpi <= 0
             ? Length.Zero
-            : Length.FromTwips((long)Math.Round(pixels * TwipsPerPixel, MidpointRounding.AwayFromZero));
+            : FromLogical((long)Math.Round(pixels * UnitsPerPixel, MidpointRounding.AwayFromZero));
 
     /// <summary>
     /// An advance width as the device measures it: the whole run's advance in device pixels,
@@ -169,7 +250,7 @@ public readonly record struct MetricGrid(int Dpi, bool QuantisesAdvances)
     {
         if (unitsPerEm <= 0 || Dpi <= 0) return Length.Zero;
 
-        double em = Math.Round(emSize.Twips / TwipsPerPixel, MidpointRounding.AwayFromZero);
+        double em = Math.Round(ToLogical(emSize) / UnitsPerPixel, MidpointRounding.AwayFromZero);
         return ToLength((long)Math.Floor(designUnits * em / unitsPerEm));
     }
 
@@ -187,7 +268,7 @@ public readonly record struct MetricGrid(int Dpi, bool QuantisesAdvances)
     public Length ToEmSize(Length emSize)
         => Dpi <= 0 || emSize <= Length.Zero
             ? emSize
-            : ToLength((long)Math.Round(emSize.Twips / TwipsPerPixel, MidpointRounding.AwayFromZero));
+            : ToLength((long)Math.Round(ToLogical(emSize) / UnitsPerPixel, MidpointRounding.AwayFromZero));
 }
 
 /// <summary>
@@ -225,7 +306,9 @@ public readonly record struct LineMetrics(
     /// <param name="emSize">The font size the document asks for.</param>
     public Length ScaledLineHeight(Length emSize)
         => Grid is { } grid
-            ? TextHeightOn(grid, emSize) + LeadingOn(grid, emSize)
+            ? LeadingAboveText
+                ? TextHeightOn(grid, emSize) + LeadingOn(grid, emSize)
+                : EditHeightOn(grid, emSize)
             : Scale(LineHeight, emSize);
 
     /// <summary>The ascent at an em size.</summary>
@@ -268,6 +351,14 @@ public readonly record struct LineMetrics(
             : Scale(LeadingAboveText ? Ascent + LineGap : Ascent, emSize);
 
     /// <summary>The descent at an em size.</summary>
+    /// <remarks>
+    /// Derived from the line height rather than measured, on a grid, so that the three quantities
+    /// close: the device rounds the ascent and the height, and whatever is left over is the
+    /// descent. It comes out right for both engines because <see cref="ScaledLineHeight"/> already
+    /// distinguishes them — Writer's leaves the leading in and EditEngine's takes the taller of two
+    /// roundings, and subtracting Writer's leading-bearing ascent or EditEngine's plain one gives
+    /// the descent each of them actually draws.
+    /// </remarks>
     public Length ScaledDescent(Length emSize)
         => Grid is { } grid
             ? ScaledLineHeight(emSize) - ScaledAscent(emSize)
@@ -287,6 +378,43 @@ public readonly record struct LineMetrics(
 
     private Length LeadingOn(MetricGrid grid, Length emSize)
         => grid.ToLength(grid.ToPixels(LineGap, UnitsPerEm, emSize));
+
+    /// <summary>
+    /// The line height EditEngine gives this face: the <b>taller</b> of the two roundings, and no
+    /// external leading.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// EditEngine measures a line twice and keeps the larger. The text portion's own height is
+    /// <c>OutputDevice::GetTextHeight</c>, which converts the summed device-pixel ascent and
+    /// descent in one step; the formatter metric is <c>FormatterFontMetric::GetHeight</c>, which
+    /// is <c>GetFontMetric().GetAscent() + GetDescent()</c> and so converts each on its own
+    /// (<c>vcl/source/outdev/font.cxx</c>:351-352). <c>ImpEditEngine::CreateLines</c> then does
+    /// <c>if (nLineHeight > pLine-&gt;GetHeight()) pLine-&gt;SetHeight(nLineHeight)</c> —
+    /// <c>editeng/source/editeng/impedit3.cxx</c>:1516-1518.
+    /// </para>
+    /// <para>
+    /// <b>Neither rounding fits on its own and the maximum of them fits exactly.</b> On Impress's
+    /// 600 dpi device, converting each separately is right on 274 of 312 measured (face, size)
+    /// pairs and converting the sum once is right on 270 — and the two disagree in opposite
+    /// directions, so their maximum is right on 312 of 312. The same holds on Calc's 720 dpi
+    /// device, 273 of 273. See <c>probes/refdev-01/</c>.
+    /// </para>
+    /// <para>
+    /// The external leading is absent because <c>IsAddExtLeading()</c> is false in every engine
+    /// that reaches here — see the remark on <see cref="ScaledAscent"/>, which is the same
+    /// discriminator: <see cref="LeadingAboveText"/> is Writer, and everything else is EditEngine.
+    /// </para>
+    /// </remarks>
+    private Length EditHeightOn(MetricGrid grid, Length emSize)
+    {
+        long ascent = grid.ToPixels(Ascent, UnitsPerEm, emSize);
+        long descent = grid.ToPixels(Descent, UnitsPerEm, emSize);
+
+        return Length.Max(
+            grid.ToLength(ascent) + grid.ToLength(descent),
+            grid.ToLength(ascent + descent));
+    }
 
     /// <summary>
     /// The internal leading at an em size: how much of the line height is above and below the em.

@@ -37,20 +37,26 @@ public class ReferenceGridTests
 {
     // hhea ascender, −descender, lineGap; units per em. Liberation Serif and Liberation Sans are the
     // pair that matters most: their totals are the *same* 2355 units.
-    private static LineMetrics Serif(MetricGrid? grid = null, bool leadingAbove = false)
+    // Every expectation in this file is a distance Writer drew, so every face here is built the way
+    // Writer asks for one: `leadingAbove: true`. That flag is not decoration — it is which of
+    // LibreOffice's two text engines the metrics belong to, and it decides the *grouping* of the
+    // conversion as well as where the leading sits. Writer converts ascent-plus-descent once and adds
+    // the gap (`GetTextHeight() + GetFontLeading()`); EditEngine takes the taller of two roundings and
+    // has no gap at all. `refdev-01` measured the second on 780 pairs across Impress and Calc.
+    private static LineMetrics Serif(MetricGrid? grid = null, bool leadingAbove = true)
         => new(1825, 443, 87, LineMetricSource.HorizontalHeader, 2048, grid, leadingAbove);
 
-    private static LineMetrics Sans(MetricGrid? grid = null, bool leadingAbove = false)
+    private static LineMetrics Sans(MetricGrid? grid = null, bool leadingAbove = true)
         => new(1854, 434, 67, LineMetricSource.HorizontalHeader, 2048, grid, leadingAbove);
 
     private static LineMetrics Carlito(MetricGrid? grid = null)
-        => new(1950, 550, 0, LineMetricSource.HorizontalHeader, 2048, grid);
+        => new(1950, 550, 0, LineMetricSource.HorizontalHeader, 2048, grid, LeadingAboveText: true);
 
     private static LineMetrics Caladea(MetricGrid? grid = null)
-        => new(900, 250, 0, LineMetricSource.TypographicMetrics, 1000, grid);
+        => new(900, 250, 0, LineMetricSource.TypographicMetrics, 1000, grid, LeadingAboveText: true);
 
     private static LineMetrics DejaVuSans(MetricGrid? grid = null)
-        => new(1901, 483, 0, LineMetricSource.HorizontalHeader, 2048, grid);
+        => new(1901, 483, 0, LineMetricSource.HorizontalHeader, 2048, grid, LeadingAboveText: true);
 
     [Fact]
     public void TheReferenceDeviceIsSixDevicePixelsToTheTwip()
