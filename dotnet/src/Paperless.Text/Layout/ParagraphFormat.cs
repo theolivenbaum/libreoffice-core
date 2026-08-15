@@ -382,17 +382,48 @@ public sealed record ParagraphFormat
     public bool TabsRelativeToIndent { get; init; } = true;
 
     /// <summary>
-    /// Whether a right, centred or decimal stop declared past the line's right edge is honoured at the
-    /// edge instead of where it was declared.
+    /// Whether a right, centred or decimal stop declared past the text frame's right edge is honoured at
+    /// that edge instead of where it was declared — and whether the blank such a stop advances across may
+    /// overrun the line's own right edge without breaking the line.
     /// </summary>
     /// <remarks>
     /// <para>
     /// Writer's rule and Writer's alone: <c>SwTabPortion::PostFormat</c>
-    /// (<c>sw/source/core/text/txttab.cxx</c>:503) sets
-    /// <c>nRight = std::min(GetTabPos(), rInf.Width())</c> above the comment <em>"If the tab position is
-    /// larger than the right margin, it gets scaled down by default"</em>. A <em>left</em> stop past the
-    /// edge is never clamped — <c>PreFormat</c> breaks the line there instead, which is what this engine
-    /// does already.
+    /// (<c>sw/source/core/text/txttab.cxx</c>:503) sets, above the comment <em>"If the tab position is
+    /// larger than the right margin, it gets scaled down by default"</em>,
+    /// <c>nRight = std::min(GetTabPos(), rInf.GetTextFrame()-&gt;getFrameArea().Right())</c> when
+    /// <c>TabOverSpacing</c> is on — which <c>WriterFilter.cxx</c>:325 turns on for every writerfilter
+    /// document — and <c>std::min(GetTabPos(), rInf.Width())</c> only for a document carrying neither
+    /// compatibility flag. A <em>left</em> stop past the edge is never clamped: <c>PreFormat</c> breaks
+    /// the line there instead, which is what this engine does already.
+    /// </para>
+    /// <para>
+    /// <strong>The frame's edge, not the line's, and the difference is the paragraph's right indent.</strong>
+    /// Clamping at the line's edge instead was measured on the corpus as a right-aligned stop landing
+    /// short by exactly that indent: 18.09 and 18.10 pt on the two <c>mcar</c> revisions, whose
+    /// <c>toc 4</c> declares <c>w:right="360"</c>, and 28.45 pt on <c>EHEST-SMS</c>, whose <c>toc 2</c>
+    /// declares <c>w:right="1134"</c> and puts its stop 566 twips inside the frame. A probe rendered
+    /// through LibreOffice 26.2.4.2 — one right stop per paragraph at ten positions crossing the text
+    /// area's edge, at three right indents — put every stop at its declared position to within 2 twips
+    /// and moved none of them by any indent.
+    /// </para>
+    /// <para>
+    /// <strong>The half of the rule that makes that survivable.</strong> A stop inside the right indent
+    /// puts the text after the tab past the line's right edge, and a line-filler that counted the tab's
+    /// stretch against the line's width would break there — which is how a contents entry becomes four
+    /// lines, one for its number, one for its title, one of leader dots and one for its page. Writer
+    /// does not count it: for a right, centred or decimal stop it fits the following text with the tab
+    /// still one twip wide (<c>PreFormat</c> only calls <c>SetLastTab</c>) and settles the tab's width
+    /// afterwards, in <c>PostFormat</c>. So this flag also switches the filler over to that two-pass
+    /// width; see <see cref="TabRuler.WidthOf"/>.
+    /// </para>
+    /// <para>
+    /// <strong>What is still approximated.</strong> Writer's bound is an absolute page coordinate
+    /// compared against a line-relative stop position, so a stop declared past the text area is honoured
+    /// out into the page's right margin, as far as the page edge — the probe above shows a stop at 10799
+    /// twips in a 9360-twip text area drawn at 12239 twips, 2879 twips into the margin. The bound here is
+    /// the text area's own right edge, so such a stop stops at the margin. That band is bounded by the
+    /// overshoot and is a great deal smaller than the indent this replaces.
     /// </para>
     /// <para>
     /// A flag rather than unconditional behaviour because the code that states it is the text frame's,
