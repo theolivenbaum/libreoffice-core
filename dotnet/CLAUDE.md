@@ -603,6 +603,27 @@ side re-checked), but the failure is silent and lands in a tree an agent is mid-
 **Copy the file aside instead.** `cp file file.before` costs nothing and cannot reach another
 branch.
 
+**And restore it with `cp`, never with `mv` — this is where that advice has actually failed.**
+`mv file.before file` keeps the *original* modification time, so the restored source looks older
+than the compiled assembly and **MSBuild's up-to-date check skips the project**. The build then
+reports `0 Warning(s), 0 Error(s)` in fourteen seconds and the binary still carries the
+experiment. Measured on 2026-08-15: a one-twip throwaway patch to `LineSpacing.cs` survived
+*three* subsequent builds whose whole purpose was to be free of it, and silently contaminated a
+`words/done-*` sweep, a 200-document reach measurement and two `--page` comparisons before a
+contradiction — a line height one twip *above* a value the source cannot produce — gave it away.
+
+There is no output that distinguishes "nothing needed rebuilding" from "the thing you just changed
+was skipped", so the habit has to be unconditional:
+
+```sh
+cp file.before file && touch file      # or: git checkout -- file && touch file
+```
+
+`rm -rf src/<project>/{obj,bin}` before the rebuild is the certain version and costs one project's
+compile. Worth it whenever a measurement is about to be trusted, and the check that catches it
+afterwards is cheap: render one document and compare it byte for byte against the run you are
+claiming to have reproduced.
+
 **The reference half of the gate can be banked without a build.** `batch-check.sh` refuses to
 start without a CLI, which is right for a round and wrong when the reference binary is what
 changed. `ref-baseline.sh` is the reference-only half, with `batch-check.sh`'s conventions
