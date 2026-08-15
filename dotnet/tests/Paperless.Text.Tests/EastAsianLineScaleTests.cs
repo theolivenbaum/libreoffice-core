@@ -159,6 +159,77 @@ public class EastAsianLineScaleTests
         printer.ScalesEastAsianFaces.ShouldBeTrue();
     }
 
+    // ------------------------------------------------ the other application's rule
+
+    /// <summary>
+    /// The 127% scale does not exist on the EditEngine path, and the two rules cannot both apply.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>lcl_ApplyCjkHeightAdjustment</c> has four callers and all four are in
+    /// <c>sw/source/core/txtnode/fntcache.cxx</c> — <c>SwFntObj::GetFontAscent</c> and
+    /// <c>GetFontHeight</c>. EditEngine has no equivalent, and <c>MS_WORD_COMP_GRID_METRICS</c>
+    /// occurs nowhere outside <c>sw/</c>. So the scale is Writer's alone, and the taller-of-two-
+    /// roundings in <see cref="LineMetrics.ScaledLineHeight"/> is EditEngine's alone.
+    /// </para>
+    /// <para>
+    /// Measured independently by <c>probes/refdev-01</c>, which put IPAGothic — a face that declares
+    /// CP932 — through both devices and found it exact on <b>39 of 39</b> pairs on each with no
+    /// scale at all. The two rounds arrived at the same boundary from opposite sides.
+    /// </para>
+    /// <para>
+    /// The expectations are LibreOffice's own, in hundredths of a millimetre, from
+    /// <c>probes/refdev-01/impress-extra.txt</c> and <c>calc-extra.txt</c>. Writer draws the same
+    /// face at the same size 304 twips tall — 536 hundredths — because it *does* scale it.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void TheScaleDoesNotExistOnTheEditEnginePath()
+    {
+        // IPAGothic at 12 pt, EditEngine's grouping and no leading, on each device.
+        LineMetrics impress = new(
+            1802, 246, 0, LineMetricSource.HorizontalHeader, 2048, MetricGrid.Presentation,
+            LeadingAboveText: false, DeclaresEastAsianCodePage: true);
+        LineMetrics calc = new(
+            1802, 246, 0, LineMetricSource.HorizontalHeader, 2048, MetricGrid.Spreadsheet,
+            LeadingAboveText: false, DeclaresEastAsianCodePage: true);
+
+        impress.ScaledAscent(Pt(12)).Mm100.ShouldBe(373);
+        impress.ScaledLineHeight(Pt(12)).Mm100.ShouldBe(424);
+
+        calc.ScaledAscent(Pt(12)).Mm100.ShouldBe(374);
+        calc.ScaledLineHeight(Pt(12)).Mm100.ShouldBe(423);
+    }
+
+    [Fact]
+    public void AskingAnEditEngineGridForWordsScaleChangesNothing()
+    {
+        // Both application rules hang off `LeadingAboveText`, and they are written on the same
+        // branch so that they are mutually exclusive by construction. This is that, asserted: even
+        // with the flag forced on and the face declaring the code page, nothing moves.
+        LineMetrics plain = new(
+            1802, 246, 0, LineMetricSource.HorizontalHeader, 2048, MetricGrid.Presentation,
+            LeadingAboveText: false, DeclaresEastAsianCodePage: true);
+        LineMetrics forced = plain with { Grid = MetricGrid.Presentation.AsWordDocument() };
+
+        forced.ScaledAscent(Pt(12)).ShouldBe(plain.ScaledAscent(Pt(12)));
+        forced.ScaledLineHeight(Pt(12)).ShouldBe(plain.ScaledLineHeight(Pt(12)));
+
+        // And the descent, which is `height − ascent`: the hazard the shared branch removes is a
+        // grid that scaled one of them and not the other.
+        forced.ScaledDescent(Pt(12)).ShouldBe(plain.ScaledDescent(Pt(12)));
+        forced.ScaledDescent(Pt(12)).ShouldBeGreaterThan(Length.Zero);
+    }
+
+    [Fact]
+    public void OnWritersOwnPathTheScaleStillApplies()
+        // The positive control for the two above: the same flag, the same face, Writer's engine.
+        => new LineMetrics(
+                1802, 246, 0, LineMetricSource.HorizontalHeader, 2048,
+                MetricGrid.Reference.AsWordDocument(),
+                LeadingAboveText: true, DeclaresEastAsianCodePage: true)
+            .ScaledLineHeight(Pt(12)).Twips.ShouldBe(304);
+
     [Theory]
     // The four code pages `lcl_ApplyCjkHeightAdjustment` tests, as bits 17 to 20 of ulCodePageRange1
     // (`include/vcl/fontcapabilities.hxx`:169-172).

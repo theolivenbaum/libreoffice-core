@@ -269,7 +269,8 @@ internal static class SheetFonts
                         key.Family, key.Weight, key.Italic, DeclaredClass: key.Declared));
                 OpenTypeFace face = resolver.LoadOpenType(reference);
 
-                return new SheetFace(face, reference, LineSpacing.Resolve(face));
+                return new SheetFace(
+                    face, reference, LineSpacing.Resolve(face, MetricGrid.Spreadsheet));
             }
         }
         catch (Exception exception) when (exception is Core.MalformedDocumentException
@@ -330,7 +331,8 @@ internal static class SheetFonts
             FontReference? reference = Fallback.ReferenceFor(resolved);
             return reference is null
                 ? null
-                : new SheetFace(resolved, reference, LineSpacing.Resolve(resolved));
+                : new SheetFace(
+                    resolved, reference, LineSpacing.Resolve(resolved, MetricGrid.Spreadsheet));
         });
     }
 

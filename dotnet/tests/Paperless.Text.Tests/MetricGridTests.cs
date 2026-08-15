@@ -27,8 +27,8 @@ public class MetricGridTests
     private static LineMetrics LiberationSans(MetricGrid? grid = null, bool leadingAbove = false)
         => new(1854, 434, 67, LineMetricSource.HorizontalHeader, 2048, grid, leadingAbove);
 
-    private static LineMetrics LiberationSerif(MetricGrid? grid = null)
-        => new(1825, 443, 87, LineMetricSource.HorizontalHeader, 2048, grid);
+    private static LineMetrics LiberationSerif(MetricGrid? grid = null, bool leadingAbove = false)
+        => new(1825, 443, 87, LineMetricSource.HorizontalHeader, 2048, grid, leadingAbove);
 
     // Twips rather than points, because that is the unit the layout engine snaps every line height to
     // before anything else uses it — and comparing points would be comparing the EMU remainder as well.
@@ -42,7 +42,8 @@ public class MetricGridTests
     [InlineData(11, 260)]
     [InlineData(12, 279)]
     public void OnAPrinterGridTheSameFaceRoundsUpToLibreOfficesAnswer(double points, long expected)
-        => LiberationSans(MetricGrid.Printer).ScaledLineHeight(Length.FromPoints(points))
+        => LiberationSans(MetricGrid.Printer, leadingAbove: true)
+            .ScaledLineHeight(Length.FromPoints(points))
             .Twips.ShouldBe(expected);
 
     [Theory]
@@ -55,7 +56,7 @@ public class MetricGridTests
         // the rounding happens twice, at the em size and again at each metric, so the error the grid
         // introduces is a sawtooth rather than a percentage. A fix that scaled instead would match one
         // of these and miss the other two.
-        LineMetrics gridded = LiberationSerif(MetricGrid.Printer);
+        LineMetrics gridded = LiberationSerif(MetricGrid.Printer, leadingAbove: true);
         gridded.ScaledLineHeight(Length.FromPoints(points)).Twips.ShouldBe(expected);
     }
 

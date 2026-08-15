@@ -54,7 +54,22 @@ internal static class SheetBandText
         new(Load);
 
     private static readonly Lazy<LineMetrics?> Metrics = new(
-        () => Resolved.Value.Face is { } face ? LineSpacing.Resolve(face) : null);
+        () => Resolved.Value.Face is { } face
+            ? LineSpacing.Resolve(face, MetricGrid.Spreadsheet)
+            : null);
+
+    /// <summary>
+    /// The same metrics with no device, which is what a chart's text is measured with.
+    /// </summary>
+    /// <remarks>
+    /// A chart's labels are not laid out by Calc and so are not quantised onto Calc's output
+    /// device: <c>chart2</c>'s view makes them as plain text shapes and takes the face's metrics
+    /// whole. Dropping the grid here rather than never adding one keeps the two answers beside
+    /// each other and keeps <see cref="ChartLineHeightAt(Length)"/>'s line gap, which
+    /// <see cref="LineMetrics.ScaledLineHeight"/> only includes when there is no device to round
+    /// it onto.
+    /// </remarks>
+    private static LineMetrics Ungridded(LineMetrics metrics) => metrics with { Grid = null };
 
     /// <summary>The distance from a line's top to its baseline, at a size.</summary>
     /// <param name="size">The em size.</param>
@@ -88,7 +103,7 @@ internal static class SheetBandText
     /// </remarks>
     /// <param name="size">The em size.</param>
     public static Length ChartLineHeightAt(Length size)
-        => Metrics.Value is { } metrics ? metrics.ScaledLineHeight(size) : size * 1.15;
+        => Metrics.Value is { } metrics ? Ungridded(metrics).ScaledLineHeight(size) : size * 1.15;
 
     /// <summary>
     /// The metrics of a named face, or the furniture's own where it names none.
@@ -143,7 +158,7 @@ internal static class SheetBandText
     /// <param name="bold">Whether the family's bold face is wanted.</param>
     public static Length ChartLineHeightAt(Length size, string? family, bool bold)
         => FaceFor(family, bold).Metrics is { } metrics
-            ? metrics.ScaledLineHeight(size)
+            ? Ungridded(metrics).ScaledLineHeight(size)
             : size * 1.15;
 
     /// <inheritdoc cref="AscentAt(Length)"/>
