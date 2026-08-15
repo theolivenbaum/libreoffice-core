@@ -39,6 +39,32 @@ format (Paperless reads), macro execution (never — Paperless only reports that
 
    Treat it as a real open defect with a known seat, not as a rounding artefact — and do not
    re-derive "our pen is off", because the declared-margin probe already refuted that.
+
+   **Section breaks amplify it from a fraction of a line into whole pages, and that is why some
+   documents are wildly out.** Worked through on `AWR OPS-AOC 044` (metrics-001, ours 12 pages
+   against 15). A narrow table cell whose text wraps one line short makes its row shorter; a
+   shorter row lets one extra row onto the page; and the document's **ten `nextPage` section
+   breaks** each convert that one-row overshoot into a full blank page, because the section ends
+   wherever the overshoot has left it. Measured, full-width rules per page: **page 1 ours 11 to
+   the reference's 10, page 2 ours 34 to 33, page 3 ours 29 to 27.** The reference's page 4 holds
+   its header, the single row `ACAS II System (with Version 7.1 or later)`, and nothing else.
+
+   Two suspects were refuted on the way, both by probe, and neither should be re-derived:
+
+   - **`w:trHeight` is exact.** Twenty rows at each of 324, 432 and 576 twips: total table height
+     agrees with the reference to **0 twips** at all three. `atLeast`, an absent `w:hRule` and
+     `exact` all behave. Only *auto* rows (no `w:trHeight` at all) differ, and AWR has none —
+     all 141 of its rows declare one.
+   - **A `nextPage` section break after a table is honoured**, both as a bare `w:sectPr` alone in
+     a `w:pPr` and in AWR's actual shape, where `pStyle`, `tabs`, `spacing`, `ind` and a `w:rPr`
+     precede it. 3 pages of 3 in both.
+
+   The probes cost twenty minutes and the first cut of them was wrong in an instructive way: the
+   CLI rejects `-o` (it is `--outdir`), so "our" PDF was never written, and a `glob` picked up the
+   *reference's* raster instead. That reported the two sides as pixel-identical — a clean,
+   confident, entirely fabricated match. **Assert your instrument produced output before
+   comparing it**; the guard is one line and it is the difference between a refutation and a
+   fiction.
 4. **Detect formats by content, never by extension.** Mislabelled files are common, and
    some distinctions (DOCX vs DOCM, which application owns an OLE2 file) cannot be made
    from a name at all. The extension is a tie-breaker hint only.
