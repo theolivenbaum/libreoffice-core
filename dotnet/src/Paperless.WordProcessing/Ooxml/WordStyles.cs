@@ -123,6 +123,19 @@ public sealed class WordStyle
         ParagraphProperties = Word.Child(element, "pPr");
         RunProperties = Word.Child(element, "rPr");
         TableProperties = Word.Child(element, "tblPr");
+
+        Dictionary<string, XElement> conditional = new(StringComparer.Ordinal);
+        foreach (XElement layer in Word.Children(element, "tblStylePr"))
+        {
+            if (Word.Attribute(layer, "type") is not { Length: > 0 } type) continue;
+            if (Word.Child(layer, "rPr") is not { } runProperties) continue;
+
+            // First wins, because a style stating the same layer twice is stating it once and then
+            // contradicting itself, and Word keeps the first.
+            conditional.TryAdd(type, runProperties);
+        }
+
+        ConditionalRunProperties = conditional;
     }
 
     /// <summary>The identifier content refers to. Not the user-visible name.</summary>
@@ -154,6 +167,17 @@ public sealed class WordStyle
 
     /// <summary>The style's <c>w:rPr</c>, or null.</summary>
     public XElement? RunProperties { get; }
+
+    /// <summary>
+    /// A table style's conditional <c>w:rPr</c> layers, by the <c>w:tblStylePr w:type</c> that names
+    /// each region. Empty on every other kind of style.
+    /// </summary>
+    /// <remarks>
+    /// Indexed rather than kept as a list because a cell asks for named regions in a fixed order of
+    /// specificity — see <see cref="WordTableStyleConditions.Names"/> — and never enumerates them.
+    /// Layers carrying no <c>w:rPr</c> are absent: this round applies the run half only.
+    /// </remarks>
+    public IReadOnlyDictionary<string, XElement> ConditionalRunProperties { get; }
 
     /// <summary>
     /// A table style's <c>w:tblPr</c>, or null. Meaningless on any other kind of style.
@@ -542,11 +566,16 @@ public sealed class WordStyles
     /// <param name="directRunProperties">The run's own <c>w:rPr</c>, or null.</param>
     /// <param name="paragraphStyleId">The paragraph style in force, or null.</param>
     /// <param name="characterStyleId">The character style the run names, or null.</param>
+    /// <param name="tableStyleRunProperties">
+    /// The table style's <c>w:rPr</c> layers for this cell, most specific first, or null outside a
+    /// table. See <see cref="TableStyleRunProperties"/>.
+    /// </param>
     public List<XElement> RunPropertyLayers(
         string localName,
         XElement? directRunProperties,
         string? paragraphStyleId,
-        string? characterStyleId)
+        string? characterStyleId,
+        IReadOnlyList<XElement>? tableStyleRunProperties = null)
     {
         ArgumentException.ThrowIfNullOrEmpty(localName);
 
@@ -556,6 +585,16 @@ public sealed class WordStyles
 
         AddChain(characterStyleId, WordStyleType.Character);
         AddChain(paragraphStyleId, WordStyleType.Paragraph);
+
+        // Under both style chains and over the document defaults, which is where §17.7.2 puts a table
+        // style: a paragraph style's font wins over the table's, and the table's over the default.
+        if (tableStyleRunProperties is not null)
+        {
+            foreach (XElement layer in tableStyleRunProperties)
+            {
+                if (Word.Child(layer, localName) is { } found) layers.Add(found);
+            }
+        }
 
         if (Word.Child(DefaultRunProperties, localName) is { } fallback) layers.Add(fallback);
 
@@ -601,6 +640,56 @@ public sealed class WordStyles
         }
 
         return chain;
+    }
+
+    /// <summary>
+    /// The <c>w:rPr</c> layers a table style applies to one cell, most specific first.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The layer §17.7.2 puts between the document defaults and the paragraph style, and the one this
+    /// reader had no notion of at all: <c>w:tblStylePr</c> was read by nothing, so a table style could
+    /// make its heading row bold and the heading row came out plain. That is not a cosmetic loss —
+    /// bold is wider, so the header wraps onto more lines, so the row is taller, so fewer body rows
+    /// fit on the page. Measured on <c>airbus-pdf-information-package_v1-4.docx</c>, whose repeated
+    /// header was three lines here against the reference's four, which moved one body row onto every
+    /// page from the sixth and left the last page holding a fifth of what it should.
+    /// </para>
+    /// <para>
+    /// A style's own layers come before its parent's, and within a style the order is
+    /// <see cref="WordTableStyleConditions.Names"/>'s — so a <c>firstRow</c> layer on the style beats a
+    /// <c>firstRow</c> layer on the style it is based on, and beats its own <c>wholeTable</c>.
+    /// </para>
+    /// </remarks>
+    /// <param name="tableStyleId">The <c>w:tblStyle</c> the table names, or null.</param>
+    /// <param name="conditions">Which regions the cell is in, and which the table asked for.</param>
+    public List<XElement> TableStyleRunProperties(
+        string? tableStyleId, WordTableStyleConditions conditions)
+    {
+        List<XElement> layers = [];
+
+        WordStyle? current = Find(tableStyleId, WordStyleType.Table);
+        if (current is null) return layers;
+
+        IReadOnlyList<string> names = conditions.Names;
+        HashSet<string> visited = new(StringComparer.Ordinal);
+
+        for (int depth = 0; current is not null && depth < MaxBasedOnDepth; depth++)
+        {
+            foreach (string name in names)
+            {
+                if (current.ConditionalRunProperties.TryGetValue(name, out XElement? found))
+                    layers.Add(found);
+            }
+
+            // The unconditional half last, since every conditional layer refines it.
+            if (current.RunProperties is { } own) layers.Add(own);
+
+            if (!visited.Add(current.StyleId)) break;
+            current = Find(current.BasedOn, WordStyleType.Table);
+        }
+
+        return layers;
     }
 
     /// <summary>
@@ -652,11 +741,16 @@ public sealed class WordStyles
     /// <param name="characterStyleId">
     /// The character style the run names through <c>w:rStyle</c>, or null.
     /// </param>
+    /// <param name="tableStyleRunProperties">
+    /// The table style's <c>w:rPr</c> layers for this cell, most specific first, or null outside a
+    /// table. See <see cref="TableStyleRunProperties"/>.
+    /// </param>
     public WordProperty ResolveRunProperty(
         string localName,
         XElement? directRunProperties,
         string? paragraphStyleId,
-        string? characterStyleId)
+        string? characterStyleId,
+        IReadOnlyList<XElement>? tableStyleRunProperties = null)
     {
         ArgumentException.ThrowIfNullOrEmpty(localName);
 
@@ -674,6 +768,8 @@ public sealed class WordStyles
             // Ordinary properties: the innermost layer that sets one wins.
             if (fromCharacter.HasValue) return fromCharacter;
             if (fromParagraph.HasValue) return fromParagraph;
+            if (FromTableStyle(localName, tableStyleRunProperties) is { HasValue: true } table)
+                return table;
             return ResolveInDocumentDefaults(runProperty: true, localName);
         }
 
@@ -689,7 +785,32 @@ public sealed class WordStyles
 
         if (fromCharacter.HasValue) return fromCharacter;
         if (fromParagraph.HasValue) return fromParagraph;
+
+        // The table style does *not* take part in the toggle cancellation above, and that is a reading
+        // of §17.7.3 rather than a shortcut: the rule cancels a toggle set by a paragraph style and a
+        // character style, which are the two chains a run is in at once. A table style is a third,
+        // outer layer — the run is in it by where it sits rather than by naming it — and cancelling
+        // against it would turn a heading row's bold *off* in any table whose cells use a bold
+        // paragraph style, which is not what Word draws.
+        if (FromTableStyle(localName, tableStyleRunProperties) is { HasValue: true } fromTable)
+            return fromTable;
+
         return ResolveInDocumentDefaults(runProperty: true, localName);
+    }
+
+    /// <summary>The first table-style layer to state a property, or unset.</summary>
+    private static WordProperty FromTableStyle(
+        string localName, IReadOnlyList<XElement>? tableStyleRunProperties)
+    {
+        if (tableStyleRunProperties is null) return WordProperty.Unset;
+
+        foreach (XElement layer in tableStyleRunProperties)
+        {
+            if (Word.Child(layer, localName) is { } found)
+                return new WordProperty(found, WordPropertyOrigin.Inherited);
+        }
+
+        return WordProperty.Unset;
     }
 
     /// <summary>

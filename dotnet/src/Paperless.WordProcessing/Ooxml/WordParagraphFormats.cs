@@ -365,13 +365,16 @@ internal static class WordParagraphFormats
     internal static WordTextStyle ResolveText(
         WordStyles styles,
         XElement? paragraphProperties,
-        DrawingTheme? theme = null)
+        DrawingTheme? theme = null,
+        IReadOnlyList<XElement>? tableStyleRunProperties = null)
     {
         ArgumentNullException.ThrowIfNull(styles);
 
         // A paragraph's mark carries its own run properties, and they are what a run with no properties
         // of its own inherits.
-        return ResolveRun(styles, paragraphProperties, Word.Child(paragraphProperties, "rPr"), theme);
+        return ResolveRun(
+            styles, paragraphProperties, Word.Child(paragraphProperties, "rPr"), theme,
+            tableStyleRunProperties);
     }
 
     /// <summary>
@@ -395,11 +398,16 @@ internal static class WordParagraphFormats
     /// <param name="paragraphProperties">The paragraph's <c>w:pPr</c>, for its <c>w:pStyle</c>.</param>
     /// <param name="runProperties">The run's own <c>w:rPr</c>, or null.</param>
     /// <param name="theme">The document's theme, for a <c>w:themeColor</c>, or null.</param>
+    /// <param name="tableStyleRunProperties">
+    /// The enclosing table style's <c>w:rPr</c> layers for this cell, most specific first, or null
+    /// outside a table. See <see cref="WordStyles.TableStyleRunProperties"/>.
+    /// </param>
     internal static WordTextStyle ResolveRun(
         WordStyles styles,
         XElement? paragraphProperties,
         XElement? runProperties,
-        DrawingTheme? theme = null)
+        DrawingTheme? theme = null,
+        IReadOnlyList<XElement>? tableStyleRunProperties = null)
     {
         ArgumentNullException.ThrowIfNull(styles);
 
@@ -408,34 +416,35 @@ internal static class WordParagraphFormats
         string? characterStyleId = Word.Attribute(Word.Child(runProperties, "rStyle"), "val");
 
         List<XElement> fonts =
-            styles.RunPropertyLayers("rFonts", runProperties, styleId, characterStyleId);
-        WordProperty size = styles.ResolveRunProperty("sz", runProperties, styleId, characterStyleId);
-        WordProperty bold = styles.ResolveRunProperty("b", runProperties, styleId, characterStyleId);
-        WordProperty italic = styles.ResolveRunProperty("i", runProperties, styleId, characterStyleId);
+            styles.RunPropertyLayers(
+                "rFonts", runProperties, styleId, characterStyleId, tableStyleRunProperties);
+        WordProperty size = styles.ResolveRunProperty("sz", runProperties, styleId, characterStyleId, tableStyleRunProperties);
+        WordProperty bold = styles.ResolveRunProperty("b", runProperties, styleId, characterStyleId, tableStyleRunProperties);
+        WordProperty italic = styles.ResolveRunProperty("i", runProperties, styleId, characterStyleId, tableStyleRunProperties);
         WordProperty language =
-            styles.ResolveRunProperty("lang", runProperties, styleId, characterStyleId);
-        WordProperty colour = styles.ResolveRunProperty("color", runProperties, styleId, characterStyleId);
+            styles.ResolveRunProperty("lang", runProperties, styleId, characterStyleId, tableStyleRunProperties);
+        WordProperty colour = styles.ResolveRunProperty("color", runProperties, styleId, characterStyleId, tableStyleRunProperties);
         WordProperty vertical =
-            styles.ResolveRunProperty("vertAlign", runProperties, styleId, characterStyleId);
+            styles.ResolveRunProperty("vertAlign", runProperties, styleId, characterStyleId, tableStyleRunProperties);
         WordProperty capitals =
-            styles.ResolveRunProperty("caps", runProperties, styleId, characterStyleId);
+            styles.ResolveRunProperty("caps", runProperties, styleId, characterStyleId, tableStyleRunProperties);
         WordProperty smallCapitals =
-            styles.ResolveRunProperty("smallCaps", runProperties, styleId, characterStyleId);
+            styles.ResolveRunProperty("smallCaps", runProperties, styleId, characterStyleId, tableStyleRunProperties);
         WordProperty highlight =
-            styles.ResolveRunProperty("highlight", runProperties, styleId, characterStyleId);
+            styles.ResolveRunProperty("highlight", runProperties, styleId, characterStyleId, tableStyleRunProperties);
         WordProperty underline =
-            styles.ResolveRunProperty("u", runProperties, styleId, characterStyleId);
+            styles.ResolveRunProperty("u", runProperties, styleId, characterStyleId, tableStyleRunProperties);
         WordProperty strike =
-            styles.ResolveRunProperty("strike", runProperties, styleId, characterStyleId);
+            styles.ResolveRunProperty("strike", runProperties, styleId, characterStyleId, tableStyleRunProperties);
         WordProperty doubleStrike =
-            styles.ResolveRunProperty("dstrike", runProperties, styleId, characterStyleId);
+            styles.ResolveRunProperty("dstrike", runProperties, styleId, characterStyleId, tableStyleRunProperties);
         WordProperty kerning =
-            styles.ResolveRunProperty("kern", runProperties, styleId, characterStyleId);
+            styles.ResolveRunProperty("kern", runProperties, styleId, characterStyleId, tableStyleRunProperties);
 
         // The character `w:spacing`, which shares its name with the paragraph one and nothing else. The
         // resolution only ever looks inside `w:rPr`, so the two cannot reach each other.
         WordProperty tracking =
-            styles.ResolveRunProperty("spacing", runProperties, styleId, characterStyleId);
+            styles.ResolveRunProperty("spacing", runProperties, styleId, characterStyleId, tableStyleRunProperties);
 
         Length resolvedSize = HalfPoints(size.Element) ?? DefaultSize;
 
