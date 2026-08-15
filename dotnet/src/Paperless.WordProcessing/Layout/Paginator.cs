@@ -584,6 +584,20 @@ public sealed class Paginator
         // page, because the head a page draws is the page's and not the section's.
         PageGeometry body = page;
         Length bodyHeight = body.TextHeight;
+
+        // How much room the fitting has already taken out of this page for its notes. The note area is
+        // never given less than this, because the body was placed against exactly this reservation —
+        // recomputing the room from `used` instead subtracts the last paragraph's space-after a second
+        // time, and a note short by that much spills along with every note after it.
+        //
+        // It is the reservation as it stood when a block was fitted, so it covers the notes already on
+        // the page and NOT the ones that block goes on to cite. That distinction is the whole rule: a
+        // note the page was shortened for must be drawn, and a note nothing was reserved for may spill.
+        //
+        // Measured on `EHEST-SMS-Safety-Management-Manual-V2.docx` page 17, whose two notes want
+        // 79.4 pt and were offered 78.0 — so both spilled and the page kept 176 pt of blank where the
+        // reference draws them, while its page count improved and no gate column saw it.
+        Length reservedNoteRoom = Length.Zero;
         Length bodyWidth = page.ColumnWidth;
 
         // A note breaks at the body's full width rather than a column's, which is what LibreOffice's own
@@ -1099,7 +1113,10 @@ public sealed class Paginator
                 // which is the paragraph arm's rule applied to the other kind of block. Before this, a
                 // table was placed against the bare column bottom and could be drawn straight over the
                 // note area a paragraph above it had already reserved.
-                Length tableRoom = columnBottom - NoteHeight(notes) - (used + before);
+                Length reservedForTable = NoteHeight(notes);
+                reservedNoteRoom = Length.Max(reservedNoteRoom, reservedForTable);
+
+                Length tableRoom = columnBottom - reservedForTable - (used + before);
 
                 // Where the table's own zero lands on the page, for the pass after this one — see
                 // `_tableOrigins`. Its first part only: a continuation's rows are already measured.
@@ -1225,8 +1242,11 @@ public sealed class Paginator
             // (`probes/footnote-deferral/footnote-deferral.py`) leaves **49** of the note's 59 words on
             // the citing page at one body length and **17** at the next, which is a cut at the room left
             // and cannot be a whole move — that predicts nought or fifty-nine and never seventeen.
+            Length reservedHere = NoteHeight(notes);
+            reservedNoteRoom = Length.Max(reservedNoteRoom, reservedHere);
+
             int fitted = Fit(
-                layout, lineIndex, used + spaceAbove, columnBottom - NoteHeight(notes),
+                layout, lineIndex, used + spaceAbove, columnBottom - reservedHere,
                 atTopOfPage: columnIsEmpty, borderBelow: paragraph.BorderBelow);
 
             int allowed = Allowed(
@@ -1535,7 +1555,7 @@ public sealed class Paginator
             // which errs towards placing a note here instead of carrying it, and so cannot start a
             // spill that would not otherwise happen.
             (PlacedFlow? noteArea, List<PageNote> carriedNotes) =
-                NoteArea(notes, body, bodyHeight - used);
+                NoteArea(notes, body, Length.Max(bodyHeight - used, reservedNoteRoom));
 
             pages.Add(Page(
                 pages.Count,
@@ -1566,6 +1586,7 @@ public sealed class Paginator
             // The notes this page could not take start the next page's, ahead of anything it cites
             // itself, so their order across the two pages is the order they were cited in.
             notes = carriedNotes;
+            reservedNoteRoom = Length.Zero;
             used = Length.Zero;
             lineUsed = Length.Zero;
             MeasureBody();
