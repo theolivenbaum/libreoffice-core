@@ -464,6 +464,18 @@ public sealed class LineFiller
                 probe = nextOpportunity;
             }
 
+            // Everything above fitted the line, so it left out the blank a trailing right, centred or
+            // decimal stop advances across — Writer settles that blank in PostFormat, once the text
+            // after the tab is already on the line. The line's own width is the drawn one, and it is
+            // what the drawing layer resolves the same stops against, so it is taken once here rather
+            // than at each of the candidates the loop above threw away.
+            if (tabs is { ClampsTabsAtLineEdge: true })
+            {
+                chosenWidth = Measure(
+                    text, lineStart, chosenVisibleEnd, widthBetween, tabs, lines.Count == 0, limit,
+                    placed: true);
+            }
+
             lines.Add(new TextLine(
                 lineStart, chosen, chosenVisibleEnd, chosenWidth,
                 EndsParagraph: chosen >= text.Length,
@@ -703,9 +715,20 @@ public sealed class LineFiller
     /// The width of a candidate line, with its tabs resolved when it has any.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// A tab's width is where it lands rather than what the font says, so a line holding one cannot be
     /// measured as a difference of two prefix widths. The check for a tab comes first because nearly every
     /// line has none, and one that has none must measure exactly as it did before tabs existed.
+    /// </para>
+    /// <para>
+    /// <c>placed</c> asks for the width the line will be <em>drawn</em> at rather than the width it is
+    /// <em>fitted</em> by. The two differ by the blank a trailing right, centred or decimal stop advances
+    /// across, which Writer settles only after the text following the tab is already on the line — see
+    /// <see cref="TabRuler.WidthOf"/>. Fitting is what nearly every call here wants and so is the
+    /// default; the filler asks for the placed width once, for the line it has settled on. The two
+    /// coincide unless the paragraph clamps its stops, which is the only case where a stop can sit past
+    /// the line's own edge at all.
+    /// </para>
     /// </remarks>
     private static Length Measure(
         string text,
@@ -714,26 +737,30 @@ public sealed class LineFiller
         Func<int, int, Length> widthBetween,
         ParagraphFormat? tabs,
         bool isFirstLine,
-        Length? lineWidth = null)
+        Length? lineWidth = null,
+        bool placed = false)
         => tabs is not null && TabRuler.HasTab(text, start, end)
             ? TabRuler.WidthOf(
                 text, start, end, tabs, widthBetween, isFirstLine,
-                RightEdge(tabs, isFirstLine, lineWidth))
+                RightEdge(tabs, isFirstLine, lineWidth),
+                countsDeferredStretch: placed || !tabs.ClampsTabsAtLineEdge)
             : widthBetween(start, end);
 
     /// <summary>
-    /// The line's right boundary in the coordinates the tab stops are stated in, or null when the caller
-    /// did not say how wide the line is.
+    /// The text frame's right boundary in the coordinates the tab stops are stated in, or null when the
+    /// caller did not say how wide the line is.
     /// </summary>
     /// <remarks>
     /// The stops are measured from the paragraph's tab origin and the width from the line's own start, so
     /// the two agree only after the line's offset is added back. See
     /// <see cref="ParagraphFormat.TabLineOffset"/>, which is negative inside a hanging indent — where the
-    /// boundary is correspondingly nearer.
+    /// boundary is correspondingly nearer. The paragraph's <em>end</em> indent is then added back on,
+    /// because the boundary Writer clamps a stop at is the frame's and not the line's: the line's width
+    /// already has the indent taken out of it and the frame's edge is that much further right.
     /// </remarks>
     private static Length? RightEdge(ParagraphFormat tabs, bool isFirstLine, Length? lineWidth)
         => tabs.ClampsTabsAtLineEdge && lineWidth is { } width
-            ? tabs.TabLineOffset(isFirstLine) + width
+            ? tabs.TabLineOffset(isFirstLine) + width + tabs.EndIndent
             : null;
 
     /// <summary>

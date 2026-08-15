@@ -13901,3 +13901,112 @@ binary — and then trusted a stored TSV as a baseline on its very next measurem
 reach of 4 that was really 2. Its own summary:
 
 > **Catching a trap is not the same as having a habit.**
+
+## The tab clamp was at the line's edge and Writer's is at the frame's
+
+Opened from the `TabOverSpacing` note above (§"Where the clamp is an approximation, and by how
+much"), which named three documents and was right about all three.
+
+### What was measured first, before any source was read
+
+The right edge of the page number on every dot-leader line, out of both PDFs' own text geometry
+rather than out of a raster, on the 28 rendered dot-leader documents in the corpus. Twenty-five
+agree with the reference to a median 0.10–0.12 pt. Three do not:
+
+| document | ours − ref | the paragraph's `w:right` |
+|---|---:|---:|
+| `EHEST-SMS-Safety-Management-Manual-V2.docx` | −28.450 pt on 22 lines, −21.350 on 2 | `toc 2` 1134, `toc 1` 992 |
+| `SPA-02_mcar_part-2_and_IS_v2.9.docx` | −18.10 median | `toc 4` 360 |
+| `02_mcar_part-2_and_IS_v2.10.docx` | −18.09 median | `toc 4` 360 |
+
+**The shortfall is the right indent, less however far inside the frame the stop already sat.**
+`mcar` declares its stop at 9360 twips in a 9360-twip text area, so the shortfall is the whole
+360-twip indent — 18.00 pt against 18.09 measured. EHEST declares 9071 in a 9639-twip area, so it
+is 1134 − 568 = 566 twips — 28.3 pt against 28.45 measured. Two styles, two values, one rule.
+
+### The rule, and the probe that pinned it
+
+`SwTabPortion::PostFormat` (`txttab.cxx`:503) has three branches, and `WriterFilter.cxx`:325 puts
+every writerfilter document in the middle one:
+
+```cpp
+nRight = bTabOverMargin ? GetTabPos()
+       : bTabOverSpacing ? std::min(GetTabPos(), rInf.GetTextFrame()->getFrameArea().Right())
+                         : std::min(GetTabPos(), rInf.Width());
+```
+
+We had implemented the third. `rInf.Width()` is the line's width with the indents taken out;
+`getFrameArea().Right()` is the frame's. `dotnet/probes/tab-over-spacing/` renders one right stop
+per paragraph at ten positions crossing the text area's edge, at three right indents, through
+26.2.4.2 and reads the positions back: **all three indent columns agree to the twip on every stop
+that is honoured**, and a stop declared past the area is honoured out into the page's right margin
+as far as the page edge. `compatibilityMode` 14 and 15 measure identically, all 30 rows.
+
+### It does not land alone, and the other half is why the round before left it
+
+Raising the bound puts the number past the line's own right edge, and a filler that counted the
+tab's stretch against the line's width breaks there — which is the four-line contents entry that
+cost the earlier round +24 pages. Writer does not count it: for a right, centred or decimal stop
+`PreFormat` only calls `SetLastTab` and leaves the tab one twip wide, so **the text after the tab
+is fitted while the tab has not yet been stretched**, and `PostFormat` settles the width
+afterwards. Only the last such stop on a line can be affected — an earlier one is settled by the
+tab that follows it, before that tab's own text is fitted.
+
+So `TabbedSegment` now carries `Deferred`, `TabRuler.WidthOf` takes `countsDeferredStretch`, and
+the filler asks for the fitting width per candidate and the placed width once, for the line it
+settled on. Both are gated on `ClampsTabsAtLineEdge`, so Impress and Calc are untouched.
+
+| file | change |
+|---|---|
+| `src/Paperless.Text/Layout/TabRuler.cs` | `TabbedSegment.Deferred`; `WidthOf(…, countsDeferredStretch)` |
+| `src/Paperless.Text/Layout/TextMeasurer.cs`:763 | `RightEdge` adds `EndIndent` back on; `Measure(…, placed)`; one placed re-measure per line |
+| `src/Paperless.WordProcessing/Layout/PageDrawing.cs`:1311 | the drawn bound loses its `− EndIndent` |
+| `src/Paperless.Text/Layout/ParagraphFormat.cs` | `ClampsTabsAtLineEdge` restated, with what is still approximated |
+
+`tests/Paperless.WordProcessing.Tests/TabOverSpacingTests.cs`, 4 tests. Two of them fail on the
+tree before the change and two pass — the two that pass are the guards on the half that must not
+move, which is the point of having them.
+
+### What it moved, over the whole words track
+
+Swept twice on checksummed binaries with no rebuild in between, `words/*` — all 23 batches, 217
+documents, the 161 in `done-*` included:
+
+| | before | after |
+|---|---|---|
+| verdict | **185 match, 32 mismatch** | **185 match, 32 mismatch** |
+| documents whose row changed at all | — | **8** |
+| page counts moved | — | **0** |
+
+Every one of the eight is an extractable-word delta of 1 to 16 on a document that keeps its
+verdict, and all but one are *downwards* — the number now abuts its leader, so poppler tokenises
+`Management………27` as one word where it used to see two. `mcar v2.10` goes from +38 words against
+the reference to +22. The two `airbus-pdf-information-package` rows in `done-015` fail identically
+before and after and have nothing to do with this.
+
+### The three documents' page counts did not move, and that is the finding
+
+`EHEST-SMS` is 80/82 either way, `mcar v2.10` 314/312, `SPA-02` 267/266. **The tab stop was a
+horizontal defect and the page counts are a vertical one**, and diffing the two token streams says
+so directly:
+
+- **EHEST** has no divergent page. The page offset first reaches −1 at our page 18 against the
+  reference's 19, returns to 0, and drifts down to −2 by our page 59 — our page breaks fall a
+  little later than the reference's, all the way down. That is the accumulation described in
+  `CLAUDE.md`, not an event.
+- **`mcar v2.10`**'s first *content* divergence is on page 3, where the reference fits the row
+  `2.1.1.2 05/201 Added definition: Safety Management System` and we push it to page 4; its first
+  *page-count* divergence is at our page 22. `SPA-02`'s is at our page 12.
+- **`OM template` is a different cause from the other three, as suspected** — it is the one with
+  no recorded tab-stop error, and it has none: its contents paragraphs carry no right indent, so it
+  measured −0.110 pt before the change and −0.110 after. Its page is lost to line height. Our
+  contents page 3 sets **83 lines to the reference's 79**, and the pitch is **13.80 pt against
+  14.15** on the contents entries while the 17.50 and 11.50 pitches on the same page agree exactly.
+  Same eight faces embedded on both sides. 0.35 pt a line, on one style.
+
+Worth recording separately, found on the way and not chased: EHEST's `w:sectPr` carries
+`<w:pgNumType w:start="0"/>`, and its **first page alone** disagrees. Ours numbers pages 1-4 as
+`1, 1, 2, 3` and the reference as `0, 1, 2, 3` — so the restart is honoured from the second page
+on and the first page is numbered as though it were not. `DocxPageGeometry.RestartAt` reads the
+attribute and `Paginator.cs`:634 seeds `pageNumber` from it, so the zero survives the reader; the
+divergence is one page wide and sits somewhere after that.

@@ -1286,10 +1286,11 @@ public static class PageDrawing
     /// <param name="isFirstLine">True for the paragraph's own first line.</param>
     /// <param name="areaWidth">
     /// How wide the rectangle holding the line is — the column for a body paragraph, the cell's inner
-    /// width for one in a table — or null when the caller does not have it. It is what turns a right stop
-    /// declared past the margin into one at the margin, and the layout resolved it the same way, so
-    /// omitting it here would draw a leader running off the page that the line was never measured to
-    /// have. See <c>TabRuler.Place</c>.
+    /// width for one in a table — or null when the caller does not have it. It is the frame edge a right
+    /// stop declared past the margin is pulled back to, and the paragraph's right indent is deliberately
+    /// not taken out of it: Writer clamps at the frame's edge, so a stop inside the indent stands. The
+    /// layout resolved it the same way, so omitting it here would draw a leader running off the page that
+    /// the line was never measured to have. See <c>TabRuler.Place</c>.
     /// </param>
     private static List<TabbedSegment> Stretches(
         PageParagraph paragraph, int start, int end, bool isFirstLine, Length? areaWidth = null)
@@ -1307,7 +1308,7 @@ public static class PageDrawing
             (from, to) => WidthBetween(paragraph, from, to),
             isFirstLine,
             paragraph.Format.ClampsTabsAtLineEdge && areaWidth is { } width
-                ? width - paragraph.Format.EndIndent - paragraph.Format.TabOrigin
+                ? width - paragraph.Format.TabOrigin
                 : null);
     }
 

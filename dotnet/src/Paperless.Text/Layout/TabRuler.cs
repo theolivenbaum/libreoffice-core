@@ -16,8 +16,16 @@ namespace Paperless.Text.Layout;
 /// The character filling that blank, or <c>'\0'</c> for none. It belongs to the stop rather than to the
 /// text, which is why it is carried on the stretch the stop placed instead of on the paragraph.
 /// </param>
+/// <param name="Deferred">
+/// True when the stop that placed the stretch is one whose blank could only be measured <em>after</em>
+/// the stretch was — a right, centred or decimal stop, all of which need the width of the text that
+/// follows them before they know how far to advance. Writer settles exactly those in
+/// <c>SwTabPortion::PostFormat</c> rather than in <c>PreFormat</c>, so the text after such a tab is
+/// fitted to the line while the tab is still one twip wide. See <see cref="TabRuler.WidthOf"/>.
+/// </param>
 public readonly record struct TabbedSegment(
-    int Start, int End, Length Left, Length Width, Length GapLeft = default, char Leader = '\0')
+    int Start, int End, Length Left, Length Width, Length GapLeft = default, char Leader = '\0',
+    bool Deferred = false)
 {
     /// <summary>Where the segment ends.</summary>
     public Length Right => Left + Width;
@@ -82,10 +90,10 @@ public static class TabRuler
     /// stops' own origin, which is the case <see cref="ParagraphFormat.NextTabStop"/> treats specially.
     /// </param>
     /// <param name="rightEdge">
-    /// Where the line's right boundary is, in the same coordinates as the stops, or null to let a stop
-    /// stand wherever it was declared. See <see cref="Place"/>: a right, centred or decimal stop past this
-    /// is honoured <em>at</em> it instead, which is the difference between a table-of-contents entry on
-    /// one line and the same entry broken across four.
+    /// Where the text frame's right boundary is, in the same coordinates as the stops, or null to let a
+    /// stop stand wherever it was declared. The <em>frame's</em> edge rather than the line's, so a
+    /// paragraph's right indent does not pull it in. See <see cref="Place"/>: a right, centred or decimal
+    /// stop past this is honoured <em>at</em> it instead.
     /// </param>
     public static List<TabbedSegment> Segments(
         string text,
@@ -128,8 +136,9 @@ public static class TabRuler
             // "no leader" on a stop that has one syntactically.
             char leader = pending is { Leader: var fill and not ' ' } ? fill : '\0';
 
-            segments.Add(
-                new TabbedSegment(at, stretchEnd, left - origin, width, pen - origin, leader));
+            segments.Add(new TabbedSegment(
+                at, stretchEnd, left - origin, width, pen - origin, leader,
+                Deferred: pending is { Alignment: not TabAlignment.Left }));
             pen = left + width;
 
             if (stretchEnd >= last) break;
@@ -150,6 +159,17 @@ public static class TabRuler
     /// <param name="widthBetween">Measures a range of the text, tabs excluded.</param>
     /// <param name="isFirstLine">As <see cref="Segments"/>'s.</param>
     /// <param name="rightEdge">As <see cref="Segments"/>'s.</param>
+    /// <param name="countsDeferredStretch">
+    /// True to count the blank a trailing right, centred or decimal stop advanced across, which is the
+    /// width the line will actually be drawn at. False to leave it out, which is the width the line is
+    /// <em>fitted</em> by: Writer decides whether the text after such a stop fits while the tab is still
+    /// one twip wide and only settles its width afterwards, in <c>SwTabPortion::PostFormat</c>
+    /// (<c>sw/source/core/text/txttab.cxx</c>). The distinction is the difference between a table of
+    /// contents entry whose page number sits at a stop past the paragraph's own right indent — which is
+    /// where Writer puts it — and the same entry broken across four lines because the stretch was
+    /// counted against a limit it was never tested against. Only the last stretch can be affected: an
+    /// earlier stop is settled by the tab that follows it, before that tab's own text is fitted.
+    /// </param>
     public static Length WidthOf(
         string text,
         int start,
@@ -157,12 +177,16 @@ public static class TabRuler
         ParagraphFormat format,
         Func<int, int, Length> widthBetween,
         bool isFirstLine = true,
-        Length? rightEdge = null)
+        Length? rightEdge = null,
+        bool countsDeferredStretch = true)
     {
         List<TabbedSegment> segments =
             Segments(text, start, end, format, widthBetween, isFirstLine, rightEdge);
 
-        return segments.Count == 0 ? Length.Zero : segments[^1].Right;
+        if (segments.Count == 0) return Length.Zero;
+
+        TabbedSegment last = segments[^1];
+        return countsDeferredStretch || !last.Deferred ? last.Right : last.GapLeft + last.Width;
     }
 
     /// <summary>True when a range holds a tab, and so needs any of this.</summary>
@@ -187,17 +211,19 @@ public static class TabRuler
     /// its text. A stop already behind the pen cannot be honoured at all, so the text simply continues.
     /// </remarks>
     /// <remarks>
-    /// A right, centred or decimal stop declared past the line's right boundary is honoured <em>at</em>
-    /// the boundary instead. Writer says so in one line and says why in the comment above it —
-    /// <em>"If the tab position is larger than the right margin, it gets scaled down by default"</em>,
+    /// A right, centred or decimal stop declared past the boundary is honoured <em>at</em> the boundary
+    /// instead. Writer says so in one line and says why in the comment above it — <em>"If the tab
+    /// position is larger than the right margin, it gets scaled down by default"</em>,
     /// <c>SwTabPortion::PostFormat</c>, <c>sw/source/core/text/txttab.cxx</c>:503, where
-    /// <c>nRight = std::min(GetTabPos(), rInf.Width())</c> unless the document asked for
-    /// <c>TabOverMargin</c>. Leaving it out is not a small difference: a table-of-contents style whose
-    /// dotted right stop sits at the page's text width, on a paragraph that also carries a right indent,
-    /// has its stop a few hundred twips past the line's own edge, and every entry then breaks into a line
-    /// for its number, a line for its title, a line of leader dots and a line for its page.
-    /// A <em>left</em> stop past the boundary is deliberately not clamped: Writer breaks the line there
-    /// instead (<c>PreFormat</c>, same file, sets <c>bFull</c>), which is what happens here already.
+    /// <c>nRight = std::min(GetTabPos(), rInf.GetTextFrame()-&gt;getFrameArea().Right())</c> for the
+    /// <c>TabOverSpacing</c> setting every writerfilter document carries, and
+    /// <c>std::min(GetTabPos(), rInf.Width())</c> only for a document carrying neither compatibility
+    /// flag. So the boundary is the <em>frame's</em> right edge and not the line's: the paragraph's own
+    /// right indent does not move it, and a stop past that indent is honoured out in the indent. Callers
+    /// pass that edge; see <see cref="ParagraphFormat.ClampsTabsAtLineEdge"/> for what it costs to
+    /// confuse the two. A <em>left</em> stop past the boundary is deliberately not clamped: Writer
+    /// breaks the line there instead (<c>PreFormat</c>, same file, sets <c>bFull</c>), which is what
+    /// happens here already.
     /// </remarks>
     private static Length Place(
         TabStop stop,
