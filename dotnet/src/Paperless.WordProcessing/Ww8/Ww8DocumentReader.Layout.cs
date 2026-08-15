@@ -1228,6 +1228,10 @@ public sealed partial class Ww8DocumentReader
         Ww8LayoutFormat layout = ResolveLayoutFormat(markPosition);
         Ww8ParagraphFormat paragraph = ResolveParagraphFormat(markPosition);
 
+        // Hidden text and tracked deletions leave before anything measures the paragraph, so every
+        // consumer below — the runs, the line breaker, the layouter — sees only what is drawn.
+        (text, positions) = WithoutInvisibleText(text, positions, markPosition);
+
         // The run properties at the paragraph's mark, which is what its mark carries and what an empty
         // paragraph is as tall as. The text's own formatting comes from the runs below.
         int at = Math.Min(Math.Max(start, 0), Math.Max(markPosition, 0));
@@ -1341,6 +1345,81 @@ public sealed partial class Ww8DocumentReader
     /// paragraph, and it is the half that makes a heading's runs large and bold.
     /// </para>
     /// </remarks>
+    /// <summary>
+    /// The paragraph's text with its hidden characters removed, and their positions with them.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Dropped here rather than where the runs are built, because the text itself is what the line
+    /// breaker and the layouter measure: leaving the characters in and marking their runs invisible
+    /// would still break lines around them and still charge the paragraph for their width.
+    /// </para>
+    /// <para>
+    /// <strong>A tracked deletion goes only when the document says to hide it.</strong> Writer reads
+    /// that straight off the <c>Dop</c> — <c>isHideRedlines = !m_xWDop-&gt;fRMView</c>,
+    /// <c>sw/source/filter/ww8/ww8par.cxx</c>:5262 — and both behaviours are in the corpus, so neither
+    /// is the rule on its own. <c>tests/corpus/features/revisions.doc</c> sets the bit and LibreOffice's
+    /// own PDF of it reads "an inserted phrase and a deleted phrase in the middle";
+    /// <c>150_5300_13_chg8.doc</c> clears it and the reference shows none of its deletions. Dropping
+    /// deletions unconditionally — which the first cut of this did, on the reasoning that layout treats
+    /// hidden text and deletions alike — rendered the fixture without its deleted phrase, and no corpus
+    /// sweep could have caught that, because the file is a fixture rather than a corpus document.
+    /// </para>
+    /// <para>
+    /// The positions list is carried along rather than recomputed: it maps each character back to its
+    /// place in the piece table, and every later lookup — the character exceptions, the field walk,
+    /// the bookmarks — indexes through it.
+    /// </para>
+    /// </remarks>
+    private (string Text, List<int> Positions) WithoutInvisibleText(
+        string text, List<int> positions, int markPosition)
+    {
+        if (text.Length == 0 || positions.Count == 0) return (text, positions);
+
+        Ww8LayoutFormat inherited = CharacterStyleFormat(markPosition);
+        int count = Math.Min(text.Length, positions.Count);
+
+        ReadOnlyMemory<byte> properties = default;
+        int cachedFrom = 0;
+        int cachedTo = 0;
+        bool cached = false;
+        bool any = false;
+
+        StringBuilder kept = new(text.Length);
+        List<int> keptPositions = new(positions.Count);
+
+        for (int index = 0; index < count; index++)
+        {
+            int byteOffset = _pieces.FileOffsetOf(positions[index]);
+
+            if (!cached || byteOffset < cachedFrom || byteOffset >= cachedTo)
+            {
+                (properties, cachedFrom, cachedTo) = _characterProperties.FindWithRange(byteOffset);
+                cached = true;
+
+                if (cachedTo <= cachedFrom) cachedTo = cachedFrom + 1;
+            }
+
+            Ww8LayoutFormat resolved = ApplyCharacterException(inherited, properties);
+
+            if (resolved.IsHiddenText == true
+                || (resolved.IsTrackedDeletion == true && DocumentProperties.HidesTrackedChanges))
+            {
+                any = true;
+                continue;
+            }
+
+            kept.Append(text[index]);
+            keptPositions.Add(positions[index]);
+        }
+
+        // Nothing was hidden, which is the overwhelmingly common case: hand back what came in rather
+        // than a copy of it.
+        if (!any) return (text, positions);
+
+        return (kept.ToString(), keptPositions);
+    }
+
     private List<Ww8LayoutRun> ReadRuns(string text, List<int> positions, int markPosition)
     {
         List<Ww8LayoutRun> runs = [];
@@ -1938,6 +2017,29 @@ public sealed partial class Ww8DocumentReader
                 // Which of the two sprms stated it travels with the value, because the two disagree
                 // about what nought and two mean in a right-to-left paragraph — see
                 // Ww8LayoutFormat.IsJustificationAbsolute.
+                // Hidden text is never drawn. A tracked DELETION is drawn or not according to the
+                // document's own `fRMView`, which is why the two are separate flags here and are
+                // resolved together only in `WithoutInvisibleText`.
+                //
+                // Read on this path because the two paths resolve character formatting separately and
+                // only the content one tested it. That is what made `150_5300_13_chg8.doc` render its
+                // deletions run together with the insertions replacing them — "may varyis determined by
+                // TERPS" against the reference's "is determined by TERPS", and "Visibility Mminimums"
+                // against "visibility minimums" — while `paperless extract` on the same file was clean.
+                case Ww8SprmReader.Ids.Vanish:
+                    format = format with
+                    {
+                        IsHiddenText = sprm.ResolveToggle(format.IsHiddenText ?? false),
+                    };
+                    continue;
+
+                case Ww8SprmReader.Ids.IsDeleted:
+                    format = format with
+                    {
+                        IsTrackedDeletion = sprm.ResolveToggle(format.IsTrackedDeletion ?? false),
+                    };
+                    continue;
+
                 case LayoutSprms.Justification:
                     format = format with
                     {

@@ -49,6 +49,21 @@ public readonly record struct Ww8LayoutFormat
     /// same statement and lands here too, which is why this is on the shared format rather than in
     /// either reader.
     /// </remarks>
+    /// <summary>
+    /// Whether the run is hidden text — <c>sprmCFVanish</c>. Never drawn.
+    /// </summary>
+    public bool? IsHiddenText { get; init; }
+
+    /// <summary>
+    /// Whether the run is a tracked deletion — <c>sprmCFRMarkDel</c>.
+    /// </summary>
+    /// <remarks>
+    /// Kept apart from <see cref="IsHiddenText"/> because the two are not the same question: hidden text
+    /// is never drawn, while a deletion is drawn struck through or not at all according to the
+    /// document's own <c>fRMView</c>. See <c>Ww8DocumentProperties.HidesTrackedChanges</c>.
+    /// </remarks>
+    public bool? IsTrackedDeletion { get; init; }
+
     public bool? IsRightToLeft { get; init; }
 
     /// <summary>The left indent in twips.</summary>
