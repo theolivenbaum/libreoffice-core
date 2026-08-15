@@ -13,45 +13,43 @@ far as it went.
 Every value it tested was **at or above 100%**. The regime below was never
 looked at, and it is wrong.
 
-What this measures, 2026-08-15, Liberation Serif 11 pt, six lines per group so
-the pitch cannot be contaminated by first-line rules. Both columns are whole
-twips on both sides, so every disagreement is a rounding decision:
+What this measures, 2026-08-15, Liberation Serif 11 pt, eleven lines on a page
+of its own per value, in whole twips on both sides:
 
-    w:line   percent   ref tw   our tw   delta pt
-       120     50.00      126      127     +0.05
-       150     62.50      159      157     -0.10
-       168     70.00      177      178     +0.05
-       180     75.00      189      190     +0.05
-       192     80.00      202      203     +0.05
-       200     83.33      209      210     +0.05
-       210     87.50      220      223     +0.15
-       220     91.67      232      233     +0.05
-       233     97.08      245      246     +0.05
-       239     99.58      253      253      0.00
-       240    100.00      253      253      0.00
-       260    108.33      275      273     -0.10
+    w:line  pct     ref  ours  delta        w:line  pct      ref  ours  delta
+       120  50.00   126   127   +1             186  77.50   197   198   +1
+       126  52.50   131   132   +1             192  80.00   202   203   +1
+       132  55.00   139   140   +1             198  82.50   209   208   -1
+       138  57.50   144   145   +1             204  85.00   215   216   +1
+       144  60.00   151   152   +1             210  87.50   220   223   +3
+       150  62.50   159   157   -2             216  90.00   227   228   +1
+       156  65.00   164   165   +1             222  92.50   235   233   -2
+       162  67.50   172   173   +1             228  95.00   240   241   +1
+       168  70.00   177   178   +1             234  97.50   247   248   +1
+       174  72.50   184   183   -1             240 100.00   253   253    0
 
-**A first, narrower sweep of this probe tested only 180, 200, 220, 233, 239,
-240 and 260, and every sub-unity value came out at exactly +1 twip.** That
-looked like a clean off-by-one and would have been implemented as one. Widening
-it breaks that: 62.50% is **two twips short** and 87.50% is **three twips
-long**. There is no single-twip correction to make.
+**We are exactly one twip too tall on sixteen of the twenty-one**, and the five
+exceptions are 62.5, 72.5, 82.5, 87.5 and 92.5 — all half-percents, though five
+other half-percents (52.5, 57.5, 67.5, 77.5, 97.5) behave normally.
 
-The two outliers are exactly the two half-percent values, which is a lead
-rather than an answer.
+Two earlier readings of this were wrong and both are worth knowing about:
 
-A candidate rule — take the percentage as `round(w:line × 100 / 240)`, then the
-height as `floor(base × pct / 100)` with base 253 twips — reproduces **6 of the
-8** measured points, and the two it misses are 62.50 and 87.50. It also
-explains why 99.58% returns the 100% answer, since it rounds to 100. It is not
-good enough to build on, and the half-percent behaviour has to be settled
-first; whether LibreOffice rounds half away from zero, to even, or does not
-round the percentage at all is exactly what those two points disagree about.
+- A **narrow sweep** (180, 200, 220, 233, 239, 240, 260) found every sub-unity
+  value at exactly +1 twip. That is a clean off-by-one and would have been
+  implemented as one. It is the majority behaviour and not the rule.
+- A **wider sweep that grouped values by vertical gap on one page** reported
+  62.5% and 87.5% as anomalies and, separately, silently dropped everything past
+  the eighth group once the content outgrew the page. One value per page removes
+  the heuristic entirely; the anomalies survived that change, so they are real.
 
-**Note the probe currently reports only the first eight groups** — the page is
-not tall enough for nineteen and the later ones are silently dropped by the
-grouping. Raise `w:h` before trusting a longer sweep. The four rows below 220
-in the table above came from this run; the last four came from the narrow one.
+**Do not subtract a twip.** It would make sixteen exact and the other five worse
+— 62.5% would go from −2 to −3 and 92.5% from −2 to −3 — and it is curve-fitting
+to a majority rather than a rule.
+
+The reference is **not** a simple scaling of its own 100% height either. Against
+`253 × pct` the residuals swing from −1.83 (52.5%) to +0.88 (62.5%), so 253 is
+not the number being scaled, and whatever LibreOffice multiplies is not what it
+reports at 100%.
 
 Where it matters
 ----------------
@@ -64,8 +62,12 @@ directly on those tables by `probes/row-boundary-drift/`, and it accumulates to
 +1.08 pt over 24 rows, which is what decides where a long table breaks across a
 page. Both documents fail on page count alone with words inside the band.
 
-The rule is **not derived**, and the widening above is why that matters: the
-narrow sweep gave a clean, wrong answer that a round would have shipped.
+The rule is **not derived**, and the two corrections above are why that matters:
+the narrow sweep gave a clean wrong answer, and the grouped sweep gave a
+different wrong answer for a reason that was in the instrument rather than in
+the renderer. The next round should start from the twenty-one points above and
+work out what quantity is actually being scaled, rather than fitting the 100%
+height.
 
 Usage
 -----
@@ -80,7 +82,8 @@ import sys
 import zipfile
 from collections import defaultdict
 
-LINES = [120, 150, 168, 180, 192, 200, 210, 220, 228, 233, 236, 239, 240, 242, 250, 260, 264, 270, 288]
+LINES = [120, 126, 132, 138, 144, 150, 156, 162, 168, 174,
+         180, 186, 192, 198, 204, 210, 216, 222, 228, 234, 240]
 FACE = 'Liberation Serif'
 HALF_POINTS = 22
 
@@ -98,23 +101,31 @@ W = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"'
 
 
 def build(path: str) -> list[str]:
+    """One `w:line` value per page, eleven lines each.
+
+    Deliberately one per page rather than groups separated by a blank. The
+    first two cuts of this probe put every group on one page and split them by
+    looking for a vertical gap, and that heuristic silently dropped groups once
+    the content outgrew the page and mis-measured the ones that straddled a
+    break — which is where two of the "anomalies" in the earlier readings came
+    from. A page break is unambiguous and costs nothing.
+    """
     body, labels = '', []
     run = f'<w:rFonts w:ascii="{FACE}" w:hAnsi="{FACE}"/><w:sz w:val="{HALF_POINTS}"/>'
 
-    for line in LINES:
+    for index, line in enumerate(LINES):
+        if index:
+            body += '<w:p><w:pPr><w:pageBreakBefore/></w:pPr></w:p>'
         body += ''.join(
             f'<w:p><w:pPr><w:spacing w:line="{line}" w:lineRule="auto" w:before="0" w:after="0"/>'
             f'<w:rPr>{run}</w:rPr></w:pPr><w:r><w:rPr>{run}</w:rPr>'
-            f'<w:t>L{i} line{line}</w:t></w:r></w:p>'
-            for i in range(6))
+            f'<w:t>L{j}</w:t></w:r></w:p>'
+            for j in range(11))
         labels.append(f'w:line={line} ({line / 240 * 100:.2f}%)')
-        # A tall blank between groups so the reader can separate them by gap alone.
-        body += ('<w:p><w:pPr><w:spacing w:line="240" w:lineRule="auto" '
-                 'w:before="300" w:after="300"/></w:pPr></w:p>')
 
     document = (
         f'<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document {W}><w:body>{body}'
-        '<w:sectPr><w:pgSz w:w="11906" w:h="33000"/>'
+        '<w:sectPr><w:pgSz w:w="11906" w:h="16838"/>'
         '<w:pgMar w:top="567" w:right="567" w:bottom="567" w:left="567"/></w:sectPr>'
         '</w:body></w:document>')
 
@@ -125,8 +136,8 @@ def build(path: str) -> list[str]:
     return labels
 
 
-def baselines(pdf: str) -> list[float]:
-    text = subprocess.run(['pdftotext', '-bbox', '-f', '1', '-l', '1', pdf, '-'],
+def baselines(pdf: str, page: int) -> list[float]:
+    text = subprocess.run(['pdftotext', '-bbox', '-f', str(page), '-l', str(page), pdf, '-'],
                           capture_output=True, text=True, check=True).stdout
     found = sorted({round(float(m.group(1)), 3)
                     for m in re.finditer(r'yMin="([\d.]+)"', text)})
@@ -135,14 +146,12 @@ def baselines(pdf: str) -> list[float]:
     return found
 
 
-def groups(ys: list[float]) -> list[list[float]]:
-    out = [[ys[0]]]
-    for a, b in zip(ys, ys[1:]):
-        if b - a > 25:
-            out.append([b])
-        else:
-            out[-1].append(b)
-    return [g for g in out if len(g) >= 5]
+def pitch(pdf: str, page: int) -> float:
+    """The baseline pitch on one page, which holds one `w:line` value and nothing else."""
+    ys = baselines(pdf, page)
+    if len(ys) < 11:
+        raise SystemExit(f'{pdf} page {page}: {len(ys)} lines, expected 11')
+    return (ys[-1] - ys[0]) / (len(ys) - 1)
 
 
 def main() -> int:
@@ -165,14 +174,12 @@ def main() -> int:
         if not os.path.isfile(path):
             raise SystemExit(f'{path} was not written — nothing to compare')
 
-    r, o = groups(baselines(reference)), groups(baselines(ours))
-    print(f"{'case':22s} {'REF pitch':>10s} {'OUR pitch':>10s} {'delta':>9s} {'ref tw':>7s} {'our tw':>7s}")
+    print(f"{'case':22s} {'ref tw':>7s} {'our tw':>7s} {'delta tw':>9s}")
+    for page, label in enumerate(labels, start=1):
+        ref = pitch(reference, page) * 20
+        our = pitch(ours, page) * 20
+        print(f'{label:22s} {ref:7.1f} {our:7.1f} {our - ref:+9.1f}')
 
-    for i in range(min(len(r), len(o), len(labels))):
-        ref = (r[i][-1] - r[i][0]) / (len(r[i]) - 1)
-        our = (o[i][-1] - o[i][0]) / (len(o[i]) - 1)
-        print(f'{labels[i]:22s} {ref:10.4f} {our:10.4f} {our - ref:+9.4f} '
-              f'{ref * 20:7.1f} {our * 20:7.1f}')
     return 0
 
 
