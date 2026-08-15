@@ -209,7 +209,7 @@ first, then re-run.
 | `slides/batch-014/…/WiGr_2021W_1_Angebot-Nachfrage-Elastizität-211` | 46 | 35 | 5 | +30 | 0/1 |
 | `slides/batch-017/…/Demick_JetBlue.pptx` | 7 | 94 | 64 | +30 | — |
 | `slides/batch-017/…/Demick_JetBlue.pptx` | 4 | 108 | 79 | +29 | — |
-| `slides/batch-016/…/FAAAIandtheArtandScienceofV&Vfinal.pptx` | 14 | 119 | 91 | +28 | 1/1 |
+| ~~`slides/batch-016/…/FAAAIandtheArtandScienceofV&Vfinal.pptx`~~ | ~~14~~ | ~~119~~ | ~~91~~ | ~~+28~~ | ~~1/1~~ | **false positive — WordArt, see below** |
 | `slides/batch-014/…/Intersil_Italy_CAN_Bus_Transceiver_Presentatio` | 30 | 130 | 103 | +27 | 6/0 |
 | `slides/batch-007/…/introduction_to_bea_tuxedo.ppt` | 38 | 84 | 63 | +21 | — |
 | `slides/batch-007/…/introduction_to_bea_tuxedo.ppt` | 2 | 38 | 27 | +11 | — |
@@ -261,6 +261,51 @@ not-a-ceiling, and none of the four was validated end to end in that round. **Th
 lesson is that this table has a shelf life.** Its inputs are our renderer *and* the reference
 binary, both of which move, and a stale row here does not merely go unused — it actively tells
 the next reader not to look.
+
+## Audited 2026-08-15 — a second row was a defect of ours, and condition 1 is nearly inert
+
+**`FAAAIandtheArtandScienceofV&Vfinal.pptx` page 14 was never a ceiling.** Its +28 was our own
+surplus: the deck's gauge carries five labels in `a:prstTxWarp` text boxes, which LibreOffice
+puts into Fontwork text-path mode and draws as filled outlines carrying no glyphs, and which we
+drew as ordinary text. Round `slides-extra-01`; the fix is a single gate in `PptxSlideLayout`
+and the document now matches the word gate outright at 1135/1133. Re-derived with the
+detector's own functions, both pages now read +1 and neither flags.
+
+So this is the *fake a ceiling* direction of the condition-3 blind spot, and it is the more
+dangerous one: a page can be listed here purely because of a defect of ours, and the row then
+tells the next reader not to fix it. It cost this one nothing only because the round was
+briefed to disbelieve it.
+
+**Page 13 of the same document carries the identical defect and was never listed, and the
+reason is not the net-delta blind spot documented above.** Nothing cancels anything there —
+gross and net are both +28. It is the **25% ratio bar**: the reference has 120 words on page 13
+and 89 on page 14, so the floor is 30.0 on one page and 22.2 on the other, and the same +28
+clears one and not the other. A defect of a fixed size is therefore flagged or not according to
+how much *other* text the page happens to carry.
+
+**Condition 1 barely discriminates at all.** Measured over the whole slides track — all 163
+documents, 4199 pages, our renderings against the banked `refpdfs-26.2.4.2-fonts/`:
+
+| | pages | share |
+|---|---:|---|
+| pages compared | 4199 | |
+| condition 1 fires — the reference draws a raster there that we do not | **1482** | 35.3% of pages |
+| …of those, where our word count **equals** the reference's exactly | **1091** | 73.6% of them |
+| …of those, that also clear condition 3 and would flag | 26 | 1.8% of them |
+
+Condition 1 fires on a third of every slide page in the corpus, and on three-quarters of those
+there is no word difference whatever — the dimension match is answering "the two renderers
+scaled or tiled some picture differently", not "the reference rasterised an object". On the
+FAAAI document alone it fires on **23 of 30 pages**, 21 of them with a zero word delta.
+
+The consequence is that **the flag is condition 3 almost by itself**, and condition 3 is a
+statement about our own surplus rather than about the reference. Any defect that adds words to
+a page has a better-than-one-in-three chance of finding a condition-1 page to sit on and being
+recorded here as unwinnable. That is a stronger reason to compute condition 3 on the ours-only
+token count — as the note above already recommends — and to add a condition that says something
+about the reference's *ink*: a page where the reference draws a raster **and has materially less
+text than the shape it covers would imply** is a ceiling; a page where the reference merely
+draws a picture is every other page.
 
 ## What is known about the mechanism, and what is not
 
