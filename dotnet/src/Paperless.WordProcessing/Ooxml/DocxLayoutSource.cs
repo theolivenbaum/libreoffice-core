@@ -79,6 +79,10 @@ public sealed partial class DocxLayoutSource
     /// LibreOffice renders it in DejaVu Serif, which moves every line break in it.
     /// </remarks>
     private readonly WordFontTable _fontTable;
+
+    /// <summary>What a <c>FILENAME</c> or <c>TITLE</c> field evaluates to.</summary>
+    private readonly ConstantFields _constants;
+
     private readonly DrawingTheme? _theme;
     private readonly Dictionary<(string? Family, int Weight, bool Italic), OpenTypeFace?> _faces = [];
     private readonly Dictionary<(string? Family, int Weight, bool Italic), FontReference> _references =
@@ -105,6 +109,10 @@ public sealed partial class DocxLayoutSource
     /// it settles which shape a family nobody has installed falls back to, which the family name on
     /// its own cannot say.
     /// </param>
+    /// <param name="constants">
+    /// What a <c>FILENAME</c> or <c>TITLE</c> field evaluates to, or null to leave both at their
+    /// cached results — see <see cref="ConstantFields"/>.
+    /// </param>
     public DocxLayoutSource(
         WordStyles styles,
         XElement? settings = null,
@@ -114,8 +122,10 @@ public sealed partial class DocxLayoutSource
         DrawingTheme? theme = null,
         DocxPictures? pictures = null,
         WordNumbering? numbering = null,
-        WordFontTable? fontTable = null)
+        WordFontTable? fontTable = null,
+        ConstantFields? constants = null)
     {
+        _constants = constants ?? default;
         ArgumentNullException.ThrowIfNull(styles);
         _styles = styles;
         _fontTable = fontTable ?? WordFontTable.Empty;
@@ -126,9 +136,7 @@ public sealed partial class DocxLayoutSource
         _defaultTabInterval = TabInterval(settings);
         _compatibilityMode = CompatibilityMode(settings);
         WordCompatibility compatibility = WordCompatibility.Read(settings);
-        _autoSpacing = compatibility.DoNotUseHtmlParagraphAutoSpacing
-            ? WordParagraphFormats.WordAutoSpacing
-            : WordParagraphFormats.HtmlAutoSpacing;
+        _autoSpacing = AutoSpacing(settings, compatibility);
         // `AsWordDocument` is the MS_WORD_COMP_GRID_METRICS compatibility flag, which the Word
         // filters set and ODF's does not. See MetricGrid.AsWordDocument.
         _metrics = (compatibility.UsesPrinterMetrics ? MetricGrid.Printer : MetricGrid.Reference)
@@ -693,7 +701,8 @@ public sealed partial class DocxLayoutSource
         bool breaksPage = _pageBreakPending;
         _pageBreakPending = false;
 
-        RunWalker walker = new(CitationOf, Symbol, _footnoteNumber, _endnoteNumber);
+        RunWalker walker = new(
+            CitationOf, Symbol, _constants, _footnoteNumber, _endnoteNumber);
         walker.Walk(element, citation);
 
         // Where the note's own number landed, for a renumbering pass that has to find it again. A field
@@ -1117,17 +1126,23 @@ public sealed partial class DocxLayoutSource
         /// from the one the file states — so it cannot be deferred to the pass that styles the ranges.
         /// </param>
         /// <param name="endnote">How many endnotes came before it, counted separately.</param>
+        /// <param name="constants">What a <c>FILENAME</c> or <c>TITLE</c> field evaluates to.</param>
         internal RunWalker(
             Func<bool, int, string> citation,
             Func<string?, char, (string Text, OpenTypeFace Face, FontReference? Font)?> symbol,
+            ConstantFields constants = default,
             int footnote = 0,
             int endnote = 0)
         {
             _citationOf = citation;
             _symbolOf = symbol;
+            _constants = constants;
             _footnote = footnote;
             _endnote = endnote;
         }
+
+        /// <summary>What a <c>FILENAME</c> or <c>TITLE</c> field evaluates to.</summary>
+        private readonly ConstantFields _constants;
 
         /// <summary>How a note of a class and an index is cited, which the source resolves.</summary>
         /// <remarks>
@@ -1186,6 +1201,20 @@ public sealed partial class DocxLayoutSource
 
         private bool _inInstruction;
 
+        /// <summary>
+        /// How many open fields have had their value written by this walk, so their cached results are
+        /// not drawn.
+        /// </summary>
+        /// <remarks>
+        /// A counter rather than a flag because fields nest: a <c>FILENAME</c> inside a <c>HYPERLINK</c>
+        /// closes before the link does, and a flag cleared at the inner end would let the outer field's
+        /// remaining result through as if it too had been substituted.
+        /// </remarks>
+        private int _hidden;
+
+        /// <summary>True while nothing the walk reads is drawn.</summary>
+        private bool Suppressed => _inInstruction || _hidden > 0;
+
         /// <summary>The fields whose begin has been seen and whose end has not, innermost last.</summary>
         /// <remarks>
         /// A stack because fields nest and Word writes them nested — a hyperlink around a cross-reference
@@ -1210,6 +1239,49 @@ public sealed partial class DocxLayoutSource
 
             /// <summary>Where the result began, or −1 for a field with no separator and so no result.</summary>
             internal int ResultAt { get; set; } = -1;
+
+            /// <summary>
+            /// True when this walk wrote the field's value itself, so its cached result is hidden.
+            /// </summary>
+            internal bool Substituted { get; set; }
+
+            /// <summary>
+            /// The run properties in force where the instruction was written.
+            /// </summary>
+            /// <remarks>
+            /// A field with no separator has no result runs to take formatting from, and the run holding
+            /// its <c>fldChar end</c> is usually bare — so the instruction's own run is the nearest thing
+            /// to what the producer meant the value to look like. Word writes the two with the same
+            /// <c>w:rPr</c>, which is what makes this the right guess rather than merely a guess.
+            /// </remarks>
+            internal XElement? InstructionProperties { get; set; }
+        }
+
+        /// <summary>The value a constant field evaluates to, or null when nothing can be computed.</summary>
+        private string? ValueOf(string instruction)
+            => FieldInstructions.ConstantFieldOf(instruction) switch
+            {
+                ConstantField.FileName => _constants.FileName is { Length: > 0 } name ? name : null,
+                ConstantField.Title => _constants.Title is { Length: > 0 } title ? title : null,
+                _ => null,
+            };
+
+        /// <summary>Writes a constant field's value in place of its cached result.</summary>
+        /// <param name="field">The field, whose instruction has been read in full.</param>
+        /// <param name="properties">The run properties to draw it under, or null for the paragraph's.</param>
+        /// <returns>True when a value was written, so the cached result must be hidden.</returns>
+        private bool Substitute(OpenField field, XElement? properties)
+        {
+            if (ValueOf(field.Instruction.ToString()) is not { } value) return false;
+
+            XElement? outer = _runProperties;
+            _runProperties = properties;
+            Emit(value);
+            _runProperties = outer;
+
+            field.Substituted = true;
+            _hidden++;
+            return true;
         }
 
         /// <summary>
@@ -1272,7 +1344,13 @@ public sealed partial class DocxLayoutSource
                     case "instrText":
                         // Not drawn — but it is the only statement of what the field computes, so it is
                         // accumulated for the innermost open field rather than merely skipped.
-                        if (_fields.Count > 0) _fields.Peek().Instruction.Append(child.Value);
+                        if (_fields.Count > 0)
+                        {
+                            OpenField open = _fields.Peek();
+                            open.Instruction.Append(child.Value);
+                            open.InstructionProperties ??= _runProperties;
+                        }
+
                         break;
 
                     case "fldChar":
@@ -1287,12 +1365,46 @@ public sealed partial class DocxLayoutSource
 
                             case "separate":
                                 _inInstruction = false;
-                                if (_fields.Count > 0) _fields.Peek().ResultAt = _builder.Length;
+                                if (_fields.Count > 0)
+                                {
+                                    OpenField open = _fields.Peek();
+                                    open.ResultAt = _builder.Length;
+
+                                    // The one point at which a field this walk computes can be written:
+                                    // the instruction has been read in full, so the field's name is
+                                    // known, and the cached result it replaces starts here.
+                                    if (_hidden == 0) Substitute(open, _runProperties);
+                                }
+
                                 break;
 
                             case "end":
                                 _inInstruction = false;
-                                if (_fields.Count > 0) CloseField(_fields.Pop());
+                                if (_fields.Count > 0)
+                                {
+                                    OpenField closing = _fields.Pop();
+
+                                    // A field with no separator has no cached result at all, and
+                                    // LibreOffice still draws its value — measured on the second
+                                    // FILENAME in `CRIF …`'s footer, which the reference draws and this
+                                    // walk would otherwise pass over in silence.
+                                    if (closing.ResultAt < 0 && _hidden == 0)
+                                    {
+                                        int at = _builder.Length;
+                                        if (Substitute(closing, closing.InstructionProperties))
+                                        {
+                                            closing.ResultAt = at;
+                                            _hidden--;
+                                        }
+                                    }
+                                    else if (closing.Substituted)
+                                    {
+                                        _hidden--;
+                                    }
+
+                                    CloseField(closing);
+                                }
+
                                 break;
                         }
 
@@ -1304,16 +1416,29 @@ public sealed partial class DocxLayoutSource
                     {
                         OpenField simple = new() { ResultAt = _builder.Length };
                         simple.Instruction.Append(Word.Attribute(child, "instr") ?? "");
-                        Append(child, depth + 1);
+
+                        // The cached result's own runs carry the formatting the producer gave the field —
+                        // here the whole field is one element, so the first of them is taken rather than
+                        // the paragraph's, which would draw the value in the style's weight instead.
+                        if (_hidden == 0
+                            && Substitute(simple, Word.Child(Word.Child(child, "r"), "rPr")))
+                        {
+                            _hidden--;
+                        }
+                        else
+                        {
+                            Append(child, depth + 1);
+                        }
+
                         CloseField(simple);
                         break;
                     }
 
-                    case "t" when !_inInstruction:
+                    case "t" when !Suppressed:
                         Emit(child.Value);
                         break;
 
-                    case "tab" when !_inInstruction:
+                    case "tab" when !Suppressed:
                         Emit("\t");
                         break;
 
@@ -1322,7 +1447,7 @@ public sealed partial class DocxLayoutSource
                     // PROP_CHAR_FONT_NAME to `w:font` with charset SYMBOL and appends the raw `w:char`
                     // (`DomainMapper::sprmWithProps`, `LN_EG_RunInnerContent_sym`), so the face travels
                     // with the character rather than with the run.
-                    case "sym" when !_inInstruction:
+                    case "sym" when !Suppressed:
                         EmitSymbol(child);
                         break;
 
@@ -1342,7 +1467,7 @@ public sealed partial class DocxLayoutSource
                     // `SwBlankPortion` cannot be broken and a U+002D is UAX #14 class HY, which is a
                     // break opportunity. Drawing the hyphen in the right face is worth more than the
                     // breaking, which only differs when a line ends exactly there.
-                    case "noBreakHyphen" when !_inInstruction:
+                    case "noBreakHyphen" when !Suppressed:
                         Emit("-");
                         break;
 
@@ -1352,7 +1477,7 @@ public sealed partial class DocxLayoutSource
                     // (`OOXMLBreakHandler::~OOXMLBreakHandler`, `writerfilter/ooxml/Handler.cxx:246`)
                     // and then *defers* it, applying it to the paragraph that follows as
                     // `BreakType_PAGE_BEFORE` (`dmapper/DomainMapper.cxx:4379`).
-                    case "br" when !_inInstruction:
+                    case "br" when !Suppressed:
                         if (Word.Attribute(child, "type") == "page") _pageBreakAt = _builder.Length;
                         else Emit(LineSeparator.ToString());
                         break;
@@ -1515,6 +1640,26 @@ public sealed partial class DocxLayoutSource
     /// <param name="index">How many notes of the class came before, counted from zero.</param>
     private string CitationOf(bool isEndnote, int index)
         => (isEndnote ? _endnoteNumbering : _footnoteNumbering).Citation(index);
+
+    /// <summary>
+    /// What <c>w:beforeAutospacing</c> and <c>w:afterAutospacing</c> stand for in this document.
+    /// </summary>
+    /// <remarks>
+    /// Three answers, in LibreOffice's own order of precedence
+    /// (<c>DomainMapper.cxx</c>:916-953). <c>w:doNotUseHTMLParagraphAutoSpacing</c> wins outright and
+    /// means five points; otherwise a document saved in <strong>web view</strong> gets 49 twips and
+    /// every other document 280. The web branch is easy to miss because <c>w:view</c> is not a
+    /// compatibility flag — it sits directly under <c>w:settings</c>, beside the zoom and the ruler,
+    /// and reads like a preference rather than a measurement.
+    /// </remarks>
+    private static Length AutoSpacing(XElement? settings, WordCompatibility compatibility)
+    {
+        if (compatibility.DoNotUseHtmlParagraphAutoSpacing) return WordParagraphFormats.WordAutoSpacing;
+
+        return Word.Attribute(Word.Child(settings, "view"), "val") == "web"
+            ? WordParagraphFormats.WebAutoSpacing
+            : WordParagraphFormats.HtmlAutoSpacing;
+    }
 
     /// <summary>
     /// The document's default tab interval.

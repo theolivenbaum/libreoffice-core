@@ -122,6 +122,25 @@ internal static class WordParagraphFormats
     /// </remarks>
     internal static readonly Length WordAutoSpacing = Length.FromTwips(100);
 
+    /// <summary>The same again, for a document saved in web view.</summary>
+    /// <remarks>
+    /// <para>
+    /// Under two and a half points rather than fourteen. LibreOffice's importer branches on the
+    /// document's <c>w:view</c> in both <c>LN_CT_Spacing_beforeAutospacing</c> and
+    /// <c>LN_CT_Spacing_afterAutospacing</c> (<c>DomainMapper.cxx</c>:927 and :948) —
+    /// <c>if (GetView() == LN_Value_doc_ST_View_web) default_spacing = 49; else 280;</c> — under a
+    /// comment conceding that 49 "is just the old value that should be removed, once the root cause in
+    /// <c>SwTabFrm::MakeAll()</c> is fixed". It is nonetheless what the reference draws, and the
+    /// difference is 11.55 pt at every auto-spaced paragraph boundary.
+    /// </para>
+    /// <para>
+    /// Found on <c>May 25 bulletin focus on carers in the workplace.docx</c>, the only document in the
+    /// words corpus that declares web view, where a blind reading of page 2 reported our bullet items
+    /// "spaced apart" against the reference's "tightly stacked" before anything had been measured.
+    /// </para>
+    /// </remarks>
+    internal static readonly Length WebAutoSpacing = Length.FromTwips(49);
+
     /// <summary>Resolves a paragraph's layout properties.</summary>
     /// <param name="styles">The document's styles.</param>
     /// <param name="paragraphProperties">The paragraph's own <c>w:pPr</c>, or null.</param>
