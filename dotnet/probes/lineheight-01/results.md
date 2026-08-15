@@ -178,6 +178,15 @@ The two that moved:
 | `Sample_SQMS_Program.docx` | `done-015` | `pages` 60/61 | **`match`**, 61/61 |
 | `1447.doc` | `pagination-001` | `pages` 3/4 | **`match`**, 4/4, words 959/959 |
 
+> **Correction, 2026-08-15, from `probes/words-metrics-01` §4: `words-after.tsv` is wrong on four
+> rows and its 169 should be 171.** `TE.CAO.00125 … OJT Logbook.docx`,
+> `xx_SETIS_PWS_template_10.19.22.docx`, `FO.FCTOA.00010 …docx` and `EHEST-SMS-…docx` are all
+> recorded here with worse word counts than the tree at this commit actually produces; the first two
+> are recorded as failing and in fact match. Two independent measurements agree against this file —
+> `refdev-01`'s own baseline, and a 200-document render made with a binary built from this commit's
+> behaviour. The cause is not established from here, but the shape fits a sweep that overlapped a
+> rebuild. **Measure a baseline; do not inherit this one.**
+
 **159 renderings changed and only six documents' error changed at all.** That is the shape a
 correct sub-line refinement makes: every page moves a fraction of a twip and almost nothing crosses
 a boundary.
@@ -297,6 +306,19 @@ ascent and the line height by `127/100` — **integer division**, applied to the
 
 `(gridded * 127) / 100` reproduces **all 39** IPAGothic ascents and **all 39** line heights exactly,
 so the rule is not in doubt. What is in doubt is whether implementing it helps:
+
+> **Superseded 2026-08-15 by `probes/words-metrics-01`, and the correction is instructive: this
+> statement of the rule is wrong, and the 39-row fit could not have shown it.** The scale reaches the
+> device's ascent and its ascent-plus-descent; the leading is added *afterwards*, unscaled —
+> `GetFontHeight` is `lcl_ApplyCjkHeightAdjustment(m_nPrtHeight, …) + GetFontLeading(…)`. IPAGothic's
+> `hhea` lineGap is **0**, so on that one face the two readings are the same number at every size.
+> WenQuanYi Zen Hei's gap of 92/1024 separates them: at 12 pt this rule gives 412 twips, the correct
+> one gives 406, and LibreOffice draws 406. Scored over 117 pairs on three faces, this rule is
+> 78/117 and the corrected one 117/117. *A perfect fit on a sample that cannot discriminate is not
+> evidence for the rule — only for the sample.*
+>
+> The reach estimate below was also wrong, and cheaply checkable: the three "at risk" documents were
+> never at risk. Only one document of the 200 has East Asian letters adjacent to Latin ones.
 
 - Across all 534 documents, **7** embed a CJK face in the reference rendering: 4 in words,
   1 in slides, 2 in sheets. Only the 4 words ones are in Writer's path at all.

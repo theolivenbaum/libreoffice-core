@@ -198,8 +198,14 @@ public static class FlowLayouter
                 ? before.Format
                 : null;
 
+            // The same four conditions the paginator routes on, and for the same reasons — a cell, a
+            // header and a text box reach layout through here instead and must break their lines in the
+            // same places. `NeedsGlyphFallback` is the one that is not about height: it says the
+            // paragraph's own face cannot draw its own text, so only the per-run path measures it in the
+            // face the drawing pass will actually use.
             LaidOutParagraph layout =
                 paragraph.HasRuns || paragraph.HasInlineObjects || paragraph.LabelRaisesFirstLine
+                || paragraph.NeedsGlyphFallback || paragraph.HasScriptSpace
                 ? layouter.Layout(
                     paragraph.Measure(),
                     paragraph.Format,

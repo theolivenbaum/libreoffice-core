@@ -395,6 +395,89 @@ public class ItemisationTests
         ReferenceEquals(resolver.FallbackFor('ש'), found).ShouldBeTrue();
     }
 
+    /// <summary>
+    /// <see cref="FontItemiser.Split"/>'s question, asked without building the list.
+    /// </summary>
+    /// <remarks>
+    /// It exists so that a caller can find out whether the shortcut it is about to take is
+    /// <em>equivalent</em>. Measuring a paragraph as one shaped run is only the same thing as
+    /// measuring it per face while its own face can draw all of it — and the paragraph that showed
+    /// this was a whole page of Chinese measured through Liberation Serif's <c>.notdef</c>, 0.778 em
+    /// apiece against the em the fallback face actually drew.
+    /// </remarks>
+    [Fact]
+    public void CoverageIsQueryableWithoutSplitting()
+    {
+        OpenTypeFace face = Carlito();
+
+        FontItemiser.NeedsFallback("plain latin prose", face).ShouldBeFalse();
+        FontItemiser.NeedsFallback("ab\u05e9\u05dcg", face).ShouldBeTrue();
+        FontItemiser.NeedsFallback("", face).ShouldBeFalse();
+    }
+
+    [Theory]
+    // The same exemption `Split` makes, and for the same reason: no font maps a tab, so a coverage
+    // check over ordinary prose would otherwise call every tab and every break a fallback.
+    [InlineData("a\tb")]
+    [InlineData("a\nb")]
+    [InlineData("a\r\nb")]
+    [InlineData("a\u200db")]
+    [InlineData("a\u200eb")]
+    public void ACharacterNothingDrawsNeedsNoFallback(string text)
+        => FontItemiser.NeedsFallback(text, Carlito()).ShouldBeFalse();
+
+    /// <summary>
+    /// The invariant that makes the predicate safe to route on, and it holds one way only.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>No means no:</b> when <see cref="FontItemiser.NeedsFallback"/> is false,
+    /// <see cref="FontItemiser.Split"/> leaves the run whole, so a caller may take the single-face
+    /// shortcut knowing it measures what the drawing pass will draw.
+    /// </para>
+    /// <para>
+    /// <b>Yes does not mean split.</b> The predicate asks about the primary face's coverage; the
+    /// split also depends on whether the resolver finds anything. Carlito cannot draw <c>汉字</c> and
+    /// a resolver limited to DejaVu Sans cannot either, so the run comes back whole and unflagged
+    /// while the predicate still says true — which is the right way round for a routing decision,
+    /// because the per-run path is the one that reports the missing glyph and makes the same cut the
+    /// drawing pass makes. Taking the shortcut there would be the pre-fix behaviour.
+    /// </para>
+    /// </remarks>
+    [Theory]
+    [InlineData("plain latin prose")]
+    [InlineData("ab\u05e9\u05dcg")]
+    [InlineData("a\tb")]
+    [InlineData("\u6c49\u5b57")]
+    public void CoverageSayingNoMeansSplittingLeavesTheRunWhole(string text)
+    {
+        OpenTypeFace face = Carlito();
+        OpenTypeFace? fallback = DejaVuSans();
+        Assert.SkipWhen(fallback is null, "DejaVu Sans is not installed");
+
+        if (FontItemiser.NeedsFallback(text, face)) return;
+
+        List<FaceRun> runs =
+            FontItemiser.Split(text, 0, text.Length, face, new FixedFallback(fallback!));
+
+        runs.Count.ShouldBe(1);
+        runs[0].IsFallback.ShouldBeFalse();
+    }
+
+    [Fact]
+    public void CoverageSaysYesEvenWhenNothingInstalledCanHelp()
+    {
+        // Stated outright because it is the direction that surprised: the question is about the
+        // primary face, not about the outcome of the search.
+        OpenTypeFace face = Carlito();
+
+        FontItemiser.NeedsFallback("\u6c49\u5b57", face).ShouldBeTrue();
+
+        List<FaceRun> runs = FontItemiser.Split("\u6c49\u5b57", 0, 2, face, new NoFallback());
+        runs.Count.ShouldBe(1);
+        runs[0].IsFallback.ShouldBeFalse();
+    }
+
     private sealed class FixedFallback(OpenTypeFace face) : IGlyphFallbackResolver
     {
         public OpenTypeFace? FallbackFor(int codePoint, int weight = 400, bool isItalic = false)

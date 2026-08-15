@@ -202,9 +202,12 @@ public sealed class Ww8Document : IWordProcessingDocument, IPaginatedDocument
         // one twip. See Ww8DocumentProperties.UsesPrinterMetrics and MetricGrid.
         LayoutFonts fonts = new()
         {
-            Metrics = _reader.DocumentProperties.UsesPrinterMetrics
+            // `AsWordDocument` is the MS_WORD_COMP_GRID_METRICS compatibility flag, which a Word
+            // binary always carries: a face declaring an East Asian code page has its ascent and its
+            // ascent-plus-descent scaled by 127%. See MetricGrid.AsWordDocument.
+            Metrics = (_reader.DocumentProperties.UsesPrinterMetrics
                 ? MetricGrid.Printer
-                : MetricGrid.Reference,
+                : MetricGrid.Reference).AsWordDocument(),
 
             // The FFN's own pitch and family bits, which decide the fallback for a family that is
             // neither installed nor substitutable. See Ww8FontTable.ShapeOf.
@@ -671,6 +674,7 @@ public sealed class Ww8Document : IWordProcessingDocument, IPaginatedDocument
                     Language: paragraph.Language, DisableKerning: !paragraph.AutoKerning),
                 Metrics = fonts.Metrics,
                 Fallback = fonts.Fallback,
+                AddsScriptSpace = true,
 
                 // #i3952#, which the WW8 importer turns on for every DOC without asking the file
                 // (`ww8par.cxx`:2041). See PageParagraph.BlanksAreTransparentToHeight.
@@ -727,6 +731,7 @@ public sealed class Ww8Document : IWordProcessingDocument, IPaginatedDocument
 
         (string text, OpenTypeFace labelFace, FontReference? labelFont) =
             SymbolLabel(fonts, paragraph.ListLabelFamily, paragraph.ListLabelSlot)
+            ?? LevelLabel(fonts, paragraph.ListLabelFamily, marker)
             ?? (marker, face, font);
 
         return PageLabel.Measured(
@@ -816,6 +821,44 @@ public sealed class Ww8Document : IWordProcessingDocument, IPaginatedDocument
     /// indistinguishable from MIDDLE DOT and was drawn as one.
     /// </para>
     /// </remarks>
+    /// <summary>
+    /// The label set in the face the level names, when that face is an ordinary one.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <see cref="SymbolLabel"/> handles a level naming a <em>symbol</em> face, where the slot has to be
+    /// recoded before it means anything. This is the other half, and it was missing: a level naming
+    /// Courier New draws its label in Courier New, and nothing about that needs recoding.
+    /// </para>
+    /// <para>
+    /// LibreOffice makes no distinction between the two — <c>WW8ListManager::ReadLVL</c>
+    /// (<c>sw/source/filter/ww8/ww8par3.cxx</c>:1077-1095) reads the <c>SvxFontItem</c> out of the
+    /// level's character format and calls <c>SetBulletFont</c> whatever the character is. Measured on
+    /// <c>A320SimNotes.doc</c>, whose second-level bullet is Word's default <c>o</c> in Courier New:
+    /// LibreOffice's PDF embeds four cuts of Liberation Mono that the document names nowhere else, and
+    /// ours embedded none, drawing the bullet in the item's own Liberation Serif Bold instead.
+    /// </para>
+    /// <para>
+    /// Refused when the resolved face has no glyph for the marker, which is the guard the symbol path
+    /// gets from its recode table: a level naming a face that cannot draw its own label would put a
+    /// missing-glyph box where a bullet belongs, and the paragraph's face is the better answer.
+    /// </para>
+    /// </remarks>
+    private static (string Text, OpenTypeFace Face, FontReference? Font)? LevelLabel(
+        LayoutFonts fonts, string? family, string marker)
+    {
+        if (family is not { Length: > 0 } || marker.Length == 0) return null;
+        if (SymbolFontRecode.IsRecodeable(family)) return null;
+        if (fonts.Face(family, 400, false) is not { } levelFace) return null;
+
+        foreach (char character in marker)
+        {
+            if (!levelFace.HasGlyphFor(character)) return null;
+        }
+
+        return (marker, levelFace, fonts.Reference(family, 400, false));
+    }
+
     private static (string Text, OpenTypeFace Face, FontReference? Font)? SymbolLabel(
         LayoutFonts fonts, string? family, char slot)
     {

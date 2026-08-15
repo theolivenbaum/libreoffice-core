@@ -129,7 +129,10 @@ public sealed partial class DocxLayoutSource
         _autoSpacing = compatibility.DoNotUseHtmlParagraphAutoSpacing
             ? WordParagraphFormats.WordAutoSpacing
             : WordParagraphFormats.HtmlAutoSpacing;
-        _metrics = compatibility.UsesPrinterMetrics ? MetricGrid.Printer : MetricGrid.Reference;
+        // `AsWordDocument` is the MS_WORD_COMP_GRID_METRICS compatibility flag, which the Word
+        // filters set and ODF's does not. See MetricGrid.AsWordDocument.
+        _metrics = (compatibility.UsesPrinterMetrics ? MetricGrid.Printer : MetricGrid.Reference)
+            .AsWordDocument();
         _footnotes = footnotes ?? new Dictionary<string, XElement>(StringComparer.Ordinal);
         _endnotes = endnotes ?? new Dictionary<string, XElement>(StringComparer.Ordinal);
         _footnoteNumbering = NumberingIn(settings, "footnotePr", NoteNumbering.Footnotes);
@@ -754,6 +757,10 @@ public sealed partial class DocxLayoutSource
                 .IsOn,
             Metrics = _metrics,
             Fallback = _fonts,
+
+            // Word's "add space between Asian and Western text". See ScriptSpacing; the DOC reader
+            // sets it for the same reason and the ODF one does not.
+            AddsScriptSpace = true,
             EmSize = text.Size,
             Language = text.Language,
             Shaping = new ShapingOptions(
