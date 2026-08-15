@@ -22,11 +22,21 @@ namespace Paperless.WordProcessing.Tests;
 /// paragraph gone. LibreOffice 26.2.4.2 drew all 90 in both files.
 /// </para>
 /// <para>
-/// What this does <em>not</em> claim is parity with Writer's follow-flow lines, which build a second
-/// frame for the nested table too and divide it in turn. A document whose whole body is wrapped in a
-/// chain of single-cell tables — a shape web exporters produce constantly, and the one
-/// <c>May 25 bulletin focus on carers in the workplace.docx</c> has — offers no legal cut at all, since
-/// the one nested table spans the entire cell. That remains open.
+/// <strong>The wrapper-chain case is now covered too, and it used to be the open one.</strong> A
+/// document whose whole body is wrapped in a chain of single-cell tables — a shape web exporters
+/// produce constantly — offers no legal cut at any level, because the one nested table spans the entire
+/// cell and the only candidate is its bottom. On
+/// <c>May 25 bulletin focus on carers in the workplace.docx</c> that bottom was measured at 1126.4 pt
+/// against a body 697.9 pt tall, so the row could not be split on a completely empty page and 86 words
+/// were lost off the end. <c>SliceRow</c> now falls back to a search through the nested tables when the
+/// ordinary candidate list yields nothing, which is exactly the rows that lose content today: 4 pages
+/// and 538 words against the reference's 4 and 538, from 4 and 448.
+/// </para>
+/// <para>
+/// Still not claimed: parity with Writer's follow-flow lines, which build a second frame for the nested
+/// table and divide it in turn. Ours divides the placed rectangle instead, so the two agree on what is
+/// drawn and not on where each page's cut falls — the bulletin's pages carry 62/154/232/90 words
+/// against the reference's 62/217/189/70.
 /// </para>
 /// </remarks>
 public sealed class NestedTableRowSplitTests
@@ -53,6 +63,63 @@ public sealed class NestedTableRowSplitTests
         NestedTables(pages).ShouldBe(0);
     }
 
+    /// <summary>
+    /// A chain of single-cell wrapper tables still places every line, across more than one page.
+    /// </summary>
+    /// <remarks>
+    /// The shape that had no legal cut at all. Each wrapper spans its parent's whole cell, so the only
+    /// candidate at every level is a bottom far below the page, and before the deep search the row was
+    /// placed whole and everything past the page bottom was silently dropped.
+    /// </remarks>
+    [Theory]
+    [InlineData(2)]
+    [InlineData(4)]
+    public void AChainOfWrapperTablesStillPlacesEveryLine(int wrappers)
+    {
+        IReadOnlyList<LaidOutPage> pages = Paginate(nested: false, wrappers: wrappers);
+
+        pages.Count.ShouldBeGreaterThan(1, "the content is far taller than one page");
+        Lines(pages).ShouldBe(Paragraphs, "every body paragraph is drawn exactly once");
+    }
+
+    /// <summary>And it draws each of them once rather than repeating them on both parts.</summary>
+    /// <remarks>
+    /// The guard on the test above, which a renderer that drew the whole wrapper on every page would
+    /// also pass. Slicing a nested table means building a partial copy of it, and the risk there is
+    /// duplication rather than loss.
+    /// </remarks>
+    [Fact]
+    public void AWrapperChainDrawsNoLineTwice()
+    {
+        IReadOnlyList<LaidOutPage> pages = Paginate(nested: false, wrappers: 3);
+
+        List<string> texts = [];
+        foreach (LaidOutPage page in pages)
+        {
+            foreach (PlacedTable table in page.Tables) Collect(table, texts);
+        }
+
+        texts.Count.ShouldBe(texts.Distinct().Count(), "no line is drawn on two pages");
+
+        static void Collect(PlacedTable table, List<string> into)
+        {
+            foreach (PlacedTableCell cell in table.Cells)
+            {
+                if (cell.Content is not { } flow) continue;
+
+                foreach (PlacedLine line in flow.Lines)
+                {
+                    // Keyed on the paragraph, because a line's own Start and End are offsets *within*
+                    // its paragraph — every single-line paragraph here starts at nought, so keying on
+                    // those collapses all thirty to two distinct values and the test passes vacuously.
+                    into.Add($"{line.ParagraphIndex}:{line.Box.Line.Start}");
+                }
+
+                foreach (PlacedTable inner in flow.Tables) Collect(inner, into);
+            }
+        }
+    }
+
     private const int Paragraphs = 30;
 
     private static int Lines(IReadOnlyList<LaidOutPage> pages)
@@ -71,15 +138,16 @@ public sealed class NestedTableRowSplitTests
             ? flow.Tables.Count + flow.Tables.Sum(CountNested)
             : 0);
 
-    private static IReadOnlyList<LaidOutPage> Paginate(bool nested)
+    private static IReadOnlyList<LaidOutPage> Paginate(bool nested, int wrappers = 0)
     {
-        using DocumentSource source = DocumentSource.FromStream(BuildPackage(nested), "rowsplit.docx");
+        using DocumentSource source =
+            DocumentSource.FromStream(BuildPackage(nested, wrappers), "rowsplit.docx");
         using IDocument document = new WordProcessingReader().Read(source);
 
         return ((WordProcessingPages)((IPaginatedDocument)document).Layout()).Pages;
     }
 
-    private static MemoryStream BuildPackage(bool nested)
+    private static MemoryStream BuildPackage(bool nested, int wrappers = 0)
     {
         const string ContentTypes = """
             <?xml version="1.0" encoding="UTF-8"?>
@@ -142,7 +210,7 @@ public sealed class NestedTableRowSplitTests
                   <w:tblGrid><w:gridCol w:w="9000"/></w:tblGrid>
                   <w:tr><w:tc><w:tcPr><w:tcW w:w="9000" w:type="dxa"/></w:tcPr>
                     {(nested ? Nested : "")}
-                    {body}
+                    {Wrap(body.ToString(), wrappers)}
                   </w:tc></w:tr>
                 </w:tbl>
                 <w:sectPr>
@@ -166,6 +234,22 @@ public sealed class NestedTableRowSplitTests
 
         stream.Position = 0;
         return stream;
+
+        // Each layer is a table of one row and one cell holding the layer below, which is the shape a
+        // web exporter produces and the one that offers no cut of its own at any level.
+        static string Wrap(string inner, int layers)
+        {
+            for (int i = 0; i < layers; i++)
+            {
+                inner = """<w:tbl><w:tblPr><w:tblW w:w="8600" w:type="dxa"/></w:tblPr>"""
+                    + """<w:tblGrid><w:gridCol w:w="8600"/></w:tblGrid>"""
+                    + """<w:tr><w:tc><w:tcPr><w:tcW w:w="8600" w:type="dxa"/></w:tcPr>"""
+                    + inner
+                    + "</w:tc></w:tr></w:tbl>";
+            }
+
+            return inner;
+        }
 
         static void Add(ZipArchive archive, string name, string content)
         {

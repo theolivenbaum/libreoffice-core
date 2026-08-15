@@ -438,6 +438,54 @@ public static class TableLayouter
             height = needed;
         }
 
+        // Nothing was cuttable at this level. Descend into the nested tables and look for a cut inside
+        // one, which is the only thing that lets a row split when a cell holds a nested table taller than
+        // the page it must fit on.
+        //
+        // **Only when the ordinary search found nothing**, which confines this to exactly the rows that
+        // are broken today: a row with no legal cut is placed whole on a page that cannot hold it, and
+        // whatever runs past the bottom is neither drawn nor carried. Every row that splits today finds
+        // its cut in the list above and never reaches here, so no document that works can be moved by it.
+        // That is the same argument the row-span exception above already makes — declining is worse than
+        // the artefact when declining hides content.
+        //
+        // Measured on `May 25 bulletin focus on carers in the workplace.docx`, a chain of single-row,
+        // single-cell wrapper tables nested five deep. Every `SliceRow` call on it reported one cell, one
+        // nested span of 0.0..1126.4 and a single candidate at that span's bottom — against a body 697.9
+        // pt tall, so the one legal cut was unreachable even on a completely empty page and the row could
+        // never be split at all. 86 words fell off the end. See `probes/nested-table-slice/`.
+        //
+        // Writer never needs this: `bTableLayoutTooComplex` (`sw/source/core/layout/tabfrm.cxx`:586-594,
+        // gating the split at :611-613) makes it refuse to cut such a row too, but its nested table is a
+        // frame in its own right and splits across the page through its own follow. Ours is a rectangle
+        // inside a cell's flow, placed whole or not at all — so the recursion has to happen here instead.
+        bool fromDeepSearch = false;
+
+        if (chosen is null)
+        {
+            List<Length> deep = [];
+            foreach (PlacedTableCell cell in cells)
+            {
+                if (cell.ContentTransform is not null || cell.Content is not { } flow) continue;
+
+                foreach (PlacedTable nested in flow.Tables) DeepCuts(nested, above, deep);
+            }
+
+            deep.Sort();
+
+            foreach (Length candidate in deep)
+            {
+                if (chosen is { } already && already == candidate) continue;
+
+                Length needed = HeightAt(cells, rowTop, above, candidate, border);
+                if (needed > room) break;
+
+                chosen = candidate;
+                height = needed;
+                fromDeepSearch = true;
+            }
+        }
+
         if (chosen is not { } cut) return null;
 
         // Whether anything is left over, asked of the content rather than of the candidate list: a cut a
@@ -456,7 +504,16 @@ public static class TableLayouter
             foreach (PlacedTable nested in flow.Tables) last = Length.Max(last, nested.Area.Bottom);
         }
 
-        bool complete = last <= cut;
+        // A nested table contributes its whole rectangle's bottom to `last`, which is right while a cut
+        // can only fall between nested tables: the part is incomplete exactly when one is still below it.
+        // A cut *inside* one breaks that reading — the rectangle's bottom stays where it always was
+        // however much of the table has been drawn, so the last part reports itself incomplete, the
+        // caller asks for one more page, and the band left over holds no lines and draws nothing.
+        //
+        // That is where the bulletin's spurious fifth page came from. Asked of the lines instead the
+        // answer is right, and it is asked only of a cut the deep search chose, so a row that splits the
+        // ordinary way keeps the rectangle test exactly as it was.
+        bool complete = last <= cut || (fromDeepSearch && !HasLinesBelow(cells, cut));
 
         // A part holding every remaining line is not a split at all; the caller places the whole row.
         if (complete && drawn <= Length.Zero) return null;
@@ -538,11 +595,24 @@ public static class TableLayouter
             {
                 if (nested.Area.Bottom > cut)
                 {
+                    // A nested table the cut falls *inside* contributes the part above the cut. Without
+                    // this the part measures nothing at a deep cut — a wrapper cell has no lines of its
+                    // own — so every candidate would appear to fit and the deepest would be chosen,
+                    // which is a part taller than the page. Only reachable through the deep-cut search
+                    // below; the ordinary candidate list never crosses a nested table.
+                    if (nested.Area.Y < cut)
+                    {
+                        Length straddleTop = isFirst ? flow.Area.Y : Length.Max(nested.Area.Y, above);
+                        top = top is { } sofar ? Length.Min(sofar, straddleTop) : straddleTop;
+                        bottom = Length.Max(bottom, cut);
+                    }
+
                     tableBelow = true;
                     continue;
                 }
 
-                if (nested.Area.Y < above) continue;
+                if (nested.Area.Bottom <= above) continue;
+                if (nested.Area.Y < above && SliceNested(nested, above, cut) is null) continue;
 
                 Length nestedTop = isFirst ? flow.Area.Y : nested.Area.Y;
                 top = top is { } already ? Length.Min(already, nestedTop) : nestedTop;
@@ -642,6 +712,149 @@ public static class TableLayouter
     /// with it, the last paragraph gone.
     /// </para>
     /// </remarks>
+    /// <summary>
+    /// Every depth at which a nested table could be divided, gathered through the tables inside it.
+    /// </summary>
+    /// <remarks>
+    /// The bottom of each of its lines, and the bottom of each table nested inside it — the same two
+    /// kinds of candidate <see cref="SliceRow"/> collects at the top level, read one level down. A
+    /// wrapper table holding a single row and a single cell offers no cut of its own, which is exactly
+    /// the shape this exists for, so the recursion has to reach the lines rather than stopping at the
+    /// rows.
+    /// </remarks>
+    /// <param name="nested">The table to look inside.</param>
+    /// <param name="above">Depths at or above this one are already drawn and are not candidates.</param>
+    /// <param name="into">The list being gathered into.</param>
+    /// <param name="depth">How far the recursion has gone; its guard.</param>
+    private static void DeepCuts(PlacedTable nested, Length above, List<Length> into, int depth = 0)
+    {
+        if (depth > FlowLayouter.MaxNesting) return;
+
+        foreach (PlacedTableCell cell in nested.Cells)
+        {
+            // A turned cell offers no cuts, for the reason `SliceRow` gives: its lines run across the row
+            // rather than down it.
+            if (cell.ContentTransform is not null || cell.Content is not { } flow) continue;
+
+            foreach (PlacedLine line in flow.Lines)
+            {
+                Length bottom = flow.Area.Y + line.Top + line.Box.Height;
+                if (bottom > above) into.Add(bottom);
+            }
+
+            foreach (PlacedTable inner in flow.Tables)
+            {
+                if (inner.Area.Bottom > above) into.Add(inner.Area.Bottom);
+
+                DeepCuts(inner, above, into, depth + 1);
+            }
+        }
+    }
+
+    /// <summary>
+    /// The part of a nested table lying between two depths, or null when none of it does.
+    /// </summary>
+    /// <remarks>
+    /// The counterpart of <see cref="Sliced"/> one level down, and it keeps page coordinates: the caller
+    /// shifts the whole thing by the same <c>dy</c> it shifts a nested table it kept whole, so nothing
+    /// here has to know where the part will land.
+    /// </remarks>
+    /// <param name="nested">The table being divided.</param>
+    /// <param name="above">The top of the band to keep.</param>
+    /// <param name="cut">Its bottom.</param>
+    /// <param name="depth">How far the recursion has gone; its guard.</param>
+    private static PlacedTable? SliceNested(PlacedTable nested, Length above, Length cut, int depth = 0)
+    {
+        if (depth > FlowLayouter.MaxNesting) return null;
+
+        List<PlacedTableCell> kept = [];
+
+        foreach (PlacedTableCell cell in nested.Cells)
+        {
+            // Undividable, so it rides on whichever part holds its top.
+            if (cell.ContentTransform is not null)
+            {
+                if (cell.Area.Y >= above && cell.Area.Y < cut) kept.Add(cell);
+                continue;
+            }
+
+            List<PlacedLine> lines = [];
+            List<PlacedTable> tables = [];
+
+            if (cell.Content is { } flow)
+            {
+                foreach (PlacedLine line in flow.Lines)
+                {
+                    Length bottom = flow.Area.Y + line.Top + line.Box.Height;
+                    if (bottom > above && bottom <= cut) lines.Add(line);
+                }
+
+                foreach (PlacedTable inner in flow.Tables)
+                {
+                    if (inner.Area.Bottom <= above || inner.Area.Y >= cut) continue;
+
+                    PlacedTable? part = inner.Area.Y >= above && inner.Area.Bottom <= cut
+                        ? inner
+                        : SliceNested(inner, above, cut, depth + 1);
+
+                    if (part is not null) tables.Add(part);
+                }
+            }
+
+            if (lines.Count == 0 && tables.Count == 0) continue;
+
+            Length top = Length.Max(cell.Area.Y, above);
+            Length bottom2 = Length.Min(cell.Area.Bottom, cut);
+
+            kept.Add(cell with
+            {
+                Area = new DocRect(cell.Area.X, top, cell.Area.Width, bottom2 - top),
+                Content = cell.Content is { } text
+                    ? text with { Lines = lines, Tables = tables }
+                    : null,
+            });
+        }
+
+        if (kept.Count == 0) return null;
+
+        Length areaTop = Length.Max(nested.Area.Y, above);
+        Length areaBottom = Length.Min(nested.Area.Bottom, cut);
+
+        return nested with
+        {
+            Area = new DocRect(nested.Area.X, areaTop, nested.Area.Width, areaBottom - areaTop),
+            Cells = kept,
+        };
+    }
+
+    /// <summary>Whether any line anywhere inside these cells ends below a depth.</summary>
+    /// <remarks>
+    /// The content test that <see cref="SliceRow"/>'s completeness check falls back on when the cut was
+    /// taken inside a nested table. Lines rather than rectangles, because a nested table's rectangle
+    /// tells you where it was laid out and not how much of it is still waiting.
+    /// </remarks>
+    private static bool HasLinesBelow(IReadOnlyList<PlacedTableCell> cells, Length cut, int depth = 0)
+    {
+        if (depth > FlowLayouter.MaxNesting) return false;
+
+        foreach (PlacedTableCell cell in cells)
+        {
+            if (cell.Content is not { } flow) continue;
+
+            foreach (PlacedLine line in flow.Lines)
+            {
+                if (flow.Area.Y + line.Top + line.Box.Height > cut) return true;
+            }
+
+            foreach (PlacedTable nested in flow.Tables)
+            {
+                if (HasLinesBelow(nested.Cells, cut, depth + 1)) return true;
+            }
+        }
+
+        return false;
+    }
+
     private static bool Crosses(List<(Length Top, Length Bottom)> spans, Length cut)
     {
         foreach ((Length top, Length bottom) in spans)
@@ -701,10 +914,21 @@ public static class TableLayouter
                 // and none is drawn twice or lost between the two.
                 foreach (PlacedTable nested in flow.Tables)
                 {
-                    if (nested.Area.Y < above || nested.Area.Bottom > cut) continue;
+                    // Wholly outside the band this part covers.
+                    if (nested.Area.Bottom <= above || nested.Area.Y >= cut) continue;
 
-                    keptTables.Add(nested);
-                    Length start = nested.Area.Y - flow.Area.Y;
+                    // Whole inside it, or divided by one end of it. The second case is new and is only
+                    // reachable through the deep-cut search in `SliceRow`: the ordinary candidate list
+                    // never crosses a nested table, so before that search existed every nested table was
+                    // wholly above the cut or wholly below it.
+                    PlacedTable? part = nested.Area.Y >= above && nested.Area.Bottom <= cut
+                        ? nested
+                        : SliceNested(nested, above, cut);
+
+                    if (part is null) continue;
+
+                    keptTables.Add(part);
+                    Length start = part.Area.Y - flow.Area.Y;
                     first = first is { } already ? Length.Min(already, start) : start;
                 }
             }
