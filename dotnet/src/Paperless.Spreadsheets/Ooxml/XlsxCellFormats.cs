@@ -299,6 +299,37 @@ internal static class XlsxCellFormats
 
     // -------------------------------------------------------------------------------- fonts
 
+    /// <summary>
+    /// The face a <c>&lt;font&gt;</c> that names none is set in.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>Not the workbook's own <c>fonts[0]</c>, and not a generic sans.</strong> Every
+    /// <c>&lt;font&gt;</c> the OOXML filter builds starts life as a copy of the theme buffer's
+    /// default model, and that model is a hard-coded <c>Cambria</c> at 11 pt —
+    /// <c>ThemeBuffer::ThemeBuffer</c> (<c>sc/source/filter/oox/themebuffer.cxx:31-33</c>), where
+    /// it is marked "TODO: locale dependent font name" and has never been made one. Nothing in
+    /// the theme part overrides it: <c>getDefaultFontModel</c> returns that same object however
+    /// the workbook's own major and minor fonts are declared.
+    /// </para>
+    /// <para>
+    /// Measured on <c>dotnet/probes/sheets-rest-01/mkfontprobe.py</c> under the installed
+    /// 26.2.4.2, whose <c>fonts[0]</c> is Arial 10 so that the two candidate answers are
+    /// distinguishable: <c>&lt;font/&gt;</c> draws in Caladea-Regular at 11.00 pt,
+    /// <c>&lt;font&gt;&lt;b/&gt;&lt;/font&gt;</c> in Caladea-Bold at 11.00,
+    /// <c>&lt;font&gt;&lt;sz val="20"/&gt;&lt;/font&gt;</c> in Caladea-Regular at 20.01, and
+    /// <c>&lt;font&gt;&lt;name val="Arial"/&gt;&lt;/font&gt;</c> in LiberationSans at
+    /// <em>11.00</em> — so the size default is the theme's eleven and not the ten a bare BIFF
+    /// font would take. Caladea is Cambria's metric-compatible substitute, which is what makes
+    /// the face readable off the PDF at all.
+    /// </para>
+    /// </remarks>
+    private const string UnnamedFontFamily = "Cambria";
+
+    /// <summary>The size a <c>&lt;font&gt;</c> that states none takes.</summary>
+    /// <remarks>The other half of the same model — see <see cref="UnnamedFontFamily"/>.</remarks>
+    private const double UnnamedFontPoints = 11.0;
+
     private static Font ReadFont(XElement font, Colour[] palette)
     {
         double? points = Number(Xlsx.Child(font, "sz"), "val");
@@ -306,8 +337,9 @@ internal static class XlsxCellFormats
 
         return new Font(
             Xlsx.Attribute(Xlsx.Child(font, "name"), "val")
-                ?? Xlsx.Attribute(Xlsx.Child(font, "rFont"), "val"),
-            Length.FromPoints(points is > 0 ? points.Value : 10),
+                ?? Xlsx.Attribute(Xlsx.Child(font, "rFont"), "val")
+                ?? UnnamedFontFamily,
+            Length.FromPoints(points is > 0 ? points.Value : UnnamedFontPoints),
             Toggle(Xlsx.Child(font, "b")) ? 700 : 400,
             Toggle(Xlsx.Child(font, "i")),
             colour,

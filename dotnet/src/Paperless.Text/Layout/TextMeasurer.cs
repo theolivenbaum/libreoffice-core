@@ -133,6 +133,11 @@ public readonly record struct TextLine(
 /// problem.
 /// </para>
 /// <para>
+/// <strong>The first of those two is Writer's rule and not EditEngine's</strong>, which is why
+/// <see cref="LineFiller(TextMeasurer, ILineBreaker, bool)"/> can turn it off. See
+/// <see cref="BreaksOverflowingBlanks"/>.
+/// </para>
+/// <para>
 /// The paragraph is shaped once and every candidate width read off the result. Shaping each candidate
 /// would be quadratic in the paragraph's length, and would also answer slightly differently, since a
 /// prefix shaped alone is not always a prefix of the shaped whole.
@@ -142,14 +147,51 @@ public sealed class LineFiller
 {
     private readonly TextMeasurer _measurer;
     private readonly ILineBreaker _breaker;
+    private readonly bool _breaksOverflowingBlanks;
 
     /// <summary>Creates a filler over a measurer and a break iterator.</summary>
-    public LineFiller(TextMeasurer measurer, ILineBreaker? breaker = null)
+    /// <param name="measurer">The measurer the candidate widths are read from.</param>
+    /// <param name="breaker">The break iterator, or null for the default.</param>
+    /// <param name="breaksOverflowingBlanks">
+    /// Whether a run of blanks wider than the line is broken inside rather than allowed to hang past
+    /// it. See <see cref="BreaksOverflowingBlanks"/>; false is Writer's rule and the default.
+    /// </param>
+    public LineFiller(
+        TextMeasurer measurer, ILineBreaker? breaker = null, bool breaksOverflowingBlanks = false)
     {
         ArgumentNullException.ThrowIfNull(measurer);
         _measurer = measurer;
         _breaker = breaker ?? LineBreaker.Instance;
+        _breaksOverflowingBlanks = breaksOverflowingBlanks;
     }
+
+    /// <summary>
+    /// Whether a line's trailing blanks are allowed to overflow it, or break inside instead.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A word processor lets them hang: a line's trailing spaces do not count towards its width, so a
+    /// run of twenty blanks at the end of a line is free however narrow the column is. That is Writer,
+    /// and it is what this class does by default.
+    /// </para>
+    /// <para>
+    /// <strong>EditEngine — which is what lays out a Calc cell — does not.</strong>
+    /// <c>ImpEditEngine::ImpBreakLine</c> walks the character-position array while it is under the
+    /// remaining width and the array holds every character's advance, blanks included
+    /// (<c>editeng/source/editeng/impedit3.cxx:2016-2018</c>). When the character it stops on is a
+    /// blank it breaks immediately behind it and compresses it —
+    /// "Break behind the blank, blank will be compressed" (<c>:2031-2035</c>) — so a run of blanks is
+    /// cut into line-fuls rather than hanging off the end of one line.
+    /// </para>
+    /// <para>
+    /// Measured on <c>dotnet/probes/sheets-rest-01/mkspaceprobe.py</c> under the installed 26.2.4.2,
+    /// eighteen wrapped cells differing only in their trailing whitespace: a cell holding 40 blanks in
+    /// a 71.25 pt column takes two lines, 100 blanks take four, 160 take five and 200 take seven, and
+    /// all eighteen are reproduced exactly by breaking behind the blank that overflows. Without this
+    /// every one of them is one line.
+    /// </para>
+    /// </remarks>
+    public bool BreaksOverflowingBlanks => _breaksOverflowingBlanks;
 
     /// <summary>
     /// Breaks a paragraph measured across its runs into lines that fit a width.
@@ -381,6 +423,30 @@ public sealed class LineFiller
                 }
             }
 
+            // The line's trailing blanks are wider than the line. A word processor lets them hang;
+            // EditEngine breaks behind the blank that overflowed and compresses it, which is what
+            // turns a cell holding a hundred spaces into four lines rather than one. Only the blanks
+            // are affected: when the character that overflows is not one, this leaves the chosen
+            // break alone and the chop below deals with it as it always has.
+            if (_breaksOverflowingBlanks && !forceChop && chosen > lineStart
+                && Measure(text, lineStart, chosen, widthBetween, tabs, lines.Count == 0, limit)
+                       > limit + chosenAllowance
+                && OverflowingBlank(
+                       text, lineStart, chosen, limit, widthBetween, tabs, lines.Count == 0)
+                       is { } behind)
+            {
+                chosen = behind;
+                chosenVisibleEnd = TrimTrailingSpaces(text, lineStart, chosen);
+                chosenWidth = Measure(
+                    text, lineStart, chosenVisibleEnd, widthBetween, tabs, lines.Count == 0, limit);
+                chosenAllowance = shrinks
+                    ? JustificationShrink.AllowanceFor(
+                        text, lineStart, chosenVisibleEnd, widthBetween)
+                    : Length.Zero;
+                chopEnd = chosen;
+                probe = nextOpportunity;
+            }
+
             // Nothing between this line's start and its first break opportunity fits. The word is
             // chopped rather than left hanging over the margin — see the remarks on this class.
             if ((forceChop || chosenWidth > limit + chosenAllowance)
@@ -564,6 +630,66 @@ public sealed class LineFiller
         }
 
         return best;
+    }
+
+    /// <summary>
+    /// Where to break when a line's own blanks overflow it, or null when they do not.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>ImpEditEngine::ImpBreakLine</c> (<c>editeng/source/editeng/impedit3.cxx:2016-2035</c>) in
+    /// two statements. It walks the character-position array — cumulative advances, every character
+    /// counted — while it is still under the remaining width, giving the first character that does
+    /// not fit; and if that character is a blank it breaks one past it, leaving the blank on the
+    /// line to be compressed away.
+    /// </para>
+    /// <para>
+    /// Null when the overflowing character is anything else, because that is a word too long for its
+    /// line and the caller already has a rule for it: <see cref="Chop"/>, which is the same walk with
+    /// EditEngine's other ending.
+    /// </para>
+    /// <para>
+    /// Binary search rather than EditEngine's linear walk, for the same reason <see cref="Chop"/>
+    /// uses one: prefix widths only grow, and a cell holding a thousand blanks would otherwise cost a
+    /// measurement per blank per line.
+    /// </para>
+    /// </remarks>
+    /// <returns>The position just past the overflowing blank, or null.</returns>
+    private static int? OverflowingBlank(
+        string text,
+        int lineStart,
+        int end,
+        Length limit,
+        Func<int, int, Length> widthBetween,
+        ParagraphFormat? tabs,
+        bool isFirstLine)
+    {
+        // The first character whose cumulative width reaches the limit, which is where EditEngine's
+        // `while (… < nRemainingWidth) nBreakInLine++` leaves off.
+        int low = lineStart;
+        int high = end - 1;
+        int at = end;
+
+        while (low <= high)
+        {
+            int middle = low + ((high - low) / 2);
+            if (Measure(text, lineStart, middle + 1, widthBetween, tabs, isFirstLine, limit) >= limit)
+            {
+                at = middle;
+                high = middle - 1;
+            }
+            else
+            {
+                low = middle + 1;
+            }
+        }
+
+        if (at >= end || text[at] != ' ') return null;
+
+        // One past the blank, and never the line's own start: a line of no characters would make no
+        // progress and the fill loop would not terminate.
+        int behind = at + 1;
+        return behind > lineStart && behind < end ? behind : null;
     }
 
     /// <summary>A cut position moved forward off the second half of a surrogate pair.</summary>

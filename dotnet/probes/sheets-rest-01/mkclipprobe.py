@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 """Build an XLSX probe of cells too wide for their column, with the neighbour occupied.
 
+Every `cellXf` states `applyFont="1"` and the workbook carries a `cellStyles`, because the
+first cut of this probe omitted both: `fontId="0"` with no flag left LibreOffice using its own
+application default of Liberation Sans 10 for the plain rows while the rich rows took the face
+their `rPr` named, so plain and rich were never compared in the same font at all.
+
 `ScOutputData::LayoutStrings` sends a cell to `DrawEdit` rather than to `DrawStrings` when
 `aCell.getType() == CELLTYPE_EDIT` (`sc/source/ui/view/output2.cxx:1710-1712`), and the two
 paths disagree about a string that does not fit: `DrawStrings` shortens it to what the clip
@@ -56,9 +61,10 @@ STYLES_TEMPLATE = '''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <borders count="1"><border/></borders>
 <cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>
 <cellXfs count="2">
-<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>
-<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0" applyAlignment="1"><alignment wrapText="1"/></xf>
+<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0" applyFont="1"/>
+<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0" applyFont="1" applyAlignment="1"><alignment wrapText="1"/></xf>
 </cellXfs>
+<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>
 </styleSheet>'''
 
 # The face and size matter, and the first cut of this probe got that wrong: at Arial 9 every
