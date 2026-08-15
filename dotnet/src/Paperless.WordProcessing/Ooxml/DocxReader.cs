@@ -318,7 +318,12 @@ public sealed class OoxmlWordDocument : IWordProcessingDocument, IPaginatedDocum
             _file.Styles, _file.Settings, footnotes: _file.Footnotes, endnotes: _file.Endnotes,
             theme: _file.Theme, pictures: new DocxPictures(_file, _laidOut),
             numbering: _file.Numbering, fontTable: _file.FontTable,
-            constants: new ConstantFields(_fileName, Content.Metadata.Title));
+            constants: new ConstantFields(_fileName, Content.Metadata.Title))
+        {
+            // Only so the reader can tell a continuous break from a page-starting one when it hands a
+            // dropped section mark's space-after on. See `DocxLayoutSource.HandOnBelowSpacing`.
+            SectionBreaks = [.. Sections.Select(section => section.Break)],
+        };
         List<PageBlock> blocks = source.Read(body);
 
         // The compatibility options, of which two reach pagination. Which ones those are was
