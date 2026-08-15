@@ -1151,6 +1151,29 @@ public sealed class Paginator
                 }
                 else
                 {
+                    // The paragraph starts the next page, so anything that kept with it has to follow.
+                    // This is the second way a paragraph can be sent onward — the first is its
+                    // predecessor finding that this one's first line does not fit, checked below — and it
+                    // is the one a keep chain reaches through a *keep* rather than through a shortage of
+                    // room: the first line fits and the paragraph moves anyway, because its own
+                    // keep-with-next or widow rule forbids leaving part of it here. Writer makes no
+                    // distinction: `SwFlowFrame::MoveFwd` pulls the predecessors along in either case.
+                    if (lineIndex == 0
+                        && placed.Count > 0
+                        && placed[^1].ParagraphIndex == paragraphIndex - 1
+                        && blocks[paragraphIndex - 1] is PageParagraph { Format.KeepWithNext: true })
+                    {
+                        MoveTrailingGroupToNextPage(
+                            blocks, placed, out List<PlacedLine> bounced, out int bouncedFrom);
+
+                        if (bounced.Count > 0 && bouncedFrom > 0)
+                        {
+                            EmitPage();
+                            paragraphIndex = bouncedFrom;
+                            continue;
+                        }
+                    }
+
                     EmitPage();
                     continue;
                 }
@@ -1589,6 +1612,14 @@ public sealed class Paginator
     /// <list type="bullet">
     ///   <item>
     ///     Keep-together forbids splitting at all, so either the whole remainder fits or none of it does.
+    ///     <strong>Keep-with-next forbids it too</strong>, which is not obvious from the name and is not
+    ///     what Word does. Writer decides both in one place — <c>SwTextFrameBreak</c>'s constructor,
+    ///     <c>sw/source/core/text/widorp.cxx:75</c>, sets <c>m_bKeep</c> from
+    ///     <c>!GetSplit().GetValue() || GetKeep().GetValue()</c>, and <c>IsBreakNow</c> then answers
+    ///     "no break" unconditionally while it holds. So a paragraph carrying <c>w:keepNext</c> moves
+    ///     whole rather than leaving its first lines behind. Measured on a French specification whose
+    ///     bulleted paragraphs each carry <c>keepNext</c>: honouring only the forward half of the
+    ///     attribute cost two pages of 29.
     ///   </item>
     ///   <item>
     ///     The orphan count is how many lines must stay behind at the foot of the page. Fewer than that
@@ -1610,7 +1641,7 @@ public sealed class Paginator
         int remaining = totalLines - from;
         if (fitted >= remaining) return remaining;
         if (atTopOfPage) return Math.Max(fitted, 1);
-        if (format.KeepTogether) return 0;
+        if (format.KeepTogether || format.KeepWithNext) return 0;
 
         int orphans = Math.Max(format.OrphanLines, 0);
         int widows = Math.Max(format.WidowLines, 0);
@@ -1790,8 +1821,13 @@ public sealed class Paginator
         }
 
         // A paragraph that started on an earlier page cannot be moved, and neither can the whole page.
+        //
+        // "Started on an earlier page" is `line 0 of it is not among the lines placed here`, and the
+        // test used to be the near-opposite — *any* line of it that is not line 0 — which refuses to
+        // move any chain whose first paragraph runs to more than one line on the page. That is nearly
+        // every real chain, so keep-with-next was in practice honoured only for single-line headings.
         if (first <= firstOnPage) return;
-        if (placed.Any(line => line.ParagraphIndex == first && !line.StartsParagraph)) return;
+        if (!placed.Any(line => line.ParagraphIndex == first && line.StartsParagraph)) return;
 
         int at = placed.FindIndex(line => line.ParagraphIndex == first);
         if (at <= 0) return;
