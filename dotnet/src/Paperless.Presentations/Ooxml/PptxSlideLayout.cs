@@ -1101,6 +1101,11 @@ internal sealed partial class PptxSlideLayout
     {
         if (BodyOf(shape, theme) is not { } body) return null;
 
+        // Fontwork is a picture of words rather than words, in the reference's output and so in
+        // ours. See SlideTextBody.IsTextPath for what LibreOffice does instead and for why the
+        // unwarped runs are not a better answer than none.
+        if (body.IsTextPath) return null;
+
         // The text area's own turn, outside the body's and inside the shape's — see
         // TextAreaTurn. Folding it into the placement is what puts it in that order.
         double areaTurn = TextAreaTurn(shape);

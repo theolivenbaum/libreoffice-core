@@ -168,6 +168,7 @@ internal static class PptxTextBody
             Wraps = Stated(bodyChain, "wrap") != "none",
             AutoFit = autofit is not null,
             FontScale = Thousandth(autofit, "fontScale", 1.0),
+            WarpPreset = Warp(bodyChain),
 
             // a:normAutofit/@lnSpcReduction is deliberately not read: neither does the reference,
             // whose normAutofit handler takes @fontScale alone. See SlideTextBody.AutoFit.
@@ -209,6 +210,38 @@ internal static class PptxTextBody
         return units == 0
             ? 0
             : units / ShapeTransform.RotationUnitsPerDegree * Math.PI / 180.0;
+    }
+
+    /// <summary>
+    /// The WordArt preset <c>a:bodyPr/a:prstTxWarp</c> asks for, or null when the body is
+    /// ordinary text.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>textNoShape</c> is normalised away to null because it is the value that means
+    /// <em>no</em> warp, and it is overwhelmingly the common one: of the 67 documents in the
+    /// corpus's slides track that carry a <c>prstTxWarp</c> at all, 65 carry only
+    /// <c>textNoShape</c>. Reading the element's presence rather than its value would turn a
+    /// two-document behaviour into a sixty-seven-document one.
+    /// </para>
+    /// <para>
+    /// The chain is walked in the same most-specific-first order the rest of the body
+    /// properties use, because <c>PPTShapeContext</c> copy-constructs the slide shape's text
+    /// body from the placeholder's, so a warp stated on a layout or master placeholder is
+    /// inherited exactly as an anchor or an inset is.
+    /// </para>
+    /// </remarks>
+    private static string? Warp(List<XElement> chain)
+    {
+        foreach (XElement source in chain)
+        {
+            if (Drawing.Child(source, "prstTxWarp") is not { } warp) continue;
+
+            string? preset = warp.Attribute("prst")?.Value;
+            return string.IsNullOrEmpty(preset) || preset == "textNoShape" ? null : preset;
+        }
+
+        return null;
     }
 
     /// <summary>

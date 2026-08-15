@@ -117,6 +117,60 @@ public sealed record SlideTextBody
     /// </remarks>
     public double FontScale { get; init; } = 1.0;
 
+    /// <summary>
+    /// The WordArt preset the body is warped along — <c>a:bodyPr/a:prstTxWarp/@prst</c> — or
+    /// null when it is ordinary text.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>textNoShape</c> is normalised to null on read: it is the value that means <em>no</em>
+    /// warp, and the reference tests for exactly that
+    /// (<c>oox/source/drawingml/textbodypropertiescontext.cxx:215-226</c> and
+    /// <c>oox/source/drawingml/shape.cxx:2202-2211</c>) before putting the shape into text-path
+    /// mode. So a non-null value here means Fontwork and nothing else does.
+    /// </para>
+    /// <para>
+    /// See <see cref="IsTextPath"/> for what that costs the text layer.
+    /// </para>
+    /// </remarks>
+    public string? WarpPreset { get; init; }
+
+    /// <summary>
+    /// Whether the body is Fontwork: drawn as glyph outlines rather than as text.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A warped body is not text in the reference's output. <c>putCustomShapeIntoTextPathMode</c>
+    /// turns the shape into a Fontwork custom shape, and
+    /// <c>svx/source/customshapes/EnhancedCustomShapeFontWork.cxx</c> converts its characters to
+    /// <c>tools::PolyPolygon</c> outlines, so what reaches a PDF is filled paths carrying no
+    /// glyph and no <c>ToUnicode</c>. Measured on the installed 26.2.4.2 rather than assumed:
+    /// the reference's page 13 of <c>FAAAIandtheArtandScienceofV&amp;Vfinal.pptx</c> holds 597
+    /// curve operators where ours holds 4, and neither <c>Automation</c> nor <c>Autonomy</c> —
+    /// words that exist only inside its warped bodies — appears anywhere in its text layer. The
+    /// same is true of <c>prst="textPlain"</c>, which curves nothing:
+    /// <c>redac-sas-201403-ppt-portfolio-rev-sim.pptx</c>'s <c>Fractographic Examinations</c>
+    /// is absent from the reference too. The test really is "not <c>textNoShape</c>".
+    /// </para>
+    /// <para>
+    /// <strong>Paperless draws nothing for such a body, which is deliberately a partial.</strong>
+    /// The arch geometry is not implemented, and until it is, the honest choice is between
+    /// leaving unwarped glyphs where they fall and drawing nothing. Measured on that document's
+    /// page 13, the four Fontwork outlines the reference draws sit 14 to 40 pt away from where
+    /// the unwarped runs land — always outward along the box's own local up for
+    /// <c>textArchUp</c> and down for <c>textArchDown</c>, which is the arch's radial
+    /// displacement. Ink in the wrong place counts twice in a comparison against the reference
+    /// and absent ink counts once, so drawing nothing is the nearer of the two; the measurement
+    /// that settles it is in <c>dotnet/probes/slides-extra-01/results.md</c>.
+    /// </para>
+    /// <para>
+    /// Extraction is unaffected. <c>paperless extract</c> reads the body through
+    /// <c>DrawingTextBody</c>, which never consults this, so the words stay in the content tree
+    /// — as they should: they are the document's own words, and it is only the *rendering* that
+    /// turns them into a picture.
+    /// </para>
+    /// </remarks>
+    public bool IsTextPath => WarpPreset is not null;
 
     /// <summary>
     /// Whether the text wraps at the shape's width.
