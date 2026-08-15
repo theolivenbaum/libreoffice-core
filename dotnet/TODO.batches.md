@@ -13762,3 +13762,57 @@ successor here moves for orphan control instead. Left for its own round: it reac
 with a `keepNext` heading.
 
 `dotnet/probes/words-b010-01/results.md`.
+
+---
+
+## 2026-08-15 — after the kind-regrouping and eleven merges
+
+**477 of 534.** Words 167/200, slides 147/163, sheets 163/171 — from 459 when the corpus was
+regrouped, and from the low 430s at the start of the previous session.
+
+| track | matching | failing | of which documented ceilings |
+|---|---:|---:|---:|
+| words | 167 | 33 | 1 |
+| slides | 147 | 16 | **14** |
+| sheets | 163 | 8 | **5** (+1 unstable) |
+
+**Slides and sheets are effectively finished.** Slides has two real defects left, both charts on
+documents whose word columns are unwinnable anyway. Sheets has two, one of which
+(`orbus_togaf`) should be reclassified as a ceiling: its gap is LibreOffice's manufactured
+`DPCache` sheet, and upstream commit `6bc8bae7047` hides that sheet — after 26.2.4.2 branched.
+
+**Essentially all remaining work is on words**, 32 real defects across pagination, metrics,
+extra and missing.
+
+### What the regrouping bought
+
+Every one of these was a group where one fix closed several documents, and every one was split
+across different batches under the complexity ordering:
+
+- `w:textDirection` read by nothing — three documents, one fix
+- a fixed-height text box formatting only the lines that fit — the ABCD family
+- `_x000D_` decoded as Calc decodes it — 13 documents, 12 of them already passing
+- an unresolvable `paperSize` index discarding the orientation — 154/175 to 175/175
+- the digit-width carry constant, recalibrated from 24.2.7.2 to 26.2.4.2
+- embedded `.fntdata` faces, which turned out to be EOT rather than XORed TTF
+- a preset text warp drawn as outlines rather than as text
+
+### The one blocking mechanism left
+
+**The line-height law is one twip out and nobody has reconstructed it.** Characterised over 195
+(face, size) pairs: we agree on 173 and differ on 22, always by exactly one twip, in both
+directions. No device resolution from 72 to 6000 dpi with any per-component rounding fits, and
+neither does any plain rounding of the exact value. It is the sole remaining cause on
+`Sample_SQMS_Program` — a build carrying the round's fix *plus* that one twip renders it at 61
+pages with every page's word count equal to the reference's — and it is the standing residue on
+`1447.doc` too.
+
+It is the highest-value unsolved problem on the project: it is the metric every line of every
+document in all three tracks is measured with.
+
+### Five documents whose passes were two errors cancelling
+
+Found this session, and worth expecting rather than being surprised by: `Sample_SQMS_Program`,
+`airbus-pdf-information-package`, `afn-afn-20250801`, `redac-sas-201403`, and
+`words/batch-008`'s ligature document. In each case a correct fix made the gate column *worse*
+by removing an error that had been offsetting another. **A pass is not evidence of correctness.**
