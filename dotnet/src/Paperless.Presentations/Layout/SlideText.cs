@@ -454,6 +454,25 @@ public sealed class SlideFonts
     public Func<string, FontPitch>? DeclaredPitches { get; set; }
 
     /// <summary>
+    /// The face the deck carries for a request, when it carries one.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Answers a path to the face, which is what <see cref="FontRequest.EmbeddedFaceKey"/> takes
+    /// and what every backend downstream of resolution can open. Null means the deck embeds
+    /// nothing usable for this family, which is true of all but three documents in the slides
+    /// track, so that is the path that has to stay cheap.
+    /// </para>
+    /// <para>
+    /// The weight and the slant are arguments rather than the family alone, because one
+    /// <c>p:embeddedFont</c> carries up to four styles under a single name and a run picks among
+    /// them. Beside <see cref="DeclaredPitches"/> and settable for the same reason: the deck's
+    /// font list lives on a part the format-specific layout owns.
+    /// </para>
+    /// </remarks>
+    public Func<string, int, bool, string?>? EmbeddedFaces { get; set; }
+
+    /// <summary>
     /// The pitch in a Windows <c>LOGFONT.lfPitchAndFamily</c> byte.
     /// </summary>
     /// <remarks>
@@ -487,11 +506,18 @@ public sealed class SlideFonts
             ? declared(named)
             : FontPitch.Unknown;
 
+        // The deck's own copy of the face, when it has one. It wins over everything installed and
+        // over the whole substitution chain, because it is the face the author measured against —
+        // see `FontRequest.EmbeddedFaceKey`.
+        string? embedded = family is { Length: > 0 } carried && EmbeddedFaces is { } faces
+            ? faces(carried, weight, isItalic)
+            : null;
+
         (OpenTypeFace? Face, FontReference? Reference) resolved = default;
         try
         {
             FontReference reference = _fonts.Resolve(
-                new FontRequest(family ?? string.Empty, weight, isItalic, pitch));
+                new FontRequest(family ?? string.Empty, weight, isItalic, pitch, embedded));
             resolved = (_fonts.LoadOpenType(reference), reference);
         }
         catch (Exception exception) when (exception is Core.MalformedDocumentException

@@ -86,7 +86,22 @@ internal sealed partial class PptxSlideLayout
         _file = file;
         _fonts = fonts;
         _fonts.DeclaredPitches = DeclaredPitchOf;
+        _fonts.EmbeddedFaces = EmbeddedFaceOf;
     }
+
+    /// <summary>
+    /// The deck's own face for a request, from <c>p:embeddedFontLst</c>.
+    /// </summary>
+    /// <remarks>
+    /// Lazily and once, like <see cref="DeclaredPitchOf"/>: the list is on the presentation part,
+    /// a deck that never draws with an embedded family never opens one of the parts, and a deck
+    /// that embeds nothing pays a dictionary miss. See <see cref="PptxEmbeddedFonts"/> for why
+    /// the declared <c>typeface</c> and not the face's own family name is the key.
+    /// </remarks>
+    private string? EmbeddedFaceOf(string typeface, int weight, bool isItalic)
+        => (_embeddedFonts ??= PptxEmbeddedFonts.Read(_file)).FaceKeyFor(typeface, weight, isItalic);
+
+    private PptxEmbeddedFonts? _embeddedFonts;
 
     /// <summary>
     /// The pitch the deck declares for a typeface, from <c>pitchFamily</c>.
