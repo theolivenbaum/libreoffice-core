@@ -72,6 +72,12 @@ public static class OoxmlNamespaces
     /// <summary>Word 2010 shape groups.</summary>
     public const string WordShapeGroup = "http://schemas.microsoft.com/office/word/2010/wordprocessingGroup";
 
+    /// <summary>
+    /// Word 2010 drawing canvases — a group of shapes with its own background, written as
+    /// <c>wpc:wpc</c> inside a <c>a:graphicData</c>.
+    /// </summary>
+    public const string WordCanvas = "http://schemas.microsoft.com/office/word/2010/wordprocessingCanvas";
+
     /// <summary>Word 2010 drawing extensions.</summary>
     public const string WordDrawing2010 = "http://schemas.microsoft.com/office/word/2010/wordprocessingDrawing";
 
@@ -122,10 +128,18 @@ public static class OoxmlNamespaces
     /// exists precisely because the choice may be unreadable. For the shape namespaces the
     /// choice is the higher-fidelity branch and its text body is plain WordprocessingML, so it
     /// is preferred; anything not listed here loses to the fallback.
+    /// <para>
+    /// <c>wpc</c> is listed for a reason worth stating: the word-processing frame reader has read a
+    /// drawing canvas since it was written, and could never be reached, because the canvas is always
+    /// offered as a <c>Requires="wpc"</c> choice beside a VML fallback. Leaving it off dropped every
+    /// shape in the canvas — measured on an EASA manual whose two organisation diagrams lost their
+    /// text and, with it, 2.4 inches of declared height apiece.
+    /// </para>
     /// </remarks>
     public static readonly IReadOnlySet<string> UnderstoodExtensions =
         new HashSet<string>(StringComparer.Ordinal)
         {
-            WordShape, WordShapeGroup, WordDrawing2010, WordMl2010, WordMl2012, DrawingML2010,
+            WordShape, WordShapeGroup, WordCanvas, WordDrawing2010, WordMl2010, WordMl2012,
+            DrawingML2010,
         };
 }
