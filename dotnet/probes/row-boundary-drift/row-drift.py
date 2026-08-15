@@ -59,9 +59,12 @@ Two things make this worth chasing rather than filing as cosmetic:
   inside a long table.
 
 Distinct from the advance-width divergence in `CLAUDE.md`'s third absolute
-rule. That one is horizontal, per-glyph, face-dependent and needs a hinted
-advance; this is vertical, per-row, and is a question of *what gets rounded*
-rather than of what the value is.
+rule. That one is horizontal, per-glyph and face-dependent, and needs a hinted
+advance; this is vertical, per-row, and is a **line height that is 0.05 pt too
+large under sub-unity proportional spacing** — a value, not a rounding rule.
+Both are small per unit and both reach whole pages by accumulating, which is
+what makes them look alike from the page count and is why the direction of the
+accumulation is the thing to check first.
 
 Usage
 -----
