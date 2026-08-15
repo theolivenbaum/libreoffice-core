@@ -248,6 +248,20 @@ public sealed record PageGeometry
     public Length ColumnGap { get; init; }
 
     /// <summary>
+    /// The columns' own widths, for a section that states them one by one instead of asking for equal
+    /// ones; null for the ordinary case.
+    /// </summary>
+    /// <remarks>
+    /// Every Word-family format has both spellings — DOC's <c>sprmSFEvenlySpaced</c> with a
+    /// <c>sprmSDxaColWidth</c> per column, DOCX's <c>w:equalWidth="0"</c> with a <c>w:col</c> per column
+    /// — and the stated widths are not a refinement of the even ones: a two-column section can be one
+    /// third and two thirds, which is a hundred points out on an A4 measure. Kept beside
+    /// <see cref="Columns"/> and <see cref="ColumnGap"/> rather than replacing them, because the even
+    /// case is the overwhelmingly common one and is exactly described by the pair.
+    /// </remarks>
+    public ColumnRuler? ColumnRuler { get; init; }
+
+    /// <summary>
     /// True when the section itself reads right to left, which reverses its columns.
     /// </summary>
     /// <remarks>
@@ -301,16 +315,38 @@ public sealed record PageGeometry
     }
 
     /// <summary>The width of one column, with the gaps between them taken out.</summary>
-    public Length ColumnWidth
-    {
-        get
-        {
-            if (Columns <= 1) return TextWidth;
+    /// <remarks>
+    /// The even answer, which is the first column's for a section that states its widths one by one —
+    /// see <see cref="ColumnWidthAt"/>, which is what a caller that knows the column should ask.
+    /// </remarks>
+    public Length ColumnWidth => ColumnWidthAt(0);
 
-            Length available = TextWidth - (ColumnGap * (Columns - 1));
-            return available > Length.Zero ? available / Columns : Length.Zero;
-        }
+    /// <summary>The width of one particular column.</summary>
+    /// <param name="column">The column, counted from zero at the leading edge.</param>
+    public Length ColumnWidthAt(int column)
+    {
+        if (Columns <= 1) return TextWidth;
+
+        if (Ruler is { } ruler) return ruler.WidthAt(column);
+
+        Length available = TextWidth - (ColumnGap * (Columns - 1));
+        return available > Length.Zero ? available / Columns : Length.Zero;
     }
+
+    /// <summary>
+    /// The stated column widths fitted to this page's measure, or null when the columns are even.
+    /// </summary>
+    /// <remarks>
+    /// Fitted rather than taken as written, because the widths are stated against the measure the
+    /// producer had in mind and a section's own margins may not agree with it. Writer does the same:
+    /// <c>SwFormatCol</c> holds wish widths and <c>Calc</c> apportions the frame's real width between
+    /// them. A ruler whose count disagrees with <see cref="Columns"/> is ignored rather than trusted,
+    /// which is the lenient reading a malformed section needs.
+    /// </remarks>
+    public ColumnRuler? Ruler
+        => ColumnRuler is { } stated && stated.Count == Columns && Columns > 1
+            ? stated.FittedTo(TextWidth)
+            : null;
 
     /// <summary>The text area's rectangle on the page.</summary>
     public DocRect TextArea =>
@@ -321,11 +357,10 @@ public sealed record PageGeometry
     /// </summary>
     /// <remarks>
     /// <para>
-    /// Columns are equal and evenly spaced, which is what <see cref="Columns"/> and
-    /// <see cref="ColumnGap"/> describe and what every format writes for an ordinary two-column stretch.
-    /// Unequal columns exist — ODF lists them individually and DOCX writes a <c>w:col</c> per column — and
-    /// are read as their count and their first gap, so a document using them gets even columns of the right
-    /// number. That is recorded as a gap rather than approximated further.
+    /// Columns are equal and evenly spaced unless the section says otherwise, which is what
+    /// <see cref="Columns"/> and <see cref="ColumnGap"/> describe and what every format writes for an
+    /// ordinary two-column stretch. A section that states a width per column carries a
+    /// <see cref="ColumnRuler"/> instead and is laid out from that.
     /// </para>
     /// <para>
     /// Clamped to the columns that exist, so a caller asking for one past the end gets the last rather than
@@ -337,12 +372,19 @@ public sealed record PageGeometry
     {
         int columns = Math.Max(1, Columns);
         int at = Math.Clamp(column, 0, columns - 1);
-        Length width = ColumnWidth;
 
         // "Leading" rather than "left": a right-to-left section fills its rightmost column first,
         // which is the whole of what its direction does to a page. Measured against LibreOffice —
         // a two-column A4 page in rl-tb draws its first line at 319 pt.
         if (IsRightToLeft) at = columns - 1 - at;
+
+        if (Ruler is { } ruler)
+        {
+            return new DocRect(
+                Margins.Left + Gutter + ruler.OffsetOf(at), Margins.Top, ruler.WidthAt(at), TextHeight);
+        }
+
+        Length width = ColumnWidth;
 
         return new DocRect(
             Margins.Left + Gutter + ((width + ColumnGap) * at), Margins.Top, width, TextHeight);
@@ -567,5 +609,101 @@ public static class PageFurnitureSlots
         }
 
         return slots.GetValueOrDefault(PageFurnitureSlot.Default);
+    }
+}
+
+/// <summary>
+/// The widths a section states for its columns, one by one, and the gaps between them.
+/// </summary>
+/// <remarks>
+/// <para>
+/// Word's own model, and Writer's: a <c>SwFormatCol</c> holds a wish width per column plus the halves of
+/// the gaps on either side of it (<c>SwWW8ImplReader::SetCols</c>, <c>sw/source/filter/ww8/ww8par6.cxx</c>
+/// :449). What is stored here is the plain pair — the text widths and the gaps — because that is what both
+/// formats write and what a rectangle needs; the halving is Writer's way of dividing the frame and is not
+/// a fact about the document.
+/// </para>
+/// <para>
+/// <see cref="Gaps"/> holds one fewer entry than <see cref="Widths"/>: a section states a spacing
+/// <em>after</em> each column but the last, and Word writes nothing after the last one.
+/// </para>
+/// </remarks>
+/// <param name="Widths">Each column's text width, in order from the leading edge.</param>
+/// <param name="Gaps">The gap after each column but the last.</param>
+public sealed record ColumnRuler(IReadOnlyList<Length> Widths, IReadOnlyList<Length> Gaps)
+{
+    /// <summary>How many columns the ruler describes.</summary>
+    public int Count => Widths.Count;
+
+    /// <summary>The widths and the gaps together, which is the measure the ruler was written against.</summary>
+    public Length Total
+    {
+        get
+        {
+            Length total = Length.Zero;
+            foreach (Length width in Widths) total += width;
+            foreach (Length gap in Gaps) total += gap;
+            return total;
+        }
+    }
+
+    /// <summary>One column's width, clamped to the columns that exist.</summary>
+    /// <param name="column">The column, counted from zero at the leading edge.</param>
+    public Length WidthAt(int column)
+        => Count == 0 ? Length.Zero : Widths[Math.Clamp(column, 0, Count - 1)];
+
+    /// <summary>How far one column's leading edge sits from the text area's.</summary>
+    /// <param name="column">The column, counted from zero at the leading edge.</param>
+    public Length OffsetOf(int column)
+    {
+        int at = Math.Clamp(column, 0, Math.Max(0, Count - 1));
+        Length offset = Length.Zero;
+
+        for (int i = 0; i < at; i++)
+        {
+            offset += Widths[i];
+            if (i < Gaps.Count) offset += Gaps[i];
+        }
+
+        return offset;
+    }
+
+    /// <summary>
+    /// The same ruler stretched or squeezed so its columns and gaps fill a given measure.
+    /// </summary>
+    /// <remarks>
+    /// The gaps keep their stated size and the widths take the difference in proportion, which is what
+    /// Writer's own apportioning does: <c>SwFormatCol::Calc</c> distributes the frame's width between the
+    /// columns' wish widths and leaves the fixed left and right insets — the gap halves — alone. A ruler
+    /// that already sums to the measure, which is the case for every file that states its widths against
+    /// the margins it also states, is returned unchanged.
+    /// </remarks>
+    /// <param name="measure">The width the columns and gaps have to fill.</param>
+    public ColumnRuler FittedTo(Length measure)
+    {
+        Length gaps = Length.Zero;
+        foreach (Length gap in Gaps) gaps += gap;
+
+        Length stated = Total - gaps;
+        Length available = measure - gaps;
+
+        if (stated <= Length.Zero || available <= Length.Zero || stated == available) return this;
+
+        List<Length> widths = new(Widths.Count);
+        Length running = Length.Zero;
+
+        for (int i = 0; i < Widths.Count; i++)
+        {
+            // The last column takes what is left rather than its own share, so rounding cannot leave the
+            // columns a few EMUs short of the measure or a few over the right margin.
+            Length width = i == Widths.Count - 1
+                ? available - running
+                : Length.FromEmu((long)(Widths[i].Emu * (double)available.Emu / stated.Emu));
+
+            widths.Add(width > Length.Zero ? width : Length.Zero);
+            running += widths[i];
+        }
+
+        return new ColumnRuler(widths, Gaps);
     }
 }
