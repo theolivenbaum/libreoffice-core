@@ -81,7 +81,10 @@ row in the table.
 **Condition 2 was missing until an agent disproved four of this file's own rows.** Without it,
 the first condition is satisfied just as well by a logo *both* renderers draw: four pages of
 `UG.CAO.00133` were flagged on a 162×109 JPEG of the EU flag in the footer, identical on both
-sides, while the document's real surplus was a header block drawn on 13 of its 18 pages. The
+sides, while the document's real surplus was a header block drawn on 13 of its 18 pages. (That
+header block was **fixed on 2026-08-15** — the reference does not inherit a header holding no
+paragraph of its own, and we did; the document is now `18/18 3674/3667`, a `match`. See
+`SectionInheritedHeaderTests`.) The
 signature misfires on any document that puts a small picture in its page furniture and has a
 furniture defect elsewhere. Adding it removed **16 of 53 pages — nearly a third of the list.**
 

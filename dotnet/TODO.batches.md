@@ -11593,6 +11593,19 @@ Agency" and so does its **footer**, which prints on every page of both rendering
 that phrase reports the head everywhere and closes the question in the wrong direction. The probes
 key on "Approval Date", checked absent from every footer and from `word/document.xml`.
 
+> **Reversed on 2026-08-15 by round `words-ug-01`, and the mechanism above is untouched — only the
+> cost accounting was wrong.** Re-measured on 26.2.4.2 with a fresh two-section probe (one table
+> alone and two tables alone are not passed down; the same table with an empty `w:p` before it, one
+> after it, and a bare paragraph all are), the behaviour is exactly as recorded here, so this
+> section's *finding* stands in full. What did not stand is the paragraph above it. The head was
+> also costing `UG.CAO.00006` **a page** — it was `30/29 8001/7399` and is now `29/29 7390/7399` —
+> so the fix gains **two** verdicts, one of them on check one of the gate rather than on words,
+> not the one recorded here. `UG.CAO.00133` is `18/18 3674/3667`, a `match`. The third document,
+> `docs-quality-MA.IMS.00001`, does get a worse word error (11973 against 12213) and its verdict is
+> unmoved, because it fails on pages at 43/44 either way. Implemented in `DocxReader.FurnitureCarry`
+> and pinned by `InheritedTableHeaderTests` plus a rewritten `SectionInheritedHeaderTests`, which
+> now carries the whole argument on both sides.
+
 ### 3. The matcher was inventing a class, and post-filtering it understated what was underneath
 
 `pdf-ops.py` anchors a non-text record at its top-left corner, and the left edge and the top edge of
@@ -11681,7 +11694,9 @@ Presentations 576, Fidelity 550 — 0 skipped, 0 warnings.
   the matcher pairs rules correctly: three vertical cell edges at 36.6 pt against 26.4/25.5/26.4.
   That is a *layout* lead on the same document, independent of the inheritance question.
 - **Whether to reproduce LibreOffice's table-only-header import defect.** Not implemented, pinned by
-  a test, worth one verdict. The decision is recorded rather than assumed.
+  a test, worth one verdict. The decision is recorded rather than assumed. — **Settled the other way
+  on 2026-08-15**: it was worth two verdicts and one of them was a page count. See the reversal note
+  under round 43's section 2 above.
 - `A1. EASA Form 2.docx` (9/7) and `B11. TE.CAO.00129` (7/6) are **pagination**, not furniture — a
   reflow that adds two pages and one page respectively. They should be worked as page-count
   failures, which is not where round 42's table put them.
@@ -11836,7 +11851,8 @@ it — `dotnet/CLAUDE.md` says so and this round did not use it.)
 - `FO.FCTOA.00010` (15/16) and the other 15 documents with form checkboxes.
 - Everything round 43 handed over and did not touch: the `.doc` reader-split clusters, `A_320.doc`
   141/150, both round-38 leads, `手机免提系统TSB.doc`, `AC-150-5370-10G-updated-201604.docx` /
-  `150-5370-10H.docx`, and the standing decision on the table-only-header import defect.
+  `150-5370-10H.docx`, and the standing decision on the table-only-header import defect (**that last
+  one was reversed on 2026-08-15 — see round 43's section 2**).
 - `UG.CAO.00133`'s header row is now 25.0 pt against 26.35 — a 1.35 pt residue, not the 10.3 pt one.
 - **Escher picture cropping is not implemented anywhere in the word-processing path.** Nothing in
   the corpus was measured to need it; noted because it was ruled out as the cause of the seal
