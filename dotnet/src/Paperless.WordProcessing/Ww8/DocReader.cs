@@ -238,7 +238,8 @@ public sealed class Ww8Document : IWordProcessingDocument, IPaginatedDocument
 
         for (int i = 0; i < Sections.Count; i++)
         {
-            sections.Add(new PaginatedSection(Sections[i], Furniture(fonts, i, carry)));
+            PageFurnitureSet? furniture = Furniture(fonts, i, carry);
+            sections.Add(new PaginatedSection(Sections[i], furniture, carry.OwnFurnitureOnContinuous));
         }
 
         return new WordProcessingPages(
@@ -341,6 +342,8 @@ public sealed class Ww8Document : IWordProcessingDocument, IPaginatedDocument
         bool ownFurniture =
             StoryLength(stated, 0) >= 2 || StoryLength(stated, 1) >= 2
             || StoryLength(stated, 2) >= 2 || StoryLength(stated, 3) >= 2;
+
+        carry.OwnFurnitureOnContinuous = continuous && ownFurniture;
 
         if (continuous && !ownFurniture)
         {
@@ -518,6 +521,13 @@ public sealed class Ww8Document : IWordProcessingDocument, IPaginatedDocument
 
         /// <summary>True when the section immediately before this one had a page descriptor.</summary>
         public bool IsImmediate { get; set; }
+
+        /// <summary>
+        /// True when the section just described is the continuous-with-its-own-running-head case, which is
+        /// the only one where <c>InsertSegments</c> builds a page descriptor for a continuous section — and
+        /// therefore the only one where such a section has anywhere to put a page-number restart.
+        /// </summary>
+        public bool OwnFurnitureOnContinuous { get; set; }
     }
 
     /// <summary>

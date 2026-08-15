@@ -261,7 +261,23 @@ public sealed record PaginationOptions
 /// header appears on most pages of a section, and laying it out again for each would shape its text over
 /// and over for an answer that cannot change.
 /// </param>
-public sealed record PaginatedSection(WritingSection Section, PageFurnitureSet? Furniture = null);
+/// <param name="RestartsNumberingAtFirstPageBreak">
+/// True when the section's <see cref="WritingSection.RestartPageNumberAt"/> takes effect at the first hard
+/// page break <em>inside</em> the section rather than where the section begins.
+/// <para>
+/// A continuous section becomes a Writer text section, which has nowhere to hang a number offset: a page
+/// number lives on a page descriptor and <c>InsertSegments</c> gives a continuous section none. The one
+/// exception it makes for itself is a continuous section that states a running head of its own — it builds
+/// a descriptor after all, then walks the section's nodes for the first that carries a hard page break and
+/// hangs the descriptor, number offset and all, on <em>that</em> node
+/// (<c>sw/source/filter/ww8/ww8par.cxx</c>:4516-4559). A section with no such break restores the previous
+/// descriptor and the restart is dropped entirely.
+/// </para>
+/// </param>
+public sealed record PaginatedSection(
+    WritingSection Section,
+    PageFurnitureSet? Furniture = null,
+    bool RestartsNumberingAtFirstPageBreak = false);
 
 /// <summary>
 /// Fills pages: lay out a paragraph, put what fits on the page, carry the rest over.
@@ -655,6 +671,14 @@ public sealed class Paginator
         int sectionFirstPage = 0;
         int column = 0;
 
+        // A continuous section's page-number restart, waiting for the first hard page break inside the
+        // section to hang itself on. Null where there is nothing waiting, which is every other section —
+        // see PaginatedSection.RestartsNumberingAtFirstPageBreak for why a continuous section's restart
+        // cannot take effect where the section begins. Cleared at the next section break: the descriptor
+        // Writer builds is only offered to the nodes of the section that built it, so a restart that
+        // reaches the section's end unclaimed is dropped rather than carried forward.
+        int? deferredRestart = null;
+
         // The furniture the page being built will draw, which is the section its *first* content belongs
         // to rather than the section it happens to end in. A continuous section break puts two sections on
         // one sheet, and a sheet has one running head: Word gives it to the section the page starts in, and
@@ -978,20 +1002,21 @@ public sealed class Paginator
                 // here it means the columns did line up, so the break stayed inside the sheet and no page
                 // was inserted to have a side.
                 if (kind is not (SectionBreak.Continuous or SectionBreak.NewColumn
-                                 or SectionBreak.EvenPage or SectionBreak.OddPage)
-                    && geometry.RestartPageNumberAt is { } restartAt
-                    && pages.Count + skippedBlanks < _options.MaxPages)
+                                 or SectionBreak.EvenPage or SectionBreak.OddPage))
                 {
-                    // "Right" is the side page one of the layout is on, so the restart wants a right-hand
-                    // sheet exactly when its parity matches page one's number. A right-hand sheet is an
-                    // odd physical one, and the next physical sheet is pages.Count + skippedBlanks + 1.
-                    bool wantsRight = restartAt % 2 == 1 == firstPageIsOdd;
-                    bool nextIsRight = (pages.Count + skippedBlanks) % 2 == 0;
-
-                    if (wantsRight != nextIsRight) skippedBlanks++;
+                    SkipBlankForRestart(geometry.RestartPageNumberAt);
                 }
 
-                pageNumber = geometry.RestartPageNumberAt ?? pageNumber;
+                // A continuous section that states a running head of its own carries its restart forward to
+                // the first hard page break inside it instead of applying it here — see
+                // PaginatedSection.RestartsNumberingAtFirstPageBreak. Every other break settles the number
+                // now, and clears anything an earlier section left waiting.
+                bool defers = kind == SectionBreak.Continuous
+                              && resolved[blockSection].RestartsNumberingAtFirstPageBreak
+                              && geometry.RestartPageNumberAt is not null;
+
+                deferredRestart = defers ? geometry.RestartPageNumberAt : null;
+                if (!defers) pageNumber = geometry.RestartPageNumberAt ?? pageNumber;
 
                 // A page with nothing on it yet belongs to the section starting here; one that already
                 // carries lines keeps the head of the section it started in.
@@ -1023,7 +1048,9 @@ public sealed class Paginator
                 // at the top of a page by construction, and asking again would end an empty page forever.
                 if (lineIndex == 0 && rowDrawn == Length.Zero && table.StartsNewPage && !pageIsEmpty)
                 {
+                    int broke = pages.Count;
                     EmitPage();
+                    TakeDeferredRestart(broke);
                     continue;
                 }
 
@@ -1107,7 +1134,9 @@ public sealed class Paginator
             // A page break before a paragraph that is not already at the top of a page.
             if (lineIndex == 0 && paragraph.Format.StartsNewPage && !pageIsEmpty)
             {
+                int broke = pages.Count;
                 EmitPage();
+                TakeDeferredRestart(broke);
                 continue;
             }
 
@@ -1343,6 +1372,56 @@ public sealed class Paginator
         {
             int before = pages.Count;
             while (pages.Count == before && pages.Count < _options.MaxPages) EmitPage();
+        }
+
+        // The undrawn blank a page-number restart leaves when the sheet it would land on is the wrong side.
+        // `SwFrame::InsertPage` takes the wished side from the restart value through
+        // `sw::IsRightPageByNumber` (`pagechg.cxx`:1590-1596), which asks only whether the restart's parity
+        // agrees with the *first* page of the layout's own number (`frmtool.cxx`:3146-3153).
+        //
+        // Measured on LibreOffice 24.2, three probes differing only in the restart value, each a
+        // three-section document whose last section breaks to an odd page and whose paragraphs print their
+        // own `PAGE`: no restart gives 1, 2, 3; a restart to 19 gives 1, 19, **21**; a restart to 20 gives
+        // 1, 20, 21. All three export three pages. The 21 in the second is two skipped blanks — one to put
+        // the odd restart on an odd sheet, one for the odd-page break that then lands on an even one.
+        void SkipBlankForRestart(int? restart)
+        {
+            if (restart is not { } restartAt || pages.Count + skippedBlanks >= _options.MaxPages) return;
+
+            // "Right" is the side page one of the layout is on, so the restart wants a right-hand sheet
+            // exactly when its parity matches page one's number. A right-hand sheet is an odd physical one,
+            // and the next physical sheet is pages.Count + skippedBlanks + 1.
+            bool wantsRight = restartAt % 2 == 1 == firstPageIsOdd;
+            bool nextIsRight = (pages.Count + skippedBlanks) % 2 == 0;
+
+            if (wantsRight != nextIsRight) skippedBlanks++;
+        }
+
+        // Claims a continuous section's waiting restart for the page a hard break has just started, which
+        // is where Writer hangs the descriptor it built for such a section — see
+        // PaginatedSection.RestartsNumberingAtFirstPageBreak. Only the first break inside the section
+        // claims it, and only a break that actually started a page: in a multi-column section EmitPage may
+        // have moved to the next column, and a column is not a page to hang a number on.
+        void TakeDeferredRestart(int pagesBefore)
+        {
+            if (deferredRestart is not { } restartAt || pages.Count == pagesBefore) return;
+
+            deferredRestart = null;
+            SkipBlankForRestart(restartAt);
+            pageNumber = restartAt;
+
+            // The descriptor begins here, so the page this break started is *its* first page — which is
+            // what decides whether the section's title-page head and foot are drawn. Writer means the same
+            // thing by it: `GiveNodePageDesc` hangs the descriptor on this node, and a page descriptor's
+            // first page is the one it starts on. Without this the page draws the section's ordinary
+            // running head, and a document whose running head lives entirely in the first-page slot —
+            // which is how Word writes a section that has one — draws nothing at all.
+            sectionFirstPage = pages.Count;
+            AdoptSection();
+
+            // The head and foot a page draws depend on which side of the sheet its number puts it on and
+            // on whether it is the descriptor's first, so the body it leaves has to be measured again.
+            MeasureBody();
         }
 
         // Whether the block here begins a page whatever precedes it: a page break of its own, or the
