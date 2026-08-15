@@ -232,6 +232,41 @@ public sealed record PageParagraph : PageBlock
     /// <summary>True when the paragraph's formatting varies across its text.</summary>
     public bool HasRuns => Runs.Count > 0;
 
+    private bool? _needsGlyphFallback;
+
+    /// <summary>
+    /// True when the paragraph's own face has no glyph for something in its own text.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The uniform-paragraph shortcut — no runs, so measure the whole text in one face — is only
+    /// equivalent while that face can draw the text. The drawing pass cuts every paragraph by face
+    /// through <see cref="FontItemiser.Split"/> whether it has runs or not, so a uniform paragraph
+    /// holding a script its face lacks was <em>drawn</em> from a fallback face and <em>measured</em>
+    /// from the missing-glyph box of the face it asked for. The two disagree by whatever the two
+    /// faces' advances differ by, and the line breaks on the measurement.
+    /// </para>
+    /// <para>
+    /// Answering true sends the paragraph down the per-run path, which is the one that itemises by
+    /// face, so both sides make the same cut. Cached because pagination measures a paragraph once per
+    /// attempt at placing it and this walks the text.
+    /// </para>
+    /// </remarks>
+    public bool NeedsGlyphFallback
+        => _needsGlyphFallback ??=
+            Fallback is not null && FontItemiser.NeedsFallback(Text, Face);
+
+    private bool? _hasScriptSpace;
+
+    /// <summary>True when the paragraph holds a script change that opens a gap.</summary>
+    /// <remarks>
+    /// The second reason a uniform paragraph cannot take the single-face shortcut: that path measures
+    /// the text straight off one shaped run and has no prefix table to add a gap to, so a paragraph
+    /// mixing scripts has to be measured per run whether its formatting varies or not.
+    /// </remarks>
+    public bool HasScriptSpace
+        => _hasScriptSpace ??= AddsScriptSpace && ScriptSpacing.Boundaries(Text).Count > 0;
+
     /// <summary>
     /// The device grid the paragraph's fonts are measured through.
     /// </summary>
@@ -270,6 +305,17 @@ public sealed record PageParagraph : PageBlock
     /// </para>
     /// </remarks>
     public IGlyphFallbackResolver? Fallback { get; init; }
+
+    /// <summary>
+    /// Whether a script change with East Asian text on one side opens Writer's extra gap.
+    /// </summary>
+    /// <remarks>
+    /// Writer's <c>SvxScriptSpaceItem</c> — "add space between Asian and Western text" — which the
+    /// Word filters turn on and ODF carries its own value for. Beside <see cref="Metrics"/> and
+    /// <see cref="Fallback"/>, set by the same readers for the same reason. See
+    /// <see cref="ScriptSpacing"/> for the rule and its two exclusions.
+    /// </remarks>
+    public bool AddsScriptSpace { get; init; }
 
     /// <summary>
     /// True when a tab or a run of spaces must not make a line taller, which is what Word does.
@@ -536,7 +582,7 @@ public sealed record PageParagraph : PageBlock
 
         return MeasuredParagraph.Measure(
             Text, runs, shaper: null, Itemisation, MeasurementObjects(), Metrics,
-            BlanksAreTransparentToHeight, WriterLineBox.LeadingAboveText);
+            BlanksAreTransparentToHeight, WriterLineBox.LeadingAboveText, AddsScriptSpace);
     }
 
     /// <summary>

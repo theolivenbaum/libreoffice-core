@@ -597,10 +597,16 @@ public sealed class Paginator
             // prefix table that carries the room it takes on its line. So does a list label bigger than
             // the text it labels, for the same reason: the label is a portion in the first line and only
             // the per-line path can make one line taller than the rest.
+            //
+            // And so does a paragraph whose own face cannot draw its own text. The shortcut measures the
+            // whole text in one face while the drawing pass itemises it by face regardless — see
+            // PageParagraph.NeedsGlyphFallback — so the two disagreed by the difference between a
+            // fallback face's advances and the primary face's missing-glyph box.
             ILineObstacles? obstacles = _obstacles?.Invoke(i);
 
             LaidOutParagraph laidOut =
                 paragraph.HasRuns || paragraph.HasInlineObjects || paragraph.LabelRaisesFirstLine
+                || paragraph.NeedsGlyphFallback || paragraph.HasScriptSpace
                 ? layouter.Layout(
                     paragraph.Measure(),
                     paragraph.Format,

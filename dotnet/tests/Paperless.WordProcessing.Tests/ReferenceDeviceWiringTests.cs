@@ -31,8 +31,25 @@ public sealed class ReferenceDeviceWiringTests
     [Fact]
     public void ADocxIsLaidOutOnTheVirtualReferenceDevice()
     {
+        // The device, which is what this file is about: 8640 dpi, advances unquantised.
+        Paragraphs(printerMetrics: false).ShouldAllBe(
+            paragraph => paragraph.Metrics == MetricGrid.Reference.AsWordDocument());
+    }
+
+    [Fact]
+    public void ADocxAlsoCarriesWordsEastAsianLineScale()
+    {
+        // `AsWordDocument` is the document's `MS_WORD_COMP_GRID_METRICS` compatibility flag rather
+        // than a property of the device — it travels beside the resolution because
+        // `lcl_ApplyCjkHeightAdjustment` is asked both questions at once. It is off by default and
+        // the Word filters turn it on, which is measurable: the same two lines of WenQuanYi Zen Hei
+        // at 12 pt are 406 twips apart out of a .docx and 325 out of a .fodt. See
+        // `EastAsianLineScaleTests`.
         Paragraphs(printerMetrics: false)
-            .ShouldAllBe(paragraph => paragraph.Metrics == MetricGrid.Reference);
+            .ShouldAllBe(paragraph => paragraph.Metrics!.Value.ScalesEastAsianFaces);
+
+        // And the device underneath it is unchanged.
+        Paragraphs(printerMetrics: false).ShouldAllBe(paragraph => paragraph.Metrics!.Value.Dpi == 6 * 1440);
     }
 
     [Fact]
@@ -40,9 +57,10 @@ public sealed class ReferenceDeviceWiringTests
     {
         // The flag still means what it meant. `w:usePrinterMetrics` becomes
         // PrinterIndependentLayout::DISABLED in the writerfilter and getReferenceDevice hands out an
-        // SfxPrinter instead — a coarser grid, not the absence of one.
-        Paragraphs(printerMetrics: true)
-            .ShouldAllBe(paragraph => paragraph.Metrics == MetricGrid.Printer);
+        // SfxPrinter instead — a coarser grid, not the absence of one. The compatibility flag is
+        // independent of which device that is, so it comes along.
+        Paragraphs(printerMetrics: true).ShouldAllBe(
+            paragraph => paragraph.Metrics == MetricGrid.Printer.AsWordDocument());
     }
 
     [Fact]

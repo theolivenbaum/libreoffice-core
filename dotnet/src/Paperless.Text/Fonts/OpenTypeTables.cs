@@ -253,6 +253,10 @@ public readonly record struct HorizontalHeaderTable(
 /// <param name="WidthClass">The width class, 1 to 9.</param>
 /// <param name="CapHeight">The capital height, or zero when the version is too old to hold it.</param>
 /// <param name="XHeight">The x-height, or zero when the version is too old to hold it.</param>
+/// <param name="CodePageRange1">
+/// The first word of <c>ulCodePageRange</c>: which legacy Windows code pages the font claims to
+/// cover. Zero when the table is version 0, which does not have the field.
+/// </param>
 public readonly record struct Os2Table(
     int Version,
     int TypoAscender,
@@ -266,8 +270,26 @@ public readonly record struct Os2Table(
     int Weight,
     int WidthClass,
     int CapHeight,
-    int XHeight)
+    int XHeight,
+    uint CodePageRange1 = 0)
 {
+    /// <summary>
+    /// True when the font claims one of the four East Asian code pages Word singles out.
+    /// </summary>
+    /// <remarks>
+    /// Bits 17 to 20 of <c>ulCodePageRange1</c> — CP932 Japanese, CP936 Simplified Chinese, CP949
+    /// Korean and CP950 Traditional Chinese — which is exactly the set
+    /// <c>vcl::CodePageCoverage</c> names and <c>lcl_ApplyCjkHeightAdjustment</c> tests
+    /// (<c>include/vcl/fontcapabilities.hxx</c>:169-172,
+    /// <c>sw/source/core/txtnode/fntcache.cxx</c>:283-286).
+    /// <para>
+    /// It is a claim about the <em>font</em> and not about the text: Word scales the line for a face
+    /// that self-reports this coverage even where the run holds nothing but Latin, which is the whole
+    /// oddity tdf#129808 records.
+    /// </para>
+    /// </remarks>
+    public bool DeclaresEastAsianCodePage => (CodePageRange1 & 0x001E0000u) != 0;
+
     /// <summary>The <c>fsSelection</c> bit meaning "use my typographic metrics".</summary>
     public const int UseTypoMetricsFlag = 1 << 7;
 
@@ -310,7 +332,12 @@ public readonly record struct Os2Table(
             // Version 2 added these. Reading them from an earlier table would take whatever bytes
             // happen to follow it.
             CapHeight: version >= 2 && os2.Length >= 90 ? BinaryPrimitives.ReadInt16BigEndian(os2[88..]) : 0,
-            XHeight: version >= 2 && os2.Length >= 88 ? BinaryPrimitives.ReadInt16BigEndian(os2[86..]) : 0);
+            XHeight: version >= 2 && os2.Length >= 88 ? BinaryPrimitives.ReadInt16BigEndian(os2[86..]) : 0,
+            // Version 1 added ulCodePageRange, and version 0 stops at 78 bytes — so this is read on
+            // the same terms as CapHeight above rather than from whatever follows a shorter table.
+            CodePageRange1: version >= 1 && os2.Length >= 82
+                ? BinaryPrimitives.ReadUInt32BigEndian(os2[78..])
+                : 0);
     }
 }
 

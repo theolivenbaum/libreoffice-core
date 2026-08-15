@@ -298,6 +298,19 @@ ascent and the line height by `127/100` — **integer division**, applied to the
 `(gridded * 127) / 100` reproduces **all 39** IPAGothic ascents and **all 39** line heights exactly,
 so the rule is not in doubt. What is in doubt is whether implementing it helps:
 
+> **Superseded 2026-08-15 by `probes/words-metrics-01`, and the correction is instructive: this
+> statement of the rule is wrong, and the 39-row fit could not have shown it.** The scale reaches the
+> device's ascent and its ascent-plus-descent; the leading is added *afterwards*, unscaled —
+> `GetFontHeight` is `lcl_ApplyCjkHeightAdjustment(m_nPrtHeight, …) + GetFontLeading(…)`. IPAGothic's
+> `hhea` lineGap is **0**, so on that one face the two readings are the same number at every size.
+> WenQuanYi Zen Hei's gap of 92/1024 separates them: at 12 pt this rule gives 412 twips, the correct
+> one gives 406, and LibreOffice draws 406. Scored over 117 pairs on three faces, this rule is
+> 78/117 and the corrected one 117/117. *A perfect fit on a sample that cannot discriminate is not
+> evidence for the rule — only for the sample.*
+>
+> The reach estimate below was also wrong, and cheaply checkable: the three "at risk" documents were
+> never at risk. Only one document of the 200 has East Asian letters adjacent to Latin ones.
+
 - Across all 534 documents, **7** embed a CJK face in the reference rendering: 4 in words,
   1 in slides, 2 in sheets. Only the 4 words ones are in Writer's path at all.
 - Of those 4, **three currently pass the gate** and one (`手机免提系统TSB.doc`, `metrics-001`,

@@ -932,6 +932,15 @@ public static class PageDrawing
                     nextObject++;
                 }
 
+                // The script-change gap, charged before the run that follows it and from the size of
+                // the run that ends at it — the same rule and the same one place `MeasuredParagraph`
+                // added it to the prefix table, so the pen and the line break agree.
+                if (paragraph.HasScriptSpace && run.Start > segment.Start
+                    && ScriptSpacing.Opens(paragraph.Text, run.Start))
+                {
+                    pen += ScriptSpacing.GapFor(SizeEndingAt(paragraph, run.Start));
+                }
+
                 string text = paragraph.Text[run.Start..run.End];
                 ShapedText shaped = TextShaper.Default.Shape(run.Face, text, run.EffectiveShaping);
                 if (shaped.Glyphs.Count == 0) continue;
@@ -969,6 +978,22 @@ public static class PageDrawing
         }
 
         return runs;
+    }
+
+    /// <summary>The em size of whatever run ends at a position.</summary>
+    /// <remarks>
+    /// `MeasuredParagraph` asks the same question of its own run list, and both have to answer the
+    /// same way or the pen pays a different gap from the one the line was broken on. A uniform
+    /// paragraph has no runs and answers with the paragraph's own size, which is what it is set in.
+    /// </remarks>
+    private static Length SizeEndingAt(PageParagraph paragraph, int position)
+    {
+        foreach (PageRun run in paragraph.Runs)
+        {
+            if (position - 1 >= run.Start && position - 1 < run.End) return run.EmSize;
+        }
+
+        return paragraph.EmSize;
     }
 
     /// <summary>
@@ -1217,7 +1242,7 @@ public static class PageDrawing
     {
         if (!paragraph.HasRuns)
         {
-            return ByFace(
+            return ByScriptSpace(paragraph, ByFace(
                 paragraph,
                 AroundObjects(
                     paragraph,
@@ -1231,7 +1256,7 @@ public static class PageDrawing
                             paragraph.Colour,
                             paragraph.Shaping,
                             Tracking: paragraph.Tracking),
-                    ]));
+                    ])));
         }
 
         List<PageRun> clipped = [];
@@ -1244,7 +1269,7 @@ public static class PageDrawing
             clipped.Add(run with { Start = from, Length = to - from });
         }
 
-        return ByFace(paragraph, AroundObjects(paragraph, clipped));
+        return ByScriptSpace(paragraph, ByFace(paragraph, AroundObjects(paragraph, clipped)));
     }
 
     /// <summary>
@@ -1270,6 +1295,39 @@ public static class PageDrawing
     /// in the PDF.
     /// </para>
     /// </remarks>
+    /// <summary>
+    /// The runs cut again at every script change that opens a gap, as the measurement cut them.
+    /// </summary>
+    /// <remarks>
+    /// The pen adds <see cref="ScriptSpacing"/>'s gap when it reaches a boundary, and it can only do
+    /// that between two runs — so a run spanning one has to be cut, exactly as a run spanning an
+    /// as-character object is. Ordinarily the fallback split has already cut here, because the two
+    /// scripts are rarely in one face; this is what makes the pen right when they are.
+    /// </remarks>
+    private static List<PageRun> ByScriptSpace(PageParagraph paragraph, List<PageRun> runs)
+    {
+        if (!paragraph.HasScriptSpace) return runs;
+
+        List<PageRun> split = [];
+
+        foreach (PageRun run in runs)
+        {
+            int from = run.Start;
+
+            for (int at = run.Start + 1; at < run.End; at++)
+            {
+                if (!ScriptSpacing.Opens(paragraph.Text, at)) continue;
+
+                split.Add(run with { Start = from, Length = at - from });
+                from = at;
+            }
+
+            split.Add(from == run.Start ? run : run with { Start = from, Length = run.End - from });
+        }
+
+        return split;
+    }
+
     private static List<PageRun> ByFace(PageParagraph paragraph, List<PageRun> runs)
     {
         if (paragraph.Fallback is not { } fallback) return runs;

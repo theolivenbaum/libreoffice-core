@@ -153,6 +153,52 @@ public static class FontItemiser
     }
 
     /// <summary>
+    /// True when a face cannot draw everything in a range, so <see cref="Split"/> would cut it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <see cref="Split"/>'s question without <see cref="Split"/>'s list, and it exists because
+    /// measuring and drawing have to answer it the same way. The drawing pass cuts <em>every</em>
+    /// paragraph by face; measurement reaches this class only through <c>MeasuredParagraph</c>, which
+    /// a paragraph of uniform formatting deliberately skips. That shortcut is sound only while the
+    /// paragraph's own face can draw its own text — and when it cannot, the paragraph was drawn in a
+    /// fallback face and measured in a face that has no glyph for a character of it, at that face's
+    /// <c>.notdef</c> width.
+    /// </para>
+    /// <para>
+    /// Measured on <c>手机免提系统TSB.doc</c>: 106 Chinese characters measured through Liberation
+    /// Serif's <c>.notdef</c>, 1593 of 2048 units, are 0.778 em each against the em apiece WenQuanYi
+    /// Zen Hei actually drew — so a line filled to 44 characters where 34 fit, running 6.8 pt past
+    /// the page's own edge. Asking this first is what keeps the uniform shortcut a shortcut and lets
+    /// it be taken only where it is equivalent.
+    /// </para>
+    /// </remarks>
+    /// <param name="text">The text to check.</param>
+    /// <param name="primary">The face the run asked for.</param>
+    public static bool NeedsFallback(ReadOnlySpan<char> text, OpenTypeFace primary)
+    {
+        ArgumentNullException.ThrowIfNull(primary);
+
+        for (int at = 0; at < text.Length;)
+        {
+            int width = 1;
+            int codePoint = text[at];
+            if (char.IsHighSurrogate(text[at]) && at + 1 < text.Length
+                && char.IsLowSurrogate(text[at + 1]))
+            {
+                codePoint = char.ConvertToUtf32(text[at], text[at + 1]);
+                width = 2;
+            }
+
+            if (!primary.HasGlyphFor(codePoint) && !IsNeverDrawn(codePoint)) return true;
+
+            at += width;
+        }
+
+        return false;
+    }
+
+    /// <summary>
     /// True for a character no font is expected to have a glyph for, and no layout draws.
     /// </summary>
     /// <remarks>

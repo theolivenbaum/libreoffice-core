@@ -89,7 +89,12 @@ public enum LineMetricSource
 /// rules differ by less than a twip and the evidence says to take the one that was measured.
 /// </para>
 /// </param>
-public readonly record struct MetricGrid(int Dpi, bool QuantisesAdvances)
+/// <param name="ScalesEastAsianFaces">
+/// Whether Word's <c>MS_WORD_COMP_GRID_METRICS</c> compatibility rule applies: a face declaring one of
+/// four East Asian code pages has its ascent, and its ascent and descent together, scaled by 127%
+/// before the leading is added. See <see cref="AsWordDocument"/> and <see cref="EastAsianScaled"/>.
+/// </param>
+public readonly record struct MetricGrid(int Dpi, bool QuantisesAdvances, bool ScalesEastAsianFaces = false)
 {
     /// <summary>A grid at a resolution, quantising advances as a real device does.</summary>
     public MetricGrid(int dpi) : this(dpi, true) { }
@@ -102,6 +107,57 @@ public readonly record struct MetricGrid(int Dpi, bool QuantisesAdvances)
     /// device pixels to the twip.
     /// </summary>
     public static MetricGrid Reference { get; } = new(6 * 1440, QuantisesAdvances: false);
+
+    /// <summary>
+    /// The same grid with Word's East Asian line scale switched on.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>MS_WORD_COMP_GRID_METRICS</c> is a document compatibility setting rather than a property of
+    /// the device, and it is off by default — <c>DocumentSettingManager</c> initialises
+    /// <c>mbMsWordCompGridMetrics(false)</c>, and an ODF file carries its own value. So the DOC and
+    /// DOCX readers ask for this and the ODF one does not, which is measured rather than reasoned:
+    /// the same two lines of WenQuanYi Zen Hei at 12 pt are 406 twips apart when LibreOffice reads
+    /// them from a <c>.docx</c> and 325 apart when it reads them from a <c>.fodt</c>.
+    /// </para>
+    /// <para>
+    /// Applied to whichever grid the document already asked for, because the flag and the device are
+    /// independent in the C++ too: every call site of <c>lcl_ApplyCjkHeightAdjustment</c> passes the
+    /// reference device it happens to have and asks the document for the flag separately. The
+    /// printer combination is unmeasured — no corpus document sets <c>usePrinterMetrics</c> and
+    /// names an East Asian face — and is written this way because that is what the C++ does, not
+    /// because it has been seen.
+    /// </para>
+    /// </remarks>
+    public MetricGrid AsWordDocument() => this with { ScalesEastAsianFaces = true };
+
+    /// <summary>
+    /// The 127% East Asian line scale, or the value unchanged.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>lcl_ApplyCjkHeightAdjustment</c> (<c>sw/source/core/txtnode/fntcache.cxx</c>:270-292,
+    /// tdf#129808): with <c>MS_WORD_COMP_GRID_METRICS</c> set and the face declaring CP932, CP936,
+    /// CP949 or CP950, <c>(nBase * 127) / 100</c> — integer division, on the value in twips.
+    /// </para>
+    /// <para>
+    /// <b>What it multiplies is not the finished line height.</b> <c>GetFontHeight</c> reads
+    /// <c>lcl_ApplyCjkHeightAdjustment(m_nPrtHeight, …) + GetFontLeading(…)</c>, so the scale
+    /// reaches the device's ascent-plus-descent and the face's leading is added afterwards,
+    /// unscaled; <c>GetFontAscent</c> is the same shape. That distinction is invisible on IPAGothic,
+    /// whose <c>hhea</c> line gap is zero — which is why <c>probes/lineheight-01</c> §7(a) recorded
+    /// the rule as scaling the height itself and was exact on all 39 of its pairs anyway. WenQuanYi
+    /// Zen Hei has a gap of 92/1024 and separates them: at 12 pt the two rules give 412 twips and
+    /// 406, and LibreOffice draws 406. See <c>probes/words-metrics-01/probe-cjk127.py</c>, which
+    /// scores both against 117 measured pairs over three faces — this rule 117, the other 78.
+    /// </para>
+    /// </remarks>
+    /// <param name="value">The ascent, or the ascent and descent together, before the leading.</param>
+    /// <param name="face">Whether the face declares one of the four East Asian code pages.</param>
+    public Length EastAsianScaled(Length value, bool face)
+        => ScalesEastAsianFaces && face
+            ? Length.FromTwips(value.Twips * 127 / 100)
+            : value;
 
     /// <summary>Twips per device pixel on this grid.</summary>
     private double TwipsPerPixel => 1440.0 / Dpi;
@@ -207,6 +263,11 @@ public readonly record struct MetricGrid(int Dpi, bool QuantisesAdvances)
 /// <b>This is a property of the application, not of the font</b>, and LibreOffice's two text engines
 /// disagree about it — see the remark on <see cref="ScaledAscent"/>.
 /// </param>
+/// <param name="DeclaresEastAsianCodePage">
+/// Whether the face claims coverage of CP932, CP936, CP949 or CP950, which is what
+/// <see cref="MetricGrid.ScalesEastAsianFaces"/> acts on. A property of the font rather than of the
+/// text: Word scales the line for such a face even where the run holds nothing but Latin.
+/// </param>
 public readonly record struct LineMetrics(
     int Ascent,
     int Descent,
@@ -214,7 +275,8 @@ public readonly record struct LineMetrics(
     LineMetricSource Source,
     int UnitsPerEm,
     MetricGrid? Grid = null,
-    bool LeadingAboveText = false)
+    bool LeadingAboveText = false,
+    bool DeclaresEastAsianCodePage = false)
 {
     /// <summary>The distance from one baseline to the next, in design units.</summary>
     public int LineHeight => Ascent + Descent + LineGap;
@@ -225,7 +287,8 @@ public readonly record struct LineMetrics(
     /// <param name="emSize">The font size the document asks for.</param>
     public Length ScaledLineHeight(Length emSize)
         => Grid is { } grid
-            ? TextHeightOn(grid, emSize) + LeadingOn(grid, emSize)
+            ? grid.EastAsianScaled(TextHeightOn(grid, emSize), DeclaresEastAsianCodePage)
+              + LeadingOn(grid, emSize)
             : Scale(LineHeight, emSize);
 
     /// <summary>The ascent at an em size.</summary>
@@ -263,7 +326,9 @@ public readonly record struct LineMetrics(
     /// </remarks>
     public Length ScaledAscent(Length emSize)
         => Grid is { } grid
-            ? grid.ToLength(grid.ToPixels(Ascent, UnitsPerEm, emSize))
+            ? grid.EastAsianScaled(
+                  grid.ToLength(grid.ToPixels(Ascent, UnitsPerEm, emSize)),
+                  DeclaresEastAsianCodePage)
               + (LeadingAboveText ? LeadingOn(grid, emSize) : Length.Zero)
             : Scale(LeadingAboveText ? Ascent + LineGap : Ascent, emSize);
 
@@ -440,7 +505,9 @@ public static class LineSpacing
             source = LineMetricSource.Fallback;
         }
 
-        return new LineMetrics(ascent, descent, lineGap, source, unitsPerEm, grid, leadingAboveText);
+        return new LineMetrics(
+            ascent, descent, lineGap, source, unitsPerEm, grid, leadingAboveText,
+            DeclaresEastAsianCodePage: face.Os2?.DeclaresEastAsianCodePage ?? false);
     }
 
     /// <summary>

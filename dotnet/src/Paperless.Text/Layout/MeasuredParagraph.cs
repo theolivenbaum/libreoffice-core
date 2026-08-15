@@ -289,6 +289,10 @@ public sealed class MeasuredParagraph
     /// Whether each run's external leading is charged to its ascent. True only for Writer's own text;
     /// see <see cref="LineMetrics.ScaledAscent"/>.
     /// </param>
+    /// <param name="addsScriptSpace">
+    /// Whether a script change with East Asian text on one side widens the text by a fifth of the em.
+    /// True for a document that came from Word; see <see cref="ScriptSpacing"/>.
+    /// </param>
     public static MeasuredParagraph Measure(
         string text,
         IReadOnlyList<FormattedRun> runs,
@@ -297,7 +301,8 @@ public sealed class MeasuredParagraph
         IReadOnlyList<InlineObject>? objects = null,
         MetricGrid? grid = null,
         bool blanksAreTransparentToHeight = false,
-        bool leadingAboveText = false)
+        bool leadingAboveText = false,
+        bool addsScriptSpace = false)
     {
         ArgumentNullException.ThrowIfNull(text);
         ArgumentNullException.ThrowIfNull(runs);
@@ -382,6 +387,24 @@ public sealed class MeasuredParagraph
         foreach (InlineObject one in inline)
         {
             for (int i = one.Offset + 1; i <= text.Length; i++) prefix[i] += one.Width.Emu;
+        }
+
+        // Writer's fifth of an em where the script changes with East Asian text on one side. Added to
+        // the prefix table the way an object is, and for the same reason: it is a width between two
+        // characters rather than a property of either, and every reader of the table — the line
+        // filler, the tab ruler, the as-character anchor — has to see it.
+        //
+        // The size is the run's that *ends* at the boundary, which is the font
+        // `SwTextFormatter::BuildPortions` has in hand when it closes the portion.
+        if (addsScriptSpace)
+        {
+            foreach (int boundary in ScriptSpacing.Boundaries(text))
+            {
+                Length gap = ScriptSpacing.GapFor(SizeAt(formatted, boundary - 1));
+                if (gap <= Length.Zero) continue;
+
+                for (int i = boundary; i <= text.Length; i++) prefix[i] += gap.Emu;
+            }
         }
 
         return new MeasuredParagraph(
@@ -506,6 +529,22 @@ public sealed class MeasuredParagraph
         }
 
         return parts;
+    }
+
+    /// <summary>The em size in force at a character position, or the first run's.</summary>
+    /// <remarks>
+    /// A linear walk because a paragraph has a handful of runs and this is asked once per script
+    /// boundary. Falls back to the first run rather than to zero, so a boundary in a gap no run
+    /// covers — which a control character cut out of the runs can leave — still opens its gap.
+    /// </remarks>
+    private static Length SizeAt(List<FormattedRun> runs, int index)
+    {
+        foreach (FormattedRun run in runs)
+        {
+            if (run.Covers(index)) return run.EmSize;
+        }
+
+        return runs.Count > 0 ? runs[0].EmSize : Length.Zero;
     }
 
     /// <summary>
