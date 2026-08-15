@@ -204,14 +204,14 @@ first, then re-run.
 | `slides/batch-012/…/OnTrac_StarCertificationProgram-3Day.pptx` | 9 | 96 | 50 | +46 | 2/0 |
 | `slides/batch-014/…/WiGr_2021W_1_Angebot-Nachfrage-Elastizität-211` | 45 | 50 | 5 | +45 | 0/1 |
 | `slides/batch-008/…/8_P-Pavese_AIRBUS-ATB-journee-CRATB.pptx` | 5 | 114 | 70 | +44 | 3/2 |ᵃ
-| `slides/batch-017/…/Demick_JetBlue.pptx` | 5 | 93 | 54 | +39 | — |
+| `slides/batch-017/…/Demick_JetBlue.pptx` | 5 | 133 | 54 | +79 | — |ᵇ
 | ~~`words/batch-015/…/approvals-and-standardisation-organisation-app`~~ | ~~6~~ | ~~161~~ | ~~123~~ | ~~+38~~ | — | **false positive — see below** |
 | `sheets/batch-010/…/TOGAF9-Tool-ConfReqts-CSQ.xls` | 21 | 69 | 31 | +38 | — |
 | `slides/batch-014/…/Structural Testing.pptx` | 19 | 37 | 5 | +32 | 2/0 |
 | `slides/batch-014/…/WiGr_2021W_1_Angebot-Nachfrage-Elastizität-211` | 44 | 34 | 4 | +30 | 0/1 |
 | `slides/batch-014/…/WiGr_2021W_1_Angebot-Nachfrage-Elastizität-211` | 46 | 35 | 5 | +30 | 0/1 |
-| `slides/batch-017/…/Demick_JetBlue.pptx` | 7 | 94 | 64 | +30 | — |
-| `slides/batch-017/…/Demick_JetBlue.pptx` | 4 | 108 | 79 | +29 | — |
+| `slides/batch-017/…/Demick_JetBlue.pptx` | 7 | 127 | 64 | +63 | — |ᵇ
+| `slides/batch-017/…/Demick_JetBlue.pptx` | 4 | 163 | 79 | +84 | — |ᵇ
 | ~~`slides/batch-016/…/FAAAIandtheArtandScienceofV&Vfinal.pptx`~~ | ~~14~~ | ~~119~~ | ~~91~~ | ~~+28~~ | ~~1/1~~ | **false positive — WordArt, see below** |
 | `slides/batch-014/…/Intersil_Italy_CAN_Bus_Transceiver_Presentatio` | 30 | 130 | 103 | +27 | 6/0 |
 | `slides/batch-007/…/introduction_to_bea_tuxedo.ppt` | 38 | 84 | 63 | +21 | — |
@@ -225,6 +225,17 @@ first, then re-run.
 ᵃ This document has **three** ceiling pages, not one — 5, 6 and 16. See *Why they sit under it*
 above and *the reference outlines its glyphs* below. Its full accounting is in
 `probes/slides-b008-01/results.md`.
+
+ᵇ Re-measured 2026-08-15 (`slides-verify-01`), and **the mechanism on these three rows is
+outlining, not rasterisation** — the em dash in the metafile column was the tell and this file
+already says to treat it as one. See the audit section above. The `ours` figures rose because
+our own output did; the reference's 54 / 64 / 79 are unchanged.
+
+**The other thirteen slides rows in this table reproduce exactly.** Every listed page of the
+fourteen `slides/ceiling-*` documents was re-measured with the generator's own raw metric on
+2026-08-15: thirteen are identical on both columns and the three above moved on ours only. So
+this table's slides half has aged far better than its preamble's shelf-life warning implies —
+what has aged is the *attribution*, not the counts.
 
 ## Audited 2026-08-14 against 26.2.4.2 — one row was inverted, and it was not a near-miss
 
@@ -309,6 +320,178 @@ token count — as the note above already recommends — and to add a condition 
 about the reference's *ink*: a page where the reference draws a raster **and has materially less
 text than the shape it covers would imply** is a ceiling; a page where the reference merely
 draws a picture is every other page.
+
+## Audited 2026-08-15 — all fourteen unverified `slides/ceiling-*` documents, re-measured
+
+Round `slides-verify-01`. Every figure below is from **this** container: LibreOffice 26.2.4.2
+with `fonts-dejavu-core` present, our tree at `e1630c6f1a6`, the gate's own metric. The
+provenance warning further up this file said the *classification* was expected to survive and
+every *number* had to be re-measured. Both halves of that turned out to be right, and the second
+half turned out to be cheaper than feared: **all fourteen gate rows reproduce their 2026-08-09
+figures to the word.** The stale-data risk on this list was real and did not fire.
+
+**The reference is deterministic on all fourteen.** Three independent samples each — the banked
+`refpdfs-26.2.4.2-fonts/` render, a fresh `batch-check.sh` conversion, and a third standalone
+`soffice --convert-to pdf` — agree on page count and on both word metrics for every document.
+The instability class is ruled out for this whole set, so nothing here should be filed
+`unstable`.
+
+### The verdicts
+
+`ceilΔ` is the sum of the per-page deltas on the pages the mechanism accounts for; `residue` is
+what is left of the gate's gap once those are excused, against the gate's own max(2%, 3) band.
+
+| document | gate | Δ | band | mechanism | ceiling pages | ceilΔ | residue |
+|---|---|---:|---:|---|---|---:|---:|
+| `W3_Case_Study_…Ed.ppt` | 900/812 | +88 | 16.2 | 1 raster | 10 | +88 | **0** |
+| `Thailand17.ppt` | 2736/2625 | +111 | 52.5 | 1 raster | 8 | +88 | +23 |
+| `Fundamentals_Module_1_basics.ppt` | 1135/1089 | +46 | 21.8 | 1 raster | 6 | +49 | **−3** |
+| `Demick_JetBlue.pptx` | 812/608 | +204 | 12.2 | **2 outlining** | 4, 5, 7 | +204 | **0** |
+| `N2_E_Maestroni_Swarm_COP.pptx` | 5285/5126 | +159 | 102.5 | 1 raster **+ 2** | 7 | +160 | **−1** |
+| `OnTrac_StarCertificationProgram-3Day.pptx` | 1326/1030 | +296 | 20.6 | 1 raster | 9, 10 | +296 | **0** |
+| `16 - UTM - (NASA).pptx` | 2454/2260 | +194 | 45.2 | 1 raster | 7, 29 | +193 | +1 |
+| `WiGr_2021W_1_….pptx` | 2154/1958 | +196 | 39.2 | 1 raster | 21, 28, 44, 45, 46, **47** | +201 | **−5** |
+| `Sylva%20introduction%20session.pptx` | 1064/1467 | **−403** | 29.3 | 3 ref splits | 13 of 15 | −412 | +9 |
+| `pres_ioc_phuket.ppt` | 992/1518 | **−526** | 30.4 | 3 ref splits | 5, 6, 23, 24 | −524 | −2 |
+| `architecture6.ppt` | 1926/2544 | **−618** | 50.9 | 3 ref splits | 10, 14, 21, 24, 27 | −618 | **0** |
+| `RRM-training-syllabus-Chapter-3-….ppt` | 2475/2576 | **−101** | 51.5 | 3 ref splits | 22 of 27 | −90 | −11 |
+| `solog_orientation_august_2019.pptx` | 670/685 | **−15** | 13.7 | 3 ref splits | 8 | −15 | **0** |
+| `7-Zulkefli_Part147n66_IKMAS.pptx` | 941/973 | **−32** | 19.5 | 3 ref splits | 3, 4 | −40 | +8 |
+
+**Fourteen of fourteen are confirmed ceilings, and every one of them passes the gate outright
+once its mechanism is excused.** Not one is a mislabelled defect. Three carry a real defect
+*inside* the ceiling, listed below; none of the three is large enough to change the verdict.
+
+### The direction is not uniform, and the deficits are a different mechanism, not a wrong label
+
+Eight surpluses and six deficits. The brief that commissioned this round was right to single the
+deficits out and the suspicion behind it was wrong: **all six deficits are mechanism 3, the
+reference splitting its own words, and mechanism 3 is a ceiling.** What was wrong on those rows
+was the *mechanism* the file implied — `pdfimages` has nothing to do with any of them — not the
+`ceiling` label.
+
+The test is the character stream and it is decisive:
+
+| document | Δ words | ours chars | ref chars | pages whose character multisets are identical |
+|---|---:|---:|---:|---|
+| `Sylva` | −403 | 5939 | 5939 | **15 of 15** |
+| `pres_ioc_phuket` | −526 | 6333 | 6339 | 25 of 26 |
+| `architecture6` | −618 | 11048 | 11035 | 29 of 31 |
+| `RRM` | −101 | 14493 | 14546 | 25 of 27 |
+| `solog` | −15 | 4756 | 4758 | 13 of 15 |
+| `7-Zulkefli` | −32 | 5808 | 5772 | 17 of 18 |
+
+`Sylva` is the cleanest instance on the project: **every one of its fifteen pages carries the
+identical character multiset on both sides, to the character**, and the gate reads −403.
+
+The operator-level cause, whole-document, from `pdf-ops.py dump` — glyphs per show operator:
+
+| document | ours | reference |
+|---|---:|---:|
+| `RRM` | 16.28 | **1.34** |
+| `pres_ioc_phuket` | 13.32 | **2.26** |
+| `solog` | 11.90 | **2.00** |
+| `architecture6` | 9.40 | **1.64** |
+| `Sylva` | 4.44 | **1.39** |
+| `7-Zulkefli` | 4.46 | **1.77** |
+
+On `Sylva` pages 2, 3, 10 and 11 the reference's figure is exactly 1.00 — **482 glyphs in 482
+shows, 406 in 406, 655 in 655, 436 in 436**, one show operator per glyph — against our 42, 77,
+80 and 71 shows for the same text. `pdftotext` reads each positioned glyph as a token. Closing
+any of these would mean shattering our own text layer to match poppler's misreading of theirs.
+
+A blind reviewer given `pres_ioc_phuket` page 24 — the single largest deficit page on the track,
+−275 words — with no numbers and no repository access reported the mechanism without being
+pointed at it: the reference's text is *"drawn with much wider inter-character spacing"* and
+carries *"conspicuously wide letter-spacing"*, while every one of the twelve event lines is
+present in both halves. A second reviewer, on `Sylva` page 10: *"nothing is missing from either
+half … every word of body copy is present and identical in both"*.
+
+### `Demick_JetBlue.pptx` is mechanism 2, not mechanism 1 — the second instance this file asked for
+
+This file's rows for `Demick_JetBlue` pages 4, 5 and 7 sit in the rasterisation table with an em
+dash in the metafile column. **The mechanism is wrong.** Neither side draws any raster those
+pages do not share: the 3006×340 and 1563×200 images are the deck's page furniture and appear on
+all ten pages, including the six where the word delta is zero — precisely the false-positive
+shape the condition-2 note above warns about.
+
+What the reference actually does there is **outline the rotated category-axis labels into filled
+paths**:
+
+| page | our surplus | our ours-only characters | reference glyph-sized fills, all `#000000` |
+|---|---:|---:|---:|
+| 4 | +63 | 126 | **126** |
+| 5 | +78 | 157 | **156** |
+| 7 | +63 | 126 | **126** |
+
+Twenty-one quarter labels of six characters (`2006-2` … `2012-3`) is 126; twenty-six is 156. Our
+side draws zero such fills on those pages and the reference draws none of them on the six pages
+where the deltas are zero. The ours-only character multiset is nothing but `0123456789` and `-`.
+
+A blind reviewer given page 5 with no numbers reported the ink as present and legible on both
+sides — *"small edge text on the chart is present and legible in both halves and reads
+identically"* — while `pdftotext` extracts not one of those characters from the reference. Ink
+with no text layer, which is the definition of this shape.
+
+**So the outlining mechanism now has its second instance and can be promoted.** The section
+below records it on one page of one document with the caveat *"do not promote it without a
+second instance"*. It has one: three pages of a second document, a different deck, a different
+chart library path, with the same signature and the same exact arithmetic. `N2_E_Maestroni…`
+page 7 is a third, mixed with a raster — the reference draws 173 black glyph-sized fills there
+that we do not.
+
+### One page joins the list and none leaves it
+
+`WiGr_2021W_1_….pptx` **page 47** is a ceiling page and was never listed: the reference draws a
+530×472 raster and two 427×64 rasters that we do not draw, and we extract 16 words there to its
+9. It misses the flag on condition 3's **absolute** bar — +7 where eight are required — while
+clearing its ratio bar at 78%. A small page can therefore carry an unmistakable ceiling and
+never be listed, which is the other end of the same arithmetic as the 25% bar's known
+behaviour.
+
+### Real defects found inside these documents — do NOT mistake them for ceiling
+
+Every one of these was found while auditing, and none of them changes a verdict. They are
+recorded here because a row in this file that says *unwinnable* is exactly where a real defect
+goes to be ignored.
+
+1. **`16 - UTM - (NASA).pptx` — an all-caps run property we do not apply.** On nine pages (1, 5,
+   12, 13, 14, 15, 16, 20, 35) the two character multisets differ **only in case**, ours lower
+   and the reference's upper, 369 characters in all: page 1 is
+   `aaaabcdeeeefgiiiiilllnnnnoopprrsstttuwy` against
+   `AAAABCDEEEEFGIIIIILLLNNNNOOPPRRSSTTTUWY`. Word-neutral in both metrics, and invisible to
+   every column of the gate.
+2. **`RRM-training-syllabus-Chapter-3-….ppt` — 54 characters of body text we drop.** Page 8's
+   last block ends `…and the tug lost` in ours against the reference's `…and the tug lost
+   control. The tug was traveling at about 7-9 kmph.”`, and page 20 loses `careful speed`. 11
+   words, the only genuine content difference in the document's 101-word deficit.
+3. **`pres_ioc_phuket.ppt` — page 16 loses `response mechanisms.`**, 21 characters. Same shape:
+   the tail of an overflowing block.
+4. **`Fundamentals_Module_1_basics.ppt` page 25 — an auto-numbered list drawn as bullets.** The
+   reference sets `1.` … `7.`; we set `•` seven times. Worth **−7 gate words**, and fixing it
+   moves this document's column *away* from a pass, which is this file's standing lesson again.
+5. **`OnTrac_StarCertificationProgram-3Day.pptx` page 10** — a blind reviewer found two, unled:
+   we omit the background's *"faint concentric arc bands"* entirely, and our page number `10`
+   sits ~90 px right and ~60 px up of the reference's, far enough that the `1` is clipped by the
+   slide edge. Neither moves a word.
+6. **`pres_ioc_phuket.ppt` page 24 — we draw no arrowheads** on the two timeline rules the
+   reference terminates with filled triangles.
+7. **`7-Zulkefli_Part147n66_IKMAS.pptx` page 1** — both sides clip an overflowing text box and
+   they clip it at different points, ours 45 characters further in. A real autofit divergence,
+   +8 words to us.
+8. **`Thailand17.ppt` pages 29 and 35** — identical character multisets, and here it is **our**
+   tokenisation that shatters: 14 one-character tokens against the reference's 3 on page 29, 18
+   against 7 on page 35. +20 words, and the only item in this audit that points at something
+   winnable in our own text layer.
+
+### What this settles about the track
+
+Sixteen slides failures remain, and with `chart-001`'s two re-verified separately, **all sixteen
+are now confirmed ceilings on current measurements** — every one page-exact, words-only, and
+every one passing the gate once its mechanism is excused. **The slides track has no winnable
+gate failure left in it.** What it has left is the eight defects above, none of which the gate
+can see, which is the argument for retiring `|words|` as the instrument on this track rather
+than for closing it.
 
 ## What is known about the mechanism, and what is not
 
@@ -724,6 +907,16 @@ Figure 3's `[08 h ; 10 h[` intervals, every value tick — are ordinary text ope
 **Established:** the table above. **Not established:** that LibreOffice outlines *all* rotated
 chart tick labels on PDF export. One document, one chart, one good internal control. Do not
 promote it without a second instance.
+
+> **The second instance arrived on 2026-08-15 and the third with it.** `Demick_JetBlue.pptx`
+> pages 4, 5 and 7 carry it — 126, 156 and 126 glyph-sized `#000000` fills against our 126, 157
+> and 126 ours-only characters, all of them the digits and hyphens of a rotated quarter axis —
+> and `N2_E_Maestroni_Swarm_COP.pptx` page 7 carries 173 more alongside a raster. Both are
+> `pptx` decks unrelated to `8_P-Pavese`, and in both the reference's *horizontal* labels on the
+> same page stay ordinary text, which is the same internal control. Worked in the
+> `slides-verify-01` audit above. The mechanism is no longer a single anecdote; what is still
+> unestablished is the *rule* — which rotated text LibreOffice outlines and which it emits as
+> per-glyph shows, since both behaviours are now attested on rotated chart tick labels.
 
 **It is not the `Template Pilot Logbook JAR-FCL V3.0.xls` shape**, recorded further up, where
 LibreOffice emits one `Tj` per glyph for rotated text. There the rotated text is still text and
