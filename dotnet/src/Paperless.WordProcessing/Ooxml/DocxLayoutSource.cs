@@ -136,9 +136,7 @@ public sealed partial class DocxLayoutSource
         _defaultTabInterval = TabInterval(settings);
         _compatibilityMode = CompatibilityMode(settings);
         WordCompatibility compatibility = WordCompatibility.Read(settings);
-        _autoSpacing = compatibility.DoNotUseHtmlParagraphAutoSpacing
-            ? WordParagraphFormats.WordAutoSpacing
-            : WordParagraphFormats.HtmlAutoSpacing;
+        _autoSpacing = AutoSpacing(settings, compatibility);
         // `AsWordDocument` is the MS_WORD_COMP_GRID_METRICS compatibility flag, which the Word
         // filters set and ODF's does not. See MetricGrid.AsWordDocument.
         _metrics = (compatibility.UsesPrinterMetrics ? MetricGrid.Printer : MetricGrid.Reference)
@@ -1642,6 +1640,26 @@ public sealed partial class DocxLayoutSource
     /// <param name="index">How many notes of the class came before, counted from zero.</param>
     private string CitationOf(bool isEndnote, int index)
         => (isEndnote ? _endnoteNumbering : _footnoteNumbering).Citation(index);
+
+    /// <summary>
+    /// What <c>w:beforeAutospacing</c> and <c>w:afterAutospacing</c> stand for in this document.
+    /// </summary>
+    /// <remarks>
+    /// Three answers, in LibreOffice's own order of precedence
+    /// (<c>DomainMapper.cxx</c>:916-953). <c>w:doNotUseHTMLParagraphAutoSpacing</c> wins outright and
+    /// means five points; otherwise a document saved in <strong>web view</strong> gets 49 twips and
+    /// every other document 280. The web branch is easy to miss because <c>w:view</c> is not a
+    /// compatibility flag — it sits directly under <c>w:settings</c>, beside the zoom and the ruler,
+    /// and reads like a preference rather than a measurement.
+    /// </remarks>
+    private static Length AutoSpacing(XElement? settings, WordCompatibility compatibility)
+    {
+        if (compatibility.DoNotUseHtmlParagraphAutoSpacing) return WordParagraphFormats.WordAutoSpacing;
+
+        return Word.Attribute(Word.Child(settings, "view"), "val") == "web"
+            ? WordParagraphFormats.WebAutoSpacing
+            : WordParagraphFormats.HtmlAutoSpacing;
+    }
 
     /// <summary>
     /// The document's default tab interval.
