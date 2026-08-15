@@ -997,7 +997,19 @@ public sealed class Paginator
                 // carries lines keeps the head of the section it started in.
                 if (placed.Count == 0 && tables.Count == 0) AdoptSection();
                 MeasureBody();
-                columnTop = Length.Zero;
+
+                // A section that starts part way down a sheet starts *its* columns there, not the
+                // sheet's. Writer gives it a section frame of its own, and the frame's columns begin at
+                // the frame's top — so a continuous break's second column starts level with its first,
+                // below whatever the section above it left. Zero here is right only when the break took
+                // a fresh page, and `used` is zero then anyway.
+                //
+                // Measured on `150_5300_13_chg12.doc`, whose glossary section is followed by a
+                // continuous break part way down page four: with the sheet's own top the new section's
+                // second column began at the top of the page and was drawn straight over the twenty-one
+                // paragraphs the section above had already put there. `pdftotext -layout` reads the two
+                // as one interleaved column and the page scores 1086 words against the reference's 785.
+                columnTop = used;
                 columnBottom = bodyHeight;
                 BeginBalance();
                 continue;
@@ -1502,7 +1514,11 @@ public sealed class Paginator
                     used = state.Top + band;
                     column = 0;
                     balance = null;
-                    columnTop = Length.Zero;
+
+                    // The section box the trial settled on, not the sheet: whatever follows the section
+                    // has to start below it in *every* column, and column one is already full of the
+                    // section's own second column. See the section-break arm above.
+                    columnTop = used;
                     columnBottom = bodyHeight;
                     return;
                 }
@@ -1524,7 +1540,10 @@ public sealed class Paginator
                 used = state.Top + (reach > state.Candidate ? reach : state.Candidate);
                 column = 0;
                 balance = null;
-                columnTop = Length.Zero;
+
+                // As the overflow arm above: content below a balanced section starts at the section
+                // box's bottom in every column, because the box spans all of them.
+                columnTop = used;
                 columnBottom = bodyHeight;
                 return;
             }
