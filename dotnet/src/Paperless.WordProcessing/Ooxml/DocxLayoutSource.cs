@@ -8,6 +8,7 @@ using Paperless.Text.Fonts;
 using Paperless.Text.Layout;
 using Paperless.Text.Shaping;
 using Paperless.WordProcessing.Layout;
+using Paperless.WordProcessing.Model;
 
 namespace Paperless.WordProcessing.Ooxml;
 
@@ -336,6 +337,7 @@ public sealed partial class DocxLayoutSource
 
         _sectionIndex = 0;
         _blocksInSection = 0;
+        _pendingBelowTarget = -1;
 
         // The body is where the document's lists start counting. Reset rather than assumed clean,
         // because the numbering may be the same instance the extraction pass already walked.
@@ -561,6 +563,88 @@ public sealed partial class DocxLayoutSource
            && paragraph.Notes.Count == 0;
 
     /// <summary>
+    /// The break each section begins with, indexed as <see cref="_sectionIndex"/> counts them.
+    /// </summary>
+    /// <remarks>
+    /// Only <see cref="HandOnBelowSpacing{T}"/> reads it, and only to tell a continuous break from a
+    /// page-starting one. Empty when the caller states nothing, which reads every section as
+    /// page-starting — the case the rule was written for, and the one a hand-built source is testing.
+    /// </remarks>
+    public IReadOnlyList<SectionBreak> SectionBreaks { get; init; } = [];
+
+    /// <summary>
+    /// The space-after of a dropped section mark, waiting for the section after it to claim it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A section mark is not laid out — see <see cref="IsSectionMarkOnly"/> — but the space-after it
+    /// declares is still the space that ends its section, and Word consolidates it against the space-before
+    /// of whatever opens the next one. Writer reproduces that by moving the value onto the last real
+    /// paragraph of the closing section before discarding the mark:
+    /// <c>DomainMapper_Impl::handleSectPrBeforeRemoval</c> stashes it
+    /// (<c>writerfilter/dmapper/DomainMapper_Impl.cxx</c>:10487) and
+    /// <c>SectionPropertyMap::EmulateSectPrBelowSpacing</c> writes it to the paragraph before the break
+    /// (<c>PropertyMap.cxx</c>:1576), whose own comment is "MS Word is excessively consistent about
+    /// consolidating paragraph top and bottom spacing. They even consolidate spacing between section
+    /// breaks!"
+    /// </para>
+    /// <para>
+    /// It <em>replaces</em> the previous paragraph's own space-after rather than adding to it, which
+    /// Writer justifies with "below spacing before a page break normally has no relevance". Both of
+    /// Writer's exclusions are reproduced: a table on either side of the break takes no hand-on, because
+    /// a table has neither of the two spacings to consolidate; and a continuous break hands nothing on
+    /// unless the paragraph opening the section carries a page break of its own, because without one the
+    /// mark's space-after never reaches the layout at all.
+    /// </para>
+    /// <para>
+    /// Measured on <c>03_Technical_Report_(progress)_template.docx</c>, whose landscape section opens with
+    /// an 18 pt space-before heading after a mark declaring 6 pt: the reference puts that heading's
+    /// baseline 12 pt below where a probe with the space-before removed puts it, which is the consolidated
+    /// 18 − 6 and not the 18 the same document's earlier section — whose mark declares no space-after at
+    /// all — moves by. Without this the two sections both moved by 18 and the document paginated to
+    /// eleven pages against the reference's ten.
+    /// </para>
+    /// </remarks>
+    private Length _pendingBelowSpacing;
+
+    /// <summary>Which block the pending space-after belongs on, or −1 when nothing is pending.</summary>
+    private int _pendingBelowTarget = -1;
+
+    /// <summary>
+    /// Gives a dropped section mark's space-after to the last paragraph of the section it closed.
+    /// </summary>
+    /// <param name="into">The blocks read so far.</param>
+    /// <param name="startsNewPage">
+    /// Whether the paragraph claiming it carries a page break, which is what lets a continuous break hand
+    /// anything on.
+    /// </param>
+    private void HandOnBelowSpacing<T>(List<T> into, bool startsNewPage)
+        where T : PageBlock
+    {
+        int target = _pendingBelowTarget;
+        _pendingBelowTarget = -1;
+
+        if (target < 0 || target >= into.Count) return;
+
+        // `_sectionIndex` has already advanced past the mark, so it names the section being opened.
+        if (!startsNewPage
+            && _sectionIndex < SectionBreaks.Count
+            && SectionBreaks[_sectionIndex] == SectionBreak.Continuous)
+        {
+            return;
+        }
+
+        // A table before the break has no space-after to replace, which is Writer's other `FindTableNode`.
+        if (into[target] is not PageParagraph last) return;
+
+        if (last with { Format = last.DeclaredFormat with { SpaceAfter = _pendingBelowSpacing } } is T
+            replaced)
+        {
+            into[target] = replaced;
+        }
+    }
+
+    /// <summary>
     /// How many tables enclose the one being read, counted while its rows are walked.
     /// </summary>
     /// <remarks>
@@ -623,11 +707,19 @@ public sealed partial class DocxLayoutSource
 
                 // Read it either way: even a paragraph that is only a section mark can leave a page break
                 // behind for the paragraph after it, and that bookkeeping lives in `Paragraph`.
-                if (Paragraph(child) is { } paragraph
-                    && !(endsSection && _blocksInSection > 0 && IsSectionMarkOnly(paragraph))
-                    && paragraph is T block)
+                if (Paragraph(child) is { } paragraph)
                 {
-                    into.Add(block);
+                    if (endsSection && _blocksInSection > 0 && IsSectionMarkOnly(paragraph))
+                    {
+                        // Dropped — but its space-after is not dropped with it. See BelowSpacing.
+                        _pendingBelowSpacing = paragraph.DeclaredFormat.SpaceAfter;
+                        _pendingBelowTarget = into.Count - 1;
+                    }
+                    else if (paragraph is T block)
+                    {
+                        HandOnBelowSpacing(into, paragraph.Format.StartsNewPage);
+                        into.Add(block);
+                    }
                 }
 
                 _blocksInSection++;
@@ -646,6 +738,11 @@ public sealed partial class DocxLayoutSource
 
             if (Word.Is(child, "tbl"))
             {
+                // A section that starts with a table takes no hand-on: a table has no space-above for the
+                // mark's space-after to consolidate against, which is the `FindTableNode` arm of
+                // `SectionPropertyMap::EmulateSectPrBelowSpacing`.
+                _pendingBelowTarget = -1;
+
                 if (Table(child) is { } table && table is T grid) into.Add(grid);
                 _blocksInSection++;
                 continue;

@@ -1107,10 +1107,28 @@ public sealed class Paginator
             // `CollapsesUpperAtPageTop` is the second rule on top of it — `SwFrame::IsCollapseUpper`,
             // which takes the space back on every page but the first from Word 2013 onwards, so at
             // `compatibilityMode` 15 an explicit break keeps nothing either.
+            //
+            // A section break is the carve-out `IsCollapseUpper` states and neither rule above catches:
+            // it declines "after applying a new page style (but do it after page breaks)", and
+            // `SectionPropertyMap::CloseSectionGroup` gives every page-starting section a page style of
+            // its own, so the paragraph that opens one carries a `RES_PAGEDESC` and keeps its space
+            // whatever the compatibility mode says. Note the break itself is what matters, not the
+            // paragraph: the `w:sectPr` sits on the paragraph *above*, so `StartsNewPage` is false here.
+            //
+            // Measured on sixteen synthetics carrying 20 pt of space-before over a 10 pt space-after,
+            // at `compatibilityMode` 15 and 12, with and without `w:titlePg`, and with and without a
+            // portrait-to-landscape change across the break. A `w:br w:type="page"` and a
+            // `w:pageBreakBefore` both track the mode — 91.4 pt at 12, 81.4 pt at 15 — and we already
+            // agree with the reference on all eight. A `nextPage` break puts the line at 91.4 pt in
+            // **all eight**, mode and geometry alike, where we put it at 81.4. This supersedes the note
+            // on `CollapsesUpperAtPageTop` claiming a plain section break sets no page description and
+            // collapses like any other; that was measured against 24.2.7.2.
             bool keepsSpaceHere =
                 column == 0
                 && (pages.Count == 0
-                    || (paragraph.Format.StartsNewPage && !_options.CollapsesUpperAtPageTop));
+                    || (paragraph.Format.StartsNewPage && !_options.CollapsesUpperAtPageTop)
+                    || (pageIsSectionFirst
+                        && geometry.Break is not (SectionBreak.Continuous or SectionBreak.NewColumn)));
 
             Length ownSpaceAbove = Length.Zero;
             Length spaceAbove = lineIndex == 0
@@ -1251,8 +1269,19 @@ public sealed class Paginator
 
             // Keep-with-next: this paragraph may not end a page its successor does not start. Checked
             // after placing it, because whether the successor fits is only knowable once this one has.
+            //
+            // Unless the successor takes a page of its own whatever happens, which is Writer's
+            // `SwFlowFrame::IsKeep` (`sw/source/core/layout/flowfrm.cxx`:345): it reads the *next*
+            // content's break and page-description items and drops the keep for
+            // `if (pPageDesc->GetPageDesc()) bKeep = false;` and for a `PageBefore`/`PageBoth` break.
+            // Keeping a paragraph with a successor that cannot share its page empties the bottom of the
+            // page for nothing — measured on `exhibit-06---technical-architecture-template.docx`, whose
+            // contents page ends with an empty keep-with-next paragraph in front of a `nextPage` section
+            // break: bouncing it gave it a page of its own, holding a running head and a page number and
+            // no text, and the document paginated to nine pages against the reference's eight.
             if (paragraph.Format.KeepWithNext
                 && paragraphIndex < blocks.Count
+                && !StartsItsOwnPage(paragraphIndex)
                 && Laid(paragraphIndex).Paragraph is { } next
                 && !FirstLineFits(next, (PageParagraph)blocks[paragraphIndex], used, columnBottom))
             {
@@ -1302,6 +1331,27 @@ public sealed class Paginator
         {
             int before = pages.Count;
             while (pages.Count == before && pages.Count < _options.MaxPages) EmitPage();
+        }
+
+        // Whether the block here begins a page whatever precedes it: a page break of its own, or the
+        // first block of a section that does not continue on the same sheet. Writer asks the same
+        // question of the next content's `SwFormatPageDesc` and `SvxFormatBreakItem` before it honours a
+        // keep-with-next — see the call site.
+        bool StartsItsOwnPage(int index)
+        {
+            if (index <= 0 || index >= blocks.Count) return false;
+
+            if (blocks[index] is PageParagraph { Format.StartsNewPage: true }
+                or PageTable { StartsNewPage: true })
+            {
+                return true;
+            }
+
+            int section = SectionOf(blocks[index], resolved.Count);
+
+            return section != SectionOf(blocks[index - 1], resolved.Count)
+                   && resolved[section].Section.Break
+                       is not (SectionBreak.Continuous or SectionBreak.NewColumn);
         }
 
         void EmitPage()
