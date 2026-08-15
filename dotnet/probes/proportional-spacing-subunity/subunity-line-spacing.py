@@ -51,6 +51,55 @@ The reference is **not** a simple scaling of its own 100% height either. Against
 not the number being scaled, and whatever LibreOffice multiplies is not what it
 reports at 100%.
 
+The rule, found in the C++ after curve fitting was proved impossible
+-------------------------------------------------------------------
+
+Successive differences in the table above swing by **3** twips, where rounding
+any smooth function of a *single* scale can only ever swing by 1. That is a
+proof, not a hunch: the reference is not scaling one number, so no amount of
+further sampling would have produced the rule. It had to come from the source.
+
+`SwTextFormatter::CalcRealHeight`, `sw/source/core/text/itrform2.cxx:2367-2394`:
+
+    tools::Long nTmp = pSpace->GetPropLineSpace();
+    if( nTmp < 50 ) nTmp = nTmp ? 50 : 100;      // clamped at 50%
+    if (nTmp < 100) {
+        nTmp *= nLineHeight;
+        nTmp /= 100;                              // TRUNCATING integer division
+        if( !nTmp ) ++nTmp;
+        nLineHeight = nTmp;
+        SwTwips nAsc = (4 * nLineHeight) / 5;    // ascent forced to 80%
+        m_pCurr->SetAscent( nAsc );
+        m_pCurr->Height( nLineHeight, false );
+    }
+
+Four things there that no amount of measuring would have produced:
+
+1. **Truncating integer division**, not rounding.
+2. **The ascent is forced to exactly 80% of the shrunk height** — it is not
+   scaled proportionally with it. That alone breaks any model that treats the
+   line as one quantity.
+3. **A 50% floor**, with a curious `nTmp ? 50 : 100` so that a stated 0 means
+   100 and anything else below 50 means 50.
+4. It is **gated on `DocumentSettingId::PROP_LINE_SPACING_SHRINKS_FIRST_LINE`**
+   and on `IsParaLine()`, so it does not apply uniformly.
+
+And a *second*, opposite branch at `itrform2.cxx:2337-2347`, on the fixed
+line-height path: `if( nTmp < 100 ) nTmp = 100;` — there, sub-unity proportional
+spacing is **ignored entirely**. So which of the two a line takes decides
+whether shrinking happens at all.
+
+The percentage itself is `round(w:line * 100.0 / 240)` at
+`sw/source/writerfilter/dmapper/DomainMapper_Impl.cxx:5399` — a floating-point
+round, half away from zero, which is why 99.58% returns the 100% answer and
+takes neither branch.
+
+**What is still open.** Composing those gives 126 twips at 50% (matching), but
+131 at 52.5% requires the percentage to arrive as 52 where `round()` gives 53.
+So one conversion step between `w:line` and `GetPropLineSpace()` is still
+unaccounted for. That is a short, targeted question against the source rather
+than another sweep.
+
 Where it matters
 ----------------
 
