@@ -197,6 +197,21 @@ the candidates the image cannot decide between* and then go and measure. A readi
 promotes itself into a diagnosis is worse than no reading, because it is cited later as though
 it were one.
 
+### `pdftotext -bbox` reports an ink box, not a baseline
+
+Its `yMin` is derived from the **font descriptor**, not from the text-positioning operator. So two
+renderings whose baselines are identical to the hundredth of a point can report a constant `yMin`
+offset, and it looks exactly like a vertical layout defect.
+
+Measured: every Caladea heading in `exhibit-06---technical-architecture-template.docx` showed a
+flat **2.1 pt** offset against the reference — which is precisely `usWinAscent − sTypoAscent` for
+that face. The `Td` baselines were the same on both sides. A round nearly filed a font-metric bug
+on it.
+
+**When the question is vertical position, read the baseline out of the content stream.** Use
+`-bbox` for *which* words are on a page and roughly where; use the operators for where a line
+actually sits.
+
 ### Ink and the text layer are different things, and may legitimately disagree
 
 You read ink. `pdftotext` reads the text layer. Measured on the calibration page: the rendered
