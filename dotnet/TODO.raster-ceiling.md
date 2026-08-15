@@ -596,6 +596,80 @@ the character-stream section — *we shatter our own line* — is the only shape
 and **winnable**, and is the reason the sentence above is not a general rule. The ordinals in
 the headings below grew by accretion and are not a sequence; read the shape names.
 
+### The rotated-text shape again on a slides deck: `southern-classic-…-final.pptx`
+
+Measured 2026-08-15, round `slides-chart-01`. `slides/chart-001/pptx/southern-classic-kennesaw-state-university-final.pptx`
+— page-exact at 23/23, **2217 gate-words against the reference's 2270**, a 53-word deficit against
+a ±45.4 band. It reads as lost content and none is lost.
+
+**We draw 19 characters *more* than the reference.** Whitespace-stripped, over all 23 pages:
+**12261 ours against 12242**. Only five pages differ at all, and every one of them carries a chart
+with a rotated category axis:
+
+| page | word delta | ours single-glyph text records | ref single-glyph text records |
+|---|---:|---:|---:|
+| 2 | **−37** | 9 | **125** |
+| 9 | −8 | 0 | **33** |
+| 10 | −11 | 1 | **45** |
+| 11 | +1 | — | — |
+| 12 | +2 | — | — |
+| | **−53** | **10** | **203** |
+
+**Page 9 is the control that makes this a mechanism rather than a correlation.** Its character
+multiset is **exactly identical** on both sides — zero characters either way — and its glyph
+count is **392 against 392**. The only thing that differs is granularity: **80 show operators
+ours against the reference's 240**. Same glyphs, same characters, same positions, −8 words.
+
+At the operator level, in page 2's rotated date-axis band (`Jan-16` … `Jan-17`, 20 labels):
+
+| page 2, axis band | ours | reference |
+|---|---:|---:|
+| text records | 20 | **111** |
+| glyphs | 132 | 128 |
+| show operators | 39 | **122** |
+
+The reference writes **one text record with one show per glyph, each in its own `Tm`**; we write
+one record per label. `pdftotext` reads each of the reference's positioned glyphs as a token.
+This is exactly the `Template Pilot Logbook JAR-FCL V3.0.xls` mechanism above, with the sign
+reversed — there our tokenisation shattered *more* than the reference's, here the reference's
+shatters more than ours, and both are unwinnable for the same reason.
+
+**Where the two sides genuinely differ in content, we draw more, not less.** The per-page
+character-multiset difference is: page 2 ours-only `Optimistic` — a fourth chart legend entry the
+*reference* drops, its legend box being too small once it wraps `Closing Price` and splits
+`Pessimisti`/`c`; pages 11 and 12 ours-only `Domestic` and `Revenue`/`Total`, the same class; and
+three `U+E46F` against three `U+F0A7`, the bullet-PUA difference already recorded under
+`architecture6.ppt`. A blind reviewer given page 2 with no numbers reported the missing legend
+entry independently: *"the top half has 4 entries, the bottom has 3 … there is no 'Optimistic'
+entry."*
+
+**The reference is deterministic here** — three independent `soffice 26.2.4.2` conversions gave
+2270 gate-words each, matching the banked PDF, so this is not the instability class.
+
+Closing this gap would mean emitting one show per glyph for rotated text, i.e. deliberately
+shattering our own text layer to match poppler's reading of theirs. **The gate cannot be won on
+this document.**
+
+### Two real defects on it that the word column cannot see, so they are not mistaken for ceiling
+
+Both were found by blind page review and confirmed against the package. Neither moves a word.
+
+1. **Page 10, value-axis increment.** `chart10.xml` fixes `c:min val="320"` and leaves the maximum
+   and the interval automatic over data spanning 343–468. The reference draws `$320 $360 $400
+   $440 $480`; we draw `$320 $370 $420 $470 $520`. Ours is a coarser increment over a taller axis,
+   so our data line uses less of the plot box. LibreOffice's normalised increments are only
+   {1, 2, 5}×10ⁿ (`chart2/source/view/axes/ScaleAutomatism.cxx`,
+   `calculateExplicitIncrementAndScaleForLinear`, STEP 3), so its 40 is an increment of **20 drawn
+   at label rhythm 2**, not an increment of 40 — which means the divergence is in
+   `nMaxMainIncrementCount`, not in the nice-number set.
+2. **Page 20, bubble-chart data labels — and here the reference is wrong.** `chart21.xml` is a
+   `c:bubbleChart` whose `c:dLbls` carry `showVal=1` and `showBubbleSize=0`, with `c:yVal`
+   47.27/52.89/62.70 and a constant `c:bubbleSize` of 3. We label 47.27/52.89/62.70; the reference
+   labels **`$3.00` three times** — the bubble size, put through the value axis's `"$"0.00`.
+   Ours is the correct output. Our bubbles are also drawn far too small, which *is* ours: the
+   reviewer described "a small pale-blue blob with a tiny dark dot" against the reference's
+   "solid disc surrounded by a wide pale halo".
+
 ## The reference outlines its glyphs, and `pdfimages` cannot see it
 
 This file's page test asks `pdfimages` whether the reference drew a raster we did not. **There
@@ -678,6 +752,42 @@ simultaneously losing 40 words of real content. Both corrections point the same 
 **Every real improvement available on this document makes its gate column worse.** That is this
 file's standing argument in its sharpest form: here the number cannot be driven down at all, only
 up, by drawing content we currently drop.
+
+### Re-measured 2026-08-15, and the prediction above has since come true
+
+Round `slides-chart-01` re-derived the whole accounting independently. The gate row is now
+**26/26 2122/2010, +112** — four *worse* than the +108 recorded above, and the reason is that
+one of the three defects was fixed:
+
+| page | net, as recorded | net, 2026-08-15 | ours-only | ref-only | what changed |
+|---|---:|---:|---:|---:|---|
+| 3 | +3 | +3 | 3 | 0 | — |
+| 5 | +43 | +43 | 43 | 0 | — |
+| 6 | +31 | +31 | 43 | 12 | — |
+| 8 | −7 | **0** | 1 | 1 | `percentStacked` / `chartUserShapes` **fixed** — and the gate went up 7 |
+| 16 | +38 | **+35** | 56 | 21 | — |
+| | **+108** | **+112** | **142** | **34** | |
+
+So the file's sharpest sentence has been demonstrated rather than argued: a real defect was
+closed, the page became correct, and the document's gate column moved further from a pass.
+
+The ceiling re-confirmed at the operator level, on the current tree against the banked reference:
+
+- **pages 5 and 6** — `pdfimages -list` reports the reference drawing object 207, a 692×240 JPEG
+  with a soft mask, on both; we draw **no image on either page**.
+- **page 16** — **neither side draws any image at all**. The reference draws **120 glyph-sized
+  fills, every one `#595959`** (114 of them inside the axis band) and **zero text operators**
+  there; we draw **20 text records of 6 glyphs each — exactly 120 glyphs — and one fill.**
+  Whole-page fills are 180 reference against our 58, a difference of 122, being those 120 plus
+  two bars.
+
+Excusing the ceiling — 2122 − 142 — gives **1980 against 2010, −30 against a ±40.2 band: a pass.**
+Fixing all three of our own defects instead gives 2152, +142.
+
+**The "arc-warped gauge labels drawn twice" suspicion recorded against this document in the task
+list is refuted.** There is no doubling anywhere on it; that suspicion belongs to
+`FAAAIandtheArtandScienceofV&Vfinal.pptx`, whose `a:prstTxWarp` gauge labels were the round
+`slides-extra-01` fix recorded further up this file.
 
 ### Its three defects, so they are not mistaken for ceiling
 
