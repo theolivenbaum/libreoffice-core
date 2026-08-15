@@ -516,7 +516,7 @@ internal static class PptxTextBody
     private static SlideMarker Marked(
         string text, List<XElement> chain, DrawingTheme? theme, bool isSymbol = true)
     {
-        XElement? font = Child(chain, "buFont");
+        XElement? font = FollowsTextFont(chain) ? null : Child(chain, "buFont");
 
         // Only a stated character is a symbol position. A generated number is digits whatever
         // face the level names for its bullet, and recoding it would make nonsense of it.
@@ -543,6 +543,37 @@ internal static class PptxTextBody
                     : 1.0,
                 ColourIn(Child(chain, "buClr"), theme),
                 isSymbol);
+    }
+
+    /// <summary>
+    /// Whether the chain asks for the bullet to be set in the text's own face — which, in
+    /// LibreOffice, means it is set in <em>neither</em> the text's face nor an <c>a:buFont</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>a:buFontTx</c> sets <c>mbBulletFontFollowText</c>, and the import's whole response to it
+    /// is to <em>skip</em> the block that would set <c>PROP_BulletFont</c> — nothing else is put in
+    /// its place (<c>oox/source/drawingml/textparagraphproperties.cxx:311-347</c>). So the bullet
+    /// keeps the numbering rule's default face, which for Impress is OpenSymbol, and the element
+    /// that reads as "follow the text" in fact means "state no face at all". Measured: a paragraph
+    /// with <c>a:buFontTx</c> over text in Courier New draws its bullet from OpenSymbol, not from
+    /// LiberationMono.
+    /// </para>
+    /// <para>
+    /// It is looked for anywhere in the chain rather than at its most specific rung, because
+    /// <c>BulletList::apply</c> only ever assigns the flag when the source <em>has</em> a value and
+    /// nothing writes a false one (<c>textparagraphproperties.cxx:267-268</c>, with the only
+    /// producer at <c>textparagraphpropertiescontext.cxx:282-283</c>). A master that says
+    /// <c>buFontTx</c> therefore outlives a paragraph that names a face.
+    /// </para>
+    /// </remarks>
+    private static bool FollowsTextFont(List<XElement> chain)
+    {
+        foreach (XElement source in chain)
+        {
+            if (Drawing.Child(source, "buFontTx") is not null) return true;
+        }
+        return false;
     }
 
     /// <summary>
