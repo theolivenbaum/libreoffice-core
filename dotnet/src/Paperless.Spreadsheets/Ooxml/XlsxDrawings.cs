@@ -32,11 +32,13 @@ namespace Paperless.Spreadsheets.Ooxml;
 /// which is the one place SpreadsheetML uses the same unit Paperless does.
 /// </para>
 /// <para>
-/// <strong><c>editAs</c> is not read.</strong> LibreOffice honours it — a
-/// <c>twoCellAnchor editAs="oneCell"</c> is imported with a fixed size
-/// (<c>drawingfragment.cxx:284-287</c>) — but the attribute says how the drawing behaves when the
-/// sheet is <em>edited</em>, and the rectangle it occupies on a printed page is the same either
-/// way. Reading it would change nothing that is drawn.
+/// <strong><c>editAs</c> decides which of the three a two-cell anchor really is</strong>, and it
+/// is read. <c>editAs="oneCell"</c> or <c>"absolute"</c> makes Calc keep the shape's stated
+/// <c>a:ext</c> and ignore the second corner (<c>drawingfragment.cxx:284-295</c>). This paragraph
+/// used to say the attribute changed nothing that is drawn; measured on <c>SIL_TDB648.xlsx</c>,
+/// whose cover photograph is anchored that way across eighteen rows that shrink on load, it is a
+/// <strong>4.7%</strong> error in the picture's height — 286.6 pt from the anchor against the
+/// reference's 300.73, which is the stated extent to a fiftieth of a point.
 /// </para>
 /// </remarks>
 internal static class XlsxDrawings
@@ -148,20 +150,44 @@ internal static class XlsxDrawings
 
         if (picture is null && frame is null && shape is null) return null;
 
+        XElement? anchored = picture ?? frame ?? shape;
+        XElement? transform = Transform(anchored);
+        DocSize extent = Size(Child(anchor, DrawingNamespace, "ext"));
+
+        // `editAs` on a two-cell anchor, which decides whether the second corner is a *size* or a
+        // hint. Calc reads it: a `twoCellAnchor editAs="oneCell"` or `"absolute"` takes the shape's
+        // own `a:ext` and keeps it, because the anchor's second corner is only where the writing
+        // application happened to leave it (`drawingfragment.cxx:284-295`). This file used to state
+        // that reading the attribute "would change nothing that is drawn", and that was measurably
+        // wrong: `SIL_TDB648.xlsx` anchors its cover photograph `editAs="oneCell"` across rows 1 to
+        // 18, and those rows are recomputed shorter on load — so the anchor gives 286.6 pt where the
+        // stated extent gives 300.75 and the reference draws 300.73. A 4.7% error in a picture's
+        // height, on a page whose word count is exact.
+        SheetAnchorKind resolved = kind;
+        if (kind == SheetAnchorKind.TwoCell
+            && Attribute(anchor, "editAs") is "oneCell" or "absolute"
+            && Size(Child(transform, MainNamespace, "ext")) is
+               { Width.Emu: > 0, Height.Emu: > 0 } stated)
+        {
+            resolved = SheetAnchorKind.OneCell;
+            extent = stated;
+        }
+
         SheetDrawing drawing = new()
         {
-            Anchor = kind,
+            Anchor = resolved,
             From = Point(Child(anchor, DrawingNamespace, "from")),
             To = Point(Child(anchor, DrawingNamespace, "to")),
-            Extent = Size(Child(anchor, DrawingNamespace, "ext")),
+            Extent = extent,
             Position = Position(Child(anchor, DrawingNamespace, "pos")),
+            Parts = Parts(anchored, transform),
         };
 
         // Each shape kind wraps its cNvPr in a differently named non-visual container, and they
         // are searched in turn rather than selected, because a group's is nvGrpSpPr and a
         // connector's is nvCxnSpPr and the wrong guess reads no name and no hidden flag.
         XElement? properties = FirstChild(
-            picture ?? frame ?? shape,
+            anchored,
             "nvPicPr", "nvGraphicFramePr", "nvSpPr", "nvCxnSpPr", "nvGrpSpPr") is { } container
                 ? Child(container, DrawingNamespace, "cNvPr")
                 : null;
@@ -466,6 +492,115 @@ internal static class XlsxDrawings
             && value >= 0
                 ? value
                 : fallback);
+
+    /// <summary>The <c>a:xfrm</c> a shape or a group states, or null when it states none.</summary>
+    private static XElement? Transform(XElement? shape)
+        => Child(FirstChild(shape, "spPr", "grpSpPr"), MainNamespace, "xfrm");
+
+    /// <summary>
+    /// The leaf shapes inside a drawing, as fractions of its own rectangle.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Read only so that <see cref="SheetDrawingBounds"/> can tell a drawing's frame from the
+    /// rectangle its contents actually cover. Nothing is read for the common case: a shape with no
+    /// turned part covers its frame and no more, so the walk returns nothing and the frame stands.
+    /// </para>
+    /// <para>
+    /// A group's <c>a:chOff</c>/<c>a:chExt</c> maps its children's coordinates onto its own
+    /// <c>a:off</c>/<c>a:ext</c>, and the mapping composes down the nesting, so each part comes back
+    /// positioned in the <em>anchored</em> shape's frame however deep it sat. Rotation does not
+    /// compose the same way and is not accumulated: DrawingML turns a group's children about their
+    /// own centres, and a group carrying its own <c>rot</c> is rare enough that taking the leaf's
+    /// alone is the smaller error than pretending the two add.
+    /// </para>
+    /// </remarks>
+    private static List<SheetDrawingPart> Parts(XElement? shape, XElement? transform)
+    {
+        if (shape is null || transform is null) return [];
+
+        // Nothing to say about an untuned shape that is not a group: it covers its frame exactly,
+        // and the walk below would return one part restating it. Checked first so that the common
+        // drawing — one picture, no rotation — costs a single attribute lookup.
+        bool isGroup = shape.Name.LocalName == "grpSp";
+        if (!isGroup && Attribute(transform, "rot") is null) return [];
+
+        XElement? offset = Child(transform, MainNamespace, "off");
+        XElement? extent = Child(transform, MainNamespace, "ext");
+        if (offset is null || extent is null) return [];
+
+        double frameX = Long(offset, "x");
+        double frameY = Long(offset, "y");
+        double frameWidth = Long(extent, "cx");
+        double frameHeight = Long(extent, "cy");
+        if (frameWidth <= 0 || frameHeight <= 0) return [];
+
+        List<SheetDrawingPart> parts = [];
+        Collect(shape, frameX, frameY, frameWidth, frameHeight, 0);
+        return parts.Count == 0 ? [] : parts;
+
+        // (x, y, width, height) are the container's own rectangle, in the anchored shape's EMUs.
+        void Collect(XElement container, double x, double y, double width, double height, int depth)
+        {
+            XElement? own = Transform(container);
+            XElement? childOffset = Child(own, MainNamespace, "chOff");
+            XElement? childExtent = Child(own, MainNamespace, "chExt");
+
+            if (container.Name.LocalName != "grpSp" || own is null
+                || childOffset is null || childExtent is null
+                || Long(childExtent, "cx") <= 0 || Long(childExtent, "cy") <= 0
+                || depth > 8)
+            {
+                if (own is null) return;
+
+                parts.Add(new SheetDrawingPart(
+                    (x - frameX) / frameWidth,
+                    (y - frameY) / frameHeight,
+                    width / frameWidth,
+                    height / frameHeight,
+                    Degrees(own)));
+                return;
+            }
+
+            // A group states its children in a coordinate space of its own and this is the mapping
+            // onto the space it occupies — `a:chOff`/`a:chExt` against `a:off`/`a:ext`. It composes
+            // down the nesting, which is why the recursion passes a rectangle rather than a scale.
+            double originX = Long(childOffset, "x");
+            double originY = Long(childOffset, "y");
+            double scaleX = width / Long(childExtent, "cx");
+            double scaleY = height / Long(childExtent, "cy");
+
+            foreach (XElement child in container.Elements())
+            {
+                if (child.Name.NamespaceName != DrawingNamespace) continue;
+                if (child.Name.LocalName is not ("sp" or "pic" or "grpSp" or "cxnSp"
+                    or "graphicFrame"))
+                {
+                    continue;
+                }
+
+                if (Transform(child) is not { } childTransform) continue;
+                if (Child(childTransform, MainNamespace, "off") is not { } at) continue;
+                if (Child(childTransform, MainNamespace, "ext") is not { } size) continue;
+
+                Collect(
+                    child,
+                    x + ((Long(at, "x") - originX) * scaleX),
+                    y + ((Long(at, "y") - originY) * scaleY),
+                    Long(size, "cx") * scaleX,
+                    Long(size, "cy") * scaleY,
+                    depth + 1);
+            }
+        }
+    }
+
+    /// <summary>How far a transform turns its shape clockwise, in degrees.</summary>
+    /// <remarks><c>@rot</c> is in sixtieth-thousandths of a degree.</remarks>
+    private static double Degrees(XElement transform)
+        => transform.Attribute("rot")?.Value is { } text
+           && long.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out long value)
+            ? value / 60000.0
+            : 0;
 
     private static DocSize Size(XElement? element)
         => element is null

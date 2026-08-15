@@ -197,36 +197,14 @@ internal static class SheetEmptyPages
 
         foreach (SheetDrawing drawing in sheet.Drawings.Items)
         {
-            (long x, long y, long x2, long y2) = Bounds(drawing, sheet.Grid);
+            // The object's *bounding* rectangle rather than its anchor: `HasAnyDraw` asks
+            // `GetCurrentBoundRect` (documen9.cxx:396), which for a group holding turned shapes is
+            // neither the group's frame nor a fixed inset of it. See `SheetDrawingBounds`.
+            (long x, long y, long x2, long y2) = SheetDrawingBounds.Of(drawing, sheet.Grid);
             if (x2 >= left && x <= right && y2 >= top && y <= bottom) return true;
         }
 
         return false;
-    }
-
-    /// <summary>A drawing's rectangle, in twips from the sheet's origin.</summary>
-    private static (long Left, long Top, long Right, long Bottom) Bounds(
-        SheetDrawing drawing, SheetGrid grid)
-    {
-        if (drawing.Anchor == SheetAnchorKind.Absolute)
-        {
-            long x = drawing.Position.X.Twips;
-            long y = drawing.Position.Y.Twips;
-            return (x, y, x + drawing.Extent.Width.Twips, y + drawing.Extent.Height.Twips);
-        }
-
-        long left = Start(drawing.From.Column, grid.Columns) + drawing.From.ColumnOffset.Twips;
-        long top = Start(drawing.From.Row, grid.Rows) + drawing.From.RowOffset.Twips;
-
-        if (drawing.Anchor == SheetAnchorKind.OneCell)
-        {
-            return (left, top,
-                    left + drawing.Extent.Width.Twips, top + drawing.Extent.Height.Twips);
-        }
-
-        long right = Start(drawing.To.Column, grid.Columns) + drawing.To.ColumnOffset.Twips;
-        long bottom = Start(drawing.To.Row, grid.Rows) + drawing.To.RowOffset.Twips;
-        return (left, top, Math.Max(left, right), Math.Max(top, bottom));
     }
 
     private static long Start(int index, SheetAxis axis)
