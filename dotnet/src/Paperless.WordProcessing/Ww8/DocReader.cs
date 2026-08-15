@@ -196,11 +196,15 @@ public sealed class Ww8Document : IWordProcessingDocument, IPaginatedDocument
     /// </remarks>
     public IPageSequence Layout(LayoutOptions? options = null)
     {
-        // A document asking for printer metrics is measured on the printer's pixel grid, which rounds every
-        // font metric and is worth up to 2.8% of a line's height. See Ww8DocumentProperties.UsesPrinterMetrics.
+        // Every document is measured on a device's pixel grid; the flag only chooses which. A document
+        // asking for printer metrics gets the printer's, which rounds every font metric and is worth up to
+        // 2.8% of a line's height; everything else gets Writer's 8640 dpi virtual reference device, worth
+        // one twip. See Ww8DocumentProperties.UsesPrinterMetrics and MetricGrid.
         LayoutFonts fonts = new()
         {
-            Metrics = _reader.DocumentProperties.UsesPrinterMetrics ? MetricGrid.Printer : null,
+            Metrics = _reader.DocumentProperties.UsesPrinterMetrics
+                ? MetricGrid.Printer
+                : MetricGrid.Reference,
 
             // The FFN's own pitch and family bits, which decide the fallback for a family that is
             // neither installed nor substitutable. See Ww8FontTable.ShapeOf.

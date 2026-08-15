@@ -33,51 +33,105 @@ public enum LineMetricSource
 /// </summary>
 /// <remarks>
 /// <para>
-/// Layout normally scales a font's design units straight to the size the document asks for, which is what
-/// LibreOffice does when it formats against a virtual reference device. A document can ask for the other
-/// behaviour: Word's "use printer metrics to lay out document" compatibility option makes Writer format
-/// against a real printer instead — <c>WW8Dop::fUsePrinterMetrics</c> becomes
-/// <c>!USE_VIRTUAL_DEVICE</c> in <c>sw/source/filter/ww8/ww8par.cxx</c>:2008, and
-/// <c>DocumentDeviceManager::getReferenceDevice</c> then hands out an <c>SfxPrinter</c>.
+/// <b>There is always a device.</b> Writer never scales a face's design units straight to the size the
+/// document asks for — it formats against a reference device, and every vertical metric is quantised
+/// onto that device's pixel grid on the way in and back onto the document's own unit on the way out.
+/// Which device it is depends on one compatibility flag:
+/// </para>
+/// <list type="bullet">
+/// <item><description>
+/// Normally a <c>VirtualDevice</c> in <c>VirtualDevice::RefDevMode::MSO1</c> with
+/// <c>MapUnit::MapTwip</c> — <c>DocumentDeviceManager::CreateVirtualDevice_</c>,
+/// <c>sw/source/core/doc/DocumentDeviceManager.cxx</c>:259. <c>MSO1</c> is <b><c>6*1440</c> = 8640
+/// dpi</b> (<c>vcl/source/gdi/virdev.cxx</c>:407), so one twip is exactly six device pixels. See
+/// <see cref="Reference"/>.
+/// </description></item>
+/// <item><description>
+/// A real printer when the document asks for one: Word's "use printer metrics to lay out document"
+/// makes <c>WW8Dop::fUsePrinterMetrics</c> into <c>!USE_VIRTUAL_DEVICE</c>
+/// (<c>sw/source/filter/ww8/ww8par.cxx</c>:2008) and <c>getReferenceDevice</c> hands out an
+/// <c>SfxPrinter</c>. See <see cref="Printer"/>.
+/// </description></item>
+/// </list>
+/// <para>
+/// The difference between the two is only the coarseness, and on the printer it is not small: at
+/// 300 dpi a pixel is 4.8 twips, so Liberation Sans at 11 pt measures 13.00 pt per line rather than
+/// the 12.65 pt its design units give — 2.8%, which over a long document is many pages. On the
+/// virtual device a pixel is a sixth of a twip and the effect is worth exactly one twip, in either
+/// direction, on about one line height in nine. That one twip is what
+/// <c>dotnet/probes/lineheight-01/</c> is about: it moved 22 of 195 measured (face, size) pairs and
+/// two earlier rounds could not reconstruct it because they swept 72–6000 dpi and the answer is
+/// 8640.
 /// </para>
 /// <para>
-/// The difference is rounding, and it is not small. Every metric goes through the device's pixel grid
-/// twice — the em size is rounded to whole device pixels, the ascent, descent and line gap are each
-/// rounded to whole pixels at that size, and the sum is rounded back to whole twips. On a 300 dpi grid
-/// that is a pixel per 4.8 twips, so Liberation Sans at 11 pt measures 13.00 pt per line rather than the
-/// 12.65 pt its design units give — a 2.8% difference, which over a long document is many pages.
-/// Measured against LibreOffice on three sizes of two faces, the grid reproduces its line pitch exactly
-/// where unquantised scaling is out by up to 7 twips.
+/// 300 dpi for the printer because that is what a headless LibreOffice's printer reports:
+/// <c>PPDParser</c> defaults both axes to 300 when the queue names no resolution and when there is no
+/// PPD at all (<c>vcl/unx/generic/printer/ppdparser.cxx</c>:1500 and :1524). The resolution is the
+/// whole of what the device contributes there, so a machine whose default queue says otherwise would
+/// need a different number — which is the honest cost of a document asking to be laid out against
+/// hardware.
 /// </para>
 /// <para>
-/// 300 dpi because that is what a headless LibreOffice's printer reports: <c>PPDParser</c> defaults both
-/// axes to 300 when the queue names no resolution and when there is no PPD at all
-/// (<c>vcl/unx/generic/printer/ppdparser.cxx</c>:1500 and :1524). The resolution is the whole of what the
-/// device contributes here, so a machine whose default queue says otherwise would need a different number
-/// — which is the honest cost of a document asking to be laid out against hardware.
+/// <b>The logical unit is the twip</b>, because that is the map mode Writer's reference device is set
+/// to. Calc's and Impress's reference devices are in 1/100 mm and Impress's is 600 dpi rather than
+/// 8640, so neither is this grid; both still scale exactly here and each would need its own.
 /// </para>
 /// </remarks>
 /// <param name="Dpi">The device resolution the metrics are rounded onto.</param>
-public readonly record struct MetricGrid(int Dpi)
+/// <param name="QuantisesAdvances">
+/// Whether horizontal advances go through the grid as well as the vertical metrics.
+/// <para>
+/// True only for a real printer, and measured rather than assumed: <c>probes/printer-metric-advance.py</c>
+/// sweeps 96 authored rows with <c>fUsePrinterMetrics</c> varied on one body, and the quantised rule is
+/// exact on all 96 with the flag set and out by 6.73 pt with it clear, where unquantised scaling is exact
+/// on all 96. The dominant term is the em rounding, which a 300 dpi device makes worth 1.3% of every
+/// advance and an 8640 dpi device makes exactly nothing — so on the virtual reference device the two
+/// rules differ by less than a twip and the evidence says to take the one that was measured.
+/// </para>
+/// </param>
+public readonly record struct MetricGrid(int Dpi, bool QuantisesAdvances)
 {
+    /// <summary>A grid at a resolution, quantising advances as a real device does.</summary>
+    public MetricGrid(int dpi) : this(dpi, true) { }
+
     /// <summary>The grid a document asking for printer metrics is laid out on.</summary>
-    public static MetricGrid Printer { get; } = new(300);
+    public static MetricGrid Printer { get; } = new(300, QuantisesAdvances: true);
+
+    /// <summary>
+    /// The virtual reference device Writer formats every other document against: 8640 dpi, six
+    /// device pixels to the twip.
+    /// </summary>
+    public static MetricGrid Reference { get; } = new(6 * 1440, QuantisesAdvances: false);
 
     /// <summary>Twips per device pixel on this grid.</summary>
     private double TwipsPerPixel => 1440.0 / Dpi;
 
-    /// <summary>A design-unit measurement in whole device pixels at an em size.</summary>
+    /// <summary>
+    /// A design-unit measurement in whole device pixels at an em size.
+    /// </summary>
+    /// <remarks>
+    /// <c>FontMetricData::ImplCalcLineSpacing</c> ends with three separate <c>round()</c> calls, one
+    /// per metric (<c>vcl/source/font/fontmetric.cxx</c>:538-540). C++ <c>round</c> takes a half away
+    /// from zero; .NET's <c>Math.Round</c> takes it to even, and on a grid this fine the halves are
+    /// common rather than exotic — a sixth of the line gaps in the corpus land on one.
+    /// </remarks>
     public long ToPixels(int designUnits, int unitsPerEm, Length emSize)
     {
         if (unitsPerEm <= 0 || Dpi <= 0) return 0;
 
-        double em = Math.Round(emSize.Twips / TwipsPerPixel);
-        return (long)Math.Round(designUnits * em / unitsPerEm);
+        double em = Math.Round(emSize.Twips / TwipsPerPixel, MidpointRounding.AwayFromZero);
+        return (long)Math.Round(designUnits * em / unitsPerEm, MidpointRounding.AwayFromZero);
     }
 
     /// <summary>Whole device pixels back in whole twips.</summary>
+    /// <remarks>
+    /// <c>CoordinateMapper::ViewToLogicDistanceY</c> is an <c>llround</c>
+    /// (<c>vcl/source/outdev/CoordinateMapper.cxx</c>:279), which is again half away from zero.
+    /// </remarks>
     public Length ToLength(long pixels)
-        => Dpi <= 0 ? Length.Zero : Length.FromTwips((long)Math.Round(pixels * TwipsPerPixel));
+        => Dpi <= 0
+            ? Length.Zero
+            : Length.FromTwips((long)Math.Round(pixels * TwipsPerPixel, MidpointRounding.AwayFromZero));
 
     /// <summary>
     /// An advance width as the device measures it: the whole run's advance in device pixels,
@@ -115,7 +169,7 @@ public readonly record struct MetricGrid(int Dpi)
     {
         if (unitsPerEm <= 0 || Dpi <= 0) return Length.Zero;
 
-        double em = Math.Round(emSize.Twips / TwipsPerPixel);
+        double em = Math.Round(emSize.Twips / TwipsPerPixel, MidpointRounding.AwayFromZero);
         return ToLength((long)Math.Floor(designUnits * em / unitsPerEm));
     }
 
@@ -133,7 +187,7 @@ public readonly record struct MetricGrid(int Dpi)
     public Length ToEmSize(Length emSize)
         => Dpi <= 0 || emSize <= Length.Zero
             ? emSize
-            : ToLength((long)Math.Round(emSize.Twips / TwipsPerPixel));
+            : ToLength((long)Math.Round(emSize.Twips / TwipsPerPixel, MidpointRounding.AwayFromZero));
 }
 
 /// <summary>

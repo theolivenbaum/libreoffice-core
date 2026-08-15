@@ -69,7 +69,9 @@ public sealed class HighlightTests
         bands[0].Area.Y.ShouldBeLessThan(baseline);
         bands[0].Area.Bottom.ShouldBeGreaterThan(baseline);
 
-        LineMetrics metrics = LineSpacing.Resolve(Face);
+        // On the reference grid, because that is what a Writer layout measures through — the band is the
+        // line's own height and so carries the same quantisation. See MetricGrid.Reference.
+        LineMetrics metrics = LineSpacing.Resolve(Face, MetricGrid.Reference);
         bands[0].Area.Height.ShouldBe(metrics.ScaledLineHeight(Size));
     }
 

@@ -519,7 +519,7 @@ public sealed class MeasuredParagraph
     /// depends on.
     /// </remarks>
     private static long Advance(ShapedText shaped, long designUnits, Length emSize, MetricGrid? grid)
-        => grid is { } device
+        => grid is { QuantisesAdvances: true } device
             ? device.ToAdvance(designUnits, shaped.UnitsPerEm, emSize).Emu
             : shaped.Scale(designUnits, emSize).Emu;
 

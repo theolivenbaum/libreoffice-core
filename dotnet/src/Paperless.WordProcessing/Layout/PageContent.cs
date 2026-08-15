@@ -233,15 +233,23 @@ public sealed record PageParagraph : PageBlock
     public bool HasRuns => Runs.Count > 0;
 
     /// <summary>
-    /// The device grid the paragraph's fonts are measured through, or null to measure them exactly.
+    /// The device grid the paragraph's fonts are measured through.
     /// </summary>
     /// <remarks>
-    /// Null for every document but the few that ask to be laid out against a printer rather than against a
-    /// virtual device — see <see cref="MetricGrid"/>. Carried on the paragraph rather than passed down the
-    /// layout call chain because a header, a table cell and a text box all need the same answer and all
-    /// reach the layouter by different routes; the reader that knows the document's answer sets it once.
+    /// <para>
+    /// <b>Defaults to <see cref="MetricGrid.Reference"/> rather than to nothing</b>, because Writer has no
+    /// unquantised path: it formats against a virtual reference device at 8640 dpi in twips, and every
+    /// vertical metric is rounded onto that grid and back. The few documents that ask to be laid out
+    /// against a printer instead get <see cref="MetricGrid.Printer"/>. Null is reserved for a caller that
+    /// genuinely wants exact scaling, which no Writer reader is.
+    /// </para>
+    /// <para>
+    /// Carried on the paragraph rather than passed down the layout call chain because a header, a table
+    /// cell and a text box all need the same answer and all reach the layouter by different routes; the
+    /// reader that knows the document's answer sets it once.
+    /// </para>
     /// </remarks>
-    public MetricGrid? Metrics { get; init; }
+    public MetricGrid? Metrics { get; init; } = MetricGrid.Reference;
 
     /// <summary>
     /// Where to look for a face when the paragraph's own has no glyph for a character, or null to not look.
