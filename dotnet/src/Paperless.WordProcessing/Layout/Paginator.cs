@@ -2395,9 +2395,14 @@ public sealed class Paginator
         {
             List<PlacedTableCell> rowCells = RowCells(laid, from);
 
+            // The same allowance the first part was cut under, or the remainder of a row that only a
+            // row-span allowance let us begin would be dropped without a word.
+            bool acrossSpans = SpansMayBeCut(heights[from], body.Height);
+
             TableLayouter.RowSlice? tail =
-                TableLayouter.SliceRow(table.Rows[from], rowCells, drawn, room - placed)
-                ?? TableLayouter.SliceRow(table.Rows[from], rowCells, drawn, Length.FromEmu(long.MaxValue));
+                TableLayouter.SliceRow(table.Rows[from], rowCells, drawn, room - placed, acrossSpans)
+                ?? TableLayouter.SliceRow(
+                    table.Rows[from], rowCells, drawn, Length.FromEmu(long.MaxValue), acrossSpans);
 
             // A remainder with nothing in it, which the cut said there was: the row is finished rather
             // than unfinished. Asking again is what would not terminate.
@@ -2446,7 +2451,12 @@ public sealed class Paginator
         {
             List<PlacedTableCell> rowCells = RowCells(laid, end);
 
-            if (TableLayouter.SliceRow(table.Rows[end], rowCells, Length.Zero, room - placed)
+            if (TableLayouter.SliceRow(
+                    table.Rows[end],
+                    rowCells,
+                    Length.Zero,
+                    room - placed,
+                    SpansMayBeCut(heights[end], body.Height))
                 is { } head)
             {
                 cells.AddRange(TableLayouter.Offset(head.Cells, body.X, body.Y + top + placed));
@@ -2542,6 +2552,19 @@ public sealed class Paginator
         => row >= Math.Max(table.HeaderRowCount, 0)
            && !table.Rows[row].HasExactHeight
            && (table.Rows[row].CanSplit || rowHeight > columnHeight);
+
+    /// <summary>
+    /// Whether a cell merged down past a row may be divided when that row is broken.
+    /// </summary>
+    /// <remarks>
+    /// The second half of the same override. A row taller than a whole column has nowhere to go, so the
+    /// alternative to cutting through a vertical merge is drawing the row off the paper — see the
+    /// row-span test in <see cref="TableLayouter.SliceRow"/>. Everywhere else the merge wins and the row
+    /// moves whole, which is why this is the *same* condition as the <c>w:cantSplit</c> override rather
+    /// than a looser one.
+    /// </remarks>
+    private static bool SpansMayBeCut(Length rowHeight, Length columnHeight)
+        => rowHeight > columnHeight;
 
     private static PlacedTable Part(
         PageTable table,
