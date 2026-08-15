@@ -119,18 +119,31 @@ public static class TableLayouter
                 }
             }
 
+            // The declared height, which is a floor unless the row says it is exact — in which case it is the
+            // height, and content taller than it is clipped rather than growing the row. Applied per row
+            // before the merge shortfall below, so that a merge spanning an exact row cannot stretch it.
+            //
             // A border takes space, and a row owns *half* of each of the two grid lines it sits between — the
             // line runs through the border's centre, so the other half belongs to the neighbour. The two
             // outermost halves, which have no neighbour, are added to the last row once the rectangles are
             // built; see there.
-            heights[row] += BorderHeight(table.Rows[row]);
-
-            // The declared height, which is a floor unless the row says it is exact — in which case it is the
-            // height, and content taller than it is clipped rather than growing the row. Applied per row
-            // before the merge shortfall below, so that a merge spanning an exact row cannot stretch it.
+            //
+            // The `atLeast` floor sits *under* those borders rather than over them: it raises the content and
+            // the borders are then added on top, so a row resting on its floor is one border taller than the
+            // floor. Measured by sweeping the border width against a fixed w:trHeight — see
+            // `dotnet/probes/words-pagination-01/row-min-height-border.py`, which reads 24.00 / 24.50 / 25.00 /
+            // 26.00 / 27.00 pt out of the reference for w:sz 0 / 4 / 8 / 16 / 24 against a 24 pt floor, while
+            // we read 24.00 throughout. That the gap tracks the border exactly is what rules out the other
+            // reading of the same two corpus observations — both `ESPN-R - MCF - Manual` and the FAA Holdover
+            // Tables draw a w:sz="4" grid, so a flat half point fits them just as well and is refuted here.
+            //
+            // `exact` is the other branch and measured the other way: at w:sz="16" both sides read 24.00, so a
+            // clipped row's height really is the whole of it, borders included. Applying the border there too
+            // would be the obvious symmetry and is wrong.
             heights[row] = table.Rows[row].HasExactHeight
                 ? Length.Max(Length.Zero, table.Rows[row].MinHeight)
-                : Length.Max(heights[row], table.Rows[row].MinHeight);
+                : Length.Max(heights[row], table.Rows[row].MinHeight)
+                  + BorderHeight(table.Rows[row]);
         }
 
         // A merged cell may still need more room than the rows it covers add up to, so the last row it

@@ -14,9 +14,11 @@ namespace Paperless.WordProcessing.Ooxml;
 /// <para>
 /// That is normally invisible, because the importer clears the pool style's direct values first.
 /// It becomes visible through <see cref="WordStyles.CompleteOneSidedSpacing"/>, where a
-/// half-stated <c>w:spacing</c> freezes the other half at whatever the *parent* style holds at
-/// that point in the import — and a parent whose own definition has not been reached yet still
-/// holds exactly these numbers.
+/// half-stated <c>w:spacing</c> freezes the other half at whatever the style resolves to at that
+/// point in the import — the style's own pool row when Writer has one under its <c>w:name</c>,
+/// and otherwise its parent's, a parent whose own definition has not been reached yet still
+/// holding exactly these numbers. Which of the two it is was measured separately; see the
+/// remarks on <see cref="WordStyles.CompleteOneSidedSpacing"/>.
 /// </para>
 /// <para>
 /// The table is measured rather than read off <c>DocumentStylePoolManager.cxx</c>, because the
@@ -75,10 +77,103 @@ internal static class WriterPoolSpacing
         };
 
     /// <summary>
+    /// The names whose pool spacing a style keeps when it is the one being half-stated, rather
+    /// than only when it is the parent being read through.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Writer's Heading 1-9, Title and Subtitle all descend from its <c>Heading</c> base, and it
+    /// is the base's 12 pt / 6 pt that survives — uniformly, not the per-level rows
+    /// <c>DocumentStylePoolManager.cxx</c>:843-906 declares (10/6 for Heading 2, 7/6 for
+    /// Heading 3, 6/3 for Heading 5, 3/3 from Heading 6 down). Those per-level items sit behind
+    /// the <c>bNoDefault</c> guard that the note above already records as inoperative, so what a
+    /// heading actually holds is its base's.
+    /// </para>
+    /// <para>
+    /// Measured on the installed 26.2.4.2 by
+    /// <c>dotnet/probes/words-pagination-01/one-sided-spacing-source.py</c>, one document naming
+    /// fifteen children after built-in styles over a single custom parent declared last, each
+    /// stating only <c>w:before="480"</c> — a control value that never appears in the answers, so
+    /// "mirror the stated value" is refuted rather than assumed away. Heading 1-9, Title and
+    /// Subtitle all read 240 above and 120 below; <c>Caption</c>, <c>List</c>, <c>Quote</c> and
+    /// <c>Body Text</c> all read nought on both sides, which is why they are absent here even
+    /// though <see cref="Pool"/> lists three of them.
+    /// </para>
+    /// <para>
+    /// That asymmetry is the whole content of this set: <c>Body Text</c> as a <em>parent</em>
+    /// still measures 140 below and <c>Caption</c> still measures 120, so <see cref="Pool"/> is
+    /// not wrong — the two positions genuinely answer differently, and only the heading family
+    /// answers from both.
+    /// </para>
+    /// <para>
+    /// The same sweep also puts one entry of <see cref="Pool"/> in doubt. Lower-case
+    /// <c>body text</c> measures nought below as a parent on 26.2.4.2 where <c>Body Text</c>
+    /// measures 140, so the two spellings are not interchangeable the way that table has them.
+    /// Left alone deliberately: it is a 24.2.7.2 measurement, no corpus document names a parent
+    /// that way, and correcting it belongs to whichever round re-measures the whole table.
+    /// </para>
+    /// </remarks>
+    private static readonly HashSet<string> ChildKeeps =
+        new(StringComparer.Ordinal)
+        {
+            "heading 1", "Heading 1", "heading 2", "Heading 2", "heading 3", "Heading 3",
+            "heading 4", "Heading 4", "heading 5", "Heading 5", "heading 6", "Heading 6",
+            "heading 7", "Heading 7", "heading 8", "Heading 8", "heading 9", "Heading 9",
+            "Title", "Subtitle",
+        };
+
+    /// <summary>
     /// The space above and below Writer's built-in style of this name, in twips, or a pair of
     /// noughts when the name is not one of Writer's.
     /// </summary>
     /// <param name="styleName">A style's <c>w:name</c>, or null.</param>
     public static (int Above, int Below) For(string? styleName)
-        => styleName is not null && Pool.TryGetValue(styleName, out (int, int) spacing) ? spacing : (0, 0);
+        => TryFor(styleName, out (int Above, int Below) spacing) ? spacing : (0, 0);
+
+    /// <summary>
+    /// The space above and below Writer's built-in style of this name, and whether Writer has a
+    /// style of that name at all.
+    /// </summary>
+    /// <remarks>
+    /// Callers that must tell "not one of Writer's" from "one of Writer's, and nought" want this
+    /// rather than <see cref="For(string?)"/>. <see cref="WordStyles.CompleteOneSidedSpacing"/>
+    /// is the one that does: an unrecognised parent lets the style's own hierarchy answer, while
+    /// a recognised parent holding nought is a real nought and suppresses it.
+    /// </remarks>
+    /// <param name="styleName">A style's <c>w:name</c>, or null.</param>
+    /// <param name="spacing">The pool style's space above and below, in twips.</param>
+    public static bool TryFor(string? styleName, out (int Above, int Below) spacing)
+    {
+        if (styleName is not null && Pool.TryGetValue(styleName, out (int, int) found))
+        {
+            spacing = found;
+            return true;
+        }
+
+        spacing = (0, 0);
+        return false;
+    }
+
+    /// <summary>
+    /// The space Writer's built-in style of this name keeps when it is itself the style whose
+    /// <c>w:spacing</c> is half-stated, and whether it keeps any.
+    /// </summary>
+    /// <remarks>
+    /// False for every name outside <see cref="ChildKeeps"/>, including names
+    /// <see cref="For(string?)"/> answers for — see that set's remarks for why the two positions
+    /// differ.
+    /// </remarks>
+    /// <param name="styleName">A style's <c>w:name</c>, or null.</param>
+    /// <param name="spacing">The pool style's space above and below, in twips.</param>
+    public static bool TryForOwnName(string? styleName, out (int Above, int Below) spacing)
+    {
+        if (styleName is not null && ChildKeeps.Contains(styleName))
+        {
+            spacing = (Pt12, Pt6);
+            return true;
+        }
+
+        spacing = (0, 0);
+        return false;
+    }
 }

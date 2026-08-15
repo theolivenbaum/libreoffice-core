@@ -893,6 +893,16 @@ public sealed class Paginator
 
             if (blocks[paragraphIndex] is PageTable table)
             {
+                // The same test the paragraph arm below makes, and it has to be made here too because a
+                // page break in front of a table is carried on the table — see
+                // `PageTable.StartsNewPage`. Only before the table's first row: a continuation is already
+                // at the top of a page by construction, and asking again would end an empty page forever.
+                if (lineIndex == 0 && rowDrawn == Length.Zero && table.StartsNewPage && !pageIsEmpty)
+                {
+                    EmitPage();
+                    continue;
+                }
+
                 Length before = columnIsEmpty && !_options.KeepsSpacingAtTopOfPage
                     ? Length.Zero
                     : table.SpaceBefore;
@@ -2115,7 +2125,9 @@ public sealed class Paginator
         }
 
         // Finally the first part of the row that does not fit, when the document lets it break.
-        if (end < heights.Count && MaySplit(table, end) && !IsCoveredByAMerge(laid, end))
+        if (end < heights.Count
+            && MaySplit(table, end, heights[end], body.Height)
+            && !IsCoveredByAMerge(laid, end))
         {
             List<PlacedTableCell> rowCells = RowCells(laid, end);
 
@@ -2178,15 +2190,43 @@ public sealed class Paginator
     /// Whether a row's own content may be broken across a page.
     /// </summary>
     /// <remarks>
-    /// The document's say first — <see cref="PageTableRow.CanSplit"/> — and then the two rules Writer
-    /// applies whatever the document says: a repeated heading never splits, since it is drawn again on the
-    /// next page anyway, and neither does a row of a stated exact height, which is a fixed size rather than
-    /// a floor. Both are the first two tests in <c>SwRowFrame::IsRowSplitAllowed</c>.
+    /// <para>
+    /// The two rules Writer applies whatever the document says come first: a repeated heading never
+    /// splits, since it is drawn again on the next page anyway, and neither does a row of a stated exact
+    /// height, which is a fixed size rather than a floor. Both are the first two tests in
+    /// <c>SwRowFrame::IsRowSplitAllowed</c> (<c>sw/source/core/layout/tabfrm.cxx</c>:5779).
+    /// </para>
+    /// <para>
+    /// <strong>Then the document's say, unless the row is taller than a whole column.</strong> A row
+    /// that cannot fit on a page of its own has nowhere to go, so <c>w:cantSplit</c> on it would hide
+    /// content outright, and Writer overrides it — <c>SwTabFrame::Split</c> (<c>tabfrm.cxx</c>:1161):
+    /// <em>"A row larger than the entire page ought to be allowed to split regardless of setting,
+    /// otherwise it has hidden content and that makes no sense"</em>. It compares against the page
+    /// <em>body</em> frame's print height, which is what <paramref name="columnHeight"/> is, not against
+    /// the room left on the current page — a row that merely does not fit here still moves rather than
+    /// splitting. The override sets <c>ForceRowSplitAllowed</c>, which
+    /// <c>IsRowSplitAllowed</c> tests <em>after</em> the two rules above, so it outranks
+    /// <c>w:cantSplit</c> and not them; the ordering here is the same.
+    /// </para>
+    /// <para>
+    /// Found on <c>ESPN-R - MCF - RA - Ed1.docx</c>, whose "Engine - Flight" row is about 440 pt tall
+    /// under a 424 pt landscape body and carries <c>w:cantSplit</c>. The reference splits it across
+    /// pages 27 and 28; we moved the whole row on, leaving about 350 pt of page 27 blank and then drawing
+    /// the row past the bottom of the paper — on nine of that document's forty landscape pages, once as
+    /// far as y = 597.0 on a 595.30 pt page. So this is a defect the page-count column and the ink both
+    /// see.
+    /// </para>
     /// </remarks>
-    private static bool MaySplit(PageTable table, int row)
+    /// <param name="table">The table.</param>
+    /// <param name="row">The row about to be broken.</param>
+    /// <param name="rowHeight">That row's laid-out height.</param>
+    /// <param name="columnHeight">
+    /// The height of a whole column, which is the most a row could ever be given.
+    /// </param>
+    private static bool MaySplit(PageTable table, int row, Length rowHeight, Length columnHeight)
         => row >= Math.Max(table.HeaderRowCount, 0)
-           && table.Rows[row].CanSplit
-           && !table.Rows[row].HasExactHeight;
+           && !table.Rows[row].HasExactHeight
+           && (table.Rows[row].CanSplit || rowHeight > columnHeight);
 
     private static PlacedTable Part(
         PageTable table,

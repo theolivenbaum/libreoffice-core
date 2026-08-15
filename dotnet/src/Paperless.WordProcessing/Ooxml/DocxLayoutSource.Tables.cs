@@ -74,6 +74,12 @@ public sealed partial class DocxLayoutSource
             Word.Child(properties, "tblCellMar"),
             StyleCellPadding(styleId, DefaultCellPadding));
 
+        // Taken before the rows are read, exactly as ReadParagraph takes it, and for the same reason: the
+        // walk over the cells reads paragraphs, and the first of them would otherwise eat the break that
+        // belongs to the table. Inside a cell it is inert, which is why the break simply vanished.
+        bool breaksPage = _pageBreakPending;
+        _pageBreakPending = false;
+
         List<PendingRow> rows = [];
 
         // Counted around the rows rather than around this table's own properties, because a cell's blocks
@@ -114,6 +120,7 @@ public sealed partial class DocxLayoutSource
             IsPositioned = Word.Child(properties, "tblpPr") is not null,
             LowerSpacing = Twips(Word.Child(properties, "tblpPr"), "bottomFromText") ?? Length.Zero,
             JoinsBordersLikeWord = true,
+            StartsNewPage = breaksPage,
         };
     }
 
