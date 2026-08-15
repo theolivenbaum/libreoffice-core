@@ -53,6 +53,18 @@ public static partial class SlideTextLayout
     private const double LineHeightFactor = 12.0 / 10.0;
 
     /// <summary>
+    /// The weight a character bullet's face is asked for at, whatever the text it labels.
+    /// </summary>
+    /// <remarks>
+    /// Both producers of a bullet font are normal: <c>nBulletFontWeight</c> starts and stays at
+    /// <c>css::awt::FontWeight::NORMAL</c> in the oox import
+    /// (<c>oox/source/drawingml/textparagraphproperties.cxx:315</c>) and
+    /// <c>SdStyleSheetPool::GetBulletFont</c> sets <c>WEIGHT_NORMAL</c>
+    /// (<c>sd/source/core/stlpool.cxx:1174</c>).
+    /// </remarks>
+    private const int MarkerWeight = 400;
+
+    /// <summary>
     /// Lays a body out and returns its glyph runs, positioned in the given rectangle's space.
     /// </summary>
     /// <param name="body">The text body.</param>
@@ -448,6 +460,38 @@ public static partial class SlideTextLayout
     /// <c>71393_pp7.ppt</c>, 170 on <c>171128IPAP.pptx</c>. Both families, so it is this layout
     /// rather than either reader.
     /// </para>
+    /// <para>
+    /// <strong>A character bullet whose file names no face is drawn from OpenSymbol, not from the
+    /// paragraph's face.</strong> <c>Outliner::ImpCalcBulletFont</c> takes
+    /// <c>pFmt-&gt;GetBulletFont()</c> for a <c>SVX_NUM_CHAR_SPECIAL</c> format and only falls back
+    /// to the paragraph's own font when there is none
+    /// (<c>editeng/source/outliner/outliner.cxx:828-847</c>) — and for Impress there always is one,
+    /// because the numbering rule is built over <c>SdStyleSheetPool::GetBulletFont</c>, which is
+    /// OpenSymbol at normal weight (<c>sd/source/core/stlpool.cxx:1169-1183</c>). The readers hand
+    /// a null <see cref="SlideMarker.Typeface"/> up for exactly the cases where nothing was named:
+    /// a DrawingML paragraph with no <c>a:buFont</c> in its chain or with <c>a:buFontTx</c>, a
+    /// SmartArt node, a binary outline whose level names no font.
+    /// </para>
+    /// <para>
+    /// Measured through <c>soffice</c> 26.2.4.2 on a probe deck of five paragraphs in one body,
+    /// read out of the PDF's own text operators: <c>a:buChar</c> with no <c>a:buFont</c> over text
+    /// in Courier New draws the bullet from <b>OpenSymbol</b>, the same over text in Times New
+    /// Roman draws it from <b>OpenSymbol</b>, <c>a:buFontTx</c> draws it from <b>OpenSymbol</b>,
+    /// <c>a:buFont typeface="Arial"</c> draws it from <b>Liberation Sans</b>, and an
+    /// <c>a:buAutoNum</c> with no font draws its number from <b>Liberation Mono</b> — the text's
+    /// own face, which is the fallback branch above and the reason this switches on
+    /// <see cref="SlideMarker.IsSymbol"/>.
+    /// </para>
+    /// <para>
+    /// <strong>The weight and the slope come from the bullet's face, not from the text's.</strong>
+    /// Both sources of a bullet font are normal and upright by construction — the oox import writes
+    /// <c>nBulletFontWeight = FontWeight::NORMAL</c> into the descriptor it pushes
+    /// (<c>oox/source/drawingml/textparagraphproperties.cxx:315</c>) and
+    /// <c>SdStyleSheetPool::GetBulletFont</c> sets <c>WEIGHT_NORMAL</c> and <c>ITALIC_NONE</c>. On
+    /// the same probe, a bold paragraph whose <c>a:buFont</c> is Arial draws its text from
+    /// Liberation Sans Bold and its bullet from Liberation Sans; its <c>a:buAutoNum</c> sibling
+    /// draws the number from Liberation Sans Bold, with the text.
+    /// </para>
     /// </remarks>
     private static MarkedParagraph? Shaped(
         SlideParagraph paragraph, Scaling scaling, SlideFonts fonts)
@@ -458,8 +502,17 @@ public static partial class SlideTextLayout
         if (paragraph.Runs.Count == 0) return null;
 
         SlideTextRun first = paragraph.Runs[0];
-        (OpenTypeFace? face, FontReference? reference) = fonts.Resolve(
-            marker.Typeface ?? first.Typeface, first.Weight, first.IsItalic);
+
+        // A character bullet has a face of its own whether or not the file names one, and it is
+        // never bold and never italic. A generated number has neither of those: it is drawn in
+        // the paragraph's own font, weight and slope included.
+        string? family = marker.IsSymbol
+            ? marker.Typeface ?? SymbolFontRecode.SubstituteFamily
+            : marker.Typeface ?? first.Typeface;
+        int weight = marker.IsSymbol ? MarkerWeight : first.Weight;
+        bool italic = !marker.IsSymbol && first.IsItalic;
+
+        (OpenTypeFace? face, FontReference? reference) = fonts.Resolve(family, weight, italic);
 
         if (face is null) return null;
 
@@ -470,7 +523,7 @@ public static partial class SlideTextLayout
             // OpenSymbol, so a resolution that failed leaves both alone rather than drawing it
             // out of whatever the request happened to land on.
             (OpenTypeFace? symbol, FontReference? symbolReference) = fonts.Resolve(
-                SymbolFontRecode.SubstituteFamily, first.Weight, first.IsItalic);
+                SymbolFontRecode.SubstituteFamily, weight, italic);
 
             if (symbol is not null)
             {

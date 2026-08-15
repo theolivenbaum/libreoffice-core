@@ -137,13 +137,17 @@ internal static class PptxTextBody
         int[] counters = new int[9];
         bool[] counting = new bool[9];
 
+        // And one bullet face per level, for the same reason and by the same mechanism: the
+        // shape's numbering rule outlives the paragraph that wrote to it. See `Marker`.
+        string?[] markerFaces = new string?[9];
+
         List<SlideParagraph> paragraphs = [];
         foreach (XElement paragraph in Drawing.Children(body, "p"))
         {
             paragraphs.Add(
                 Paragraph(
-                    paragraph, listStyle, theme, defaultTypeface, counters, counting, inherited,
-                    fields, shapeTextStyle));
+                    paragraph, listStyle, theme, defaultTypeface, counters, counting,
+                    markerFaces, inherited, fields, shapeTextStyle));
         }
 
         // The autofit choice is taken whole from the nearest a:bodyPr that states one of the
@@ -279,6 +283,7 @@ internal static class PptxTextBody
         string? defaultTypeface,
         int[] counters,
         bool[] counting,
+        string?[] markerFaces,
         Func<int, IReadOnlyList<XElement>>? inherited,
         SlideFields? fields,
         DrawingCharacterStyle? shapeTextStyle)
@@ -377,7 +382,7 @@ internal static class PptxTextBody
             Length.FromEmu(Emu(chain, "marL")),
             Length.FromEmu(Emu(chain, "indent")),
             Language(Drawing.Child(paragraph, "r")),
-            Marker(chain, theme, level, counters, counting, hasText: text.Length > 0))
+            Marker(chain, theme, level, counters, counting, markerFaces, text.Length > 0))
         {
             // a:defTabSz, whose absence means DrawingML's own default of one inch and not a word
             // processor's half inch. Nearly every master states it explicitly as 914400, which is
@@ -436,6 +441,28 @@ internal static class PptxTextBody
     /// blank line an author leaves between two items is still an <c>a:p</c> and still inherits
     /// the level's bullet, and counting it makes the next item jump from 2 to 4.
     /// </para>
+    /// <para>
+    /// <strong>A stated bullet face outlives the paragraph that states it, per level.</strong>
+    /// Each paragraph writes its bullet properties into the <em>shape's</em> numbering rule —
+    /// <c>xNumRule-&gt;replaceByIndex(getLevel(), …)</c>,
+    /// <c>oox/source/drawingml/textparagraph.cxx:191</c> over
+    /// <c>textparagraphproperties.cxx:483-502</c> — and
+    /// <c>SvxUnoNumberingRules::replaceByIndex</c> starts from the level's <em>existing</em>
+    /// format (<c>editeng/source/uno/unonrule.cxx:257</c>). A paragraph that pushes no
+    /// <c>PROP_BulletFont</c>, because it names none or because it says <c>a:buFontTx</c>,
+    /// therefore keeps whatever the last paragraph at its level left there. The bullet map itself
+    /// is per paragraph (<c>textparagraph.cxx:136</c>) and carries nothing; the rule is what
+    /// persists.
+    /// </para>
+    /// <para>
+    /// Measured through <c>soffice</c> 26.2.4.2 on a four-paragraph probe body: a first paragraph
+    /// stating <c>a:buFont typeface="Courier New"</c> and <c>a:buNone</c> — so drawing no bullet
+    /// at all — makes the next level-0 paragraph's faceless <c>a:buChar</c> draw from
+    /// <b>LiberationMono</b>, while the level-1 paragraph between them draws from
+    /// <b>OpenSymbol</b>, and a following <c>a:buFontTx</c> paragraph draws from
+    /// <b>LiberationMono</b> again. So it is per level, it survives <c>buNone</c>, and it is what
+    /// <c>a:buFontTx</c> actually resolves to whenever a sibling has named a face.
+    /// </para>
     /// </remarks>
     private static SlideMarker? Marker(
         List<XElement> chain,
@@ -443,9 +470,19 @@ internal static class PptxTextBody
         int level,
         int[] counters,
         bool[] counting,
+        string?[] markerFaces,
         bool hasText)
     {
         int slot = Math.Clamp(level, 0, counters.Length - 1);
+
+        // Before any of the branches below, and whether or not this paragraph draws anything:
+        // stating a face writes it into the level's rule, and a `buNone` paragraph states it just
+        // as loudly as a bulleted one.
+        if (!FollowsTextFont(chain)
+            && Drawing.Attribute(Child(chain, "buFont"), "typeface") is { Length: > 0 } stated)
+        {
+            markerFaces[slot] = stated;
+        }
 
         foreach (XElement source in chain)
         {
@@ -461,7 +498,7 @@ internal static class PptxTextBody
 
                 return Marked(
                     DrawingTextBody.AutoNumber(number, slot, counters, counting),
-                    chain, theme, isSymbol: false);
+                    chain, theme, markerFaces[slot], isSymbol: false);
             }
 
             if (Drawing.Child(source, "buChar") is not { } bullet) continue;
@@ -477,7 +514,7 @@ internal static class PptxTextBody
             // the table could be reached: a bullet stated as `char="&#xF0D8;"` — which is a
             // quarter of the corpus's symbol bullets — became U+2022 and was then re-symbolised
             // into slot 0x22, so every one of them drew the *same* wrong glyph.
-            return Marked(FirstCodePoint(character), chain, theme);
+            return Marked(FirstCodePoint(character), chain, theme, markerFaces[slot]);
         }
 
         counting[slot] = false;
@@ -511,12 +548,22 @@ internal static class PptxTextBody
     /// Each satellite property is looked up down the whole chain separately from the bullet
     /// character, because a paragraph routinely states the character and leaves the font, size
     /// and colour to its level — and because the three are each their own element rather than
-    /// attributes of the bullet.
+    /// attributes of the bullet. The face is the exception and arrives as
+    /// <paramref name="typeface"/>: it belongs to the level rather than to the paragraph, so
+    /// <see cref="Marker"/> resolves it. Null means "nothing has named one", which
+    /// <c>SlideTextLayout</c> draws from OpenSymbol.
     /// </remarks>
     private static SlideMarker Marked(
-        string text, List<XElement> chain, DrawingTheme? theme, bool isSymbol = true)
+        string text,
+        List<XElement> chain,
+        DrawingTheme? theme,
+        string? typeface,
+        bool isSymbol = true)
     {
-        XElement? font = Child(chain, "buFont");
+        // Whether *this* paragraph's own chain makes it a symbol position, which is the question
+        // `pushToPropMap` asks when it decides whether to move the character into the Private Use
+        // Area — a decision it takes per paragraph, unlike the face, which is the level's.
+        XElement? font = FollowsTextFont(chain) ? null : Child(chain, "buFont");
 
         // Only a stated character is a symbol position. A generated number is digits whatever
         // face the level names for its bullet, and recoding it would make nonsense of it.
@@ -526,7 +573,6 @@ internal static class PptxTextBody
         // OpenSymbol glyph holding the same picture, which needs the slot and the face together.
         // Everything else is collapsed to U+2022 here, which is what the whole of this method's
         // input used to arrive already collapsed to.
-        string? typeface = Drawing.Attribute(font, "typeface");
         bool recodeable = symbolFont && SymbolFontRecode.IsRecodeable(typeface);
         string symbolised = symbolFont ? Symbolised(text) : text;
 
@@ -543,6 +589,41 @@ internal static class PptxTextBody
                     : 1.0,
                 ColourIn(Child(chain, "buClr"), theme),
                 isSymbol);
+    }
+
+    /// <summary>
+    /// Whether the chain asks for the bullet to be set in the text's own face — which, in
+    /// LibreOffice, means it is set in <em>neither</em> the text's face nor an <c>a:buFont</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>a:buFontTx</c> sets <c>mbBulletFontFollowText</c>, and the import's whole response to it
+    /// is to <em>skip</em> the block that would set <c>PROP_BulletFont</c> — nothing else is put in
+    /// its place (<c>oox/source/drawingml/textparagraphproperties.cxx:311-347</c>). So the bullet
+    /// keeps the numbering rule's default face, which for Impress is OpenSymbol, and the element
+    /// that reads as "follow the text" in fact means "state no face at all". Measured: a paragraph
+    /// with <c>a:buFontTx</c> over text in Courier New draws its bullet from OpenSymbol, not from
+    /// LiberationMono.
+    /// </para>
+    /// <para>
+    /// It is looked for anywhere in the chain rather than at its most specific rung, because
+    /// <c>BulletList::apply</c> only ever assigns the flag when the source <em>has</em> a value and
+    /// nothing writes a false one (<c>textparagraphproperties.cxx:267-268</c>, with the only
+    /// producer at <c>textparagraphpropertiescontext.cxx:282-283</c>). A master that says
+    /// <c>buFontTx</c> therefore outlives a paragraph that names a face.
+    /// </para>
+    /// <para>
+    /// It suppresses only <em>this</em> paragraph's push. What the level's rule already holds from
+    /// an earlier sibling stands — see <see cref="Marker"/>, where that is carried.
+    /// </para>
+    /// </remarks>
+    private static bool FollowsTextFont(List<XElement> chain)
+    {
+        foreach (XElement source in chain)
+        {
+            if (Drawing.Child(source, "buFontTx") is not null) return true;
+        }
+        return false;
     }
 
     /// <summary>
