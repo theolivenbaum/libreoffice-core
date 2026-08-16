@@ -533,7 +533,94 @@ public sealed class LineFiller
                 text.Length, text.Length, text.Length, Length.Zero, EndsParagraph: true));
         }
 
+        SpillTrailingNoBreakSpace(
+            text, lines, opportunities, widthBetween, tabs, availableWidth, firstLineWidth,
+            widthOfLine);
+
         return lines;
+    }
+
+    /// <summary>
+    /// Moves a trailing no-break space and its blanks onto lines of their own.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// See <see cref="ParagraphFormat.SpillsTrailingNoBreakSpace"/> for what was measured and where.
+    /// The whole rule is here: find the no-break space that the paragraph's trailing blanks hang off,
+    /// break at the last opportunity that still precedes it — everything after that is bound to it and
+    /// travels with it, which is what drags the preceding word down — and then, unless the paragraph is
+    /// block-adjusted, add the empty line that follows.
+    /// </para>
+    /// <para>
+    /// A post-pass rather than a case inside the fill loop because it is not a fitting decision: the
+    /// tail fits the line it was put on, by a wide margin, on every document this fires for. Expressing
+    /// it as a width would mean inventing one.
+    /// </para>
+    /// <para>
+    /// The two rows that pin the shape down both fall out of this and neither was written into it. A
+    /// paragraph ending <c>"lanes." NBSP SP</c> has its last opportunity before <c>lanes</c>, so the
+    /// new line carries a visible word and the paragraph gains one text line and one blank one. A
+    /// paragraph ending <c>"lanes." SP NBSP SP</c> has one immediately before the no-break space, so
+    /// the new line is invisible, the text-line count does not move, and both extra pitches show up as
+    /// the gap to whatever follows.
+    /// </para>
+    /// </remarks>
+    private static void SpillTrailingNoBreakSpace(
+        string text,
+        List<TextLine> lines,
+        IReadOnlyList<int> opportunities,
+        Func<int, int, Length> widthBetween,
+        ParagraphFormat? tabs,
+        Length availableWidth,
+        Length? firstLineWidth,
+        Func<int, IReadOnlyList<TextLine>, Length>? widthOfLine)
+    {
+        if (tabs is not { SpillsTrailingNoBreakSpace: true } || lines.Count == 0) return;
+
+        // The tail has to be a no-break space and then ordinary blanks, and nothing after them.
+        int blanks = text.Length;
+        while (blanks > 0 && text[blanks - 1] == ' ') blanks--;
+
+        if (blanks == text.Length || blanks == 0 || text[blanks - 1] != '\u00A0') return;
+
+        int hard = blanks - 1;
+        TextLine last = lines[^1];
+
+        Length LimitAt(int index) => widthOfLine is not null
+            ? widthOfLine(index, lines)
+            : index == 0 ? firstLineWidth ?? availableWidth : availableWidth;
+
+        TextLine LineOf(int start, int end, int index)
+        {
+            int visible = TrimTrailingSpaces(text, start, end);
+            Length limit = LimitAt(index);
+            return new TextLine(
+                start, end, visible,
+                Measure(text, start, visible, widthBetween, tabs, index == 0, limit),
+                EndsParagraph: end >= text.Length);
+        }
+
+        // The last opportunity that still precedes the no-break space, and it has to leave something
+        // on the line it breaks: a split at the line's own start would move the whole line and make no
+        // progress, so such a paragraph keeps the arrangement the fill loop gave it.
+        int split = 0;
+        foreach (int at in opportunities)
+        {
+            if (at > last.Start && at <= hard && at > split) split = at;
+        }
+
+        if (split > last.Start)
+        {
+            lines[^1] = LineOf(last.Start, split, lines.Count - 1);
+            lines.Add(LineOf(split, text.Length, lines.Count));
+        }
+
+        // Block adjustment takes the trailing blanks into the justification instead of spilling them,
+        // and is the one arrangement that does not gain the second line.
+        if (tabs.Alignment is TextAlignment.Justify or TextAlignment.Distribute) return;
+
+        lines.Add(new TextLine(
+            text.Length, text.Length, text.Length, Length.Zero, EndsParagraph: true));
     }
 
     /// <summary>

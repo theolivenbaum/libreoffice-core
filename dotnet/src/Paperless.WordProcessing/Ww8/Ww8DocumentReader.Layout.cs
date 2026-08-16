@@ -503,6 +503,7 @@ public sealed partial class Ww8DocumentReader
             DefaultTabInterval = DocumentProperties.DefaultTabInterval,
             TabsRelativeToIndent = false,
             ClampsTabsAtLineEdge = true,
+            SpillsTrailingNoBreakSpace = true,
         };
 
         Ww8LayoutParagraph paragraph = new(
@@ -1249,6 +1250,7 @@ public sealed partial class Ww8DocumentReader
             // indent, which is what `ww8par.cxx` records by clearing TABS_RELATIVE_TO_INDENT.
             TabsRelativeToIndent = false,
             ClampsTabsAtLineEdge = true,
+            SpillsTrailingNoBreakSpace = true,
         };
 
         // The level is looked up whether or not it draws a label, because a continuation paragraph of a

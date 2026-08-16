@@ -248,6 +248,7 @@ internal static class WordParagraphFormats
             // maps, citing #i24363#.
             TabsRelativeToIndent = false,
             ClampsTabsAtLineEdge = true,
+            SpillsTrailingNoBreakSpace = true,
 
             // WriterFilter.cxx:325 sets TabOverSpacing on every document it reads, unconditionally.
             TabsOverSpacing = true,

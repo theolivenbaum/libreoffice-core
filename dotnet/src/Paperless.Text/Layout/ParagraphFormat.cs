@@ -470,6 +470,38 @@ public sealed record ParagraphFormat
     public bool TabsOverSpacing { get; init; }
 
     /// <summary>
+    /// Whether a paragraph ending in a no-break space and ordinary blanks spills onto two more lines.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>Measured, not ported.</strong> A paragraph whose text ends with U+00A0 followed by one
+    /// or more U+0020 and nothing else costs Writer <em>two</em> extra line pitches: everything bound
+    /// to the no-break space moves onto a line of its own, and an empty line follows it. Under block
+    /// adjustment only the first of the two happens. Trailing ordinary blanks cost nothing however many
+    /// there are, a no-break space with nothing after it costs nothing, and a visible character after
+    /// the blanks removes the effect entirely.
+    /// </para>
+    /// <para>
+    /// Established over nine tails on a real paragraph, five adjustments, a one-line paragraph and a
+    /// synthetic body swept from one to four lines — <c>probes/trailing-nbsp-wrap/</c>, which also
+    /// records why an ad-hoc version of that last sweep reported the opposite. The C++ this shadows is
+    /// <c>SwTextGuess::maybeAdjustPositionsForBlockAdjust</c>
+    /// (<c>sw/source/core/text/guess.cxx:78-130</c>), whose own comment says it returns false "to create
+    /// a trailing <c>SwHolePortion</c>" and whose gate on block adjustment is exactly the split above;
+    /// beside it <c>IsBlank</c> (<c>:47</c>) is the "elided at the end of a line" set and excludes
+    /// U+00A0, which <c>TrimTrailingSpaces</c> already agrees with. The portion arithmetic that turns
+    /// that hole into two pitches has not been traced, so this reproduces the measured outcome rather
+    /// than claiming the mechanism.
+    /// </para>
+    /// <para>
+    /// A flag for the same reason <see cref="ClampsTabsAtLineEdge"/> is one: it was measured through
+    /// Writer's text frame and says nothing about a slide's text body or a spreadsheet cell, which
+    /// Impress and Calc lay out through other code. Every word-processing reader turns it on.
+    /// </para>
+    /// </remarks>
+    public bool SpillsTrailingNoBreakSpace { get; init; }
+
+    /// <summary>
     /// Whether a justified line may squeeze its blanks below their natural width to fit another word.
     /// </summary>
     /// <remarks>
