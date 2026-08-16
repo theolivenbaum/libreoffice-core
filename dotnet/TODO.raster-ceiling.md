@@ -189,9 +189,33 @@ pagination (78 pages against 77, now 77/77), which makes the per-page comparison
 29, 30, 31 and 32 — the taxiway-geometry figures — where we play the embedded metafile and emit
 its labels as real text. Pages 1–28 measured together are **142 words short**; the whole document
 is **494 over**, so every word of the excess and more is on those five pages. `words` is the only
-column it still fails and it cannot be won. Its neighbour `150_5300_13_chg8.doc` has the same
-figures but is not decidable yet — its pagination still differs, for an unrelated reason (a
-tracked-changes duplication worth about 190 words).
+column it still fails and it cannot be won.
+
+### And its neighbour has now been decided too: `150_5300_13_chg8.doc`
+
+This file recorded it as "not decidable yet — its pagination still differs, for an unrelated
+reason (a tracked-changes duplication worth about 190 words)". **That reason is gone.** The WW8
+round read `fRMView` off the `Dop` and stopped drawing tracked deletions in a document that hides
+them, which took chg8 from 19 pages to 18 against the reference's 18, so the per-page comparison
+is legal now.
+
+Measured per page, the excess is **+172 on a band of 170.24** — it fails by 1.76 words — and it
+is not spread:
+
+| page | ours | ref | delta | what |
+|---:|---:|---:|---:|---|
+| 8 | 162 | 30 | **+132** | `pdfimages -list` shows the reference drawing **2 images** and only the caption, "Figure 3-5. Obstacle Free Zone (OFZ) for Runways…", where we play the embedded metafile and emit its labels — `INNER-APPROACH OFZ`, `DISPLACED THRESHOLD`, `RUNWAY OFZ` — as real searchable text |
+| 15 | 75 | 6 | +69 | **not a ceiling**: neither side draws an image there. The reference leaves page 15 nearly blank (`AC 150/5300-13 Appendix 2 292 9/29/89`) and we fill it, compensated by −59 and −60 on pages 13 and 14 — a local pagination shift inside the appendices that nets out |
+| others | | | −29 | noise |
+
+**Page 8 alone decides it.** Subtracting its +132 leaves the document at **+40 against a 170.24
+band**, comfortably inside — so `words` is the only column it fails, the failure is the ceiling,
+and it cannot be won. Ours is the better output on that page: the reference's figure is a picture
+and ours is text a reader can search.
+
+The page-15 shift is a real difference and is *not* excused by this. It costs no gate column today
+(the pages either side cancel it) and should be looked at on its own terms rather than folded into
+the ceiling.
 
 ## The flagged pages
 
