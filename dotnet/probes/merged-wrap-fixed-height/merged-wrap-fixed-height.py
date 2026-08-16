@@ -54,26 +54,41 @@ once each case's words are made unique — the first cut of this probe counted
 consecutive filler words after a marker and ran into the neighbouring row, which
 made the control disagree and looked like a renderer difference.
 
-The rule is real, and it was established by ablating the corpus file itself
-rather than by building one. Mutating `fse_identification_form.xlsx` one property
-at a time and re-rendering through LibreOffice:
+The behaviour is real and was established by ablating the corpus file itself.
+Mutating `fse_identification_form.xlsx` one property at a time — each of these
+*alone* restores the text:
 
-    case          does the reference draw B16?
-    baseline      no
-    no-height     YES     (drop ht="14.45" customHeight="1" from row 16)
-    tall-row      YES     (raise that height to 40)
-    no-merge16    no      (drop the B16:G16 merge)
-    no-wrap       YES     (give B16 a style without wrapText)
+    case             does the reference draw B16?
+    baseline         no
+    borderId 22 -> 0 YES
+    vertical="top"   YES
+    vertical="center" YES
+    no-height        YES   (drop ht="14.45" customHeight="1")
+    tall-row         YES   (raise that height to 40)
+    no-wrap          YES   (a style without wrapText)
+    no-merge16       no    (so the merge is NOT one of the conditions)
 
-So the suppression needs *both* `wrapText` and a `customHeight` row too short for
-the wrapped result, and it is total — not a clip that leaves a partial line.
+**Four conditions are needed together**: `wrapText`, a border, Calc's *default*
+vertical alignment — which is bottom — and a `customHeight` row too short. Take
+away any one and the text appears.
 
-The threshold is tight, which is why the synthetic misses it: the workbook
-declares `defaultRowHeight="15"` and pins row 16 to **14.45**, 0.55 pt *below* one
-line of its 11 pt Calibri. The 87 characters fit one line across the ~760 pt
-merged band, so even that single line does not fit the row, and nothing is drawn.
-Its neighbours all have room — B13 is 507 characters in a 61.5 pt row, B15 is 237
-in 39.95 — and all of them are drawn.
+Sweeping the row height alone gives a sharp threshold: nothing at 14.45, 15,
+15.4, 15.5, and everything at 15.6, 15.75, 16, 18, 30. Binary, not progressive,
+so it is not a partial clip leaving some ink.
+
+That points at `output2.cxx`:3248, which sets `bClip` when the laid text is at
+least one reference unit taller than the cell *and* the row carries
+`CRFlags::ManualSize`, together with :3330, which puts bottom-aligned text at
+`nTopM + cellHeight - engineHeight` — above the cell's top once the text is
+taller. The border steals just enough usable height to tip one 11 pt line over,
+and the clip then cuts where the glyphs are not.
+
+**This probe still contradicts that, and the contradiction is unresolved.** It
+builds the same shape *without borders*, its `customHeight` is honoured — measured
+row pitches are 14.43 / 29.00 / 43.48 against the declared 14.45 / 29 / 43.5 — and
+yet even 300 characters in a 14.45 pt row draw every word, where the mechanism
+above says they should be clipped away. **Add a border to this probe and re-run it
+before trusting any implementation.**
 
 Reading the output
 ------------------
