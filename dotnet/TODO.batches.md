@@ -5043,6 +5043,24 @@ Measured cost: `EHEST-SMS-Safety-Management-Manual-V2.docx` went 82/82 to 78/82,
 regression of the round, and `ABCD-FE-01-00 Flight Envelope…docx` 15/15 to 14/15 while already
 failing on words. Both are documents whose lines *should* overrun and wrap.
 
+> **This section is superseded and the approximation it describes is gone.** `TabOverSpacing` was
+> subsequently implemented properly, both halves of it, as
+> `ParagraphFormat.ClampsTabsAtLineEdge` — the bound is the frame's right edge, and the flag also
+> switches the filler to Writer's two-pass tab width so the overrun does not break the line. It is
+> set by the DOCX, ODF and WW8 readers alike.
+>
+> **Re-measured 2026-08-16 on the three documents this section names, and the shortfall is not
+> there any more.** On `EHEST-SMS`, all 24 leader entries of its contents pages end at 510.25 pt
+> against the reference's 510.35 — **−0.10 pt, not −28.45**. On `SPA-02_mcar…docx`, contents page
+> 21 agrees line for line, its leaders ending at 540.0 against 540.1. Anything below that quotes
+> 18.09, 18.10 or 28.45 pt as a live figure is quoting the intermediate state.
+>
+> Those three documents *are* still open, and on `pages` rather than `words` — 268/266, 314/312 and
+> 80/82 — but not for this reason. `SPA-02` was aligned page by page: its first divergence is page
+> 7 at **one word**, and the deltas wobble by ones and twos from there, which is line-level
+> accumulation over 267 pages rather than a structural event. Look to the advance divergence and
+> the trailing-space line-break rule, not to the tab stop.
+
 ### What is left in `batch-012`, and what was measured on 013 and 014
 
 `batch-012` is 9/10 and its remaining failure is `手机免提系统TSB.doc`, which is the glyph-fallback
