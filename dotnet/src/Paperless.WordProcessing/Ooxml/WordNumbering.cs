@@ -13,7 +13,17 @@ public sealed class WordNumberingLevel
                 && int.TryParse(ilvl, out int parsed) ? parsed : 0;
         NumberFormat = Word.Value(element, "numFmt") ?? "decimal";
         LevelText = Word.Value(element, "lvlText") ?? string.Empty;
-        Start = int.TryParse(Word.Value(element, "start"), out int start) ? start : 1;
+        // An absent `w:start` means zero, not one. Measured rather than read off the schema: four
+        // one-level lists differing only in this element render 0/1/2 in LibreOffice when it is
+        // omitted and 0/1/2, 1/2/3 and 3/4/5 for `w:val` of 0, 1 and 3 — and we agreed on all three
+        // explicit values and disagreed only on the omission. See
+        // `probes/numbering-start-default/`.
+        //
+        // `ABCD-FE-01-00 Flight Envelope` is the corpus document it decides: its heading list
+        // (abstractNum 9, level 0) carries no `w:start`, so LibreOffice numbers its sections from
+        // zero — "0. Introduction", "1. References" — and its own stored table of contents, which
+        // Word wrote, agrees. We numbered every section one higher.
+        Start = int.TryParse(Word.Value(element, "start"), out int start) ? start : 0;
         RestartAfterLevel = int.TryParse(Word.Value(element, "lvlRestart"), out int restart)
             ? restart
             : null;
