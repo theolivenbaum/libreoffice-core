@@ -217,6 +217,34 @@ The page-15 shift is a real difference and is *not* excused by this. It costs no
 (the pages either side cancel it) and should be looked at on its own terms rather than folded into
 the ceiling.
 
+## A third: EMF metafiles on slides
+
+`slides/chart-001/pptx/8_P-Pavese_AIRBUS-ATB-journee-CRATB.pptx`, 2122 words against 2010 and
+26 of 26 slides. Decided 2026-08-16, and it is the ordinary raster ceiling on the slides track
+rather than a new mechanism — recorded because the *evidence* runs the opposite way from the word
+documents: there `pdfimages` finds the reference's picture on a page we fill with text, and here it
+finds pictures where our page has **none**.
+
+Three slides embed an EMF — `image7.emf` on slide 3, `image8.emf` on 5 and `image9.emf` on 6 —
+and LibreOffice rasterises each one on export while we play the metafile and emit its labels as
+real searchable text:
+
+| slide | ours | ref | delta | ref images | our images | ref ink | our ink |
+|---:|---:|---:|---:|---:|---:|---:|---:|
+| 3 | 63 | 60 | +3 | 2 | 1 | 9.07 % | 8.75 % |
+| 5 | 100 | 57 | **+43** | 2 | 0 | 5.50 % | 5.01 % |
+| 6 | 196 | 165 | **+31** | 2 | 0 | 11.36 % | 11.17 % |
+
+The ink agrees to half a percent on every one, so both renderings draw the figure; only ours is
+text. Slides 5 and 6 carry the same journal-article extract because their two EMFs are
+byte-identical in size, and our extra tokens on both read `study of of telephone calls to a a
+hotline` — the doubling is the metafile drawing overlapping runs, not a duplication defect.
+
+**The ceiling decides the document.** The fourth differing slide is 16 at +35, which is the chart
+category-axis tokenisation of task #73 and not a ceiling; +3 +43 +31 +35 is the whole +112.
+Subtracting only the three EMF slides leaves **+35 against a 40.2 band**, inside it — so `words` is
+the only column it fails and it cannot be won.
+
 ## A second kind of ceiling: OMML formulas
 
 Everything above is about **rasters** — LibreOffice drawing a picture where we draw text.
