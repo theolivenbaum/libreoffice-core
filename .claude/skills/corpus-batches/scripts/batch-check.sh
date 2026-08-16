@@ -131,10 +131,22 @@ mapfile -t DIRS < <(cd "$ROOT_DIR" && ls -d $GLOB 2>/dev/null)
 
 mapfile -t FILES < <(
   for d in "${DIRS[@]}"; do
+    # Every extension `dotnet/CLAUDE.md` declares in scope. The macro-enabled and template
+    # forms are here deliberately: a document this list omits is not reported as skipped, it
+    # simply never appears, so the TOTAL line looks correct and the gate is silently blind to
+    # it. Two `.xlsm` sat in `sheets/chartset-*` unmeasured until the count was reconciled
+    # against the files on disk.
     find "$ROOT_DIR/$d" -type f \
-      \( -iname '*.doc'  -o -iname '*.docx' -o -iname '*.rtf'  -o -iname '*.odt' -o -iname '*.ott' \
-      -o -iname '*.xls'  -o -iname '*.xlsx' -o -iname '*.ods'  -o -iname '*.csv' \
-      -o -iname '*.ppt'  -o -iname '*.pptx' -o -iname '*.odp'  -o -iname '*.otp' \) 2>/dev/null
+      \( -iname '*.doc'  -o -iname '*.docx' -o -iname '*.docm' -o -iname '*.dot' \
+      -o -iname '*.dotx' -o -iname '*.dotm' -o -iname '*.rtf'  -o -iname '*.odt' \
+      -o -iname '*.ott'  -o -iname '*.fodt' -o -iname '*.sxw' \
+      -o -iname '*.xls'  -o -iname '*.xlsx' -o -iname '*.xlsm' -o -iname '*.xlsb' \
+      -o -iname '*.xlt'  -o -iname '*.xltx' -o -iname '*.xltm' -o -iname '*.ods' \
+      -o -iname '*.ots'  -o -iname '*.fods' -o -iname '*.csv'  -o -iname '*.sxc' \
+      -o -iname '*.ppt'  -o -iname '*.pptx' -o -iname '*.pptm' -o -iname '*.pot' \
+      -o -iname '*.potx' -o -iname '*.potm' -o -iname '*.ppsx' -o -iname '*.ppsm' \
+      -o -iname '*.pps'  -o -iname '*.odp'  -o -iname '*.otp'  -o -iname '*.fodp' \
+      -o -iname '*.sxi' \) 2>/dev/null
   done | sort
 )
 
