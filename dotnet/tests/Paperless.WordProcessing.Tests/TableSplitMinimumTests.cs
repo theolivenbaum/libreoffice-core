@@ -116,12 +116,96 @@ public sealed class TableSplitMinimumTests
         TextOn(pages, 0).ShouldContain("CAPTION");
     }
 
+    /// <summary>
+    /// A table whose <em>last</em> row keeps with the next moves to join the paragraph below it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Writer states this on the following frame rather than on the table: <c>SwFrameNotify</c>
+    /// invalidates the previous frame's position when "pPre is a table and the last row wants to keep
+    /// with me" (<c>sw/source/core/layout/frmtool.cxx</c>:167-176), and <c>SwTabFrame::MakeAll</c>'s rule
+    /// 7 — "The last table row wants to keep with its next" — says it from the table's side
+    /// (<c>tabfrm.cxx</c>:2831-2845). Both are gated on the same <c>TABLE_ROW_KEEP</c>.
+    /// </para>
+    /// <para>
+    /// Measured on <c>150-5370-10H.docx</c>, which renders 725 pages against 727 with only the minimum
+    /// rule and 726 with this one. Its `Coarse Aggregate Material Requirements` table carries
+    /// <c>w:keepNext</c> on the first cell of all eight rows and is followed by three note paragraphs
+    /// that are themselves a keep chain: we moved the notes and left the table, and every row of that
+    /// table lands at the same height in both renderings, so it is placement and not measurement.
+    /// </para>
+    /// </remarks>
+    /// <remarks>
+    /// Swept over the filler rather than pinned at one length, because the exact row height of a
+    /// synthetic decides which side of the page boundary the pair falls on, and a single length either
+    /// tests the rule or tests nothing depending on that. The invariant holds at every length: the table
+    /// and the paragraph it keeps with are never on different pages.
+    /// </remarks>
+    [Theory]
+    [InlineData(36)]
+    [InlineData(38)]
+    [InlineData(40)]
+    [InlineData(42)]
+    [InlineData(44)]
+    public void ATableWhoseLastRowKeepsIsNeverSeparatedFromTheParagraphBelowIt(int filler)
+    {
+        WordProcessingPages pages = Paginate(
+            Document(rows: 5, keeps: true, keepsLast: true, after: 3, filler: filler));
+
+        PageOfTable(pages).ShouldBe(PageOfText(pages, "after 0"));
+    }
+
+    /// <summary>
+    /// And the sweep separates them when the last row does not keep, so the rule above is not vacuous.
+    /// </summary>
+    /// <remarks>
+    /// Without this, a paginator that never split the two at any filler length — because they always
+    /// fitted together — would pass the theory above at every one of its five lengths.
+    /// </remarks>
+    [Fact]
+    public void WithoutThatKeepTheSweepDoesSeparateThem()
+    {
+        int[] fillers = [36, 38, 40, 42, 44];
+
+        bool anySeparated = fillers.Any(filler =>
+        {
+            WordProcessingPages pages = Paginate(
+                Document(rows: 5, keeps: true, keepsLast: false, after: 3, filler: filler));
+            return PageOfTable(pages) != PageOfText(pages, "after 0");
+        });
+
+        anySeparated.ShouldBeTrue(
+            "the sweep must cross the boundary, or the theory above proves nothing");
+    }
+
     /// <summary>The flag follows the format, exactly as LibreOffice's own setting does.</summary>
     [Fact]
     public void OnlyTheWordPresetKeepsTableRowsWithTheNext()
     {
         PaginationOptions.Word.KeepsTableRowsWithNext.ShouldBeTrue();
         PaginationOptions.Default.KeepsTableRowsWithNext.ShouldBeFalse();
+    }
+
+    /// <summary>Which page the table's first row landed on.</summary>
+    private static int PageOfTable(WordProcessingPages pages)
+    {
+        for (int page = 0; page < pages.Pages.Count; page++)
+        {
+            if (RowsOn(pages.Pages[page]) > 0) return page;
+        }
+
+        return -1;
+    }
+
+    /// <summary>Which page a marker string landed on.</summary>
+    private static int PageOfText(WordProcessingPages pages, string marker)
+    {
+        for (int page = 0; page < pages.Pages.Count; page++)
+        {
+            if (TextOn(pages, page).Contains(marker, StringComparison.Ordinal)) return page;
+        }
+
+        return -1;
     }
 
     /// <summary>How many of the table's own rows landed on a page.</summary>
@@ -157,14 +241,26 @@ public sealed class TableSplitMinimumTests
     /// <param name="headings">How many leading rows are <c>w:tblHeader</c>.</param>
     /// <param name="caption">Whether a paragraph precedes the table.</param>
     /// <param name="captionKeeps">Whether that paragraph carries <c>w:keepNext</c>.</param>
+    /// <param name="keepsLast">
+    /// Whether the <em>last</em> row keeps too, which is a different rule from the rest of them: it binds
+    /// the table to what follows rather than holding the table together.
+    /// </param>
+    /// <param name="after">How many lines of paragraph follow the table.</param>
+    /// <param name="filler">
+    /// How many filler lines precede it, overriding <see cref="Filler"/>. Swept by the keep tests, whose
+    /// answer otherwise depends on where one synthetic's row height happens to fall.
+    /// </param>
     private static string Document(
         int rows,
         bool keeps,
         int headings = 0,
         bool caption = false,
-        bool captionKeeps = true)
+        bool captionKeeps = true,
+        bool keepsLast = false,
+        int after = 0,
+        int? filler = null)
     {
-        string filler = string.Concat(Enumerable.Range(0, Filler).Select(
+        string lines = string.Concat(Enumerable.Range(0, filler ?? Filler).Select(
             i => $"<w:p><w:r><w:rPr><w:sz w:val=\"24\"/></w:rPr><w:t>filler {i}</w:t></w:r></w:p>"));
 
         string head = caption
@@ -179,19 +275,23 @@ public sealed class TableSplitMinimumTests
                 <w:trPr>{(i < headings ? "<w:tblHeader/>" : string.Empty)}</w:trPr>
                 <w:tc>
                   <w:tcPr><w:tcW w:w="5000" w:type="dxa"/></w:tcPr>
-                  <w:p><w:pPr>{(keeps && i < rows - 1 ? "<w:keepNext/>" : string.Empty)}</w:pPr>
+                  <w:p><w:pPr>{(keeps && (keepsLast || i < rows - 1) ? "<w:keepNext/>" : string.Empty)}</w:pPr>
                     <w:r><w:rPr><w:sz w:val="24"/></w:rPr><w:t>row {i}</w:t></w:r></w:p>
                 </w:tc>
               </w:tr>
             """));
 
+        string tail = string.Concat(Enumerable.Range(0, after).Select(
+            i => $"<w:p><w:r><w:rPr><w:sz w:val=\"24\"/></w:rPr><w:t>after {i}</w:t></w:r></w:p>"));
+
         return $"""
-            {filler}{head}
+            {lines}{head}
               <w:tbl>
                 <w:tblPr><w:tblW w:w="5000" w:type="dxa"/><w:tblLayout w:type="fixed"/></w:tblPr>
                 <w:tblGrid><w:gridCol w:w="5000"/></w:tblGrid>
                 {body}
               </w:tbl>
+            {tail}
             """;
     }
 

@@ -1170,10 +1170,9 @@ public sealed class Paginator
                         && paragraphIndex > 0
                         && blocks[paragraphIndex - 1] is PageParagraph { Format.KeepWithNext: true })
                     {
-                        MoveTrailingGroupToNextPage(
-                            blocks, placed, out List<PlacedLine> movedAbove, out int movedAboveFrom);
-
-                        if (movedAbove.Count > 0 && movedAboveFrom > 0)
+                        if (MoveTrailingGroupToNextPage(
+                                blocks, placed, tables, notes,
+                                out _, out int movedAboveFrom))
                         {
                             EmitPage();
                             paragraphIndex = movedAboveFrom;
@@ -1210,6 +1209,44 @@ public sealed class Paginator
                 paragraphIndex++;
                 lineIndex = 0;
                 rowDrawn = Length.Zero;
+
+                // A table whose *last* row keeps with the next must share its page with whatever follows
+                // it, exactly as a keep-with-next paragraph must. Writer states it on the following
+                // frame rather than on the table: `SwFrameNotify` invalidates the table's position when
+                // "pPre is a table and the last row wants to keep with me"
+                // (`sw/source/core/layout/frmtool.cxx`:167-176), gated on the same `TABLE_ROW_KEEP`; the
+                // second statement of it is `SwTabFrame::MakeAll`'s rule 7, "The last table row wants to
+                // keep with its next" (`tabfrm.cxx`:2831-2845).
+                //
+                // Measured on `150-5370-10H.docx` page 240. Its `Cement Treated Aggregate Base Material
+                // Requirements` table carries a direct `w:keepNext` on the first cell of all nine rows,
+                // the last included, and is followed by the two-line footnote paragraph that explains its
+                // superscript. Every row of it lands at the same height in both renderings — a constant
+                // 361.8 pt apart, so this is not a row-height difference — but the reference moves the
+                // caption, the table and the footnote together to page 241 where we fit the table alone
+                // and push only the footnote on.
+                //
+                // AC-150-5370-10G's table is the control that keeps this from being folded into
+                // `MinimumRowsBeforeASplit`: its rows keep too, but its *last* row does not, and it
+                // needed only the minimum.
+                if (_options.KeepsTableRowsWithNext
+                    && part.Placed.FirstRow == 0
+                    && table.Rows.Count > 0
+                    && KeepsWithTheRowBelow(table.Rows[^1])
+                    && paragraphIndex < blocks.Count
+                    && !StartsItsOwnPage(paragraphIndex)
+                    && Laid(paragraphIndex).Paragraph is { } afterTable
+                    && !FirstLineFits(
+                        afterTable, (PageParagraph)blocks[paragraphIndex], used, columnBottom)
+                    && MoveTrailingGroupToNextPage(
+                        blocks, placed, tables, notes, out _, out int tableMovedFrom,
+                        endBlock: paragraphIndex - 1))
+                {
+                    EmitPage();
+                    paragraphIndex = tableMovedFrom;
+                    continue;
+                }
+
                 continue;
             }
 
@@ -1309,10 +1346,9 @@ public sealed class Paginator
                         && placed[^1].ParagraphIndex == paragraphIndex - 1
                         && blocks[paragraphIndex - 1] is PageParagraph { Format.KeepWithNext: true })
                     {
-                        MoveTrailingGroupToNextPage(
-                            blocks, placed, out List<PlacedLine> bounced, out int bouncedFrom);
-
-                        if (bounced.Count > 0 && bouncedFrom > 0)
+                        if (MoveTrailingGroupToNextPage(
+                                blocks, placed, tables, notes,
+                                out _, out int bouncedFrom))
                         {
                             EmitPage();
                             paragraphIndex = bouncedFrom;
@@ -1413,10 +1449,9 @@ public sealed class Paginator
                 && Laid(paragraphIndex).Paragraph is { } next
                 && !FirstLineFits(next, (PageParagraph)blocks[paragraphIndex], used, columnBottom))
             {
-                MoveTrailingGroupToNextPage(
-                    blocks, placed, out List<PlacedLine> moved, out int movedFrom);
-
-                if (moved.Count > 0 && movedFrom > 0)
+                if (MoveTrailingGroupToNextPage(
+                        blocks, placed, tables, notes,
+                        out _, out int movedFrom))
                 {
                     EmitPage();
                     paragraphIndex = movedFrom;
@@ -2071,46 +2106,106 @@ public sealed class Paginator
     /// whose every paragraph keeps with the next cannot be emptied, so nothing moves and the group is
     /// broken after all, which is what Writer does rather than looping.
     /// </remarks>
-    private static void MoveTrailingGroupToNextPage(
+    /// <summary>
+    /// Takes the keep-with-next group that ends this page off it, so the next page lays it again.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>A table is part of the chain, not the end of it.</strong> This used to stop at one, on the
+    /// reasoning that "keep-with-next is a paragraph property, and a paragraph cannot be kept with a
+    /// table it does not know about" — which is true of the paragraph and false of the table. Writer
+    /// states the rule on the *following* frame instead: <c>SwFrameNotify</c> invalidates the previous
+    /// frame's position when "pPre is a table and the last row wants to keep with me"
+    /// (<c>sw/source/core/layout/frmtool.cxx</c>:167-176), gated on <c>TABLE_ROW_KEEP</c>, and
+    /// <c>SwTabFrame::MakeAll</c>'s rule 7 says the same from the table's side (<c>tabfrm.cxx</c>:2831).
+    /// </para>
+    /// <para>
+    /// Measured on <c>150-5370-10H.docx</c> page 272. Its `Coarse Aggregate Material Requirements` table
+    /// carries <c>w:keepNext</c> on the first cell of all eight rows and is followed by three
+    /// <c>TableTextNotes</c> paragraphs that are themselves a keep chain. We moved the notes and left the
+    /// table; the reference moves the caption, the table and the notes together. Every row of the table
+    /// lands at the same height in both, so this is placement and not measurement.
+    /// </para>
+    /// <para>
+    /// Because a table lives in <c>tables</c> rather than in <c>placed</c>, a group spanning both has to
+    /// be unwound from both, together with the notes those cells cited — they belong to whichever page
+    /// finally draws them.
+    /// </para>
+    /// </remarks>
+    /// <param name="blocks">The section's blocks.</param>
+    /// <param name="placed">This page's lines.</param>
+    /// <param name="tables">This page's tables.</param>
+    /// <param name="notes">This page's notes.</param>
+    /// <param name="moved">The lines taken off, for a caller that needs to know it happened.</param>
+    /// <param name="movedFrom">The block the next page resumes at.</param>
+    /// <param name="endBlock">
+    /// The last block of the group, when the caller knows it. Defaults to the last block with a line on
+    /// the page — which is right when a paragraph ends the group and wrong when a table does, since a
+    /// table contributes no line.
+    /// </param>
+    /// <returns>True when the group came off; false when nothing would be left behind.</returns>
+    private bool MoveTrailingGroupToNextPage(
         IReadOnlyList<PageBlock> blocks,
         List<PlacedLine> placed,
+        List<PlacedTable> tables,
+        List<PageNote> notes,
         out List<PlacedLine> moved,
-        out int movedFrom)
+        out int movedFrom,
+        int? endBlock = null)
     {
         moved = [];
         movedFrom = -1;
 
-        if (placed.Count == 0) return;
+        if (placed.Count == 0 && endBlock is null) return false;
 
-        int firstOnPage = placed[0].ParagraphIndex;
-        int last = placed[^1].ParagraphIndex;
+        int last = endBlock ?? placed[^1].ParagraphIndex;
 
-        // Walk back over the chain of paragraphs that each keep with the next. A table ends the chain:
-        // keep-with-next is a paragraph property, and a paragraph cannot be kept with a table it does not
-        // know about.
-        int first = last;
-        while (first > firstOnPage
-               && blocks[first - 1] is PageParagraph previous
-               && previous.Format.KeepWithNext)
+        // A block began on this page when its first piece is here: line 0 for a paragraph, row 0 for a
+        // table. One that began earlier cannot be moved off.
+        //
+        // The paragraph half used to be the near-opposite — *any* line of it that is not line 0 — which
+        // refuses to move any chain whose first paragraph runs to more than one line on the page. That is
+        // nearly every real chain, so keep-with-next was in practice honoured only for single-line
+        // headings.
+        bool BeganHere(int block) => blocks[block] switch
         {
-            first--;
+            PageTable table => tables.Any(
+                one => ReferenceEquals(one.Table, table) && one.FirstRow == 0),
+            _ => placed.Any(line => line.ParagraphIndex == block && line.StartsParagraph),
+        };
+
+        bool KeepsWithWhatFollows(int block) => blocks[block] switch
+        {
+            PageParagraph paragraph => paragraph.Format.KeepWithNext,
+            PageTable table => _options.KeepsTableRowsWithNext
+                               && table.Rows.Count > 0
+                               && KeepsWithTheRowBelow(table.Rows[^1]),
+            _ => false,
+        };
+
+        int first = last;
+        while (first > 0 && KeepsWithWhatFollows(first - 1) && BeganHere(first - 1)) first--;
+
+        if (!BeganHere(first)) return false;
+
+        List<PlacedTable> going = [.. tables.Where(
+            one => Enumerable.Range(first, last - first + 1)
+                             .Any(block => ReferenceEquals(blocks[block], one.Table)))];
+
+        // Something has to stay, or the page empties for nothing and the next page faces the identical
+        // question — Writer's `!pIndPrev` escape, and the reason this cannot spin.
+        if (!placed.Any(line => line.ParagraphIndex < first) && going.Count == tables.Count) return false;
+
+        foreach (PlacedTable one in going)
+        {
+            foreach (PageNote note in PlacedNotes.In(one)) notes.Remove(note);
         }
 
-        // A paragraph that started on an earlier page cannot be moved, and neither can the whole page.
-        //
-        // "Started on an earlier page" is `line 0 of it is not among the lines placed here`, and the
-        // test used to be the near-opposite — *any* line of it that is not line 0 — which refuses to
-        // move any chain whose first paragraph runs to more than one line on the page. That is nearly
-        // every real chain, so keep-with-next was in practice honoured only for single-line headings.
-        if (first <= firstOnPage) return;
-        if (!placed.Any(line => line.ParagraphIndex == first && line.StartsParagraph)) return;
-
-        int at = placed.FindIndex(line => line.ParagraphIndex == first);
-        if (at <= 0) return;
-
-        moved = [.. placed[at..]];
-        placed.RemoveRange(at, placed.Count - at);
+        moved = [.. placed.Where(line => line.ParagraphIndex >= first)];
+        placed.RemoveAll(line => line.ParagraphIndex >= first);
+        tables.RemoveAll(going.Contains);
         movedFrom = first;
+        return true;
     }
 
     private static LaidOutPage Page(
