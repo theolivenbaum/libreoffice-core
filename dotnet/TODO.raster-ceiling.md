@@ -217,6 +217,40 @@ The page-15 shift is a real difference and is *not* excused by this. It costs no
 (the pages either side cancel it) and should be looked at on its own terms rather than folded into
 the ceiling.
 
+## A second kind of ceiling: OMML formulas
+
+Everything above is about **rasters** — LibreOffice drawing a picture where we draw text.
+`ABCD-FE-01-00 Flight Envelope - v1 08.03.16.docx` is the same trade made by a different
+mechanism, and it is worth naming separately because no image is involved and `pdfimages -list`
+reports nothing on either side.
+
+The document holds **87 `m:oMath` and 33 `m:oMathPara`** formulas. LibreOffice imports OMML into
+its Math component and draws the result with **no extractable text at all**; we draw real
+searchable text. Measured on page 4, where a symbol table gives the cleanest view:
+
+- Both renderings put `=` at x≈244.6 and `[1/rad]` at x≈519.5 — **the formula's slot is identical**,
+  so this is not a width or layout difference.
+- The reference leaves the 269.5 pt between them **empty of text**; we write `dcLdα` into it.
+- Ink agrees to a tenth of a percent — **7.251 % against 7.359 %** — so both genuinely *draw* the
+  formula. Only ours is text.
+- `pdffonts` shows the reference embedding five faces and ours those five plus DejaVu Serif, the
+  face our formula text resolves to.
+
+Across the whole document **156 tokens are ours alone against 39 the reference's alone**, which is
+**0.97 per formula site** over the 120 sites — the entire +109 excess, against a 74.40 band.
+
+**`words` cannot be won on this document**, and ours is the better output: a reader can search our
+formulas and cannot search LibreOffice's.
+
+**It also fails `pages`, 14 against 15, and that is NOT excused by this.** A ceiling explains an
+extractable-text difference, not a pagination one. The page-4 row pitch is identical in both
+(13.4 pt), so the formulas are not taller or shorter there; where the pagination actually diverges
+has not been established. Recording it here is a statement about the `words` column only.
+
+One real defect was found and fixed while measuring this and is *not* part of the ceiling: the
+document's heading list carries no `w:start`, whose default is zero rather than one, so we numbered
+every section one higher. That is worth −8 words and no pages.
+
 ## The flagged pages
 
 | Document | Page | ours | ref | excess | metafile |
