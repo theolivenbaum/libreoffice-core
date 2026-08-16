@@ -1292,3 +1292,33 @@ Two things follow, and both are needed together:
 The word gate cannot see any of this: both sides draw exactly five labels, so it costs nothing and
 is invisible in every column. It is a real rendering defect and it needs its own round, over a full
 sweep — the interval ceiling reaches every auto-scaled value axis in the corpus.
+
+## A fifth ceiling, and this one we created on purpose: an EMF we draw as text
+
+`UG.CAO.00006 Foreign Part 145 approvals…docx` matched the gate at 7390 words against 7399 while we
+drew **no figure at all**. Giving `w:pict`/`w:object` a layout path (`DocxVmlFrames`) draws its
+519.55 × 224.65 pt inline OLE object, and the gate now fails it at 7565.
+
+The extra words are the object's own, and the two renderings differ in kind rather than in content.
+On page 13:
+
+| | words | images |
+|---|---:|---:|
+| reference | 103 | **3** |
+| ours | 279 | **1** |
+
+LibreOffice converts the EMF preview to a bitmap and draws two pictures; we draw the metafile, so its
+text stays text. `pdftotext` reads ours and cannot read the reference's, and the 176-word difference
+is exactly that. Page counts agree at 29 either way.
+
+**This is the same mechanism as the raster ceilings above with the sign reversed** — there the
+reference's rasterising *inflates* its count against ours, here it *deflates* it — and the same
+verdict follows: ours is the better output and `wc -w` scores it as the failure.
+
+**It was taken knowingly, and the trade is worth stating plainly.** The change costs this one
+document on the gate (words track 201 → 200 of 210) and buys a figure on every document that has
+one. `EHEST-SMS`'s Figure 1 is the case it was built for: the gap between "…An example is provided
+below:" and the caption was 60 pt against the reference's 236.6 and is now **236.00**. Its page count
+does not move — the rest of its 80/82 is elsewhere, in the Appendix forms — so the gate shows this
+as a pure loss and the rendering shows it as a pure gain. Reverting it would put the figure back to
+nothing.

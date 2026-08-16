@@ -1217,6 +1217,18 @@ public sealed partial class DocxLayoutSource
             Func<XElement, IReadOnlyList<PageBlock>>? content =
                 _frameDepth < MaxFrameNesting ? Content : null;
 
+            // VML states its geometry differently from DrawingML and most of it reserves nothing, so
+            // it has a reader of its own rather than a branch inside `DocxFrames`.
+            if (anchor.Element.Name.LocalName is "pict" or "object")
+            {
+                if (DocxVmlFrames.Read(anchor.Element, anchor.Offset, Pictures) is { } vml)
+                {
+                    frames.Add(vml);
+                }
+
+                continue;
+            }
+
             frames.AddRange(DocxFrames.ReadAll(
                 anchor.Element, content, anchor.Offset, Pictures,
                 new DocxFrameContext(_theme, InHeaderFooter, _compatibilityMode)));
@@ -1701,24 +1713,16 @@ public sealed partial class DocxLayoutSource
                         Emit(AnchorCharacter.ToString());
                         break;
 
-                    // KNOWN GAP, measured rather than suspected: a `w:pict` and a `w:object` reserve
-                    // no height at all — the anchor character is one text line and nothing more.
-                    // Writer reserves the size the VML shape declares even when it cannot draw what
-                    // is inside it. Measured on
-                    // `words/pagination-002/docx/EHEST-SMS-Safety-Management-Manual-V2.docx`, whose
-                    // Figure 1 is a `w:object` wrapping an embedded Visio drawing behind
-                    // `<v:shape style="width:425pt;height:190pt">`: on its page 18 the reference
-                    // leaves 236.6 pt between "…An example is provided below:" and the figure caption
-                    // and draws an empty placeholder frame in it, where we leave 60 pt. That 176 pt is
-                    // the whole of that document's first page-count divergence, and everything after
-                    // page 18 is its cascade.
-                    //
-                    // Closing it means giving VML a layout path, not only the extraction path
-                    // `DocxContentReader` already has — `v:shape/@style`'s width and height, or
-                    // `w:object/@w:dxaOrig`/`@w:dyaOrig` as the fallback — so it is a piece of work
-                    // rather than a patch, and it will move every document in the corpus holding a
-                    // `w:pict`.
-                    case "commentReference" or "pict" or "object":
+                    // A `w:pict` or a `w:object` is a VML shape. It states its size in a CSS `style`
+                    // rather than in a `wp:extent`, and only an inline one takes room on the line —
+                    // see `DocxVmlFrames`, which decides both and returns nothing for a floating
+                    // shape, leaving the anchor character to stand for it as it did before.
+                    case "pict" or "object":
+                        _frames.Add(new FrameAnchor(_builder.Length, child));
+                        Emit(AnchorCharacter.ToString());
+                        break;
+
+                    case "commentReference":
                         Emit(AnchorCharacter.ToString());
                         break;
 
