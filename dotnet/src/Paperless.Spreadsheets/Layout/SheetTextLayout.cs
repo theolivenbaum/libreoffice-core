@@ -1257,7 +1257,7 @@ internal static class SheetTextLayout
         // comparison on the key makes safe.
         ParagraphLayouter layouter = atomic
             ? Layouters.GetOrAdd(
-                " field " + face.Reference.FaceKey,
+                "\0field\0" + face.Reference.FaceKey,
                 _ => new ParagraphLayouter(
                     face.Face, breaker: SheetFieldBreaker.Instance, shaper: SheetFonts.Shaper,
                     breaksOverflowingBlanks: true))
