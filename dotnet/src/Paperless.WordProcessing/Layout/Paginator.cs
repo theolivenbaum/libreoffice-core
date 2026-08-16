@@ -1625,7 +1625,7 @@ public sealed class Paginator
             // which errs towards placing a note here instead of carrying it, and so cannot start a
             // spill that would not otherwise happen.
             (PlacedFlow? noteArea, List<PageNote> carriedNotes) =
-                NoteArea(notes, body, bodyHeight - BodyInk(placed, tables));
+                NoteArea(notes, body, bodyHeight - BodyInk(placed, tables, body.TextArea.Y));
 
             pages.Add(Page(
                 pages.Count,
@@ -2553,13 +2553,36 @@ public sealed class Paginator
     /// the page. This is the quantity itself, and it stays right whatever consumes it.
     /// </para>
     /// </remarks>
+    /// <summary>
+    /// How far down the body its drawn content reaches, measured from the body's own top.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>The two lists count in different coordinates and that is the whole reason
+    /// <paramref name="bodyTop"/> exists.</strong> A <see cref="PlacedLine"/>'s <c>Top</c> is relative to
+    /// its column — the column rectangle is applied when it is drawn — while a <see cref="PlacedTable"/>
+    /// is offset into page coordinates as it is placed (<c>TableLayouter.Offset(cells, body.X,
+    /// body.Y + top)</c>), so its <c>Area</c> already carries the body's own offset. Taking the maximum of
+    /// the two raw is comparing a depth with a position.
+    /// </para>
+    /// <para>
+    /// Measured on <c>TE.CAO.00125 Foreign Part 145 approvals - OJT Logbook.docx</c>, whose body starts
+    /// 129.0 pt down a landscape page: its page 3 has 61.9 pt free under a table ending at 492.4 and a
+    /// footnote needing 52.17, and the subtraction returned <em>−67.05</em>. Every page carrying both a
+    /// table and a note therefore spilled the note, and this one carried it two pages — the reference
+    /// draws it at the foot of page 3, we drew it on page 5, and the document ran to 16 pages against 15.
+    /// </para>
+    /// </remarks>
+    /// <param name="lines">The page's lines, whose tops are column-relative.</param>
+    /// <param name="tables">The page's tables, whose areas are in page coordinates.</param>
+    /// <param name="bodyTop">Where the body starts on the page, which is what makes the two comparable.</param>
     private static Length BodyInk(
-        IReadOnlyList<PlacedLine> lines, IReadOnlyList<PlacedTable> tables)
+        IReadOnlyList<PlacedLine> lines, IReadOnlyList<PlacedTable> tables, Length bodyTop)
     {
         Length ink = Length.Zero;
 
         foreach (PlacedLine line in lines) ink = Length.Max(ink, line.Top + line.Box.Height);
-        foreach (PlacedTable table in tables) ink = Length.Max(ink, table.Area.Bottom);
+        foreach (PlacedTable table in tables) ink = Length.Max(ink, table.Area.Bottom - bodyTop);
 
         return ink;
     }
