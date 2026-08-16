@@ -1,107 +1,55 @@
-#!/usr/bin/env python3
-"""When does Calc draw nothing at all for a wrapped cell in a fixed-height row?
+"""RETRACTED — the corpus case this was built for is reference nondeterminism.
 
-Why this exists
+Read this first
 ---------------
 
-`sheets/unstable-001/xlsx/fse_identification_form.xlsx` is 440 words against 427,
-and the whole difference is one sentence we draw and LibreOffice does not:
-cell B16, "The serial number of the FSE assigned by the Original Equipment
-Manufacturer (OEM)." Rasterised at 150 dpi its row band is 0.06 % dark in the
-reference against 6.12 % in ours, so the reference draws no glyphs there at all —
-this is not white text and not something covering it.
+This probe was written to characterise why LibreOffice draws nothing for cell B16
+of `sheets/unstable-001/xlsx/fse_identification_form.xlsx`. **There is no such
+rule.** LibreOffice's rendering of that document is not a function of its input:
+rendering the untouched file eighteen times through `soffice --convert-to pdf`
+drew B16 **once** and omitted it seventeen times, at 443 and 430 extracted words
+respectively. Our own renderer is byte-identical across five runs.
 
-B16 is the odd one out among its neighbours in exactly one way:
+Every "the reference draws it / does not" result in the investigation that led
+here — dropping the border, setting `vertical="top"`, raising the row height,
+removing `wrapText`, shortening the text — was a single render, and therefore a
+single sample of a coin flip. Two commits stated mechanisms built on those
+samples; both are wrong, and the correction is in the history beside them.
 
-    cell  chars  style           row height
-    B12      66  wrap            auto
-    B13     507  wrap            61.5   fixed
-    B14     347  wrap + vcentre  44.1   fixed
-    B15     237  wrap + vcentre  39.95  fixed
-    B16      87  wrap            14.45  fixed   <- drawn by us, not by the reference
-    B17      31  wrap            auto
-    B18      43  wrap            15.75  fixed
+The document is in `unstable-001` and that classification was right all along.
 
-Every neighbour either has room for its text or is free to grow. B16 has 87
-characters in a row pinned to a single line's height. So the question is what
-Calc does when wrapped text needs more lines than a `customHeight` row allows —
-and specifically whether it clips to the visible band, which would still show
-*some* text, or suppresses the cell entirely, which is what the reference does.
+What survives
+-------------
 
-This is worth measuring rather than reasoning about, because both behaviours are
-plausible and they differ in what a reader sees.
+Only the measurements taken on OUR renderer, which is deterministic, and the two
+observations that do not depend on the reference being stable:
 
-What it builds
---------------
+- the difference is exactly cell B16 and nothing else — the reference-only token
+  set is empty in every run;
+- our output is stable and self-consistent, and matches the reference's *minority*
+  outcome, which is the one where the cell's text is drawn. The cell does hold
+  that text, so drawing it is not obviously the wrong answer.
 
-One sheet per case, each a merged `B:E` cell with `wrapText`, sweeping two
-variables independently:
+The lesson, which is the reason this file is kept
+-------------------------------------------------
 
-- how many characters the cell holds, so the wrapped text needs 1, 2, 3 or 5
-  lines at the merged width;
-- the row's height: `auto` (no `ht`), and fixed at one, two and three lines.
+**When the reference is a black box, one render is one sample.** An ablation
+table built from single runs looks exactly like a mechanism and can be entirely
+noise — it produced a clean, plausible, four-condition rule here that survived
+several rounds of reasoning before a repeat measurement dissolved it. Repeat any
+ablation against `soffice` at least a handful of times before believing a row of
+it, and repeat it *first* on the unmutated file to establish whether the document
+is stable at all.
 
-The control is the auto-height row, which must always draw everything.
+What the probe itself still shows
+----------------------------------
 
-What it found, 2026-08-16 — and what the ABLATION found instead
----------------------------------------------------------------
-
-**This synthetic does not reproduce the corpus case, and that is worth knowing
-before it is trusted.** Across all sixteen cases the reference draws essentially
-every word, including 300 characters in a 14.45 pt row, so a synthetic alone
-would have refuted the suppression rule. The `auto` control agrees throughout
-once each case's words are made unique — the first cut of this probe counted
-consecutive filler words after a marker and ran into the neighbouring row, which
-made the control disagree and looked like a renderer difference.
-
-The behaviour is real and was established by ablating the corpus file itself.
-Mutating `fse_identification_form.xlsx` one property at a time — each of these
-*alone* restores the text:
-
-    case             does the reference draw B16?
-    baseline         no
-    borderId 22 -> 0 YES
-    vertical="top"   YES
-    vertical="center" YES
-    no-height        YES   (drop ht="14.45" customHeight="1")
-    tall-row         YES   (raise that height to 40)
-    no-wrap          YES   (a style without wrapText)
-    no-merge16       no    (so the merge is NOT one of the conditions)
-
-**Four conditions are needed together**: `wrapText`, a border, Calc's *default*
-vertical alignment — which is bottom — and a `customHeight` row too short. Take
-away any one and the text appears.
-
-Sweeping the row height alone gives a sharp threshold: nothing at 14.45, 15,
-15.4, 15.5, and everything at 15.6, 15.75, 16, 18, 30. Binary, not progressive,
-so it is not a partial clip leaving some ink.
-
-That points at `output2.cxx`:3248, which sets `bClip` when the laid text is at
-least one reference unit taller than the cell *and* the row carries
-`CRFlags::ManualSize`, together with :3330, which puts bottom-aligned text at
-`nTopM + cellHeight - engineHeight` — above the cell's top once the text is
-taller. The border steals just enough usable height to tip one 11 pt line over,
-and the clip then cuts where the glyphs are not.
-
-**This probe still contradicts that, and the contradiction is unresolved.** It
-builds the same shape *without borders*, its `customHeight` is honoured — measured
-row pitches are 14.43 / 29.00 / 43.48 against the declared 14.45 / 29 / 43.5 — and
-yet even 300 characters in a 14.45 pt row draw every word, where the mechanism
-above says they should be clipped away. **Add a border to this probe and re-run it
-before trusting any implementation.**
-
-Reading the output
-------------------
-
-`ref` and `ours` are how many of the cell's words each rendering puts on the
-page. The interesting rows are the ones where the text needs more lines than the
-height allows:
-
-- both drawing everything means the row height does not clip at all;
-- the reference drawing *some* means it clips to the band, and the rule is a
-  partial one;
-- the reference drawing **none** while we draw everything is the corpus case, and
-  the rule is "wrapped text that does not fit a fixed-height row is not drawn".
+The synthetic below never reproduced the corpus behaviour, at any of its
+thirty-two combinations of text length, row height and border. That is now
+explained: there was nothing to reproduce. Its `customHeight` handling is sound
+and was verified — measured row pitches of 14.43 / 29.00 / 43.48 against the
+declared 14.45 / 29 / 43.5 — so it remains usable as a check that wrapped text in
+a fixed-height row is drawn by both engines, which it is.
 
 Usage
 -----
@@ -157,11 +105,17 @@ STYLES = (
     'spreadsheetml/2006/main">'
     '<fonts count="1"><font><sz val="11"/><name val="Calibri"/></font></fonts>'
     '<fills count="1"><fill><patternFill patternType="none"/></fill></fills>'
-    '<borders count="1"><border/></borders>'
+    '<borders count="2"><border/>'
+    '<border><left style="thin"><color rgb="FF000000"/></left>'
+    '<right style="thin"><color rgb="FF000000"/></right>'
+    '<top style="thin"><color rgb="FF000000"/></top>'
+    '<bottom style="thin"><color rgb="FF000000"/></bottom></border></borders>'
     '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>'
-    '<cellXfs count="2"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>'
+    '<cellXfs count="3"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>'
     '<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0" applyAlignment="1">'
-    '<alignment horizontal="left" wrapText="1"/></xf></cellXfs>'
+    '<alignment horizontal="left" wrapText="1"/></xf>'
+    '<xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0" applyBorder="1" '
+    'applyAlignment="1"><alignment horizontal="left" wrapText="1"/></xf></cellXfs>'
     '</styleSheet>')
 
 
@@ -178,13 +132,14 @@ def words(length, tag):
 def build(path, cases):
     rows, merges = '', ''
 
-    for index, (length, height, tag) in enumerate(cases):
+    for index, (length, height, bordered, tag) in enumerate(cases):
         r = index + 1
         ht = f' ht="{height}" customHeight="1"' if height is not None else ''
         rows += (
             f'<row r="{r}" spans="1:5"{ht}>'
             f'<c r="A{r}" t="inlineStr"><is><t>row{r}</t></is></c>'
-            f'<c r="B{r}" s="1" t="inlineStr"><is><t>{words(length, tag)}</t></is></c>'
+            f'<c r="B{r}" s="{2 if bordered else 1}" t="inlineStr">'
+            f'<is><t>{words(length, tag)}</t></is></c>'
             '</row>')
         merges += f'<mergeCell ref="B{r}:E{r}"/>'
 
@@ -222,10 +177,11 @@ def main():
     os.makedirs(os.path.join(out, 'ours'), exist_ok=True)
 
     cases = []
-    for length in LENGTHS:
-        for height in HEIGHTS:
-            tag = f'C{length}H{"A" if height is None else int(height)}'
-            cases.append((length, height, tag))
+    for bordered in (False, True):
+        for length in LENGTHS:
+            for height in HEIGHTS:
+                tag = ('B' if bordered else 'N') + f'C{length}H{"A" if height is None else int(height)}'
+                cases.append((length, height, bordered, tag))
 
     xlsx = os.path.join(out, 'wrap.xlsx')
     build(xlsx, cases)
@@ -241,13 +197,14 @@ def main():
         if not os.path.isfile(produced):
             raise SystemExit(f'{produced} was not written — nothing to compare')
 
-    print(f"{'chars':>6s} {'height':>7s} {'total':>6s} {'ref':>6s} {'ours':>6s}  agree?")
+    print(f"{'border':>7s} {'chars':>6s} {'height':>7s} {'total':>6s} {'ref':>6s} {'ours':>6s}  agree?")
 
-    for length, height, tag in cases:
+    for length, height, bordered, tag in cases:
         r, o = drawn(reference, tag), drawn(ours, tag)
         total = len(words(length, tag).split())
         name = 'auto' if height is None else f'{height:g}'
-        print(f'{length:6d} {name:>7s} {total:6d} {r:6d} {o:6d}  {"yes" if r == o else "NO"}')
+        print(f'{"yes" if bordered else "no":>7s} {length:6d} {name:>7s} {total:6d} '
+              f'{r:6d} {o:6d}  {"yes" if r == o else "NO"}')
 
     print('\nthe auto-height rows are the control and must always agree.')
     print('a reference count of 0 where ours is not is the corpus case.')
