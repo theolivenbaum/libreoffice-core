@@ -1224,3 +1224,71 @@ document, and any story told about it will be fiction with evidence attached.
 Three of these four are in the failing lists above, which means an unknown share of what those
 rows report is instability rather than defect. The rate over the words and slides tracks is still
 unmeasured.
+
+## A fourth ceiling: LibreOffice writes rotated axis labels one glyph at a time
+
+`southern-classic-kennesaw-state-university-final.pptx` (slides `chart-001`) is 2217 words against
+2270, 23 slides of 23, and **the whole of its deficit is how the two PDFs encode the same rotated
+text.** Nothing is missing from our rendering.
+
+Three of its charts crowd a horizontal axis badly enough that LibreOffice's escalation ladder turns
+the labels 45° — `AxisLabelProperties::autoRotate45` (`VAxisProperties.cxx:403-408`), reached from
+`VCartesianAxis.cxx:936-947` once a label's box overlaps its neighbour's. **We turn them too, at
+the same angle, in the same places, and we draw the same labels.** Counted off the two content
+streams:
+
+| slide | labels drawn, both sides | label | chars | reference rotated `Tm` |
+|---|---:|---|---:|---:|
+| 2 | 19 | `Jan-16` | 6 | **114** = 19 × 6 |
+| 9 | 8 | `2002` | 4 | **32** = 8 × 4 |
+| 10 | 11 | `1995` | 4 | **44** = 11 × 4 |
+
+The reference emits **one positioned glyph per character** for rotated text; we emit one positioned
+string per label (19, 8 and 11 rotated `cm` operators against its 114, 32 and 44 rotated `Tm`).
+`pdftotext` splits at every one of the reference's, so its axis reads as a hundred-odd "words" where
+ours reads as a dozen. Bucketed by *y*, every one of the three deficits lands in the rotated band and
+nowhere else — slide 2 −39 across y 340-400, slide 9 −8 across y 380-420, slide 10 −11 across
+y 200-220 — summing to −58 against a document total of −55.
+
+**This is the mechanism `ChartAxisLabels`' own class documentation already records** for
+`bnc889755.pptx`, which "extracts 89 words for 16 month names" for exactly this reason: *"Neither
+number is reachable by drawing the labels correctly."* It is written down here because that note
+lives in a source file nobody reads while chasing a word count, and this document is the list that
+gets checked first.
+
+Two readings were made and refuted on the way, both worth not repeating:
+
+- **"The reference rotates and we do not."** Scanning the PDFs for rotated *text matrices* finds 4
+  streams in the reference and **0** in ours — a clean, confident, wrong answer. Our backend rotates
+  with a `cm` on the graphics state and leaves `Tm` axis-aligned; the reference does the opposite.
+  **Scan for both, or the same page reads as unrotated in whichever stack you did not check.**
+- **"It is just tighter spacing, so `pdftotext` joins our labels."** Also wrong, and in the other
+  direction: the labels are identical and it is the reference that is fragmented, not us that are
+  merged.
+
+Our output is the better one — real searchable strings rather than 114 loose glyphs — and `wc -w`
+scores it as the failure. **Ceiling.**
+
+### What is genuinely wrong on this document, and it is not the word count
+
+Slide 10's value axis is auto-scaled from `<c:min val="320"/>` alone over data 343…468. The
+reference draws `$320 $360 $400 $440 $480`; we draw `$320 $370 $420 $470 $520`. **A step of 40 is
+not on the 1-2-5 ladder** that both `ScaleAutomatism.cxx:884-893` and our faithful port of it
+(`ChartScale.cs:283-295`) are limited to, so the reference's increment is really **20 with every
+second label suppressed** — the vertical arm of the same escalation ladder, where
+`canAutoAdjustLabelPlacement` refuses rotation for a horizontal-text vertical axis
+(`VCartesianAxis.cxx:552-556`) and the loop falls through to `m_nRhythm++`.
+
+Two things follow, and both are needed together:
+
+1. The `maximumIntervals` `ChartLayout` derives for this axis is **≤ 7** where LibreOffice's is
+   **≥ 8**. At 10 the raw interval is 148/10 = 14.8 → 2 × 10 = **20**; at 4 it is 37 → 5 × 10 =
+   **50**, which is what we draw. The boundary is sharp: ceilings 8, 9 and 10 all give 20, and 4
+   through 7 all give 50.
+2. We do not thin a **value** axis' labels by rhythm at all — `ChartAxisLabels.Resolve` is reached
+   only from `ArrangeCategories`. Fixing (1) alone would draw nine labels at `$320 $340 $360 …`,
+   which is further from the reference than what we draw now.
+
+The word gate cannot see any of this: both sides draw exactly five labels, so it costs nothing and
+is invisible in every column. It is a real rendering defect and it needs its own round, over a full
+sweep — the interval ceiling reaches every auto-scaled value axis in the corpus.
