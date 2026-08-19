@@ -382,17 +382,48 @@ public sealed record ParagraphFormat
     public bool TabsRelativeToIndent { get; init; } = true;
 
     /// <summary>
-    /// Whether a right, centred or decimal stop declared past the line's right edge is honoured at the
-    /// edge instead of where it was declared.
+    /// Whether a right, centred or decimal stop declared past the text frame's right edge is honoured at
+    /// that edge instead of where it was declared — and whether the blank such a stop advances across may
+    /// overrun the line's own right edge without breaking the line.
     /// </summary>
     /// <remarks>
     /// <para>
     /// Writer's rule and Writer's alone: <c>SwTabPortion::PostFormat</c>
-    /// (<c>sw/source/core/text/txttab.cxx</c>:503) sets
-    /// <c>nRight = std::min(GetTabPos(), rInf.Width())</c> above the comment <em>"If the tab position is
-    /// larger than the right margin, it gets scaled down by default"</em>. A <em>left</em> stop past the
-    /// edge is never clamped — <c>PreFormat</c> breaks the line there instead, which is what this engine
-    /// does already.
+    /// (<c>sw/source/core/text/txttab.cxx</c>:503) sets, above the comment <em>"If the tab position is
+    /// larger than the right margin, it gets scaled down by default"</em>,
+    /// <c>nRight = std::min(GetTabPos(), rInf.GetTextFrame()-&gt;getFrameArea().Right())</c> when
+    /// <c>TabOverSpacing</c> is on — which <c>WriterFilter.cxx</c>:325 turns on for every writerfilter
+    /// document — and <c>std::min(GetTabPos(), rInf.Width())</c> only for a document carrying neither
+    /// compatibility flag. A <em>left</em> stop past the edge is never clamped: <c>PreFormat</c> breaks
+    /// the line there instead, which is what this engine does already.
+    /// </para>
+    /// <para>
+    /// <strong>The frame's edge, not the line's, and the difference is the paragraph's right indent.</strong>
+    /// Clamping at the line's edge instead was measured on the corpus as a right-aligned stop landing
+    /// short by exactly that indent: 18.09 and 18.10 pt on the two <c>mcar</c> revisions, whose
+    /// <c>toc 4</c> declares <c>w:right="360"</c>, and 28.45 pt on <c>EHEST-SMS</c>, whose <c>toc 2</c>
+    /// declares <c>w:right="1134"</c> and puts its stop 566 twips inside the frame. A probe rendered
+    /// through LibreOffice 26.2.4.2 — one right stop per paragraph at ten positions crossing the text
+    /// area's edge, at three right indents — put every stop at its declared position to within 2 twips
+    /// and moved none of them by any indent.
+    /// </para>
+    /// <para>
+    /// <strong>The half of the rule that makes that survivable.</strong> A stop inside the right indent
+    /// puts the text after the tab past the line's right edge, and a line-filler that counted the tab's
+    /// stretch against the line's width would break there — which is how a contents entry becomes four
+    /// lines, one for its number, one for its title, one of leader dots and one for its page. Writer
+    /// does not count it: for a right, centred or decimal stop it fits the following text with the tab
+    /// still one twip wide (<c>PreFormat</c> only calls <c>SetLastTab</c>) and settles the tab's width
+    /// afterwards, in <c>PostFormat</c>. So this flag also switches the filler over to that two-pass
+    /// width; see <see cref="TabRuler.WidthOf"/>.
+    /// </para>
+    /// <para>
+    /// <strong>What is still approximated.</strong> Writer's bound is an absolute page coordinate
+    /// compared against a line-relative stop position, so a stop declared past the text area is honoured
+    /// out into the page's right margin, as far as the page edge — the probe above shows a stop at 10799
+    /// twips in a 9360-twip text area drawn at 12239 twips, 2879 twips into the margin. The bound here is
+    /// the text area's own right edge, so such a stop stops at the margin. That band is bounded by the
+    /// overshoot and is a great deal smaller than the indent this replaces.
     /// </para>
     /// <para>
     /// A flag rather than unconditional behaviour because the code that states it is the text frame's,
@@ -403,6 +434,72 @@ public sealed record ParagraphFormat
     /// </para>
     /// </remarks>
     public bool ClampsTabsAtLineEdge { get; init; }
+
+    /// <summary>
+    /// Whether the document carries LibreOffice's <c>TabOverSpacing</c> compatibility setting.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Word 2013 and later, and so every file <c>writerfilter</c> reads: it is set unconditionally in
+    /// <c>sw/source/writerfilter/filter/WriterFilter.cxx</c>:325, which serves DOCX and RTF. A binary
+    /// <c>.doc</c> does not carry it, and ODF carries it only when a settings file states it.
+    /// </para>
+    /// <para>
+    /// <strong>What a <c>.doc</c> carries instead is <c>TAB_OVER_MARGIN</c></strong>, the older and wider
+    /// setting — <c>ww8par.cxx</c>:2047, beside the <c>TAB_COMPAT</c> at :1949 — and WriterFilter's own
+    /// comment says why the two are not the same thing: <em>"TabOverSpacing … is a subset of
+    /// TabOverMargin. TabOverMargin looks at tabs beyond the normal text area, while TabOverSpacing only
+    /// refers to a tab beyond the paragraph margin"</em> (:321-324). So the three word-processing formats
+    /// take three different branches of <c>PreFormat</c>, not two, and this flag names only one of them.
+    /// An earlier note here said the WW8 filter sets <c>TAB_COMPAT</c> "and no more", which is wrong.
+    /// </para>
+    /// <para>
+    /// It decides what a <em>left</em> stop past the frame does to the line, and the two answers are
+    /// opposite. With it, <c>SwTabPortion::PreFormat</c> sets <c>bFull</c> and the line breaks at the tab
+    /// (<c>sw/source/core/text/txttab.cxx</c>:429-440). Without it, the same tab reaches the
+    /// <c>TAB_COMPAT</c> rescue below, which takes the break back where the tab is the paragraph's last
+    /// character (<c>txttab.cxx</c>:448-458). So the same footer keeps its page number on one line in a
+    /// <c>.doc</c> and does not in a <c>.docx</c>. See <see cref="TabRuler.WidthOf"/>.
+    /// </para>
+    /// <para>
+    /// Distinct from <see cref="ClampsTabsAtLineEdge"/>, which every word-processing reader turns on:
+    /// that one is about where an <em>aligned</em> stop past the frame is honoured, and Writer answers
+    /// that the same way for both settings bar the boundary it measures against.
+    /// </para>
+    /// </remarks>
+    public bool TabsOverSpacing { get; init; }
+
+    /// <summary>
+    /// Whether a paragraph ending in a no-break space and ordinary blanks spills onto two more lines.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>Measured, not ported.</strong> A paragraph whose text ends with U+00A0 followed by one
+    /// or more U+0020 and nothing else costs Writer <em>two</em> extra line pitches: everything bound
+    /// to the no-break space moves onto a line of its own, and an empty line follows it. Under block
+    /// adjustment only the first of the two happens. Trailing ordinary blanks cost nothing however many
+    /// there are, a no-break space with nothing after it costs nothing, and a visible character after
+    /// the blanks removes the effect entirely.
+    /// </para>
+    /// <para>
+    /// Established over nine tails on a real paragraph, five adjustments, a one-line paragraph and a
+    /// synthetic body swept from one to four lines — <c>probes/trailing-nbsp-wrap/</c>, which also
+    /// records why an ad-hoc version of that last sweep reported the opposite. The C++ this shadows is
+    /// <c>SwTextGuess::maybeAdjustPositionsForBlockAdjust</c>
+    /// (<c>sw/source/core/text/guess.cxx:78-130</c>), whose own comment says it returns false "to create
+    /// a trailing <c>SwHolePortion</c>" and whose gate on block adjustment is exactly the split above;
+    /// beside it <c>IsBlank</c> (<c>:47</c>) is the "elided at the end of a line" set and excludes
+    /// U+00A0, which <c>TrimTrailingSpaces</c> already agrees with. The portion arithmetic that turns
+    /// that hole into two pitches has not been traced, so this reproduces the measured outcome rather
+    /// than claiming the mechanism.
+    /// </para>
+    /// <para>
+    /// A flag for the same reason <see cref="ClampsTabsAtLineEdge"/> is one: it was measured through
+    /// Writer's text frame and says nothing about a slide's text body or a spreadsheet cell, which
+    /// Impress and Calc lay out through other code. Every word-processing reader turns it on.
+    /// </para>
+    /// </remarks>
+    public bool SpillsTrailingNoBreakSpace { get; init; }
 
     /// <summary>
     /// Whether a justified line may squeeze its blanks below their natural width to fit another word.
@@ -454,18 +551,72 @@ public sealed record ParagraphFormat
     /// </para>
     /// </remarks>
     /// <param name="position">Where the tab is, measured from <see cref="TabOrigin"/>.</param>
-    public TabStop NextTabStop(Length position)
+    public TabStop NextTabStop(Length position) => NextTabStop(position, null);
+
+    /// <summary>
+    /// The stop a tab at a position advances to, with a list level's own stop in the search.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The tab that follows a numbering label is an ordinary tab, and the ruler it searches is the
+    /// paragraph's with the level's stop <em>merged into it</em> — Writer inserts it into the line's own
+    /// copy of the paragraph's <c>SvxTabStopItem</c> in <c>SwLineInfo::InitLineInfo</c>
+    /// (<c>sw/source/core/text/inftxt.cxx</c>:124-137) and then runs the same
+    /// <c>SwTextFormatter::GetTabStop</c> over it as for any other tab. So the level's stop competes with
+    /// the paragraph's rather than pre-empting them: a paragraph stop nearer the pen wins.
+    /// </para>
+    /// <para>
+    /// That is not a nicety. The pen after a label sits inside the hanging indent, so the search position
+    /// is <em>behind</em> the paragraph's stops and every one of them is still ahead — including one
+    /// declared at the indent itself, which is exactly where a Word bullet list puts its text. Measured on
+    /// <c>info-bulletin-601.doc</c> (words/extra-001), whose level states a 36 pt list tab while the
+    /// paragraph declares a stop at its own 21.30 pt indent: LibreOffice sets the item's text at 21.30 pt
+    /// and preferring the level's stop set it at 36 pt, shortening every bulleted first line by 14.7 pt.
+    /// </para>
+    /// <para>
+    /// The one thing the merge does not do is let the hanging-indent rule below overrule the level's own
+    /// stop. Writer guards it with <c>nNextPos != GetListTabStopPosition()</c>
+    /// (<c>txttab.cxx</c>:269-272), so a level whose stop is the nearest one ahead keeps it even though
+    /// the pen is inside the indent.
+    /// </para>
+    /// </remarks>
+    /// <param name="position">Where the tab is, measured from <see cref="TabOrigin"/>.</param>
+    /// <param name="listTabStop">
+    /// The level's own stop, in the same coordinates, or null for a tab that is not a label's follower.
+    /// </param>
+    public TabStop NextTabStop(Length position, Length? listTabStop)
     {
         // The paragraph's own indent, in the same coordinates as the stops. A tab before it is inside the
         // hanging indent, and only the first line of a paragraph with a negative first-line indent has
         // anything before it at all.
         Length indent = TabsRelativeToIndent ? Length.Zero : StartIndent;
 
+        TabStop? nearest = null;
+
         foreach (TabStop stop in TabStops)
         {
             if (stop.Position <= position) continue;
 
-            return position < indent && stop.Position > indent ? new TabStop(indent) : stop;
+            nearest = stop;
+            break;
+        }
+
+        // The level's stop takes its place in the ruler by position, so it wins only where it is the
+        // first one past the pen.
+        bool tookListStop = false;
+
+        if (listTabStop is { } list && list > position
+            && (nearest is not { } found || list < found.Position))
+        {
+            nearest = new TabStop(list);
+            tookListStop = true;
+        }
+
+        if (nearest is { } hit)
+        {
+            return !tookListStop && position < indent && hit.Position > indent
+                ? new TabStop(indent)
+                : hit;
         }
 
         if (position < indent) return new TabStop(indent);

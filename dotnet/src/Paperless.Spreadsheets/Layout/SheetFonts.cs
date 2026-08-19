@@ -95,8 +95,19 @@ internal static class SheetFonts
     /// </remarks>
     public const string DefaultFamily = "Liberation Sans";
 
-    private static readonly ConcurrentDictionary<(string Family, int Weight, bool Italic), SheetFace?>
-        Cache = new();
+    /// <summary>
+    /// Every face a workbook has asked for, keyed by everything that can change the answer.
+    /// </summary>
+    /// <remarks>
+    /// The declared class is part of the key rather than a detail of the lookup, because it is part
+    /// of the <em>question</em>: two cells naming the same absent family and declaring different
+    /// shapes for it resolve to two different faces, and a key without it would hand the second
+    /// whichever the first happened to load. Present in almost no workbook, so the extra dimension
+    /// costs nothing in practice.
+    /// </remarks>
+    private static readonly
+        ConcurrentDictionary<(string Family, int Weight, bool Italic, FontFamilyClass Declared),
+                             SheetFace?> Cache = new();
 
     /// <summary>The face a format asks for, or null when no face could be read at all.</summary>
     /// <param name="format">The cell's resolved format.</param>
@@ -108,7 +119,8 @@ internal static class SheetFonts
             ? DefaultFamily
             : format.FontFamily;
 
-        return Cache.GetOrAdd((family, format.FontWeight, format.IsItalic), Load);
+        return Cache.GetOrAdd(
+            (family, format.FontWeight, format.IsItalic, format.DeclaredFontClass), Load);
     }
 
     /// <summary>The upright regular face of one family, or null when none could be read.</summary>
@@ -119,9 +131,26 @@ internal static class SheetFonts
     /// whose text boxes are set in the same face as its cells should resolve it once.
     /// </remarks>
     /// <param name="family">The family name, or null for the default.</param>
-    public static SheetFace? ForFamily(string? family)
+    public static SheetFace? ForFamily(string? family) => ForFamily(family, bold: false);
+
+    /// <summary>The upright face of one family at one of two weights.</summary>
+    /// <remarks>
+    /// The weight is a <c>bool</c> rather than a number because the callers that have one have
+    /// only that: BIFF's <c>bls</c> is 400 or 700 in every file of the corpus, and a chart's
+    /// model carries the answer as <see cref="Paperless.Core.Charts.ChartPlot.IsTitleBold"/>. The
+    /// resolver underneath takes a full weight and the cache is keyed on it, so widening this
+    /// later costs nothing.
+    /// </remarks>
+    /// <param name="family">The family name, or null for the default.</param>
+    /// <param name="bold">Whether the family's bold face is wanted.</param>
+    public static SheetFace? ForFamily(string? family, bool bold)
         => Cache.GetOrAdd(
-            (string.IsNullOrWhiteSpace(family) ? DefaultFamily : family, 400, false), Load);
+            // Unknown class: a chart's font is named directly and carries no generic-family
+            // declaration for a fallback to honour, unlike a cell's, which comes from a
+            // SpreadsheetML <font> that may state <family val="N"/>.
+            (string.IsNullOrWhiteSpace(family) ? DefaultFamily : family, bold ? 700 : 400, false,
+             FontFamilyClass.Unknown),
+            Load);
 
     /// <summary>
     /// How much of a twip a digit width has to carry before it is taken as the next one up.
@@ -131,37 +160,57 @@ internal static class SheetFonts
     /// <strong>Fitted, with no mechanism behind it, and said so deliberately.</strong> LibreOffice
     /// reports a digit width as a whole number of twips off its reference device
     /// (<c>UnitConverter::finalizeImport</c> asks <c>XFont::getCharWidth</c>, which returns an
-    /// integer), and the device's own quantisation decides the last one. Neither truncating nor
-    /// rounding reproduces all nine faces that have been round-tripped through LibreOffice
-    /// 24.2.7.2 and read back out of the <c>style:column-width</c> it wrote — truncating misses
-    /// two and rounding misses two others. Every one of the nine is satisfied by truncating
-    /// unless the fraction exceeds a threshold anywhere in <c>(0.64, 0.70]</c>, and this is the
-    /// middle of that band.
+    /// integer), and the device's own quantisation decides the last one. No simple rule
+    /// reproduces every case: swept over 205 points — five faces at every half point from 6 to
+    /// 26 — truncating agrees with the installed 26.2.4.2 on 119, rounding half up on 194, and
+    /// the fractional part alone cannot decide it, since the reference truncates a fraction as
+    /// large as 0.521 and carries one as small as 0.440.
     /// </para>
     /// <para>
-    /// Exact metric → what LibreOffice writes: Liberation Sans 111.23 → 111, 122.35 → 122,
-    /// 133.48 → 133; Carlito 111.50 → 111 and 121.64 → <em>121</em>; Liberation Serif
-    /// 100.00 → 100; Liberation Mono 120.02 → 120; DejaVu Sans 139.97 → <em>140</em> and
-    /// 152.70 → <em>153</em>. The four italicised are the ones a single rule gets wrong.
+    /// <strong>The constant is chosen against the configurations the corpus actually uses, not
+    /// against that sweep.</strong> Enumerating the default font of all 171 sheets documents
+    /// gives seventeen distinct family/size pairs, and a one-cell probe rendered through the
+    /// installed binary gives the reference's digit width for each. Written as "truncate unless
+    /// the fraction exceeds <c>c</c>", they constrain it to <c>0.5039 &lt;= c &lt; 0.6406</c>:
+    /// Carlito 11 pt is 111.5039 and must truncate to 111 (the default font of 65 documents),
+    /// while Carlito 12 pt is 121.6406 and must carry to 122 (7 documents). This is the midpoint
+    /// of that window, and it also scores 190 of 205 on the independent sweep above.
     /// </para>
     /// <para>
-    /// <strong>What makes it worth having is the corpus, not the nine.</strong> Swept over the
-    /// whole 171-document sheets track against the truncating rule, six documents moved and
-    /// <em>every one of them improved</em>: <c>dragon-175066A.xlsx</c> 14 pages to 13 and into
-    /// parity, and five word counts closer to the reference, four of them exact —
-    /// 345 → 344 of 344, 799 → 798 of 798, 4176 → 4184 of 4184, 6257 → 6246 of 6245, and
-    /// 73991 → 73750 of 73542. No page count moved anywhere else and nothing regressed.
+    /// Exact metric → what 26.2.4.2 writes: Liberation Sans 111.23 → 111, 122.35 → 122,
+    /// 133.48 → 133; Carlito 111.50 → 111 and 121.64 → 122; Liberation Serif 100.00 → 100;
+    /// Liberation Mono 120.02 → 120; DejaVu Sans 127.25 → 127, 139.97 → 140 and 152.70 → 153.
+    /// All ten hold at this value.
+    /// </para>
+    /// <para>
+    /// <strong>Rounding half up is the obvious alternative and is wrong here.</strong> It scores
+    /// better on the uniform sweep, but it takes Carlito 11 pt to 112 — and Carlito 11 pt is the
+    /// default font of 65 corpus documents against Carlito 12 pt's 7. It would break fifty-one
+    /// passing documents to fix six.
+    /// </para>
+    /// <para>
+    /// <strong>This constant was 0.67, and that was right for LibreOffice 24.2.7.2.</strong> The
+    /// figure it was fitted to recorded Carlito 121.64 → <em>121</em>; the installed 26.2.4.2
+    /// answers 122 for the same face at the same size, measured off a filled cell's rectangle in
+    /// its own PDF. Ground truth moved, so the old window <c>(0.64, 0.70]</c> and the new one no
+    /// longer overlap. Any figure here calibrated against 24.2.7.2 needs re-measuring before it
+    /// is relied on, and this is one of them.
     /// </para>
     /// <para>
     /// A one-twip column width is normally invisible, which is why truncation survived several
-    /// rounds. It stops being invisible on a fit-to-page sheet: <c>ScPrintFunc::CalcZoom</c>
-    /// bisects on <em>integer</em> percentages, so a 0.7% error in the total print width is
-    /// enough to move the answer a whole percent and take a page with it. That is exactly
-    /// <c>dragon-175066A.xlsx</c>, whose default font 宋体 fontconfig resolves to DejaVu Sans on
-    /// this machine, and whose zoom was 38 against LibreOffice's 37.
+    /// rounds. It stops being invisible twice over. On a fit-to-page sheet
+    /// <c>ScPrintFunc::CalcZoom</c> bisects on <em>integer</em> percentages, so a 0.7% error in
+    /// the total print width moves the answer a whole percent and takes a page with it — that is
+    /// <c>dragon-175066A.xlsx</c>, default font 宋体, resolved to DejaVu Sans here, whose zoom was
+    /// 38 against LibreOffice's 37 (unaffected by this change: 152.70 carries at both constants).
+    /// And it decides how many columns fit a page when the fit is close —
+    /// <c>sectors-defense-and-aerospace.xlsx</c> is 40 columns wide in Calibri 12, where one twip
+    /// per digit is 2 pt per column and the difference between two reference columns needing
+    /// 488.07 pt of a 487.73 pt page and two of ours needing 484.0 pt. That is one column per
+    /// page against two, and 227 pages against 449.
     /// </para>
     /// </remarks>
-    private const double DigitWidthCarry = 0.67;
+    private const double DigitWidthCarry = 0.57;
 
     /// <summary>
     /// What one digit of a workbook's default font is worth, in twips.
@@ -190,7 +239,7 @@ internal static class SheetFonts
 
         SheetFace? face = Cache.GetOrAdd(
             (string.IsNullOrWhiteSpace(font.Family) ? DefaultFamily : font.Family,
-             font.Weight, font.IsItalic),
+             font.Weight, font.IsItalic, font.DeclaredClass),
             Load);
 
         if (face is null || font.Size <= Length.Zero)
@@ -203,18 +252,25 @@ internal static class SheetFonts
         return twips - whole > DigitWidthCarry ? whole + 1 : whole;
     }
 
-    private static SheetFace? Load((string Family, int Weight, bool Italic) key)
+    private static SheetFace? Load(
+        (string Family, int Weight, bool Italic, FontFamilyClass Declared) key)
     {
         try
         {
             lock (Gate)
             {
                 SystemFontResolver resolver = Shared;
+
+                // The declared family only, not the declared pitch — the same half of the
+                // declaration the DOCX and DOC paths pass, and for the same reason: only roman and
+                // swiss were measured to move LibreOffice's answer.
                 FontReference reference = resolver.Resolve(
-                    new FontRequest(key.Family, key.Weight, key.Italic));
+                    new FontRequest(
+                        key.Family, key.Weight, key.Italic, DeclaredClass: key.Declared));
                 OpenTypeFace face = resolver.LoadOpenType(reference);
 
-                return new SheetFace(face, reference, LineSpacing.Resolve(face));
+                return new SheetFace(
+                    face, reference, LineSpacing.Resolve(face, MetricGrid.Spreadsheet));
             }
         }
         catch (Exception exception) when (exception is Core.MalformedDocumentException
@@ -275,7 +331,8 @@ internal static class SheetFonts
             FontReference? reference = Fallback.ReferenceFor(resolved);
             return reference is null
                 ? null
-                : new SheetFace(resolved, reference, LineSpacing.Resolve(resolved));
+                : new SheetFace(
+                    resolved, reference, LineSpacing.Resolve(resolved, MetricGrid.Spreadsheet));
         });
     }
 

@@ -1,6 +1,7 @@
 using Paperless.Core.Geometry;
 using Paperless.Core.Graphics;
 using Paperless.Core.Units;
+using Paperless.Vector;
 
 namespace Paperless.Spreadsheets.Layout;
 
@@ -114,13 +115,99 @@ internal sealed class SheetPageGraphics(SheetLayout sheet, double scale)
             // case where the raster is the fallback. `VectorImage.Draw` maps the picture's own frame
             // onto the box and clips to it — the same stretch `DrawImage` gives a raster, and not the
             // extent of the picture's ink, which would put a logo with margins outside its anchor.
-            if (drawing.Vector is { } vector && !vector.Value.IsEmpty) vector.Value.Draw(sink, box);
-            else if (drawing.Image is { } image) sink.DrawImage(image, box);
+            if (drawing.Vector is { } vector && !vector.Value.IsEmpty)
+                DrawPicture(sink, box, drawing.Crop, vector, null, drawing.Opacity);
+            else if (drawing.Image is { } image)
+                DrawPicture(sink, box, drawing.Crop, null, image, drawing.Opacity);
             else if (drawing.Chart is { } chart) SheetChart.Draw(sink, chart, box, scale);
 
             // Not an `else`: a shape may carry both a picture and a caption, and the text goes
             // over the fill rather than instead of it.
             if (drawing.Text is { } text) SheetShapePainter.Draw(sink, text, box, scale);
+        }
+    }
+
+    /// <summary>
+    /// Draws a drawing's picture into its box, cropped when the shape says so.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>A crop is a larger destination plus a clip, and the clip is the half that was
+    /// missing here.</strong> The surviving fraction of the picture is what fills the anchor, so
+    /// the whole of it is correspondingly bigger and everything outside the anchor is cut off.
+    /// Nothing on this path clipped a picture before — <c>DrawImage</c> was called bare — so the
+    /// larger rectangle without the clip would not crop a logo, it would spill the whole of it
+    /// across the sheet.
+    /// </para>
+    /// <para>
+    /// The clip is taken only when there is a crop. It is a no-op otherwise for both backends,
+    /// since a raster is stretched onto exactly the box and <c>VectorImage.Draw</c> clips to its
+    /// destination itself; making it unconditional would put a <c>q</c>/<c>W n</c>/<c>Q</c> pair
+    /// into the PDF for every picture in the corpus and change every one of those renderings for
+    /// no reason at all.
+    /// </para>
+    /// </remarks>
+    private static void DrawPicture(
+        IDrawingSink sink,
+        DocRect box,
+        PictureCropFractions crop,
+        Lazy<VectorImage>? vector,
+        RasterImage? image,
+        double opacity)
+    {
+        DocRect destination = crop.Apply(box);
+
+        if (destination == box)
+        {
+            PaintPicture(sink, box, vector, image, opacity);
+            return;
+        }
+
+        sink.Save();
+        try
+        {
+            sink.ClipPath(GraphicsPath.Rectangle(box));
+            PaintPicture(sink, destination, vector, image, opacity);
+        }
+        finally
+        {
+            sink.Restore();
+        }
+    }
+
+    /// <summary>Puts whichever of the two pictures there is into a rectangle.</summary>
+    /// <remarks>
+    /// A raster takes the opacity on the draw itself, which is one <c>gs</c> and no group; a
+    /// display list has to be composited as a whole, because a constant alpha applied to each of
+    /// its members would show every overlap inside the picture at full strength. That is the same
+    /// distinction <c>IDrawingSink.BeginTransparencyGroup</c> exists for, and the group is opened
+    /// only when there is something to fade — an unconditional one would put a form XObject round
+    /// every metafile in the corpus.
+    /// </remarks>
+    private static void PaintPicture(
+        IDrawingSink sink, DocRect where, Lazy<VectorImage>? vector, RasterImage? image,
+        double opacity)
+    {
+        if (vector is null)
+        {
+            if (image is not null) sink.DrawImage(image, where, opacity);
+            return;
+        }
+
+        if (opacity >= 1)
+        {
+            vector.Value.Draw(sink, where);
+            return;
+        }
+
+        sink.BeginTransparencyGroup(opacity);
+        try
+        {
+            vector.Value.Draw(sink, where);
+        }
+        finally
+        {
+            sink.EndTransparencyGroup();
         }
     }
 

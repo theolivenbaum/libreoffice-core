@@ -139,6 +139,44 @@ public sealed class BalancedColumnTests
     }
 
     /// <summary>
+    /// A paragraph gap hanging off the bottom of a column does not make the band too short.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The two questions the search asks are different and used to be one. <em>Whether</em> a band holds
+    /// the section is about its lines: a column that took every line offered has fitted, and the fitting
+    /// rules never test the following space-after against the column bottom either. <em>How tall</em> the
+    /// section is then does count that gap — which is what
+    /// <see cref="TheBoxCountsTheLastParagraphsSpaceAfter"/> pins.
+    /// </para>
+    /// <para>
+    /// Asking the first question with the gap included rejects nearly every candidate, since the gap only
+    /// fits when the content happens to end flush, so the bisection's lower bound is raised by the first
+    /// such rejection and it settles on the tallest band it tried. Here that is six paragraphs against
+    /// two; measured on <c>150_5300_13_chg10.doc</c> it was a section 46 pt too tall, which pushed the
+    /// last row of its opening table onto a page of its own.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void AParagraphGapHangingOffAColumnDoesNotShortenTheBand()
+    {
+        // Eight paragraphs of one line each, gapped by more than a line. Which is what it takes: with no
+        // gap at all, or with a gap the fill happens to end flush against, the two rules agree.
+        const int Stretch = 8;
+        LaidOutPage page = Paginate(
+            balances: true, everyGap: Length.FromPoints(14), stretch: Stretch)[0];
+
+        int first = page.Lines.Count(line =>
+            line.Column == 0 && line.ParagraphIndex >= SectionStart
+            && line.ParagraphIndex < SectionStart + Stretch);
+
+        int second = page.Lines.Count(line => line.Column == 1);
+
+        (first + second).ShouldBe(Stretch);
+        Math.Abs(first - second).ShouldBeLessThanOrEqualTo(1);
+    }
+
+    /// <summary>
     /// A section whose trailing space cannot fit in <em>any</em> band still ends the search.
     /// </summary>
     /// <remarks>
@@ -232,16 +270,19 @@ public sealed class BalancedColumnTests
     /// <summary>
     /// Three sections on one page: a single-column opening, a two-column stretch, a single-column close.
     /// </summary>
-    private static List<LaidOutPage> Paginate(bool balances, Length spaceAfter = default)
+    private static List<LaidOutPage> Paginate(
+        bool balances, Length spaceAfter = default, Length everyGap = default, int stretch = SectionLines)
     {
         List<PageBlock> blocks = [];
 
         for (int i = 0; i < SectionStart; i++) blocks.Add(Paragraph($"Opening {i}", 0));
 
-        for (int i = 0; i < SectionLines; i++)
+        for (int i = 0; i < stretch; i++)
         {
             blocks.Add(Paragraph(
-                $"Stretch {i}", 1, i == SectionLines - 1 ? spaceAfter : default));
+                $"Stretch {i}",
+                1,
+                i == stretch - 1 && spaceAfter > Length.Zero ? spaceAfter : everyGap));
         }
 
         blocks.Add(Paragraph("Closing", 2));

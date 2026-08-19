@@ -16,8 +16,16 @@ namespace Paperless.Text.Layout;
 /// The character filling that blank, or <c>'\0'</c> for none. It belongs to the stop rather than to the
 /// text, which is why it is carried on the stretch the stop placed instead of on the paragraph.
 /// </param>
+/// <param name="Deferred">
+/// True when the stop that placed the stretch is one whose blank could only be measured <em>after</em>
+/// the stretch was — a right, centred or decimal stop, all of which need the width of the text that
+/// follows them before they know how far to advance. Writer settles exactly those in
+/// <c>SwTabPortion::PostFormat</c> rather than in <c>PreFormat</c>, so the text after such a tab is
+/// fitted to the line while the tab is still one twip wide. See <see cref="TabRuler.WidthOf"/>.
+/// </param>
 public readonly record struct TabbedSegment(
-    int Start, int End, Length Left, Length Width, Length GapLeft = default, char Leader = '\0')
+    int Start, int End, Length Left, Length Width, Length GapLeft = default, char Leader = '\0',
+    bool Deferred = false)
 {
     /// <summary>Where the segment ends.</summary>
     public Length Right => Left + Width;
@@ -79,13 +87,13 @@ public static class TabRuler
     /// <param name="isFirstLine">
     /// True for the paragraph's first line. It decides where the line's left edge sits relative to the
     /// stops, which differs by the first-line indent — and a hanging one puts the edge <em>before</em> the
-    /// stops' own origin, which is the case <see cref="ParagraphFormat.NextTabStop"/> treats specially.
+    /// stops' own origin, which is the case <see cref="ParagraphFormat.NextTabStop(Length)"/> treats specially.
     /// </param>
     /// <param name="rightEdge">
-    /// Where the line's right boundary is, in the same coordinates as the stops, or null to let a stop
-    /// stand wherever it was declared. See <see cref="Place"/>: a right, centred or decimal stop past this
-    /// is honoured <em>at</em> it instead, which is the difference between a table-of-contents entry on
-    /// one line and the same entry broken across four.
+    /// Where the text frame's right boundary is, in the same coordinates as the stops, or null to let a
+    /// stop stand wherever it was declared. The <em>frame's</em> edge rather than the line's, so a
+    /// paragraph's right indent does not pull it in. See <see cref="Place"/>: a right, centred or decimal
+    /// stop past this is honoured <em>at</em> it instead.
     /// </param>
     public static List<TabbedSegment> Segments(
         string text,
@@ -128,8 +136,9 @@ public static class TabRuler
             // "no leader" on a stop that has one syntactically.
             char leader = pending is { Leader: var fill and not ' ' } ? fill : '\0';
 
-            segments.Add(
-                new TabbedSegment(at, stretchEnd, left - origin, width, pen - origin, leader));
+            segments.Add(new TabbedSegment(
+                at, stretchEnd, left - origin, width, pen - origin, leader,
+                Deferred: pending is { Alignment: not TabAlignment.Left }));
             pen = left + width;
 
             if (stretchEnd >= last) break;
@@ -150,6 +159,17 @@ public static class TabRuler
     /// <param name="widthBetween">Measures a range of the text, tabs excluded.</param>
     /// <param name="isFirstLine">As <see cref="Segments"/>'s.</param>
     /// <param name="rightEdge">As <see cref="Segments"/>'s.</param>
+    /// <param name="countsDeferredStretch">
+    /// True to count the blank a trailing right, centred or decimal stop advanced across, which is the
+    /// width the line will actually be drawn at. False to leave it out, which is the width the line is
+    /// <em>fitted</em> by: Writer decides whether the text after such a stop fits while the tab is still
+    /// one twip wide and only settles its width afterwards, in <c>SwTabPortion::PostFormat</c>
+    /// (<c>sw/source/core/text/txttab.cxx</c>). The distinction is the difference between a table of
+    /// contents entry whose page number sits at a stop past the paragraph's own right indent — which is
+    /// where Writer puts it — and the same entry broken across four lines because the stretch was
+    /// counted against a limit it was never tested against. Only the last stretch can be affected: an
+    /// earlier stop is settled by the tab that follows it, before that tab's own text is fitted.
+    /// </param>
     public static Length WidthOf(
         string text,
         int start,
@@ -157,12 +177,182 @@ public static class TabRuler
         ParagraphFormat format,
         Func<int, int, Length> widthBetween,
         bool isFirstLine = true,
-        Length? rightEdge = null)
+        Length? rightEdge = null,
+        bool countsDeferredStretch = true)
     {
         List<TabbedSegment> segments =
             Segments(text, start, end, format, widthBetween, isFirstLine, rightEdge);
 
-        return segments.Count == 0 ? Length.Zero : segments[^1].Right;
+        if (segments.Count == 0) return Length.Zero;
+
+        TabbedSegment last = segments[^1];
+
+        if (!countsDeferredStretch
+            && ForgivesTrailingTab(segments, text, format, isFirstLine, rightEdge))
+        {
+            return last.GapLeft;
+        }
+
+        return countsDeferredStretch || !last.Deferred ? last.Right : last.GapLeft + last.Width;
+    }
+
+    /// <summary>
+    /// True when the line ends on a tab the paragraph's last character, landing past the frame's edge —
+    /// the one tab Writer refuses to break a line for.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A left or default stop past the frame <em>does</em> break the line, and
+    /// <see cref="Place"/> deliberately leaves it unclamped for that reason. <c>SwTabPortion::PreFormat</c>
+    /// then takes the break back for exactly one case: <c>bFull = false</c> where
+    /// <c>bTabCompat &amp;&amp; bAtParaEnd &amp;&amp; GetTabPos() &gt;= nTextFrameWidth</c>
+    /// (<c>sw/source/core/text/txttab.cxx</c>:448-458). <c>bAtParaEnd</c> is
+    /// <c>rInf.GetIdx() + GetLen() == rInf.GetText().getLength()</c>: the tab is the paragraph's final
+    /// character, so nothing follows it that a second line could hold. Every Word document has
+    /// <c>TAB_COMPAT</c> — the WW8 filter sets it at <c>sw/source/filter/ww8/ww8par.cxx</c>:1949 and
+    /// writerfilter with it — so for word processing the compatibility half is always satisfied.
+    /// </para>
+    /// <para>
+    /// <strong>The rescue is unreachable for a file writerfilter read</strong>, and that is
+    /// <see cref="ParagraphFormat.TabsOverSpacing"/>: the branch above it returns <c>bFull = true</c> for
+    /// a left stop at or past the frame and never falls through (<c>txttab.cxx</c>:429-440). So this is a
+    /// <c>.doc</c> and <c>.odt</c> rule, not a <c>.docx</c> one — measured, and the measurement is what
+    /// found it. Applying it to every word-processing document instead took
+    /// <c>19-06 Assistive Technology TAB Final - 508.docx</c> (words/done-012) from 8 pages to 7, by
+    /// keeping a row of form-field checkboxes over stops at 1980 to 9936 twips on one line.
+    /// </para>
+    /// <para>
+    /// Measured on <c>150_5300_13_chg10.doc</c> (words/table-001), whose figure-page footer reads
+    /// <c>Chap 4</c>, tab, tab, the page-number field, tab, over stops at 3 in centred and 7 in right in a
+    /// text area exactly 7 in wide. The second tab lands the number on the right stop at the frame's edge;
+    /// the third has no stop left to find, takes the next default interval at 7.5 in, and overran the line.
+    /// We broke there and put the page number on a second line at the left margin — 4 pages of 78 —
+    /// where LibreOffice keeps the footer one line high. A two-line footer is a shorter body, and on
+    /// page 36 that was enough to push a figure's caption onto a page of its own.
+    /// </para>
+    /// <para>
+    /// <strong>The rescue is that tab's alone.</strong> <c>PreFormat</c> runs once per tab portion and
+    /// <c>bAtParaEnd</c> is a statement about <em>that</em> tab, so a line ending in six tabs is six
+    /// separate decisions and only the sixth can be forgiven. An earlier one that reached the line's
+    /// boundary has already ended the line — see <see cref="BreakAt"/>, which is the other half of this
+    /// rule and the half that decides where.
+    /// </para>
+    /// <para>
+    /// Only the <em>fitting</em> width, never the placed one. Writer sets the tab portion's width to
+    /// <c>GetTabPos() - rInf.X()</c> before it decides <c>bFull</c> and does not take it back with the
+    /// break, so the line really is that wide once drawn — it simply is not a reason to break. The
+    /// stretch the tab opened holds no characters, so nothing is drawn out there either way.
+    /// </para>
+    /// </remarks>
+    private static bool ForgivesTrailingTab(
+        List<TabbedSegment> segments,
+        string text,
+        ParagraphFormat format,
+        bool isFirstLine,
+        Length? rightEdge)
+    {
+        // Two at least: the first stretch is the line's own start, which no tab introduced.
+        if (segments.Count < 2 || rightEdge is not { } edge) return false;
+
+        // A document Word 2013 or later wrote never reaches the rescue: PreFormat's TabOverSpacing
+        // branch has already set bFull and broken out.
+        if (format.TabsOverSpacing) return false;
+
+        TabbedSegment last = segments[^1];
+
+        // A right, centred or decimal stop is settled in PostFormat and is already forgiven above; this
+        // is the left and default case, which PreFormat breaks for.
+        if (last.Deferred || !last.IsEmpty || last.Start < text.Length) return false;
+
+        // The stops are stated from the paragraph's tab origin and the stretch from the line's own start.
+        return last.Left + format.TabLineOffset(isFirstLine) >= edge;
+    }
+
+    /// <summary>
+    /// The index of the tab a line starting at a position has to end before, or null when no tab ends it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>A tab ends a line at itself, not at the nearest break opportunity behind it.</strong>
+    /// Writer builds a line as a chain of portions in document order, and a tab portion that finds
+    /// itself at or past the line's boundary sets <c>bFull</c>, zeroes its own width and length and
+    /// drops the rest of the chain (<c>SwTabPortion::PreFormat</c>,
+    /// <c>sw/source/core/text/txttab.cxx</c>:462-476) — so the line ends immediately in front of the
+    /// tab and the tab itself opens the next one. A width-driven filler cannot express that: it asks
+    /// the break iterator where a line may end, and between <c>Chap 2</c> and six tabs the only
+    /// opportunity is the space, so the whole overrun is charged to the one word in front of it.
+    /// </para>
+    /// <para>
+    /// Measured on <c>150_5300_13_chg12.doc</c> (words/pagination-002), whose <c>Chap 2</c> footer is
+    /// exactly that line: stops at 3 in centred and 6 in right, a 0.25 in default interval, a 7 in text
+    /// area with 0.25 in of end indent, so the six tabs land at 216, 432, 450, 468, 486 and 504 pt
+    /// against a line boundary of 486. The fifth reaches it — <c>bFull</c> is
+    /// <c>rInf.Width() &lt;= rInf.X() + PrtWidth()</c>, inclusive — and is not the paragraph's last
+    /// character, so Writer ends the line there and the foot is two lines high. Breaking at the space
+    /// instead gave three lines and <c>Chap</c> alone on the first.
+    /// </para>
+    /// <para>
+    /// The boundary is the <em>line's</em>, <c>rInf.Width()</c>, and not the frame's — the two differ
+    /// by the paragraph's end indent, and the frame's is what <paramref name="rightEdge"/> carries for
+    /// <see cref="Place"/>'s benefit.
+    /// </para>
+    /// <para>
+    /// A tab at the line's own start never breaks it: <c>PreFormat</c>'s <c>bFull</c> arm fills the
+    /// line with it rather than opening an empty one (<c>txttab.cxx</c>:464-471), and a rule that
+    /// broke there would not terminate. Past that tab <c>rInf.X()</c> is the line's whole width, which
+    /// is the case <c>txttab.cxx</c>:428 hands to <c>PostFormat</c> — so nothing after it breaks the
+    /// line either, and this returns null for such a line.
+    /// </para>
+    /// </remarks>
+    /// <param name="text">The paragraph's text.</param>
+    /// <param name="start">Where the line starts.</param>
+    /// <param name="format">The paragraph's stops and default interval.</param>
+    /// <param name="widthBetween">Measures a range of the text, tabs excluded.</param>
+    /// <param name="isFirstLine">As <see cref="Segments"/>'s.</param>
+    /// <param name="lineEdge">
+    /// The line's own right boundary, in the coordinates the stops are stated in.
+    /// </param>
+    /// <param name="rightEdge">As <see cref="Segments"/>'s: the frame's edge, for the aligned stops.</param>
+    public static int? BreakAt(
+        string text,
+        int start,
+        ParagraphFormat format,
+        Func<int, int, Length> widthBetween,
+        bool isFirstLine,
+        Length lineEdge,
+        Length? rightEdge)
+    {
+        ArgumentNullException.ThrowIfNull(text);
+        ArgumentNullException.ThrowIfNull(format);
+
+        List<TabbedSegment> segments =
+            Segments(text, start, text.Length, format, widthBetween, isFirstLine, rightEdge);
+        Length origin = format.TabLineOffset(isFirstLine);
+
+        for (int index = 1; index < segments.Count; index++)
+        {
+            TabbedSegment segment = segments[index];
+
+            // A right, centred or decimal stop is settled in PostFormat, with the text after it already
+            // fitted to the line, and never sets bFull.
+            if (segment.Deferred || segment.Left + origin < lineEdge) continue;
+
+            // The tab that opened the stretch. One at the line's own start is forced onto it.
+            int tab = segment.Start - 1;
+            if (tab <= start) return null;
+
+            // The paragraph's final tab, which TAB_COMPAT forgives for a document writerfilter did
+            // not read.
+            if (index == segments.Count - 1
+                && ForgivesTrailingTab(segments, text, format, isFirstLine, rightEdge))
+            {
+                return null;
+            }
+
+            return tab;
+        }
+
+        return null;
     }
 
     /// <summary>True when a range holds a tab, and so needs any of this.</summary>
@@ -187,17 +377,19 @@ public static class TabRuler
     /// its text. A stop already behind the pen cannot be honoured at all, so the text simply continues.
     /// </remarks>
     /// <remarks>
-    /// A right, centred or decimal stop declared past the line's right boundary is honoured <em>at</em>
-    /// the boundary instead. Writer says so in one line and says why in the comment above it —
-    /// <em>"If the tab position is larger than the right margin, it gets scaled down by default"</em>,
+    /// A right, centred or decimal stop declared past the boundary is honoured <em>at</em> the boundary
+    /// instead. Writer says so in one line and says why in the comment above it — <em>"If the tab
+    /// position is larger than the right margin, it gets scaled down by default"</em>,
     /// <c>SwTabPortion::PostFormat</c>, <c>sw/source/core/text/txttab.cxx</c>:503, where
-    /// <c>nRight = std::min(GetTabPos(), rInf.Width())</c> unless the document asked for
-    /// <c>TabOverMargin</c>. Leaving it out is not a small difference: a table-of-contents style whose
-    /// dotted right stop sits at the page's text width, on a paragraph that also carries a right indent,
-    /// has its stop a few hundred twips past the line's own edge, and every entry then breaks into a line
-    /// for its number, a line for its title, a line of leader dots and a line for its page.
-    /// A <em>left</em> stop past the boundary is deliberately not clamped: Writer breaks the line there
-    /// instead (<c>PreFormat</c>, same file, sets <c>bFull</c>), which is what happens here already.
+    /// <c>nRight = std::min(GetTabPos(), rInf.GetTextFrame()-&gt;getFrameArea().Right())</c> for the
+    /// <c>TabOverSpacing</c> setting every writerfilter document carries, and
+    /// <c>std::min(GetTabPos(), rInf.Width())</c> only for a document carrying neither compatibility
+    /// flag. So the boundary is the <em>frame's</em> right edge and not the line's: the paragraph's own
+    /// right indent does not move it, and a stop past that indent is honoured out in the indent. Callers
+    /// pass that edge; see <see cref="ParagraphFormat.ClampsTabsAtLineEdge"/> for what it costs to
+    /// confuse the two. A <em>left</em> stop past the boundary is deliberately not clamped: Writer
+    /// breaks the line there instead (<c>PreFormat</c>, same file, sets <c>bFull</c>), which is what
+    /// happens here already.
     /// </remarks>
     private static Length Place(
         TabStop stop,

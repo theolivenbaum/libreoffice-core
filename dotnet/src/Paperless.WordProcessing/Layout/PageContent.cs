@@ -5,6 +5,7 @@ using Paperless.Text.Fonts;
 using Paperless.Text.Itemisation;
 using Paperless.Text.Layout;
 using Paperless.Text.Shaping;
+using Paperless.WordProcessing.Model;
 
 namespace Paperless.WordProcessing.Layout;
 
@@ -201,6 +202,18 @@ public sealed record PageParagraph : PageBlock
     public Length Tracking { get; init; }
 
     /// <summary>
+    /// How the paragraph's text is shaped where its runs say nothing else, once
+    /// <see cref="Tracking"/> has had its say.
+    /// </summary>
+    /// <remarks>
+    /// The uniform paragraph's own <see cref="PageRun.EffectiveShaping"/>. A paragraph set end to
+    /// end in one tracked style carries no runs at all — it is uniform by every test
+    /// <see cref="Runs"/> makes — so the rule has to be stated here as well or such a paragraph is
+    /// the one kind that escapes it.
+    /// </remarks>
+    public ShapingOptions EffectiveShaping => Shaping.WithTracking(Tracking);
+
+    /// <summary>
     /// The paragraph's runs, when its formatting is not uniform.
     /// </summary>
     /// <remarks>
@@ -220,16 +233,59 @@ public sealed record PageParagraph : PageBlock
     /// <summary>True when the paragraph's formatting varies across its text.</summary>
     public bool HasRuns => Runs.Count > 0;
 
+    private bool? _needsGlyphFallback;
+
     /// <summary>
-    /// The device grid the paragraph's fonts are measured through, or null to measure them exactly.
+    /// True when the paragraph's own face has no glyph for something in its own text.
     /// </summary>
     /// <remarks>
-    /// Null for every document but the few that ask to be laid out against a printer rather than against a
-    /// virtual device — see <see cref="MetricGrid"/>. Carried on the paragraph rather than passed down the
-    /// layout call chain because a header, a table cell and a text box all need the same answer and all
-    /// reach the layouter by different routes; the reader that knows the document's answer sets it once.
+    /// <para>
+    /// The uniform-paragraph shortcut — no runs, so measure the whole text in one face — is only
+    /// equivalent while that face can draw the text. The drawing pass cuts every paragraph by face
+    /// through <see cref="FontItemiser.Split"/> whether it has runs or not, so a uniform paragraph
+    /// holding a script its face lacks was <em>drawn</em> from a fallback face and <em>measured</em>
+    /// from the missing-glyph box of the face it asked for. The two disagree by whatever the two
+    /// faces' advances differ by, and the line breaks on the measurement.
+    /// </para>
+    /// <para>
+    /// Answering true sends the paragraph down the per-run path, which is the one that itemises by
+    /// face, so both sides make the same cut. Cached because pagination measures a paragraph once per
+    /// attempt at placing it and this walks the text.
+    /// </para>
     /// </remarks>
-    public MetricGrid? Metrics { get; init; }
+    public bool NeedsGlyphFallback
+        => _needsGlyphFallback ??=
+            Fallback is not null && FontItemiser.NeedsFallback(Text, Face);
+
+    private bool? _hasScriptSpace;
+
+    /// <summary>True when the paragraph holds a script change that opens a gap.</summary>
+    /// <remarks>
+    /// The second reason a uniform paragraph cannot take the single-face shortcut: that path measures
+    /// the text straight off one shaped run and has no prefix table to add a gap to, so a paragraph
+    /// mixing scripts has to be measured per run whether its formatting varies or not.
+    /// </remarks>
+    public bool HasScriptSpace
+        => _hasScriptSpace ??= AddsScriptSpace && ScriptSpacing.Boundaries(Text).Count > 0;
+
+    /// <summary>
+    /// The device grid the paragraph's fonts are measured through.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Defaults to <see cref="MetricGrid.Reference"/> rather than to nothing</b>, because Writer has no
+    /// unquantised path: it formats against a virtual reference device at 8640 dpi in twips, and every
+    /// vertical metric is rounded onto that grid and back. The few documents that ask to be laid out
+    /// against a printer instead get <see cref="MetricGrid.Printer"/>. Null is reserved for a caller that
+    /// genuinely wants exact scaling, which no Writer reader is.
+    /// </para>
+    /// <para>
+    /// Carried on the paragraph rather than passed down the layout call chain because a header, a table
+    /// cell and a text box all need the same answer and all reach the layouter by different routes; the
+    /// reader that knows the document's answer sets it once.
+    /// </para>
+    /// </remarks>
+    public MetricGrid? Metrics { get; init; } = MetricGrid.Reference;
 
     /// <summary>
     /// Where to look for a face when the paragraph's own has no glyph for a character, or null to not look.
@@ -252,6 +308,17 @@ public sealed record PageParagraph : PageBlock
     public IGlyphFallbackResolver? Fallback { get; init; }
 
     /// <summary>
+    /// Whether a script change with East Asian text on one side opens Writer's extra gap.
+    /// </summary>
+    /// <remarks>
+    /// Writer's <c>SvxScriptSpaceItem</c> — "add space between Asian and Western text" — which the
+    /// Word filters turn on and ODF carries its own value for. Beside <see cref="Metrics"/> and
+    /// <see cref="Fallback"/>, set by the same readers for the same reason. See
+    /// <see cref="ScriptSpacing"/> for the rule and its two exclusions.
+    /// </remarks>
+    public bool AddsScriptSpace { get; init; }
+
+    /// <summary>
     /// True when a tab or a run of spaces must not make a line taller, which is what Word does.
     /// </summary>
     /// <remarks>
@@ -270,6 +337,18 @@ public sealed record PageParagraph : PageBlock
     /// </para>
     /// </remarks>
     public bool BlanksAreTransparentToHeight { get; init; }
+
+    /// <summary>
+    /// True when this paragraph's lines carry no margin line number and do not advance the count.
+    /// </summary>
+    /// <remarks>
+    /// <c>w:pPr/w:suppressLineNumbers</c>, and Writer's <c>SwFormatLineNumber::IsCount</c>. Both halves
+    /// matter and only one of them is obvious: a suppressed paragraph is skipped by the counter as well as
+    /// by the pen, so the line after it takes the number the line before it would have led to. On the
+    /// paragraph rather than in <see cref="LineNumbering"/> because it is stated per paragraph, and false
+    /// on all but a handful — see <see cref="LineNumbering"/> for the rest of the rule.
+    /// </remarks>
+    public bool SuppressesLineNumbers { get; init; }
 
     /// <summary>
     /// The direction its bidi resolution takes as its base.
@@ -388,8 +467,46 @@ public sealed record PageParagraph : PageBlock
     public bool LabelRaisesFirstLine => LabelExtent is not null;
 
     /// <summary>
-    /// The label's line box, when it is taller than the paragraph's own, and null otherwise.
+    /// The label's line box, when it reaches past the paragraph's own on either side of the baseline,
+    /// and null otherwise.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>A line is composed side by side, so the test has to be as well.</strong> Writer's
+    /// <c>SwLineLayout::CalcLine</c> keeps a running maximum ascent and a running maximum descent and
+    /// makes the line out of the two, so a portion that is <em>shorter overall</em> than the text beside
+    /// it still deepens the line when its descent alone is deeper. Asking only whether the label's whole
+    /// box or its ascent is bigger misses exactly that case, and it is not exotic: it is what a level
+    /// that names a different <em>face</em> at the <em>same</em> size does, which round 47 recorded as a
+    /// blind spot it could not see and could not act on.
+    /// </para>
+    /// <para>
+    /// Measured against the installed 26.2.4.2 by <c>dotnet/probes/words-b-01/labelshape.py</c>, a 12 pt
+    /// level over a 12 pt Liberation Serif item, reading the baseline-to-baseline gap to the paragraph
+    /// below:
+    /// </para>
+    /// <list type="table">
+    /// <item><description>
+    /// Liberation Mono label — ascent 9.99, descent 3.60 against the item's 11.20 and 2.60, so its
+    /// <em>box</em> is 13.59 against 13.80 and neither old term fires. LibreOffice's gap is 14.80 and
+    /// ours was 13.80: the whole of the label's extra 1.00 pt of descent was lost.
+    /// </description></item>
+    /// <item><description>
+    /// Caladea label — ascent 10.80, descent 3.00, box 13.80 exactly equal to the item's. LibreOffice
+    /// 14.20, ours 13.80.
+    /// </description></item>
+    /// <item><description>
+    /// Carlito (box 14.65, taller outright) and Liberation Sans (ascent 11.26, taller above) are the
+    /// controls this must not move, because the old gate already fired for both — and both matched
+    /// LibreOffice to the hundredth before and still do.
+    /// </description></item>
+    /// </list>
+    /// <para>
+    /// Nothing below this changes: once the extent is returned, <c>MeasuredParagraph.MeasureLine</c>
+    /// already folds the object into the line's ascent and descent separately. The defect was only ever
+    /// that a whole class of label never got that far.
+    /// </para>
+    /// </remarks>
     private (Length Height, Length Ascent)? LabelExtent
     {
         get
@@ -397,36 +514,52 @@ public sealed record PageParagraph : PageBlock
             if (Label is not { Text.Length: > 0 } label) return null;
 
             (Length height, Length ascent) = label.LineExtent(Metrics);
-            (Length own, Length ownAscent) = OwnExtent();
+            (Length own, Length ownAscent, Length ownDescent) = OwnExtent();
 
-            return height > own || ascent > ownAscent ? (height, ascent) : null;
+            return height > own || ascent > ownAscent || height - ascent > ownDescent
+                ? (height, ascent)
+                : null;
         }
     }
 
     /// <summary>The line box the paragraph's own face and size give, for the label to be compared against.</summary>
     /// <remarks>
+    /// <para>
     /// The paragraph's rather than the first line's runs', because this only has to decide whether the
     /// label can matter; <see cref="MeasuredParagraph.HeightOf"/> takes the maximum over whatever is
     /// really on the line, so a run taller than both still wins.
+    /// </para>
+    /// <para>
+    /// The descent is accumulated per face rather than taken as <c>height - ascent</c> at the end. Those
+    /// are different numbers whenever the tallest run and the highest-ascent run are not the same run,
+    /// and the difference would show up as a label that raises the line in a paragraph mixing two faces
+    /// and not in either face alone.
+    /// </para>
     /// </remarks>
-    private (Length Height, Length Ascent) OwnExtent()
+    private (Length Height, Length Ascent, Length Descent) OwnExtent()
     {
         Length height = Length.Zero;
         Length ascent = Length.Zero;
+        Length descent = Length.Zero;
+
+        void Fold(OpenTypeFace face, Length size)
+        {
+            LineMetrics metrics = LineSpacing.Resolve(face, Metrics, WriterLineBox.LeadingAboveText);
+            Length box = Length.FromTwips(metrics.ScaledLineHeight(size).Twips);
+            Length above = Length.FromTwips(metrics.ScaledAscent(size).Twips);
+
+            height = Length.Max(height, box);
+            ascent = Length.Max(ascent, above);
+            descent = Length.Max(descent, box - above);
+        }
 
         foreach (PageRun run in Runs)
         {
-            LineMetrics metrics = LineSpacing.Resolve(
-                run.Face, Metrics, WriterLineBox.LeadingAboveText);
-            Length size = run.MetricEmSize > Length.Zero ? run.MetricEmSize : run.EmSize;
-            height = Length.Max(height, Length.FromTwips(metrics.ScaledLineHeight(size).Twips));
-            ascent = Length.Max(ascent, Length.FromTwips(metrics.ScaledAscent(size).Twips));
+            Fold(run.Face, run.MetricEmSize > Length.Zero ? run.MetricEmSize : run.EmSize);
         }
 
-        LineMetrics own = LineSpacing.Resolve(Face, Metrics, WriterLineBox.LeadingAboveText);
-        return (
-            Length.Max(height, Length.FromTwips(own.ScaledLineHeight(EmSize).Twips)),
-            Length.Max(ascent, Length.FromTwips(own.ScaledAscent(EmSize).Twips)));
+        Fold(Face, EmSize);
+        return (height, ascent, descent);
     }
 
     /// <summary>
@@ -450,7 +583,7 @@ public sealed record PageParagraph : PageBlock
 
         return MeasuredParagraph.Measure(
             Text, runs, shaper: null, Itemisation, MeasurementObjects(), Metrics,
-            BlanksAreTransparentToHeight, WriterLineBox.LeadingAboveText);
+            BlanksAreTransparentToHeight, WriterLineBox.LeadingAboveText, AddsScriptSpace);
     }
 
     /// <summary>
@@ -474,7 +607,8 @@ public sealed record PageParagraph : PageBlock
     {
         if (LabelExtent is not (Length height, Length ascent)) return HasInlineObjects ? [.. InlineObjects] : null;
 
-        List<InlineObject> objects = [new InlineObject(0, Length.Zero, height, ascent)];
+        List<InlineObject> objects =
+            [new InlineObject(0, Length.Zero, height, ascent, RaisesTextHeight: true)];
         objects.AddRange(InlineObjects);
         return objects;
     }
@@ -681,6 +815,15 @@ public readonly record struct PageRun(
     /// <summary>One past the run's last character.</summary>
     public int End => Start + Length;
 
+    /// <summary>
+    /// The shaping this run is drawn with, once its tracking has had its say.
+    /// </summary>
+    /// <remarks>
+    /// The drawing half of <see cref="FormattedRun.EffectiveShaping"/>, and it has to be the same
+    /// answer: the measurement decided where the line broke on the strength of it.
+    /// </remarks>
+    public ShapingOptions EffectiveShaping => Shaping.WithTracking(Tracking);
+
     /// <summary>True when the run carries a rule under it, through it, or both.</summary>
     public bool IsDecorated => IsUnderlined || IsStruckThrough;
 
@@ -728,6 +871,10 @@ public readonly record struct PageRun(
 /// <paramref name="ColumnGap"/> the gap between them.
 /// </param>
 /// <param name="ColumnGap"><inheritdoc cref="Columns" path="/summary"/></param>
+/// <param name="ColumnRuler">
+/// The stated widths of those columns, already fitted to the body's measure, for a section that does not
+/// space them evenly; null for the ordinary case.
+/// </param>
 /// <remarks>
 /// <see cref="UpperSpace"/> is carried because a frame anchored to the paragraph is positioned from a
 /// point above the line: Writer's <c>SwAnchoredObjectPosition::GetTopForObjPos</c>
@@ -753,7 +900,8 @@ public readonly record struct PlacedLine(
     int Column = 0,
     Length UpperSpace = default,
     int Columns = 1,
-    Length ColumnGap = default)
+    Length ColumnGap = default,
+    ColumnRuler? ColumnRuler = null)
 {
     /// <summary>Where a frame anchored to this line's paragraph measures its offset from.</summary>
     /// <remarks>
@@ -822,6 +970,42 @@ public sealed record PlacedFlow
     /// </remarks>
     public Length Advance { get; init; }
 
+    /// <summary>
+    /// The proportional line spacing the flow's last paragraph would have handed to a paragraph after
+    /// it, which nothing collected because there is no paragraph after it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Held apart from <see cref="Advance"/> rather than folded into it because only some callers want
+    /// it. Inside a flow the gap is unambiguous — <see cref="ParagraphLeading"/> gives it to the line
+    /// below, Writer's newer builds keep it under the line above, and both put the same distance in the
+    /// same place — but at the flow's <em>end</em> the two answers differ by the whole gap, and which is
+    /// right depends on the frame: a running head grows by it, and a body's last paragraph on a page
+    /// does not, since the space belongs to the page break.
+    /// </para>
+    /// <para>
+    /// Measured against the installed 26.2.4.2 by <c>probes/words-w-pitch/mkhdr.py</c>, a two-paragraph
+    /// header whose second paragraph is empty, at <c>w:top</c> 720 and <c>w:header</c> 709, with the
+    /// body's first baseline reporting the header band:
+    /// </para>
+    /// <code>
+    ///   mark rPr   w:line       reference   this engine before
+    ///   10 pt      240 (100%)      774.04   774.05
+    ///   10 pt      480 (200%)      762.54   774.05
+    ///   12 pt      240 (100%)      771.74   771.75
+    ///   12 pt      360 (150%)      764.89   771.75
+    ///   12 pt      480 (200%)      757.99   771.75
+    ///   20 pt      480 (200%)      739.54   762.55
+    /// </code>
+    /// <para>
+    /// Every reference row is the header plus the last paragraph's own proportional gap; every "before"
+    /// row is the header without it, and moves with the size but not with the spacing. It is 13.75 pt on
+    /// <c>OM template for non-complex NCC operators</c>, whose running head ends with an empty 12 pt
+    /// paragraph at <c>w:line="480"</c> — enough to take one contents entry per page.
+    /// </para>
+    /// </remarks>
+    public Length TrailingLineSpacing { get; init; }
+
     /// <summary>True when nothing was laid out.</summary>
     public bool IsEmpty => Lines.Count == 0 && Tables.Count == 0;
 }
@@ -878,6 +1062,16 @@ public sealed record LaidOutPage
     public Length ColumnGap { get; init; }
 
     /// <summary>
+    /// The columns' own widths for a section that stated them one by one, already fitted to
+    /// <see cref="BodyArea"/>; null when the columns are even.
+    /// </summary>
+    /// <remarks>
+    /// Carried on the page for the reason <see cref="ColumnArea(int)"/> is: a renderer is handed a page,
+    /// and recomputing the ruler would mean giving it the section too.
+    /// </remarks>
+    public ColumnRuler? ColumnRuler { get; init; }
+
+    /// <summary>
     /// True when the page's section reads right to left, so that its first column is the rightmost.
     /// </summary>
     /// <remarks>
@@ -897,21 +1091,7 @@ public sealed record LaidOutPage
     /// </remarks>
     /// <param name="column">The column, counted from zero at the leading edge.</param>
     public DocRect ColumnArea(int column)
-    {
-        int columns = Math.Max(1, ColumnCount);
-        int at = Math.Clamp(column, 0, columns - 1);
-
-        Length gaps = ColumnGap * (columns - 1);
-        Length width = BodyArea.Width - gaps;
-        width = width > Length.Zero ? width / columns : BodyArea.Width;
-
-        // The leading edge is the right one in a right-to-left section, so its first column is the
-        // rightmost — see PageGeometry.IsRightToLeft, where it is measured.
-        if (IsRightToLeft) at = columns - 1 - at;
-
-        return new DocRect(
-            BodyArea.X + ((width + ColumnGap) * at), BodyArea.Y, width, BodyArea.Height);
-    }
+        => Area(ColumnCount, ColumnGap, ColumnRuler, column);
 
     /// <summary>
     /// The rectangle one line's own coordinates are relative to.
@@ -927,15 +1107,38 @@ public sealed record LaidOutPage
         if (line.Columns <= 1 && ColumnCount > 1) return ColumnArea(line.Column);
         if (line.Columns <= 1) return BodyArea;
 
-        int at = Math.Clamp(line.Column, 0, line.Columns - 1);
-        Length gaps = line.ColumnGap * (line.Columns - 1);
+        return Area(line.Columns, line.ColumnGap, line.ColumnRuler, line.Column);
+    }
+
+    /// <summary>
+    /// One column's rectangle inside <see cref="BodyArea"/>, from either description of the columns.
+    /// </summary>
+    /// <remarks>
+    /// The page and a line each state their own count, gap and ruler — a page can hold sections that
+    /// disagree about all three — and the arithmetic below is the same for both, so it lives here rather
+    /// than twice. A ruler whose count does not match is ignored, which is the lenient reading a section
+    /// that states widths for columns it does not have needs.
+    /// </remarks>
+    private DocRect Area(int count, Length gap, ColumnRuler? ruler, int column)
+    {
+        int columns = Math.Max(1, count);
+        int at = Math.Clamp(column, 0, columns - 1);
+
+        // The leading edge is the right one in a right-to-left section, so its first column is the
+        // rightmost — see PageGeometry.IsRightToLeft, where it is measured.
+        if (IsRightToLeft) at = columns - 1 - at;
+
+        if (ruler is { } stated && stated.Count == columns)
+        {
+            return new DocRect(
+                BodyArea.X + stated.OffsetOf(at), BodyArea.Y, stated.WidthAt(at), BodyArea.Height);
+        }
+
+        Length gaps = gap * (columns - 1);
         Length width = BodyArea.Width - gaps;
-        width = width > Length.Zero ? width / line.Columns : BodyArea.Width;
+        width = width > Length.Zero ? width / columns : BodyArea.Width;
 
-        if (IsRightToLeft) at = line.Columns - 1 - at;
-
-        return new DocRect(
-            BodyArea.X + ((width + line.ColumnGap) * at), BodyArea.Y, width, BodyArea.Height);
+        return new DocRect(BodyArea.X + ((width + gap) * at), BodyArea.Y, width, BodyArea.Height);
     }
 
     /// <summary>The lines on the page, in order.</summary>
@@ -950,6 +1153,25 @@ public sealed record LaidOutPage
     /// touches, each time with the rows that fit and its headings repeated.
     /// </remarks>
     public IReadOnlyList<PlacedTable> Tables { get; init; } = [];
+
+    /// <summary>
+    /// The margin line numbers beside the body's lines, empty for a document that asks for none.
+    /// </summary>
+    /// <remarks>
+    /// Filled by a pass over the finished pages rather than during the fill, because a margin number is
+    /// drawn outside the text area and so cannot move a line — see <see cref="LineNumbering"/>.
+    /// </remarks>
+    public IReadOnlyList<PageLineNumber> LineNumbers { get; init; } = [];
+
+    /// <summary>
+    /// The rule <see cref="LineNumbers"/> were produced by, or null when the page carries none.
+    /// </summary>
+    /// <remarks>
+    /// Beside them rather than folded into each, because the face, the size and the shaping are the same
+    /// for every number on every page of the document and a backend needs them once — a page carrying
+    /// forty-five numbers would otherwise carry forty-five copies of one font reference.
+    /// </remarks>
+    public LineNumbering? Numbering { get; init; }
 
     /// <summary>Which section's geometry the page was laid on.</summary>
     public int SectionIndex { get; init; }
@@ -989,6 +1211,12 @@ public sealed record LaidOutPage
     /// <para>
     /// Carried on the page rather than derived by a backend, because its position depends on where the notes
     /// ended up and only pagination knows that.
+    /// </para>
+    /// <para>
+    /// Both measurements above are Writer's, and a document a Word filter opened gets neither: a fixed two
+    /// inches, and a position 60 % of the way down a reservation taken from the default paragraph style.
+    /// See <see cref="PaginationOptions.UsesWordNoteSeparator"/>, which is where that switch lives and why
+    /// it is not simply part of <see cref="PaginationOptions.Word"/>.
     /// </para>
     /// </remarks>
     public DocRect? NoteSeparator { get; init; }

@@ -235,6 +235,86 @@ public sealed class TableRowSplitTests
         LinesIn(second[0], 1).ShouldBeGreaterThan(0, $"{name}: the rest of it carries over");
     }
 
+    /// <summary>
+    /// A row carrying a cell merged down into the rows after it moves whole rather than breaking —
+    /// unless it is taller than a whole page, where moving it hides content.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The two halves of Writer's own override, which is the same one <c>w:cantSplit</c> gets: a merge
+    /// normally forbids the cut, because half of the merged rectangle would be drawn on each of two
+    /// pages; a row larger than the entire page "ought to be allowed to split regardless of setting,
+    /// otherwise it has hidden content and that makes no sense" (<c>SwTabFrame::Split</c>,
+    /// <c>sw/source/core/layout/tabfrm.cxx</c>:1161), and Writer re-formats the spanned cells around the
+    /// cut in <c>lcl_AdjustRowSpanCells</c>.
+    /// </para>
+    /// <para>
+    /// Measured on <c>ESPN-R - MCF - RA - Ed1.docx</c>, whose "Engine - Flight" row is 440.5 pt under a
+    /// 422.2 pt landscape body and whose first cell is merged down into the rows below it. Declining the
+    /// cut left about 356 pt of page 27 blank and then drew the row to y = 30.6 on a page whose bottom
+    /// margin is at 56.7 — one page too many, 59 against the reference's 58.
+    /// </para>
+    /// </remarks>
+    [Theory]
+    [InlineData(8, false)]
+    [InlineData(40, true)]
+    public void ARowWithACellMergedDownwardsBreaksOnlyWhenItIsTallerThanThePage(
+        int linesInTheMergedRow, bool expectBreak)
+    {
+        PageTable table = MergedTable(linesInTheMergedRow);
+
+        List<LaidOutPage> pages = Paginate(table);
+
+        pages.Count.ShouldBeGreaterThan(1);
+
+        // Row 1 is the one carrying the merge. It is broken when it appears on two consecutive parts.
+        List<int> partsHoldingRowOne =
+        [
+            .. Enumerable.Range(0, pages.Count)
+                .Where(page => pages[page].Tables.Any(part => part.FirstRow <= 1 && part.RowEnd > 1)),
+        ];
+
+        if (expectBreak)
+        {
+            partsHoldingRowOne.Count.ShouldBeGreaterThan(
+                1, "a row taller than the page has nowhere to go and must be cut");
+        }
+        else
+        {
+            partsHoldingRowOne.Count.ShouldBe(
+                1, "a merge that fits somewhere keeps the row whole");
+        }
+
+        // Whichever way it went, every line is drawn exactly once: the two one-line left-hand cells and
+        // the three right-hand ones.
+        pages.Sum(LinesOn).ShouldBe(1 + 8 + 1 + linesInTheMergedRow + 8);
+    }
+
+    /// <summary>
+    /// Three rows of two columns, the second row's left-hand cell merged down over the third.
+    /// </summary>
+    private static PageTable MergedTable(int linesInTheMergedRow) => new()
+    {
+        ColumnWidths = [Length.FromTwips(2000), Length.FromTwips(4000)],
+        Rows =
+        [
+            Row(Cell(0, "top left", 1), Cell(1, "top right", 8)),
+            Row(
+                Cell(0, "merged", 1, rowSpan: 2),
+                Cell(1, "middle right", linesInTheMergedRow)),
+            Row(Cell(1, "bottom right", 8)),
+        ],
+    };
+
+    private static PageTableRow Row(params PageTableCell[] cells) => new() { Cells = cells };
+
+    private static PageTableCell Cell(int column, string text, int lines, int rowSpan = 1) => new()
+    {
+        Column = column,
+        RowSpan = rowSpan,
+        Blocks = [.. Enumerable.Range(0, lines).Select(line => Paragraph($"{text} {line}"))],
+    };
+
     /// <summary>How many lines of one row of a table part were drawn, over every cell.</summary>
     private static int LinesIn(PlacedTable table, int row)
         => table.Cells.Where(cell => cell.Row == row).Sum(cell => cell.Content?.Lines.Count ?? 0);

@@ -8,6 +8,7 @@ using Paperless.Text.Fonts;
 using Paperless.Text.Layout;
 using Paperless.Text.Shaping;
 using Paperless.WordProcessing.Layout;
+using Paperless.WordProcessing.Model;
 
 namespace Paperless.WordProcessing.Ooxml;
 
@@ -58,17 +59,31 @@ public sealed partial class DocxLayoutSource
     /// <summary>What <c>w:beforeAutospacing</c> and <c>w:afterAutospacing</c> stand for here.</summary>
     private readonly Length _autoSpacing;
 
-    /// <summary>
-    /// The device grid every font metric is rounded onto, or null for printer-independent layout.
-    /// </summary>
+    /// <summary>The device grid every font metric is rounded onto.</summary>
     /// <remarks>
-    /// Set by <c>w:usePrinterMetrics</c>, which writerfilter turns into
-    /// <c>PrinterIndependentLayout::DISABLED</c> at
-    /// <c>sw/source/writerfilter/dmapper/DomainMapper_Impl.cxx:10173</c> — the same state
-    /// <c>WW8Dop::fUsePrinterMetrics</c> puts a DOC into, and the same 300 dpi grid
+    /// Always one or the other, never nothing: <see cref="MetricGrid.Reference"/> is the 8640 dpi
+    /// virtual device Writer formats against by default. <c>w:usePrinterMetrics</c> swaps it for a real
+    /// printer's — writerfilter turns that flag into <c>PrinterIndependentLayout::DISABLED</c> at
+    /// <c>sw/source/writerfilter/dmapper/DomainMapper_Impl.cxx:10173</c>, the same state
+    /// <c>WW8Dop::fUsePrinterMetrics</c> puts a DOC into, and the same printer grid
     /// <see cref="Ww8.DocReader"/> already passes.
     /// </remarks>
-    private readonly MetricGrid? _metrics;
+    private readonly MetricGrid _metrics;
+
+    /// <summary>
+    /// <c>word/fontTable.xml</c>, for the shape it declares for each family it names.
+    /// </summary>
+    /// <remarks>
+    /// Layout does not measure with it and never asks it for a face. What it settles is the one
+    /// question the family name alone cannot answer — whether a family nobody has installed is a
+    /// roman or a grotesque — and getting that wrong renders a serif document in DejaVu Sans where
+    /// LibreOffice renders it in DejaVu Serif, which moves every line break in it.
+    /// </remarks>
+    private readonly WordFontTable _fontTable;
+
+    /// <summary>What a <c>FILENAME</c> or <c>TITLE</c> field evaluates to.</summary>
+    private readonly ConstantFields _constants;
+
     private readonly DrawingTheme? _theme;
     private readonly Dictionary<(string? Family, int Weight, bool Italic), OpenTypeFace?> _faces = [];
     private readonly Dictionary<(string? Family, int Weight, bool Italic), FontReference> _references =
@@ -90,6 +105,15 @@ public sealed partial class DocxLayoutSource
     /// advanced by this walk, which is why <see cref="Read"/> and <see cref="ReadFlow"/> reset them: a
     /// caller sharing one instance with the extraction pass must not have the two interleave.
     /// </param>
+    /// <param name="fontTable">
+    /// <c>word/fontTable.xml</c>, or null for a document without one. Nothing is measured with it —
+    /// it settles which shape a family nobody has installed falls back to, which the family name on
+    /// its own cannot say.
+    /// </param>
+    /// <param name="constants">
+    /// What a <c>FILENAME</c> or <c>TITLE</c> field evaluates to, or null to leave both at their
+    /// cached results — see <see cref="ConstantFields"/>.
+    /// </param>
     public DocxLayoutSource(
         WordStyles styles,
         XElement? settings = null,
@@ -98,10 +122,14 @@ public sealed partial class DocxLayoutSource
         IReadOnlyDictionary<string, XElement>? endnotes = null,
         DrawingTheme? theme = null,
         DocxPictures? pictures = null,
-        WordNumbering? numbering = null)
+        WordNumbering? numbering = null,
+        WordFontTable? fontTable = null,
+        ConstantFields? constants = null)
     {
+        _constants = constants ?? default;
         ArgumentNullException.ThrowIfNull(styles);
         _styles = styles;
+        _fontTable = fontTable ?? WordFontTable.Empty;
         _numbering = numbering ?? new WordNumbering();
         Pictures = pictures;
         _theme = theme;
@@ -109,10 +137,11 @@ public sealed partial class DocxLayoutSource
         _defaultTabInterval = TabInterval(settings);
         _compatibilityMode = CompatibilityMode(settings);
         WordCompatibility compatibility = WordCompatibility.Read(settings);
-        _autoSpacing = compatibility.DoNotUseHtmlParagraphAutoSpacing
-            ? WordParagraphFormats.WordAutoSpacing
-            : WordParagraphFormats.HtmlAutoSpacing;
-        _metrics = compatibility.UsesPrinterMetrics ? MetricGrid.Printer : null;
+        _autoSpacing = AutoSpacing(settings, compatibility);
+        // `AsWordDocument` is the MS_WORD_COMP_GRID_METRICS compatibility flag, which the Word
+        // filters set and ODF's does not. See MetricGrid.AsWordDocument.
+        _metrics = (compatibility.UsesPrinterMetrics ? MetricGrid.Printer : MetricGrid.Reference)
+            .AsWordDocument();
         _footnotes = footnotes ?? new Dictionary<string, XElement>(StringComparer.Ordinal);
         _endnotes = endnotes ?? new Dictionary<string, XElement>(StringComparer.Ordinal);
         _footnoteNumbering = NumberingIn(settings, "footnotePr", NoteNumbering.Footnotes);
@@ -197,6 +226,109 @@ public sealed partial class DocxLayoutSource
     /// <summary>The substitutions made while resolving the document's fonts.</summary>
     public IReadOnlyList<FontSubstitution> Substitutions => _fonts.Substitutions;
 
+    /// <summary>
+    /// The room Word leaves above a page's notes: the default paragraph style's line height.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>sw::FootnoteSeparatorHeight</c> takes this branch for every document a Word filter opened
+    /// (<c>sw/source/core/layout/ftnfrm.cxx</c>:257-272), and its helper is explicit about the source:
+    /// <em>"the height of the line that hosts the separator line (the top margin of the container),
+    /// based on the default paragraph style"</em>, read as <c>SwFont::GetHeight</c> of that style's
+    /// font (<c>:57-77</c>). Not the note's font, and not the body paragraph's — the <em>default
+    /// style's</em>, which in a DOCX is what a paragraph naming no <c>w:pStyle</c> resolves to.
+    /// </para>
+    /// <para>
+    /// So it is asked of the same chain and the same faces every other run goes through, and measured
+    /// with <see cref="Paperless.Text.Fonts.LineSpacing"/> on the document's own device grid: this has
+    /// to be the height a line of that text would be, or it is a different number that happens to be
+    /// close.
+    /// </para>
+    /// <para>
+    /// Zero when no face can be read at all, which the paginator reads as "no reservation of this
+    /// kind"; a document whose default font is missing has larger problems than its note separator.
+    /// </para>
+    /// </remarks>
+    public Length DefaultParagraphLineHeight
+    {
+        get
+        {
+            WordTextStyle text = WordParagraphFormats.ResolveText(_styles, null, _theme);
+            if (Face(text) is not { } face) return Length.Zero;
+
+            return LineSpacing.Resolve(face, _metrics, WriterLineBox.LeadingAboveText)
+                .ScaledLineHeight(text.Size);
+        }
+    }
+
+    /// <summary>
+    /// The document's margin line numbering, or null when it asks for none.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Word states this per section and Writer holds one per document, so the <em>last</em>
+    /// <c>w:lnNumType</c> in document order is the one that stands: the importer writes each into the
+    /// global settings as it meets it (<c>sw/source/writerfilter/dmapper/DomainMapper.cxx</c>:1213 and
+    /// :2795), and a section that says nothing does not put the previous one back. A <c>w:countBy</c> of
+    /// nought is how a later section turns numbering off, which is the same rule read the other way —
+    /// <c>if (aSettings.nInterval == 0) … PROP_IS_ON false</c>.
+    /// </para>
+    /// <para>
+    /// The numbers take the document's <em>default</em> character formatting rather than any paragraph's,
+    /// because Writer's <c>Line Numbering</c> character style declares nothing at all; see
+    /// <see cref="LineNumbering"/>, where the four probes that establish it are recorded.
+    /// </para>
+    /// </remarks>
+    /// <param name="body">The <c>w:body</c> element.</param>
+    public LineNumbering? LineNumbers(XElement body)
+    {
+        ArgumentNullException.ThrowIfNull(body);
+
+        XElement? stated = body
+            .Descendants(Word.Name("sectPr"))
+            .Select(section => Word.Child(section, "lnNumType"))
+            .LastOrDefault(numbering => numbering is not null);
+
+        if (stated is null) return null;
+
+        if (!Word.Integer(Word.Attribute(stated, "countBy"), out int countBy) || countBy <= 0)
+        {
+            return null;
+        }
+
+        WordProperty size = _styles.ResolveInDocumentDefaults(runProperty: true, "sz");
+        WordProperty fonts = _styles.ResolveInDocumentDefaults(runProperty: true, "rFonts");
+
+        Length emSize = size.IntegerValue is { } halfPoints && halfPoints > 0
+            ? Length.FromPoints(halfPoints / 2.0)
+            : LineNumbering.DefaultEmSize;
+
+        WordTextStyle style = new(
+            Word.Attribute(fonts.Element, "ascii"), emSize, Weight: 400, IsItalic: false, Language: null);
+
+        if (Face(style) is not { } face) return null;
+
+        return new LineNumbering
+        {
+            Face = face,
+            Font = _references.GetValueOrDefault(style.FaceKey),
+            EmSize = emSize,
+            CountBy = countBy,
+            Start = Word.Integer(Word.Attribute(stated, "start"), out int start) && start > 0
+                ? start
+                : 1,
+            Distance = Word.Integer(Word.Attribute(stated, "distance"), out int distance)
+                       && distance > 0
+                ? Length.FromTwips(distance)
+                : LineNumbering.DefaultDistance,
+
+            // `newSection` maps to false beside `continuous`, because Writer has no per-section restart
+            // to map it onto — see the importer's own line, cited above.
+            RestartsEachPage =
+                string.Equals(Word.Attribute(stated, "restart"), "newPage", StringComparison.Ordinal),
+        };
+    }
+
     /// <summary>Reads the body's blocks — its paragraphs and its tables — in document order.</summary>
     /// <param name="body">The <c>w:body</c> element.</param>
     public List<PageBlock> Read(XElement body)
@@ -205,6 +337,7 @@ public sealed partial class DocxLayoutSource
 
         _sectionIndex = 0;
         _blocksInSection = 0;
+        _pendingBelowTarget = -1;
 
         // The body is where the document's lists start counting. Reset rather than assumed clean,
         // because the numbering may be the same instance the extraction pass already walked.
@@ -395,16 +528,121 @@ public sealed partial class DocxLayoutSource
     /// </para>
     /// <para>
     /// "Nothing but the mark" is read from what the paragraph produced rather than from its markup, so a
-    /// mark that anchors a frame, cites a note, or defers a page break keeps its paragraph: each of those
-    /// is content the page would otherwise lose, and Writer guards them individually
-    /// (<c>HasTopAnchoredObjects</c>, <c>IsParaWithInlineObject</c>, the column-break test).
+    /// mark that anchors a frame or cites a note keeps its paragraph: each of those is content the page
+    /// would otherwise lose, and Writer guards them individually (<c>HasTopAnchoredObjects</c>,
+    /// <c>IsParaWithInlineObject</c>).
+    /// </para>
+    /// <para>
+    /// <strong>A page break does not save the mark, and used to.</strong> The guard list in
+    /// <c>bRemove</c> protects a <em>column</em> break — <c>bIsColumnBreak</c>, built from
+    /// <c>BreakType_COLUMN_BEFORE</c>/<c>_AFTER</c>/<c>_BOTH</c> a dozen lines above it — and names no
+    /// page break at all, so a mark carrying one is removed and the break dies with the paragraph it was
+    /// attached to. Measured on the installed 26.2.4.2 by four authored routes onto the same flag, each a
+    /// three-paragraph section ending in an empty mark followed by a landscape section: a preceding
+    /// <c>&lt;w:br w:type="page"/&gt;</c>, two of them, a <c>w:pageBreakBefore</c> on the mark itself, and
+    /// the same on a section already filling its page. LibreOffice emits one portrait page for the first
+    /// three and two for the fourth; taking the break at its word emits one more in every case.
+    /// </para>
+    /// <para>
+    /// The corpus case is <c>1_tpr_template__from_fy14_.docx</c>, whose first section ends with a
+    /// page-break paragraph and then an empty mark. Its first two pages are word for word and line for
+    /// line the reference's; page three held one word, the footer's page number, and pushed the landscape
+    /// section that follows onto page four. Nine of the corpus's 200 documents change with this rule.
+    /// </para>
+    /// <para>
+    /// Column breaks are not guarded here because the reader does not model one: only
+    /// <c>w:br w:type="page"</c> reaches <see cref="ParagraphFormat.StartsNewPage"/>, so the flag this
+    /// test used to read can never have meant a column break. That is a real gap in the other direction —
+    /// 26.2.4.2 keeps a mark carrying a column break and gives it a page, and we drop it — and it is
+    /// recorded in <c>dotnet/probes/words-e-01/results.md</c> rather than guessed at here.
     /// </para>
     /// </remarks>
     private static bool IsSectionMarkOnly(PageParagraph paragraph)
         => paragraph.Text.Length == 0
            && paragraph.Frames.Count == 0
-           && paragraph.Notes.Count == 0
-           && !paragraph.Format.StartsNewPage;
+           && paragraph.Notes.Count == 0;
+
+    /// <summary>
+    /// The break each section begins with, indexed as <see cref="_sectionIndex"/> counts them.
+    /// </summary>
+    /// <remarks>
+    /// Only <see cref="HandOnBelowSpacing{T}"/> reads it, and only to tell a continuous break from a
+    /// page-starting one. Empty when the caller states nothing, which reads every section as
+    /// page-starting — the case the rule was written for, and the one a hand-built source is testing.
+    /// </remarks>
+    public IReadOnlyList<SectionBreak> SectionBreaks { get; init; } = [];
+
+    /// <summary>
+    /// The space-after of a dropped section mark, waiting for the section after it to claim it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A section mark is not laid out — see <see cref="IsSectionMarkOnly"/> — but the space-after it
+    /// declares is still the space that ends its section, and Word consolidates it against the space-before
+    /// of whatever opens the next one. Writer reproduces that by moving the value onto the last real
+    /// paragraph of the closing section before discarding the mark:
+    /// <c>DomainMapper_Impl::handleSectPrBeforeRemoval</c> stashes it
+    /// (<c>writerfilter/dmapper/DomainMapper_Impl.cxx</c>:10487) and
+    /// <c>SectionPropertyMap::EmulateSectPrBelowSpacing</c> writes it to the paragraph before the break
+    /// (<c>PropertyMap.cxx</c>:1576), whose own comment is "MS Word is excessively consistent about
+    /// consolidating paragraph top and bottom spacing. They even consolidate spacing between section
+    /// breaks!"
+    /// </para>
+    /// <para>
+    /// It <em>replaces</em> the previous paragraph's own space-after rather than adding to it, which
+    /// Writer justifies with "below spacing before a page break normally has no relevance". Both of
+    /// Writer's exclusions are reproduced: a table on either side of the break takes no hand-on, because
+    /// a table has neither of the two spacings to consolidate; and a continuous break hands nothing on
+    /// unless the paragraph opening the section carries a page break of its own, because without one the
+    /// mark's space-after never reaches the layout at all.
+    /// </para>
+    /// <para>
+    /// Measured on <c>03_Technical_Report_(progress)_template.docx</c>, whose landscape section opens with
+    /// an 18 pt space-before heading after a mark declaring 6 pt: the reference puts that heading's
+    /// baseline 12 pt below where a probe with the space-before removed puts it, which is the consolidated
+    /// 18 − 6 and not the 18 the same document's earlier section — whose mark declares no space-after at
+    /// all — moves by. Without this the two sections both moved by 18 and the document paginated to
+    /// eleven pages against the reference's ten.
+    /// </para>
+    /// </remarks>
+    private Length _pendingBelowSpacing;
+
+    /// <summary>Which block the pending space-after belongs on, or −1 when nothing is pending.</summary>
+    private int _pendingBelowTarget = -1;
+
+    /// <summary>
+    /// Gives a dropped section mark's space-after to the last paragraph of the section it closed.
+    /// </summary>
+    /// <param name="into">The blocks read so far.</param>
+    /// <param name="startsNewPage">
+    /// Whether the paragraph claiming it carries a page break, which is what lets a continuous break hand
+    /// anything on.
+    /// </param>
+    private void HandOnBelowSpacing<T>(List<T> into, bool startsNewPage)
+        where T : PageBlock
+    {
+        int target = _pendingBelowTarget;
+        _pendingBelowTarget = -1;
+
+        if (target < 0 || target >= into.Count) return;
+
+        // `_sectionIndex` has already advanced past the mark, so it names the section being opened.
+        if (!startsNewPage
+            && _sectionIndex < SectionBreaks.Count
+            && SectionBreaks[_sectionIndex] == SectionBreak.Continuous)
+        {
+            return;
+        }
+
+        // A table before the break has no space-after to replace, which is Writer's other `FindTableNode`.
+        if (into[target] is not PageParagraph last) return;
+
+        if (last with { Format = last.DeclaredFormat with { SpaceAfter = _pendingBelowSpacing } } is T
+            replaced)
+        {
+            into[target] = replaced;
+        }
+    }
 
     /// <summary>
     /// How many tables enclose the one being read, counted while its rows are walked.
@@ -426,6 +664,17 @@ public sealed partial class DocxLayoutSource
     /// takes its own style and the outer one resumes after it.
     /// </remarks>
     private IReadOnlyList<XElement>? _tableStyle;
+
+    /// <summary>
+    /// The table style's <c>w:rPr</c> layers for the cell being read, most specific first, or null in
+    /// the body.
+    /// </summary>
+    /// <remarks>
+    /// The companion of <see cref="_tableStyle"/> and a field for the same reason, but it changes per
+    /// <em>cell</em> rather than per table: conditional formatting is a property of where the cell sits.
+    /// See <see cref="WordTableStyleConditions"/>.
+    /// </remarks>
+    private IReadOnlyList<XElement>? _tableStyleRun;
 
     /// <summary>
     /// Walks the body's block-level children.
@@ -458,11 +707,19 @@ public sealed partial class DocxLayoutSource
 
                 // Read it either way: even a paragraph that is only a section mark can leave a page break
                 // behind for the paragraph after it, and that bookkeeping lives in `Paragraph`.
-                if (Paragraph(child) is { } paragraph
-                    && !(endsSection && _blocksInSection > 0 && IsSectionMarkOnly(paragraph))
-                    && paragraph is T block)
+                if (Paragraph(child) is { } paragraph)
                 {
-                    into.Add(block);
+                    if (endsSection && _blocksInSection > 0 && IsSectionMarkOnly(paragraph))
+                    {
+                        // Dropped — but its space-after is not dropped with it. See BelowSpacing.
+                        _pendingBelowSpacing = paragraph.DeclaredFormat.SpaceAfter;
+                        _pendingBelowTarget = into.Count - 1;
+                    }
+                    else if (paragraph is T block)
+                    {
+                        HandOnBelowSpacing(into, paragraph.Format.StartsNewPage);
+                        into.Add(block);
+                    }
                 }
 
                 _blocksInSection++;
@@ -481,6 +738,11 @@ public sealed partial class DocxLayoutSource
 
             if (Word.Is(child, "tbl"))
             {
+                // A section that starts with a table takes no hand-on: a table has no space-above for the
+                // mark's space-after to consolidate against, which is the `FindTableNode` arm of
+                // `SectionPropertyMap::EmulateSectPrBelowSpacing`.
+                _pendingBelowTarget = -1;
+
                 if (Table(child) is { } table && table is T grid) into.Add(grid);
                 _blocksInSection++;
                 continue;
@@ -516,8 +778,10 @@ public sealed partial class DocxLayoutSource
         // `mark` is not dead weight: an empty paragraph has nothing *but* its mark, and its height
         // is the mark's. Same probe: the mark alone carrying `w:sz w:val="72"` gives the empty
         // paragraph 36 pt of height in the reference.
-        WordTextStyle mark = WordParagraphFormats.ResolveText(_styles, properties, _theme);
-        WordTextStyle body = WordParagraphFormats.ResolveRun(_styles, properties, null, _theme);
+        WordTextStyle mark =
+            WordParagraphFormats.ResolveText(_styles, properties, _theme, _tableStyleRun);
+        WordTextStyle body =
+            WordParagraphFormats.ResolveRun(_styles, properties, null, _theme, _tableStyleRun);
 
         // Both are resolved, not only the one this paragraph draws its text in, because `Face` is
         // also what fills `_references` — and a `FontReference` is the only thing a PDF can turn
@@ -534,7 +798,8 @@ public sealed partial class DocxLayoutSource
         bool breaksPage = _pageBreakPending;
         _pageBreakPending = false;
 
-        RunWalker walker = new(CitationOf, Symbol, _footnoteNumber, _endnoteNumber);
+        RunWalker walker = new(
+            CitationOf, Symbol, _constants, _footnoteNumber, _endnoteNumber, StyleReferenceText);
         walker.Walk(element, citation);
 
         // Where the note's own number landed, for a renumbering pass that has to find it again. A field
@@ -587,8 +852,21 @@ public sealed partial class DocxLayoutSource
             // #i3952#: a tab or a run of spaces does not raise a line's height in a Word document, and a
             // DOCX imports with the setting on. See PageParagraph.BlanksAreTransparentToHeight.
             BlanksAreTransparentToHeight = true,
+
+            // A toggle in the schema, so `<w:suppressLineNumbers/>` and `w:val="1"` both mean on and
+            // `w:val="0"` — which a style commonly writes to undo an inherited one — means off.
+            SuppressesLineNumbers = _styles
+                .ResolveParagraphProperty(
+                    "suppressLineNumbers",
+                    properties,
+                    Word.Value(properties, "pStyle") ?? _styles.DefaultStyleId(WordStyleType.Paragraph))
+                .IsOn,
             Metrics = _metrics,
             Fallback = _fonts,
+
+            // Word's "add space between Asian and Western text". See ScriptSpacing; the DOC reader
+            // sets it for the same reason and the ODF one does not.
+            AddsScriptSpace = true,
             EmSize = text.Size,
             Language = text.Language,
             Shaping = new ShapingOptions(
@@ -608,7 +886,58 @@ public sealed partial class DocxLayoutSource
         // own answer, so a break inside a caption cannot push the paragraph after the caption's frame.
         _pageBreakPending = walker.BreaksPage;
 
+        // After the walk, so a STYLEREF in *this* paragraph still quotes the one before it. Word's own
+        // search runs backwards from the field, and a heading whose own text is what a caption inside it
+        // would quote does not arise.
+        if (mapped.Length > 0 && Word.Value(properties, "pStyle") is { Length: > 0 } styled)
+        {
+            _styleText[styled] = mapped;
+        }
+
         return read;
+    }
+
+    /// <summary>
+    /// The text last read in each paragraph style, which is what a <c>STYLEREF</c> quotes.
+    /// </summary>
+    /// <remarks>
+    /// The most recent one rather than all of them, because the search is backwards from the field —
+    /// <c>SwGetRefFieldType::FindAnchorRefStyleOther</c> scans from the field's own node towards the
+    /// start and takes the first match. Keeping the last text seen per style answers that in one lookup
+    /// and costs one dictionary entry per style the document actually uses.
+    /// </remarks>
+    private readonly Dictionary<string, string> _styleText = [];
+
+    /// <summary>
+    /// What a <c>STYLEREF</c> naming a style quotes, or null when nothing in that style has been read.
+    /// </summary>
+    /// <remarks>
+    /// The name a field states is a style <em>name</em> — or Word's undocumented bare digit for a
+    /// built-in heading level — while a paragraph names a style <em>id</em>, so the two are matched
+    /// through the style table rather than directly. Null when the style is unknown or nothing precedes
+    /// the field in it, which leaves the producer's cached result in place: a wrong substitution is
+    /// worse than a stale one.
+    /// </remarks>
+    /// <param name="name">The style the field named.</param>
+    private string? StyleReferenceText(string name)
+    {
+        if (_styleText.Count == 0) return null;
+        if (_styleText.TryGetValue(name, out string? byId)) return byId;
+
+        // "1" through "9" mean the built-in heading of that level, which is a style whose *name* is
+        // "heading N" whatever the document calls its id.
+        string wanted = name.Length == 1 && name[0] is >= '1' and <= '9'
+            ? "heading " + name
+            : name;
+
+        foreach (WordStyle style in _styles.All)
+        {
+            if (style.Type != WordStyleType.Paragraph) continue;
+            if (!string.Equals(style.Name, wanted, StringComparison.OrdinalIgnoreCase)) continue;
+            if (_styleText.TryGetValue(style.StyleId, out string? byName)) return byName;
+        }
+
+        return null;
     }
 
     /// <summary>Whether the paragraph read next begins a page, because the one before ended with a break.</summary>
@@ -748,7 +1077,7 @@ public sealed partial class DocxLayoutSource
             WordTextStyle style = range.RunProperties is null
                 ? paragraph
                 : WordParagraphFormats.ResolveRun(
-                    _styles, paragraphProperties, range.RunProperties, _theme);
+                    _styles, paragraphProperties, range.RunProperties, _theme, _tableStyleRun);
 
             if (range.IsCitation) style = AsCitation(style);
 
@@ -858,6 +1187,18 @@ public sealed partial class DocxLayoutSource
     private int _frameDepth;
 
     /// <summary>
+    /// Whether the walk is inside a header or a footer part.
+    /// </summary>
+    /// <remarks>
+    /// Set by the reader around its <see cref="ReadFlow"/> call and restored afterwards, the same shape
+    /// as <c>DocxPictures.Scope</c> beside it and for the same reason: the part is what knows, and the
+    /// walk cannot tell — a header's body is an ordinary block sequence. It decides one thing, the paint
+    /// order of the drawings it anchors (<see cref="PageFrame.BehindText"/>), so a caller that forgets
+    /// to set it gets the body's answer rather than a wrong one.
+    /// </remarks>
+    public bool InHeaderFooter { get; set; }
+
+    /// <summary>
     /// Reads the frames a paragraph anchors, with their own text laid out inside them.
     /// </summary>
     /// <remarks>
@@ -876,7 +1217,18 @@ public sealed partial class DocxLayoutSource
             Func<XElement, IReadOnlyList<PageBlock>>? content =
                 _frameDepth < MaxFrameNesting ? Content : null;
 
-            frames.AddRange(DocxFrames.ReadAll(anchor.Element, content, anchor.Offset, Pictures));
+            // VML states its geometry differently from DrawingML and most of it reserves nothing, so
+            // it has a reader of its own rather than a branch inside `DocxFrames`.
+            if (anchor.Element.Name.LocalName is "pict" or "object")
+            {
+                frames.AddRange(
+                    DocxVmlFrames.ReadAll(anchor.Element, anchor.Offset, Pictures, content));
+                continue;
+            }
+
+            frames.AddRange(DocxFrames.ReadAll(
+                anchor.Element, content, anchor.Offset, Pictures,
+                new DocxFrameContext(_theme, InHeaderFooter, _compatibilityMode)));
         }
 
         return frames;
@@ -931,17 +1283,32 @@ public sealed partial class DocxLayoutSource
         /// from the one the file states — so it cannot be deferred to the pass that styles the ranges.
         /// </param>
         /// <param name="endnote">How many endnotes came before it, counted separately.</param>
+        /// <param name="constants">What a <c>FILENAME</c> or <c>TITLE</c> field evaluates to.</param>
+        /// <param name="styleReference">
+        /// What a <c>STYLEREF</c> naming a style quotes, or null when nothing has been read in that
+        /// style yet. Supplied by the source because the answer is a paragraph this walker never sees.
+        /// </param>
         internal RunWalker(
             Func<bool, int, string> citation,
             Func<string?, char, (string Text, OpenTypeFace Face, FontReference? Font)?> symbol,
+            ConstantFields constants = default,
             int footnote = 0,
-            int endnote = 0)
+            int endnote = 0,
+            Func<string, string?>? styleReference = null)
         {
             _citationOf = citation;
             _symbolOf = symbol;
+            _constants = constants;
             _footnote = footnote;
             _endnote = endnote;
+            _styleReference = styleReference;
         }
+
+        /// <summary>What a <c>STYLEREF</c> quotes, or null when the source cannot answer.</summary>
+        private readonly Func<string, string?>? _styleReference;
+
+        /// <summary>What a <c>FILENAME</c> or <c>TITLE</c> field evaluates to.</summary>
+        private readonly ConstantFields _constants;
 
         /// <summary>How a note of a class and an index is cited, which the source resolves.</summary>
         /// <remarks>
@@ -1000,6 +1367,20 @@ public sealed partial class DocxLayoutSource
 
         private bool _inInstruction;
 
+        /// <summary>
+        /// How many open fields have had their value written by this walk, so their cached results are
+        /// not drawn.
+        /// </summary>
+        /// <remarks>
+        /// A counter rather than a flag because fields nest: a <c>FILENAME</c> inside a <c>HYPERLINK</c>
+        /// closes before the link does, and a flag cleared at the inner end would let the outer field's
+        /// remaining result through as if it too had been substituted.
+        /// </remarks>
+        private int _hidden;
+
+        /// <summary>True while nothing the walk reads is drawn.</summary>
+        private bool Suppressed => _inInstruction || _hidden > 0;
+
         /// <summary>The fields whose begin has been seen and whose end has not, innermost last.</summary>
         /// <remarks>
         /// A stack because fields nest and Word writes them nested — a hyperlink around a cross-reference
@@ -1024,6 +1405,56 @@ public sealed partial class DocxLayoutSource
 
             /// <summary>Where the result began, or −1 for a field with no separator and so no result.</summary>
             internal int ResultAt { get; set; } = -1;
+
+            /// <summary>
+            /// True when this walk wrote the field's value itself, so its cached result is hidden.
+            /// </summary>
+            internal bool Substituted { get; set; }
+
+            /// <summary>
+            /// The run properties in force where the instruction was written.
+            /// </summary>
+            /// <remarks>
+            /// A field with no separator has no result runs to take formatting from, and the run holding
+            /// its <c>fldChar end</c> is usually bare — so the instruction's own run is the nearest thing
+            /// to what the producer meant the value to look like. Word writes the two with the same
+            /// <c>w:rPr</c>, which is what makes this the right guess rather than merely a guess.
+            /// </remarks>
+            internal XElement? InstructionProperties { get; set; }
+        }
+
+        /// <summary>The value a constant field evaluates to, or null when nothing can be computed.</summary>
+        private string? ValueOf(string instruction)
+        {
+            if (FieldInstructions.StyleReferenceName(instruction) is { } style)
+            {
+                return _styleReference?.Invoke(style) is { Length: > 0 } quoted ? quoted : null;
+            }
+
+            return FieldInstructions.ConstantFieldOf(instruction) switch
+            {
+                ConstantField.FileName => _constants.FileName is { Length: > 0 } name ? name : null,
+                ConstantField.Title => _constants.Title is { Length: > 0 } title ? title : null,
+                _ => null,
+            };
+        }
+
+        /// <summary>Writes a constant field's value in place of its cached result.</summary>
+        /// <param name="field">The field, whose instruction has been read in full.</param>
+        /// <param name="properties">The run properties to draw it under, or null for the paragraph's.</param>
+        /// <returns>True when a value was written, so the cached result must be hidden.</returns>
+        private bool Substitute(OpenField field, XElement? properties)
+        {
+            if (ValueOf(field.Instruction.ToString()) is not { } value) return false;
+
+            XElement? outer = _runProperties;
+            _runProperties = properties;
+            Emit(value);
+            _runProperties = outer;
+
+            field.Substituted = true;
+            _hidden++;
+            return true;
         }
 
         /// <summary>
@@ -1086,7 +1517,13 @@ public sealed partial class DocxLayoutSource
                     case "instrText":
                         // Not drawn — but it is the only statement of what the field computes, so it is
                         // accumulated for the innermost open field rather than merely skipped.
-                        if (_fields.Count > 0) _fields.Peek().Instruction.Append(child.Value);
+                        if (_fields.Count > 0)
+                        {
+                            OpenField open = _fields.Peek();
+                            open.Instruction.Append(child.Value);
+                            open.InstructionProperties ??= _runProperties;
+                        }
+
                         break;
 
                     case "fldChar":
@@ -1101,12 +1538,46 @@ public sealed partial class DocxLayoutSource
 
                             case "separate":
                                 _inInstruction = false;
-                                if (_fields.Count > 0) _fields.Peek().ResultAt = _builder.Length;
+                                if (_fields.Count > 0)
+                                {
+                                    OpenField open = _fields.Peek();
+                                    open.ResultAt = _builder.Length;
+
+                                    // The one point at which a field this walk computes can be written:
+                                    // the instruction has been read in full, so the field's name is
+                                    // known, and the cached result it replaces starts here.
+                                    if (_hidden == 0) Substitute(open, _runProperties);
+                                }
+
                                 break;
 
                             case "end":
                                 _inInstruction = false;
-                                if (_fields.Count > 0) CloseField(_fields.Pop());
+                                if (_fields.Count > 0)
+                                {
+                                    OpenField closing = _fields.Pop();
+
+                                    // A field with no separator has no cached result at all, and
+                                    // LibreOffice still draws its value — measured on the second
+                                    // FILENAME in `CRIF …`'s footer, which the reference draws and this
+                                    // walk would otherwise pass over in silence.
+                                    if (closing.ResultAt < 0 && _hidden == 0)
+                                    {
+                                        int at = _builder.Length;
+                                        if (Substitute(closing, closing.InstructionProperties))
+                                        {
+                                            closing.ResultAt = at;
+                                            _hidden--;
+                                        }
+                                    }
+                                    else if (closing.Substituted)
+                                    {
+                                        _hidden--;
+                                    }
+
+                                    CloseField(closing);
+                                }
+
                                 break;
                         }
 
@@ -1118,16 +1589,29 @@ public sealed partial class DocxLayoutSource
                     {
                         OpenField simple = new() { ResultAt = _builder.Length };
                         simple.Instruction.Append(Word.Attribute(child, "instr") ?? "");
-                        Append(child, depth + 1);
+
+                        // The cached result's own runs carry the formatting the producer gave the field —
+                        // here the whole field is one element, so the first of them is taken rather than
+                        // the paragraph's, which would draw the value in the style's weight instead.
+                        if (_hidden == 0
+                            && Substitute(simple, Word.Child(Word.Child(child, "r"), "rPr")))
+                        {
+                            _hidden--;
+                        }
+                        else
+                        {
+                            Append(child, depth + 1);
+                        }
+
                         CloseField(simple);
                         break;
                     }
 
-                    case "t" when !_inInstruction:
+                    case "t" when !Suppressed:
                         Emit(child.Value);
                         break;
 
-                    case "tab" when !_inInstruction:
+                    case "tab" when !Suppressed:
                         Emit("\t");
                         break;
 
@@ -1136,7 +1620,7 @@ public sealed partial class DocxLayoutSource
                     // PROP_CHAR_FONT_NAME to `w:font` with charset SYMBOL and appends the raw `w:char`
                     // (`DomainMapper::sprmWithProps`, `LN_EG_RunInnerContent_sym`), so the face travels
                     // with the character rather than with the run.
-                    case "sym" when !_inInstruction:
+                    case "sym" when !Suppressed:
                         EmitSymbol(child);
                         break;
 
@@ -1156,7 +1640,7 @@ public sealed partial class DocxLayoutSource
                     // `SwBlankPortion` cannot be broken and a U+002D is UAX #14 class HY, which is a
                     // break opportunity. Drawing the hyphen in the right face is worth more than the
                     // breaking, which only differs when a line ends exactly there.
-                    case "noBreakHyphen" when !_inInstruction:
+                    case "noBreakHyphen" when !Suppressed:
                         Emit("-");
                         break;
 
@@ -1166,7 +1650,7 @@ public sealed partial class DocxLayoutSource
                     // (`OOXMLBreakHandler::~OOXMLBreakHandler`, `writerfilter/ooxml/Handler.cxx:246`)
                     // and then *defers* it, applying it to the paragraph that follows as
                     // `BreakType_PAGE_BEFORE` (`dmapper/DomainMapper.cxx:4379`).
-                    case "br" when !_inInstruction:
+                    case "br" when !Suppressed:
                         if (Word.Attribute(child, "type") == "page") _pageBreakAt = _builder.Length;
                         else Emit(LineSeparator.ToString());
                         break;
@@ -1226,7 +1710,16 @@ public sealed partial class DocxLayoutSource
                         Emit(AnchorCharacter.ToString());
                         break;
 
-                    case "commentReference" or "pict" or "object":
+                    // A `w:pict` or a `w:object` is a VML shape. It states its size in a CSS `style`
+                    // rather than in a `wp:extent`, and only an inline one takes room on the line —
+                    // see `DocxVmlFrames`, which decides both and returns nothing for a floating
+                    // shape, leaving the anchor character to stand for it as it did before.
+                    case "pict" or "object":
+                        _frames.Add(new FrameAnchor(_builder.Length, child));
+                        Emit(AnchorCharacter.ToString());
+                        break;
+
+                    case "commentReference":
                         Emit(AnchorCharacter.ToString());
                         break;
 
@@ -1331,6 +1824,26 @@ public sealed partial class DocxLayoutSource
         => (isEndnote ? _endnoteNumbering : _footnoteNumbering).Citation(index);
 
     /// <summary>
+    /// What <c>w:beforeAutospacing</c> and <c>w:afterAutospacing</c> stand for in this document.
+    /// </summary>
+    /// <remarks>
+    /// Three answers, in LibreOffice's own order of precedence
+    /// (<c>DomainMapper.cxx</c>:916-953). <c>w:doNotUseHTMLParagraphAutoSpacing</c> wins outright and
+    /// means five points; otherwise a document saved in <strong>web view</strong> gets 49 twips and
+    /// every other document 280. The web branch is easy to miss because <c>w:view</c> is not a
+    /// compatibility flag — it sits directly under <c>w:settings</c>, beside the zoom and the ruler,
+    /// and reads like a preference rather than a measurement.
+    /// </remarks>
+    private static Length AutoSpacing(XElement? settings, WordCompatibility compatibility)
+    {
+        if (compatibility.DoNotUseHtmlParagraphAutoSpacing) return WordParagraphFormats.WordAutoSpacing;
+
+        return Word.Attribute(Word.Child(settings, "view"), "val") == "web"
+            ? WordParagraphFormats.WebAutoSpacing
+            : WordParagraphFormats.HtmlAutoSpacing;
+    }
+
+    /// <summary>
     /// The document's default tab interval.
     /// </summary>
     /// <remarks>
@@ -1389,8 +1902,19 @@ public sealed partial class DocxLayoutSource
         OpenTypeFace? face = null;
         try
         {
+            // The declared family only. The table declares a pitch too and LibreOffice's DOCX filter
+            // does not act on it: probed on 26.2.4.2 with a one-run package, `Garamond` declared
+            // `swiss` moves the fallback from DejaVu Serif to DejaVu Sans while `Garamond` declared
+            // `fixed` — and `MS Mincho` declared `modern`+`fixed` — leaves it exactly where it was.
+            // Its ODF filter *does* honour `style:font-pitch`, so this is a difference between the
+            // two importers rather than a property of the resolver, and passing the pitch here put
+            // one corpus document into DejaVu Sans Mono that the reference sets in DejaVu Sans.
+            FontFamilyClass declared = _fontTable.ShapeOf(text.FamilyName).Class;
+
             FontReference reference = _fonts.Resolve(
-                new FontRequest(text.FamilyName ?? string.Empty, text.Weight, text.IsItalic));
+                new FontRequest(
+                    text.FamilyName ?? string.Empty, text.Weight, text.IsItalic,
+                    DeclaredClass: declared));
 
             face = _fonts.LoadOpenType(reference);
             _references[key] = reference;

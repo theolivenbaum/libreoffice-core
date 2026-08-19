@@ -54,8 +54,23 @@ public static class DrawingChartPlot
     /// It inverts the default of every unstated data-label and trendline flag; see
     /// <see cref="LabelOf"/>.
     /// </param>
+    /// <param name="styles">
+    /// The theme's <c>a:fmtScheme</c>, for the width of the line an automatically-formatted
+    /// series draws. Null when the caller has none, which leaves such a line at the hairline the
+    /// reader would otherwise give it.
+    /// </param>
+    /// <param name="ranges">
+    /// Resolves a sequence's <c>c:f</c> against the cells it names, when the caller has the
+    /// workbook to resolve it in. Null — the default, and what the presentation and
+    /// word-processing readers pass — keeps the cached points as the only source. See
+    /// <see cref="ChartRangeResolver"/> for why the two differ.
+    /// </param>
     public static ChartPlot? Read(
-        XElement chartSpace, DrawingTheme? theme = null, bool office2007 = false)
+        XElement chartSpace,
+        DrawingTheme? theme = null,
+        bool office2007 = false,
+        DrawingStyleMatrix? styles = null,
+        ChartRangeResolver? ranges = null)
     {
         ArgumentNullException.ThrowIfNull(chartSpace);
 
@@ -88,13 +103,31 @@ public static class DrawingChartPlot
 
         List<ChartSeries> series = [];
         string?[] categories = [];
+        double?[] categoryValues = [];
+
+        // The automatic-format context, which is a property of the whole chart space rather than
+        // of any one group: the style index, and the largest c:ser/c:idx anywhere in the plot
+        // area — which is what the accent cycle's shade/tint step divides by
+        // (plotareaconverter.cxx:452-457).
+        ChartAutoContext automatic = new(
+            DrawingChartAutoFormat.StyleOf(chartSpace),
+            MaximumSeriesIndex(groups),
+            styles,
+            groups.Count == 1 ? Flag(groups[0], "varyColors") : false,
+            groups.Count == 1);
 
         for (int at = 0; at < groups.Count; at++)
         {
-            (List<ChartSeries> read, string?[] labels) =
-                ReadSeries(groups[at], kinds[at], theme, axes.IndexOf(groups[at]), office2007);
+            (List<ChartSeries> read, string?[] labels, double?[] numbers) = ReadSeries(
+                groups[at], kinds[at], theme, axes.IndexOf(groups[at]), office2007, automatic,
+                ranges);
 
-            if (categories.Length == 0 && labels.Length > 0) categories = labels;
+            if (categories.Length == 0 && labels.Length > 0)
+            {
+                categories = labels;
+                categoryValues = numbers;
+            }
+
             series.AddRange(read);
         }
 
@@ -135,8 +168,21 @@ public static class DrawingChartPlot
 
         XElement? upDown = Child(stock, "upDownBars");
 
+        // A c:dateAx is a continuous serial scale and not a run of category slots, so it is
+        // resolved here — before the plot is built — and the points are put in date order with it.
+        IReadOnlyList<string?> orderedCategories = categories;
+        IReadOnlyList<ChartSeries> orderedSeries = series;
+
+        ChartDateAxis? dateAxis = DateAxisOf(chartSpace, axes.Category, categoryValues);
+        if (dateAxis is not null)
+        {
+            (dateAxis, orderedCategories, orderedSeries) =
+                ChartDateScale.SortByDate(dateAxis, orderedCategories, orderedSeries);
+        }
+
         return new ChartPlot
         {
+            DateAxis = dateAxis,
             Title = TitleText(Child(chart, "title")),
             // A scatter chart's horizontal axis is its domain and not its category axis, and its
             // title hangs off that element — so reading only c:catAx loses it entirely. The same
@@ -144,8 +190,8 @@ public static class DrawingChartPlot
             // "Dissolved Oxygen (%)" is three words the reference draws and this did not.
             CategoryAxisTitle = TitleText(Child(axes.Domain ?? axes.Category, "title")),
             ValueAxisTitle = TitleText(Child(axes.Value, "title")),
-            Categories = categories,
-            Series = series,
+            Categories = orderedCategories,
+            Series = orderedSeries,
             Kind = kind,
 
             // A doughnut is a pie of concentric rings; the element name is the whole of the file's
@@ -164,6 +210,7 @@ public static class DrawingChartPlot
             GapWidth = Number(Child(group, "gapWidth")) ?? Number(Child(upDown, "gapWidth")) ?? 100.0,
             Overlap = Number(Child(group, "overlap")) ?? 0.0,
             IsStacked = grouping is "stacked" or "percentStacked",
+            IsPercentStacked = grouping is "percentStacked",
             ValueScale = ScaleOf(axes.Value),
             ValueFormat = FormatOf(axes.Value),
             CategoryFormat = FormatOf(axes.Category),
@@ -182,6 +229,8 @@ public static class DrawingChartPlot
             CategoryLabelsVisible = Labelled(axes.Domain ?? axes.Category),
             Legend = LegendOf(Child(chart, "legend")),
             Background = FillOf(Child(chartSpace, "spPr"), theme),
+            Border = LineOf(Child(chartSpace, "spPr"), theme),
+            BorderWidth = LineWidthOf(Child(chartSpace, "spPr")),
             PlotBackground = FillOf(Child(plotArea, "spPr"), theme),
             ValueGrid = GridOf(axes.Value, theme),
             CategoryGrid = GridOf(axes.Category, theme) ?? GridOf(axes.Domain, theme),
@@ -396,6 +445,84 @@ public static class DrawingChartPlot
     /// </remarks>
     private static bool Labelled(XElement? axis)
         => !string.Equals(Value(Child(axis, "tickLblPos")), "none", StringComparison.Ordinal);
+
+    /// <summary>
+    /// The date axis a <c>c:dateAx</c> asks for, or null when the category axis is an ordinary
+    /// run of slots.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>The element name is not the whole of the statement.</strong>
+    /// <c>AxisConverter::convertFromModel</c> gives a <c>c:dateAx</c> <c>AxisType::DATE</c> and
+    /// copies <c>c:auto</c> onto <c>ScaleData::AutoDateAxis</c>
+    /// (<c>oox/source/drawingml/chart/axisconverter.cxx</c>); chart2 then asks
+    /// <c>ExplicitCategoriesProvider::isDateAxis</c> whether the categories really are dates
+    /// before it uses the scale, and that test is the categories' <em>number format</em>. So an
+    /// automatic date axis over a column of plain numbers is drawn as a category axis, and only a
+    /// <c>c:auto val="0"</c> forces the scale on regardless. This is the same pair of rules
+    /// <c>XlsChartReader</c> applies to <c>CHDATERANGE</c>'s two flags, reached from the other
+    /// vocabulary.
+    /// </para>
+    /// <para>
+    /// <strong>Both stated limits and the tick interval come in as serials.</strong>
+    /// <c>c:scaling/c:min</c> and <c>c:max</c> on a date axis are already serial numbers, unlike
+    /// <c>CHDATERANGE</c>'s, which count their own base unit from the null date. <c>c:majorUnit</c>
+    /// is a count and <c>c:majorTimeUnit</c> the unit it counts, defaulting to days
+    /// (<c>CT_DateAx</c>'s <c>ST_TimeUnit</c> default), and <c>c:baseTimeUnit</c> is the
+    /// resolution — the finest unit the axis distinguishes — which the scale otherwise derives
+    /// from the data.
+    /// </para>
+    /// <para>
+    /// <strong><c>c:date1904</c> decides what a serial names.</strong> It sits on
+    /// <c>c:chartSpace</c> rather than on the axis, and it is four years and a day of error when
+    /// it is missed.
+    /// </para>
+    /// </remarks>
+    /// <param name="chartSpace">The <c>c:chartSpace</c>, for <c>c:date1904</c>.</param>
+    /// <param name="axis">The category axis element, or null when the chart has none.</param>
+    /// <param name="values">The category cells read as numbers.</param>
+    private static ChartDateAxis? DateAxisOf(
+        XElement chartSpace, XElement? axis, double?[] values)
+    {
+        if (axis is null || !Is(axis, "dateAx") || values.Length == 0) return null;
+
+        NumberFormatCode? format = FormatOf(axis);
+
+        // c:auto is absent on plenty of parts and its schema default is true, so an unstated one
+        // takes the checked path rather than forcing the scale on.
+        bool automatic = Flag(axis, "auto") ?? true;
+        if (automatic && format is not { IsDateTime: true }) return null;
+
+        XElement? scaling = Child(axis, "scaling");
+
+        ChartTimeInterval? interval = null;
+        if (Number(Child(axis, "majorUnit")) is { } unit and > 0.0)
+        {
+            interval = new ChartTimeInterval(
+                (int)Math.Clamp(unit, 1.0, int.MaxValue),
+                TimeUnitOf(Value(Child(axis, "majorTimeUnit"))) ?? ChartTimeUnit.Day);
+        }
+
+        return ChartDateScale.Resolve(
+            values,
+            format,
+            Number(Child(scaling, "min")),
+            Number(Child(scaling, "max")),
+            interval,
+            TimeUnitOf(Value(Child(axis, "baseTimeUnit"))),
+            Flag(chartSpace, "date1904") == true
+                ? SpreadsheetDateSystem.Date1904
+                : SpreadsheetDateSystem.Date1900);
+    }
+
+    /// <summary>The three <c>ST_TimeUnit</c> spellings, or null when the element is absent.</summary>
+    private static ChartTimeUnit? TimeUnitOf(string? stated) => stated switch
+    {
+        "days" => ChartTimeUnit.Day,
+        "months" => ChartTimeUnit.Month,
+        "years" => ChartTimeUnit.Year,
+        _ => null,
+    };
 
     private static NumberFormatCode? FormatOf(XElement? axis)
     {
@@ -630,11 +757,60 @@ public static class DrawingChartPlot
                 _ => ChartLegendPosition.Right,
             };
 
-    private static (List<ChartSeries> Series, string?[] Categories) ReadSeries(
-        XElement group, ChartPlotKind kind, DrawingTheme? theme, int axisIndex, bool office2007)
+    /// <summary>
+    /// What a series takes from the chart's automatic formatting when it states nothing.
+    /// </summary>
+    /// <param name="Style">The chart space's <c>c:style/@val</c>.</param>
+    /// <param name="MaxSeriesIndex">The largest <c>c:ser/c:idx</c> in the whole plot area.</param>
+    /// <param name="Styles">
+    /// The theme's format matrix, for the width of the line an automatic series draws. Null when
+    /// the caller has none, which leaves the width at the reader's hairline default rather than
+    /// inventing one.
+    /// </param>
+    /// <param name="VaryColours">
+    /// <c>c:varyColors</c> on the plot area's only group, which makes a frame series colour its
+    /// points from the cycle instead of taking one colour for the whole series. Null when the
+    /// group states none, whose default is true on anything but a file Office 2007 wrote —
+    /// <c>TypeGroupModel</c>'s <c>mbVaryColors( !bMSO2007Doc )</c>.
+    /// </param>
+    /// <param name="SingleGroup">
+    /// Whether the plot area holds exactly one group, which is <c>bSupportsVaryColorsByPoint</c>.
+    /// </param>
+    private readonly record struct ChartAutoContext(
+        int Style, int MaxSeriesIndex, DrawingStyleMatrix? Styles, bool? VaryColours, bool SingleGroup);
+
+    /// <summary>
+    /// The largest <c>c:ser/c:idx</c> over every plot group, or −1 when none states one.
+    /// </summary>
+    /// <remarks>
+    /// Taken across the groups rather than within one, because the accent cycle is numbered over
+    /// the whole plot area: a combination chart's line group carries <c>c:idx val="2"</c> and
+    /// takes accent 3 even though it is the only series in its group.
+    /// </remarks>
+    private static int MaximumSeriesIndex(List<XElement> groups)
+    {
+        int maximum = -1;
+
+        foreach (XElement group in groups)
+            foreach (XElement element in Children(group, "ser"))
+                maximum = Math.Max(maximum, Drawing.Number(Child(element, "idx"), "val") ?? -1);
+
+        return maximum;
+    }
+
+    private static (List<ChartSeries> Series, string?[] Categories, double?[] CategoryValues)
+        ReadSeries(
+        XElement group,
+        ChartPlotKind kind,
+        DrawingTheme? theme,
+        int axisIndex,
+        bool office2007,
+        ChartAutoContext automatic = default,
+        ChartRangeResolver? ranges = null)
     {
         List<ChartSeries> series = [];
         string?[] categories = [];
+        double?[] categoryValues = [];
 
         // c:scatterStyle decides whether a scatter series draws its line, its markers or both.
         // "marker" alone is the case that matters: drawing the line and not the markers leaves an
@@ -657,17 +833,28 @@ public static class DrawingChartPlot
             ChartStockRole.Open, ChartStockRole.High, ChartStockRole.Low, ChartStockRole.Close,
         ];
 
+        int seriesInGroup = Children(group, "ser").Count();
+
         int stockRole = kind != ChartPlotKind.Stock
             ? -1
-            : Children(group, "ser").Count() == 3 ? 1 : 0;
+            : seriesInGroup == 3 ? 1 : 0;
 
         foreach (XElement element in Children(group, "ser"))
         {
-            (string?[] labels, _) = ReadSequence(Child(element, "cat") ?? Child(element, "xVal"));
-            if (categories.Length == 0 && labels.Length > 0) categories = labels;
+            (string?[] labels, double?[] labelNumbers) = ReadSequence(
+                Child(element, "cat") ?? Child(element, "xVal"), ranges);
+            if (categories.Length == 0 && labels.Length > 0)
+            {
+                categories = labels;
+
+                // The same cells read as numbers, which is what a c:dateAx scales against. Kept
+                // beside the text rather than instead of it: a date axis labels its *ticks* and
+                // still wants the strings for a chart that turns out not to be one.
+                categoryValues = labelNumbers;
+            }
 
             XElement? valueSource = Child(element, "val") ?? Child(element, "yVal");
-            (_, double?[] numbers) = ReadSequence(valueSource);
+            (_, double?[] numbers) = ReadSequence(valueSource, ranges);
 
             // The format the *data* carries, which is what a label showing a value falls back to
             // when it states none of its own — VSeriesPlotter's detectNumberFormatKey, which asks
@@ -680,7 +867,7 @@ public static class DrawingChartPlot
             if (kind is ChartPlotKind.Scatter or ChartPlotKind.Bubble
                 && Child(element, "xVal") is { } xVal)
             {
-                (_, double?[] xs) = ReadSequence(xVal);
+                (_, double?[] xs) = ReadSequence(xVal, ranges);
                 if (xs.Length > 0) domain = xs;
             }
 
@@ -689,26 +876,53 @@ public static class DrawingChartPlot
             double?[]? sizes = null;
             if (kind == ChartPlotKind.Bubble && Child(element, "bubbleSize") is { } bubbleSize)
             {
-                (_, double?[] read) = ReadSequence(bubbleSize);
+                (_, double?[] read) = ReadSequence(bubbleSize, ranges);
                 if (read.Length > 0) sizes = read;
             }
 
             XElement? properties = Child(element, "spPr");
             XElement? seriesLabels = Child(element, "dLbls");
 
+            // The automatic colours the chart's style gives this series, which its own c:spPr
+            // then overrides. Both halves matter: without the automatic one a series stating
+            // nothing is drawn black and its legend key blank, and without the override a series
+            // stating a colour loses it.
+            int seriesIndex = Drawing.Number(Child(element, "idx"), "val") ?? -1;
+            ChartAutoObject frame = IsFrameSeries(kind)
+                ? ChartAutoObject.FilledSeries
+                : ChartAutoObject.LinearSeries;
+
+            Colour? autoFill = DrawingChartAutoFormat.ColourOf(
+                automatic.Style, frame, stroke: false, seriesIndex, automatic.MaxSeriesIndex,
+                theme, automatic.Styles);
+            Colour? autoLine = DrawingChartAutoFormat.ColourOf(
+                automatic.Style, frame, stroke: true, seriesIndex, automatic.MaxSeriesIndex,
+                theme, automatic.Styles);
+
             series.Add(new ChartSeries(
                 DrawingChartText.Label(Child(element, "tx")),
                 numbers,
-                FillOf(properties, theme),
-                LineOf(properties, theme),
-                LineWidthOf(properties),
-                PointFills(element, numbers.Length, theme),
+                SuppressesFill(properties) ? null : FillOf(properties, theme) ?? autoFill,
+                SuppressesLine(properties) ? null : LineOf(properties, theme) ?? autoLine,
+                StatedLineWidth(properties) ?? AutoLineWidth(automatic, frame, theme, seriesIndex),
+                PointFills(
+                    element,
+                    numbers.Length,
+                    theme,
+                    kind,
+                    automatic,
+                    seriesIndex,
+                    seriesInGroup,
+                    office2007),
                 kind)
             {
                 XValues = domain,
-                Marker = MarkerOf(Child(element, "marker"), kind, scatterStyle, radarStyle),
-                HasLine = scatterLine
-                          && Drawing.Child(Drawing.Child(properties, "ln"), "noFill") is null,
+                Marker = MarkerOf(element, kind, scatterStyle, radarStyle, seriesIndex),
+                MarkerFill = MarkerFillOf(element, theme),
+                MarkerLine = LineOf(MarkerProperties(element), theme),
+                HasLine = scatterLine && !SuppressesLine(properties),
+                DashPattern = DashOf(properties),
+                LineCap = CapOf(properties),
                 Label = WithSource(LabelOf(seriesLabels, groupLabel, kind, office2007), sourceFormat),
                 PointLabels = PointLabelsOf(
                     seriesLabels, numbers.Length, groupLabel, kind, sourceFormat, office2007),
@@ -724,7 +938,7 @@ public static class DrawingChartPlot
             if (stockRole >= 0) stockRole++;
         }
 
-        return (series, categories);
+        return (series, categories, categoryValues);
     }
 
     /// <summary>
@@ -805,25 +1019,47 @@ public static class DrawingChartPlot
     /// What marker a series draws, or none.
     /// </summary>
     /// <remarks>
-    /// <c>c:marker/c:symbol</c>. Absent means <c>auto</c> for a scatter chart — which draws one —
-    /// and none for a line chart, which is the asymmetry that makes a scatter chart look empty if
-    /// it is treated like a line chart with no markers stated. <c>c:scatterStyle val="line"</c> or
-    /// <c>"smooth"</c> turns them off again, and <c>c:radarStyle val="marker"</c> turns them on
-    /// for a radar chart the same way — which is the whole difference between that style and
-    /// <c>standard</c>, both of which draw a stroked polygon.
+    /// <para>
+    /// <c>c:marker/c:symbol</c>. <c>c:scatterStyle val="line"</c> or <c>"smooth"</c> turns
+    /// markers off, and <c>c:radarStyle val="marker"</c> turns them on — which is the whole
+    /// difference between that style and <c>standard</c>, both of which draw a stroked polygon.
+    /// </para>
+    /// <para>
+    /// <strong>A series of a non-frame type that states no <c>c:marker</c> at all draws an
+    /// automatic marker, and the shape cycles with the series index.</strong>
+    /// <c>SeriesModel</c>'s constructor is <c>mnMarkerSymbol( XML_auto )</c>
+    /// (<c>seriesmodel.cxx:119</c>) and <c>TypeGroupConverter::convertMarker</c> maps that to
+    /// <c>SymbolStyle_AUTO</c>, which <c>VDataSeries::getSymbolProperties</c> then resolves to
+    /// <c>StandardSymbol = m_nGlobalSeriesIndex</c> (<c>VDataSeries.cxx:875-883</c>) — square,
+    /// diamond, arrow-down, arrow-up and so on. It is <c>c:marker/c:symbol</c> that turns them
+    /// off, because that context reads <c>getToken( XML_val, XML_none )</c>
+    /// (<c>seriescontext.cxx:445</c>), and Excel writes exactly that on a plain line chart.
+    /// </para>
+    /// <para>
+    /// The group's own <c>&lt;c:marker val="0"/&gt;</c> does <em>not</em> turn them off:
+    /// <c>TypeGroupModel::mbShowMarker</c> is parsed at <c>typegroupcontext.cxx:216-218</c> and
+    /// read by nothing in the whole of <c>oox</c> and <c>chart2</c> — the reference's own
+    /// property-read-and-never-used. Honouring it here would draw fewer markers than the
+    /// reference on every file that states it.
+    /// </para>
     /// </remarks>
     private static ChartMarker MarkerOf(
-        XElement? marker, ChartPlotKind kind, string? scatterStyle, string? radarStyle)
+        XElement? series,
+        ChartPlotKind kind,
+        string? scatterStyle,
+        string? radarStyle,
+        int seriesIndex)
     {
-        string? symbol = Value(Child(marker, "symbol"));
+        string? symbol = Value(Child(Child(series, "marker"), "symbol"));
 
         if (symbol is null)
         {
-            bool automatic =
-                (kind == ChartPlotKind.Scatter && scatterStyle is not ("line" or "smooth"))
-                || (kind == ChartPlotKind.Radar && radarStyle == "marker");
+            bool suppressed =
+                (kind == ChartPlotKind.Scatter && scatterStyle is "line" or "smooth")
+                || (kind == ChartPlotKind.Radar && radarStyle != "marker")
+                || IsFrameSeries(kind);
 
-            return automatic ? ChartMarker.Square : ChartMarker.None;
+            return suppressed ? ChartMarker.None : AutomaticMarker(seriesIndex);
         }
 
         return symbol switch
@@ -837,6 +1073,34 @@ public static class DrawingChartPlot
             "star" => ChartMarker.Star,
             _ => ChartMarker.Square,
         };
+    }
+
+    /// <summary>
+    /// The shape an automatic marker takes at a series index.
+    /// </summary>
+    /// <remarks>
+    /// <c>ShapeFactory</c>'s standard symbol list in the order
+    /// <c>TypeGroupConverter::convertMarker</c> names it (<c>typegroupconverter.cxx:637-650</c>):
+    /// 0 square, 1 diamond, 2 arrow down, 3 arrow up. Only the shapes
+    /// <see cref="ChartMarker"/> can draw are distinguished; the rest of the list cycles back
+    /// through them rather than through nothing, on the same reasoning that puts
+    /// <c>dot</c> and <c>dash</c> on a square.
+    /// </remarks>
+    private static ChartMarker AutomaticMarker(int seriesIndex)
+    {
+        ChartMarker[] cycle =
+        [
+            ChartMarker.Square,
+            ChartMarker.Diamond,
+            ChartMarker.Triangle,
+            ChartMarker.Triangle,
+            ChartMarker.Circle,
+            ChartMarker.Cross,
+            ChartMarker.Star,
+            ChartMarker.Square,
+        ];
+
+        return cycle[Math.Max(seriesIndex, 0) % cycle.Length];
     }
 
     /// <summary>
@@ -1103,9 +1367,51 @@ public static class DrawingChartPlot
     /// has them, and without them every wedge is the series' one colour — which reads as a broken
     /// renderer rather than as an unread element.
     /// </remarks>
-    private static Colour?[]? PointFills(XElement series, int count, DrawingTheme? theme)
+    private static Colour?[]? PointFills(
+        XElement series,
+        int count,
+        DrawingTheme? theme,
+        ChartPlotKind kind = ChartPlotKind.Bar,
+        ChartAutoContext automatic = default,
+        int seriesIndex = -1,
+        int seriesCount = 1,
+        bool office2007 = false)
     {
         Colour?[]? fills = null;
+
+        bool frame = IsFrameSeries(kind);
+        bool byPoint = frame
+                       && automatic.SingleGroup
+                       && (automatic.VaryColours ?? !office2007)
+                       && (IsPie(kind) || seriesCount == 1);
+        bool varies = frame && (IsPie(kind) || byPoint);
+
+        // A pie always colours its points from the cycle, and any other frame series does when
+        // the chart says c:varyColors and holds one group with one series
+        // (typegroupconverter.cxx:496-501, seriesconverter.cxx:940-962). Where the colours vary
+        // it is the *point* index that walks the accents and the point count that sizes the
+        // shade/tint cycle; where they do not, every point takes the series' own colour, which
+        // is what a pie with c:varyColors val="0" draws. Without any of this a pie with no c:dPt
+        // is one flat disc.
+        if (varies && count > 0)
+        {
+            for (int index = 0; index < count; index++)
+            {
+                Colour? cycled = DrawingChartAutoFormat.ColourOf(
+                    automatic.Style,
+                    ChartAutoObject.FilledSeries,
+                    stroke: false,
+                    byPoint ? index : seriesIndex,
+                    byPoint ? count - 1 : automatic.MaxSeriesIndex,
+                    theme,
+                    automatic.Styles);
+
+                if (cycled is null) continue;
+
+                fills ??= new Colour?[count];
+                fills[index] = cycled;
+            }
+        }
 
         foreach (XElement point in Children(series, "dPt"))
         {
@@ -1121,21 +1427,153 @@ public static class DrawingChartPlot
         return fills;
     }
 
+    /// <summary>
+    /// Whether a plot kind's series is drawn as an area rather than as a line.
+    /// </summary>
+    /// <remarks>
+    /// <c>TypeGroupInfo::mbSeriesIsFrame2d</c>
+    /// (<c>oox/source/drawingml/chart/typegroupconverter.cxx:92-117</c>), which is what
+    /// <c>getSeriesObjectType</c> switches on to pick between the filled and linear automatic
+    /// format tables. A radar chart is in both columns depending on its <c>c:radarStyle</c>, and
+    /// a stock chart is linear despite drawing boxes.
+    /// </remarks>
+    private static bool IsFrameSeries(ChartPlotKind kind) => kind is
+        ChartPlotKind.Bar or ChartPlotKind.Area or ChartPlotKind.Pie
+        or ChartPlotKind.OfPie or ChartPlotKind.Bubble;
+
+    /// <summary>Whether a plot kind is one of the three <c>TYPECATEGORY_PIE</c> types.</summary>
+    private static bool IsPie(ChartPlotKind kind)
+        => kind is ChartPlotKind.Pie or ChartPlotKind.OfPie;
+
+    /// <summary>
+    /// A chart's own <c>a:ln/@w</c>, or null when it states none.
+    /// </summary>
+    /// <remarks>
+    /// Distinguished from a stated zero, which is a hairline the file asked for and must not be
+    /// replaced by the theme's width. <see cref="LineWidthOf"/> cannot tell the two apart because
+    /// it answers with a <c>Length</c>.
+    /// </remarks>
+    /// <summary>
+    /// The dash array a series' <c>a:ln</c> asks for, or null for a solid line.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>a:prstDash</c> names one of ten patterns whose lengths are percentages of the pen width,
+    /// so the expansion needs the width — see <see cref="DashPresets"/>. It runs against the
+    /// <em>stated</em> width and not the automatic one, because a series that states a dash states
+    /// a line, and every corpus file that carries one carries <c>a:ln w="…"</c> with it.
+    /// </para>
+    /// <para>
+    /// <c>a:ln/@cap</c> of <c>rnd</c> or <c>sq</c> shortens each ink length and lengthens the gap,
+    /// which is why the cap is read here rather than defaulted: the three threshold lines of
+    /// <c>southern-classic-kennesaw-state-university-final.pptx</c> are <c>cap="rnd"</c> and would
+    /// otherwise be drawn a third longer than the reference's dots.
+    /// </para>
+    /// </remarks>
+    private static IReadOnlyList<Length>? DashOf(XElement? properties)
+    {
+        XElement? line = Drawing.Child(properties, "ln");
+        if (line is null) return null;
+
+        return DashPresets.Pattern(
+            Drawing.Attribute(Drawing.Child(line, "prstDash"), "val"),
+            StatedLineWidth(properties) ?? Length.Zero,
+            CapOf(properties) != LineCap.Butt);
+    }
+
+    /// <summary>
+    /// <c>a:ln/@cap</c>, which decides both how a line ends and what its dashes look like.
+    /// </summary>
+    /// <remarks>
+    /// <c>flat</c> and an absent attribute are butt — <c>ST_LineCap</c>'s default is <c>flat</c>
+    /// and <c>LineProperties::pushToPropMap</c> maps it to <c>DrawingLineCap_BUTT</c>. The other
+    /// two matter because <see cref="DashPresets"/> has already taken 99% off each ink length on
+    /// their account: drawn butt, that array is a row of hairlines where the file asked for dots.
+    /// </remarks>
+    private static LineCap CapOf(XElement? properties) =>
+        Drawing.Attribute(Drawing.Child(properties, "ln"), "cap") switch
+        {
+            "rnd" => LineCap.Round,
+            "sq" => LineCap.Square,
+            _ => LineCap.Butt,
+        };
+
+    private static Length? StatedLineWidth(XElement? properties)
+        => Drawing.Number(Drawing.Child(properties, "ln"), "w") is { } emu
+            ? Length.FromEmu(Math.Max(emu, 0))
+            : null;
+
+    /// <summary>
+    /// How wide a series' automatic line is: the theme's subtle line style scaled by the chart
+    /// style's relative width.
+    /// </summary>
+    /// <remarks>
+    /// <c>LineFormatter</c> takes <c>Theme::getLineStyle(THEMED_STYLE_SUBTLE)</c> and multiplies
+    /// its width by <c>mnRelLineWidth / 100</c> (<c>objectformatter.cxx:826-853</c>). Every theme
+    /// Office ships states 9525 EMU there, so a chart at the default style draws its lines at
+    /// 2.25 pt — which against a hairline is the difference between a chart and a wireframe.
+    /// Null when there is no format matrix to ask, so nothing is invented.
+    /// </remarks>
+    private static Length AutoLineWidth(
+        ChartAutoContext automatic, ChartAutoObject frame, DrawingTheme? theme, int seriesIndex)
+    {
+        if (automatic.Styles is not { } styles) return Length.Zero;
+        if (seriesIndex < 0) return Length.Zero;
+
+        int relative = DrawingChartAutoFormat.RelativeLineWidth(automatic.Style, frame);
+        if (relative <= 0) return Length.Zero;
+
+        XElement? line = styles.LineStyle(DrawingChartAutoFormat.SubtleStyleIndex);
+        if (Drawing.Number(line, "w") is not { } emu || emu <= 0) return Length.Zero;
+
+        _ = theme;
+        return Length.FromEmu(emu * relative / 100);
+    }
+
     /// <summary>A shape property bag's solid fill, or null when it has none.</summary>
     /// <remarks>
-    /// Only <c>a:solidFill</c>. A gradient or picture fill on a bar is legal and rare; drawing
-    /// nothing for one leaves the bar's outline, which reads as "something is here and it is not
-    /// coloured in" rather than as a missing bar.
+    /// <para>
+    /// <c>a:solidFill</c>, and failing that the middle stop of an <c>a:gradFill</c>. A chart's
+    /// model carries one colour per series rather than a paint, so a gradient cannot be drawn as
+    /// one here — but reading it as "no fill" draws no bar at all, and a bar in one of its own
+    /// colours is much nearer the reference than an empty row. Measured on
+    /// <c>N2_E_Maestroni_Swarm_COP.pptx</c>, a stacked Gantt whose first series is a
+    /// three-stop gradient with an <c>a:alpha</c> on every stop: the reference draws 111 pale
+    /// bars and we drew none, so the chart read as having one bar per row instead of two.
+    /// </para>
+    /// <para>
+    /// The stop nearest the middle rather than the first, because a DrawingML gradient's end
+    /// stops are routinely its extremes — a <c>tint</c> at one end and a <c>shade</c> at the
+    /// other — and the middle is what the shape reads as at a glance. Alpha survives, so a
+    /// gradient the file made translucent stays translucent.
+    /// </para>
     /// </remarks>
     private static Colour? FillOf(XElement? properties, DrawingTheme? theme)
     {
-        XElement? fill = Drawing.Child(properties, "solidFill");
-        if (fill is null) return null;
+        if (Drawing.Child(properties, "solidFill") is { } fill)
+        {
+            foreach (XElement child in fill.Elements())
+                if (DrawingColour.Read(child) is { } colour) return colour.Resolve(theme);
 
-        foreach (XElement child in fill.Elements())
-            if (DrawingColour.Read(child) is { } colour) return colour.Resolve(theme);
+            return null;
+        }
 
-        return null;
+        if (DrawingFill.ReadGradient(Drawing.Child(properties, "gradFill")) is not { } gradient)
+            return null;
+
+        DrawingGradientStop? middle = null;
+        double best = double.MaxValue;
+
+        foreach (DrawingGradientStop stop in gradient.Stops)
+        {
+            double distance = Math.Abs(stop.Position - 0.5);
+            if (distance >= best) continue;
+
+            best = distance;
+            middle = stop;
+        }
+
+        return middle?.Colour.Resolve(theme);
     }
 
     private static Colour? LineOf(XElement? properties, DrawingTheme? theme)
@@ -1144,6 +1582,90 @@ public static class DrawingChartPlot
         if (line is null) return null;
         if (Drawing.Child(line, "noFill") is not null) return null;
         return FillOf(line, theme);
+    }
+
+    /// <summary>
+    /// Whether these shape properties state <em>no line at all</em>, as against stating nothing.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <see cref="LineOf"/> returns null for both, which is right for a colour and wrong for the
+    /// question a caller with a fallback is asking. <c>c:ser/c:spPr/a:ln/a:noFill</c> is a
+    /// <em>suppression</em>: <c>LineFormatter::convertFormatting</c> resolves it to
+    /// <c>LineStyle_NONE</c> (<c>objectformatter.cxx:857-889</c> through
+    /// <c>LineProperties::pushToPropMap</c>), so the automatic colour the chart's style would
+    /// otherwise have given the series must not be substituted for it.
+    /// </para>
+    /// <para>
+    /// Absence is the opposite and stays the opposite: a series with no <c>a:ln</c> is what the
+    /// automatic table exists for. Collapsing the two is why a scatter series whose file says it
+    /// has no line was carrying one in <see cref="ChartSeries.Line"/> — invisible in the polyline,
+    /// which <see cref="ChartSeries.HasLine"/> already suppressed, and visible in every consumer
+    /// that reads the colour without consulting that flag.
+    /// </para>
+    /// </remarks>
+    private static bool SuppressesLine(XElement? properties)
+        => Drawing.Child(Drawing.Child(properties, "ln"), "noFill") is not null;
+
+    /// <summary>
+    /// Whether these shape properties state <em>no fill at all</em>, as against stating nothing.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The same distinction <see cref="SuppressesLine"/> draws, one element up.
+    /// <c>c:ser/c:spPr/a:noFill</c> resolves to <c>FillStyle_NONE</c> and must not be replaced by
+    /// the colour the chart's style would otherwise give the series; a <c>c:spPr</c> with no fill
+    /// element at all is the case the automatic table exists for.
+    /// </para>
+    /// <para>
+    /// <strong>Found by a blind reviewer, from the picture alone.</strong> Sent
+    /// <c>8_P-Pavese_AIRBUS-ATB-journee-CRATB.pptx</c>'s page 8 with no access to the package, it
+    /// reported that ours caps each column with a silver block reaching 100% where the reference
+    /// shows only the plot background — and listed "drawn but with a fill equal to the background"
+    /// among the causes it could not separate from "not drawn". The file settles it: that series,
+    /// <c>Non suivi</c>, is <c>&lt;c:spPr&gt;&lt;a:noFill/&gt;&lt;/c:spPr&gt;</c> and nothing else.
+    /// </para>
+    /// </remarks>
+    private static bool SuppressesFill(XElement? properties)
+        => Drawing.Child(properties, "noFill") is not null;
+
+    /// <summary>A series' <c>c:marker/c:spPr</c>, or null when it states none.</summary>
+    private static XElement? MarkerProperties(XElement? series)
+        => Child(Child(series, "marker"), "spPr");
+
+    /// <summary>
+    /// The colour a marker is filled in when it states shape properties of its own.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>TypeGroupConverter::convertMarker</c> (<c>typegroupconverter.cxx:657-678</c>) takes
+    /// <c>xShapeProps->getFillProperties().maFillColor</c> for the symbol's fill and, when there
+    /// is none, falls back to the symbol's <em>line</em> colour — the fix for tdf#124817, whose
+    /// comment says so in as many words. Both halves matter on this corpus: the marker is stated
+    /// with a <c>a:solidFill</c> on <c>FAAAI…</c> and with a three-stop <c>a:gradFill</c> on
+    /// <c>8_P-Pavese_AIRBUS…</c>, where only the fallback finds a colour at all.
+    /// </para>
+    /// <para>
+    /// <strong>A gradient is deliberately not read here, though <see cref="FillOf"/> reads one
+    /// for a series.</strong> <c>maFillColor</c> is set by <c>a:solidFill</c> alone, so the
+    /// reference genuinely does not see the gradient's stops, and taking the middle stop instead
+    /// would draw the AIRBUS markers in a colour LibreOffice never computes. The two policies
+    /// differ because the questions do: an unfilled bar is a missing row, an unfilled marker has
+    /// a line colour standing behind it.
+    /// </para>
+    /// </remarks>
+    private static Colour? MarkerFillOf(XElement? series, DrawingTheme? theme)
+    {
+        XElement? properties = MarkerProperties(series);
+        if (properties is null) return null;
+
+        if (Drawing.Child(properties, "solidFill") is { } fill)
+        {
+            foreach (XElement child in fill.Elements())
+                if (DrawingColour.Read(child) is { } colour) return colour.Resolve(theme);
+        }
+
+        return LineOf(properties, theme);
     }
 
     /// <summary>
@@ -1455,17 +1977,35 @@ public static class DrawingChartPlot
         return DrawingChartText.Label(tx);
     }
 
-    /// <summary>Reads a cached data sequence, sparse indices and all.</summary>
+    /// <summary>Reads a data sequence: its live cells where the caller can reach them, else its
+    /// cached points.</summary>
     /// <remarks>
-    /// The same rule <see cref="DrawingChart"/> documents at length: the array is sized from
-    /// <c>c:ptCount</c> and every point placed at its own <c>@idx</c>, because the indices skip
-    /// blanks and reading in document order slides every later value onto the wrong category. A
-    /// chart drawn that way has the right bars against the wrong labels and looks entirely
-    /// plausible.
+    /// <para>
+    /// <strong>The <c>c:f</c> wins and the cache is the fallback</strong>, when a resolver is
+    /// given at all — <c>ExcelChartConverter::createDataSequence</c>'s own order
+    /// (<c>sc/source/filter/oox/excelchartconverter.cxx:76-94</c>). With no resolver the cache is
+    /// the only source, which is the <c>ChartConverter</c> base and the right answer for a deck or
+    /// a document whose numbers live in a workbook this reader must not open. See
+    /// <see cref="ChartRangeResolver"/>.
+    /// </para>
+    /// <para>
+    /// Reading the cache: the same rule <see cref="DrawingChart"/> documents at length — the array
+    /// is sized from <c>c:ptCount</c> and every point placed at its own <c>@idx</c>, because the
+    /// indices skip blanks and reading in document order slides every later value onto the wrong
+    /// category. A chart drawn that way has the right bars against the wrong labels and looks
+    /// entirely plausible.
+    /// </para>
     /// </remarks>
-    private static (string?[] Text, double?[] Numbers) ReadSequence(XElement? source)
+    private static (string?[] Text, double?[] Numbers) ReadSequence(
+        XElement? source, ChartRangeResolver? ranges = null)
     {
         if (source is null) return ([], []);
+
+        if (ranges is not null && FormulaOf(source) is { } formula
+            && ranges(formula) is { } live && live.Text.Count > 0)
+        {
+            return ([.. live.Text], [.. live.Numbers]);
+        }
 
         XElement? cache =
             Child(Child(source, "strRef"), "strCache")
@@ -1501,6 +2041,23 @@ public static class DrawingChartPlot
         }
 
         return (text, numbers);
+    }
+
+    /// <summary>The <c>c:f</c> a reference states, or null when the sequence is a literal.</summary>
+    /// <remarks>
+    /// Only the three <c>…Ref</c> containers carry one; <c>c:strLit</c> and <c>c:numLit</c> hold
+    /// the numbers themselves and name nothing, which is exactly the case
+    /// <c>maFormula.isEmpty()</c> tests for.
+    /// </remarks>
+    private static string? FormulaOf(XElement source)
+    {
+        foreach (string container in (string[])["numRef", "strRef", "multiLvlStrRef"])
+        {
+            if (Child(Child(source, container), "f")?.Value is { Length: > 0 } formula)
+                return formula;
+        }
+
+        return null;
     }
 
     private static double? Number(XElement? element)

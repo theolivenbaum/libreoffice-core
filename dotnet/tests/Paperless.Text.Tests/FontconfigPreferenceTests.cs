@@ -150,10 +150,174 @@ public class FontconfigPreferenceTests
         resolver.FallbackFor(Han)?.FamilyName.ShouldBe("WenQuanYi Zen Hei");
     }
 
+    // ------------------------------------------------------- the classification, and why it exists
+
+    [Fact]
+    public void AFamilyIsFiledUnderTheGenericItDefaultsTo()
+    {
+        // `45-latin.conf`'s whole content, in miniature: an <alias> whose body is a <default> naming
+        // a generic is what says a family is a grotesque or a roman.
+        using Tree tree = Tree.Create();
+        tree.Write(
+            "conf.d/45-latin.conf",
+            Conf(
+                Default("Calibri", "sans-serif"),
+                Default("Cambria", "serif"),
+                Default("Courier New", "monospace")));
+
+        FontconfigPreferences fontconfig = FontconfigPreferences.Read([tree.Root]);
+
+        fontconfig.GenericClassOf("Calibri").ShouldBe(FontFamilyClass.SansSerif);
+        fontconfig.GenericClassOf("Cambria").ShouldBe(FontFamilyClass.Serif);
+        fontconfig.GenericClassOf("Courier New").ShouldBe(FontFamilyClass.Fixed);
+    }
+
+    [Fact]
+    public void AFamilyFiledUnderNothingIsAGrotesque()
+    {
+        // `49-sansserif.conf`: sans-serif is appended to any pattern that has not already named a
+        // generic, so fontconfig has an answer for every name and never reports "unknown". This is
+        // the rule the whole round turns on — `Century Schoolbook` reaches it, and `VCL.xcu` calls
+        // the same family a roman.
+        using Tree tree = Tree.Create();
+        tree.Write("conf.d/45-latin.conf", Conf(Default("Cambria", "serif")));
+
+        FontconfigPreferences.Read([tree.Root])
+            .GenericClassOf("Century Schoolbook").ShouldBe(FontFamilyClass.SansSerif);
+    }
+
+    [Fact]
+    public void ADefaultChainIsWalkedToWhicheverGenericItReaches()
+    {
+        // 30-metric-aliases.conf's <default>s name *concrete* families, so one hop is normal and the
+        // answer depends on where the hop lands. Both of these are on the machine this was written
+        // on and both are measured: `fc-match "Century Schoolbook"` answers DejaVu Sans and
+        // `fc-match "Palatino Linotype"` answers DejaVu Serif.
+        using Tree tree = Tree.Create();
+        tree.Write(
+            "conf.d/30-metric.conf",
+            Conf(
+                Default("Century Schoolbook", "New Century Schoolbook"),
+                Default("Palatino Linotype", "Palatino")));
+        tree.Write("conf.d/45-latin.conf", Conf(Default("Palatino", "serif")));
+
+        FontconfigPreferences fontconfig = FontconfigPreferences.Read([tree.Root]);
+
+        fontconfig.GenericClassOf("Century Schoolbook").ShouldBe(FontFamilyClass.SansSerif);
+        fontconfig.GenericClassOf("Palatino Linotype").ShouldBe(FontFamilyClass.Serif);
+    }
+
+    [Fact]
+    public void AFamilyTakesTheGenericOfAFamilyItAccepts()
+    {
+        // The case that says <default> alone is not enough. `Palatino` is filed under no generic at
+        // all; what makes `fc-match Palatino` answer DejaVu Serif is that it *accepts* Palatino
+        // Linotype, which 45-latin.conf files under serif — the accepted family joins the pattern
+        // and brings its own generic with it. Reading only <default> answers DejaVu Sans and is
+        // measurably wrong.
+        using Tree tree = Tree.Create();
+        tree.Write("conf.d/30-metric.conf", Conf(Accept("Palatino", "Palatino Linotype")));
+        tree.Write("conf.d/45-latin.conf", Conf(Default("Palatino Linotype", "serif")));
+
+        FontconfigPreferences.Read([tree.Root])
+            .GenericClassOf("Palatino").ShouldBe(FontFamilyClass.Serif);
+    }
+
+    [Fact]
+    public void AGenericThisResolverHasNoFaceListForBehavesAsTheDefault()
+    {
+        // `Cambria Math` is filed `math` by 45-generic.conf. A maths face is a roman, and filing it
+        // as one is wrong: no maths font is installed on a stock configuration, so the pattern falls
+        // through to the overall default and 26.2.4.2 draws it in DejaVu Sans.
+        using Tree tree = Tree.Create();
+        tree.Write("conf.d/45-generic.conf", Conf(Default("Cambria Math", "math")));
+
+        FontconfigPreferences.Read([tree.Root])
+            .GenericClassOf("Cambria Math").ShouldBe(FontFamilyClass.SansSerif);
+    }
+
+    [Fact]
+    public void AGenericPreferListDoesNotClassifyTheFamiliesOnIt()
+    {
+        // 60-latin.conf lists a dozen families under <alias><family>serif</family><prefer>. That is
+        // a preference order, not a classification, and following it would file every family on the
+        // machine under every generic that mentions it.
+        using Tree tree = Tree.Create();
+        tree.Write("conf.d/60-latin.conf", Alias("serif", "Some Roman"));
+
+        FontconfigPreferences fontconfig = FontconfigPreferences.Read([tree.Root]);
+
+        fontconfig.Names("Some Roman").ShouldBeFalse();
+        fontconfig.RankOf("Some Roman").ShouldBe(0);
+    }
+
+    [Fact]
+    public void ACycleInTheChainTerminates()
+    {
+        // 30-metric-aliases.conf really does contain `Arial → Helvetica` and `Helvetica → Arial`.
+        using Tree tree = Tree.Create();
+        tree.Write(
+            "conf.d/30-metric.conf",
+            Conf(Default("Arial", "Helvetica"), Default("Helvetica", "Arial")));
+
+        FontconfigPreferences.Read([tree.Root])
+            .GenericClassOf("Arial").ShouldBe(FontFamilyClass.SansSerif);
+    }
+
+    [Fact]
+    public void WhetherFontconfigNamesAFamilyAtAllIsAskable()
+    {
+        // The question the substitution order turns on: a family fontconfig names nowhere gets
+        // nothing but the default generic, so LibreOffice's own chain is never reached for it.
+        using Tree tree = Tree.Create();
+        tree.Write("conf.d/45-latin.conf", Conf(Default("Calibri", "sans-serif")));
+
+        FontconfigPreferences fontconfig = FontconfigPreferences.Read([tree.Root]);
+
+        fontconfig.IsConfigured.ShouldBeTrue();
+        fontconfig.Names("Calibri").ShouldBeTrue();
+        fontconfig.Names("CG Times").ShouldBeFalse();
+    }
+
+    [Fact]
+    public void WithNoFontconfigThereIsNoClassificationToRead()
+    {
+        // Not "sans-serif" — *unknown*, so the resolver can tell "fontconfig says grotesque" from
+        // "there is no fontconfig here" and fall back to LibreOffice's own table for the second.
+        FontconfigPreferences.None.IsConfigured.ShouldBeFalse();
+        FontconfigPreferences.None.GenericClassOf("Calibri").ShouldBe(FontFamilyClass.Unknown);
+        FontconfigPreferences.None.Names("Calibri").ShouldBeFalse();
+    }
+
+    [Fact]
+    public void AGenericNamedByADocumentClassifiesAsItself()
+    {
+        using Tree tree = Tree.Create();
+        tree.Write("conf.d/45-latin.conf", Conf(Default("Calibri", "sans-serif")));
+
+        FontconfigPreferences fontconfig = FontconfigPreferences.Read([tree.Root]);
+
+        fontconfig.GenericClassOf("serif").ShouldBe(FontFamilyClass.Serif);
+        fontconfig.GenericClassOf("monospace").ShouldBe(FontFamilyClass.Fixed);
+    }
+
     private static string Alias(string subject, params string[] preferred)
         => "<?xml version=\"1.0\"?><fontconfig><alias><family>" + subject + "</family><prefer>"
            + string.Concat(preferred.Select(f => $"<family>{f}</family>"))
            + "</prefer></alias></fontconfig>";
+
+    /// <summary>One or more alias fragments wrapped as a configuration file.</summary>
+    private static string Conf(params string[] aliases)
+        => "<?xml version=\"1.0\"?><fontconfig>" + string.Concat(aliases) + "</fontconfig>";
+
+    private static string Default(string subject, string target)
+        => "<alias><family>" + subject + "</family><default><family>" + target
+           + "</family></default></alias>";
+
+    private static string Accept(string subject, params string[] accepted)
+        => "<alias><family>" + subject + "</family><accept>"
+           + string.Concat(accepted.Select(f => $"<family>{f}</family>"))
+           + "</accept></alias>";
 
     /// <summary>A throwaway fontconfig tree: a root file including a <c>conf.d</c> beside it.</summary>
     private sealed class Tree : IDisposable

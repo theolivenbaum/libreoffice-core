@@ -2,7 +2,7 @@
 """Compare two renderings a *line* at a time, and say what the first difference is.
 
     line-anatomy.py ours.pdf ref.pdf [--page N] [--all]
-    line-anatomy.py --corpus rows.tsv --root /workspace/sample-files --cli … --out anat.tsv
+    line-anatomy.py --corpus rows.tsv --root /c/sandbox/workdir/sample-files --cli … --out anat.tsv
 
 WHY NOT `pdf-ops.py diff`
 ─────────────────────────
@@ -275,7 +275,7 @@ def main() -> int:
     ap.add_argument("ref", nargs="?", type=Path)
     ap.add_argument("--page", type=int)
     ap.add_argument("--corpus", type=Path)
-    ap.add_argument("--root", type=Path, default=Path("/workspace/sample-files"))
+    ap.add_argument("--root", type=Path, default=Path("/c/sandbox/workdir/sample-files"))
     ap.add_argument("--cli", type=Path,
                     default=Path("dotnet/tools/Paperless.Cli/bin/Debug/net10.0/linux-x64/Paperless.Cli"))
     ap.add_argument("--out", type=Path)

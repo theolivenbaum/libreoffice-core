@@ -152,6 +152,16 @@ public sealed partial class Ww8DocumentReader
         public bool AutoKerning { get; init; }
 
         /// <summary>
+        /// The distance the paragraph mark's own formatting puts between characters, nought for none.
+        /// </summary>
+        /// <remarks>
+        /// The mark's, for the same reason as <see cref="AutoKerning"/> beside it: a paragraph set end to
+        /// end in one condensed style carries no runs at all — it is uniform by every test
+        /// <c>RunsOf</c> makes — so without this it would be measured at the face's nominal advances.
+        /// </remarks>
+        public Length Tracking { get; init; }
+
+        /// <summary>
         /// The text frame this paragraph asks to be part of, empty when it asks for none.
         /// </summary>
         /// <remarks>
@@ -218,6 +228,12 @@ public sealed partial class Ww8DocumentReader
     /// this position is a placeholder and this is what stands in its place; <see cref="FamilyName"/> is
     /// already the face the same sprm named, since a slot means nothing without one.
     /// </param>
+    /// <param name="Tracking">
+    /// The distance <c>sprmCDxaSpace</c> puts between the run's characters, negative for a condensed
+    /// run. Unlike the two rules it changes the run's width, so
+    /// <see cref="MatchesFormatting"/> compares it and a run carrying it survives the
+    /// uniform-paragraph shortcut — see <see cref="Ww8LayoutFormat.CharacterSpacing"/>.
+    /// </param>
     public readonly record struct Ww8LayoutRun(
         int Start,
         int Length,
@@ -233,7 +249,8 @@ public sealed partial class Ww8DocumentReader
         bool IsUnderlined = false,
         bool IsStruckThrough = false,
         bool AutoKerning = false,
-        char? SymbolSlot = null)
+        char? SymbolSlot = null,
+        Length Tracking = default)
     {
         /// <summary>One past the run's last character.</summary>
         public int End => Start + Length;
@@ -486,6 +503,7 @@ public sealed partial class Ww8DocumentReader
             DefaultTabInterval = DocumentProperties.DefaultTabInterval,
             TabsRelativeToIndent = false,
             ClampsTabsAtLineEdge = true,
+            SpillsTrailingNoBreakSpace = true,
         };
 
         Ww8LayoutParagraph paragraph = new(
@@ -504,6 +522,34 @@ public sealed partial class Ww8DocumentReader
 
     /// <summary>The stylesheet index of the default paragraph style, which WW8 fixes at nought.</summary>
     private const int DefaultStyleIndex = 0;
+
+    /// <summary>
+    /// The face and em size the default paragraph style sets its text in.
+    /// </summary>
+    /// <remarks>
+    /// Style nought's character chain, resolved exactly as <see cref="BlankFurniture"/> resolves it —
+    /// the same call, so a document whose default style is reached one way here and another way there
+    /// cannot happen. Wanted for the note separator, whose reservation Word takes from this style's
+    /// line height and not from the page's or the note's (see
+    /// <see cref="Layout.PaginationOptions.NoteSeparatorHeight"/>).
+    /// </remarks>
+    public (string? FamilyName, Length Size, int Weight, bool IsItalic) DefaultStyleFont
+    {
+        get
+        {
+            Ww8LayoutFormat character = default;
+            foreach (ReadOnlyMemory<byte> inherited in
+                     _styles.ResolveCharacterChain(DefaultStyleIndex))
+            {
+                character = ApplyLayoutSprms(character, inherited);
+            }
+
+            return (character.FontIndex is { } index ? Fonts.Name(index) : null,
+                    SizeOf(character),
+                    character.IsBold == true ? 700 : 400,
+                    character.IsItalic == true);
+        }
+    }
 
     /// <summary>How many stories precede the first section's furniture in the header subdocument.</summary>
     private const int SeparatorStories = 6;
@@ -640,6 +686,13 @@ public sealed partial class Ww8DocumentReader
             switch (character)
             {
                 case ParagraphMark or Special.SectionMark:
+                    // Inside a table a U+000C is not a break at all and not a paragraph either:
+                    // `HandlePageBreakChar` does nothing whatever under `if (!m_nInTable)`, so the
+                    // character simply vanishes and the text either side of it stays one paragraph.
+                    // Closing here instead adds an empty paragraph per occurrence — see
+                    // <see cref="IsInATable"/> for what that cost `A_320.doc`.
+                    if (character == Special.SectionMark && IsInATable(position)) continue;
+
                     // A U+000C ends a paragraph only when one is under way. `HandlePageBreakChar`
                     // (`ww8par.cxx`:3438) adds a paragraph end exactly when the character before it was
                     // not one — `if (!m_bWasParaEnd && IsTemp)` — and otherwise lets the break settle on
@@ -872,7 +925,7 @@ public sealed partial class Ww8DocumentReader
             Ww8ParagraphFormat format = ResolveParagraphFormat(markPosition);
 
             Ww8LayoutParagraph paragraph =
-                Describe(current.ToString(), positions, body.Start + start, markPosition) with
+                Describe(current.ToString(), positions, body.Start + start, markPosition, body.Start) with
                 {
                     Notes = _pendingNotes.Count == 0 ? null : [.. _pendingNotes],
                     Frames = _pendingFrames.Count == 0 ? null : [.. _pendingFrames],
@@ -938,6 +991,7 @@ public sealed partial class Ww8DocumentReader
                 {
                     Picture = PictureOf(shape),
                     Members = GroupMembers(shape, anchor),
+                    WrittenByWord97 = WrittenByWord97,
 
                     // SwWW8ImplReader::IsInlineEscherHack, ww8par.hxx:1737 — the innermost open field
                     // being a SHAPE is the whole of the test, and ww8graf.cxx:2355 then anchors the
@@ -1170,15 +1224,21 @@ public sealed partial class Ww8DocumentReader
     /// properties, which is a mistake that produces a document formatted one paragraph out of step.
     /// </remarks>
     private Ww8LayoutParagraph Describe(
-        string text, List<int> positions, int start, int markPosition)
+        string text, List<int> positions, int start, int markPosition, int storyStart = 0)
     {
         Ww8LayoutFormat layout = ResolveLayoutFormat(markPosition);
         Ww8ParagraphFormat paragraph = ResolveParagraphFormat(markPosition);
 
+        // Hidden text and tracked deletions leave before anything measures the paragraph, so every
+        // consumer below — the runs, the line breaker, the layouter — sees only what is drawn.
+        (text, positions) = WithoutInvisibleText(text, positions, markPosition);
+
         // The run properties at the paragraph's mark, which is what its mark carries and what an empty
         // paragraph is as tall as. The text's own formatting comes from the runs below.
-        Ww8LayoutFormat character = ResolveCharacterLayout(
-            Math.Min(Math.Max(start, 0), Math.Max(markPosition, 0)));
+        int at = Math.Min(Math.Max(start, 0), Math.Max(markPosition, 0));
+        Ww8LayoutFormat character = text.Length == 0
+            ? EmptyParagraphCharacterLayout(at, storyStart)
+            : ResolveCharacterLayout(at);
 
         Length size = SizeOf(character);
 
@@ -1190,6 +1250,7 @@ public sealed partial class Ww8DocumentReader
             // indent, which is what `ww8par.cxx` records by clearing TABS_RELATIVE_TO_INDENT.
             TabsRelativeToIndent = false,
             ClampsTabsAtLineEdge = true,
+            SpillsTrailingNoBreakSpace = true,
         };
 
         // The level is looked up whether or not it draws a label, because a continuation paragraph of a
@@ -1227,6 +1288,7 @@ public sealed partial class Ww8DocumentReader
             HasAutoSpaceAfter = layout.HasAutoSpaceAfter ?? false,
             ListRule = paragraph.ListNumber,
             AutoKerning = character.AutoKerning ?? false,
+            Tracking = TrackingOf(character),
             Borders = layout.ToParagraphBorders(),
 
             // Not for a paragraph in a table: Word applies a frame to a whole row or to nothing, and
@@ -1285,6 +1347,81 @@ public sealed partial class Ww8DocumentReader
     /// paragraph, and it is the half that makes a heading's runs large and bold.
     /// </para>
     /// </remarks>
+    /// <summary>
+    /// The paragraph's text with its hidden characters removed, and their positions with them.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Dropped here rather than where the runs are built, because the text itself is what the line
+    /// breaker and the layouter measure: leaving the characters in and marking their runs invisible
+    /// would still break lines around them and still charge the paragraph for their width.
+    /// </para>
+    /// <para>
+    /// <strong>A tracked deletion goes only when the document says to hide it.</strong> Writer reads
+    /// that straight off the <c>Dop</c> — <c>isHideRedlines = !m_xWDop-&gt;fRMView</c>,
+    /// <c>sw/source/filter/ww8/ww8par.cxx</c>:5262 — and both behaviours are in the corpus, so neither
+    /// is the rule on its own. <c>tests/corpus/features/revisions.doc</c> sets the bit and LibreOffice's
+    /// own PDF of it reads "an inserted phrase and a deleted phrase in the middle";
+    /// <c>150_5300_13_chg8.doc</c> clears it and the reference shows none of its deletions. Dropping
+    /// deletions unconditionally — which the first cut of this did, on the reasoning that layout treats
+    /// hidden text and deletions alike — rendered the fixture without its deleted phrase, and no corpus
+    /// sweep could have caught that, because the file is a fixture rather than a corpus document.
+    /// </para>
+    /// <para>
+    /// The positions list is carried along rather than recomputed: it maps each character back to its
+    /// place in the piece table, and every later lookup — the character exceptions, the field walk,
+    /// the bookmarks — indexes through it.
+    /// </para>
+    /// </remarks>
+    private (string Text, List<int> Positions) WithoutInvisibleText(
+        string text, List<int> positions, int markPosition)
+    {
+        if (text.Length == 0 || positions.Count == 0) return (text, positions);
+
+        Ww8LayoutFormat inherited = CharacterStyleFormat(markPosition);
+        int count = Math.Min(text.Length, positions.Count);
+
+        ReadOnlyMemory<byte> properties = default;
+        int cachedFrom = 0;
+        int cachedTo = 0;
+        bool cached = false;
+        bool any = false;
+
+        StringBuilder kept = new(text.Length);
+        List<int> keptPositions = new(positions.Count);
+
+        for (int index = 0; index < count; index++)
+        {
+            int byteOffset = _pieces.FileOffsetOf(positions[index]);
+
+            if (!cached || byteOffset < cachedFrom || byteOffset >= cachedTo)
+            {
+                (properties, cachedFrom, cachedTo) = _characterProperties.FindWithRange(byteOffset);
+                cached = true;
+
+                if (cachedTo <= cachedFrom) cachedTo = cachedFrom + 1;
+            }
+
+            Ww8LayoutFormat resolved = ApplyCharacterException(inherited, properties);
+
+            if (resolved.IsHiddenText == true
+                || (resolved.IsTrackedDeletion == true && DocumentProperties.HidesTrackedChanges))
+            {
+                any = true;
+                continue;
+            }
+
+            kept.Append(text[index]);
+            keptPositions.Add(positions[index]);
+        }
+
+        // Nothing was hidden, which is the overwhelmingly common case: hand back what came in rather
+        // than a copy of it.
+        if (!any) return (text, positions);
+
+        return (kept.ToString(), keptPositions);
+    }
+
     private List<Ww8LayoutRun> ReadRuns(string text, List<int> positions, int markPosition)
     {
         List<Ww8LayoutRun> runs = [];
@@ -1329,7 +1466,8 @@ public sealed partial class Ww8DocumentReader
                 format.IsUnderlined ?? false,
                 format.IsStruckThrough ?? false,
                 format.AutoKerning ?? false,
-                format.SymbolSlot);
+                format.SymbolSlot,
+                TrackingOf(format));
 
             if (runs.Count > 0 && MatchesFormatting(runs[^1], run))
             {
@@ -1356,7 +1494,21 @@ public sealed partial class Ww8DocumentReader
            && a.Highlight == b.Highlight
            && a.IsUnderlined == b.IsUnderlined
            && a.IsStruckThrough == b.IsStruckThrough
-           && a.AutoKerning == b.AutoKerning;
+           && a.AutoKerning == b.AutoKerning
+           && a.Tracking == b.Tracking;
+
+    /// <summary>
+    /// The distance a character format puts between its characters, nought when it states none.
+    /// </summary>
+    /// <remarks>
+    /// The bound rejects the absurd rather than the merely large, as <see cref="SizeOf"/>'s does: a
+    /// two-byte operand read out of a malformed CHPX can name a whole page of tracking, and a line whose
+    /// every gap is an inch wide never breaks.
+    /// </remarks>
+    private static Length TrackingOf(Ww8LayoutFormat format)
+        => format.CharacterSpacing is { } twips and >= -1440 and <= 1440
+            ? Length.FromTwips(twips)
+            : Length.Zero;
 
     /// <summary>
     /// The em size a character format states, defaulting to ten points.
@@ -1706,6 +1858,67 @@ public sealed partial class Ww8DocumentReader
             _characterProperties.Find(_pieces.FileOffsetOf(position)));
 
     /// <summary>
+    /// The character sprms an <em>empty</em> paragraph is as tall as.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>The CHPX in force at the position before it</strong> — which is the previous paragraph's
+    /// mark — with the mark's <em>own</em> CHPX laid over the top. The inherited half is the rule, and it
+    /// is not a guess about intent: a CHPX exception whose FKP range <em>ends</em> at this mark is
+    /// still open when LibreOffice's reader consumes the previous mark, and consuming a mark is what
+    /// appends the next (here empty) node — so the reader closes the attribute at offset 0 of a node that
+    /// has no characters, and a zero-length hint on an empty node covers all of it. The empty paragraph
+    /// comes out as tall as the run that ended just above it.
+    /// </para>
+    /// <para>
+    /// <strong>Both halves apply, sprm by sprm, and the mark's own does not displace the inherited one.</strong>
+    /// This read "its own mark's CHPX when the mark carries one, and otherwise the inherited one" for two
+    /// rounds, which is right whenever the mark carries nothing and wrong the moment it carries anything at
+    /// all — and a mark that states only a *complex-script* size states something. Measured on
+    /// <c>info-bulletin-601.doc</c>: the empty paragraph at cp 41 carries a CHPX of
+    /// <c>sprmCHpsBi 0x16</c> and four font-index sprms and <em>no</em> <c>sprmCHps</c>, while cp 40 —
+    /// the previous mark, whose run ends here — states <c>sprmCHps 0x2C</c> and <c>sprmCFBold</c>.
+    /// LibreOffice's own import writes that paragraph out as <c>fo:font-size="22pt"
+    /// fo:font-weight="bold" style:font-size-complex="11pt"</c>: the Latin size and the weight from the
+    /// run that ended above, the complex size from the mark's own CHPX. Taking the mark's own alone left
+    /// it at the style's 11 pt and cost 27.6 pt over three such paragraphs on page 1 — one page of the
+    /// document.
+    /// </para>
+    /// <para>
+    /// Measured on <c>003.doc</c>, whose CHPX FKP reads (fc ranges, ours to name the CPs):
+    /// <c>[35..62] 14pt</c>, <c>[63..72] none</c>, <c>[73..83] 36pt</c>, <c>[84] none</c>,
+    /// <c>[85] 14pt</c>, <c>[86..] none</c>. LibreOffice draws the empty paragraphs at cp 63, 84 and 86 at
+    /// 14, 36 and 14 pt and the ones at cp 64-72 and cp 87 at the style's 12 pt: every one of the seven
+    /// agrees with this rule, including the five that must <em>not</em> inherit. Reading only the mark's
+    /// own CHPX made three of them 12 pt, 32.20 pt short over one page — enough for two extra empty
+    /// paragraphs to fit at the foot of page 1 and for the document to lose its last page.
+    /// </para>
+    /// <para>
+    /// The inherited half is only the <em>exception</em>. The paragraph style stays this paragraph's own,
+    /// because what LibreOffice carries across the mark is a character attribute and not a style: an empty
+    /// Normal paragraph after a Heading 7 whose CHPX states nothing but bold must come out 12 pt bold, not
+    /// 26 pt.
+    /// </para>
+    /// <para>
+    /// Never across a story boundary. The first paragraph of a header, a footnote or a text box has no
+    /// "position before it" in its own flow, and the character before its start belongs to another story
+    /// entirely.
+    /// </para>
+    /// </remarks>
+    private Ww8LayoutFormat EmptyParagraphCharacterLayout(int position, int storyStart)
+    {
+        Ww8LayoutFormat own = ResolveCharacterLayout(position);
+        if (position <= storyStart) return own;
+
+        ReadOnlyMemory<byte> before = _characterProperties.Find(_pieces.FileOffsetOf(position - 1));
+        if (before.IsEmpty) return own;
+
+        return ApplyCharacterException(
+            ApplyCharacterException(CharacterStyleFormat(position), before),
+            _characterProperties.Find(_pieces.FileOffsetOf(position)));
+    }
+
+    /// <summary>
     /// Applies one CHPX over an inherited format: its character style first, then its own sprms.
     /// </summary>
     /// <remarks>
@@ -1806,6 +2019,29 @@ public sealed partial class Ww8DocumentReader
                 // Which of the two sprms stated it travels with the value, because the two disagree
                 // about what nought and two mean in a right-to-left paragraph — see
                 // Ww8LayoutFormat.IsJustificationAbsolute.
+                // Hidden text is never drawn. A tracked DELETION is drawn or not according to the
+                // document's own `fRMView`, which is why the two are separate flags here and are
+                // resolved together only in `WithoutInvisibleText`.
+                //
+                // Read on this path because the two paths resolve character formatting separately and
+                // only the content one tested it. That is what made `150_5300_13_chg8.doc` render its
+                // deletions run together with the insertions replacing them — "may varyis determined by
+                // TERPS" against the reference's "is determined by TERPS", and "Visibility Mminimums"
+                // against "visibility minimums" — while `paperless extract` on the same file was clean.
+                case Ww8SprmReader.Ids.Vanish:
+                    format = format with
+                    {
+                        IsHiddenText = sprm.ResolveToggle(format.IsHiddenText ?? false),
+                    };
+                    continue;
+
+                case Ww8SprmReader.Ids.IsDeleted:
+                    format = format with
+                    {
+                        IsTrackedDeletion = sprm.ResolveToggle(format.IsTrackedDeletion ?? false),
+                    };
+                    continue;
+
                 case LayoutSprms.Justification:
                     format = format with
                     {
@@ -2012,6 +2248,9 @@ public sealed partial class Ww8DocumentReader
                 case LayoutSprms.FontKern:
                     format = format with { AutoKerning = sprm.Word != 0 };
                     break;
+                case LayoutSprms.CharacterSpacing:
+                    format = format with { CharacterSpacing = sprm.SignedWord };
+                    break;
                 case LayoutSprms.Language or LayoutSprms.Language80:
                     format = format with { LanguageId = sprm.Word };
                     break;
@@ -2203,6 +2442,16 @@ public sealed partial class Ww8DocumentReader
         /// because that is all Writer can hold — see <see cref="Ww8LayoutFormat.AutoKerning"/>.
         /// </remarks>
         internal const ushort FontKern = 0x484B;
+
+        /// <summary>
+        /// <c>sprmCDxaSpace</c>: a fixed distance added between the run's characters.
+        /// </summary>
+        /// <remarks>
+        /// Two bytes of <em>signed</em> twips, so a condensed run states a negative operand
+        /// (<c>SwWW8ImplReader::Read_Kern</c>, <c>sw/source/filter/ww8/ww8par6.cxx:4165</c>). Reading it
+        /// unsigned would expand by 65 000 twips exactly where the document meant to condense.
+        /// </remarks>
+        internal const ushort CharacterSpacing = 0x8840;
 
         internal const ushort FontSize = 0x4A43;
         internal const ushort FontIndex = 0x4A4F;

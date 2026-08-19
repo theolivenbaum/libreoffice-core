@@ -91,7 +91,14 @@ public static class DrawingChart
     /// series — in which case the caller should keep recording the frame as a graphic, because
     /// there is nothing better to say about it.
     /// </returns>
-    public static ContentSection? Read(XElement chartSpace)
+    /// <param name="ranges">
+    /// Resolves a sequence's <c>c:f</c> against the cells it names, when the caller has them.
+    /// Null — the default, and what the presentation and word-processing readers pass — keeps the
+    /// cached points as the only source. See <see cref="ChartRangeResolver"/>; the two are the
+    /// same split, and the content tree has to take the same side as the drawing or a chart's
+    /// table and its picture disagree about how many points it has.
+    /// </param>
+    public static ContentSection? Read(XElement chartSpace, ChartRangeResolver? ranges = null)
     {
         ArgumentNullException.ThrowIfNull(chartSpace);
 
@@ -113,7 +120,7 @@ public static class DrawingChart
             if (TitleText(Child(axis, "title")) is { Length: > 0 } text) axisTitles.Add(text);
         }
 
-        List<Series> series = ReadSeries(plotArea);
+        List<Series> series = ReadSeries(plotArea, ranges);
 
         if (title is null && axisTitles.Count == 0 && series.Count == 0) return null;
 
@@ -141,7 +148,7 @@ public static class DrawingChart
     /// </remarks>
     private readonly record struct Point(double? Number, string? Text);
 
-    private static List<Series> ReadSeries(XElement? plotArea)
+    private static List<Series> ReadSeries(XElement? plotArea, ChartRangeResolver? ranges)
     {
         List<Series> series = [];
         if (plotArea is null) return series;
@@ -162,9 +169,10 @@ public static class DrawingChart
                 // c:cat is what every category-based type states; a scatter chart has no
                 // categories at all and states its x values as c:xVal instead, which is the
                 // same CT_AxDataSource and reads identically. Likewise c:val and c:yVal.
-                (string?[] categories, _) = ReadSequence(Child(element, "cat") ?? Child(element, "xVal"));
+                (string?[] categories, _) = ReadSequence(
+                    Child(element, "cat") ?? Child(element, "xVal"), ranges);
                 (string?[] text, double?[] numbers) =
-                    ReadSequence(Child(element, "val") ?? Child(element, "yVal"));
+                    ReadSequence(Child(element, "val") ?? Child(element, "yVal"), ranges);
 
                 Point[] points = new Point[text.Length];
                 for (int at = 0; at < points.Length; at++) points[at] = new Point(numbers[at], text[at]);
@@ -355,9 +363,17 @@ public static class DrawingChart
     /// on the spreadsheet library, and would report numbers no reference renderer draws.
     /// </para>
     /// </remarks>
-    private static (string?[] Text, double?[] Numbers) ReadSequence(XElement? source)
+    private static (string?[] Text, double?[] Numbers) ReadSequence(
+        XElement? source, ChartRangeResolver? ranges = null)
     {
         if (source is null) return ([], []);
+
+        // The c:f wins where the caller can resolve it, exactly as it does in the drawing reader.
+        if (ranges is not null && FormulaOf(source) is { } formula
+            && ranges(formula) is { } live && live.Text.Count > 0)
+        {
+            return ([.. live.Text], [.. live.Numbers]);
+        }
 
         if (Child(source, "multiLvlStrRef") is { } multiLevel)
             return ReadMultiLevel(Child(multiLevel, "multiLvlStrCache"));
@@ -388,6 +404,18 @@ public static class DrawingChart
         }
 
         return (text, numbers);
+    }
+
+    /// <summary>The <c>c:f</c> a reference states, or null when the sequence is a literal.</summary>
+    private static string? FormulaOf(XElement source)
+    {
+        foreach (string container in (string[])["numRef", "strRef", "multiLvlStrRef"])
+        {
+            if (Child(Child(source, container), "f")?.Value is { Length: > 0 } formula)
+                return formula;
+        }
+
+        return null;
     }
 
     /// <summary>

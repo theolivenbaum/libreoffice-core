@@ -57,6 +57,7 @@ public sealed class AutoKerningTests
                 W + "style",
                 new XAttribute(W + "type", "paragraph"),
                 new XAttribute(W + "styleId", "Kerned"),
+                new XElement(W + "name", new XAttribute(W + "val", "Kerned")),
                 new XElement(W + "rPr", new XElement(W + "kern", new XAttribute(W + "val", "32")))));
 
         WordTextStyle text = WordParagraphFormats.ResolveRun(
@@ -77,6 +78,7 @@ public sealed class AutoKerningTests
                 W + "style",
                 new XAttribute(W + "type", "paragraph"),
                 new XAttribute(W + "styleId", "Kerned"),
+                new XElement(W + "name", new XAttribute(W + "val", "Kerned")),
                 new XElement(W + "rPr", new XElement(W + "kern", new XAttribute(W + "val", "32")))));
 
         WordTextStyle text = WordParagraphFormats.ResolveRun(

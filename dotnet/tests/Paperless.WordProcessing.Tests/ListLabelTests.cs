@@ -252,6 +252,80 @@ public sealed class ListLabelTests
     }
 
     /// <summary>
+    /// A paragraph stop nearer the pen than the level's own beats the level's, even where the level's
+    /// is still ahead.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Writer does not consult the level's stop first and the paragraph's second. It inserts the
+    /// level's into the line's copy of the paragraph's ruler — <c>SwLineInfo::InitLineInfo</c>,
+    /// <c>sw/source/core/text/inftxt.cxx</c>:124-137 — and runs one search over the merged list, so
+    /// whichever stop is nearest the pen wins. The pen after a label sits inside the hanging indent, so
+    /// every paragraph stop is still ahead of it, including one at the paragraph's own indent.
+    /// </para>
+    /// <para>
+    /// Measured on <c>info-bulletin-601.doc</c> (words/extra-001), whose bullet level states a 36 pt
+    /// list tab while its paragraphs declare a stop at their own 21.30 pt indent: LibreOffice sets the
+    /// item's text at 21.30 pt. Preferring the level's stop set it at 36 pt, which shortened every
+    /// bulleted first line by 14.7 pt, cost the document a line, and through that a page — 7 against
+    /// the reference's 6.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void AParagraphStopNearerThanTheLevelsBeatsIt()
+    {
+        PageParagraph paragraph = Item("•", start: 21.3, firstLine: -21.3, adjust: measured =>
+            measured with
+            {
+                Follow = LabelFollow.ListTab,
+                TabStop = Length.FromPoints(36),
+            }) with
+        {
+            Format = new ParagraphFormat
+            {
+                StartIndent = Length.FromPoints(21.3),
+                FirstLineIndent = Length.FromPoints(-21.3),
+                TabsRelativeToIndent = false,
+                TabStops = [new TabStop(Length.FromPoints(21.3))],
+            },
+        };
+
+        paragraph.Label!.Width.ShouldBeLessThan(Length.FromPoints(21.3));
+        paragraph.Format.LineStart(isFirstLine: true).ShouldBe(Length.FromPoints(21.3));
+    }
+
+    /// <summary>
+    /// The level's stop still wins where nothing of the paragraph's is nearer.
+    /// </summary>
+    /// <remarks>
+    /// The control on the rule above: the same shape with the paragraph's only stop moved out past the
+    /// level's, which is the case the merge must not disturb. Writer keeps the level's stop here even
+    /// though the pen is inside the hanging indent, because the left-margin override is guarded by
+    /// <c>nNextPos != GetListTabStopPosition()</c> (<c>txttab.cxx</c>:269-272).
+    /// </remarks>
+    [Fact]
+    public void TheLevelsStopWinsWhenNoParagraphStopIsNearer()
+    {
+        PageParagraph paragraph = Item("•", start: 21.3, firstLine: -21.3, adjust: measured =>
+            measured with
+            {
+                Follow = LabelFollow.ListTab,
+                TabStop = Length.FromPoints(36),
+            }) with
+        {
+            Format = new ParagraphFormat
+            {
+                StartIndent = Length.FromPoints(21.3),
+                FirstLineIndent = Length.FromPoints(-21.3),
+                TabsRelativeToIndent = false,
+                TabStops = [new TabStop(Length.FromPoints(72))],
+            },
+        };
+
+        paragraph.Format.LineStart(isFirstLine: true).ShouldBe(Length.FromPoints(36));
+    }
+
+    /// <summary>
     /// A label that fits the room set aside for it still stops at that room's edge.
     /// </summary>
     /// <remarks>
@@ -393,6 +467,122 @@ public sealed class ListLabelTests
         Wrapping(labelPoints: 22).LabelRaisesFirstLine.ShouldBeTrue();
     }
 
+    /// <summary>
+    /// A taller label takes its share of proportional line spacing, where an inline picture does not.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The wiring half of <c>Paperless.Text.Tests.ListLabelLineSpacingTests</c>: the label enters
+    /// measurement as an <see cref="InlineObject"/> and that object has to be the flagged kind, or the
+    /// rule is right in the layer below and never reaches a document.
+    /// </para>
+    /// <para>
+    /// Measured on the installed 24.2.7.2 by <c>dotnet/probes/words-r47/list-label-line-height.py</c>:
+    /// a 28 pt level over 12 pt text at 200% grows the gap by the label's own 32.20 pt line box, not
+    /// by the item's 13.80. Here the level is 22 pt over 11 pt text, so the first line's extension is
+    /// the label's 25.30 pt box rather than the text's 12.65.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void ATallerLabelTakesTheProportionalShareRatherThanTheItemsText()
+    {
+        PageParagraph item = Wrapping(labelPoints: 22) with
+        {
+            Format = new ParagraphFormat
+            {
+                StartIndent = Length.FromPoints(36),
+                FirstLineIndent = Length.FromPoints(-36),
+                LineSpacing = LineSpacingRule.Multiple(2.0),
+            },
+        };
+
+        (Length natural, _, Length text) =
+            item.Measure().MeasureLine(0, Lines(item)[0].Line.VisibleEnd);
+
+        // The label's box, not the item's text: 25.30 pt at 22 pt in Liberation Serif.
+        Math.Abs(text.Twips - Length.FromPoints(25.30).Twips).ShouldBeLessThanOrEqualTo(1);
+        text.ShouldBe(natural);
+
+        Length doubled = Lines(item)[0].Height;
+        Math.Abs(doubled.Twips - (2 * natural.Twips)).ShouldBeLessThanOrEqualTo(1);
+    }
+
+    /// <summary>
+    /// A label deeper than its text raises the first line, even when its whole box is shorter.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Round 47 asked whether the label's <em>box</em> or its <em>ascent</em> beat the item's, and a
+    /// level naming a different face at the same size regularly does neither while still hanging
+    /// further below the baseline. It recorded that as a blind spot it could not act on.
+    /// </para>
+    /// <para>
+    /// Liberation Mono at 12 pt is ascent 9.99, descent 3.60, box 13.59; Liberation Serif at 12 pt is
+    /// 11.20, 2.60, 13.80. So the label is shorter overall and lower-topped, and only its descent
+    /// reaches past the item's — and the line Writer builds is 11.20 + 3.60 = 14.80.
+    /// </para>
+    /// <para>
+    /// Measured against the installed 26.2.4.2 by <c>dotnet/probes/words-b-01/labelshape.py</c>:
+    /// LibreOffice's baseline-to-baseline gap to the paragraph below is 14.80 pt with a Liberation
+    /// Mono label and 13.80 without one.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void ALabelDeeperThanItsTextRaisesTheFirstLineEvenWhenItsBoxIsShorter()
+    {
+        PageParagraph paragraph = TwoFaced("Liberation Mono");
+
+        paragraph.LabelRaisesFirstLine.ShouldBeTrue();
+
+        List<LineBox> lines = Lines(paragraph);
+        List<LineBox> plain = Lines(TwoFaced("Liberation Serif"));
+
+        lines[0].Height.ShouldBeGreaterThan(plain[0].Height);
+        Math.Abs(lines[0].Height.Twips - Length.FromPoints(14.80).Twips)
+            .ShouldBeLessThanOrEqualTo(1);
+        Math.Abs(plain[0].Height.Twips - Length.FromPoints(13.80).Twips)
+            .ShouldBeLessThanOrEqualTo(1);
+    }
+
+    /// <summary>
+    /// The two controls the descent rule is not allowed to disturb.
+    /// </summary>
+    /// <remarks>
+    /// Liberation Sans at 12 pt has ascent 11.26 against Liberation Serif's 11.20 and a shallower
+    /// descent, so the old ascent term already fired for it and its answer must not change; a label in
+    /// the item's own face at the item's own size reaches past it on neither side and must still leave
+    /// the paragraph on the unmeasured path. Both were measured against 26.2.4.2 in the same probe and
+    /// both matched before this rule and after it.
+    /// </remarks>
+    [Fact]
+    public void ALabelTallerAboveOrEqualOnBothSidesIsUnaffectedByTheDescentRule()
+    {
+        TwoFaced("Liberation Sans").LabelRaisesFirstLine.ShouldBeTrue();
+        TwoFaced("Liberation Serif").LabelRaisesFirstLine.ShouldBeFalse();
+    }
+
+    /// <summary>A 12 pt Liberation Serif item whose label is 12 pt in a face of its own.</summary>
+    private static PageParagraph TwoFaced(string labelFamily)
+    {
+        SystemFontResolver resolver = new(SystemFontIndex.Build());
+        OpenTypeFace labelFace = resolver.LoadOpenType(
+            resolver.Resolve(new FontRequest(labelFamily, 400, false)));
+
+        return new PageParagraph
+        {
+            Text = "An item labelled in a face that is not its own.",
+            Face = Face,
+            EmSize = Length.FromPoints(12),
+            Format = new ParagraphFormat
+            {
+                StartIndent = Length.FromPoints(36),
+                FirstLineIndent = Length.FromPoints(-36),
+            },
+            Label = PageLabel.Measured("1.", labelFace, Length.FromPoints(12))
+                with { Follow = LabelFollow.Nothing },
+        };
+    }
+
     /// <summary>An item long enough to wrap, whose label is set at a size of its own.</summary>
     private static PageParagraph Wrapping(double labelPoints)
         => new()
@@ -413,7 +603,8 @@ public sealed class ListLabelTests
     /// <summary>The paragraph's lines, laid out the way the paginator lays a block out.</summary>
     private static List<LineBox> Lines(PageParagraph paragraph)
     {
-        ParagraphLayouter layouter = new(paragraph.Face, breaker: null, paragraph.Metrics);
+        ParagraphLayouter layouter = new(
+            paragraph.Face, breaker: null, paragraph.Metrics, WriterLineBox.LeadingAboveText);
 
         LaidOutParagraph laidOut =
             paragraph.HasRuns || paragraph.HasInlineObjects || paragraph.LabelRaisesFirstLine

@@ -167,6 +167,71 @@ public sealed partial record ChartSeries(
     /// </remarks>
     public ChartMarker Marker { get; init; } = ChartMarker.None;
 
+    /// <summary>
+    /// The colour the marker is filled in where it states one of its own, or null to take the
+    /// series' colour.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>c:marker/c:spPr</c>. A marker carries its own shape properties and they are not the
+    /// series': <c>TypeGroupConverter::convertMarker</c> reads the symbol's fill colour, falling
+    /// back to the symbol's line colour when there is no fill
+    /// (<c>typegroupconverter.cxx:657-678</c>, tdf#124817), and only then does the series' colour
+    /// come into it.
+    /// </para>
+    /// <para>
+    /// Null means "the file states nothing", which keeps every marker whose file says nothing
+    /// drawn exactly as before — including every ODF chart, whose reader has no such element to
+    /// give.
+    /// </para>
+    /// </remarks>
+    public Colour? MarkerFill { get; init; }
+
+    /// <summary>The marker's own outline colour, or null to take the series'.</summary>
+    /// <remarks><c>c:marker/c:spPr/a:ln</c>. See <see cref="MarkerFill"/>.</remarks>
+    public Colour? MarkerLine { get; init; }
+
+    /// <summary>
+    /// The dash array the series' line is stroked with, or null for a solid line.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Alternating ink and gap lengths, already expanded from whatever the file named — OOXML's
+    /// <c>a:prstDash</c> through <see cref="DashPresets"/>, ODF's <c>draw:stroke-dash</c>. It is
+    /// stored expanded rather than as a preset name because the lengths are a percentage of the
+    /// pen width, so the name alone does not determine the pattern.
+    /// </para>
+    /// <para>
+    /// <strong>A threshold line is the case this exists for.</strong> A chart that draws its
+    /// target as a dotted horizontal rule and its data as a solid curve is telling the reader
+    /// which is which by the dash and by nothing else; drawn solid, the three lines of
+    /// <c>southern-classic-kennesaw-state-university-final.pptx</c>'s price chart read as four
+    /// series of equal standing. It also widens the legend key, which
+    /// <c>getPreferredLegendKeyAspectRatio</c> doubles from 800 to 1600 for a dashed line.
+    /// </para>
+    /// </remarks>
+    public IReadOnlyList<Length>? DashPattern { get; init; }
+
+    /// <summary>How the ends of the series' line — and of each of its dashes — are drawn.</summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>The cap is half of what a dash pattern looks like, not a refinement of it.</strong>
+    /// <c>DashPresets</c> takes 99% off each ink length for a round or square cap because
+    /// Microsoft measures the cap inside the dash and ODF adds it on — so a <c>sysDot</c> on a
+    /// 3 pt pen becomes 0.03 pt of ink and 5.97 of gap, and the cap is the whole of the dot.
+    /// Drawn butt, that same array is a row of hairline rectangles.
+    /// </para>
+    /// <para>
+    /// Measured in the PDF operators: the reference emits <c>1 J</c> beside every
+    /// <c>[0.03 5.97] 0 d</c> on
+    /// <c>southern-classic-kennesaw-state-university-final.pptx</c> page 2, and we emitted
+    /// <c>0 J</c> for all 893 of our strokes. A blind reviewer sent that page called ours
+    /// "narrow, tall, rectangular dashes with wide gaps" against the reference's "clearly round
+    /// dots", and named the cap as the first candidate — before the operator census was run.
+    /// </para>
+    /// </remarks>
+    public LineCap LineCap { get; init; } = LineCap.Butt;
+
     /// <summary>Whether the series joins its points with a line.</summary>
     /// <remarks>
     /// False for a scatter chart whose <c>c:scatterStyle</c> is <c>marker</c>, and for a line
@@ -424,6 +489,58 @@ public sealed partial record ChartPlot
     /// <summary>Whether the series are stacked on top of one another.</summary>
     public bool IsStacked { get; init; }
 
+    /// <summary>
+    /// Whether the stack is normalised to fill the plot — <c>c:grouping val="percentStacked"</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A percent stack is not a stack with a percentage format on its axis: every category is
+    /// divided by its own total, so the columns are the same height whatever the raw numbers are
+    /// and the axis runs 0 to 1 regardless of them. Reading it as an ordinary stack and then
+    /// applying the axis' <c>0%</c> format multiplies the raw total by a hundred — measured on
+    /// <c>8_P-Pavese_AIRBUS-ATB-journee-CRATB.pptx</c>, whose stack of 548 over 73 gave an axis
+    /// reading <c>0%, 10000% … 70000%</c> against the reference's <c>0% … 100%</c>.
+    /// </para>
+    /// <para>
+    /// <strong>The raw value survives into the data labels.</strong> Normalising the stored
+    /// values instead would be a smaller change and would make every <c>c:showVal</c> label read
+    /// <c>0.88</c> where both the file and the reference say <c>548</c>, so the normalisation is
+    /// applied where the geometry is computed and nowhere else.
+    /// </para>
+    /// </remarks>
+    public bool IsPercentStacked { get; init; }
+
+    /// <summary>
+    /// What one category's values are divided by on a percent stack, or null when they are not.
+    /// </summary>
+    /// <remarks>
+    /// The sum of the <em>absolute</em> values in the category, which is what makes a category
+    /// holding +50 and −50 fill the plot in both directions rather than divide by zero. Null for
+    /// any chart that is not percent-stacked and for a category that sums to nothing, and a null
+    /// means "draw the value as it stands".
+    /// </remarks>
+    /// <param name="index">The category's index.</param>
+    /// <param name="axis">
+    /// Which value axis to total, matching <see cref="ValueRange"/>: −1 for every series.
+    /// </param>
+    public double? StackTotal(int index, int axis = -1)
+    {
+        if (!IsPercentStacked) return null;
+
+        double total = 0.0;
+
+        foreach (ChartSeries series in Series)
+        {
+            if (axis >= 0 && series.AxisIndex != axis) continue;
+            if (index < 0 || index >= series.Values.Count) continue;
+            if (series.Values[index] is not { } value || !double.IsFinite(value)) continue;
+
+            total += Math.Abs(value);
+        }
+
+        return total > 0.0 ? total : null;
+    }
+
     /// <summary>What the value axis states, before the automatic parts are resolved.</summary>
     public ChartScaleRequest ValueScale { get; init; }
 
@@ -489,11 +606,38 @@ public sealed partial record ChartPlot
     /// </remarks>
     public NumberFormatCode? CategoryFormat { get; init; }
 
+    /// <summary>
+    /// The category axis resolved as a <em>date</em> axis, or null when it is a run of category
+    /// slots like any other.
+    /// </summary>
+    /// <remarks>
+    /// Set only where the file states a date axis and the categories bear it out. Everything that
+    /// maps a category across the plot area consults it first — see
+    /// <see cref="ChartDateAxis"/> for why the two answers differ by more than a tick label.
+    /// </remarks>
+    public ChartDateAxis? DateAxis { get; init; }
+
     /// <summary>Where the legend goes.</summary>
     public ChartLegendPosition Legend { get; init; } = ChartLegendPosition.None;
 
     /// <summary>The chart area's own fill, or null when it states none.</summary>
     public Colour? Background { get; init; }
+
+    /// <summary>
+    /// The frame the chart draws around its whole area, or null when it draws none.
+    /// </summary>
+    /// <remarks>
+    /// <c>c:chartSpace/c:spPr/a:ln</c>. Only a stated one: a PPTX chart's <em>automatic</em>
+    /// chart-space line is <c>spNoFormats</c> — an invisible entry for every style — and the grey
+    /// <c>D9D9D9</c> default <c>LineFormatter</c> otherwise supplies is explicitly skipped for
+    /// the Impress filter (<c>oox/source/drawingml/chart/objectformatter.cxx:837-847</c>,
+    /// tdf#150176). So a chart with no <c>a:ln</c> has no frame and one with an <c>a:ln</c> has
+    /// exactly what it says.
+    /// </remarks>
+    public Colour? Border { get; init; }
+
+    /// <summary>How wide <see cref="Border"/> is; zero is a hairline.</summary>
+    public Length BorderWidth { get; init; }
 
     /// <summary>
     /// The table of numbers drawn under the plot, or null when the chart has none.
@@ -859,6 +1003,15 @@ public sealed partial record ChartPlot
                 }
 
                 if (!any) continue;
+
+                // A percent stack's category is its own unit, so each half is a fraction of the
+                // total rather than a count — which is what puts the axis at 0 to 1.
+                if (StackTotal(at, axis) is { } total)
+                {
+                    positive /= total;
+                    negative /= total;
+                }
+
                 minimum = Math.Min(minimum, negative);
                 maximum = Math.Max(maximum, positive);
             }

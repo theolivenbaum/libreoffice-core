@@ -102,12 +102,20 @@ internal sealed class XlsDecorationTable
 {
     private readonly List<Colour> _palette = [];
     private readonly List<XlsXfDecoration> _formats = [];
+    private readonly List<(bool IsCellXf, int Parent)> _lineage = [];
 
     /// <summary>True when no <c>XF</c> in the workbook paints anything.</summary>
     public bool IsEmpty => _formats.Count == 0;
 
     /// <summary>Records one <c>XF</c>'s decoration, in record order.</summary>
-    public void Add(XlsXfDecoration decoration) => _formats.Add(decoration);
+    /// <param name="decoration">What the record paints.</param>
+    /// <param name="isCellXf">True for a cell <c>XF</c>, false for a style <c>XF</c>.</param>
+    /// <param name="parentIndex">The <c>XF</c> index this one names as its style.</param>
+    public void Add(XlsXfDecoration decoration, bool isCellXf, int parentIndex)
+    {
+        _formats.Add(decoration);
+        _lineage.Add((isCellXf, parentIndex));
+    }
 
     /// <summary>
     /// Reads a <c>PALETTE</c> record: the colours the workbook redefined.
@@ -139,9 +147,10 @@ internal sealed class XlsDecorationTable
         if (index < 0 || index >= _formats.Count) return SheetCellDecoration.None;
 
         XlsXfDecoration xf = _formats[index];
+        bool ownAttributes = HasStyleParent(index);
 
         Colour? background = null;
-        if (xf.StatesArea && xf.Pattern != 0)
+        if ((xf.StatesArea || ownAttributes) && xf.Pattern != 0)
         {
             // Pattern 1 is solid and its colour is the foreground. Everything else is a hatch
             // of foreground over background, which one colour cannot stand for, so the
@@ -149,7 +158,7 @@ internal sealed class XlsDecorationTable
             background = xf.Pattern == 1 ? Colour(xf.ForeColour) : Colour(xf.BackColour);
         }
 
-        SheetCellBorders borders = xf.StatesBorder
+        SheetCellBorders borders = xf.StatesBorder || ownAttributes
             ? new SheetCellBorders(
                 Edge(xf.LeftLine, xf.LeftColour),
                 Edge(xf.RightLine, xf.RightColour),
@@ -160,6 +169,44 @@ internal sealed class XlsDecorationTable
         return background is null && borders.IsNone
             ? SheetCellDecoration.None
             : new SheetCellDecoration(background, borders);
+    }
+
+    /// <summary>
+    /// True when this <c>XF</c> is a cell <c>XF</c> whose named style exists, in which case its
+    /// own border and fill bytes are what Calc paints whatever its "used" flags say.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The "used" flags do <em>not</em> decide the border or the fill of a cell <c>XF</c>.
+    /// <c>XclImpXF::CreatePattern</c> (<c>sc/source/filter/excel/xistyle.cxx:1291-1294</c>) turns
+    /// each flag <em>on</em> whenever the parent style either states nothing or states something
+    /// different:
+    /// </para>
+    /// <code>
+    /// if( !mbBorderUsed )
+    ///     mbBorderUsed = !pParentXF->mbBorderUsed || !(maBorder == pParentXF->maBorder);
+    /// </code>
+    /// <para>
+    /// So a cleared flag survives only when the parent states the <em>same</em> border — and the
+    /// border the cell then inherits through its style sheet is that identical one. Both branches
+    /// therefore land on this record's own bytes, which is why honouring the flag literally is a
+    /// defect rather than a simplification: it drops borders and fills that Calc paints. Measured
+    /// on <c>7-memento-2015-transports-aeriens-b.xls</c>, whose <c>XF</c> 115 carries a thin
+    /// <c>#0066CC</c> box with the flag cleared and a parent style carrying the same box.
+    /// </para>
+    /// <para>
+    /// A missing parent is the one case the flag still rules: <c>GetXF</c> returns null, Calc
+    /// skips the block above, and the attribute stays unset. Style <c>XF</c>s have no parent to
+    /// consult at all.
+    /// </para>
+    /// </remarks>
+    /// <param name="index">The <c>XF</c> index.</param>
+    private bool HasStyleParent(int index)
+    {
+        if (index >= _lineage.Count) return false;
+
+        (bool isCellXf, int parent) = _lineage[index];
+        return isCellXf && parent >= 0 && parent < _formats.Count;
     }
 
     /// <summary>

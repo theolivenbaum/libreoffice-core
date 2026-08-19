@@ -459,14 +459,57 @@ public sealed class SystemFontResolver : IFontResolver, IGlyphFallbackResolver
         if (_index.Best(request.FamilyName, request.Weight, request.IsItalic) is { } exact)
             return Reference(request, exact, requested: request.FamilyName);
 
-        // LibreOffice's substitution chain, in its own order.
-        foreach (string candidate in FontSubstitutions.ChainFor(request.FamilyName))
-        {
-            if (_index.Best(candidate, request.Weight, request.IsItalic) is not { } substitute)
-                continue;
+        // What the *document* declared about the family, when it declared something acted on.
+        //
+        // This runs **before** the substitution chain, and that ordering is the whole point rather than
+        // a detail. `FontConfigManager::Substitute` (`vcl/unx/generic/font/fontconfig.cxx`) is the
+        // *pre-match* substitution: it runs before LibreOffice consults `VCL.xcu` at all, and it asks
+        // fontconfig for the requested name plus a generic family. A name fontconfig aliases only
+        // weakly therefore loses to the generic and never reaches the chain. Measured against 26.2.4.2
+        // with authored one-paragraph documents on the four names that can tell the two orderings
+        // apart, because each has a chain entry that *is* installed: `Times`, `Helvetica`, `Albany`
+        // and `Thorndale` all answer DejaVu once a class is declared, where the chain answers
+        // Liberation.
+        string[]? generic = DeclaredGenericFor(request);
 
-            Record(request, substitute);
-            return Reference(request, substitute, requested: request.FamilyName);
+        if (generic is not null)
+        {
+            // Except a *strong* metric alias, which fontconfig's own `30-metric-aliases.conf` binds hard
+            // enough to beat a generic family. The test is whether an installed face declares itself the
+            // equivalent of the very name asked for — Liberation Sans of Arial, Carlito of Calibri — and
+            // not whether the two are transitively compatible: Liberation Sans is metrically Helvetica's
+            // equal through Arial, and `Helvetica` declared swiss still renders in DejaVu Sans.
+            foreach (string candidate in FontSubstitutions.ChainFor(request.FamilyName))
+            {
+                if (!ClaimsEquivalenceWith(candidate, request.FamilyName)) continue;
+                if (_index.Best(candidate, request.Weight, request.IsItalic) is not { } aliased) continue;
+
+                Record(request, aliased);
+                return Reference(request, aliased, requested: request.FamilyName);
+            }
+
+            foreach (string candidate in generic)
+            {
+                if (_index.Best(candidate, request.Weight, request.IsItalic) is not { } preferred)
+                    continue;
+
+                Record(request, preferred);
+                return Reference(request, preferred, requested: request.FamilyName);
+            }
+        }
+
+        // LibreOffice's substitution chain, in its own order — when the running binary reaches it
+        // at all. See `ConsultsTheChain`.
+        if (ConsultsTheChain(request))
+        {
+            foreach (string candidate in FontSubstitutions.ChainFor(request.FamilyName))
+            {
+                if (_index.Best(candidate, request.Weight, request.IsItalic) is not { } substitute)
+                    continue;
+
+                Record(request, substitute);
+                return Reference(request, substitute, requested: request.FamilyName);
+            }
         }
 
         // Nothing named matched, so fall back by shape. A monospaced request must not land on a
@@ -590,7 +633,7 @@ public sealed class SystemFontResolver : IFontResolver, IGlyphFallbackResolver
     /// documents actually name.
     /// </para>
     /// </remarks>
-    private static IReadOnlyList<string> GenericFallbacks(FontRequest request)
+    private IReadOnlyList<string> GenericFallbacks(FontRequest request)
     {
         if (request.Pitch == FontPitch.Fixed) return MonoFallbacks;
 
@@ -598,7 +641,12 @@ public sealed class SystemFontResolver : IFontResolver, IGlyphFallbackResolver
         // and only the second one is fontconfig's to answer.
         if (string.IsNullOrWhiteSpace(request.FamilyName)) return DefaultFallbacks;
 
-        return FontSubstitutions.ClassOf(request.FamilyName) switch
+        // What the *document* says the family is, which beats what anything says the *name* is.
+        // The same helper the pre-match step above uses, so the two cannot drift apart — reaching
+        // here at all means the declared generic named nothing installed either.
+        if (DeclaredGenericFor(request) is { } declared) return declared;
+
+        return ShapeOf(request.FamilyName) switch
         {
             FontFamilyClass.Fixed => MonoFallbacks,
             FontFamilyClass.Serif => SerifFallbacks,
@@ -608,6 +656,147 @@ public sealed class SystemFontResolver : IFontResolver, IGlyphFallbackResolver
             _ => SansFallbacks,
         };
     }
+
+    /// <summary>
+    /// The generic shape a family name implies, read from fontconfig rather than from
+    /// <c>VCL.xcu</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>This is the substitution the running binary makes, and the table's <c>FontType</c>
+    /// is not.</strong> By the time control reaches here the family is not installed and no chain
+    /// entry has answered, which is the case <c>FcPreMatchSubstitution::FindFontSubstitute</c>
+    /// (<c>vcl/unx/generic/font/fontsubst.cxx</c>:98) handles by handing the name to fontconfig —
+    /// so the generic that decides the face is the one *fontconfig* files the name under, not the
+    /// one LibreOffice's own configuration does. The two disagree, and not rarely: over the 296
+    /// families the sample corpus names, ten differ. <c>Century Schoolbook</c>, <c>Century</c>,
+    /// <c>NewCenturySchlbk</c>, <c>Book Antiqua</c>, <c>Bookman Old Style</c>, <c>CG Times</c> and
+    /// <c>Times-Roman</c> are romans to <c>VCL.xcu</c> and are filed under nothing at all by
+    /// fontconfig, so they take its sans-serif default; <c>Lucida Console</c> is fixed to
+    /// <c>VCL.xcu</c> and likewise unfiled; <c>Palatino Linotype</c>, <c>SimSun</c> and
+    /// <c>ＭＳ 明朝</c> go the other way, unknown to the table and filed <c>serif</c> by
+    /// fontconfig. Measured on the installed 26.2.4.2 with the 296-row face probe: the binary
+    /// answers fontconfig's way on every one.
+    /// </para>
+    /// <para>
+    /// The table is still the answer where there is no fontconfig to ask — Windows, most macOS —
+    /// because there the pre-match hook does not exist either and <c>ImplFontSubstitute</c> really
+    /// is what runs.
+    /// </para>
+    /// </remarks>
+    private FontFamilyClass ShapeOf(string? familyName)
+        => _preferences.IsConfigured
+            ? _preferences.GenericClassOf(familyName)
+            : FontSubstitutions.ClassOf(familyName);
+
+    /// <summary>
+    /// Whether LibreOffice's own <c>SubstFonts</c> chain is reached for this request at all.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>PhysicalFontCollection::FindFontFamily</c> calls the pre-match hook
+    /// (<c>vcl/source/font/PhysicalFontCollection.cxx</c>:1142) and returns whatever it names if
+    /// that family is installed (<c>:1151</c>); <c>ImplFontSubstitute</c>, which is the chain, is
+    /// only reached in the *second* loop at <c>:1180</c>. On Linux the hook asks fontconfig, and
+    /// fontconfig always answers. So the chain is unreachable for a family fontconfig speaks for —
+    /// which, once the generic default is counted, is every family.
+    /// </para>
+    /// <para>
+    /// <strong>Only it demonstrably is not, for the eight names the chain currently gets right.</strong>
+    /// Over the 296 corpus families, exactly 18 are answered by the chain rather than by a shape
+    /// fallback, and the split is clean: eight are families fontconfig itself names — <c>Arial</c>,
+    /// <c>Calibri</c>, <c>Cambria</c>, <c>Courier</c>, <c>Courier New</c>, <c>Helvetica</c>,
+    /// <c>Times</c>, <c>Times New Roman</c> — where our chain and fontconfig's own aliases reach the
+    /// same installed face and the chain is a faithful stand-in for the alias expansion this
+    /// resolver does not implement. Six are pi faces, where the hook bails before fontconfig is
+    /// asked at all (<c>fontsubst.cxx</c>:101, on a symbol-encoded request). The remaining four are
+    /// the defect: <c>CG Times</c>, <c>Times-Roman</c>, <c>MS Gothic</c> and <c>MS PGothic</c>, all
+    /// four unnamed by fontconfig, all four sent by the chain to a face 26.2.4.2 does not use.
+    /// </para>
+    /// <para>
+    /// So the rule is <em>a family fontconfig names nowhere does not reach the chain</em>, which is
+    /// the mechanism restated in terms of what is checkable. It replaces a hardcoded pair —
+    /// <c>Helv</c> and <c>SansSerif</c>, found by the same probe a round earlier — and derives both
+    /// of them, neither being named by any <c>&lt;alias&gt;</c> in a stock configuration.
+    /// </para>
+    /// <para>
+    /// <c>MS Gothic</c> is worth naming because the obvious objection is that fontconfig answers by
+    /// character and this request carries none, so an East Asian family might deserve its chain
+    /// entry. It does not: 26.2.4.2 draws Latin text declared <c>MS Gothic</c> in DejaVu Sans and
+    /// <em>Japanese</em> text declared <c>MS Gothic</c> in WenQuanYi Zen Hei, and the chain's answer
+    /// — IPAGothic — is neither. The CJK coverage comes back through glyph fallback, which reads
+    /// the same configuration and ranks WenQuanYi Zen Hei first.
+    /// </para>
+    /// </remarks>
+    private bool ConsultsTheChain(FontRequest request)
+    {
+        // A machine with no fontconfig has no pre-match hook either, so nothing overrides the table.
+        if (!_preferences.IsConfigured) return true;
+
+        // A pi face is symbol-encoded, and the hook bails on those before fontconfig is consulted.
+        if (FontSubstitutions.ClassOf(request.FamilyName) == FontFamilyClass.Symbol) return true;
+
+        return _preferences.Names(request.FamilyName);
+    }
+
+    /// <summary>
+    /// The faces the generic family a document's own declaration implies, or null when it implies none.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Two classes and only two, because that is what LibreOffice sends: <c>FontConfigManager::Substitute</c>
+    /// (<c>vcl/unx/generic/font/fontconfig.cxx</c>) appends <c>"serif"</c> as a second <c>FC_FAMILY</c>
+    /// for <c>FAMILY_ROMAN</c> and <c>"sans"</c> for <c>FAMILY_SWISS</c>, and nothing at all for any
+    /// other family type. A monospaced class looks as though it ought to add <c>"monospace"</c> and
+    /// does not — measured, <c>Times</c> declared <c>modern</c> still comes out Liberation Serif, which
+    /// is the plain <c>fc-match Times</c> answer. The readers collapse those codes to
+    /// <see cref="FontFamilyClass.Unknown"/> for the same reason.
+    /// </para>
+    /// <para>
+    /// <strong>A declared fixed pitch wins over a declared family</strong>, because a document relying
+    /// on its columns lining up is making the stronger statement: measured, <c>Garamond</c> declared
+    /// roman <em>and</em> fixed answers DejaVu Sans Mono rather than DejaVu Serif.
+    /// </para>
+    /// <para>
+    /// <strong>A pi face is exempt</strong>, whatever class the document put beside it. Every Word
+    /// document that uses <c>Symbol</c> declares it roman and there is no roman equivalent of a font of
+    /// arrows and Greek letters; fontconfig knows it too and binds the name hard enough to survive a
+    /// generic — <c>fc-match "Symbol,serif"</c> and <c>fc-match Symbol</c> both answer OpenSymbol, and
+    /// so does 26.2.4.2 on a document declaring Symbol as a roman. Without this the declaration sent
+    /// every Symbol run to DejaVu Serif, which draws the characters rather than the symbols they stand
+    /// for — measured on <c>ABCD-FE-01-00 Flight Envelope.docx</c> and its sibling.
+    /// </para>
+    /// <para>
+    /// The lists themselves are the existing shape fallbacks, already documented as the answer
+    /// fontconfig's generic families give on this configuration and measured face by face.
+    /// </para>
+    /// </remarks>
+    private static string[]? DeclaredGenericFor(FontRequest request)
+    {
+        if (request.Pitch == FontPitch.Fixed) return MonoFallbacks;
+
+        if (FontSubstitutions.ClassOf(request.FamilyName) == FontFamilyClass.Symbol) return null;
+
+        return request.DeclaredClass switch
+        {
+            FontFamilyClass.Serif => SerifFallbacks,
+            FontFamilyClass.SansSerif => SansFallbacks,
+            _ => null,
+        };
+    }
+
+    /// <summary>
+    /// True when an installed family declares itself the metric equivalent of the name asked for.
+    /// </summary>
+    /// <remarks>
+    /// Deliberately one-directional and deliberately not <see cref="FontSubstitutions.AreMetricCompatible"/>,
+    /// which is transitive: Liberation Sans and Helvetica are compatible through Arial, and a document
+    /// naming Helvetica as a grotesque still renders in DejaVu Sans. What survives a generic family in
+    /// fontconfig is the alias bound to the requested name itself, so that is what is tested.
+    /// </remarks>
+    private static bool ClaimsEquivalenceWith(string candidate, string requested)
+        => FontSubstitutions.MicrosoftEquivalentOf(candidate) is { } equivalent
+           && FontSubstitutions.Normalise(equivalent) == FontSubstitutions.Normalise(requested);
 
     /// <summary>A face loaded through a resolver.</summary>
     private sealed class ResolvedFontFace(FontReference reference, OpenTypeFace face) : IFontFace

@@ -1155,6 +1155,10 @@ public sealed partial class RtfDocumentReader
                 // document it maps, and RTF goes through the same mapper.
                 TabsRelativeToIndent = false,
                 ClampsTabsAtLineEdge = true,
+            SpillsTrailingNoBreakSpace = true,
+
+                // And, by the same route, TabOverSpacing — WriterFilter.cxx:325.
+                TabsOverSpacing = true,
             },
             _fontFamilies.GetValueOrDefault(state.FontIndex),
             SizeOf(state),

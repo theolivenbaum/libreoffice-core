@@ -128,6 +128,32 @@ public sealed class DocxPictures
     }
 
     /// <summary>
+    /// The picture a VML shape names through <c>v:imagedata</c>, or nothing when it names none.
+    /// </summary>
+    /// <remarks>
+    /// VML states its picture as <c>v:imagedata/@r:id</c> rather than as <c>a:blip/@r:embed</c>, so the
+    /// choice <see cref="Read"/> makes between a vector and its raster fallback has no counterpart here:
+    /// there is one relationship and it is whatever the file stored, commonly an EMF. The scoping is the
+    /// same and is the part that matters — a shape in a header resolves against that header's
+    /// relationships, which <see cref="Scope"/> already tracks.
+    /// </remarks>
+    public FramePicture ReadVml(XElement shape)
+    {
+        ArgumentNullException.ThrowIfNull(shape);
+
+        XElement? data = shape
+            .DescendantsAndSelf()
+            .FirstOrDefault(element => element.Name.LocalName == "imagedata");
+
+        if (data?.Attribute(XName.Get("id", OoxmlNamespaces.Relationships))?.Value is not { } id)
+        {
+            return FramePicture.None;
+        }
+
+        return Embedded(id);
+    }
+
+    /// <summary>
     /// The chart a <c>w:drawing</c> holds, or null when it holds none.
     /// </summary>
     /// <remarks>

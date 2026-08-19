@@ -37,6 +37,7 @@ internal static class Program
         return command switch
         {
             "identify" => Identify(rest),
+            "analyze" => AnalyzeCommand.Analyze(rest),
             "extract" => ExtractCommand.Extract(rest),
             "metadata" => ExtractCommand.Metadata(rest),
             "render" => RenderCommand.Render(rest),
@@ -210,6 +211,7 @@ internal static class Program
               extract  FILE...   Extract text, tables and structure
               metadata FILE...   Report the document's metadata
               render   FILE...   Lay out and write pages as PDF, PNG or JPEG
+              analyze  FILE...   Report a PDF's pages, page sizes, words and fonts
               version            Print the version
               help               Print this message
 

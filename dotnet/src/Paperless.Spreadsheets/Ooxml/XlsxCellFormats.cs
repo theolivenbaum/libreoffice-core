@@ -3,6 +3,7 @@ using System.Xml.Linq;
 using Paperless.Core.Graphics;
 using Paperless.Core.Units;
 using Paperless.Spreadsheets.Layout;
+using Paperless.Text.Fonts;
 
 namespace Paperless.Spreadsheets.Ooxml;
 
@@ -67,7 +68,8 @@ internal sealed record XlsxCellFormatTable(
     /// the same place for both (<c>StylesBuffer::getDefaultFont</c>).
     /// </remarks>
     public SheetDefaultFont DefaultColumnFont { get; } = new(
-        DefaultFont.FontFamily, DefaultFont.FontSize, DefaultFont.FontWeight, DefaultFont.IsItalic);
+        DefaultFont.FontFamily, DefaultFont.FontSize, DefaultFont.FontWeight, DefaultFont.IsItalic,
+        DefaultFont.DeclaredFontClass);
 }
 
 /// <summary>
@@ -150,6 +152,7 @@ internal static class XlsxCellFormats
             ? new SheetCellFormat
             {
                 FontFamily = fonts[0].Family,
+                DeclaredFontClass = fonts[0].DeclaredClass,
                 FontSize = fonts[0].Size,
                 FontWeight = fonts[0].Weight,
                 IsItalic = fonts[0].Italic,
@@ -177,12 +180,22 @@ internal static class XlsxCellFormats
         return cellFormat with
         {
             FontFamily = font.Family ?? defaultFont.FontFamily,
+
+            // The declaration follows the name it qualifies rather than falling back on its own:
+            // an rPr that renames the face and says nothing about its shape has said the shape is
+            // unknown, and inheriting the cell's would file the new name under the old one's
+            // family. Only a run that renames nothing keeps the cell's declaration.
+            DeclaredFontClass = font.DeclaredFamily is { } code
+                ? SheetDeclaredFonts.FromWindowsCode(code)
+                : font.Family is null ? defaultFont.DeclaredFontClass : FontFamilyClass.Unknown,
             FontSize = font.Points is > 0
                 ? Length.FromPoints(font.Points.Value)
                 : defaultFont.FontSize,
             FontWeight = font.Bold is { } bold ? bold ? 700 : 400 : defaultFont.FontWeight,
             IsItalic = font.Italic ?? defaultFont.IsItalic,
             Colour = Resolve(font.Colour, palette) ?? defaultFont.Colour,
+            Underline = font.Underline ?? defaultFont.Underline,
+            IsStruckThrough = font.StruckThrough ?? defaultFont.IsStruckThrough,
         };
     }
 
@@ -223,7 +236,8 @@ internal static class XlsxCellFormats
 
     private readonly record struct Font(
         string? Family, Length Size, int Weight, bool Italic, Colour Colour, bool HasColour,
-        SheetUnderline Underline, bool Strike);
+        SheetUnderline Underline, bool Strike,
+        FontFamilyClass DeclaredClass = FontFamilyClass.Unknown);
 
     private static Record ReadRecord(XElement xf)
     {
@@ -285,6 +299,37 @@ internal static class XlsxCellFormats
 
     // -------------------------------------------------------------------------------- fonts
 
+    /// <summary>
+    /// The face a <c>&lt;font&gt;</c> that names none is set in.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>Not the workbook's own <c>fonts[0]</c>, and not a generic sans.</strong> Every
+    /// <c>&lt;font&gt;</c> the OOXML filter builds starts life as a copy of the theme buffer's
+    /// default model, and that model is a hard-coded <c>Cambria</c> at 11 pt —
+    /// <c>ThemeBuffer::ThemeBuffer</c> (<c>sc/source/filter/oox/themebuffer.cxx:31-33</c>), where
+    /// it is marked "TODO: locale dependent font name" and has never been made one. Nothing in
+    /// the theme part overrides it: <c>getDefaultFontModel</c> returns that same object however
+    /// the workbook's own major and minor fonts are declared.
+    /// </para>
+    /// <para>
+    /// Measured on <c>dotnet/probes/sheets-rest-01/mkfontprobe.py</c> under the installed
+    /// 26.2.4.2, whose <c>fonts[0]</c> is Arial 10 so that the two candidate answers are
+    /// distinguishable: <c>&lt;font/&gt;</c> draws in Caladea-Regular at 11.00 pt,
+    /// <c>&lt;font&gt;&lt;b/&gt;&lt;/font&gt;</c> in Caladea-Bold at 11.00,
+    /// <c>&lt;font&gt;&lt;sz val="20"/&gt;&lt;/font&gt;</c> in Caladea-Regular at 20.01, and
+    /// <c>&lt;font&gt;&lt;name val="Arial"/&gt;&lt;/font&gt;</c> in LiberationSans at
+    /// <em>11.00</em> — so the size default is the theme's eleven and not the ten a bare BIFF
+    /// font would take. Caladea is Cambria's metric-compatible substitute, which is what makes
+    /// the face readable off the PDF at all.
+    /// </para>
+    /// </remarks>
+    private const string UnnamedFontFamily = "Cambria";
+
+    /// <summary>The size a <c>&lt;font&gt;</c> that states none takes.</summary>
+    /// <remarks>The other half of the same model — see <see cref="UnnamedFontFamily"/>.</remarks>
+    private const double UnnamedFontPoints = 11.0;
+
     private static Font ReadFont(XElement font, Colour[] palette)
     {
         double? points = Number(Xlsx.Child(font, "sz"), "val");
@@ -292,15 +337,33 @@ internal static class XlsxCellFormats
 
         return new Font(
             Xlsx.Attribute(Xlsx.Child(font, "name"), "val")
-                ?? Xlsx.Attribute(Xlsx.Child(font, "rFont"), "val"),
-            Length.FromPoints(points is > 0 ? points.Value : 10),
+                ?? Xlsx.Attribute(Xlsx.Child(font, "rFont"), "val")
+                ?? UnnamedFontFamily,
+            Length.FromPoints(points is > 0 ? points.Value : UnnamedFontPoints),
             Toggle(Xlsx.Child(font, "b")) ? 700 : 400,
             Toggle(Xlsx.Child(font, "i")),
             colour,
             stated,
             UnderlineOf(Xlsx.Child(font, "u")),
-            Toggle(Xlsx.Child(font, "strike")));
+            Toggle(Xlsx.Child(font, "strike")),
+            DeclaredClassOf(font));
     }
+
+    /// <summary>
+    /// The generic family a <c>&lt;font&gt;</c> declares, for a family nobody has installed.
+    /// </summary>
+    /// <remarks>
+    /// <c>&lt;family val="N"/&gt;</c>, whose N is the Windows <c>FF_*</c> code — the same one BIFF's
+    /// <c>FONT</c> record carries as a byte, which is why both go through
+    /// <see cref="SheetDeclaredFonts.FromWindowsCode"/>. Excel writes it on nearly every font it
+    /// emits and it has no effect at all until the name fails to resolve, at which point it is the
+    /// whole answer.
+    /// </remarks>
+    private static FontFamilyClass DeclaredClassOf(XElement font)
+        => Xlsx.Attribute(Xlsx.Child(font, "family"), "val") is { } stated
+           && int.TryParse(stated, NumberStyles.Integer, CultureInfo.InvariantCulture, out int code)
+            ? SheetDeclaredFonts.FromWindowsCode(code)
+            : FontFamilyClass.Unknown;
 
     /// <summary>
     /// The line under a font, whose <c>val</c> is optional and whose default is not "none".
@@ -312,7 +375,7 @@ internal static class XlsxCellFormats
     /// an underline turns it off. The two accounting styles differ from the plain ones only in how
     /// wide the line is drawn, which is not reproduced — see <see cref="SheetUnderline"/>.
     /// </remarks>
-    private static SheetUnderline UnderlineOf(XElement? element) => element is null
+    internal static SheetUnderline UnderlineOf(XElement? element) => element is null
         ? SheetUnderline.None
         : Xlsx.Attribute(element, "val") switch
         {
@@ -384,21 +447,15 @@ internal static class XlsxCellFormats
     /// Lightens towards white for a positive tint and darkens towards black for a negative one.
     /// </summary>
     /// <remarks>
-    /// The linear form, which is what LibreOffice's OOXML filter applies to a plain RGB value
-    /// (<c>oox/source/helper/graphichelper.cxx</c>). The exact form works in HSL luminance and
-    /// differs by a shade or two on saturated colours.
+    /// <see cref="XlsxTint"/> holds the transform. This used to apply the linear form — blending
+    /// each channel towards white — on the grounds that it is what LibreOffice's OOXML filter
+    /// does. That is not what it does for a <em>SpreadsheetML</em> tint: one <c>XlsColor</c>
+    /// serves fonts, fills and borders alike and every one of its setters calls
+    /// <c>addExcelTintTransformation</c> (<c>sc/source/filter/oox/stylesbuffer.cxx:255-279</c>),
+    /// which is a luminance modulation in HSL. The two agree closely on unsaturated colours,
+    /// which is why the difference went unnoticed here.
     /// </remarks>
-    private static Colour Tint(Colour colour, double tint)
-    {
-        double factor = Math.Clamp(tint, -1.0, 1.0);
-        return new Colour(Channel(colour.R), Channel(colour.G), Channel(colour.B), colour.A);
-
-        byte Channel(byte component) => (byte)Math.Clamp(
-            factor >= 0
-                ? component + ((255 - component) * factor)
-                : component * (1 + factor),
-            0, 255);
-    }
+    private static Colour Tint(Colour colour, double tint) => XlsxTint.Apply(colour, tint);
 
     private static Colour[] ReadPalette(XElement styleSheet)
     {
@@ -474,6 +531,7 @@ internal static class XlsxCellFormats
         SheetCellFormat probe = new()
         {
             FontFamily = first.Family,
+            DeclaredFontClass = first.DeclaredClass,
             FontSize = first.Size,
             FontWeight = first.Weight,
             IsItalic = first.Italic,
@@ -515,6 +573,7 @@ internal static class XlsxCellFormats
         return new SheetCellFormat
         {
             FontFamily = font.Family,
+            DeclaredFontClass = font.DeclaredClass,
             FontSize = font.Size,
             FontWeight = font.Weight,
             IsItalic = font.Italic,

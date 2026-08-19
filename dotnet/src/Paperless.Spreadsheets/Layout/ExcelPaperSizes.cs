@@ -1,3 +1,4 @@
+using Paperless.Core.Geometry;
 using Paperless.Core.Units;
 
 namespace Paperless.Spreadsheets.Layout;
@@ -64,16 +65,80 @@ public static class ExcelPaperSizes
     /// <summary>The portrait dimensions of a paper index.</summary>
     /// <param name="index">The index the file states.</param>
     public static (Length Width, Length Height) Portrait(int index)
+        => TryPortrait(index, out (Length Width, Length Height) size) ? size : A4;
+
+    /// <summary>The portrait dimensions of a paper index, and whether the table knew it.</summary>
+    /// <remarks>
+    /// Callers need the difference, because an index the table does not cover is not merely a
+    /// missing measurement — it also suppresses the landscape swap. See <see cref="Page"/>.
+    /// </remarks>
+    /// <param name="index">The index the file states.</param>
+    /// <param name="size">The portrait dimensions, or <see cref="A4"/> when the index is unknown.</param>
+    /// <returns>Whether <paramref name="index"/> named a size this table holds.</returns>
+    public static bool TryPortrait(int index, out (Length Width, Length Height) size)
     {
-        if (index < 0 || index >= Table.Length) return A4;
+        if (index < 0 || index >= Table.Length)
+        {
+            size = A4;
+            return false;
+        }
 
         (double width, double height, Unit unit) = Table[index];
-        if (width <= 0 || height <= 0) return A4;
+        if (width <= 0 || height <= 0)
+        {
+            size = A4;
+            return false;
+        }
 
-        return unit == Unit.Inch
+        size = unit == Unit.Inch
             ? (Inches(width), Inches(height))
             : (Millimetres(width), Millimetres(height));
+        return true;
     }
+
+    /// <summary>
+    /// The page box a stated paper index and orientation imply.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>An orientation only rotates a paper the application recognises.</strong> Where the
+    /// index is one LibreOffice cannot resolve, it writes no size onto the page style at all and
+    /// the locale default is left standing — in its own portrait orientation, with the file's
+    /// <c>orientation</c> discarded along with the size. Applying the swap to the fallback instead
+    /// turns every such sheet 90 degrees.
+    /// </para>
+    /// <para>
+    /// Measured on the installed 26.2.4.2 rather than read out of the source tree, over
+    /// <c>paperSize="0"</c>–<c>"135"</c> at <c>orientation="landscape"</c>: the indices it resolves
+    /// swap (<c>9</c> gives 841.89 x 595.30, <c>8</c> gives 1190.55 x 841.89), and every index it
+    /// does not — <c>0</c>, <c>48</c>, <c>49</c>, <c>71</c>–<c>74</c>, <c>77</c>, <c>84</c>–<c>87</c>
+    /// and <c>91</c> upwards — renders 595.304 x 841.89, A4 portrait, despite asking for landscape.
+    /// <c>ODs-February-2022-Airbus-Commercial-Aircraft.xlsx</c> states <c>paperSize="121"</c> on
+    /// eight of its thirteen sheets and is 154 pages against 175 for exactly this reason.
+    /// </para>
+    /// </remarks>
+    /// <param name="index">The paper index the file states.</param>
+    /// <param name="landscape">Whether the file asks for landscape.</param>
+    public static DocSize Page(int index, bool landscape)
+    {
+        if (!TryPortrait(index, out (Length Width, Length Height) size)) return Default;
+
+        return landscape
+            ? new DocSize(size.Height, size.Width)
+            : new DocSize(size.Width, size.Height);
+    }
+
+    /// <summary>
+    /// The page box to use when the file states no usable page setup at all.
+    /// </summary>
+    /// <remarks>
+    /// Portrait, and deliberately not rotated by any orientation the file states, for the same
+    /// reason as <see cref="Page"/>: the application's own paper is what stands. Measured —
+    /// <c>usePrinterDefaults="1"</c> alongside <c>orientation="landscape"</c> renders A4 portrait
+    /// even when the paper index is one LibreOffice resolves perfectly well, such as <c>8</c> or
+    /// <c>9</c>.
+    /// </remarks>
+    public static DocSize Default { get; } = new(A4.Width, A4.Height);
 
     /// <summary>Converts to twips the way LibreOffice's own table does: rounded up at a half.</summary>
     private static Length Inches(double inches)

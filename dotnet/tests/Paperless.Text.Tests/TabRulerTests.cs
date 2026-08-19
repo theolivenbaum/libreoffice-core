@@ -234,4 +234,104 @@ public sealed class TabRulerTests
         TabRuler.Segments("ab\tcd", 0, 5, format, Measure, rightEdge: Length.FromPoints(20))[1]
             .Left.ShouldBe(Length.FromPoints(30));
     }
+
+    [Fact]
+    public void ATabEndingTheParagraphPastTheEdgeDoesNotWidenTheLineItIsFittedBy()
+    {
+        // `bFull = false` where `bTabCompat && bAtParaEnd && GetTabPos() >= nTextFrameWidth` —
+        // SwTabPortion::PreFormat, sw/source/core/text/txttab.cxx:448-458. The tab is the paragraph's
+        // last character, so nothing follows it that a second line could hold, and Writer keeps the line.
+        // Measured on 150_5300_13_chg10.doc, whose footer "Chap 4\t\t<page>\t" broke after its second tab
+        // and put the page number on a line of its own at the left margin.
+        ParagraphFormat format = With(new TabStop(Length.FromPoints(20), TabAlignment.Right));
+
+        // "ab" ends at 2, the tab takes the right stop at the edge and "cd" ends on it at 20. The trailing
+        // tab has no stop left, takes the next default interval at 30, and overruns.
+        TabRuler.WidthOf(
+                "ab\tcd\t", 0, 6, format, Measure, rightEdge: Length.FromPoints(20),
+                countsDeferredStretch: false)
+            .ShouldBe(Length.FromPoints(20));
+
+        // The drawn width is Writer's own: PreFormat sets the portion's width before it takes the break
+        // back and does not take that back with it.
+        TabRuler.WidthOf("ab\tcd\t", 0, 6, format, Measure, rightEdge: Length.FromPoints(20))
+            .ShouldBe(Length.FromPoints(30));
+    }
+
+    [Fact]
+    public void ATabInsideTheParagraphPastTheEdgeStillBreaksTheLine()
+    {
+        // The other half of `bAtParaEnd`: a tab with text after it has somewhere to break to, so the
+        // forgiveness must not reach it. "ef" follows the trailing tab here and the line is full.
+        ParagraphFormat format = With(new TabStop(Length.FromPoints(20), TabAlignment.Right));
+
+        TabRuler.WidthOf(
+                "ab\tcd\tef", 0, 8, format, Measure, rightEdge: Length.FromPoints(20),
+                countsDeferredStretch: false)
+            .ShouldBe(Length.FromPoints(32));
+    }
+
+    [Fact]
+    public void TabOverSpacingBreaksTheLineAtThatTabInstead()
+    {
+        // The branch above the rescue — txttab.cxx:429-440 — returns `bFull = true` for a left stop at
+        // or past the frame and never falls through, so a file writerfilter read never reaches it. The
+        // same footer therefore keeps its page number on one line in a .doc and not in a .docx.
+        ParagraphFormat format = With(new TabStop(Length.FromPoints(20), TabAlignment.Right)) with
+        {
+            TabsOverSpacing = true,
+        };
+
+        TabRuler.WidthOf(
+                "ab\tcd\t", 0, 6, format, Measure, rightEdge: Length.FromPoints(20),
+                countsDeferredStretch: false)
+            .ShouldBe(Length.FromPoints(30));
+    }
+
+    [Fact]
+    public void ATabReachingTheLineEdgeEndsTheLineAtItself()
+    {
+        // `SwTabPortion::PreFormat` runs once per tab portion, and a tab that finds itself at or past
+        // the line's boundary sets bFull, zeroes itself and drops the rest of the chain
+        // (txttab.cxx:462-476) — so the line ends in front of the tab and not at the last break
+        // opportunity behind it. "ab" ends at 2, the tabs take 10, 20 and 30; the one landing on 20
+        // reaches the edge and is not the paragraph's last character.
+        TabRuler.BreakAt(
+                "ab\t\t\t", 0, With(), Measure, isFirstLine: true,
+                lineEdge: Length.FromPoints(20), rightEdge: Length.FromPoints(20))
+            .ShouldBe(3);
+    }
+
+    [Fact]
+    public void TheLastTabOfTheParagraphStillEndsNoLine()
+    {
+        // The same three tabs against a wider line: only the last of them reaches the edge, and
+        // `bAtParaEnd` forgives exactly that one.
+        TabRuler.BreakAt(
+                "ab\t\t\t", 0, With(), Measure, isFirstLine: true,
+                lineEdge: Length.FromPoints(30), rightEdge: Length.FromPoints(30))
+            .ShouldBeNull();
+    }
+
+    [Fact]
+    public void AnAlignedStopNeverEndsTheLine()
+    {
+        // A right, centred or decimal stop is settled in PostFormat with the text after it already
+        // fitted, and never sets bFull.
+        TabRuler.BreakAt(
+                "ab\tcd", 0, With(new TabStop(Length.FromPoints(20), TabAlignment.Right)), Measure,
+                isFirstLine: true, lineEdge: Length.FromPoints(20), rightEdge: Length.FromPoints(20))
+            .ShouldBeNull();
+    }
+
+    [Fact]
+    public void ATabAtTheLineStartIsFilledRatherThanBrokenFor()
+    {
+        // `if (rInf.GetIdx() == rInf.GetLineStart())` — PreFormat fills the line with the tab instead
+        // of opening an empty one, and a rule that broke there would not terminate.
+        TabRuler.BreakAt(
+                "ab\t\t\t", 3, With(), Measure, isFirstLine: false,
+                lineEdge: Length.FromPoints(10), rightEdge: Length.FromPoints(10))
+            .ShouldBeNull();
+    }
 }

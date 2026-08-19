@@ -28,12 +28,20 @@ namespace Paperless.Presentations.Layout;
 /// Caladea is all of them. <c>@lnSpcReduction</c> is not read at all.
 /// </para>
 /// <para>
-/// <em>It is not the algorithm master has.</em> LibreOffice 25.2 replaced the search with a walk
-/// down a fixed table of twelve scale levels
-/// (<c>editeng/source/editeng/impedit3.cxx</c>, <c>constScaleLevels</c>), so reading the tree this
-/// checkout holds — 27.2 alpha — describes an engine that is not the one producing the reference
-/// renders. What is ported here is 24.2.7.2, the installed <c>soffice</c>, fetched by tag.
+/// <em>It is not the algorithm master has, and it is no longer the algorithm the reference has
+/// either.</em> LibreOffice 25.2 replaced the search with a walk down a fixed table of twelve
+/// scale levels (<c>editeng/source/editeng/impedit3.cxx</c>, <c>constScaleLevels</c>): format
+/// unscaled, then take the <em>first</em> level that fits. What is ported here is the bisection
+/// of 24.2.7.2, which was the installed <c>soffice</c> when it was written and is not the
+/// installed <c>soffice</c> now — this container's reference binary is <strong>26.2.4.2</strong>,
+/// so every claim below about what "the reference" does is a claim about 24.2.
 /// <strong>Check which version wrote the reference before porting anything out of this tree.</strong>
+/// </para>
+/// <para>
+/// The one property of the level table reproduced here is its <em>floor</em>, because without it
+/// the bisection walks off the bottom of its own range and scales a body to nothing at all — see
+/// <see cref="FitFloor"/>. Replacing the search with the table proper subsumes that clamp rather
+/// than contradicting it: 0.250 is the table's last row.
 /// </para>
 /// <para>
 /// <em>The fit measures the same line box it draws.</em> A slide's line is 1.2 em whatever face
@@ -75,6 +83,42 @@ public static partial class SlideTextLayout
     /// 100 per cent one at a smaller font, and it is the closest fit that wins.
     /// </remarks>
     private static readonly double[] FitSpacings = [1.0, 0.9, 0.8];
+
+    /// <summary>The smallest font scale a fit may answer with; below it the reference gives up.</summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>An autofitted body never shrinks past a quarter — it overflows instead.</strong>
+    /// <c>constScaleLevels</c>' last row is <c>{0.250, 0.800}</c> and the walk stops there whether
+    /// or not the text fits, so a placeholder holding far more text than it has room for is drawn
+    /// at a quarter size and allowed to run past its own bottom edge. The bisection ported here
+    /// has no such stop: its interval is <c>[0, 1]</c> and it will happily answer a scale of a few
+    /// thousandths.
+    /// </para>
+    /// <para>
+    /// That is not merely "too small"; it is <em>nothing</em>, and the arithmetic that makes it
+    /// nothing is <see cref="Scaling.Scaled"/>'s rounding to a whole point. A 77 pt run at the
+    /// 0.003897 the search answered is 0.3 pt, which rounds to <strong>0</strong> hundredths of a
+    /// millimetre — so every run in the body is laid out and drawn at an em of zero and the page
+    /// receives no text-showing operator for it at all.
+    /// </para>
+    /// <para>
+    /// Measured on <c>NWD-GLA-Community-Outreach-Day-Oct-2025.pptx</c>, whose slides 5, 6 and 12
+    /// each put seventeen paragraphs of 52–88 pt text in a 1152128 EMU (90.7 pt) subtitle: we drew
+    /// the title and nothing else, where 26.2.4.2 draws the body at stated × 0.250 exactly —
+    /// 60 pt → 15, 52 → 13, 88 → 22, 72 → 18, 77 → 19 (<c>/F 18.992 Tf</c> in its page 12 stream).
+    /// The clamp reproduces all seven of those sizes through our own metrics.
+    /// </para>
+    /// </remarks>
+    private const double FitFloor = 0.250;
+
+    /// <summary>The line-spacing scale that goes with <see cref="FitFloor"/>.</summary>
+    /// <remarks>
+    /// The floor is a whole row of <c>constScaleLevels</c>, not just a font multiplier: a body that
+    /// has run out of font scale has run out of leading too. Stated separately rather than left to
+    /// whatever the search last held, so the answer at the floor does not depend on the path taken
+    /// to it — though on all three measured bodies the search had already settled on 0.8 itself.
+    /// </remarks>
+    private const double FitFloorSpacing = 0.800;
 
     /// <summary>
     /// How a fit's answer is applied to a body: a font multiplier and a line-spacing multiplier.
@@ -332,7 +376,13 @@ public static partial class SlideTextLayout
             }
         }
 
-        return bestFont > 0 ? new Scaling(bestFont, bestSpacing, true) : Scaling.None;
+        // Clamped rather than returned raw. The search is free to walk below the floor while it
+        // brackets — a degenerate measurement down there is what tells it to climb back up — but
+        // it may not answer with a scale the reference would never have reached, and it may not
+        // answer with none: a body that overflows still draws, at the floor, overflowing.
+        if (bestFont < FitFloor) return new Scaling(FitFloor, FitFloorSpacing, true);
+
+        return new Scaling(bestFont, bestSpacing, true);
     }
 
     /// <summary>

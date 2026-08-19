@@ -19,6 +19,15 @@ namespace Paperless.Spreadsheets.Layout;
 /// <param name="Text">The characters it covers.</param>
 /// <param name="Offset">How far along the run it starts.</param>
 /// <param name="Width">How far its pen travels.</param>
+/// <param name="Underline">The line under this segment alone.</param>
+/// <param name="StruckThrough">Whether this segment alone is struck through.</param>
+/// <remarks>
+/// <see cref="Underline"/> and <see cref="StruckThrough"/> are per segment because they are the
+/// two properties a rich cell can change part-way through a line and the only ones a rule has to
+/// be placed for. <see cref="Offset"/> and <see cref="Width"/> already say where that rule goes,
+/// which is what makes this cheap: the geometry was always here, and the decorations were being
+/// taken from the cell instead.
+/// </remarks>
 internal sealed record SheetTextSegment(
     List<PositionedGlyph> Glyphs,
     List<int> Clusters,
@@ -27,7 +36,9 @@ internal sealed record SheetTextSegment(
     Colour? Colour,
     string Text,
     Length Offset,
-    Length Width);
+    Length Width,
+    SheetUnderline Underline = SheetUnderline.None,
+    bool StruckThrough = false);
 
 /// <summary>A shaped piece of cell text, positioned once it is placed.</summary>
 /// <remarks>
@@ -58,6 +69,67 @@ internal sealed class SheetTextRun
 
     /// <summary>How far the run's pen travels.</summary>
     public Length Width { get; }
+
+    /// <summary>
+    /// How wide the run is once the blanks it ends with are taken off.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A wrapped line keeps the spaces it broke after — see <c>SheetTextLayout.Wrap</c>, which
+    /// takes a line to its <c>End</c> rather than to its <c>VisibleEnd</c> because Calc's own
+    /// output draws them. Centring against that width is what those spaces must <em>not</em> be
+    /// allowed to do: they hang off the right, so half of them is subtracted from the left and the
+    /// line starts before the cell does.
+    /// </para>
+    /// <para>
+    /// EditEngine names the same quantity — <c>tdf#168135</c>, "exclude trailing spaces from
+    /// centering width" (<c>ImpEditEngine::CreateLines</c>,
+    /// <c>editeng/source/editeng/impedit3.cxx:1646-1682</c>). It is only <em>one</em> of the two
+    /// bounds a centred line is placed by here, because our wrapped lines can overflow the width
+    /// they were broken against where EditEngine's cannot; see
+    /// <c>SheetTextLayout.AlignedWidth</c>, which is the sole caller and holds the arithmetic and
+    /// the measurements.
+    /// </para>
+    /// <para>
+    /// Only U+0020 counts, which is what EditEngine tests for. A no-break space is not a blank
+    /// here and neither is a tab; a cell holding either takes the plain width.
+    /// </para>
+    /// </remarks>
+    public Length WithoutTrailingBlanks
+    {
+        get
+        {
+            Length width = Width;
+
+            for (int index = _segments.Count - 1; index >= 0; index--)
+            {
+                SheetTextSegment segment = _segments[index];
+
+                int trimmed = segment.Text.Length;
+                while (trimmed > 0 && segment.Text[trimmed - 1] == ' ') trimmed--;
+
+                if (trimmed == segment.Text.Length) return width;
+
+                if (trimmed == 0)
+                {
+                    width -= segment.Width;
+                    continue;
+                }
+
+                // Part of the segment survives, so only the glyphs the trimmed characters own
+                // come off. The cluster map is what says which those are — a segment is not one
+                // glyph per character in general, and a blank is not always one glyph.
+                for (int glyph = 0; glyph < segment.Glyphs.Count; glyph++)
+                {
+                    if (segment.Clusters[glyph] >= trimmed) width -= segment.Glyphs[glyph].Advance;
+                }
+
+                return width;
+            }
+
+            return width;
+        }
+    }
 
     /// <summary>The pieces the run is made of, in reading order.</summary>
     public IReadOnlyList<SheetTextSegment> Segments => _segments;
@@ -149,7 +221,11 @@ internal static class SheetText
 
         List<SheetTextSegment> segments = [];
         Length offset = Length.Zero;
-        Append(segments, text, resolved, size, colour, ref offset);
+
+        // No decorations here: a plain cell's underline is the cell's own and is drawn across the
+        // whole line by SheetTextLayout, which is both correct and cheaper than carrying it on
+        // every segment. Only a rich cell needs the per-segment answer.
+        Append(segments, text, resolved, size, colour, SheetUnderline.None, false, ref offset);
 
         return segments.Count == 0 ? null : new SheetTextRun(segments, offset);
     }
@@ -193,12 +269,23 @@ internal static class SheetText
             int to = Math.Min(portion.End, last);
             if (to <= from) continue;
 
-            if (SheetFonts.For(portion.Format) is not { } face) continue;
+            // Neither of these two falls back to nothing. Dropping a portion drops its
+            // *characters*, which is the worst failure this path has: the text is in the file and
+            // in the extraction, and only the page loses it — silently, with no diagnostic and no
+            // gap to notice. A portion whose face will not resolve is drawn in the sheet's own
+            // default face and one stating no usable size at the default size, both of which are
+            // wrong in a way a reader can see and argue with. What remains below is a scale of
+            // nought or less, which is degenerate for the whole page rather than for one portion,
+            // and takes every portion with it as the single-face path already does.
+            SheetFace? resolved = SheetFonts.For(portion.Format) ?? DefaultFace;
+            if (resolved is not { } face) continue;
 
-            Length size = SizeOf(portion.Format.FontSize, scale, percent);
+            Length size = SizeOf(SizeStatedBy(portion.Format), scale, percent);
             if (size <= Length.Zero) continue;
 
-            Append(segments, text[from..to], face, size, portion.Format.Colour, ref offset);
+            Append(
+                segments, text[from..to], face, size, portion.Format.Colour,
+                portion.Format.Underline, portion.Format.IsStruckThrough, ref offset);
         }
 
         return segments.Count == 0 ? null : new SheetTextRun(segments, offset);
@@ -227,6 +314,8 @@ internal static class SheetText
         SheetFace face,
         Length size,
         Colour? colour,
+        SheetUnderline underline,
+        bool struckThrough,
         ref Length offset)
     {
         List<FaceRun> runs = FontItemiser.Split(
@@ -246,10 +335,24 @@ internal static class SheetText
 
             segments.Add(Segment(
                 text.Substring(run.Start, run.Length), drawn, size, colour, offset,
-                out Length width));
+                underline, struckThrough, out Length width));
             offset += width;
         }
     }
+
+    /// <summary>
+    /// The em size a portion asks for, which is the default when it asks for nothing usable.
+    /// </summary>
+    /// <remarks>
+    /// A run stating <c>sz="0"</c> — or a reader that could not make a size out of what it stated
+    /// — must not be drawn at nothing. <see cref="SheetDeviceUnits.SnapFontSize(Length, double)"/>
+    /// floors a size at one device pixel rather than at zero, so such a portion used to be drawn
+    /// at 0.113 pt: present in the PDF's text layer and invisible on the page, which is a worse
+    /// answer than either drawing it properly or leaving it out. The default is what the device
+    /// would select for a zero height anyway.
+    /// </remarks>
+    public static Length SizeStatedBy(SheetCellFormat format)
+        => format.FontSize > Length.Zero ? format.FontSize : SheetCellFormat.Default.FontSize;
 
     /// <summary>
     /// A portion's em size, snapped to the drawing device's unit before anything scales it.
@@ -270,7 +373,8 @@ internal static class SheetText
     }
 
     private static SheetTextSegment Segment(
-        string text, SheetFace face, Length size, Colour? colour, Length offset, out Length width)
+        string text, SheetFace face, Length size, Colour? colour, Length offset,
+        SheetUnderline underline, bool struckThrough, out Length width)
     {
         ShapedText shaped = TextShaper.Default.Shape(face.Face, text, NoKerning);
 
@@ -292,7 +396,8 @@ internal static class SheetText
         }
 
         width = pen;
-        return new SheetTextSegment(glyphs, clusters, face, size, colour, text, offset, pen);
+        return new SheetTextSegment(
+            glyphs, clusters, face, size, colour, text, offset, pen, underline, struckThrough);
     }
 
     /// <summary>How wide a string is in a face, without keeping the run.</summary>

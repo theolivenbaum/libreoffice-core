@@ -133,6 +133,11 @@ public readonly record struct TextLine(
 /// problem.
 /// </para>
 /// <para>
+/// <strong>The first of those two is Writer's rule and not EditEngine's</strong>, which is why
+/// <see cref="LineFiller(TextMeasurer, ILineBreaker, bool)"/> can turn it off. See
+/// <see cref="BreaksOverflowingBlanks"/>.
+/// </para>
+/// <para>
 /// The paragraph is shaped once and every candidate width read off the result. Shaping each candidate
 /// would be quadratic in the paragraph's length, and would also answer slightly differently, since a
 /// prefix shaped alone is not always a prefix of the shaped whole.
@@ -142,14 +147,51 @@ public sealed class LineFiller
 {
     private readonly TextMeasurer _measurer;
     private readonly ILineBreaker _breaker;
+    private readonly bool _breaksOverflowingBlanks;
 
     /// <summary>Creates a filler over a measurer and a break iterator.</summary>
-    public LineFiller(TextMeasurer measurer, ILineBreaker? breaker = null)
+    /// <param name="measurer">The measurer the candidate widths are read from.</param>
+    /// <param name="breaker">The break iterator, or null for the default.</param>
+    /// <param name="breaksOverflowingBlanks">
+    /// Whether a run of blanks wider than the line is broken inside rather than allowed to hang past
+    /// it. See <see cref="BreaksOverflowingBlanks"/>; false is Writer's rule and the default.
+    /// </param>
+    public LineFiller(
+        TextMeasurer measurer, ILineBreaker? breaker = null, bool breaksOverflowingBlanks = false)
     {
         ArgumentNullException.ThrowIfNull(measurer);
         _measurer = measurer;
         _breaker = breaker ?? LineBreaker.Instance;
+        _breaksOverflowingBlanks = breaksOverflowingBlanks;
     }
+
+    /// <summary>
+    /// Whether a line's trailing blanks are allowed to overflow it, or break inside instead.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A word processor lets them hang: a line's trailing spaces do not count towards its width, so a
+    /// run of twenty blanks at the end of a line is free however narrow the column is. That is Writer,
+    /// and it is what this class does by default.
+    /// </para>
+    /// <para>
+    /// <strong>EditEngine — which is what lays out a Calc cell — does not.</strong>
+    /// <c>ImpEditEngine::ImpBreakLine</c> walks the character-position array while it is under the
+    /// remaining width and the array holds every character's advance, blanks included
+    /// (<c>editeng/source/editeng/impedit3.cxx:2016-2018</c>). When the character it stops on is a
+    /// blank it breaks immediately behind it and compresses it —
+    /// "Break behind the blank, blank will be compressed" (<c>:2031-2035</c>) — so a run of blanks is
+    /// cut into line-fuls rather than hanging off the end of one line.
+    /// </para>
+    /// <para>
+    /// Measured on <c>dotnet/probes/sheets-rest-01/mkspaceprobe.py</c> under the installed 26.2.4.2,
+    /// eighteen wrapped cells differing only in their trailing whitespace: a cell holding 40 blanks in
+    /// a 71.25 pt column takes two lines, 100 blanks take four, 160 take five and 200 take seven, and
+    /// all eighteen are reproduced exactly by breaking behind the blank that overflows. Without this
+    /// every one of them is one line.
+    /// </para>
+    /// </remarks>
+    public bool BreaksOverflowingBlanks => _breaksOverflowingBlanks;
 
     /// <summary>
     /// Breaks a paragraph measured across its runs into lines that fit a width.
@@ -295,6 +337,12 @@ public sealed class LineFiller
             int chosenVisibleEnd = lineStart;
             Length chosenAllowance = Length.Zero;
 
+            // Where a tab ends the line whatever the break iterator offered, or the text's end when
+            // none does. Writer's portions are built in document order and a tab that reaches the
+            // line's boundary ends it in front of itself — see <see cref="TabRuler.BreakAt"/>. Only
+            // for a paragraph that clamps its stops, which is what says the text is a Writer frame's.
+            int tabEnd = TabEnd(text, lineStart, widthBetween, tabs, lines.Count == 0, limit);
+
             // Walk the opportunities after the line's start, keeping the last that fits.
             int probe = nextOpportunity;
             while (probe < opportunities.Count)
@@ -305,6 +353,9 @@ public sealed class LineFiller
                     probe++;
                     continue;
                 }
+
+                // Nothing past the tab is on this line, so nothing past it is a candidate for its end.
+                if (end > tabEnd) break;
 
                 int visibleEnd = TrimTrailingSpaces(text, lineStart, end);
                 Length width = Measure(
@@ -332,6 +383,27 @@ public sealed class LineFiller
                 // The first opportunity is taken whatever it measures, and chopped below if it does
                 // not fit: an empty line followed by the same problem is not an option.
                 if (width > limit + allowance) break;
+            }
+
+            // The tab's own cut, which is not a break opportunity and so was never a candidate above.
+            // It wins whenever the text in front of it fits, because that is where Writer's line
+            // ended; when it does not fit the line breaks earlier and the tab stays on the next one.
+            if (tabEnd < text.Length && chosen < tabEnd)
+            {
+                int visibleEnd = TrimTrailingSpaces(text, lineStart, tabEnd);
+                Length width = Measure(
+                    text, lineStart, visibleEnd, widthBetween, tabs, lines.Count == 0, limit);
+                Length allowance = shrinks
+                    ? JustificationShrink.AllowanceFor(text, lineStart, visibleEnd, widthBetween)
+                    : Length.Zero;
+
+                if (chosen <= lineStart || width <= limit + allowance)
+                {
+                    chosen = tabEnd;
+                    chosenVisibleEnd = visibleEnd;
+                    chosenWidth = width;
+                    chosenAllowance = allowance;
+                }
             }
 
             if (chosen <= lineStart)
@@ -381,6 +453,30 @@ public sealed class LineFiller
                 }
             }
 
+            // The line's trailing blanks are wider than the line. A word processor lets them hang;
+            // EditEngine breaks behind the blank that overflowed and compresses it, which is what
+            // turns a cell holding a hundred spaces into four lines rather than one. Only the blanks
+            // are affected: when the character that overflows is not one, this leaves the chosen
+            // break alone and the chop below deals with it as it always has.
+            if (_breaksOverflowingBlanks && !forceChop && chosen > lineStart
+                && Measure(text, lineStart, chosen, widthBetween, tabs, lines.Count == 0, limit)
+                       > limit + chosenAllowance
+                && OverflowingBlank(
+                       text, lineStart, chosen, limit, widthBetween, tabs, lines.Count == 0)
+                       is { } behind)
+            {
+                chosen = behind;
+                chosenVisibleEnd = TrimTrailingSpaces(text, lineStart, chosen);
+                chosenWidth = Measure(
+                    text, lineStart, chosenVisibleEnd, widthBetween, tabs, lines.Count == 0, limit);
+                chosenAllowance = shrinks
+                    ? JustificationShrink.AllowanceFor(
+                        text, lineStart, chosenVisibleEnd, widthBetween)
+                    : Length.Zero;
+                chopEnd = chosen;
+                probe = nextOpportunity;
+            }
+
             // Nothing between this line's start and its first break opportunity fits. The word is
             // chopped rather than left hanging over the margin — see the remarks on this class.
             if ((forceChop || chosenWidth > limit + chosenAllowance)
@@ -396,6 +492,18 @@ public sealed class LineFiller
                 // and there is nothing left to squeeze.
                 chosenAllowance = Length.Zero;
                 probe = nextOpportunity;
+            }
+
+            // Everything above fitted the line, so it left out the blank a trailing right, centred or
+            // decimal stop advances across — Writer settles that blank in PostFormat, once the text
+            // after the tab is already on the line. The line's own width is the drawn one, and it is
+            // what the drawing layer resolves the same stops against, so it is taken once here rather
+            // than at each of the candidates the loop above threw away.
+            if (tabs is { ClampsTabsAtLineEdge: true })
+            {
+                chosenWidth = Measure(
+                    text, lineStart, chosenVisibleEnd, widthBetween, tabs, lines.Count == 0, limit,
+                    placed: true);
             }
 
             lines.Add(new TextLine(
@@ -425,7 +533,94 @@ public sealed class LineFiller
                 text.Length, text.Length, text.Length, Length.Zero, EndsParagraph: true));
         }
 
+        SpillTrailingNoBreakSpace(
+            text, lines, opportunities, widthBetween, tabs, availableWidth, firstLineWidth,
+            widthOfLine);
+
         return lines;
+    }
+
+    /// <summary>
+    /// Moves a trailing no-break space and its blanks onto lines of their own.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// See <see cref="ParagraphFormat.SpillsTrailingNoBreakSpace"/> for what was measured and where.
+    /// The whole rule is here: find the no-break space that the paragraph's trailing blanks hang off,
+    /// break at the last opportunity that still precedes it — everything after that is bound to it and
+    /// travels with it, which is what drags the preceding word down — and then, unless the paragraph is
+    /// block-adjusted, add the empty line that follows.
+    /// </para>
+    /// <para>
+    /// A post-pass rather than a case inside the fill loop because it is not a fitting decision: the
+    /// tail fits the line it was put on, by a wide margin, on every document this fires for. Expressing
+    /// it as a width would mean inventing one.
+    /// </para>
+    /// <para>
+    /// The two rows that pin the shape down both fall out of this and neither was written into it. A
+    /// paragraph ending <c>"lanes." NBSP SP</c> has its last opportunity before <c>lanes</c>, so the
+    /// new line carries a visible word and the paragraph gains one text line and one blank one. A
+    /// paragraph ending <c>"lanes." SP NBSP SP</c> has one immediately before the no-break space, so
+    /// the new line is invisible, the text-line count does not move, and both extra pitches show up as
+    /// the gap to whatever follows.
+    /// </para>
+    /// </remarks>
+    private static void SpillTrailingNoBreakSpace(
+        string text,
+        List<TextLine> lines,
+        IReadOnlyList<int> opportunities,
+        Func<int, int, Length> widthBetween,
+        ParagraphFormat? tabs,
+        Length availableWidth,
+        Length? firstLineWidth,
+        Func<int, IReadOnlyList<TextLine>, Length>? widthOfLine)
+    {
+        if (tabs is not { SpillsTrailingNoBreakSpace: true } || lines.Count == 0) return;
+
+        // The tail has to be a no-break space and then ordinary blanks, and nothing after them.
+        int blanks = text.Length;
+        while (blanks > 0 && text[blanks - 1] == ' ') blanks--;
+
+        if (blanks == text.Length || blanks == 0 || text[blanks - 1] != '\u00A0') return;
+
+        int hard = blanks - 1;
+        TextLine last = lines[^1];
+
+        Length LimitAt(int index) => widthOfLine is not null
+            ? widthOfLine(index, lines)
+            : index == 0 ? firstLineWidth ?? availableWidth : availableWidth;
+
+        TextLine LineOf(int start, int end, int index)
+        {
+            int visible = TrimTrailingSpaces(text, start, end);
+            Length limit = LimitAt(index);
+            return new TextLine(
+                start, end, visible,
+                Measure(text, start, visible, widthBetween, tabs, index == 0, limit),
+                EndsParagraph: end >= text.Length);
+        }
+
+        // The last opportunity that still precedes the no-break space, and it has to leave something
+        // on the line it breaks: a split at the line's own start would move the whole line and make no
+        // progress, so such a paragraph keeps the arrangement the fill loop gave it.
+        int split = 0;
+        foreach (int at in opportunities)
+        {
+            if (at > last.Start && at <= hard && at > split) split = at;
+        }
+
+        if (split > last.Start)
+        {
+            lines[^1] = LineOf(last.Start, split, lines.Count - 1);
+            lines.Add(LineOf(split, text.Length, lines.Count));
+        }
+
+        // Block adjustment takes the trailing blanks into the justification instead of spilling them,
+        // and is the one arrangement that does not gain the second line.
+        if (tabs.Alignment is TextAlignment.Justify or TextAlignment.Distribute) return;
+
+        lines.Add(new TextLine(
+            text.Length, text.Length, text.Length, Length.Zero, EndsParagraph: true));
     }
 
     /// <summary>
@@ -566,6 +761,66 @@ public sealed class LineFiller
         return best;
     }
 
+    /// <summary>
+    /// Where to break when a line's own blanks overflow it, or null when they do not.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>ImpEditEngine::ImpBreakLine</c> (<c>editeng/source/editeng/impedit3.cxx:2016-2035</c>) in
+    /// two statements. It walks the character-position array — cumulative advances, every character
+    /// counted — while it is still under the remaining width, giving the first character that does
+    /// not fit; and if that character is a blank it breaks one past it, leaving the blank on the
+    /// line to be compressed away.
+    /// </para>
+    /// <para>
+    /// Null when the overflowing character is anything else, because that is a word too long for its
+    /// line and the caller already has a rule for it: <see cref="Chop"/>, which is the same walk with
+    /// EditEngine's other ending.
+    /// </para>
+    /// <para>
+    /// Binary search rather than EditEngine's linear walk, for the same reason <see cref="Chop"/>
+    /// uses one: prefix widths only grow, and a cell holding a thousand blanks would otherwise cost a
+    /// measurement per blank per line.
+    /// </para>
+    /// </remarks>
+    /// <returns>The position just past the overflowing blank, or null.</returns>
+    private static int? OverflowingBlank(
+        string text,
+        int lineStart,
+        int end,
+        Length limit,
+        Func<int, int, Length> widthBetween,
+        ParagraphFormat? tabs,
+        bool isFirstLine)
+    {
+        // The first character whose cumulative width reaches the limit, which is where EditEngine's
+        // `while (… < nRemainingWidth) nBreakInLine++` leaves off.
+        int low = lineStart;
+        int high = end - 1;
+        int at = end;
+
+        while (low <= high)
+        {
+            int middle = low + ((high - low) / 2);
+            if (Measure(text, lineStart, middle + 1, widthBetween, tabs, isFirstLine, limit) >= limit)
+            {
+                at = middle;
+                high = middle - 1;
+            }
+            else
+            {
+                low = middle + 1;
+            }
+        }
+
+        if (at >= end || text[at] != ' ') return null;
+
+        // One past the blank, and never the line's own start: a line of no characters would make no
+        // progress and the fill loop would not terminate.
+        int behind = at + 1;
+        return behind > lineStart && behind < end ? behind : null;
+    }
+
     /// <summary>A cut position moved forward off the second half of a surrogate pair.</summary>
     private static int Whole(string text, int index)
     {
@@ -577,9 +832,20 @@ public sealed class LineFiller
     /// The width of a candidate line, with its tabs resolved when it has any.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// A tab's width is where it lands rather than what the font says, so a line holding one cannot be
     /// measured as a difference of two prefix widths. The check for a tab comes first because nearly every
     /// line has none, and one that has none must measure exactly as it did before tabs existed.
+    /// </para>
+    /// <para>
+    /// <c>placed</c> asks for the width the line will be <em>drawn</em> at rather than the width it is
+    /// <em>fitted</em> by. The two differ by the blank a trailing right, centred or decimal stop advances
+    /// across, which Writer settles only after the text following the tab is already on the line — see
+    /// <see cref="TabRuler.WidthOf"/>. Fitting is what nearly every call here wants and so is the
+    /// default; the filler asks for the placed width once, for the line it has settled on. The two
+    /// coincide unless the paragraph clamps its stops, which is the only case where a stop can sit past
+    /// the line's own edge at all.
+    /// </para>
     /// </remarks>
     private static Length Measure(
         string text,
@@ -588,26 +854,64 @@ public sealed class LineFiller
         Func<int, int, Length> widthBetween,
         ParagraphFormat? tabs,
         bool isFirstLine,
-        Length? lineWidth = null)
+        Length? lineWidth = null,
+        bool placed = false)
         => tabs is not null && TabRuler.HasTab(text, start, end)
             ? TabRuler.WidthOf(
                 text, start, end, tabs, widthBetween, isFirstLine,
-                RightEdge(tabs, isFirstLine, lineWidth))
+                RightEdge(tabs, isFirstLine, lineWidth),
+                countsDeferredStretch: placed || !tabs.ClampsTabsAtLineEdge)
             : widthBetween(start, end);
 
     /// <summary>
-    /// The line's right boundary in the coordinates the tab stops are stated in, or null when the caller
-    /// did not say how wide the line is.
+    /// Where a tab ends the line whatever the break iterator offered, or the text's end when none does.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <see cref="TabRuler.BreakAt"/> is the rule and this is its guard: it is asked only of a paragraph
+    /// that clamps its stops — which is what says the text belongs to a Writer text frame rather than to
+    /// a slide's text body or a spreadsheet cell, both of which lay tabs out through other code — and
+    /// only when the line actually holds one, since nearly none do and the walk costs a measurement per
+    /// tab.
+    /// </para>
+    /// <para>
+    /// The line's boundary is <paramref name="lineWidth"/> converted into the coordinates the stops are
+    /// stated in, which is the same conversion <see cref="RightEdge"/> makes without the end indent
+    /// added back on: the break is decided against <c>rInf.Width()</c> and a stop is clamped against the
+    /// frame's edge, and those two differ by exactly that indent.
+    /// </para>
+    /// </remarks>
+    private static int TabEnd(
+        string text,
+        int lineStart,
+        Func<int, int, Length> widthBetween,
+        ParagraphFormat? tabs,
+        bool isFirstLine,
+        Length? lineWidth)
+        => tabs is { ClampsTabsAtLineEdge: true } && lineWidth is { } width
+           && TabRuler.HasTab(text, lineStart, text.Length)
+            ? TabRuler.BreakAt(
+                  text, lineStart, tabs, widthBetween, isFirstLine,
+                  tabs.TabLineOffset(isFirstLine) + width,
+                  RightEdge(tabs, isFirstLine, width))
+              ?? text.Length
+            : text.Length;
+
+    /// <summary>
+    /// The text frame's right boundary in the coordinates the tab stops are stated in, or null when the
+    /// caller did not say how wide the line is.
     /// </summary>
     /// <remarks>
     /// The stops are measured from the paragraph's tab origin and the width from the line's own start, so
     /// the two agree only after the line's offset is added back. See
     /// <see cref="ParagraphFormat.TabLineOffset"/>, which is negative inside a hanging indent — where the
-    /// boundary is correspondingly nearer.
+    /// boundary is correspondingly nearer. The paragraph's <em>end</em> indent is then added back on,
+    /// because the boundary Writer clamps a stop at is the frame's and not the line's: the line's width
+    /// already has the indent taken out of it and the frame's edge is that much further right.
     /// </remarks>
     private static Length? RightEdge(ParagraphFormat tabs, bool isFirstLine, Length? lineWidth)
         => tabs.ClampsTabsAtLineEdge && lineWidth is { } width
-            ? tabs.TabLineOffset(isFirstLine) + width
+            ? tabs.TabLineOffset(isFirstLine) + width + tabs.EndIndent
             : null;
 
     /// <summary>

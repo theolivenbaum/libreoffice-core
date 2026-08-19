@@ -97,8 +97,8 @@ green, batches 1–11 quietly broken, and no idea which change did it.
 ```sh
 S=.claude/skills/corpus-batches/scripts
 
-$S/batch-check.sh /workspace/sample-files 'words/batch-007' out 3     # the batch you are on
-$S/batch-check.sh /workspace/sample-files 'words/batch-00[1-6]' out 3 # the gate for moving on
+$S/batch-check.sh /c/sandbox/workdir/sample-files 'words/batch-007' out 3     # the batch you are on
+$S/batch-check.sh /c/sandbox/workdir/sample-files 'words/batch-00[1-6]' out 3 # the gate for moving on
 ```
 
 Both exit non-zero on any mismatch, so either can gate a commit.
@@ -257,8 +257,8 @@ separate agents have now spent part of a round re-deriving that a particular pag
 class.
 
 ```sh
-.claude/skills/corpus-batches/scripts/raster-ceiling-pages.py /workspace/sample-files out           # full, slow
-.claude/skills/corpus-batches/scripts/raster-ceiling-pages.py /workspace/sample-files out --documents-only
+.claude/skills/corpus-batches/scripts/raster-ceiling-pages.py /c/sandbox/workdir/sample-files out           # full, slow
+.claude/skills/corpus-batches/scripts/raster-ceiling-pages.py /c/sandbox/workdir/sample-files out --documents-only
 ```
 
 **The flag keys on the observable signature, never on the presumed cause**, and getting that
@@ -477,6 +477,36 @@ explanation usually does not, and an unmeasured diff has only the explanation.
 The parent session's job at salvage time is to check each killed agent's branch for commits
 (`git log --oneline HEAD..worktree-agent-*`), merge and re-verify what is there, and stash the
 rest as patches before removing the worktrees — which also frees the disk the next round needs.
+
+### Try resuming before salvaging: the agent itself is usually still there
+
+**Salvage is the fallback, not the first move.** When the process dies — a restart, a crash, the
+harness exiting — the agents' *transcripts* survive on disk, and sending a message to a dead
+agent's id resumes it from that transcript with its context intact. That is strictly better than
+salvage, because the thing salvage cannot recover is exactly the thing the transcript keeps: what
+the agent had already measured, refuted and decided but not yet written down.
+
+Six agents died mid-round this way in one session. All six resumed, and the survey that decided it
+took one command:
+
+```sh
+git worktree list
+for b in <branches>; do git log --oneline -1 "$b"; git rev-list --count "$b" ^HEAD; done
+for w in <worktrees>; do git -C "$w" status --short | grep -vE '\.(png|ico)$'; done
+```
+
+What that survey showed is the reason to run it before writing any brief: **three branches had
+real code committed with tests and fixtures, and not one had a `results.md` for its own round** —
+only a `prediction.md`. Two others had nothing committed at all, with a full round's work sitting
+as untracked files. So the honest summary was not "some agents finished and some did not"; it was
+"every one of them shipped something and none of them had been through the gate". A resume message
+that says *what the parent can see on disk* — the exact commits, the exact dirty paths — gets a
+far better result than one that asks the agent what it was doing.
+
+**The standing defence is to make agents commit early.** Brief every agent to commit on its branch
+as soon as it has anything, `wip:` if unfinished, because an interrupted round that committed is a
+salvage and an interrupted round that did not is a rescue. Two rounds in one session were nearly
+lost to this, and both were recovered only because the worktrees happened to survive.
 
 **Do not merge a salvage into the branch yourself — hand the branch on and make its successor
 re-derive it.** A restart killed an agent whose two commits looked complete: clean worktree, a
@@ -742,6 +772,48 @@ status` compares the tree to HEAD, so it cannot see a bad HEAD.** Any workflow t
 `dotnet/src` to another commit — a cross-track sweep, a `--no-build` re-measurement, a
 bisect — must restore it before anything stages, and must be checked against the *base*
 rather than against the tree.
+
+### The shell's working directory is not where the last `cd` put it
+
+A merge session ran `cd <primary> && git merge …` and then issued the next two merges with no
+`cd`, on the understanding that the directory persists between calls. It did not. Both landed
+on the **agent worktree's** branch. `git log` in the primary showed a clean fast-forward of the
+first round only, and the build and full test suite that followed measured **the worktree, not
+the tree being merged into** — reporting test counts that were correct numbers for the wrong
+checkout.
+
+What makes it worth recording is that **every check passed**: the merges reported success, the
+counts matched what the rounds predicted, and the tree was clean. This is the same family as
+"`git status` cannot see a bad HEAD" — a measurement of the wrong tree announces nothing, and
+the numbers being right is not evidence you measured the right thing.
+
+```sh
+git -C "$PRIMARY" rev-parse --abbrev-ref HEAD    # before merging
+git -C "$PRIMARY" merge --no-edit <branch>
+git -C "$PRIMARY" log --oneline --graph -3       # must show the merge commit
+```
+
+Pass `-C <path>` to every `git` invocation that matters. After a merge, the target's graph must
+show the merge commit; a fast-forward of something else means it went somewhere else.
+
+### An agent that dies leaves three kinds of uncommitted work, and they are not the same
+
+Three agents were lost mid-round to a worker restart. All three had committed as they went —
+which is the only reason anything survived — and all three had uncommitted working trees. Merging
+the branches as found would have been wrong in two of the three cases:
+
+- **A finished round with a stray probe script.** Merge as found.
+- **A broken mid-edit.** One removed a `MoveTo` from an arm its committed fix did not touch, and
+  **failed the round's own test**. Discarded. Running the round's own tests against the
+  uncommitted tree settles this in seconds and is the first thing to try.
+- **A refutation of the round's own last commit**, with the counter-measurement already written
+  into the comment. Merging the branch as found would have landed a change its author had
+  measured and rejected. The revert was committed from the working tree, and the round's result
+  is the refutation.
+
+So: **never merge a dead agent's branch on the strength of its commit log.** Read the
+uncommitted diff first and decide which of the three it is. The commit log of the second and
+third cases reads like a finished fix in both.
 
 ### A prediction that is low for the wrong reason still comes true
 
@@ -1041,7 +1113,7 @@ insurance against a shared layer being disturbed. Still run it; stop expecting i
 S=.claude/skills/corpus-batches/scripts
 
 # 1. Render everything. Parallel, resumable — a whole corpus outlives whatever starts it.
-for i in 0 1 2; do $S/render-corpus.sh /workspace/sample-files /tmp/triage $i 3 & done; wait
+for i in 0 1 2; do $S/render-corpus.sh /c/sandbox/workdir/sample-files /tmp/triage $i 3 & done; wait
 
 # 2. Retry the failures once with a generous ceiling before writing any of them off.
 
@@ -1049,8 +1121,8 @@ for i in 0 1 2; do $S/render-corpus.sh /workspace/sample-files /tmp/triage $i 3 
 python3 $S/pdf-complexity.py /tmp/triage/pdf > /tmp/triage/complexity.tsv
 
 # 4. Preview the plan, then apply it on a clean working tree.
-python3 $S/make-batches.py /workspace/sample-files /tmp/triage/complexity.tsv
-python3 $S/make-batches.py /workspace/sample-files /tmp/triage/complexity.tsv --apply
+python3 $S/make-batches.py /c/sandbox/workdir/sample-files /tmp/triage/complexity.tsv
+python3 $S/make-batches.py /c/sandbox/workdir/sample-files /tmp/triage/complexity.tsv --apply
 ```
 
 ## Traps

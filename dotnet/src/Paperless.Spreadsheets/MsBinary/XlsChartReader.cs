@@ -1,6 +1,7 @@
 using Paperless.Core.Charts;
 using Paperless.Core.Geometry;
 using Paperless.Core.Graphics;
+using Paperless.Core.Numbers;
 using Paperless.Core.Units;
 using Paperless.MsBinary.Escher;
 
@@ -27,6 +28,7 @@ internal static class BiffChartRecords
     public const ushort Axis = 0x101D;
     public const ushort ValueRange = 0x101F;
     public const ushort LabelRange = 0x1020;
+    public const ushort DateRange = 0x1062;
     public const ushort AxisLine = 0x1021;
     public const ushort DefaultText = 0x1024;
     public const ushort Text = 0x1025;
@@ -38,8 +40,18 @@ internal static class BiffChartRecords
     public const ushort RadarLine = 0x103E;
     public const ushort RadarArea = 0x1040;
     public const ushort AxesSet = 0x1041;
+
+    /// <summary>
+    /// <c>CHPROPERTIES</c>, whose empty mode decides what a blank cell plots as.
+    /// </summary>
+    /// <remarks><c>EXC_ID_CHPROPERTIES</c>, <c>sc/source/filter/inc/xlchart.hxx:596</c>.</remarks>
+    public const ushort Properties = 0x1044;
+
     public const ushort SourceLink = 0x1051;
     public const ushort EscherFormat = 0x1066;
+
+    /// <summary>An axis' own number format index — <c>EXC_ID_CHFORMAT</c>, <c>xlchart.hxx:635</c>.</summary>
+    public const ushort NumberFormat = 0x104E;
 
     /// <summary>True for any record this reader acts on or has to track the nesting of.</summary>
     /// <remarks>
@@ -97,11 +109,60 @@ internal sealed class XlsChartBuilder
     private bool _valueGrid;
     private bool _categoryGrid;
 
+    /// <summary>The <c>ifmt</c> the value axis' own <c>CHFORMAT</c> states, or none.</summary>
+    /// <remarks>
+    /// Kept as the index rather than resolved on the spot for the same reason a colour is: the
+    /// workbook's format table is not the chart substream's to reach into, and is handed over
+    /// when the plot is built.
+    /// </remarks>
+    private int _valueFormatIndex = NoNumberFormat;
+
     private ChartPlotKind _kind = ChartPlotKind.Bar;
     private ChartBarDirection _direction = ChartBarDirection.Column;
     private bool _stacked;
     private ChartScaleRequest _valueScale;
     private ChartAxisText _categoryText = DefaultCategoryText;
+
+    /// <summary>Whether <c>CHLABELRANGE</c> asked for every category to be labelled.</summary>
+    /// <remarks>
+    /// Kept beside <see cref="_isDateAxis"/> rather than folded straight into
+    /// <see cref="_categoryText"/> because the two records that decide the answer are separate and
+    /// unordered, exactly as <c>XclImpChLabelRange</c> keeps <c>maLabelData</c> and
+    /// <c>maDateData</c> apart until <c>Convert</c>.
+    /// </remarks>
+    private bool _everyLabel = true;
+
+    /// <summary>Whether <c>CHDATERANGE</c> declared the category axis a date axis.</summary>
+    private bool _isDateAxis;
+
+    /// <summary>What <c>CHDATERANGE</c> states, once it has said the axis is a date axis.</summary>
+    private double? _dateMinimum;
+    private double? _dateMaximum;
+    private ChartTimeInterval? _dateInterval;
+    private ChartTimeUnit? _dateResolution;
+
+    /// <summary>
+    /// Whether the axis' date-ness is <em>inferred</em> rather than stated.
+    /// </summary>
+    /// <remarks>
+    /// <c>EXC_CHDATERANGE_AUTODATE</c> becomes <c>ScaleData::AutoDateAxis</c>, and chart2 then
+    /// keeps the axis a plain category axis unless the categories are all dates —
+    /// <c>AxisHelper::checkDateAxis</c> asks <c>ExplicitCategoriesProvider::isDateAxis</c>, which
+    /// is <c>lcl_fillDateCategories</c> testing each cell's own number format
+    /// (<c>chart2/source/tools/ExplicitCategoriesProvider.cxx:409-484</c>).
+    /// </remarks>
+    private bool _autoDateAxis;
+
+    /// <summary>
+    /// Whether a blank cell plots as zero rather than as a gap — <c>CHPROPERTIES</c>' empty mode.
+    /// </summary>
+    /// <remarks>
+    /// <c>XclImpChChart::CreateDiagram</c> (<c>xichart.cxx:4222-4229</c>) maps mode 1 to
+    /// <c>USE_ZERO</c> and everything else to <c>LEAVE_GAP</c> or <c>CONTINUE</c>. It matters to a
+    /// date axis and to nothing else this reader builds, because a blank <em>category</em> on a
+    /// date axis is a serial the axis has to cover.
+    /// </remarks>
+    private bool _blanksAsZero;
     private bool _hasType;
     private bool _hasLegend;
 
@@ -113,6 +174,18 @@ internal sealed class XlsChartBuilder
     private int _globalFont = NoFont;
     private int _axesSetFont = NoFont;
     private int _firstFont = NoFont;
+
+    /// <summary>The <c>CHFONT</c> of the <c>CHTEXT</c> currently open, whatever it turns out to be.</summary>
+    /// <remarks>
+    /// A <c>CHTEXT</c> writes its font before it says what it dresses — the <c>CHOBJECTLINK</c>
+    /// that names it a title or an axis title comes last — so the index has to be held until the
+    /// group closes, exactly as its string already is.
+    /// </remarks>
+    private int _pendingFont = NoFont;
+
+    private int _titleFont = NoFont;
+    private int _axisTitleFont = NoFont;
+    private int _labelFont = NoFont;
 
     private BiffChartColour? _background;
     private BiffChartColour? _plotBackground;
@@ -198,6 +271,7 @@ internal sealed class XlsChartBuilder
             case BiffChartRecords.Text:
                 _pendingText = null;
                 _pendingLink = -1;
+                _pendingFont = NoFont;
                 _openDefaultText = defaultText;
                 break;
 
@@ -236,12 +310,25 @@ internal sealed class XlsChartBuilder
                 if (stream.ReadUInt16() == MajorGridLine) MarkGrid();
                 break;
 
+            case BiffChartRecords.NumberFormat when Inside(BiffChartRecords.Axis) && _axis == AxisY:
+                _valueFormatIndex = stream.ReadUInt16();
+                break;
+
             case BiffChartRecords.ValueRange:
                 ReadValueRange(stream);
                 break;
 
             case BiffChartRecords.LabelRange when _axis == AxisX:
                 ReadLabelRange(stream);
+                break;
+
+            case BiffChartRecords.DateRange when _axis == AxisX:
+                ReadDateRange(stream);
+                break;
+
+            case BiffChartRecords.Properties:
+                stream.Skip(2);
+                _blanksAsZero = stream.ReadByte() == EmptyCellsAsZero;
                 break;
 
             case BiffChartRecords.Legend:
@@ -324,16 +411,36 @@ internal sealed class XlsChartBuilder
     /// The workbook's <c>FONT</c> buffer, which is where a <c>CHFONT</c>'s index points. Null
     /// leaves the chart with no family, which is what it had before this was read at all.
     /// </param>
+    /// <param name="formats">
+    /// Resolves the workbook's format table, which is where an axis' <c>CHFORMAT</c> index
+    /// points. Null leaves an axis carrying one on the source's format, which is the same answer
+    /// the reference reaches when the index resolves to nothing.
+    /// </param>
+    /// <param name="dates">
+    /// The workbook's date epoch, which decides what serial a date axis' ticks name.
+    /// </param>
     public ChartPlot? Build(
-        XlsChartData? data, XlsExternSheets? sheets, int ownSheet, XlsCellFormats? fonts = null)
+        XlsChartData? data,
+        XlsExternSheets? sheets,
+        int ownSheet,
+        XlsCellFormats? fonts = null,
+        Func<int, NumberFormatCode?>? formats = null,
+        SpreadsheetDateSystem dates = SpreadsheetDateSystem.Date1900)
     {
         if (!HasChart) return null;
 
-        (IReadOnlyList<string?> categories, IReadOnlyList<ChartSeries> series) =
-            BuildSeries(data, sheets, ownSheet, fonts);
+        (IReadOnlyList<string?> categories, IReadOnlyList<ChartSeries> series,
+            NumberFormatCode? sourceFormat, IReadOnlyList<double?> categoryValues,
+            NumberFormatCode? categoryFormat) = BuildSeries(data, sheets, ownSheet, fonts);
 
-        return new ChartPlot
+        ChartDateAxis? dateAxis = DateAxisOf(categoryValues, categoryFormat, dates);
+        if (dateAxis is not null)
+            (dateAxis, categories, series) =
+                ChartDateScale.SortByDate(dateAxis, categories, series);
+
+        ChartPlot plot = new()
         {
+            DateAxis = dateAxis,
             Title = _title,
             CategoryAxisTitle = _categoryTitle,
             ValueAxisTitle = _valueTitle,
@@ -344,6 +451,7 @@ internal sealed class XlsChartBuilder
             Series = series,
             ValueScale = _valueScale,
             CategoryAxisText = _categoryText,
+            ValueFormat = ValueFormatOf(sourceFormat, formats),
             ValueGrid = _valueGrid ? GridColour : null,
             CategoryGrid = _categoryGrid ? GridColour : null,
             Legend = _hasLegend ? ChartLegendPosition.Right : ChartLegendPosition.None,
@@ -351,6 +459,86 @@ internal sealed class XlsChartBuilder
             Background = _background?.Resolve(fonts),
             PlotBackground = _plotBackground?.Resolve(fonts),
         };
+
+        // Each of the three is overridden only where the substream names a font for it, so a
+        // chart that names none keeps chart2's own defaults — which is what ChartPlot already
+        // holds and what the reference falls back to for the same reason.
+        if (FontOf(_titleFont, GlobalDefaultText, fonts) is { } title)
+            plot = plot with { TitleSize = title.Height, IsTitleBold = title.Weight >= BoldWeight };
+
+        if (FontOf(_axisTitleFont, AxesSetDefaultText, fonts) is { } axisTitle)
+        {
+            plot = plot with
+            {
+                AxisTitleSize = axisTitle.Height,
+                IsAxisTitleBold = axisTitle.Weight >= BoldWeight,
+            };
+        }
+
+        if (FontOf(_labelFont, AxesSetDefaultText, fonts) is { } label)
+            plot = plot with { LabelSize = label.Height, IsLabelBold = label.Weight >= BoldWeight };
+
+        return plot;
+    }
+
+    /// <summary>
+    /// The <c>FONT</c> one piece of chart text is set in, or null when nothing names one.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>XclImpChText::UpdateText</c> (<c>sc/source/filter/excel/xichart.cxx:1042-1057</c>) is the
+    /// whole of the fallback: a text object keeps its own <c>CHFONT</c> and takes the default
+    /// text's when it has none. Which default depends on what the text is —
+    /// <c>XclImpChChart::GetDefaultText</c> (<c>:3956-3970</c>) gives the chart title and the
+    /// legend the <em>global</em> default and gives an axis title, an axis label and a data label
+    /// the <em>axes-set</em> default in BIFF8, the global one in BIFF5.
+    /// </para>
+    /// <para>
+    /// The generation is not tested for here because it does not have to be: BIFF5 writes no
+    /// axes-set default at all, so asking for it and falling through to the global one reaches
+    /// the same font by the same route.
+    /// </para>
+    /// </remarks>
+    /// <param name="stated">The index the object's own <c>CHFONT</c> gave, or <see cref="NoFont"/>.</param>
+    /// <param name="defaultText">Which <c>CHDEFAULTTEXT</c> stands in for it.</param>
+    /// <param name="fonts">The workbook's <c>FONT</c> buffer.</param>
+    private BiffFont? FontOf(int stated, int defaultText, XlsCellFormats? fonts)
+    {
+        int index = stated != NoFont ? stated
+            : defaultText == AxesSetDefaultText && _axesSetFont != NoFont ? _axesSetFont
+            : _globalFont;
+
+        return index == NoFont ? null : fonts?.FontAt(index);
+    }
+
+    /// <summary>
+    /// The format the value axis writes its tick labels through, or null for General.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>XclImpChAxis::Convert</c> (<c>sc/source/filter/excel/xichart.cxx:3363-3377</c>) is two
+    /// lines and an ordering: a <c>CHFORMAT</c> that resolves is set on the axis and turns
+    /// <c>LinkNumberFormatToSource</c> <em>off</em>; anything else leaves it on, and the format
+    /// then comes from the cells the axis plots — see <see cref="XlsChartData.FormatOf"/>.
+    /// </para>
+    /// <para>
+    /// <strong>What is deliberately not read is <c>CHSOURCELINK</c>'s own <c>ifmt</c>.</strong> It
+    /// looks like the answer and is not: it feeds a data label
+    /// (<c>XclImpChText::ConvertNumFmt</c>, <c>xichart.cxx:1684</c>), and on
+    /// <c>Template Pilot Logbook JAR-FCL V3.0.xls</c>' second chart it is 370 — an index no
+    /// <c>FORMAT</c> record in that workbook defines, while the cells it names carry <c>0.0</c>,
+    /// which is what the reference draws.
+    /// </para>
+    /// </remarks>
+    private NumberFormatCode? ValueFormatOf(
+        NumberFormatCode? sourceFormat, Func<int, NumberFormatCode?>? formats)
+    {
+        if (_valueFormatIndex != NoNumberFormat && formats?.Invoke(_valueFormatIndex) is { } stated)
+        {
+            return stated;
+        }
+
+        return sourceFormat;
     }
 
     /// <summary>
@@ -403,14 +591,27 @@ internal sealed class XlsChartBuilder
     /// (<c>XclImpChTypeGroup::CreateDataSeries</c> hands the group's categories to the
     /// diagram once).
     /// </para>
+    /// <para>
+    /// <strong>The value axis' linked format comes from the first series that has one</strong>, and
+    /// not from all of them. <c>AxisHelper::getExplicitNumberFormatKeyForAxis</c> counts the format
+    /// of every series attached to the axis and takes the most frequent
+    /// (<c>chart2/source/tools/AxisHelper.cxx:276-295</c>); the two reduce to the same answer
+    /// whenever the series agree, and every chart substream in the corpus has all of its series in
+    /// one column of one format. Recorded as a simplification rather than as a port.
+    /// </para>
     /// </remarks>
-    private (IReadOnlyList<string?> Categories, IReadOnlyList<ChartSeries> Series) BuildSeries(
+    private (IReadOnlyList<string?> Categories, IReadOnlyList<ChartSeries> Series,
+        NumberFormatCode? ValueFormat, IReadOnlyList<double?> CategoryValues,
+        NumberFormatCode? CategoryFormat) BuildSeries(
         XlsChartData? data, XlsExternSheets? sheets, int ownSheet, XlsCellFormats? fonts)
     {
-        if (data is null || _series.Count == 0) return ([], []);
+        if (data is null || _series.Count == 0) return ([], [], null, [], null);
 
         List<string?> categories = [];
+        List<double?> categoryValues = [];
+        NumberFormatCode? categoryFormat = null;
         List<ChartSeries> built = [];
+        NumberFormatCode? valueFormat = null;
 
         foreach (SeriesLinks series in _series)
         {
@@ -422,11 +623,23 @@ internal sealed class XlsChartBuilder
             List<double?> numbers = data.Numbers(valueSheet, values);
             if (numbers.TrueForAll(number => number is null)) continue;
 
+            if (BlanksCountAsZero)
+            {
+                for (int at = 0; at < numbers.Count; at++) numbers[at] ??= 0.0;
+            }
+
+            valueFormat ??= data.FormatOf(valueSheet, values);
+
             if (categories.Count == 0
                 && series.Categories is { } labels
                 && Resolve(labels, sheets, ownSheet) is { } labelSheet)
             {
                 categories.AddRange(data.Texts(labelSheet, labels));
+
+                // Kept beside the displayed text because a date axis plots the *number* and
+                // labels its own ticks; a text axis prints the text and never asks for these.
+                categoryValues.AddRange(data.Numbers(labelSheet, labels));
+                categoryFormat = data.FormatOf(labelSheet, labels);
             }
 
             string? name = series.Name;
@@ -446,7 +659,7 @@ internal sealed class XlsChartBuilder
 
         // Categories are indexed by point, so a shorter list than the longest series leaves the
         // tail of that series unlabelled rather than mislabelled.
-        return (categories, built);
+        return (categories, built, valueFormat, categoryValues, categoryFormat);
     }
 
     private static int? Resolve(XlsChartRange range, XlsExternSheets? sheets, int ownSheet)
@@ -469,12 +682,32 @@ internal sealed class XlsChartBuilder
     /// path on which a stale one can be read. It was written, found to fail no case under
     /// mutation, and removed rather than left as an untested comfort.
     /// </para>
+    /// <para>
+    /// <strong>BIFF gives each axis its own label font and <see cref="ChartPlot"/> holds one for
+    /// both</strong>, so one of the two has to be picked and the category axis is it: its labels
+    /// are what <see cref="ChartAxisLabels"/> tests for collision, so the size it is measured at
+    /// decides whether the axis is rotated or thinned and therefore how many labels a page shows,
+    /// while the value axis' size only widens a band. Of the corpus's fifteen chart substreams
+    /// <strong>fourteen state the same size on both axes</strong> and the choice is moot;
+    /// <c>2012-GA-Survey-Chapter-6-Tables-16Dec2013-V2.xls</c> is the one that states 8 pt on its
+    /// category axis and 10 pt on its value axis. Recorded rather than resolved — resolving it
+    /// means a second property on the model and a reason from more than one file.
+    /// </para>
     /// </remarks>
     private void ReadFont(ushort index)
     {
         if (_firstFont == NoFont) _firstFont = index;
 
+        // An axis' own CHFONT sits directly inside its CHAXIS and dresses its tick labels.
+        if (InnermostIs(BiffChartRecords.Axis))
+        {
+            if (_axis == AxisX || _labelFont == NoFont) _labelFont = index;
+            return;
+        }
+
         if (!InnermostIs(BiffChartRecords.Text)) return;
+
+        _pendingFont = index;
 
         if (_openDefaultText == GlobalDefaultText && _globalFont == NoFont) _globalFont = index;
         else if (_openDefaultText == AxesSetDefaultText && _axesSetFont == NoFont) _axesSetFont = index;
@@ -675,15 +908,25 @@ internal sealed class XlsChartBuilder
         {
             switch (_pendingLink)
             {
-                case LinkTitle: _title ??= text; break;
-                case LinkValueAxis: _valueTitle ??= text; break;
-                case LinkCategoryAxis: _categoryTitle ??= text; break;
+                case LinkTitle:
+                    _title ??= text;
+                    if (_titleFont == NoFont) _titleFont = _pendingFont;
+                    break;
+                case LinkValueAxis:
+                    _valueTitle ??= text;
+                    if (_axisTitleFont == NoFont) _axisTitleFont = _pendingFont;
+                    break;
+                case LinkCategoryAxis:
+                    _categoryTitle ??= text;
+                    if (_axisTitleFont == NoFont) _axisTitleFont = _pendingFont;
+                    break;
                 default: break;
             }
         }
 
         _pendingText = null;
         _pendingLink = -1;
+        _pendingFont = NoFont;
     }
 
     private void ReadValueRange(BiffRecordReader stream)
@@ -714,6 +957,13 @@ internal sealed class XlsChartBuilder
     /// <see cref="ChartAxisLabels"/> happens at all.
     /// </para>
     /// <para>
+    /// <strong>Only on an axis that is not a date axis.</strong> Those three lines are the
+    /// <c>else</c> of an <c>if</c> over <c>CHDATERANGE</c>'s <c>DATEAXIS</c> flag, and this
+    /// frequency decides nothing on the other branch — see <see cref="ReadDateRange"/>, which is
+    /// why the answer is composed by <see cref="CategoryTextOf"/> from both records rather than
+    /// settled here.
+    /// </para>
+    /// <para>
     /// <strong>This is worth 25 words a page on a checklist with eight chart pages</strong>, and
     /// it is invisible to anything but a drawn comparison: the labels our layout dropped were
     /// dropped because they collide, which is the correct answer to a question BIFF does not ask.
@@ -724,14 +974,184 @@ internal sealed class XlsChartBuilder
     private void ReadLabelRange(BiffRecordReader stream)
     {
         stream.Skip(2);
-        bool everyLabel = stream.ReadUInt16() == 1;
+        _everyLabel = stream.ReadUInt16() == 1;
+        _categoryText = CategoryTextOf(_everyLabel, _isDateAxis);
+    }
 
-        _categoryText = new ChartAxisText(
+    /// <summary>
+    /// Reads <c>CHDATERANGE</c>, whose one flag decides which of two label rules applies.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>XclImpChLabelRange::Convert</c> (<c>xichart.cxx:3013-3047</c>) is an <c>if</c> and an
+    /// <c>else</c> over exactly this flag, and the label properties are set in the <em>else</em>
+    /// alone. A date axis takes the other branch, sets a scaling and a time increment, and never
+    /// touches <c>TEXTOVERLAP</c>, <c>TEXTBREAK</c> or <c>ARRANGEORDER</c> at all — so what stands
+    /// is chart2's own defaults for them, all three of which are set at
+    /// <c>chart2/source/model/main/Axis.cxx:239-242</c>: <c>TextBreak</c> false,
+    /// <c>TextOverlap</c> false, <c>ArrangeOrder</c> automatic.
+    /// </para>
+    /// <para>
+    /// <strong>That is the difference between an axis that rotates its labels and one that cannot.</strong>
+    /// <see cref="ChartAxisLabels.Resolve"/> returns on its first test when overlap is allowed, so
+    /// a chart whose <c>CHLABELRANGE</c> says "label every category" — which is the default, and
+    /// what nearly every chart states — never reaches the auto-rotate ladder. Applying that to a
+    /// date axis as well is a rule the reference deliberately does not have. Measured on
+    /// <c>Template Pilot Logbook JAR-FCL V3.0.xls</c>, whose <c>CHDATERANGE</c> flags are
+    /// <c>0x00ff</c> and therefore include <c>DATEAXIS</c>: the reference sets 848 glyphs at 45°
+    /// across the document and we set none.
+    /// </para>
+    /// <para>
+    /// The record is read even when it arrives before its <c>CHLABELRANGE</c>, because BIFF does
+    /// not fix their order and LibreOffice keeps both halves on one object and decides at the end.
+    /// </para>
+    /// </remarks>
+    private void ReadDateRange(BiffRecordReader stream)
+    {
+        ushort minimum = stream.ReadUInt16();
+        ushort maximum = stream.ReadUInt16();
+        ushort majorStep = stream.ReadUInt16();
+        ushort majorUnit = stream.ReadUInt16();
+        stream.Skip(4);
+        ushort baseUnit = stream.ReadUInt16();
+        stream.Skip(2);
+        ushort flags = stream.ReadUInt16();
+
+        _isDateAxis = (flags & DateAxis) != 0;
+        _autoDateAxis = (flags & AutoDate) != 0;
+        _categoryText = CategoryTextOf(_everyLabel, _isDateAxis);
+
+        if (!_isDateAxis) return;
+
+        // Every limit and every step is counted in the base unit, not in days
+        // (lclConvertTimeValue / lclConvertTimeInterval, xichart.cxx:2960-2988), and an "auto"
+        // flag means the field says nothing at all rather than stating what it happens to hold —
+        // the corpus's one date axis states 37935 and 41292 under flags 0x00FF and the reference
+        // ignores both.
+        _dateResolution = (flags & AutoBase) != 0 ? null : UnitOf(baseUnit);
+        _dateMinimum = (flags & AutoMinimum) != 0 ? null : InDays(minimum, baseUnit);
+        _dateMaximum = (flags & AutoMaximum) != 0 ? null : InDays(maximum, baseUnit);
+        _dateInterval = (flags & AutoMajor) != 0 || majorStep == 0
+            ? null
+            : new ChartTimeInterval(majorStep, UnitOf(majorUnit));
+    }
+
+    /// <summary>
+    /// The date axis this chart's category axis resolves to, or null when it has none.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Three separate statements have to agree before a category axis becomes a date axis, and
+    /// the middle one is the reason a grep for <c>CHDATERANGE</c> over-counts.
+    /// </para>
+    /// <list type="number">
+    /// <item><description><c>CHDATERANGE</c>' <c>DATEAXIS</c> flag.</description></item>
+    /// <item><description>
+    /// If <c>AUTODATE</c> is also set — which it is on every chart in the corpus that states a
+    /// date axis at all — the categories have to <em>be</em> dates.
+    /// <c>lcl_fillDateCategories</c> asks each cell's own number format and gives up on the whole
+    /// axis at the first cell that has a value and no date format, so the test is the resolved
+    /// category format and it has to be a date one.
+    /// </description></item>
+    /// <item><description>Some category has to hold a number at all.</description></item>
+    /// </list>
+    /// <para>
+    /// <strong>And a blank category is a serial rather than a gap on an area chart.</strong>
+    /// <c>AreaChart::addSeries</c> (<c>chart2/source/view/charttypes/AreaChart.cxx:136-143</c>)
+    /// promotes <c>LEAVE_GAP</c> to <c>USE_ZERO</c> for an area plotter and for no other, so the
+    /// 774 blanks in the corpus's date-axis workbook count as 30 December 1899 and pull the axis
+    /// back to serial zero. Measured rather than assumed: the same categories as a line chart or a
+    /// bar chart take the data minimum instead, and that workbook's own <c>CHPROPERTIES</c> states
+    /// mode 0, which is the gap.
+    /// </para>
+    /// </remarks>
+    private ChartDateAxis? DateAxisOf(
+        IReadOnlyList<double?> values, NumberFormatCode? format, SpreadsheetDateSystem dates)
+    {
+        if (!_isDateAxis || values.Count == 0) return null;
+        if (_autoDateAxis && format is not { IsDateTime: true }) return null;
+
+        IReadOnlyList<double?> resolved = values;
+
+        if (BlanksCountAsZero)
+        {
+            double?[] zeroed = new double?[values.Count];
+            for (int at = 0; at < values.Count; at++) zeroed[at] = values[at] ?? 0.0;
+            resolved = zeroed;
+        }
+
+        return ChartDateScale.Resolve(
+            resolved, format, _dateMinimum, _dateMaximum, _dateInterval, _dateResolution, dates);
+    }
+
+    /// <summary>
+    /// Whether a blank cell counts as zero rather than as a gap, in this chart's values and in
+    /// its categories alike.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Two rules, and the second is not in the file. <c>CHPROPERTIES</c>' empty mode says what the
+    /// author asked for; and then <c>AreaChart::addSeries</c>
+    /// (<c>chart2/source/view/charttypes/AreaChart.cxx:136-143</c>) overrides a
+    /// <c>LEAVE_GAP</c> to <c>USE_ZERO</c> for every <em>area</em> plotter — not for a line, not
+    /// for a bar, and not for a scatter, all three of which go through the same class with
+    /// <c>m_bArea</c> false.
+    /// </para>
+    /// <para>
+    /// <strong>It decides the shape of the drawing and not only the axis.</strong> The corpus's
+    /// area chart on a date axis has values in 25 of its 799 rows; with gaps it draws a hairline
+    /// at the right edge of the plot, and with zeros it draws the wedge the reference draws —
+    /// a run along the baseline from the first date to the last cluster and a spike at the end.
+    /// Both halves of the rule were measured on 26.2.4.2 by rendering the same 799 categories as
+    /// an area, a line and a bar chart and reading where the axis started.
+    /// </para>
+    /// <para>
+    /// Only this reader applies it. <c>ChartLayout</c>'s <c>AddAreas</c> records that neither
+    /// <c>c:dispBlanksAs</c> nor <c>CHPROPERTIES</c> reaches it, and that is still true of the
+    /// OOXML and ODF readers.
+    /// </para>
+    /// </remarks>
+    private bool BlanksCountAsZero => _blanksAsZero || _kind is ChartPlotKind.Area;
+
+    /// <summary>The unit a <c>CHDATERANGE</c> field's <c>0/1/2</c> names.</summary>
+    private static ChartTimeUnit UnitOf(ushort unit) => unit switch
+    {
+        DateRangeMonths => ChartTimeUnit.Month,
+        DateRangeYears => ChartTimeUnit.Year,
+        _ => ChartTimeUnit.Day,
+    };
+
+    /// <summary>
+    /// A stated limit converted from its base unit to a serial number.
+    /// </summary>
+    /// <remarks>
+    /// <c>lclConvertTimeValue</c> counts months and years <em>from the null date</em>, so a limit
+    /// of 24 months is 30 December 1901. Days are already serials.
+    /// </remarks>
+    private static double InDays(ushort value, ushort baseUnit) => baseUnit switch
+    {
+        DateRangeMonths => ChartDateScale.SerialOf(
+            ChartDateScale.AddMonths(NullDate, value), SpreadsheetDateSystem.Date1900),
+        DateRangeYears => ChartDateScale.SerialOf(
+            ChartDateScale.AddYears(NullDate, value), SpreadsheetDateSystem.Date1900),
+        _ => value,
+    };
+
+    /// <summary>Serial zero of the 1900 system, which is what a stated month or year counts from.</summary>
+    private static readonly DateOnly NullDate = new(1899, 12, 30);
+
+    /// <summary>What a category axis states about its labels, given the two records that decide it.</summary>
+    private static ChartAxisText CategoryTextOf(bool everyLabel, bool dateAxis) => dateAxis
+        ? new ChartAxisText(
+            Rotation: 0.0,
+            OverlapAllowed: false,
+            LineBreakAllowed: false,
+            Stagger: ChartLabelStagger.Auto)
+        : new ChartAxisText(
             Rotation: 0.0,
             OverlapAllowed: everyLabel,
             LineBreakAllowed: everyLabel,
             Stagger: ChartLabelStagger.SideBySide);
-    }
 
     /// <summary>
     /// Which axis a major gridline belongs to.
@@ -840,6 +1260,19 @@ internal sealed class XlsChartBuilder
     /// <summary>No <c>CHFONT</c> was stated — <c>EXC_FONT_NOTFOUND</c>.</summary>
     private const int NoFont = -1;
 
+    /// <summary>No <c>CHFORMAT</c> was stated — <c>EXC_FORMAT_NOTFOUND</c>.</summary>
+    private const int NoNumberFormat = -1;
+
+    /// <summary>
+    /// The weight at which a <c>FONT</c> counts as the family's bold face.
+    /// </summary>
+    /// <remarks>
+    /// <c>XclImpFont::GuessScriptType</c>'s neighbours read the record's <c>nWeight</c> straight
+    /// into a <c>FontWeight</c>, and <c>lclGetApiWeight</c> puts the boundary at
+    /// <c>EXC_FONTWGHT_BOLD</c>, which is 700. Every <c>FONT</c> in the corpus is 400 or 700.
+    /// </remarks>
+    private const int BoldWeight = 700;
+
     /// <summary>A DFF record header: version and instance, type, then a four-byte length.</summary>
     private const int DffHeaderLength = 8;
 
@@ -888,6 +1321,27 @@ internal sealed class XlsChartBuilder
     private const ushort BarPercent = 0x0004;
     private const ushort LineStacked = 0x0001;
     private const ushort LinePercent = 0x0002;
+
+    /// <summary><c>EXC_CHDATERANGE_DATEAXIS</c>, <c>xlchart.hxx:716</c>.</summary>
+    private const ushort DateAxis = 0x0010;
+
+    /// <summary>
+    /// <c>EXC_CHDATERANGE_AUTOBASE</c> and <c>AUTODATE</c>, <c>xlchart.hxx:717-719</c>.
+    /// </summary>
+    /// <remarks>
+    /// Its automatic-minimum, -maximum and -major bits are 0x0001, 0x0002 and 0x0004, the same
+    /// three values <c>CHVALUERANGE</c> uses, so <see cref="AutoMinimum"/> and its neighbours
+    /// serve both records rather than being written twice.
+    /// </remarks>
+    private const ushort AutoBase = 0x0020;
+    private const ushort AutoDate = 0x0080;
+
+    /// <summary><c>EXC_CHDATERANGE_DAYS</c>, <c>MONTHS</c>, <c>YEARS</c> — <c>xlchart.hxx:721-723</c>.</summary>
+    private const ushort DateRangeMonths = 1;
+    private const ushort DateRangeYears = 2;
+
+    /// <summary><c>EXC_CHPROPS_EMPTY_ZERO</c>, <c>xlchart.hxx:605</c>.</summary>
+    private const byte EmptyCellsAsZero = 1;
 
     private const ushort AutoMinimum = 0x0001;
     private const ushort AutoMaximum = 0x0002;

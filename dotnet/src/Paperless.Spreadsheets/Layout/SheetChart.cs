@@ -61,7 +61,8 @@ internal static class SheetChart
         foreach (ChartLine line in drawing.Lines)
         {
             sink.StrokePath(
-                new GraphicsPath().MoveTo(line.From).LineTo(line.To), Pen(line.Colour, line.Width));
+                new GraphicsPath().MoveTo(line.From).LineTo(line.To),
+                Pen(line.Colour, line.Width, line.DashPattern, line.Cap));
         }
 
         // The free-form marks — wedges, polylines, areas — after the axes and before the text.
@@ -70,7 +71,8 @@ internal static class SheetChart
             if (shape.Path.Commands.Count == 0) continue;
 
             if (shape.Fill is { } fill) sink.FillPath(shape.Path, Paint.Solid(fill));
-            if (shape.Line is { } line) sink.StrokePath(shape.Path, Pen(line, shape.LineWidth));
+            if (shape.Line is { } line)
+                sink.StrokePath(shape.Path, Pen(line, shape.LineWidth, shape.DashPattern, shape.Cap));
         }
 
         foreach (ChartLabel label in drawing.Labels) Text(sink, label);
@@ -107,8 +109,10 @@ internal static class SheetChart
     /// thinnest line the device has. Substituting a visible width makes every gridline and every
     /// bar outline heavier than the reference's.
     /// </remarks>
-    private static Stroke Pen(Colour colour, Length width)
-        => new(Paint.Solid(colour), width, LineCap.Butt, LineJoin.Miter);
+    private static Stroke Pen(
+        Colour colour, Length width, IReadOnlyList<Length>? dash = null,
+        LineCap cap = LineCap.Butt)
+        => new(Paint.Solid(colour), width, cap, LineJoin.Miter, DashPattern: dash);
 
     /// <summary>
     /// Draws one label, shaped and placed by its anchor.
@@ -124,10 +128,16 @@ internal static class SheetChart
     private static void Text(IDrawingSink sink, ChartLabel label)
     {
         if (label.Text.Length == 0) return;
-        if (SheetBandText.Shape(label.Text, label.Size, label.Family) is not { } run) return;
 
-        Length line = SheetBandText.ChartLineHeightAt(label.Size, label.Family);
-        Length ascent = SheetBandText.AscentAt(label.Size, label.Family);
+        // Null is "whatever the chart's labels are set in", and ChartLayout's stamping pass has
+        // already replaced every null with the chart's own answer by the time a drawing is
+        // handed over — so a null surviving to here means no weight was ever stated.
+        bool bold = label.IsBold ?? false;
+
+        if (SheetBandText.Shape(label.Text, label.Size, label.Family, bold) is not { } run) return;
+
+        Length line = SheetBandText.ChartLineHeightAt(label.Size, label.Family, bold);
+        Length ascent = SheetBandText.AscentAt(label.Size, label.Family, bold);
 
         if (label.Rotation != 0.0)
         {
@@ -222,24 +232,31 @@ internal static class SheetChart
         /// <c>SheetBandText</c>'s default.
         /// </para>
         /// <para>
-        /// <strong><paramref name="bold"/> arrived the same way and is still ignored, one round
-        /// behind the family.</strong> <see cref="ChartPlot.IsTitleBold"/> was added on the slides
-        /// track, where an OOXML chart's title and axis titles were measured bold against
-        /// LibreOffice's own model; the reader a workbook's chart reaches is the same one, so it
-        /// now hands a weight to this measurer and to <see cref="SheetChart"/>'s drawing, and both
-        /// drop it. Honouring it needs <c>SheetBandText</c> to hold a bold face beside its regular
-        /// one, and it would move every workbook whose chart has a title — measured against
-        /// nothing. That belongs to a round that sweeps this track, exactly as the family did.
+        /// <strong><paramref name="bold"/> arrived the same way and was ignored for one round
+        /// longer.</strong> <see cref="ChartPlot.IsTitleBold"/> was added on the slides track,
+        /// where an OOXML chart's title and axis titles were measured bold against LibreOffice's
+        /// own model; the reader a workbook's chart reaches is the same one, so it handed a weight
+        /// to this measurer and to <see cref="SheetChart"/>'s drawing and both dropped it. It is
+        /// honoured now, and the corpus said the cost of not doing so plainly: the reference draws
+        /// <c>Template Pilot Logbook JAR-FCL V3.0.xls</c>' chart title and both its axis titles in
+        /// Liberation Sans <em>Bold</em> — <c>pdftohtml -xml</c> marks them <c>&lt;b&gt;</c> — and
+        /// we drew all three regular while the model already said otherwise.
+        /// </para>
+        /// <para>
+        /// <strong>Measuring and drawing take the same flag for the same reason they take the same
+        /// family.</strong> A bold face is wider, so a title measured regular reserves too little
+        /// room at the top of the chart and every gridline below it moves.
         /// </para>
         /// </remarks>
         public DocSize Measure(string text, Length size, string? family, bool bold)
         {
             ArgumentNullException.ThrowIfNull(text);
 
-            Length height = SheetBandText.ChartLineHeightAt(size, family);
+            Length height = SheetBandText.ChartLineHeightAt(size, family, bold);
             return text.Length == 0
                 ? new DocSize(Length.Zero, height)
-                : new DocSize(SheetBandText.Shape(text, size, family)?.Width ?? Length.Zero, height);
+                : new DocSize(
+                    SheetBandText.Shape(text, size, family, bold)?.Width ?? Length.Zero, height);
         }
     }
 }

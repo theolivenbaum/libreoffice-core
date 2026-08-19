@@ -1,7 +1,10 @@
 using System.IO.Compression;
 using System.Text;
 using Paperless.Core.Documents;
+using Paperless.Core.Geometry;
+using Paperless.Core.Graphics;
 using Paperless.Core.Units;
+using Paperless.WordProcessing.Model;
 using Paperless.TestKit;
 using Paperless.WordProcessing.Layout;
 using Shouldly;
@@ -53,6 +56,114 @@ public sealed class CharacterSpacingTests
         (tracked - bare).ShouldBe(Length.FromTwips(twips) * (Sentence.Length - 1));
     }
 
+    /// <summary>
+    /// The drawn pen advances every glyph by the tracking, a run's last included, so the text after a
+    /// tracked run starts one unit further on.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>This is one unit more than the measurement charges, and the difference is
+    /// LibreOffice's own.</strong> <c>SvxFont::QuickGetTextSize</c> takes the trailing kern back off —
+    /// which <c>Paperless.Text.Tests</c>' <c>CharacterTrackingTests</c> pins and which is right
+    /// for the text-size query it describes — while the pen keeps it. Measured on both engines with a
+    /// tracked run of three characters followed by an untracked one at a declared 2.25 pt
+    /// (<c>probes/tracking-trailing-gap/</c>): Writer gives gaps of 2.20, 2.24 and then 2.29 into the
+    /// untracked run, Impress 2.24, 2.26 and 2.29. The gap into the next run is the same as the gaps
+    /// inside the tracked one.
+    /// </para>
+    /// <para>
+    /// Worth a word on nearly every page of <c>OM template for non-complex NCC operators</c>, whose
+    /// header is <c>Rev.</c> then a space run then <c>X</c> then <c>of</c> with no space between the
+    /// last two: the <c>X</c> run's 45 twentieths open a 2.25 pt gap, so the reference's text layer
+    /// reads <c>X of</c> where ours read <c>Xof</c>.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void TheDrawnPenCarriesATrackedRunsTrailingUnit()
+    {
+        const int Twips = 45;
+
+        Length tracked = DrawnAdvance("AAA", Twips);
+        Length bare = DrawnAdvance("AAA", spacing: null);
+
+        (tracked - bare).ShouldBe(
+            Length.FromTwips(Twips) * 3,
+            "three glyphs each carry the tracking, the last included");
+    }
+
+    /// <summary>How far the pen advances across a run as it is actually drawn.</summary>
+    /// <remarks>
+    /// Summed from the emitted glyphs rather than asked of the measurement, because the two answers
+    /// differ by design here and it is the drawn one this pins.
+    /// </remarks>
+    private static Length DrawnAdvance(string text, int? spacing)
+    {
+        string runProperties = spacing is { } twips
+            ? $"<w:rPr><w:spacing w:val=\"{twips}\"/></w:rPr>"
+            : string.Empty;
+
+        PageParagraph paragraph = Paragraph($"""
+            <w:p>
+              <w:r>{runProperties}<w:t xml:space="preserve">{text}</w:t></w:r>
+            </w:p>
+            """);
+
+        List<PageBlock> blocks = [paragraph];
+        List<LaidOutPage> pages = new Paginator(PaginationOptions.Word).Paginate(
+            blocks, new WritingSection { Page = DrawGeometry });
+
+        GlyphCollector collector = new();
+        foreach (LaidOutPage page in pages) PageDrawing.Draw(page, blocks, collector);
+
+        return collector.Advance;
+    }
+
+    /// <summary>An A4 page, wide enough that the run is never broken.</summary>
+    private static PageGeometry DrawGeometry { get; } = new()
+    {
+        Size = new DocSize(Length.FromTwips(11906), Length.FromTwips(16838)),
+        Margins = PageMargins.Uniform(Length.FromTwips(567)),
+    };
+
+    /// <summary>Adds up every glyph advance the page draws and ignores everything else.</summary>
+    /// <remarks>
+    /// The whole sink rather than a base class, because there is no no-op one to derive from — the
+    /// interface has thirteen members and no default implementations.
+    /// </remarks>
+    private sealed class GlyphCollector : IDrawingSink
+    {
+        public Length Advance { get; private set; }
+
+        public void DrawGlyphRun(GlyphRun run, Paint paint)
+        {
+            ArgumentNullException.ThrowIfNull(run);
+
+            foreach (PositionedGlyph glyph in run.Glyphs) Advance += glyph.Advance;
+        }
+
+        public void BeginPage(DocSize size) { }
+
+        public void EndPage() { }
+
+        public void Save() { }
+
+        public void Restore() { }
+
+        public void Transform(AffineTransform transform) { }
+
+        public void ClipPath(GraphicsPath path, FillRule rule = FillRule.NonZero) { }
+
+        public void FillPath(GraphicsPath path, Paint paint, FillRule rule = FillRule.NonZero) { }
+
+        public void StrokePath(GraphicsPath path, Stroke stroke) { }
+
+        public void DrawImage(RasterImage image, DocRect destination, double opacity = 1.0) { }
+
+        public void BeginTransparencyGroup(double opacity) { }
+
+        public void EndTransparencyGroup() { }
+    }
+
     /// <summary>A run's own tracking survives the uniform-paragraph shortcut.</summary>
     /// <remarks>
     /// The readers drop a paragraph's run list when every run agrees with the paragraph mark, because a
@@ -85,6 +196,54 @@ public sealed class CharacterSpacingTests
 
         paragraph.Tracking.ShouldBe(Length.Zero);
         paragraph.Runs.Select(run => run.Tracking).ShouldAllBe(tracking => tracking == Length.Zero);
+    }
+
+    /// <summary>A tracked run does not ligate, all the way from the markup.</summary>
+    /// <remarks>
+    /// <para>
+    /// The document-level end of <c>Paperless.Text.Tests.TrackingLigatureTests</c>, which has the
+    /// rule and the reasoning. Here because the rule has to survive the whole path — the reader
+    /// putting <c>w:spacing</c> on the run, the run reaching the measurement with its tracking
+    /// intact, and the measurement passing it to the shaper — and each of those three has broken
+    /// independently before.
+    /// </para>
+    /// <para>
+    /// The glyph count is the assertion because it is what a PDF writer turns into
+    /// <c>ToUnicode</c> entries: a ligature is one code mapping to two characters, and poppler
+    /// answers a multi-character entry by shattering the whole line into single-character words.
+    /// That cost <c>words/batch-008/…/FAA-2017-0628-0002_attachment_1.docx</c> 28 words of 638
+    /// on text that was character-for-character identical to the reference's.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void ATrackedRunDoesNotLigate()
+    {
+        // Calibri resolves to Carlito, whose liga lookup maps t+i to one glyph. Named explicitly
+        // rather than left to the default, or the test measures whatever face the machine prefers.
+        const string Text = "Formation";
+
+        int plain = Glyphs(Text, spacing: null);
+        int tracked = Glyphs(Text, spacing: 60);
+
+        Assert.SkipWhen(plain == Text.Length, "the resolved face does not ligate ti");
+
+        plain.ShouldBe(Text.Length - 1, "untracked, ti is one glyph");
+        tracked.ShouldBe(Text.Length, "tracked, every character is its own glyph");
+    }
+
+    private static int Glyphs(string sentence, int? spacing)
+    {
+        string runProperties = spacing is { } twips
+            ? $"<w:rPr><w:rFonts w:ascii=\"Calibri\" w:hAnsi=\"Calibri\"/><w:spacing w:val=\"{twips}\"/></w:rPr>"
+            : "<w:rPr><w:rFonts w:ascii=\"Calibri\" w:hAnsi=\"Calibri\"/></w:rPr>";
+
+        PageParagraph paragraph = Paragraph($"""
+            <w:p>
+              <w:r>{runProperties}<w:t xml:space="preserve">{sentence}</w:t></w:r>
+            </w:p>
+            """);
+
+        return paragraph.Measure().Runs.Sum(run => run.Shaped.Glyphs.Count);
     }
 
     /// <summary>The corpus fixture is the width LibreOffice makes it.</summary>

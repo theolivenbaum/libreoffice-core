@@ -249,6 +249,86 @@ public sealed record PageFrame
     /// <summary>The inset between the frame's edge and its text.</summary>
     public Margins Padding { get; init; }
 
+    /// <summary>
+    /// True when the frame's height is stated rather than grown from its text, so content taller than
+    /// the frame is not formatted at all.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A shape's text body either grows to fit its text — DrawingML's <c>a:spAutoFit</c>, VML's
+    /// <c>mso-fit-shape-to-text</c> — or keeps the height the file states. In the second case Writer
+    /// formats only the lines that fit and simply does not lay the rest out: they are absent from the
+    /// PDF's text operators, not merely clipped by a painting rectangle, so <c>pdftotext</c> cannot
+    /// find them either.
+    /// </para>
+    /// <para>
+    /// <strong>Measured on the installed 26.2.4.2</strong>, not inferred — see
+    /// <c>dotnet/probes/words-extra-01/</c>. Sixty authored boxes of stated heights from 1 pt to 100 pt,
+    /// at three inset sizes, holding six paragraphs of 8 pt text, give one rule:
+    /// <em>a line is formatted iff its top offset is strictly less than the box's content height</em>,
+    /// and the first line is always formatted however short the box. The obvious alternative — a line
+    /// is kept when it fits entirely — is refuted by a 10 pt box with zero insets, which draws two
+    /// lines of a ~9.6 pt face.
+    /// </para>
+    /// <para>
+    /// <c>a:normAutofit</c> does <em>not</em> disable it: LibreOffice does not shrink the text, it
+    /// truncates exactly as <c>a:noAutofit</c> does. Neither does <c>bodyPr/@vertOverflow</c>, whose
+    /// <c>overflow</c> and <c>clip</c> values render identically. Only autofit-to-text spares the
+    /// content.
+    /// </para>
+    /// <para>
+    /// False by default, which is the behaviour every format had before this existed. The DOCX reader
+    /// sets it because that is where it was measured; the ODF, WW8 and RTF readers do not, and a round
+    /// wanting it there should measure those importers rather than assume the rule transfers.
+    /// </para>
+    /// </remarks>
+    public bool HasFixedHeight { get; init; }
+
+    /// <summary>
+    /// True when the frame is painted <em>behind</em> the document's text rather than over it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Z-order, not layout: nothing about where a line breaks or where the frame sits depends on this,
+    /// and the layouters never read it. It decides one thing — whether
+    /// <see cref="PageDrawing.Draw"/> emits the frame before the header and body or after them.
+    /// </para>
+    /// <para>
+    /// In Writer this is the <c>SvxOpaqueItem</c>: false puts the fly on the <em>hell</em> layer and
+    /// true on <em>heaven</em> (<c>sw/source/core/layout/fly.cxx</c>:1129-1138), and every importer
+    /// reaches paint order by setting that one item. The two readers derive it differently because the
+    /// two formats state it differently, and both rules are LibreOffice's own:
+    /// </para>
+    /// <list type="bullet">
+    ///   <item>
+    ///     <description>
+    ///     <strong>WW8</strong> — <c>bMoveToBackground = bDrawHell || ((header||footer) &amp;&amp; nwr == 3)</c>
+    ///     (<c>sw/source/filter/ww8/ww8graf.cxx</c>:2833). <c>bDrawHell</c> is the Escher
+    ///     <c>DFF_Prop_fPrint</c> group's <c>fBehindDocument</c> bit
+    ///     (<c>filter/source/msfilter/msdffimp.cxx</c>:5547). The <c>FSPA</c>'s own <c>fBelowText</c>
+    ///     is deliberately <em>not</em> consulted — the comment beside the C++ says in terms that its
+    ///     value "can be neglected" (#i46794), and a reader that trusts it instead gets a different
+    ///     answer on exactly the documents this matters for.
+    ///     </description>
+    ///   </item>
+    ///   <item>
+    ///     <description>
+    ///     <strong>DOCX</strong> — <c>m_bOpaque</c> in
+    ///     <c>sw/source/writerfilter/dmapper/GraphicImport.cxx</c>. It starts as
+    ///     <c>!IsInHeaderFooter()</c> (:342), so a drawing anchored in a header or footer is behind the
+    ///     text whatever else it says; <c>behindDoc="1"</c> clears it (:698-702); and for
+    ///     <c>wrapSquare</c>, <c>wrapThrough</c>, <c>wrapTight</c> and <c>wrapTopAndBottom</c> a file
+    ///     targeting Word 2013 or later restores it (:1589, :1697, tdf#137850) — so under a modern
+    ///     compatibility mode <c>behindDoc</c> is honoured for <c>wrapNone</c> alone.
+    ///     </description>
+    ///   </item>
+    /// </list>
+    /// <para>
+    /// False by default, which is what every reader did before this existed.
+    /// </para>
+    /// </remarks>
+    public bool BehindText { get; init; }
+
     /// <summary>The frame's background, or null when it has none.</summary>
     public Colour? Fill { get; init; }
 
@@ -331,6 +411,25 @@ public sealed record PageFrame
     /// </para>
     /// </remarks>
     public Lazy<VectorImage>? Vector { get; init; }
+
+    /// <summary>
+    /// How much of the picture each edge throws away, or <see cref="PictureCropFractions.None"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>Applied where the frame is placed, not where it is read.</strong> A crop draws the
+    /// whole picture into a rectangle <em>larger</em> than the frame and clips to the frame, and
+    /// the frame's rectangle is <see cref="PlacedFrame.Area"/> — resolved by <c>FrameLayout</c>
+    /// against the anchor, the origin and the alignment, none of which a reader has. So
+    /// <see cref="PageDrawing"/> does both halves together; see <see cref="FramePicture.Crop"/>.
+    /// </para>
+    /// <para>
+    /// Set on the <c>.doc</c> path from Escher properties 256–259. The other three front ends
+    /// state a crop too — <c>a:srcRect</c> in DOCX, <c>fo:clip</c> in ODF, <c>\piccropl</c> and its
+    /// siblings in RTF — and none of them is read yet.
+    /// </para>
+    /// </remarks>
+    public PictureCropFractions Crop { get; init; }
 
     /// <summary>
     /// The chart the frame holds, or null when it holds none.

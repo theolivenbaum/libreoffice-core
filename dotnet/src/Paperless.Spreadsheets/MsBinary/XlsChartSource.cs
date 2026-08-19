@@ -1,3 +1,5 @@
+using Paperless.Core.Numbers;
+
 namespace Paperless.Spreadsheets.MsBinary;
 
 /// <summary>
@@ -280,11 +282,17 @@ internal sealed class XlsExternSheets
 /// the authoring application displayed, which for the date column a flight log plots against is
 /// not the serial and not its shortest round-trip form either.
 /// </para>
+/// <para>
+/// <strong>And its number format, which is what a value axis' tick labels are written
+/// through.</strong> BIFF states no format on an axis that does not carry a <c>CHFORMAT</c>; the
+/// axis links to its source instead, and the source is these cells. See <see cref="FormatOf"/>.
+/// </para>
 /// </remarks>
 internal sealed class XlsChartData
 {
     private readonly Dictionary<int, List<XlsChartRange>> _wanted = [];
-    private readonly Dictionary<(int Sheet, int Row, int Column), (double? Number, string Text)> _cells = [];
+
+    private readonly Dictionary<(int Sheet, int Row, int Column), Held> _cells = [];
 
     /// <summary>True when no chart in the workbook names a cell, so no sheet need offer any.</summary>
     public bool IsEmpty => _wanted.Count == 0;
@@ -333,9 +341,21 @@ internal sealed class XlsChartData
         return false;
     }
 
-    /// <summary>Records a wanted cell's value and the text its sheet shows for it.</summary>
-    public void Offer(int sheet, int row, int column, double? number, string text)
-        => _cells[(sheet, row, column)] = (number, text ?? string.Empty);
+    /// <summary>Records a wanted cell's value, the text its sheet shows for it, and its format.</summary>
+    /// <param name="sheet">Which sheet the cell is on.</param>
+    /// <param name="row">Its row.</param>
+    /// <param name="column">Its column.</param>
+    /// <param name="number">Its value, or null when it holds none.</param>
+    /// <param name="text">The text the sheet displays for it.</param>
+    /// <param name="format">
+    /// The number format its <c>XF</c> resolves to, which <see cref="FormatOf"/> answers a value
+    /// axis with. Null is General and is also what a caller with no format table to consult
+    /// passes.
+    /// </param>
+    public void Offer(
+        int sheet, int row, int column, double? number, string text,
+        NumberFormatCode? format = null)
+        => _cells[(sheet, row, column)] = new Held(number, text ?? string.Empty, format);
 
     /// <summary>The numbers a rectangle holds, one per cell, null where a cell has none.</summary>
     public List<double?> Numbers(int sheet, XlsChartRange range)
@@ -343,9 +363,7 @@ internal sealed class XlsChartData
         List<double?> values = [];
         foreach ((int row, int column) in range.Cells())
         {
-            values.Add(_cells.TryGetValue((sheet, row, column), out (double? Number, string Text) cell)
-                ? cell.Number
-                : null);
+            values.Add(_cells.TryGetValue((sheet, row, column), out Held cell) ? cell.Number : null);
         }
 
         return values;
@@ -357,9 +375,7 @@ internal sealed class XlsChartData
         List<string?> values = [];
         foreach ((int row, int column) in range.Cells())
         {
-            values.Add(_cells.TryGetValue((sheet, row, column), out (double? Number, string Text) cell)
-                ? cell.Text
-                : null);
+            values.Add(_cells.TryGetValue((sheet, row, column), out Held cell) ? cell.Text : null);
         }
 
         return values;
@@ -367,9 +383,46 @@ internal sealed class XlsChartData
 
     /// <summary>The displayed text of one cell, or null when it holds none.</summary>
     public string? TextOf(int sheet, int row, int column)
-        => _cells.TryGetValue((sheet, row, column), out (double? Number, string Text) cell)
-            ? cell.Text
-            : null;
+        => _cells.TryGetValue((sheet, row, column), out Held cell) ? cell.Text : null;
+
+    /// <summary>
+    /// The number format a sequence of cells gives the axis that plots it, or null for General.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>The first non-empty numeric cell decides, and nothing else does.</strong> An axis
+    /// with no <c>CHFORMAT</c> links its format to its source
+    /// (<c>XclImpChAxis::Convert</c>, <c>sc/source/filter/excel/xichart.cxx:3363-3377</c>), and
+    /// <c>AxisHelper::getExplicitNumberFormatKeyForAxis</c>
+    /// (<c>chart2/source/tools/AxisHelper.cxx:135-310</c>) resolves that by asking the sequence
+    /// for <c>getNumberFormatKeyByIndex(-1)</c> — which <c>ScChart2DataSequence</c> answers with
+    /// "the format of the first non-empty cell that has a number", carrying the comment
+    /// <c>// TODO: use nicer heuristic</c> (<c>sc/source/ui/unoobj/chart2uno.cxx:3257-3277</c>).
+    /// The heuristic is reproduced rather than improved on: a range whose first row is a stray
+    /// text header and whose second is currency has to be read the same way by both.
+    /// </para>
+    /// <para>
+    /// A cell that is present but empty is skipped for the same reason a plotter skips it, so a
+    /// series padded with blanks above its numbers still takes its format from the numbers.
+    /// </para>
+    /// </remarks>
+    /// <param name="sheet">The sheet the rectangle is on.</param>
+    /// <param name="range">The rectangle.</param>
+    public NumberFormatCode? FormatOf(int sheet, XlsChartRange range)
+    {
+        foreach ((int row, int column) in range.Cells())
+        {
+            if (!_cells.TryGetValue((sheet, row, column), out Held cell)) continue;
+            if (cell.Number is null) continue;
+
+            return cell.Format is { IsGeneral: false } format ? format : null;
+        }
+
+        return null;
+    }
+
+    /// <summary>What is kept for one cell some chart plots.</summary>
+    private readonly record struct Held(double? Number, string Text, NumberFormatCode? Format);
 
     /// <summary>
     /// The largest rectangle a chart link is believed rather than ignored.

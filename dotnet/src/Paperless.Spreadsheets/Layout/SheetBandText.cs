@@ -54,7 +54,22 @@ internal static class SheetBandText
         new(Load);
 
     private static readonly Lazy<LineMetrics?> Metrics = new(
-        () => Resolved.Value.Face is { } face ? LineSpacing.Resolve(face) : null);
+        () => Resolved.Value.Face is { } face
+            ? LineSpacing.Resolve(face, MetricGrid.Spreadsheet)
+            : null);
+
+    /// <summary>
+    /// The same metrics with no device, which is what a chart's text is measured with.
+    /// </summary>
+    /// <remarks>
+    /// A chart's labels are not laid out by Calc and so are not quantised onto Calc's output
+    /// device: <c>chart2</c>'s view makes them as plain text shapes and takes the face's metrics
+    /// whole. Dropping the grid here rather than never adding one keeps the two answers beside
+    /// each other and keeps <see cref="ChartLineHeightAt(Length)"/>'s line gap, which
+    /// <see cref="LineMetrics.ScaledLineHeight"/> only includes when there is no device to round
+    /// it onto.
+    /// </remarks>
+    private static LineMetrics Ungridded(LineMetrics metrics) => metrics with { Grid = null };
 
     /// <summary>The distance from a line's top to its baseline, at a size.</summary>
     /// <param name="size">The em size.</param>
@@ -88,7 +103,7 @@ internal static class SheetBandText
     /// </remarks>
     /// <param name="size">The em size.</param>
     public static Length ChartLineHeightAt(Length size)
-        => Metrics.Value is { } metrics ? metrics.ScaledLineHeight(size) : size * 1.15;
+        => Metrics.Value is { } metrics ? Ungridded(metrics).ScaledLineHeight(size) : size * 1.15;
 
     /// <summary>
     /// The metrics of a named face, or the furniture's own where it names none.
@@ -100,12 +115,19 @@ internal static class SheetBandText
     /// back to the default face loses only the face, which is what a substitution is.
     /// </remarks>
     /// <param name="family">The family name, or null for the furniture's own face.</param>
+    /// <param name="bold">
+    /// Whether the family's bold face is wanted. The furniture never asks for one — a header and
+    /// a column heading are drawn in whatever a plain cell would be — but a chart's title does,
+    /// and asking for bold of a family that has no bold face resolves back to its regular one
+    /// rather than to nothing.
+    /// </param>
     private static (OpenTypeFace? Face, FontReference Reference, LineMetrics? Metrics) FaceFor(
-        string? family)
+        string? family, bool bold = false)
     {
-        if (string.IsNullOrWhiteSpace(family)) return (Resolved.Value.Face, Description, Metrics.Value);
+        if (string.IsNullOrWhiteSpace(family) && !bold)
+            return (Resolved.Value.Face, Description, Metrics.Value);
 
-        return SheetFonts.ForFamily(family) is { } named
+        return SheetFonts.ForFamily(family, bold) is { } named
             ? (named.Face, named.Reference, named.Metrics)
             : (Resolved.Value.Face, Description, Metrics.Value);
     }
@@ -128,7 +150,23 @@ internal static class SheetBandText
     /// <param name="size">The em size.</param>
     /// <param name="family">The family name, or null for the furniture's own face.</param>
     public static Length ChartLineHeightAt(Length size, string? family)
-        => FaceFor(family).Metrics is { } metrics ? metrics.ScaledLineHeight(size) : size * 1.15;
+        => ChartLineHeightAt(size, family, bold: false);
+
+    /// <inheritdoc cref="ChartLineHeightAt(Length)"/>
+    /// <param name="size">The em size.</param>
+    /// <param name="family">The family name, or null for the furniture's own face.</param>
+    /// <param name="bold">Whether the family's bold face is wanted.</param>
+    public static Length ChartLineHeightAt(Length size, string? family, bool bold)
+        => FaceFor(family, bold).Metrics is { } metrics
+            ? Ungridded(metrics).ScaledLineHeight(size)
+            : size * 1.15;
+
+    /// <inheritdoc cref="AscentAt(Length)"/>
+    /// <param name="size">The em size.</param>
+    /// <param name="family">The family name, or null for the furniture's own face.</param>
+    /// <param name="bold">Whether the family's bold face is wanted.</param>
+    public static Length AscentAt(Length size, string? family, bool bold)
+        => FaceFor(family, bold).Metrics is { } metrics ? metrics.ScaledAscent(size) : size * 0.9;
 
     /// <summary>Shapes one line, or null when there is no face to shape it with.</summary>
     /// <param name="text">The text.</param>
@@ -140,10 +178,22 @@ internal static class SheetBandText
     /// <param name="size">The em size.</param>
     /// <param name="family">The family name, or null for the furniture's own face.</param>
     public static BandRun? Shape(string text, Length size, string? family)
+        => Shape(text, size, family, bold: false);
+
+    /// <inheritdoc cref="Shape(string, Length)"/>
+    /// <param name="text">The text.</param>
+    /// <param name="size">The em size.</param>
+    /// <param name="family">The family name, or null for the furniture's own face.</param>
+    /// <param name="bold">
+    /// Whether to shape in the family's bold face. It has to be the same decision the measurer
+    /// made or the two come apart — a title measured regular and drawn bold overruns the room it
+    /// reserved — which is why <c>SheetChart</c> passes the same flag to both.
+    /// </param>
+    public static BandRun? Shape(string text, Length size, string? family, bool bold)
     {
         if (text.Length == 0) return null;
 
-        (OpenTypeFace? resolved, FontReference reference, _) = FaceFor(family);
+        (OpenTypeFace? resolved, FontReference reference, _) = FaceFor(family, bold);
         if (resolved is not { } face) return null;
 
         ShapedText shaped = TextShaper.Default.Shape(face, text);

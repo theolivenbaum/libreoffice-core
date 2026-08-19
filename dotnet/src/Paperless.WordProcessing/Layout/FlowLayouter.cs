@@ -57,19 +57,60 @@ public static class FlowLayouter
     /// Writer's <c>AddParaLineSpacingToTableCells</c>, forwarded to <see cref="TableLayouter.LayOut"/>
     /// so that a table nested in a cell, a header or a text frame follows the same rule the body's does.
     /// </param>
+    /// <param name="floatsPositionedTables">
+    /// Whether a <see cref="PageTable.IsPositioned"/> table is taken out of the flow — placed where the
+    /// flow has reached but leaving it there, so the blocks after it start where it started rather than
+    /// below it, and contributing its own bottom edge plus <see cref="PageTable.LowerSpacing"/> to the
+    /// flow's height instead of stacking. True for a running head or foot and false everywhere else; see
+    /// the remarks for the measurement that decides it.
+    /// </param>
     /// <remarks>
+    /// <para>
     /// Nothing is clipped and nothing overflows into a second rectangle: content taller than the area is
     /// placed anyway and runs past its bottom, which is what Writer does with a fixed-height header whose
     /// text does not fit. A stated offset is honoured even then, so an overflowing footer grows downwards
     /// rather than climbing into the body.
+    /// </para>
+    /// <para>
+    /// <b>A positioned table in a running head is a frame, and its anchor paragraph does not move out of
+    /// its way.</b> Writer's DOCX importer turns a <c>w:tblpPr</c> table into a fly holding a table —
+    /// visible in <c>--convert-to fodt</c> as a <c>draw:frame</c> whose style carries <c>w:bottomFromText</c>
+    /// as <c>fo:margin-bottom</c> — and in a header <c>SwTextFly</c> does not wrap the anchor's text around
+    /// it. Measured on the installed 26.2.4.2 by perturbing that flat XML and re-rendering, on
+    /// <c>words/batch-010/docx/5709.16 ch.40_mgfinal.docx</c>: the body's first line moves one for one with
+    /// the frame's lower spacing (0 → 114.54 pt, 403 twips → 134.69, 1 in → 186.54), does not move with the
+    /// frame's <em>upper</em> spacing, and does not move when the anchor paragraph grows from 8 pt to 20 pt
+    /// — only when the paragraph grows taller than the frame does it take over. Put text in that paragraph
+    /// and it draws at the very top of the header, overlapping the frame.
+    /// </para>
+    /// <para>
+    /// So the head's height is <c>max(in-flow content height, frame bottom + the frame's lower spacing)</c>,
+    /// which is what this computes. Stacking the table instead made this document's header 10.95 pt short
+    /// — the table's height plus a 9.20 pt empty paragraph, where Writer takes the table's height plus a
+    /// 20.15 pt lower spacing — and that one step, repeated on all 31 pages, is what cost it a page.
+    /// </para>
+    /// <para>
+    /// The body is deliberately not given the same treatment. There <c>bWrapAllowed</c> is true
+    /// (<c>sw/source/core/text/txtfly.cxx</c>, the <c>!IsInFootnote() &amp;&amp; !bFooterHeader</c> arm), so
+    /// the anchor's text goes <em>below</em> the fly — which is what stacking already approximates — and no
+    /// measurement was taken there. 21 corpus documents hold a positioned table in the body against 4 in a
+    /// header or foot.
+    /// </para>
     /// </remarks>
+    /// <param name="anchored">
+    /// The frames the flow's own paragraphs anchor, with the page coordinates its origin corresponds to,
+    /// or null when the caller does not know where the flow sits — which is every caller but a table
+    /// cell's. See <see cref="AnchoredObstacles"/> for why a cell needs its own route to them.
+    /// </param>
     public static PlacedFlow? LayOut(
         IReadOnlyList<PageBlock> blocks,
         DocRect area,
         Length? offsetFromTop,
         int nesting = 0,
         bool collapsesSpacing = false,
-        bool addsCellLineSpacing = false)
+        bool addsCellLineSpacing = false,
+        bool floatsPositionedTables = false,
+        AnchoredObstacles? anchored = null)
     {
         ArgumentNullException.ThrowIfNull(blocks);
 
@@ -78,6 +119,14 @@ public static class FlowLayouter
         List<PlacedLine> placed = [];
         List<PlacedTable> tables = [];
         Length top = Length.Zero;
+
+        // How far down a floated table reaches, its own lower spacing included. The flow is as tall as the
+        // lower of its stacked content and this, which is the `max` the remarks above measured.
+        Length floated = Length.Zero;
+
+        // Tables the flow actually stacked, which a floated one is not. Only these decide whether a
+        // paragraph is the first thing in the frame.
+        int stacked = 0;
 
         // What the paragraph last placed hands down to the next one's first line. See
         // <see cref="ParagraphLeading"/>: the leading proportional line spacing adds above a first line
@@ -96,7 +145,13 @@ public static class FlowLayouter
             {
                 if (nesting >= MaxNesting) continue;
 
-                top += nested.SpaceBefore;
+                // A floated table is placed where the flow has reached and leaves it there. Its own
+                // space-before is a table property and belongs to the flow it was taken out of, so it is
+                // not applied either — the frame's position is what the fly carries, and only the
+                // horizontal half of that is read.
+                bool floats = floatsPositionedTables && nested.IsPositioned;
+
+                if (!floats) top += nested.SpaceBefore;
 
                 // The flow's width is what a table stating none of its own is fitted to, which for a cell is
                 // the cell and for a header the text area. It changes nothing for a table declaring a grid.
@@ -106,7 +161,8 @@ public static class FlowLayouter
                     nesting + 1,
                     area.Width,
                     collapsesSpacing,
-                    addsCellLineSpacing);
+                    addsCellLineSpacing,
+                    anchored?.Below(new DocPoint(Length.Zero, top)));
 
                 Length height = Length.Zero;
                 foreach (Length row in rowHeights) height += row;
@@ -124,7 +180,15 @@ public static class FlowLayouter
                     RowEnd = rowHeights.Count,
                 });
 
-                top += height + nested.SpaceAfter;
+                if (floats)
+                {
+                    floated = Length.Max(floated, top + height + nested.LowerSpacing);
+                }
+                else
+                {
+                    top += height + nested.SpaceAfter;
+                    stacked++;
+                }
 
                 // A table hands no leading down: `GetSpacingValuesOfFrame` reports a line spacing only
                 // for a text frame. Nor does it collapse against the paragraph after it — its space-after
@@ -141,15 +205,26 @@ public static class FlowLayouter
                 ? before.Format
                 : null;
 
+            // The same four conditions the paginator routes on, and for the same reasons — a cell, a
+            // header and a text box reach layout through here instead and must break their lines in the
+            // same places. `NeedsGlyphFallback` is the one that is not about height: it says the
+            // paragraph's own face cannot draw its own text, so only the per-run path measures it in the
+            // face the drawing pass will actually use.
+            // The frames this paragraph itself anchors, which for a flow is the only way it can meet
+            // one: a cell's obstacles are keyed by nothing the paginator can look a cell paragraph up
+            // by. Null for every flow but a table cell's, and for every cell holding no floating frame.
+            ILineObstacles? obstacles = anchored?.For(paragraph, top);
+
             LaidOutParagraph layout =
                 paragraph.HasRuns || paragraph.HasInlineObjects || paragraph.LabelRaisesFirstLine
+                || paragraph.NeedsGlyphFallback || paragraph.HasScriptSpace
                 ? layouter.Layout(
                     paragraph.Measure(),
                     paragraph.Format,
                     area.Width,
                     paragraph.Language,
                     previous,
-                    obstacles: null,
+                    obstacles,
                     emSize: paragraph.EmSize)
                 : layouter.Layout(
                     paragraph.Text,
@@ -158,7 +233,8 @@ public static class FlowLayouter
                     area.Width,
                     paragraph.Language,
                     previous,
-                    paragraph.Shaping);
+                    paragraph.EffectiveShaping,
+                    obstacles);
 
             // Collapsing: the gap between two paragraphs is the larger of the two spacings rather than
             // their sum, so only the part of this paragraph's space-before that exceeds the space-after
@@ -182,10 +258,12 @@ public static class FlowLayouter
                 // above and has just been added to the gap — and so does the flow's first line, which is
                 // the same rule the first line of a page's body follows: the space is part of the upper
                 // margin and is dropped at the top of a frame, and each of these three is a frame.
+                // A floated table is not content the flow has passed: it left `top` where it was, so a
+                // paragraph beside it is still the first thing in the frame and still drops its leading.
                 LineBox box = ParagraphLeading.AsDrawn(
                     layout.Lines[line],
                     isFirstOfParagraph: line == 0,
-                    isFirstInFrame: placed.Count == 0 && tables.Count == 0);
+                    isFirstInFrame: placed.Count == 0 && stacked == 0);
 
                 // `above` and not `above + leading`: the leading is the paragraph above's, and Writer's
                 // `GetTopForObjPos` keeps it in a paragraph-anchored frame's origin. See
@@ -214,7 +292,12 @@ public static class FlowLayouter
         // shift at nought instead pushed such a footer down past the page's bottom edge, and on a Word
         // document whose `w:bottom` equals its `w:footer` that is every footer it has. A stated offset is
         // taken as given either way.
-        Length shift = offsetFromTop ?? (area.Height - top);
+        //
+        // The flow is as tall as the lower of the two edges — what it stacked, and what a floated table
+        // reaches with its lower spacing. A running foot holding a positioned table is bottom-aligned
+        // against the second of those exactly as it would be against the first.
+        Length reach = Length.Max(top, floated);
+        Length shift = offsetFromTop ?? (area.Height - reach);
 
         if (shift != Length.Zero)
         {
@@ -242,7 +325,12 @@ public static class FlowLayouter
             Lines = placed,
             Tables = tables,
             Area = area,
-            Advance = top,
+            Advance = reach,
+
+            // Whatever the last paragraph would have handed down. `leading` holds it because the loop
+            // leaves it there for a paragraph that never came; see PlacedFlow.TrailingLineSpacing for
+            // why it is reported rather than added.
+            TrailingLineSpacing = leading,
         };
     }
 
@@ -300,4 +388,61 @@ public static class FlowLayouter
 
     private static DocRect Shift(DocRect area, Length dy)
         => new(area.X, area.Y + dy, area.Width, area.Height);
+
+    /// <summary>
+    /// A flow cut down to what fits in a shape of a stated height, the way Writer formats one.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A text box whose height the file states rather than grows does not overflow and is not clipped:
+    /// Writer stops formatting when the next line would start below the box, and the lines after that
+    /// are never laid out at all. The difference from clipping is measurable — the text is absent from
+    /// the PDF's text-showing operators, so <c>pdftotext</c> does not find it — and it is why a
+    /// four-paragraph running head 15 pt tall extracts as one line and not four.
+    /// </para>
+    /// <para>
+    /// <strong>The rule is the measured one</strong>, from the 60 authored boxes in
+    /// <c>dotnet/probes/words-extra-01/</c>: keep an item whose top is <em>strictly less</em> than
+    /// <paramref name="height"/>, and always keep the first one however short the box. Keeping only
+    /// items that fit entirely is a different rule and is refuted — a 10 pt box with no insets draws
+    /// two lines of a face taller than 5 pt.
+    /// </para>
+    /// <para>
+    /// Tables are kept or dropped whole. LibreOffice truncates a table in a box by <em>row</em> on this
+    /// same rule, so a table straddling the boundary keeps rows we would drop; no corpus document in
+    /// the group that motivated this has one, and doing it properly means re-running
+    /// <see cref="TableLayouter"/> against a height it does not currently take.
+    /// </para>
+    /// </remarks>
+    /// <param name="flow">The flow as it was laid out with no height limit.</param>
+    /// <param name="height">The shape's content height — its own less its text insets.</param>
+    public static PlacedFlow Truncated(PlacedFlow flow, Length height)
+    {
+        ArgumentNullException.ThrowIfNull(flow);
+
+        List<PlacedLine> lines = [];
+        foreach (PlacedLine line in flow.Lines)
+        {
+            if (line.Top < height) lines.Add(line);
+        }
+
+        List<PlacedTable> tables = [];
+        foreach (PlacedTable table in flow.Tables)
+        {
+            if (table.Area.Y - flow.Area.Y < height) tables.Add(table);
+        }
+
+        // The first thing always survives. Writer formats one line into a box too short for any, which
+        // is what makes a 15 pt head still say "Document reference:" rather than nothing at all.
+        if (lines.Count == 0 && tables.Count == 0)
+        {
+            if (flow.Lines.Count > 0) lines.Add(flow.Lines[0]);
+            else if (flow.Tables.Count > 0) tables.Add(flow.Tables[0]);
+        }
+
+        if (lines.Count == flow.Lines.Count && tables.Count == flow.Tables.Count) return flow;
+
+        PlacedFlow cut = flow with { Lines = lines, Tables = tables };
+        return cut with { Advance = Length.Min(flow.Advance, Extent(cut)) };
+    }
 }

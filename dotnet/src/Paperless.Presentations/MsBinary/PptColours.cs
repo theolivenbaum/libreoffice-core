@@ -1,6 +1,8 @@
 using Paperless.Core.Graphics;
 using Paperless.MsBinary.Escher;
 using Paperless.MsBinary.Records;
+using Paperless.Presentations.Layout;
+using Paperless.Text.Fonts;
 
 namespace Paperless.Presentations.MsBinary;
 
@@ -405,17 +407,32 @@ public sealed class PptFontTable
     /// </remarks>
     private const byte SymbolCharSet = 2;
 
+    /// <summary>
+    /// Where <c>lfPitchAndFamily</c> sits in a <c>FontEntityAtom</c>'s content.
+    /// </summary>
+    /// <remarks>
+    /// The sixty-four-byte name is followed by <c>lfCharSet</c>, a flags byte and
+    /// <c>fontType</c>, and the pitch-and-family byte is the last of the sixty-eight. Confirmed on
+    /// <c>introduction_to_bea_tuxedo.ppt</c>, whose collection reads <c>0x12</c> for Times New
+    /// Roman (variable, roman), <c>0x00</c> for Arial (nothing declared) and <c>0x31</c> for
+    /// Lucida Console (fixed, modern) — the three values a well-formed collection should give.
+    /// </remarks>
+    private const int PitchAndFamilyOffset = 67;
+
     private readonly List<string> _names;
     private readonly List<bool> _symbols;
+    private readonly Dictionary<string, FontPitch> _pitches;
 
-    private PptFontTable(List<string> names, List<bool> symbols)
+    private PptFontTable(List<string> names, List<bool> symbols, Dictionary<string, FontPitch> pitches)
     {
         _names = names;
         _symbols = symbols;
+        _pitches = pitches;
     }
 
     /// <summary>A collection holding nothing, for a document with no environment.</summary>
-    public static PptFontTable Empty { get; } = new([], []);
+    public static PptFontTable Empty { get; } =
+        new([], [], new Dictionary<string, FontPitch>(StringComparer.OrdinalIgnoreCase));
 
     /// <summary>How many faces the collection names.</summary>
     public int Count => _names.Count;
@@ -437,6 +454,20 @@ public sealed class PptFontTable
     public bool IsSymbol(int index)
         => index >= 0 && index < _symbols.Count && _symbols[index];
 
+    /// <summary>
+    /// The pitch the collection declares for a face, or <see cref="FontPitch.Unknown"/>.
+    /// </summary>
+    /// <remarks>
+    /// By name rather than by index, because the resolver is reached with a family name that may
+    /// have come from a master, a layout or a run and has lost whichever <c>cfTypeface</c> index
+    /// named it. The two low bits of <c>lfPitchAndFamily</c> are Windows's <c>LOGFONT</c> encoding,
+    /// the same one the WW8 font table uses: 1 fixed, 2 variable, 0 nothing stated.
+    /// </remarks>
+    public FontPitch PitchOf(string? name)
+        => name is not null && _pitches.TryGetValue(name, out FontPitch pitch)
+            ? pitch
+            : FontPitch.Unknown;
+
     /// <summary>Reads the collection out of a document's <c>Environment</c> container.</summary>
     /// <param name="stream">The document stream.</param>
     /// <param name="environment">The <c>Environment</c> container, or null when there is none.</param>
@@ -447,6 +478,7 @@ public sealed class PptFontTable
 
         List<string> names = [];
         List<bool> symbols = [];
+        Dictionary<string, FontPitch> pitches = new(StringComparer.OrdinalIgnoreCase);
 
         foreach (DffRecordHeader child in stream.Children(container))
         {
@@ -457,12 +489,21 @@ public sealed class PptFontTable
                 if (entity.Type != PptRecordTypes.FontEntityAtom) continue;
 
                 ReadOnlySpan<byte> content = stream.Content(entity);
-                names.Add(NameOf(content));
+                string name = NameOf(content);
+                names.Add(name);
                 symbols.Add(content.Length > NameBytes && content[NameBytes] == SymbolCharSet);
+
+                if (name.Length == 0 || content.Length <= PitchAndFamilyOffset) continue;
+
+                FontPitch pitch = SlideFonts.PitchIn(content[PitchAndFamilyOffset]);
+
+                // First entry wins: a collection naming the same face twice is malformed rather
+                // than impossible, and the earlier atom is the one a run's index reaches.
+                if (pitch != FontPitch.Unknown) pitches.TryAdd(name, pitch);
             }
         }
 
-        return names.Count > 0 ? new PptFontTable(names, symbols) : Empty;
+        return names.Count > 0 ? new PptFontTable(names, symbols, pitches) : Empty;
     }
 
     private static string NameOf(ReadOnlySpan<byte> content)

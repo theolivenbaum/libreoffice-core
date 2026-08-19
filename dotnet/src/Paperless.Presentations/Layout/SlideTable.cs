@@ -110,7 +110,7 @@ public static class SlideTable
                     edge.Pen.Width,
                     LineCap.Butt,
                     LineJoin.Round,
-                    DashPattern: SlideDashes.Pattern(edge.Pen.PresetDash, edge.Pen.Width)),
+                    DashPattern: DashPresets.Pattern(edge.Pen.PresetDash, edge.Pen.Width)),
             });
         }
 

@@ -127,8 +127,8 @@ public static partial class ChartLayout
             if (series.Marker is not ChartMarker.None)
             {
                 Length size = plot.LabelSize * MarkerSize;
-                Colour fill = series.Fill ?? series.Line ?? AxisColour;
-                Colour stroke = series.Line ?? fill;
+                Colour fill = series.MarkerFill ?? series.Fill ?? series.Line ?? AxisColour;
+                Colour stroke = series.MarkerLine ?? series.Line ?? fill;
 
                 foreach ((DocPoint at, _, _) in points)
                     shapes.Add(Marker(series.Marker, at, size, fill, stroke));

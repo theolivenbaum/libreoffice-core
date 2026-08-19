@@ -125,13 +125,46 @@ PDF export keys:
 | Key | Type | Notes |
 |---|---|---|
 | `SelectPdfVersion` | `long` | `0` default; `1` PDF/A-1b; `15`/`16`/`17` for PDF 1.5/1.6/1.7 |
-| `UseTaggedPDF` | `boolean` | Set **false** for reference output: tagging changes nothing visually and enlarges the file |
+| `UseTaggedPDF` | `boolean` | **Leave it alone.** It defaults true and Calc paints differently when it is on — see below |
 | `ReduceImageResolution` | `boolean` | Set **false** for reference output, or images get downsampled |
 | `MaxImageResolution` | `long` | DPI cap when reducing |
 | `Quality` | `long` | JPEG quality 1-100 |
 | `ExportBookmarks` | `boolean` | |
 | `PageRange` | `string` | e.g. `"1-3"` |
 | `ExportNotesPages` | `boolean` | Impress: also export speaker-notes pages |
+
+### `UseTaggedPDF` is not cosmetic, and this table used to say it was
+
+This row previously read *"Set **false** for reference output: tagging changes nothing visually
+and enlarges the file"*. **That advice was wrong and following it would have silently produced
+references that paint differently from every banked one.**
+
+`UseTaggedPDF` defaults to **true** (`Common.xcs:4318`), so every reference in
+`refpdfs-26.2.4.2-fonts/` is tagged — `pdfinfo` reports `Tagged: yes` on all of them. And Calc
+branches on it while painting: `ScOutputData::LayoutStrings` scans one column before the printed
+block only `if ( mnX1 > 0 && !bTaggedPDF )`, so a rightward cell overflow is painted on its
+anchor's page when tagged and on every following page strip when not.
+
+Measured on `essd-16-3433-2024-t02.xlsx`, one binary, one file, only this option changed:
+
+```
+tagged     439 / 0   / 0   / 0     words per page
+untagged   439 / 315 / 152 / 49
+```
+
+A whole-track audit then rendered all 171 sheets both ways and compared 18 495 pages pixel by
+pixel: 34 documents differ, 320 pages, and **866 098 untagged-only ink pixels against 885
+tagged-only** — every one of the 885 being antialiasing fringe. So the flag does not merely
+change the tag tree; it changes the ink, in one direction, on a fifth of the track.
+
+The audit is `dotnet/probes/sheets-tagged-01/results.md`, and its conclusion is the reassuring
+half: **that is the only paint-affecting site.** Every other `bTaggedPDF` conditional in
+`output2.cxx`, `output.cxx`, `printfun.cxx` and `docuno.cxx` opens or closes a structure element,
+and `PDFWriterImpl::beginStructureElementMCSeq` emits marked-content operators only, which cannot
+paint.
+
+**So: never set this false to make a reference.** If you need an untagged rendering to isolate a
+behaviour, say so explicitly in the round's notes and never bank it.
 
 PNG export keys:
 

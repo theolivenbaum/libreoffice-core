@@ -72,6 +72,45 @@ public readonly record struct CellBorders(
     public bool IsNone => Left.IsNone && Right.IsNone && Top.IsNone && Bottom.IsNone;
 }
 
+/// <summary>
+/// Which way a cell's text runs, when the document turns it out of the ordinary direction.
+/// </summary>
+/// <remarks>
+/// <para>
+/// The three answers LibreOffice's own DOCX importer reduces <c>w:textDirection</c>'s six values to
+/// (<c>sw/source/writerfilter/dmapper/DomainMapperTableManager.cxx</c>:325-350): <c>btLr</c> becomes
+/// <c>WritingMode2::BT_LR</c>, <c>tbRl</c> and <c>tbRlV</c> both become <c>TB_RL</c>, and <c>lrTb</c>,
+/// <c>lrTbV</c> and <c>tbLrV</c> are all upright — the last of those is ignored outright with the comment
+/// "we can't handle these". Measured against the installed 26.2.4.2, which confirms all six.
+/// </para>
+/// <para>
+/// A direction rather than an angle, because what the two turned values change is not only the glyphs'
+/// rotation: the line breaks at the cell's <em>height</em>, successive lines stack across its
+/// <em>width</em>, and <see cref="PageTableCell.VerticalAlignment"/> stops meaning anything vertical. An
+/// angle would carry the first of those and none of the rest.
+/// </para>
+/// </remarks>
+public enum CellTextDirection
+{
+    /// <summary>Upright, left to right — every format's default and almost every cell.</summary>
+    LeftToRight,
+
+    /// <summary>
+    /// Turned a quarter turn anticlockwise: glyphs run up the page and lines stack rightwards.
+    /// </summary>
+    /// <remarks>
+    /// OOXML's <c>btLr</c>, and the only turned direction the sample corpus contains — 111 occurrences
+    /// across ten of its two hundred word-processing documents, all of them DOCX.
+    /// </remarks>
+    BottomToTopLeftToRight,
+
+    /// <summary>
+    /// Turned a quarter turn clockwise: glyphs run down the page and lines stack leftwards.
+    /// </summary>
+    /// <remarks>OOXML's <c>tbRl</c> and <c>tbRlV</c>.</remarks>
+    TopToBottomRightToLeft,
+}
+
 /// <summary>Where a cell's text sits when its content is shorter than its row.</summary>
 public enum CellVerticalAlignment
 {
@@ -135,6 +174,29 @@ public sealed record PageTable : PageBlock
     /// </remarks>
     public TableColumnFit? ColumnFit { get; init; }
 
+    /// <summary>
+    /// The table's width as a percentage of the area it sits in, or null when it is an absolute width.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// OOXML's <c>w:tblW w:type="pct"</c>, whose unit is fiftieths of a percent, and which
+    /// <c>DomainMapperTableManager::sprm</c>
+    /// (<c>sw/source/writerfilter/dmapper/DomainMapperTableManager.cxx</c>:191) turns into
+    /// <c>SizeType::VARIABLE</c> with a percentage <em>clamped to 100</em> — a table stating 102.24% is
+    /// laid out at 100%, not at 102.24%. The grid is then restated in the same proportions at that
+    /// width, which is what <see cref="WidthsWithin"/> does.
+    /// </para>
+    /// <para>
+    /// Not a nicety: <c>ESPN-R - MCF - RA - Ed1.docx</c>'s running header holds a
+    /// <c>w:tblW w:w="5000" w:type="pct"</c> over a grid summing to 9633 twips, so ignoring the
+    /// percentage drew that table 481.65 pt wide where Writer draws it 714.35 pt — the whole landscape
+    /// text width — and <c>Page 26/58</c> then broke across two lines in a cell that should hold it on
+    /// one. Scaling the grid to the stated percentage reproduces all four of the reference's column
+    /// boundaries to within 0.04 pt.
+    /// </para>
+    /// </remarks>
+    public int? RelativeWidth { get; init; }
+
     /// <summary>The rows, top to bottom.</summary>
     public required IReadOnlyList<PageTableRow> Rows { get; init; }
 
@@ -188,6 +250,50 @@ public sealed record PageTable : PageBlock
     /// </remarks>
     public bool JoinsBordersLikeWord { get; init; }
 
+    /// <summary>
+    /// True when a row's declared height is a floor on its <em>content</em> rather than on the whole row,
+    /// so the cells' margins and the top border are added to it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The second thing a table's provenance still decides, and unlike <see cref="JoinsBordersLikeWord"/>
+    /// it changes the layout. LibreOffice calls it <c>DocumentSettingId::MIN_ROW_HEIGHT_INCL_BORDER</c>,
+    /// its own comment calls it "MS Word 'atLeast' oddities", and the DOC, DOCX and RTF filters set it
+    /// (<c>ww8par.cxx</c>:1966 and <c>DomainMapper.cxx</c>:156) while the ODF filter never does — the same
+    /// three-against-one split, and reached the same way, as the flag above.
+    /// </para>
+    /// <para>
+    /// It is not a nicety either way round. Off, the FAA Holdover Tables' 397-twip rows come out 20.85 pt
+    /// against the reference's 22.00. On, the <c>table-exact-row</c> fixture's ODF forms come out a
+    /// margin too tall — which is how the split was found, since applying it to all five formats fixed
+    /// <c>.doc</c>, <c>.docx</c> and <c>.rtf</c> and broke <c>.odt</c> and <c>.fodt</c>.
+    /// </para>
+    /// </remarks>
+    public bool MinHeightIncludesInsets { get; init; }
+
+    /// <summary>
+    /// Whether the table begins a page, the way
+    /// <see cref="Paperless.Text.Layout.ParagraphFormat.StartsNewPage"/> does for a paragraph.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A DOCX has no "page break before this table": it puts the break on the empty paragraph in front of
+    /// it, as <c>&lt;w:br w:type="page"/&gt;</c>, and the importer has to carry it forward onto whatever
+    /// block comes next. That is easy to miss because the flag is only ever *read* where a paragraph is
+    /// read, so a break landing in front of a table was consumed by the first paragraph inside the
+    /// table's first cell, where it means nothing at all — the table went on drawing where it was.
+    /// </para>
+    /// <para>
+    /// LibreOffice does carry it, and says so in its own import: <c>ESPN-R - MCF - Manual</c> has two such
+    /// paragraphs, one before its "Section 2" form table and one before its "Post-flight briefing" table,
+    /// and no <c>w:pageBreakBefore</c> anywhere in the document — yet the flat XML from
+    /// <c>--convert-to fodt</c> carries <c>fo:break-before="page"</c> on <c>Table12</c> and
+    /// <c>Table13</c>, the only two in the file. The reference leaves 255 pt of page 31 empty and opens
+    /// the table on page 32; we filled it, and the document came out a page short.
+    /// </para>
+    /// </remarks>
+    public bool StartsNewPage { get; init; }
+
     /// <summary>How wide the table is, which is its columns added up.</summary>
     /// <remarks>
     /// The declared columns, so a table whose grid the file left blank answers with what it declared rather
@@ -215,17 +321,52 @@ public sealed record PageTable : PageBlock
     /// </remarks>
     /// <param name="available">The width of the area the table sits in.</param>
     public IReadOnlyList<Length> WidthsWithin(Length available)
-        => ColumnFit is null ? ColumnWidths : ColumnFit.Resolve(ColumnWidths, available);
+    {
+        if (RelativeWidth is { } percent)
+        {
+            Length target = Length.FromTwips(Math.Max(1, available.Twips * percent / 100));
+            return ColumnFit is null ? Scaled(ColumnWidths, target) : ColumnFit.Resolve(ColumnWidths, target);
+        }
+
+        return ColumnFit is null ? ColumnWidths : ColumnFit.Resolve(ColumnWidths, available);
+    }
 
     /// <summary>How wide the table is inside an area of a given width.</summary>
     /// <param name="available">The width of the area the table sits in.</param>
     public Length WidthWithin(Length available)
     {
-        if (ColumnFit is null) return Width;
+        if (ColumnFit is null && RelativeWidth is null) return Width;
 
         Length total = Length.Zero;
         foreach (Length column in WidthsWithin(available)) total += column;
         return total;
+    }
+
+    /// <summary>
+    /// The declared grid restated in the same proportions at a given total width.
+    /// </summary>
+    /// <remarks>
+    /// Twips, and the last column takes the remainder, so the parts add back up to the total exactly — the
+    /// same arithmetic <see cref="TableColumnFit"/> does, for the same reason.
+    /// </remarks>
+    private static IReadOnlyList<Length> Scaled(IReadOnlyList<Length> columns, Length target)
+    {
+        long grid = 0;
+        foreach (Length column in columns) grid += Math.Max(0, column.Twips);
+
+        if (grid <= 0 || columns.Count == 0) return columns;
+
+        Length[] scaled = new Length[columns.Count];
+        long used = 0;
+        for (int i = 0; i < columns.Count - 1; i++)
+        {
+            long share = Math.Max(0, columns[i].Twips) * target.Twips / grid;
+            scaled[i] = Length.FromTwips(share);
+            used += share;
+        }
+
+        scaled[^1] = Length.FromTwips(Math.Max(0, target.Twips - used));
+        return scaled;
     }
 
     /// <summary>
@@ -248,6 +389,36 @@ public sealed record PageTable : PageBlock
     /// </para>
     /// </remarks>
     public FrameHorizontalAlignment? HorizontalPosition { get; init; }
+
+    /// <summary>
+    /// True when the table is <em>positioned</em> — it names a place on the page rather than following the
+    /// text, which in Writer makes it a frame holding a table rather than a table in the flow.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Not the same question as <see cref="HorizontalPosition"/>, which is null for a positioned table that
+    /// states no <c>w:tblpXSpec</c> — two of the corpus's four running heads holding one are positioned
+    /// against the page's own edges by <c>w:tblpX</c>, with no spec at all. So the flag is carried
+    /// separately rather than read off the alignment.
+    /// </para>
+    /// <para>
+    /// What it changes is <em>where the flow it sits in has got to</em>, and only in a running head or
+    /// foot — see <see cref="FlowLayouter.LayOut"/>. Everywhere else the table keeps the in-flow placement
+    /// it has always had.
+    /// </para>
+    /// </remarks>
+    public bool IsPositioned { get; init; }
+
+    /// <summary>
+    /// The space a positioned table keeps clear below itself — OOXML's <c>w:bottomFromText</c>.
+    /// </summary>
+    /// <remarks>
+    /// A frame's lower spacing rather than a table's space-after, which is why it is not
+    /// <see cref="SpaceAfter"/>: Writer writes it as the fly's <c>fo:margin-bottom</c>, it belongs to the
+    /// frame rather than to the table inside it, and it is only ever consulted for a table that
+    /// <see cref="IsPositioned"/>.
+    /// </remarks>
+    public Length LowerSpacing { get; init; }
 
     /// <summary>
     /// Where the table's left edge sits inside an area of a given width, measured from that area's own
@@ -369,7 +540,34 @@ public sealed record PageTableCell
     public CellPadding Padding { get; init; }
 
     /// <summary>Where the text sits when the row is taller than the content.</summary>
+    /// <remarks>
+    /// For a turned cell this is still the alignment across the <em>line stack</em>, which is then
+    /// horizontal rather than vertical — the property keeps its name because it is what every format
+    /// spells <c>vAlign</c>, and because it is the same axis in the cell's own frame.
+    /// </remarks>
     public CellVerticalAlignment VerticalAlignment { get; init; }
+
+    /// <summary>
+    /// Which way the cell's text runs; <see cref="CellTextDirection.LeftToRight"/> for almost every cell.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A rotated row-group label down the side of a table — <c>AIRCRAFT</c>, <c>ENGINES</c> — is what this
+    /// is for, and it is the commonest use of it by a distance. Reading it as upright text does not merely
+    /// draw the label the wrong way round: the paragraph then breaks at the <em>column's</em> width, which
+    /// for a label column is a few points, so every line holds one glyph and the cell becomes as tall as
+    /// the label is long. That turned a 7-page form into 9 on <c>A1. EASA Form 2.docx</c>.
+    /// </para>
+    /// <para>
+    /// The layout consequences live in <see cref="TableLayouter"/>; the one worth knowing here is that a
+    /// turned cell contributes <em>nothing</em> to its row's height, measured on the installed 26.2.4.2.
+    /// A row holding only turned cells collapses to nothing and draws neither text nor borders.
+    /// </para>
+    /// </remarks>
+    public CellTextDirection TextDirection { get; init; }
+
+    /// <summary>True when the cell's text is turned out of the upright direction.</summary>
+    public bool IsTurned => TextDirection != CellTextDirection.LeftToRight;
 
     /// <summary>
     /// The colour behind the cell's text, or null when the cell is not shaded.
@@ -446,7 +644,31 @@ public sealed record PlacedTableCell
     public required DocRect Area { get; init; }
 
     /// <summary>Its text, laid out inside the padding, or null when the cell is empty.</summary>
+    /// <remarks>
+    /// In page coordinates for an ordinary cell, and in the cell's <em>own</em> coordinates when
+    /// <see cref="ContentTransform"/> is not null — see there.
+    /// </remarks>
     public PlacedFlow? Content { get; init; }
+
+    /// <summary>
+    /// How to get from <see cref="Content"/>'s coordinates to the page's, or null when the two are the
+    /// same — which they are for every cell but a turned one.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A turned cell's text is laid out in an upright frame of its own, breaking at what is the cell's
+    /// height on the page, and this quarter turn is what puts that frame where it belongs. Carrying the
+    /// turn rather than pre-rotating the lines is what keeps every consumer of <see cref="PlacedFlow"/>
+    /// working on one kind of flow: the line boxes, the glyph runs and the tab stops inside are all
+    /// measured along the text's own direction, which is the only frame they mean anything in.
+    /// </para>
+    /// <para>
+    /// A backend applies it by pushing the transform and drawing the flow exactly as it draws an upright
+    /// one, which is also what LibreOffice does — its PDF writes a <c>0 1 -1 0 x y</c> text matrix per
+    /// glyph and nothing else about the run changes.
+    /// </para>
+    /// </remarks>
+    public AffineTransform? ContentTransform { get; init; }
 
     /// <summary>Which row of the table it starts in.</summary>
     public int Row { get; init; }

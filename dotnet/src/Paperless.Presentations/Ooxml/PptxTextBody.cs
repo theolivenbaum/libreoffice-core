@@ -44,6 +44,14 @@ internal static class PptxTextBody
     private const int DefaultSizeHundredthsOfPoint = 1800;
 
     /// <summary>
+    /// <c>WINDOWS_CHARSET_SYMBOL</c>, the only <c>a:sym/@charset</c> value that makes the
+    /// request symbol-encoded — <c>oox/inc/drawingml/textfont.hxx</c> and
+    /// <c>TextFont::implGetFontData</c>. Absent means <c>WINDOWS_CHARSET_DEFAULT</c>, which is
+    /// 1 and not this.
+    /// </summary>
+    private const int WindowsCharsetSymbol = 2;
+
+    /// <summary>
     /// The character an <c>a:br</c> becomes.
     /// </summary>
     /// <remarks>
@@ -129,13 +137,17 @@ internal static class PptxTextBody
         int[] counters = new int[9];
         bool[] counting = new bool[9];
 
+        // And one bullet face per level, for the same reason and by the same mechanism: the
+        // shape's numbering rule outlives the paragraph that wrote to it. See `Marker`.
+        string?[] markerFaces = new string?[9];
+
         List<SlideParagraph> paragraphs = [];
         foreach (XElement paragraph in Drawing.Children(body, "p"))
         {
             paragraphs.Add(
                 Paragraph(
-                    paragraph, listStyle, theme, defaultTypeface, counters, counting, inherited,
-                    fields, shapeTextStyle));
+                    paragraph, listStyle, theme, defaultTypeface, counters, counting,
+                    markerFaces, inherited, fields, shapeTextStyle));
         }
 
         // The autofit choice is taken whole from the nearest a:bodyPr that states one of the
@@ -160,6 +172,7 @@ internal static class PptxTextBody
             Wraps = Stated(bodyChain, "wrap") != "none",
             AutoFit = autofit is not null,
             FontScale = Thousandth(autofit, "fontScale", 1.0),
+            WarpPreset = Warp(bodyChain),
 
             // a:normAutofit/@lnSpcReduction is deliberately not read: neither does the reference,
             // whose normAutofit handler takes @fontScale alone. See SlideTextBody.AutoFit.
@@ -204,6 +217,38 @@ internal static class PptxTextBody
     }
 
     /// <summary>
+    /// The WordArt preset <c>a:bodyPr/a:prstTxWarp</c> asks for, or null when the body is
+    /// ordinary text.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>textNoShape</c> is normalised away to null because it is the value that means
+    /// <em>no</em> warp, and it is overwhelmingly the common one: of the 67 documents in the
+    /// corpus's slides track that carry a <c>prstTxWarp</c> at all, 65 carry only
+    /// <c>textNoShape</c>. Reading the element's presence rather than its value would turn a
+    /// two-document behaviour into a sixty-seven-document one.
+    /// </para>
+    /// <para>
+    /// The chain is walked in the same most-specific-first order the rest of the body
+    /// properties use, because <c>PPTShapeContext</c> copy-constructs the slide shape's text
+    /// body from the placeholder's, so a warp stated on a layout or master placeholder is
+    /// inherited exactly as an anchor or an inset is.
+    /// </para>
+    /// </remarks>
+    private static string? Warp(List<XElement> chain)
+    {
+        foreach (XElement source in chain)
+        {
+            if (Drawing.Child(source, "prstTxWarp") is not { } warp) continue;
+
+            string? preset = warp.Attribute("prst")?.Value;
+            return string.IsNullOrEmpty(preset) || preset == "textNoShape" ? null : preset;
+        }
+
+        return null;
+    }
+
+    /// <summary>
     /// What an <c>a:fld</c> of this type draws, or null to fall back to its cached text.
     /// </summary>
     /// <remarks>
@@ -238,6 +283,7 @@ internal static class PptxTextBody
         string? defaultTypeface,
         int[] counters,
         bool[] counting,
+        string?[] markerFaces,
         Func<int, IReadOnlyList<XElement>>? inherited,
         SlideFields? fields,
         DrawingCharacterStyle? shapeTextStyle)
@@ -282,7 +328,7 @@ internal static class PptxTextBody
                 runs.Add(Run(
                     Drawing.Child(child, "rPr"), sources, text.Length, content.Length,
                     theme, defaultTypeface));
-                text.Append(content);
+                text.Append(Capitalised(content, Drawing.Child(child, "rPr"), sources));
             }
             else if (Drawing.Is(child, "br"))
             {
@@ -306,7 +352,7 @@ internal static class PptxTextBody
                 runs.Add(Run(
                     Drawing.Child(child, "rPr"), sources, text.Length, content.Length,
                     theme, defaultTypeface));
-                text.Append(content);
+                text.Append(Capitalised(content, Drawing.Child(child, "rPr"), sources));
             }
         }
 
@@ -336,7 +382,7 @@ internal static class PptxTextBody
             Length.FromEmu(Emu(chain, "marL")),
             Length.FromEmu(Emu(chain, "indent")),
             Language(Drawing.Child(paragraph, "r")),
-            Marker(chain, theme, level, counters, counting, hasText: text.Length > 0))
+            Marker(chain, theme, level, counters, counting, markerFaces, text.Length > 0))
         {
             // a:defTabSz, whose absence means DrawingML's own default of one inch and not a word
             // processor's half inch. Nearly every master states it explicitly as 914400, which is
@@ -395,6 +441,28 @@ internal static class PptxTextBody
     /// blank line an author leaves between two items is still an <c>a:p</c> and still inherits
     /// the level's bullet, and counting it makes the next item jump from 2 to 4.
     /// </para>
+    /// <para>
+    /// <strong>A stated bullet face outlives the paragraph that states it, per level.</strong>
+    /// Each paragraph writes its bullet properties into the <em>shape's</em> numbering rule —
+    /// <c>xNumRule-&gt;replaceByIndex(getLevel(), …)</c>,
+    /// <c>oox/source/drawingml/textparagraph.cxx:191</c> over
+    /// <c>textparagraphproperties.cxx:483-502</c> — and
+    /// <c>SvxUnoNumberingRules::replaceByIndex</c> starts from the level's <em>existing</em>
+    /// format (<c>editeng/source/uno/unonrule.cxx:257</c>). A paragraph that pushes no
+    /// <c>PROP_BulletFont</c>, because it names none or because it says <c>a:buFontTx</c>,
+    /// therefore keeps whatever the last paragraph at its level left there. The bullet map itself
+    /// is per paragraph (<c>textparagraph.cxx:136</c>) and carries nothing; the rule is what
+    /// persists.
+    /// </para>
+    /// <para>
+    /// Measured through <c>soffice</c> 26.2.4.2 on a four-paragraph probe body: a first paragraph
+    /// stating <c>a:buFont typeface="Courier New"</c> and <c>a:buNone</c> — so drawing no bullet
+    /// at all — makes the next level-0 paragraph's faceless <c>a:buChar</c> draw from
+    /// <b>LiberationMono</b>, while the level-1 paragraph between them draws from
+    /// <b>OpenSymbol</b>, and a following <c>a:buFontTx</c> paragraph draws from
+    /// <b>LiberationMono</b> again. So it is per level, it survives <c>buNone</c>, and it is what
+    /// <c>a:buFontTx</c> actually resolves to whenever a sibling has named a face.
+    /// </para>
     /// </remarks>
     private static SlideMarker? Marker(
         List<XElement> chain,
@@ -402,9 +470,19 @@ internal static class PptxTextBody
         int level,
         int[] counters,
         bool[] counting,
+        string?[] markerFaces,
         bool hasText)
     {
         int slot = Math.Clamp(level, 0, counters.Length - 1);
+
+        // Before any of the branches below, and whether or not this paragraph draws anything:
+        // stating a face writes it into the level's rule, and a `buNone` paragraph states it just
+        // as loudly as a bulleted one.
+        if (!FollowsTextFont(chain)
+            && Drawing.Attribute(Child(chain, "buFont"), "typeface") is { Length: > 0 } stated)
+        {
+            markerFaces[slot] = stated;
+        }
 
         foreach (XElement source in chain)
         {
@@ -420,7 +498,7 @@ internal static class PptxTextBody
 
                 return Marked(
                     DrawingTextBody.AutoNumber(number, slot, counters, counting),
-                    chain, theme, isSymbol: false);
+                    chain, theme, markerFaces[slot], isSymbol: false);
             }
 
             if (Drawing.Child(source, "buChar") is not { } bullet) continue;
@@ -436,7 +514,7 @@ internal static class PptxTextBody
             // the table could be reached: a bullet stated as `char="&#xF0D8;"` — which is a
             // quarter of the corpus's symbol bullets — became U+2022 and was then re-symbolised
             // into slot 0x22, so every one of them drew the *same* wrong glyph.
-            return Marked(FirstCodePoint(character), chain, theme);
+            return Marked(FirstCodePoint(character), chain, theme, markerFaces[slot]);
         }
 
         counting[slot] = false;
@@ -470,12 +548,22 @@ internal static class PptxTextBody
     /// Each satellite property is looked up down the whole chain separately from the bullet
     /// character, because a paragraph routinely states the character and leaves the font, size
     /// and colour to its level — and because the three are each their own element rather than
-    /// attributes of the bullet.
+    /// attributes of the bullet. The face is the exception and arrives as
+    /// <paramref name="typeface"/>: it belongs to the level rather than to the paragraph, so
+    /// <see cref="Marker"/> resolves it. Null means "nothing has named one", which
+    /// <c>SlideTextLayout</c> draws from OpenSymbol.
     /// </remarks>
     private static SlideMarker Marked(
-        string text, List<XElement> chain, DrawingTheme? theme, bool isSymbol = true)
+        string text,
+        List<XElement> chain,
+        DrawingTheme? theme,
+        string? typeface,
+        bool isSymbol = true)
     {
-        XElement? font = Child(chain, "buFont");
+        // Whether *this* paragraph's own chain makes it a symbol position, which is the question
+        // `pushToPropMap` asks when it decides whether to move the character into the Private Use
+        // Area — a decision it takes per paragraph, unlike the face, which is the level's.
+        XElement? font = FollowsTextFont(chain) ? null : Child(chain, "buFont");
 
         // Only a stated character is a symbol position. A generated number is digits whatever
         // face the level names for its bullet, and recoding it would make nonsense of it.
@@ -485,7 +573,6 @@ internal static class PptxTextBody
         // OpenSymbol glyph holding the same picture, which needs the slot and the face together.
         // Everything else is collapsed to U+2022 here, which is what the whole of this method's
         // input used to arrive already collapsed to.
-        string? typeface = Drawing.Attribute(font, "typeface");
         bool recodeable = symbolFont && SymbolFontRecode.IsRecodeable(typeface);
         string symbolised = symbolFont ? Symbolised(text) : text;
 
@@ -502,6 +589,41 @@ internal static class PptxTextBody
                     : 1.0,
                 ColourIn(Child(chain, "buClr"), theme),
                 isSymbol);
+    }
+
+    /// <summary>
+    /// Whether the chain asks for the bullet to be set in the text's own face — which, in
+    /// LibreOffice, means it is set in <em>neither</em> the text's face nor an <c>a:buFont</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>a:buFontTx</c> sets <c>mbBulletFontFollowText</c>, and the import's whole response to it
+    /// is to <em>skip</em> the block that would set <c>PROP_BulletFont</c> — nothing else is put in
+    /// its place (<c>oox/source/drawingml/textparagraphproperties.cxx:311-347</c>). So the bullet
+    /// keeps the numbering rule's default face, which for Impress is OpenSymbol, and the element
+    /// that reads as "follow the text" in fact means "state no face at all". Measured: a paragraph
+    /// with <c>a:buFontTx</c> over text in Courier New draws its bullet from OpenSymbol, not from
+    /// LiberationMono.
+    /// </para>
+    /// <para>
+    /// It is looked for anywhere in the chain rather than at its most specific rung, because
+    /// <c>BulletList::apply</c> only ever assigns the flag when the source <em>has</em> a value and
+    /// nothing writes a false one (<c>textparagraphproperties.cxx:267-268</c>, with the only
+    /// producer at <c>textparagraphpropertiescontext.cxx:282-283</c>). A master that says
+    /// <c>buFontTx</c> therefore outlives a paragraph that names a face.
+    /// </para>
+    /// <para>
+    /// It suppresses only <em>this</em> paragraph's push. What the level's rule already holds from
+    /// an earlier sibling stands — see <see cref="Marker"/>, where that is carried.
+    /// </para>
+    /// </remarks>
+    private static bool FollowsTextFont(List<XElement> chain)
+    {
+        foreach (XElement source in chain)
+        {
+            if (Drawing.Child(source, "buFontTx") is not null) return true;
+        }
+        return false;
     }
 
     /// <summary>
@@ -615,8 +737,49 @@ internal static class PptxTextBody
                 ? fonts.Resolve(Drawing.Attribute(Drawing.Child(element, "latin"), "typeface"))
                 : Literal(Drawing.Attribute(Drawing.Child(element, "latin"), "typeface")));
 
+        // a:rPr/a:sym — the face the run's private-use characters are drawn from, and it inherits
+        // down the same chain everything else here does: TextCharacterProperties::assignUsed takes
+        // maSymbolFont from the source whenever the source states one
+        // (oox/source/drawingml/textcharacterproperties.cxx:55), so a level's a:defRPr can carry
+        // it for every run under it. Theme-resolved for the same reason a:latin is: getFontData
+        // puts the name through Theme::resolveFont before using it (textfont.cxx:80-85), so a
+        // "+mn-lt" here is the minor latin face and not a family of that name.
+        //
+        // The element is taken whole rather than attribute by attribute, because the typeface and
+        // the charset only mean anything together — see SlideSymbolFont. `assignIfUsed` copies the
+        // TextFont as a unit for exactly the same reason.
+        XElement? symbol = First(
+            runProperties, defaults, element => Drawing.Child(element, "sym"));
+
+        SlideSymbolFont? symbolFont = null;
+        if (symbol is not null)
+        {
+            string? family = theme?.Fonts is { } symbolFonts
+                ? symbolFonts.Resolve(Drawing.Attribute(symbol, "typeface"))
+                : Literal(Drawing.Attribute(symbol, "typeface"));
+
+            // getFontData returns false for an empty name and no switch happens at all
+            // (textfont.cxx:87-94), so a nameless a:sym is not an a:sym.
+            if (!string.IsNullOrEmpty(family))
+            {
+                symbolFont = new SlideSymbolFont(
+                    family,
+                    Drawing.Number(symbol, "charset") == WindowsCharsetSymbol);
+            }
+        }
+
         Colour? colour = sources.Resolve(
-            runProperties, style => style.Colour, element => SolidColour(element, theme));
+            runProperties, style => style.Colour, element => RunColour(element, theme));
+
+        // A run's own a:hlinkClick redecorates it: see HyperlinkColour and the underline below.
+        // The run's *own* a:rPr is what decides, not the inherited chain, because LibreOffice
+        // tests maTextCharacterProperties — the run's properties before the defaults are merged
+        // in — rather than the merged set (oox/source/drawingml/textrun.cxx:88, :162-168).
+        XElement? hyperlink = Drawing.Child(runProperties, "hlinkClick");
+        if (hyperlink is not null && Drawing.Child(hyperlink, "extLst") is null)
+        {
+            colour = HyperlinkColour(runProperties, sources, theme) ?? colour;
+        }
 
         // a:rPr/@spc, in hundredths of a point, and negative far more often than not: a deck's
         // designer pulls a heading in and PowerPoint records it per run. LibreOffice reads it into
@@ -642,6 +805,7 @@ internal static class PptxTextBody
         int baseline = First(runProperties, defaults, element => Drawing.Number(element, "baseline"))
                        ?? 0;
 
+
         return new SlideTextRun(
             start,
             length,
@@ -651,11 +815,17 @@ internal static class PptxTextBody
             italic,
             colour ?? Colour.Black,
             Length.FromEmu(tracking * Length.EmuPerPoint / 100),
-            IsUnderlined: underline is not null and not "none",
+            // A hyperlink underlines itself unless the run states an underline of its own — and
+            // "of its own" is again the run's a:rPr and not the chain behind it, so a defRPr
+            // saying u="none" above a linked run does not stop the rule
+            // (oox/source/drawingml/textrun.cxx:167-168).
+            IsUnderlined: (hyperlink is not null && Drawing.Attribute(runProperties, "u") is null)
+                          || underline is not null and not "none",
             IsStruckThrough: strike is not null and not "noStrike",
             Escapement: baseline == 0
                 ? SlideEscapement.None
-                : new SlideEscapement(baseline / 1000, SlideEscapement.AutomaticProportion));
+                : new SlideEscapement(baseline / 1000, SlideEscapement.AutomaticProportion),
+            SymbolFont: symbolFont);
     }
 
     /// <summary>
@@ -668,6 +838,54 @@ internal static class PptxTextBody
     /// it. Merging whole property sets gives the right answer on every run that states everything
     /// — which is every run LibreOffice writes — and the wrong one everywhere it matters.
     /// </remarks>
+    /// <summary>
+    /// A run's text as <c>a:rPr/@cap</c> draws it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// DrawingML's text capitalisation, which LibreOffice reads into <c>CharCaseMap</c>
+    /// (<c>oox/source/drawingml/textcharacterpropertiescontext.cxx:79-80</c> takes the attribute,
+    /// <c>textcharacterproperties.cxx:194</c> sets the property). It is inherited down the
+    /// layout/master chain like any other run property, so it is resolved through
+    /// <see cref="First{T}"/> rather than read off the run's own <c>a:rPr</c> — a deck that states
+    /// it once on its master and nowhere else is the common case, and 71 of the corpus's decks
+    /// state it at all.
+    /// </para>
+    /// <para>
+    /// <strong>This is presentation, not content.</strong> It is applied here, on the layout
+    /// path, and deliberately not in <c>PptxShapeReader</c>, which is what the extraction API
+    /// reads: copying an all-caps-formatted run out of a deck yields the case the author typed.
+    /// The reference's PDF holds the upper-case glyphs, which is why the rendering must match and
+    /// the extraction must not.
+    /// </para>
+    /// <para>
+    /// <strong>Only <c>all</c> is implemented.</strong> <c>small</c> needs real or synthesised
+    /// small capitals — a smaller face for the lower-case letters, not merely upper-casing them —
+    /// and LibreOffice's own behaviour has not been measured here, so it is left drawing the text
+    /// as authored, exactly as before. Seven corpus decks state it. Guessing at it would trade a
+    /// known-absent feature for a wrong one.
+    /// </para>
+    /// <para>
+    /// The length guard is not defensive padding. Run offsets index this same buffer, so a
+    /// casing that changed the length would silently desynchronise every run after it;
+    /// <see cref="string.ToUpperInvariant"/> maps one char to one char and cannot, but the guard
+    /// states the invariant the indices depend on rather than leaving it to be rediscovered.
+    /// Invariant casing is also what keeps a Turkish dotless i from turning into something the
+    /// reference did not draw.
+    /// </para>
+    /// </remarks>
+    private static string Capitalised(string content, XElement? runProperties, RunSources sources)
+    {
+        if (First(runProperties, sources.Defaults, element => Drawing.Attribute(element, "cap"))
+            is not "all")
+        {
+            return content;
+        }
+
+        string upper = content.ToUpperInvariant();
+        return upper.Length == content.Length ? upper : content;
+    }
+
     private static T? First<T>(XElement? own, XElement?[] defaults, Func<XElement, T?> read)
     {
         if (own is not null && read(own) is { } fromRun) return fromRun;
@@ -741,14 +959,123 @@ internal static class PptxTextBody
         }
     }
 
-    private static Colour? SolidColour(XElement properties, DrawingTheme? theme)
+    /// <summary>
+    /// The one colour a run's fill reduces to, from either an <c>a:solidFill</c> or an
+    /// <c>a:gradFill</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>A run's colour is a fill, not a colour</b>, and DrawingML lets it be any of the fills a
+    /// shape can have. Text is drawn with one colour, so LibreOffice reduces whichever fill it
+    /// finds to a single one on the way in — <c>FillProperties::getBestSolidColor</c>
+    /// (<c>oox/source/drawingml/fillproperties.cxx:402-425</c>), reached from
+    /// <c>TextCharacterProperties::pushToPropMap</c>
+    /// (<c>oox/source/drawingml/textcharacterproperties.cxx:115-117</c>), which then sets
+    /// <c>PROP_CharColor</c> at <c>:139</c> and <c>PROP_CharTransparence</c> from that colour's
+    /// alpha at <c>:153-156</c>. Reading only <c>a:solidFill</c> left a gradient-filled run with
+    /// no stated colour at all, so it inherited whatever was above it and usually came out
+    /// opaque black.
+    /// </para>
+    /// <para>
+    /// <b>The alpha is the visible half.</b> Measured on
+    /// <c>OnTrac_StarCertificationProgram-3Day.pptx</c>, whose <c>slideMaster3.xml</c> draws an
+    /// 82 pt page number from a <c>defRPr</c> whose <c>a:gradFill</c> is two identical <c>tx1</c>
+    /// stops at <c>a:alpha val="10000"</c>: the reference emits <c>0 0 0 rg</c> under an
+    /// ExtGState of <c>/CA 0.1 /ca 0.1</c>. It is black at a tenth opacity and not a grey, which
+    /// is worth stating because it looks like a grey and the two are only the same over a white
+    /// background.
+    /// </para>
+    /// <para>
+    /// <b>Which stop.</b> LibreOffice takes the first, unless there are more than two, in which
+    /// case it takes the second — its stops are a map keyed by position, so "first" means lowest
+    /// and not first in the file. Neither the file order nor
+    /// <c>DrawingChartPlot.FillOf</c>'s nearest-to-the-middle rule reproduces that; the chart
+    /// heuristic is a deliberate choice for a series colour and is not this.
+    /// </para>
+    /// </remarks>
+    /// <param name="properties">One <c>a:rPr</c> or <c>a:defRPr</c>.</param>
+    /// <param name="theme">The theme its scheme colours resolve against.</param>
+    private static Colour? RunColour(XElement properties, DrawingTheme? theme)
     {
-        XElement? solid = Drawing.Child(properties, "solidFill");
-        if (solid is null) return null;
+        if (Drawing.Child(properties, "solidFill") is { } solid)
+        {
+            foreach (XElement child in solid.Elements())
+            {
+                if (DrawingColour.Read(child)?.Resolve(theme) is { } colour) return colour;
+            }
+
+            return null;
+        }
+
+        if (DrawingFill.ReadGradient(Drawing.Child(properties, "gradFill")) is not { Stops.Count: > 0 } gradient)
+        {
+            return null;
+        }
+
+        List<DrawingGradientStop> ordered = [.. gradient.Stops.OrderBy(stop => stop.Position)];
+        return ordered[ordered.Count > 2 ? 1 : 0].Colour.Resolve(theme);
+    }
+
+    /// <summary>
+    /// What a run carrying an <c>a:hlinkClick</c> is drawn in: the theme's <c>hlink</c> slot
+    /// under the transforms the run's inherited fill already had.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>The slot is swapped, the transform chain is kept.</b> LibreOffice calls
+    /// <c>maFillColor.setSchemeClr(XML_hlink)</c> on the character properties it has already
+    /// merged (<c>oox/source/drawingml/textrun.cxx:162-166</c>), and <c>Color::setSchemeClr</c>
+    /// assigns only the base — <c>meMode</c> and <c>mnC1</c> — leaving the <c>lumMod</c>,
+    /// <c>tint</c> and <c>alpha</c> already on the object in place
+    /// (<c>oox/source/drawingml/color.cxx:405-413</c>). So a linked run does not simply come out
+    /// the theme's link colour; it comes out the theme's link colour <em>seen through whatever
+    /// the placeholder was doing to the text colour</em>.
+    /// </para>
+    /// <para>
+    /// That distinction is the whole reason this is not two lines. Measured on
+    /// <c>slides/batch-004/pptx/solog_orientation_august_2019.pptx</c> against the banked
+    /// 26.2.4.2 reference: its <c>slideLayout1.xml</c> gives the subtitle placeholder
+    /// <c>schemeClr tx1</c> under <c>tint val="75000"</c>, which draws the body at
+    /// <c>#8B8B8B</c>. The reference draws the three <c>mailto:</c> runs on page 3 at
+    /// <c>#8B8BFF</c> — the theme's <c>hlink</c> <c>#0000FF</c> under that same 75% tint, since
+    /// tinting toward white leaves a saturated blue channel at FF and lifts the other two to 8B.
+    /// Resolving <c>hlink</c> on its own would have drawn them <c>#0000FF</c> and been wrong on
+    /// exactly this page while right on the deck's other five, which is the kind of near-miss
+    /// that survives a whole round.
+    /// </para>
+    /// <para>
+    /// Only <c>a:solidFill</c> is followed, because <c>maFillColor</c> is the solid-fill colour
+    /// and a gradient-filled run leaves it unset — such a run links out as the untransformed
+    /// theme colour, which is what LibreOffice does with it too. The shape's
+    /// <c>p:style/a:fontRef</c> is skipped in the walk for a different reason: it hands back an
+    /// already-resolved <see cref="Colour"/> with no chain left to keep, so there is nothing for
+    /// this to carry over even when it is the layer that would have won.
+    /// </para>
+    /// </remarks>
+    private static Colour? HyperlinkColour(
+        XElement? runProperties, RunSources sources, DrawingTheme? theme)
+    {
+        DrawingColour? inherited = sources.Resolve<DrawingColour>(
+            runProperties, _ => null, RunFillColour);
+
+        return DrawingColour.FromScheme("hlink", inherited?.Transforms).Resolve(theme);
+    }
+
+    /// <summary>
+    /// The unresolved <c>a:solidFill</c> colour one <c>a:rPr</c> or <c>a:defRPr</c> states.
+    /// </summary>
+    /// <remarks>
+    /// The same source <see cref="RunColour"/> reads, stopped one step earlier so the transform
+    /// chain is still on it. Kept separate rather than folded into <c>RunColour</c> because every
+    /// other caller wants the resolved colour and would only have to resolve it again.
+    /// </remarks>
+    private static DrawingColour? RunFillColour(XElement properties)
+    {
+        if (Drawing.Child(properties, "solidFill") is not { } solid) return null;
 
         foreach (XElement child in solid.Elements())
         {
-            if (DrawingColour.Read(child)?.Resolve(theme) is { } colour) return colour;
+            if (DrawingColour.Read(child) is { } colour) return colour;
         }
 
         return null;

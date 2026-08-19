@@ -1,11 +1,20 @@
 using Paperless.Core.Units;
 
-namespace Paperless.Presentations.Layout;
+namespace Paperless.Core.Graphics;
 
 /// <summary>
-/// Expands DrawingML's ten preset dash patterns into the dash array a stroke carries.
+/// Expands DrawingML's ten preset dash patterns into the dash array a <see cref="Stroke"/>
+/// carries.
 /// </summary>
 /// <remarks>
+/// <para>
+/// <strong>In Core because it depends on nothing above Core.</strong> It began in
+/// <c>Paperless.Presentations</c>, where a table border wanted it, and a chart series' dotted
+/// threshold line then could not reach it — <c>Paperless.Ooxml</c> and <c>Core/Charts</c> both
+/// sit below presentations. Its whole input is a preset name and a pen width and its whole
+/// output is a list of <see cref="Length"/>, so the move costs Core's zero-dependency rule
+/// nothing. See <c>CLAUDE.md</c>: the question is not who uses it but what it depends on.
+/// </para>
 /// <para>
 /// <c>a:prstDash</c> names a pattern; it does not state one. The lengths are a <em>percentage of
 /// the line width</em>, which is why a table of literal point values would be wrong on every line
@@ -28,7 +37,7 @@ namespace Paperless.Presentations.Layout;
 /// visibly shorter strokes. A butt cap leaves the numbers alone.
 /// </para>
 /// </remarks>
-public static class SlideDashes
+public static class DashPresets
 {
     /// <summary>
     /// The width a hairline is treated as when scaling a dash: 26.95 units of 1/100 mm.

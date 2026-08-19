@@ -3,7 +3,7 @@ words/batch-015/doc/A320SimNotes.doc	0	0	0	-	-	pagination-differs
 words/batch-015/doc/info-bulletin-601.doc	0	0	0	-	-	pagination-differs
 words/batch-015/docx/1_tpr_template__from_fy14_.docx	0	0	0	-	-	pagination-differs
 words/batch-015/docx/B11. TE.CAO.00129  Experience  logbook.docx	0	0	0	-	-	pagination-differs
-words/batch-015/docx/approvals-and-standardisation-organisation-approvals-docs-part-145-annex-B-B11.-TE.CAO.00129-Foreign-Part-145-approvals---Experience--logbook.docx	6	0	0	161	123	ceiling
+words/batch-015/docx/approvals-and-standardisation-organisation-approvals-docs-part-145-annex-B-B11.-TE.CAO.00129-Foreign-Part-145-approvals---Experience--logbook.docx	6	0	0	121	121	false-positive-rotated-cell-text
 words/batch-013/docx/A1. EASA Form 2.docx	0	1	0	-	-	pagination-differs
 words/batch-013/docx/FO.FCTOA_.000129 Application for activities related to FSTD.docx	2	2	0	254	187	ceiling
 words/batch-013/docx/FO.FCTOA_.000129 Application for activities related to FSTD.docx	5	2	0	429	162	ceiling
@@ -65,7 +65,7 @@ slides/batch-007/ppt/introduction_to_bea_tuxedo.ppt	38	0	0	84	63	ceiling
 slides/batch-007/ppt/introduction_to_bea_tuxedo.ppt	39	0	0	38	30	ceiling
 slides/batch-016/pptx/16 - UTM - (NASA).pptx	7	2	0	261	158	ceiling
 slides/batch-016/pptx/16 - UTM - (NASA).pptx	29	2	0	109	1	ceiling
-slides/batch-016/pptx/FAAAIandtheArtandScienceofV&Vfinal.pptx	14	1	1	119	91	ceiling
+slides/batch-016/pptx/FAAAIandtheArtandScienceofV&Vfinal.pptx	14	1	1	119	91	not-a-ceiling-our-wordart
 slides/batch-014/ppt/Thailand17.ppt	8	6	0	102	9	ceiling
 slides/batch-014/pptx/Intersil_Italy_CAN_Bus_Transceiver_Presentation_Final.pptx	30	6	0	130	103	ceiling
 slides/batch-014/pptx/N2_E_Maestroni_Swarm_COP.pptx	7	0	0	307	102	ceiling
@@ -78,7 +78,6 @@ slides/batch-014/pptx/WiGr_2021W_1_Angebot-Nachfrage-Elastizität-211017-171222.
 slides/batch-017/pptx/Demick_JetBlue.pptx	4	0	0	108	79	ceiling
 slides/batch-017/pptx/Demick_JetBlue.pptx	5	0	0	93	54	ceiling
 slides/batch-017/pptx/Demick_JetBlue.pptx	7	0	0	94	64	ceiling
-slides/batch-009/pptx/NWD-GLA-Community-Outreach-Day-Oct-2025.pptx	5	0	0	15	5	ceiling
 slides/batch-012/pptx/OnTrac_StarCertificationProgram-3Day.pptx	9	2	0	96	50	ceiling
 slides/batch-012/pptx/OnTrac_StarCertificationProgram-3Day.pptx	10	2	0	281	30	ceiling
 sheets/batch-015/xls/grants-2005.xls	0	0	0	-	-	pagination-differs

@@ -5,6 +5,7 @@ using Paperless.Text.Fonts;
 using Paperless.Text.Itemisation;
 using Paperless.Text.Layout;
 using Paperless.Text.Shaping;
+using Paperless.Vector;
 
 namespace Paperless.WordProcessing.Layout;
 
@@ -42,6 +43,19 @@ public static class PageDrawing
     /// already been shortened to keep clear of it — so a frame drawn first would be painted over by
     /// whatever ran under it.
     /// </para>
+    /// <para>
+    /// <strong>Except the ones the document puts behind its text</strong>, which go first —
+    /// <see cref="PageFrame.BehindText"/>. Writer keeps these on the <em>hell</em> layer and paints that
+    /// layer before the text; a letterhead or a watermark is the whole of the case, and it is not a
+    /// nuance. Measured on <c>info-bulletin-601.doc</c>, whose every page carries one full-page opaque
+    /// raster anchored in the header story: emitted after the text it covers the text, and the document
+    /// renders as five blank sheets while its extractable word count reads 1298 of 1302 — a defect no
+    /// gate column can see, because the words are all still in the PDF's text layer underneath.
+    /// </para>
+    /// <para>
+    /// The footer stays last, and that is deliberate rather than left over: it is what kept the page
+    /// numbers legible on that document while everything above them was buried.
+    /// </para>
     /// </remarks>
     /// <param name="page">The page to draw.</param>
     /// <param name="blocks">The blocks the page's body lines index into.</param>
@@ -56,12 +70,23 @@ public static class PageDrawing
         sink.BeginPage(page.Size);
         try
         {
+            foreach (PlacedFrame frame in page.Frames)
+            {
+                if (frame.Frame.BehindText) DrawFrame(frame, sink);
+            }
+
             DrawFlow(page.Header, sink);
             DrawBody(page, blocks, sink);
+            DrawLineNumbers(page, sink);
             foreach (PlacedTable table in page.Tables) DrawTable(table, sink);
             DrawSeparator(page.NoteSeparator, sink);
             DrawFlow(page.Notes, sink);
-            foreach (PlacedFrame frame in page.Frames) DrawFrame(frame, sink);
+
+            foreach (PlacedFrame frame in page.Frames)
+            {
+                if (!frame.Frame.BehindText) DrawFrame(frame, sink);
+            }
+
             DrawFlow(page.Footer, sink);
         }
         finally
@@ -95,6 +120,39 @@ public static class PageDrawing
                  page.Lines.GroupBy(line => (line.Columns, line.Column)))
         {
             DrawLines(page.ColumnArea(band.First()), [.. band], blocks, sink);
+        }
+    }
+
+    /// <summary>
+    /// Draws a page's margin line numbers, right-aligned against the text edge.
+    /// </summary>
+    /// <remarks>
+    /// Right-aligned here rather than in <see cref="LineNumbering"/> because aligning means measuring, and
+    /// measuring means shaping: the model carries the right edge and this shapes the digits once, to draw
+    /// them and to know how far left of that edge to start. Measured on the reference, whose one-, two-
+    /// and three-digit numbers sit at three different left edges and one right one.
+    /// </remarks>
+    private static void DrawLineNumbers(LaidOutPage page, IDrawingSink sink)
+    {
+        if (page.LineNumbers.Count == 0) return;
+        if (page.Numbering is not { } numbering) return;
+
+        FontReference font = numbering.Font ?? Reference(numbering.Face);
+
+        foreach (PageLineNumber mark in page.LineNumbers)
+        {
+            ShapedText shaped = TextShaper.Default.Shape(numbering.Face, mark.Text, numbering.Shaping);
+            Length width = shaped.Width(numbering.EmSize);
+
+            sink.DrawGlyphRun(
+                Build(
+                    shaped,
+                    mark.Text,
+                    numbering.EmSize,
+                    font,
+                    new DocPoint(mark.RightBaseline.X - width, mark.RightBaseline.Y),
+                    Length.Zero),
+                Paint.Solid(Colour.Black));
         }
     }
 
@@ -167,8 +225,8 @@ public static class PageDrawing
         if (frame.Frame.Chart is { } chart)
             FrameChart.Draw(sink, chart, frame.Area, frame.Frame.ChartFontFamily);
         else if (frame.Frame.Vector is { } vector && !vector.Value.IsEmpty)
-            vector.Value.Draw(sink, frame.Area);
-        else if (frame.Frame.Image is { } image) sink.DrawImage(image, frame.Area);
+            DrawPicture(sink, frame, vector, null);
+        else if (frame.Frame.Image is { } image) DrawPicture(sink, frame, null, image);
 
         DrawFlow(frame.Content, sink);
 
@@ -202,6 +260,61 @@ public static class PageDrawing
     }
 
     /// <summary>
+    /// Draws a frame's picture into its area, cropped when the file says so.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>A crop is a larger destination plus a clip, and until this round the word path had
+    /// neither.</strong> The fractions say how much of the picture each edge throws away, so the
+    /// surviving part is what fills the frame and the whole of it is correspondingly bigger; the
+    /// clip to the frame is what turns that into a crop rather than into a picture drawn over the
+    /// text on either side of it. Adding the rectangle without the clip would be strictly worse
+    /// than doing nothing.
+    /// </para>
+    /// <para>
+    /// Clipped only where there is a crop. Both backends already confine a picture to the
+    /// rectangle they are given — a raster is stretched onto exactly it, and
+    /// <c>VectorImage.Draw</c> clips to its destination — so an unconditional clip would be a
+    /// no-op that changed the bytes of every rendering carrying a picture.
+    /// </para>
+    /// <para>
+    /// The border is drawn after this and is deliberately outside the clip: it belongs to the
+    /// frame rather than to the picture, and half a hairline of it falls on the boundary the clip
+    /// would have cut away.
+    /// </para>
+    /// </remarks>
+    private static void DrawPicture(
+        IDrawingSink sink, PlacedFrame frame, Lazy<VectorImage>? vector, RasterImage? image)
+    {
+        DocRect destination = frame.Frame.Crop.Apply(frame.Area);
+
+        if (destination == frame.Area)
+        {
+            PaintPicture(sink, frame.Area, vector, image);
+            return;
+        }
+
+        sink.Save();
+        try
+        {
+            sink.ClipPath(GraphicsPath.Rectangle(frame.Area));
+            PaintPicture(sink, destination, vector, image);
+        }
+        finally
+        {
+            sink.Restore();
+        }
+    }
+
+    /// <summary>Puts whichever of the two pictures a frame has into a rectangle.</summary>
+    private static void PaintPicture(
+        IDrawingSink sink, DocRect where, Lazy<VectorImage>? vector, RasterImage? image)
+    {
+        if (vector is not null) vector.Value.Draw(sink, where);
+        else if (image is not null) sink.DrawImage(image, where);
+    }
+
+    /// <summary>
     /// Draws a table, which is its cells' text.
     /// </summary>
     /// <remarks>
@@ -218,9 +331,41 @@ public static class PageDrawing
             if (cell.Cell.Shading is { } colour) Fill(cell.Area, colour, sink);
         }
 
-        foreach (PlacedTableCell cell in table.Cells) DrawFlow(cell.Content, sink);
+        foreach (PlacedTableCell cell in table.Cells) DrawCellContent(cell, sink);
 
         DrawBorders(table, sink);
+    }
+
+    /// <summary>
+    /// Draws one cell's text, turning it first when the cell says so.
+    /// </summary>
+    /// <remarks>
+    /// The whole of the turned case, and deliberately so: the flow underneath is an ordinary upright one
+    /// in its own coordinates, so every backend draws it through the code it already had and only the
+    /// transform is new. LibreOffice's own PDF does the same thing — a <c>0 1 -1 0 x y</c> text matrix
+    /// and an otherwise unremarkable run — which is why the turned text stays real text in the output
+    /// rather than becoming a picture of itself.
+    /// </remarks>
+    private static void DrawCellContent(PlacedTableCell cell, IDrawingSink sink)
+    {
+        if (cell.ContentTransform is not { } onto)
+        {
+            DrawFlow(cell.Content, sink);
+            return;
+        }
+
+        if (cell.Content is null) return;
+
+        sink.Save();
+        try
+        {
+            sink.Transform(onto);
+            DrawFlow(cell.Content, sink);
+        }
+        finally
+        {
+            sink.Restore();
+        }
     }
 
     /// <summary>
@@ -810,8 +955,17 @@ public static class PageDrawing
                     nextObject++;
                 }
 
+                // The script-change gap, charged before the run that follows it and from the size of
+                // the run that ends at it — the same rule and the same one place `MeasuredParagraph`
+                // added it to the prefix table, so the pen and the line break agree.
+                if (paragraph.HasScriptSpace && run.Start > segment.Start
+                    && ScriptSpacing.Opens(paragraph.Text, run.Start))
+                {
+                    pen += ScriptSpacing.GapFor(SizeEndingAt(paragraph, run.Start));
+                }
+
                 string text = paragraph.Text[run.Start..run.End];
-                ShapedText shaped = TextShaper.Default.Shape(run.Face, text, run.Shaping);
+                ShapedText shaped = TextShaper.Default.Shape(run.Face, text, run.EffectiveShaping);
                 if (shaped.Glyphs.Count == 0) continue;
 
                 // A raised run draws above the baseline and advances along it unchanged, which is why the
@@ -847,6 +1001,22 @@ public static class PageDrawing
         }
 
         return runs;
+    }
+
+    /// <summary>The em size of whatever run ends at a position.</summary>
+    /// <remarks>
+    /// `MeasuredParagraph` asks the same question of its own run list, and both have to answer the
+    /// same way or the pen pays a different gap from the one the line was broken on. A uniform
+    /// paragraph has no runs and answers with the paragraph's own size, which is what it is set in.
+    /// </remarks>
+    private static Length SizeEndingAt(PageParagraph paragraph, int position)
+    {
+        foreach (PageRun run in paragraph.Runs)
+        {
+            if (position - 1 >= run.Start && position - 1 < run.End) return run.EmSize;
+        }
+
+        return paragraph.EmSize;
     }
 
     /// <summary>
@@ -983,6 +1153,48 @@ public static class PageDrawing
     /// This paints inside space the tab had already reserved, so it moves no line break and no page
     /// break: a paragraph measures exactly as it did before the leader existed.
     /// </para>
+    /// <para>
+    /// <b>The fill character's width is a whole twip, and that is not a rounding nicety — it is worth
+    /// one or two dots on every contents line.</b> <c>nCharWidth</c> is a <c>SwTwips</c> and so is the
+    /// portion's <c>Width()</c>, so Writer's count is an integer division of two integer-twip lengths.
+    /// Carlito's full stop at 12 pt is 60.586 twips; Writer measures 60 and fits 134 dots into the
+    /// 8051-twip blank of <c>system_design__technical_architecture_template.docx</c>, where dividing by
+    /// the exact advance fits 132. The two missing dots leave a 2.51 pt hole in front of the page
+    /// number, and poppler — which is what the corpus gate scores — reads a hole that wide as a word
+    /// break, so <c>Revision History………4</c> extracts as three tokens against the reference's two. A
+    /// leader that stops a character short of its stop and a spurious extracted word are therefore the
+    /// same defect measured two ways — but <em>only</em> this one. A leader can also stop short because
+    /// the stop itself is in the wrong place, which is the <c>TabOverSpacing</c> clamp recorded in
+    /// <c>TODO.batches.md</c> and is not this: measured over the 28 corpus documents that draw a dot
+    /// leader, the page number's right edge agrees with the reference to 0.10 pt on 25 of them and is
+    /// 18 to 28 pt short on the other three.
+    /// </para>
+    /// <para>
+    /// <b>The count is taken at the whole twip and the fill is then drawn back down onto the blank</b>,
+    /// which is the <c>bKern</c> argument <c>SwTabPortion::Paint</c> passes to
+    /// <c>SwTextPaintInfo::DrawText</c>: it selects <c>SwFont::DrawStretchText_</c>, so the run is laid
+    /// out against the portion's width rather than its own. Counting at 60 twips and setting at 60.586
+    /// would put 134 dots into 132 dots' worth of blank, so the surplus is taken back off every
+    /// character and the last one lands at the stop.
+    /// </para>
+    /// <para>
+    /// <b>It compresses and it does not expand</b>, and that asymmetry is measured rather than assumed
+    /// — VCL's <c>GenericSalLayout::Justify</c> spreads a widening across the blanks in the string, and
+    /// a run of dots has none. Both halves are visible in the reference's own PDFs. In
+    /// <c>system_design__technical_architecture_template.docx</c>, where Carlito's 60.586 twips
+    /// truncates, the per-dot advance comes out 3.0002, 3.0121 or 3.0240 pt line by line — never the
+    /// font's own 3.0293 — and each run ends flush against its page number. In
+    /// <c>Agile_Arc_SysDes.docx</c>, where Liberation Serif's full stop is 55 twips exactly and nothing
+    /// truncates, the dots are written as one unadjusted show at their natural width and stop 2.05 to
+    /// 2.35 pt short of the number, which is just the division's remainder left where it fell.
+    /// </para>
+    /// <para>
+    /// The extracted word count turns on that trailing gap rather than on the dot count, because
+    /// poppler starts a new word at a gap of about a tenth of the em: a leader ending 1.5 pt short of a
+    /// 12 pt page number extracts as a separate token and one ending 0.3 pt short does not. Correcting
+    /// the count alone moved 24 of one document's 33 contents lines and left its token count exactly
+    /// where it was; the two together took it to the reference's, word for word.
+    /// </para>
     /// </remarks>
     private static (GlyphRun Run, Colour Colour)? Leader(
         PageParagraph paragraph, TabbedSegment segment, Length lineLeft, Length baseline)
@@ -991,17 +1203,32 @@ public static class PageDrawing
 
         PageRun at = RunAt(paragraph, segment.Start - 1);
 
-        Length unit = TextShaper.Default
-            .Shape(at.Face, segment.Leader.ToString(), at.Shaping)
+        Length exact = TextShaper.Default
+            .Shape(at.Face, segment.Leader.ToString(), at.EffectiveShaping)
             .Width(at.EmSize);
+        if (exact <= Length.Zero) return null;
+
+        // Truncated, not rounded: 60.586 twips has to become 60 for the reference's 134 dots, and
+        // rounding it to 61 fits 131.
+        Length unit = Length.FromTwips(exact.Emu / Length.EmuPerTwip);
         if (unit <= Length.Zero) return null;
 
         long count = segment.GapWidth.Emu / unit.Emu;
         if (segment.Leader == '_') count++;
         if (count <= 0) return null;
 
+        // Compressed to fit, never expanded to fill, and the clamp is not symmetry for its own sake —
+        // it is what the reference does, measured. A count taken at the truncated width can ask for
+        // more room than the blank has, and then the run is squeezed onto it; when it asks for less,
+        // the remainder is simply left. `MaxLeaderCharacters` is excluded because a clamped count is a
+        // guess at what a hostile document meant, and dividing the blank by it would set one character
+        // per page rather than refuse.
+        Length pitch = count <= MaxLeaderCharacters
+            ? Length.FromEmu(Math.Min(exact.Emu, segment.GapWidth.Emu / count))
+            : exact;
+
         string fill = new(segment.Leader, (int)Math.Min(count, MaxLeaderCharacters));
-        ShapedText shaped = TextShaper.Default.Shape(at.Face, fill, at.Shaping);
+        ShapedText shaped = TextShaper.Default.Shape(at.Face, fill, at.EffectiveShaping);
         if (shaped.Glyphs.Count == 0) return null;
 
         return (
@@ -1011,7 +1238,8 @@ public static class PageDrawing
                 at.EmSize,
                 at.Font ?? Reference(paragraph, at.Face),
                 new DocPoint(lineLeft + segment.GapLeft, baseline - at.Rise),
-                Length.Zero),
+                Length.Zero,
+                pitch - exact),
             at.EffectiveColour);
     }
 
@@ -1058,10 +1286,11 @@ public static class PageDrawing
     /// <param name="isFirstLine">True for the paragraph's own first line.</param>
     /// <param name="areaWidth">
     /// How wide the rectangle holding the line is — the column for a body paragraph, the cell's inner
-    /// width for one in a table — or null when the caller does not have it. It is what turns a right stop
-    /// declared past the margin into one at the margin, and the layout resolved it the same way, so
-    /// omitting it here would draw a leader running off the page that the line was never measured to
-    /// have. See <c>TabRuler.Place</c>.
+    /// width for one in a table — or null when the caller does not have it. It is the frame edge a right
+    /// stop declared past the margin is pulled back to, and the paragraph's right indent is deliberately
+    /// not taken out of it: Writer clamps at the frame's edge, so a stop inside the indent stands. The
+    /// layout resolved it the same way, so omitting it here would draw a leader running off the page that
+    /// the line was never measured to have. See <c>TabRuler.Place</c>.
     /// </param>
     private static List<TabbedSegment> Stretches(
         PageParagraph paragraph, int start, int end, bool isFirstLine, Length? areaWidth = null)
@@ -1079,7 +1308,7 @@ public static class PageDrawing
             (from, to) => WidthBetween(paragraph, from, to),
             isFirstLine,
             paragraph.Format.ClampsTabsAtLineEdge && areaWidth is { } width
-                ? width - paragraph.Format.EndIndent - paragraph.Format.TabOrigin
+                ? width - paragraph.Format.TabOrigin
                 : null);
     }
 
@@ -1095,7 +1324,7 @@ public static class PageDrawing
     {
         if (!paragraph.HasRuns)
         {
-            return ByFace(
+            return ByScriptSpace(paragraph, ByFace(
                 paragraph,
                 AroundObjects(
                     paragraph,
@@ -1109,7 +1338,7 @@ public static class PageDrawing
                             paragraph.Colour,
                             paragraph.Shaping,
                             Tracking: paragraph.Tracking),
-                    ]));
+                    ])));
         }
 
         List<PageRun> clipped = [];
@@ -1122,7 +1351,7 @@ public static class PageDrawing
             clipped.Add(run with { Start = from, Length = to - from });
         }
 
-        return ByFace(paragraph, AroundObjects(paragraph, clipped));
+        return ByScriptSpace(paragraph, ByFace(paragraph, AroundObjects(paragraph, clipped)));
     }
 
     /// <summary>
@@ -1148,6 +1377,39 @@ public static class PageDrawing
     /// in the PDF.
     /// </para>
     /// </remarks>
+    /// <summary>
+    /// The runs cut again at every script change that opens a gap, as the measurement cut them.
+    /// </summary>
+    /// <remarks>
+    /// The pen adds <see cref="ScriptSpacing"/>'s gap when it reaches a boundary, and it can only do
+    /// that between two runs — so a run spanning one has to be cut, exactly as a run spanning an
+    /// as-character object is. Ordinarily the fallback split has already cut here, because the two
+    /// scripts are rarely in one face; this is what makes the pen right when they are.
+    /// </remarks>
+    private static List<PageRun> ByScriptSpace(PageParagraph paragraph, List<PageRun> runs)
+    {
+        if (!paragraph.HasScriptSpace) return runs;
+
+        List<PageRun> split = [];
+
+        foreach (PageRun run in runs)
+        {
+            int from = run.Start;
+
+            for (int at = run.Start + 1; at < run.End; at++)
+            {
+                if (!ScriptSpacing.Opens(paragraph.Text, at)) continue;
+
+                split.Add(run with { Start = from, Length = at - from });
+                from = at;
+            }
+
+            split.Add(from == run.Start ? run : run with { Start = from, Length = run.End - from });
+        }
+
+        return split;
+    }
+
     private static List<PageRun> ByFace(PageParagraph paragraph, List<PageRun> runs)
     {
         if (paragraph.Fallback is not { } fallback) return runs;
@@ -1363,7 +1625,7 @@ public static class PageDrawing
                      : RunsIn(paragraph, from, to))
         {
             string text = paragraph.Text[run.Start..run.End];
-            total += TextShaper.Default.Shape(run.Face, text, run.Shaping).Width(run.EmSize);
+            total += TextShaper.Default.Shape(run.Face, text, run.EffectiveShaping).Width(run.EmSize);
 
             // One tracking unit per character, which is exactly what the prefix table charges across a
             // range: it puts the gap *before* each character, so a range of n of them carries n. Any other
@@ -1404,17 +1666,43 @@ public static class PageDrawing
         List<int> clusters = new(shaped.Glyphs.Count);
 
         Length pen = Length.Zero;
-        int remaining = shaped.Glyphs.Count;
 
         foreach (ShapedGlyph glyph in shaped.Glyphs)
         {
             Length advance = shaped.Scale(glyph.Advance, emSize);
 
-            // Tracking is the gap *between* characters, so the run's last glyph does not carry one —
-            // which is what the reference draws (`SvxFont::QuickGetTextSize` adds one per advance and
-            // then takes the trailing one back off) and what keeps the drawn pen within one tracking
-            // unit of the width the measurement charged.
-            if (tracking != Length.Zero && --remaining > 0) advance += tracking;
+            // Every glyph carries its tracking, the run's last included, so the text after a tracked
+            // run starts one tracking unit further on.
+            //
+            // This used to exempt the last glyph, citing `SvxFont::QuickGetTextSize`
+            // (`editeng/source/items/svxfont.cxx`:481-500) — "adds one per advance and then takes the
+            // trailing one back off". That is a text-*size* query, and `editeng` is Draw and Impress's
+            // engine rather than Writer's, so it was worth measuring what the reference actually draws.
+            // Against a tracked run of three characters followed by an untracked one at a declared
+            // 2.25 pt (`probes/tracking-trailing-gap/`):
+            //
+            //     Writer   (w:spacing)    A->A 2.20, 2.24    A->BBB 2.29
+            //     Impress  (a:rPr/@spc)   A->A 2.24, 2.26    A->ABB 2.29
+            //
+            // The gap into the untracked run is the same as the gaps inside the tracked one, in both
+            // engines — so the last glyph carries its tracking and the two families agree.
+            //
+            // **The asymmetry this leaves is LibreOffice's own and is deliberate.** The measurement
+            // side stays at n − 1 — `MeasuredParagraph`'s prefix table and the tests in
+            // `CharacterTrackingTests`, which cite `QuickGetTextSize` for exactly that count — because
+            // that citation is about a text *size* query and is right for what it describes. The pen
+            // is a different question and the probe measures it directly. So LibreOffice measures a
+            // tracked run one unit narrower than it draws it, and reproducing that means reproducing
+            // both numbers rather than picking one and making them agree.
+            //
+            // Making the measurement charge n as well was tried and reverted: it breaks the five
+            // `CharacterTrackingTests` that pin the editeng count, and it moves line breaking for
+            // every tracked run in the corpus to buy internal tidiness the reference does not have.
+            //
+            // Visible on `OM template for non-complex NCC operators`, whose header is `Rev.` + a space
+            // run + `X` + `of` with no space between the last two: the `X` run's 45 twentieths open a
+            // 2.25 pt gap the reference draws, so `pdftotext` reads `X of` there and read `Xof` here.
+            if (tracking != Length.Zero) advance += tracking;
 
             // A blank on a justified line is wider than the font says. Tested on the character the
             // cluster names rather than on the glyph id, because a glyph id means nothing without the

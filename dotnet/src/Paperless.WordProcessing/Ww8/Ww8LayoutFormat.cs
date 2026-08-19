@@ -49,6 +49,21 @@ public readonly record struct Ww8LayoutFormat
     /// same statement and lands here too, which is why this is on the shared format rather than in
     /// either reader.
     /// </remarks>
+    /// <summary>
+    /// Whether the run is hidden text — <c>sprmCFVanish</c>. Never drawn.
+    /// </summary>
+    public bool? IsHiddenText { get; init; }
+
+    /// <summary>
+    /// Whether the run is a tracked deletion — <c>sprmCFRMarkDel</c>.
+    /// </summary>
+    /// <remarks>
+    /// Kept apart from <see cref="IsHiddenText"/> because the two are not the same question: hidden text
+    /// is never drawn, while a deletion is drawn struck through or not at all according to the
+    /// document's own <c>fRMView</c>. See <c>Ww8DocumentProperties.HidesTrackedChanges</c>.
+    /// </remarks>
+    public bool? IsTrackedDeletion { get; init; }
+
     public bool? IsRightToLeft { get; init; }
 
     /// <summary>The left indent in twips.</summary>
@@ -287,6 +302,27 @@ public readonly record struct Ww8LayoutFormat
     /// format rather than in either reader.
     /// </remarks>
     public bool? AutoKerning { get; init; }
+
+    /// <summary>
+    /// The fixed distance put between the run's characters, in twips, from <c>sprmCDxaSpace</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Signed: a negative operand condenses and a positive one expands. LibreOffice reads it as
+    /// <c>SvxKerningItem(nKern, RES_CHRATR_KERNING)</c> straight from the two-byte operand in twips
+    /// (<c>SwWW8ImplReader::Read_Kern</c>, <c>sw/source/filter/ww8/ww8par6.cxx:4165-4174</c>) — the same
+    /// item OOXML's <c>w:spacing</c> and ODF's <c>fo:letter-spacing</c> land in, so it is
+    /// <see cref="Layout.PageRun.Tracking"/> on our side too.
+    /// </para>
+    /// <para>
+    /// It is not a nicety. <c>150_5300_13_chg8.doc</c> condenses 69 of its character styles by
+    /// −0.0016 in, which is 2.3 % of the advance of a run of digits: measured on its page 4, the
+    /// reference sets <c>150/5300-13</c> in 49.95 pt where the nominal Liberation Serif advances make
+    /// 51.11 pt. Ignoring it makes every line break early, which lengthens every paragraph, which
+    /// overflows the columns and moves the tables below them onto pages of their own.
+    /// </para>
+    /// </remarks>
+    public int? CharacterSpacing { get; init; }
 
     /// <summary>The Windows language id, from <c>sprmCRgLid0</c>.</summary>
     public int? LanguageId { get; init; }

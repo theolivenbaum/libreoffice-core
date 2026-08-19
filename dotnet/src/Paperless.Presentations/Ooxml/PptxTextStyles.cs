@@ -147,9 +147,37 @@ internal sealed class PptxTextStyles
     /// The layout placeholder a shape stands in for, and the master placeholder behind that one.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// The layout placeholder has a placeholder of its own on the master; that second hop is what
     /// makes a three-level chain rather than a two-level one, and it is the reason a title whose
     /// layout states nothing still finds the master's rectangle, list style and prompt geometry.
+    /// </para>
+    /// <para>
+    /// <strong>The layout placeholder is read with no master behind it, deliberately.</strong>
+    /// <see cref="PptxPlaceholder.Read(XElement, XElement?, XElement?)"/> gives an untyped
+    /// <c>p:ph</c> the type of whatever placeholder shares its <c>idx</c> one level up, and that
+    /// rule belongs to a <em>slide's</em> placeholder only. LibreOffice reaches it through
+    /// <c>mpSlidePersistPtr-&gt;getMasterPersist()</c>
+    /// (<c>oox/source/ppt/pptshapecontext.cxx:68,86-90</c>), and a layout has no master persist to
+    /// get: the layout fragment is imported <em>into the master's own</em>
+    /// <c>SlidePersist</c> — <c>LayoutFragmentHandler(rFilter, aLayoutFragmentPath,
+    /// pMasterPersistPtr)</c>
+    /// (<c>oox/source/ppt/presentationfragmenthandler.cxx:287</c>, and only slides and notes ever
+    /// get a <c>setMasterPersist</c>, at <c>:614</c> and <c>:643</c>). So a layout's bare
+    /// <c>&lt;p:ph idx="4"/&gt;</c> keeps the default <c>obj</c> and never becomes whatever the
+    /// master's index 4 happens to be.
+    /// </para>
+    /// <para>
+    /// Passing the master here made it become that, and the types it can collide with are the
+    /// ones no content placeholder should ever inherit from. Measured on
+    /// <c>slides/batch-004/pptx/solog_orientation_august_2019.pptx</c>: slide 5's right-hand
+    /// content box is <c>&lt;p:ph sz="quarter" idx="4"/&gt;</c>, its layout's is untyped at the
+    /// same index, and <c>slideMaster1.xml</c>'s index 4 is the <em>slide-number</em>
+    /// placeholder. The box therefore drew in that placeholder's 12 pt <c>algn="r"</c>
+    /// <c>tx1</c>-at-75%-tint grey — five bulleted paragraphs set flush right in pale grey where
+    /// the reference sets them flush left in black. Two of the three defects a blind reviewer
+    /// ranked first on that page were this one bug.
+    /// </para>
     /// </remarks>
     public (XElement? Direct, XElement? Inherited) Placeholders(PptxPlaceholder? placeholder)
     {
@@ -162,7 +190,7 @@ internal sealed class PptxTextStyles
 
         XElement? inherited = null;
         if (direct is not null && !masterShapes.Contains(direct)
-            && PptxPlaceholder.Read(direct, _master) is { } layoutKey)
+            && PptxPlaceholder.Read(direct, master: null) is { } layoutKey)
             inherited = layoutKey.Find(masterShapes);
 
         return (direct, inherited);

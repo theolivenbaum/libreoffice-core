@@ -72,6 +72,18 @@ public readonly record struct FormattedRun(
     /// <summary>One past the run's last character.</summary>
     public int End => Start + Length;
 
+    /// <summary>
+    /// The shaping this run is actually shaped with, once its tracking has had its say.
+    /// </summary>
+    /// <remarks>
+    /// Every path that shapes a run has to use this rather than <see cref="Shaping"/>, because
+    /// measurement and drawing disagreeing about a ligature is worse than either answer: the line
+    /// would be laid out at one width and painted at another. See
+    /// <see cref="ShapingOptions.WithTracking"/> for the rule and for what it cost when it was
+    /// missing.
+    /// </remarks>
+    public ShapingOptions EffectiveShaping => Shaping.WithTracking(Tracking);
+
     /// <summary>The size this run's line metrics are scaled by.</summary>
     public Core.Units.Length LineEmSize
         => MetricEmSize > Core.Units.Length.Zero ? MetricEmSize : EmSize;
@@ -126,8 +138,31 @@ public readonly record struct FormattedRun(
 /// and the reason this is the default rather than a value every caller has to state. The rest hangs below
 /// and grows the line's descent, so a line box is always tall enough to hold the whole object either way.
 /// </param>
+/// <param name="RaisesTextHeight">
+/// <para>
+/// Whether this object takes part in the height proportional line spacing multiplies. False for a real
+/// as-character object, which is the whole point of round 45's rule; <strong>true for a list label</strong>,
+/// which is not an object at all in Writer but a <c>SwNumberPortion</c> standing in the line.
+/// </para>
+/// <para>
+/// Writer draws the line exactly here. <c>SwTextFrame::CalcHeightOfLastLine</c>
+/// (<c>sw/source/core/text/txtfrm.cxx</c>:3952-3957) asks the line for
+/// <c>MaxAscentDescent(…, bNoFlyCnt = true)</c> — <em>"i#47162 — suppress consideration of fly content
+/// portions and the line portion"</em> — and <c>SwTextFrame::GetLineSpace</c> takes
+/// <c>(prop − 100)%</c> of that. A fly-in-content is suppressed; a number portion is not.
+/// </para>
+/// <para>
+/// Measured, because the citation is only the hypothesis:
+/// <c>dotnet/probes/words-r47/list-label-line-height.py</c> puts a 14, 20 and 28 pt level over 12 pt
+/// text at 100, 150 and 200% and LibreOffice's extension is <c>(prop − 100)%</c> of the <em>label's</em>
+/// box every time, against the item's text height before this flag existed.
+/// <c>label-and-picture.py</c> then puts a 100 pt picture on the same line and the extension stays at
+/// the label's 32.20 pt rather than the line's 114 — so the base is the tallest portion that is not a
+/// fly, and the two rules are one rule.
+/// </para>
+/// </param>
 public readonly record struct InlineObject(
-    int Offset, Length Width, Length Height, Length? Ascent = null)
+    int Offset, Length Width, Length Height, Length? Ascent = null, bool RaisesTextHeight = false)
 {
     /// <summary>How much of the object sits above the baseline, with the default resolved.</summary>
     public Length AboveBaseline => Ascent ?? Height;
@@ -254,6 +289,10 @@ public sealed class MeasuredParagraph
     /// Whether each run's external leading is charged to its ascent. True only for Writer's own text;
     /// see <see cref="LineMetrics.ScaledAscent"/>.
     /// </param>
+    /// <param name="addsScriptSpace">
+    /// Whether a script change with East Asian text on one side widens the text by a fifth of the em.
+    /// True for a document that came from Word; see <see cref="ScriptSpacing"/>.
+    /// </param>
     public static MeasuredParagraph Measure(
         string text,
         IReadOnlyList<FormattedRun> runs,
@@ -262,7 +301,8 @@ public sealed class MeasuredParagraph
         IReadOnlyList<InlineObject>? objects = null,
         MetricGrid? grid = null,
         bool blanksAreTransparentToHeight = false,
-        bool leadingAboveText = false)
+        bool leadingAboveText = false,
+        bool addsScriptSpace = false)
     {
         ArgumentNullException.ThrowIfNull(text);
         ArgumentNullException.ThrowIfNull(runs);
@@ -290,7 +330,7 @@ public sealed class MeasuredParagraph
             foreach (FormattedRun part in SubRuns(text, run, items, options))
             {
                 ShapedText shaped = engine.Shape(
-                    part.Face, text.AsSpan(part.Start, part.Length), part.Shaping);
+                    part.Face, text.AsSpan(part.Start, part.Length), part.EffectiveShaping);
 
                 measured.Add(new MeasuredRun(
                     part, shaped, LineSpacing.Resolve(part.Face, grid, leadingAboveText)));
@@ -347,6 +387,24 @@ public sealed class MeasuredParagraph
         foreach (InlineObject one in inline)
         {
             for (int i = one.Offset + 1; i <= text.Length; i++) prefix[i] += one.Width.Emu;
+        }
+
+        // Writer's fifth of an em where the script changes with East Asian text on one side. Added to
+        // the prefix table the way an object is, and for the same reason: it is a width between two
+        // characters rather than a property of either, and every reader of the table — the line
+        // filler, the tab ruler, the as-character anchor — has to see it.
+        //
+        // The size is the run's that *ends* at the boundary, which is the font
+        // `SwTextFormatter::BuildPortions` has in hand when it closes the portion.
+        if (addsScriptSpace)
+        {
+            foreach (int boundary in ScriptSpacing.Boundaries(text))
+            {
+                Length gap = ScriptSpacing.GapFor(SizeAt(formatted, boundary - 1));
+                if (gap <= Length.Zero) continue;
+
+                for (int i = boundary; i <= text.Length; i++) prefix[i] += gap.Emu;
+            }
         }
 
         return new MeasuredParagraph(
@@ -473,6 +531,22 @@ public sealed class MeasuredParagraph
         return parts;
     }
 
+    /// <summary>The em size in force at a character position, or the first run's.</summary>
+    /// <remarks>
+    /// A linear walk because a paragraph has a handful of runs and this is asked once per script
+    /// boundary. Falls back to the first run rather than to zero, so a boundary in a gap no run
+    /// covers — which a control character cut out of the runs can leave — still opens its gap.
+    /// </remarks>
+    private static Length SizeAt(List<FormattedRun> runs, int index)
+    {
+        foreach (FormattedRun run in runs)
+        {
+            if (run.Covers(index)) return run.EmSize;
+        }
+
+        return runs.Count > 0 ? runs[0].EmSize : Length.Zero;
+    }
+
     /// <summary>
     /// A sub-run's advance width, through the device grid when the document asks for one.
     /// </summary>
@@ -484,7 +558,7 @@ public sealed class MeasuredParagraph
     /// depends on.
     /// </remarks>
     private static long Advance(ShapedText shaped, long designUnits, Length emSize, MetricGrid? grid)
-        => grid is { } device
+        => grid is { QuantisesAdvances: true } device
             ? device.ToAdvance(designUnits, shaped.UnitsPerEm, emSize).Emu
             : shaped.Scale(designUnits, emSize).Emu;
 
@@ -586,6 +660,48 @@ public sealed class MeasuredParagraph
         // Held before the objects have their say: this is what proportional line spacing scales.
         Length textHeight = Length.Max(height, ascent + descent);
 
+        // The same two maxima again, kept apart from the line's own so that a fly-in-content can raise
+        // the line without raising this. A label joins these; a picture does not. See the fold below.
+        Length textAscent = ascent;
+        Length textDescent = descent;
+
+        // A blank or tab run is transparent to the line's *height* and opaque to the height
+        // proportional line spacing takes its percentage of. The two exclusions are separate rules in
+        // Writer and they do not have the same membership: the blanks-and-tabs rule decides
+        // `SwLineLayout::Height`, and `m_nLineSpacingBaseHeight` is a second maximum with its own test.
+        //
+        // Measured against the installed 26.2.4.2 by `probes/words-w-pitch/mk.py`, six paragraphs per
+        // group of a 10 pt Arial style at `w:line="288" w:lineRule="auto"` with `w:contextualSpacing`,
+        // so the pitch is the line height plus the proportional gap and nothing else. A run holding one
+        // tab, or one space, in a face and size of its own:
+        //
+        //   | the blank run       | line height | LibreOffice's pitch | base it implies |
+        //   |---------------------|------------:|--------------------:|----------------:|
+        //   | none                |       11.50 |               13.80 |           11.50 |
+        //   | Calibri 11 pt tab   |       11.50 |               14.15 |           13.43 |
+        //   | Calibri 11 pt space |       11.50 |               14.15 |           13.43 |
+        //   | Calibri 22 pt tab   |       11.50 |               16.85 |           26.86 |
+        //   | Arial 20 pt tab     |       11.50 |               16.10 |           23.00 |
+        //
+        // Every implied base is the blank run's own line height to the twip, and the line height never
+        // moves — so the blank run is in one maximum and out of the other. Scaling the line instead, or
+        // leaving the blank run out of both, gives 13.80 for all five.
+        //
+        // This is what a contents entry costs: `OM template for non-complex NCC operators` sets each
+        // `TOC4` line with a `minorHAnsi` 11 pt run holding the tab between the number and the title,
+        // and drawing those at 13.80 rather than 14.15 fitted 83 entries where the reference fits 79.
+        if (_blanksAreTransparentToHeight)
+        {
+            Length blankHeight = Length.Zero;
+            Length blankAscent = Length.Zero;
+            Length blankDescent = Length.Zero;
+
+            Fold(start, end, skipBlankRuns: false, ref blankHeight, ref blankAscent, ref blankDescent);
+
+            textHeight = Length.Max(
+                textHeight, Length.Max(blankHeight, blankAscent + blankDescent));
+        }
+
         // A line holding no text has nothing to hang below its baseline. Writer builds a line's descent
         // out of the portions that carry text and a fly-in-content is not one of them, so a picture
         // alone on its line makes a line exactly as tall as the picture — floored at the paragraph
@@ -632,7 +748,29 @@ public sealed class MeasuredParagraph
 
             ascent = Length.Max(ascent, one.AboveBaseline);
             descent = Length.Max(descent, one.BelowBaseline);
+
+            // A list label is a portion rather than an object, so it counts towards the height
+            // proportional line spacing takes its percentage of — see <see cref="InlineObject"/>.
+            //
+            // Per side, not as a box. Writer keeps a running maximum ascent and a running maximum
+            // descent and makes the base out of the two, so a label that is deeper than the text but no
+            // taller overall still widens the base by its extra descent. Folding its whole box in
+            // instead gives the same answer for a label of the paragraph's own face at a larger size —
+            // which is every row round 47 measured, and why it could not see the difference — and a
+            // short answer for a label that differs by face.
+            //
+            // Measured against the installed 26.2.4.2 by `dotnet/probes/words-b-01/labelshape.py`, a
+            // 12 pt level over a 12 pt Liberation Serif item at 200%: a Liberation Mono label (ascent
+            // 9.99, descent 3.60) gives LibreOffice an extension of 14.80 = 11.20 + 3.60, and a Caladea
+            // one (10.80, 3.00) gives 14.20 = 11.20 + 3.00. The box rule gives 13.59 and 13.80.
+            if (one.RaisesTextHeight)
+            {
+                textAscent = Length.Max(textAscent, one.AboveBaseline);
+                textDescent = Length.Max(textDescent, one.BelowBaseline);
+            }
         }
+
+        textHeight = Length.Max(textHeight, textAscent + textDescent);
 
         return (Length.Max(height, ascent + descent), ascent, textHeight);
     }

@@ -41,6 +41,16 @@ public static class OoxmlNamespaces
     /// </remarks>
     public const string DrawingMLChart = "http://schemas.openxmlformats.org/drawingml/2006/chart";
 
+    /// <summary>DrawingML for the shapes drawn <em>on</em> a chart — <c>cdr:</c>.</summary>
+    /// <remarks>
+    /// The <c>chartUserShapes</c> part's vocabulary. It is a third drawing dialect beside
+    /// <see cref="DrawingMLSpreadsheet"/> and <see cref="DrawingMLWordprocessing"/>, with the same
+    /// shape: three anchor and wrapper elements of its own around ordinary
+    /// <see cref="DrawingML"/> content.
+    /// </remarks>
+    public const string ChartDrawing =
+        "http://schemas.openxmlformats.org/drawingml/2006/chartDrawing";
+
     /// <summary>OPC relationships.</summary>
     public const string Relationships = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
 
@@ -61,6 +71,12 @@ public static class OoxmlNamespaces
 
     /// <summary>Word 2010 shape groups.</summary>
     public const string WordShapeGroup = "http://schemas.microsoft.com/office/word/2010/wordprocessingGroup";
+
+    /// <summary>
+    /// Word 2010 drawing canvases — a group of shapes with its own background, written as
+    /// <c>wpc:wpc</c> inside a <c>a:graphicData</c>.
+    /// </summary>
+    public const string WordCanvas = "http://schemas.microsoft.com/office/word/2010/wordprocessingCanvas";
 
     /// <summary>Word 2010 drawing extensions.</summary>
     public const string WordDrawing2010 = "http://schemas.microsoft.com/office/word/2010/wordprocessingDrawing";
@@ -112,10 +128,18 @@ public static class OoxmlNamespaces
     /// exists precisely because the choice may be unreadable. For the shape namespaces the
     /// choice is the higher-fidelity branch and its text body is plain WordprocessingML, so it
     /// is preferred; anything not listed here loses to the fallback.
+    /// <para>
+    /// <c>wpc</c> is listed for a reason worth stating: the word-processing frame reader has read a
+    /// drawing canvas since it was written, and could never be reached, because the canvas is always
+    /// offered as a <c>Requires="wpc"</c> choice beside a VML fallback. Leaving it off dropped every
+    /// shape in the canvas — measured on an EASA manual whose two organisation diagrams lost their
+    /// text and, with it, 2.4 inches of declared height apiece.
+    /// </para>
     /// </remarks>
     public static readonly IReadOnlySet<string> UnderstoodExtensions =
         new HashSet<string>(StringComparer.Ordinal)
         {
-            WordShape, WordShapeGroup, WordDrawing2010, WordMl2010, WordMl2012, DrawingML2010,
+            WordShape, WordShapeGroup, WordCanvas, WordDrawing2010, WordMl2010, WordMl2012,
+            DrawingML2010,
         };
 }

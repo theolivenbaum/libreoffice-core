@@ -153,6 +153,83 @@ public sealed class PaginationComparisonTests : IDisposable
         headingPage.ShouldBe(bodyPage, "the heading has to be on the same page as its body");
     }
 
+    /// <summary>
+    /// Keep-with-next also forbids splitting the paragraph that carries it.
+    /// </summary>
+    /// <remarks>
+    /// Not what the name says and not what Word does, but it is what Writer does, and it is decided in
+    /// one place: <c>SwTextFrameBreak</c>'s constructor sets <c>m_bKeep</c> from
+    /// <c>!GetSplit().GetValue() || GetKeep().GetValue()</c>
+    /// (<c>sw/source/core/text/widorp.cxx</c>:75-76), and <c>IsBreakNow</c> answers "no break"
+    /// unconditionally while <c>m_bKeep</c> holds — so keep-with-next and do-not-split reach the same
+    /// switch. Honouring only the forward half of the attribute cost two pages of 29 on
+    /// <c>CRIF - Spécification technique - Socle applicatif.docx</c>, whose bulleted paragraphs each
+    /// carry <c>w:keepNext</c>.
+    /// </remarks>
+    [Fact]
+    public void KeepWithNextAlsoForbidsSplittingTheParagraphItself()
+    {
+        OpenTypeFace face = Carlito();
+
+        // Swept rather than pinned at one filler, because a split is only possible at the fillers where
+        // the paragraph straddles the page edge — a single value can pass by never straddling at all.
+        for (int filler = 34; filler <= 46; filler++)
+        {
+            List<PageParagraph> paragraphs =
+            [
+                Paragraph(face, Filler(filler), ParagraphFormat.Default),
+                Paragraph(face, Filler(20), ParagraphFormat.Default with { KeepWithNext = true }),
+                Paragraph(face, "The successor it keeps with", ParagraphFormat.Default),
+            ];
+
+            List<LaidOutPage> pages = new Paginator().Paginate(paragraphs, Section());
+
+            pages.Count(p => p.Lines.Any(l => l.ParagraphIndex == 1))
+                .ShouldBe(1, $"filler {filler}: a keep-with-next paragraph may not be split");
+        }
+    }
+
+    /// <summary>
+    /// A whole keep-with-next chain follows the paragraph that its own keep sent to the next page.
+    /// </summary>
+    /// <remarks>
+    /// The chain has to move for either reason a paragraph starts a new page: because its first line did
+    /// not fit, and because it fitted and moved anyway. Only the first was handled, so a run of
+    /// <c>w:keepNext</c> paragraphs was broken exactly where the last of them was bounced by the rule
+    /// above — one page of 29 on the CRIF specification, whose section 2.4.4 opens a chain twelve
+    /// paragraphs long.
+    /// </remarks>
+    [Fact]
+    public void AKeepWithNextChainFollowsAParagraphItsOwnKeepSentOnward()
+    {
+        OpenTypeFace face = Carlito();
+        ParagraphFormat kept = ParagraphFormat.Default with { KeepWithNext = true };
+
+        // The last member is long, and the filler is swept, so that the run covers every amount of room
+        // left over — including the amounts where its *first line fits* and the paragraph moves anyway.
+        // That is the only shape the defect had: a chain broken by a keep rather than by a shortage.
+        for (int filler = 40; filler <= 74; filler++)
+        {
+            List<PageParagraph> paragraphs =
+            [
+                Paragraph(face, Filler(filler), ParagraphFormat.Default),
+                Paragraph(face, Filler(2), kept),
+                Paragraph(face, Filler(2), kept),
+                Paragraph(face, Filler(12), kept),
+                Paragraph(face, "The successor the chain keeps with", ParagraphFormat.Default),
+            ];
+
+            List<LaidOutPage> pages = new Paginator().Paginate(paragraphs, Section());
+
+            int[] chain = [1, 2, 3];
+            int[] where = [.. chain.Select(i =>
+                pages.FindIndex(p => p.Lines.Any(l => l.ParagraphIndex == i)))];
+
+            where.Distinct().Count().ShouldBe(
+                1, $"filler {filler}: the chain was broken across pages {string.Join(", ", where)}");
+        }
+    }
+
     [Fact]
     public void OrphanControlRefusesToLeaveASingleLineBehind()
     {

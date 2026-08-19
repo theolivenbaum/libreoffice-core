@@ -49,6 +49,18 @@ internal static class PptTextBody
     private const uint StatesBulletHeight = 0x0000_0040;
     private const uint StatesBulletColour = 0x0000_0020;
 
+    /// <summary>
+    /// The mask bit for <c>PPT_ParaAttr_BuHardColor</c>, which says whether the paragraph itself
+    /// decided that its bullet's colour is stated rather than inherited from its text.
+    /// </summary>
+    private const uint StatesBulletHardColour = 0x0000_0004;
+
+    /// <summary>
+    /// <c>PPT_ParaAttr_BuHardColor</c>'s bit within the bullet-flags word — the second, counting
+    /// from <c>PPT_ParaAttr_BulletOn</c> at bit zero.
+    /// </summary>
+    private const ushort BulletHardColourFlag = 0x0004;
+
     /// <summary>The mask bits a character run sets for its face, size and colour.</summary>
     private const uint StatesFontIndex = 0x0001_0000;
     private const uint StatesFontHeight = 0x0002_0000;
@@ -191,10 +203,29 @@ internal static class PptTextBody
     /// The bullet the paragraph draws, or null when it draws none.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// The character, its face, its size and its colour each fall through to the master's level
     /// independently, which is what lets a deck state a per-level bullet once and every slide use
     /// it. The size is a percentage of the text's, so it becomes
     /// <see cref="SlideMarker.Scale"/> rather than a length.
+    /// </para>
+    /// <para>
+    /// <strong>The colour word is only the bullet's colour when a separate flag says so.</strong>
+    /// PowerPoint writes a <c>bulletColor</c> into the record whether or not the bullet has one of
+    /// its own, and gates it behind <c>PPT_ParaAttr_BuHardColor</c> — bit two of the bullet-flags
+    /// word, which is stated by the paragraph when the mask names it and inherited from the
+    /// master's level when it does not. With the flag clear the bullet takes the colour of the
+    /// paragraph's <em>first character run</em> instead
+    /// (<c>PPTParagraphObj::GetAttrib</c>, <c>filter/source/msfilter/svdfppt.cxx:5891-5916</c> for
+    /// the paragraph's own set and <c>:6019-6055</c> for the fall-through to the level).
+    /// </para>
+    /// <para>
+    /// Reading the word unconditionally is not a subtle error: measured on
+    /// <c>slides/batch-007/ppt/architecture6.ppt</c>, every one of its eighty bullets came out
+    /// <c>#000000</c> against a reference that draws them in the run's own <c>#46424D</c>, and the
+    /// two whose paragraph opens on a red run are drawn red by LibreOffice and were black here.
+    /// A null colour is what <see cref="SlideMarker"/> already spells "the first run's".
+    /// </para>
     /// </remarks>
     private static SlideMarker? Marker(
         PptParagraphRun properties,
@@ -217,6 +248,12 @@ internal static class PptTextBody
             ? properties.BulletColour
             : level.BulletColour;
 
+        // The paragraph states the flag only when its mask names it; otherwise the master's level
+        // holds it, exactly as the character and the face do.
+        bool hardColour = properties.States(StatesBulletHardColour)
+            ? (properties.BulletFlags & BulletHardColourFlag) != 0
+            : (level.BulletFlags & BulletHardColourFlag) != 0;
+
         char symbol = PptTextReader.Symbolised(character, fonts, font);
         string? face = fonts[font];
 
@@ -238,7 +275,7 @@ internal static class PptTextBody
             text,
             typeface,
             height is > 0 and <= 400 ? height / 100.0 : 1.0,
-            PptColour.ResolveText(colour, scheme));
+            hardColour ? PptColour.ResolveText(colour, scheme) : null);
     }
 
     /// <summary>
@@ -336,6 +373,7 @@ internal static class PptTextBody
             PptColour.ResolveText(colour, scheme) ?? Colour.Black,
             IsUnderlined: emphasis.HasFlag(RunEmphasis.Underline),
             IsStruckThrough: emphasis.HasFlag(RunEmphasis.Strikethrough),
+            IsShadowed: emphasis.HasFlag(RunEmphasis.Shadow),
             Escapement: escapement == 0
                 ? SlideEscapement.None
                 : new SlideEscapement(escapement, SlideEscapement.AutomaticProportion));

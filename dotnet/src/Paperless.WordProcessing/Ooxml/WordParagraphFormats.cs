@@ -122,6 +122,25 @@ internal static class WordParagraphFormats
     /// </remarks>
     internal static readonly Length WordAutoSpacing = Length.FromTwips(100);
 
+    /// <summary>The same again, for a document saved in web view.</summary>
+    /// <remarks>
+    /// <para>
+    /// Under two and a half points rather than fourteen. LibreOffice's importer branches on the
+    /// document's <c>w:view</c> in both <c>LN_CT_Spacing_beforeAutospacing</c> and
+    /// <c>LN_CT_Spacing_afterAutospacing</c> (<c>DomainMapper.cxx</c>:927 and :948) —
+    /// <c>if (GetView() == LN_Value_doc_ST_View_web) default_spacing = 49; else 280;</c> — under a
+    /// comment conceding that 49 "is just the old value that should be removed, once the root cause in
+    /// <c>SwTabFrm::MakeAll()</c> is fixed". It is nonetheless what the reference draws, and the
+    /// difference is 11.55 pt at every auto-spaced paragraph boundary.
+    /// </para>
+    /// <para>
+    /// Found on <c>May 25 bulletin focus on carers in the workplace.docx</c>, the only document in the
+    /// words corpus that declares web view, where a blind reading of page 2 reported our bullet items
+    /// "spaced apart" against the reference's "tightly stacked" before anything had been measured.
+    /// </para>
+    /// </remarks>
+    internal static readonly Length WebAutoSpacing = Length.FromTwips(49);
+
     /// <summary>Resolves a paragraph's layout properties.</summary>
     /// <param name="styles">The document's styles.</param>
     /// <param name="paragraphProperties">The paragraph's own <c>w:pPr</c>, or null.</param>
@@ -154,8 +173,9 @@ internal static class WordParagraphFormats
         // Attribute by attribute rather than element by element: see WordStyles.ParagraphPropertyLayers.
         List<XElement> indent =
             styles.ParagraphPropertyLayers("ind", paragraphProperties, styleId, tableStyle);
-        List<XElement> spacings =
-            styles.ParagraphPropertyLayers("spacing", paragraphProperties, styleId, tableStyle);
+        List<XElement> spacings = GroupedMargins(
+            styles.ParagraphPropertyLayers("spacing", paragraphProperties, styleId, tableStyle),
+            paragraphProperties);
 
         Length auto = autoSpacing ?? HtmlAutoSpacing;
 
@@ -228,6 +248,10 @@ internal static class WordParagraphFormats
             // maps, citing #i24363#.
             TabsRelativeToIndent = false,
             ClampsTabsAtLineEdge = true,
+            SpillsTrailingNoBreakSpace = true,
+
+            // WriterFilter.cxx:325 sets TabOverSpacing on every document it reads, unconditionally.
+            TabsOverSpacing = true,
 
             ShrinksJustifiedBlanks = shrinksJustifiedBlanks,
         };
@@ -365,13 +389,16 @@ internal static class WordParagraphFormats
     internal static WordTextStyle ResolveText(
         WordStyles styles,
         XElement? paragraphProperties,
-        DrawingTheme? theme = null)
+        DrawingTheme? theme = null,
+        IReadOnlyList<XElement>? tableStyleRunProperties = null)
     {
         ArgumentNullException.ThrowIfNull(styles);
 
         // A paragraph's mark carries its own run properties, and they are what a run with no properties
         // of its own inherits.
-        return ResolveRun(styles, paragraphProperties, Word.Child(paragraphProperties, "rPr"), theme);
+        return ResolveRun(
+            styles, paragraphProperties, Word.Child(paragraphProperties, "rPr"), theme,
+            tableStyleRunProperties);
     }
 
     /// <summary>
@@ -395,11 +422,16 @@ internal static class WordParagraphFormats
     /// <param name="paragraphProperties">The paragraph's <c>w:pPr</c>, for its <c>w:pStyle</c>.</param>
     /// <param name="runProperties">The run's own <c>w:rPr</c>, or null.</param>
     /// <param name="theme">The document's theme, for a <c>w:themeColor</c>, or null.</param>
+    /// <param name="tableStyleRunProperties">
+    /// The enclosing table style's <c>w:rPr</c> layers for this cell, most specific first, or null
+    /// outside a table. See <see cref="WordStyles.TableStyleRunProperties"/>.
+    /// </param>
     internal static WordTextStyle ResolveRun(
         WordStyles styles,
         XElement? paragraphProperties,
         XElement? runProperties,
-        DrawingTheme? theme = null)
+        DrawingTheme? theme = null,
+        IReadOnlyList<XElement>? tableStyleRunProperties = null)
     {
         ArgumentNullException.ThrowIfNull(styles);
 
@@ -408,34 +440,35 @@ internal static class WordParagraphFormats
         string? characterStyleId = Word.Attribute(Word.Child(runProperties, "rStyle"), "val");
 
         List<XElement> fonts =
-            styles.RunPropertyLayers("rFonts", runProperties, styleId, characterStyleId);
-        WordProperty size = styles.ResolveRunProperty("sz", runProperties, styleId, characterStyleId);
-        WordProperty bold = styles.ResolveRunProperty("b", runProperties, styleId, characterStyleId);
-        WordProperty italic = styles.ResolveRunProperty("i", runProperties, styleId, characterStyleId);
+            styles.RunPropertyLayers(
+                "rFonts", runProperties, styleId, characterStyleId, tableStyleRunProperties);
+        WordProperty size = styles.ResolveRunProperty("sz", runProperties, styleId, characterStyleId, tableStyleRunProperties);
+        WordProperty bold = styles.ResolveRunProperty("b", runProperties, styleId, characterStyleId, tableStyleRunProperties);
+        WordProperty italic = styles.ResolveRunProperty("i", runProperties, styleId, characterStyleId, tableStyleRunProperties);
         WordProperty language =
-            styles.ResolveRunProperty("lang", runProperties, styleId, characterStyleId);
-        WordProperty colour = styles.ResolveRunProperty("color", runProperties, styleId, characterStyleId);
+            styles.ResolveRunProperty("lang", runProperties, styleId, characterStyleId, tableStyleRunProperties);
+        WordProperty colour = styles.ResolveRunProperty("color", runProperties, styleId, characterStyleId, tableStyleRunProperties);
         WordProperty vertical =
-            styles.ResolveRunProperty("vertAlign", runProperties, styleId, characterStyleId);
+            styles.ResolveRunProperty("vertAlign", runProperties, styleId, characterStyleId, tableStyleRunProperties);
         WordProperty capitals =
-            styles.ResolveRunProperty("caps", runProperties, styleId, characterStyleId);
+            styles.ResolveRunProperty("caps", runProperties, styleId, characterStyleId, tableStyleRunProperties);
         WordProperty smallCapitals =
-            styles.ResolveRunProperty("smallCaps", runProperties, styleId, characterStyleId);
+            styles.ResolveRunProperty("smallCaps", runProperties, styleId, characterStyleId, tableStyleRunProperties);
         WordProperty highlight =
-            styles.ResolveRunProperty("highlight", runProperties, styleId, characterStyleId);
+            styles.ResolveRunProperty("highlight", runProperties, styleId, characterStyleId, tableStyleRunProperties);
         WordProperty underline =
-            styles.ResolveRunProperty("u", runProperties, styleId, characterStyleId);
+            styles.ResolveRunProperty("u", runProperties, styleId, characterStyleId, tableStyleRunProperties);
         WordProperty strike =
-            styles.ResolveRunProperty("strike", runProperties, styleId, characterStyleId);
+            styles.ResolveRunProperty("strike", runProperties, styleId, characterStyleId, tableStyleRunProperties);
         WordProperty doubleStrike =
-            styles.ResolveRunProperty("dstrike", runProperties, styleId, characterStyleId);
+            styles.ResolveRunProperty("dstrike", runProperties, styleId, characterStyleId, tableStyleRunProperties);
         WordProperty kerning =
-            styles.ResolveRunProperty("kern", runProperties, styleId, characterStyleId);
+            styles.ResolveRunProperty("kern", runProperties, styleId, characterStyleId, tableStyleRunProperties);
 
         // The character `w:spacing`, which shares its name with the paragraph one and nothing else. The
         // resolution only ever looks inside `w:rPr`, so the two cannot reach each other.
         WordProperty tracking =
-            styles.ResolveRunProperty("spacing", runProperties, styleId, characterStyleId);
+            styles.ResolveRunProperty("spacing", runProperties, styleId, characterStyleId, tableStyleRunProperties);
 
         Length resolvedSize = HalfPoints(size.Element) ?? DefaultSize;
 
@@ -818,9 +851,72 @@ internal static class WordParagraphFormats
                           ?? styles.DefaultStyleId(WordStyleType.Paragraph);
 
         return IsAuto(
-            styles.ParagraphPropertyLayers("spacing", paragraphProperties, styleId, tableStyle),
+            GroupedMargins(
+                styles.ParagraphPropertyLayers("spacing", paragraphProperties, styleId, tableStyle),
+                paragraphProperties),
             before ? "beforeAutospacing" : "afterAutospacing",
             before ? "before" : "after");
+    }
+
+    /// <summary>
+    /// The <c>w:spacing</c> layers as a paragraph that sets one of its two margins directly sees
+    /// them — which is without the pool completion its style may carry.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// writerfilter's <c>tdf#118521</c> block, <c>DomainMapper_Impl.cxx</c>:3110-3138: <em>"set
+    /// paragraph top or bottom margin based on the paragraph style if we already set the other
+    /// margin with direct formatting"</em>. The two margins are one <c>SvxULSpaceItem</c>, so
+    /// setting either directly forces both to be written directly, and the one the file did not
+    /// state is fetched from <c>GetPropertyFromParaStyleSheet</c> — the DOCX <c>w:basedOn</c> chain
+    /// and then <c>w:docDefaults</c>, never Writer's pool.
+    /// </para>
+    /// <para>
+    /// So the completion <see cref="WordStyles.PoolCompletedSide"/> marks is invisible on exactly
+    /// these paragraphs, and dropping the marked attribute from the layer list is the whole of the
+    /// difference: everything below it in the chain is already the DOCX inheritance the C++ walks.
+    /// </para>
+    /// <para>
+    /// The condition is three-way and not two — <c>bTopSet != bBottomSet || bBottomSet !=
+    /// bContextSet</c> — so a paragraph stating <em>only</em> <c>w:contextualSpacing</c> and no
+    /// <c>w:spacing</c> at all triggers it and loses the completion on both margins. That arm is
+    /// measured rather than assumed: `direct-one-sided-spacing.py`'s <c>ctx-only</c> row reads 60
+    /// below where <c>style-only</c> reads 120.
+    /// </para>
+    /// <para>
+    /// What counts as "set" is the attribute being present, not its value and not the element's:
+    /// <c>w:before="0"</c> triggers it and a <c>w:spacing</c> carrying only <c>w:line</c> does not.
+    /// Both are rows in that probe.
+    /// </para>
+    /// </remarks>
+    /// <param name="layers">The <c>w:spacing</c> layers, innermost first.</param>
+    /// <param name="paragraphProperties">The paragraph's own <c>w:pPr</c>, or null.</param>
+    private static List<XElement> GroupedMargins(
+        List<XElement> layers, XElement? paragraphProperties)
+    {
+        XElement? direct = Word.Child(paragraphProperties, "spacing");
+        bool top = Word.Attribute(direct, "before") is not null
+                   || Word.Attribute(direct, "beforeAutospacing") is not null;
+        bool bottom = Word.Attribute(direct, "after") is not null
+                      || Word.Attribute(direct, "afterAutospacing") is not null;
+        bool context = Word.Child(paragraphProperties, "contextualSpacing") is not null;
+
+        if (top == bottom && bottom == context) return layers;
+
+        List<XElement>? rewritten = null;
+        for (int i = 0; i < layers.Count; i++)
+        {
+            string? completed = WordStyles.PoolCompletedSide(layers[i]);
+            if (completed is null) continue;
+            if (completed == "before" ? top : bottom) continue;
+
+            rewritten ??= [.. layers];
+            XElement without = new(layers[i]);
+            without.Attribute(Word.Name(completed))?.Remove();
+            rewritten[i] = without;
+        }
+
+        return rewritten ?? layers;
     }
 
     /// <summary>An OOXML on/off attribute, which real files spell three ways.</summary>

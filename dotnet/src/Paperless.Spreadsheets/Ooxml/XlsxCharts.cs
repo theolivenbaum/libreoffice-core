@@ -34,7 +34,12 @@ internal static class XlsxCharts
     /// <summary>Reads the charts anchored on one sheet, in the drawing's own order.</summary>
     /// <param name="package">The workbook's package.</param>
     /// <param name="sheetPartName">The worksheet part the drawing hangs off.</param>
-    public static IEnumerable<ContentSection> Read(IPackage package, string? sheetPartName)
+    /// <param name="ranges">
+    /// Resolves a sequence's <c>c:f</c> against the workbook's cells, so that the table this
+    /// yields holds the same points the picture is drawn from. See <see cref="ChartRangeResolver"/>.
+    /// </param>
+    public static IEnumerable<ContentSection> Read(
+        IPackage package, string? sheetPartName, ChartRangeResolver? ranges = null)
     {
         ArgumentNullException.ThrowIfNull(package);
         if (sheetPartName is null || package is not OpcPackage opc) yield break;
@@ -73,7 +78,7 @@ internal static class XlsxCharts
                     chartSpace = OoxmlXml.TryLoad(content, out _);
 
                 if (chartSpace is null) continue;
-                if (DrawingChart.Read(chartSpace) is { } section) yield return section;
+                if (DrawingChart.Read(chartSpace, ranges) is { } section) yield return section;
             }
         }
     }

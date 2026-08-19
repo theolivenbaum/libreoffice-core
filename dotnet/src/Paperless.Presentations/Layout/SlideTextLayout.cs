@@ -3,6 +3,7 @@ using Paperless.Core.Graphics;
 using Paperless.Core.Numbering;
 using Paperless.Core.Units;
 using Paperless.Text.Fonts;
+using Paperless.Text.Itemisation;
 using Paperless.Text.Layout;
 using Paperless.Text.Shaping;
 
@@ -52,6 +53,18 @@ public static partial class SlideTextLayout
     private const double LineHeightFactor = 12.0 / 10.0;
 
     /// <summary>
+    /// The weight a character bullet's face is asked for at, whatever the text it labels.
+    /// </summary>
+    /// <remarks>
+    /// Both producers of a bullet font are normal: <c>nBulletFontWeight</c> starts and stays at
+    /// <c>css::awt::FontWeight::NORMAL</c> in the oox import
+    /// (<c>oox/source/drawingml/textparagraphproperties.cxx:315</c>) and
+    /// <c>SdStyleSheetPool::GetBulletFont</c> sets <c>WEIGHT_NORMAL</c>
+    /// (<c>sd/source/core/stlpool.cxx:1174</c>).
+    /// </remarks>
+    private const int MarkerWeight = 400;
+
+    /// <summary>
     /// Lays a body out and returns its glyph runs, positioned in the given rectangle's space.
     /// </summary>
     /// <param name="body">The text body.</param>
@@ -65,6 +78,10 @@ public static partial class SlideTextLayout
     {
         ArgumentNullException.ThrowIfNull(body);
         ArgumentNullException.ThrowIfNull(fonts);
+
+        // Before anything is measured, because a symbol run's recode changes the glyph and
+        // therefore its advance, and an advance decided after the line break is decided too late.
+        body = SlideSymbolRuns.Normalise(body, fonts);
 
         DocRect area = OnGrid(textRectangle).Deflate(OnGrid(body.Insets));
         List<PlacedGlyphRun> placed = [];
@@ -189,6 +206,10 @@ public static partial class SlideTextLayout
     {
         ArgumentNullException.ThrowIfNull(body);
         ArgumentNullException.ThrowIfNull(fonts);
+
+        // The same normalisation Place does, and for the same reason: a cell whose height this
+        // decides must be measured over the glyphs that are actually going to be drawn in it.
+        body = SlideSymbolRuns.Normalise(body, fonts);
 
         return Measure(body, width, fonts, Scaling.Stated(body), body.FontIndependentLineSpacing)
             .Total;
@@ -397,7 +418,7 @@ public static partial class SlideTextLayout
 
         if (marker.IsSymbol)
         {
-            LineMetrics metrics = LineSpacing.Resolve(face);
+            LineMetrics metrics = LineSpacing.Resolve(face, MetricGrid.Presentation);
             Length ascent = Rounded(metrics.ScaledAscent(size));
             Length descent = Rounded(metrics.ScaledDescent(size));
 
@@ -439,6 +460,38 @@ public static partial class SlideTextLayout
     /// <c>71393_pp7.ppt</c>, 170 on <c>171128IPAP.pptx</c>. Both families, so it is this layout
     /// rather than either reader.
     /// </para>
+    /// <para>
+    /// <strong>A character bullet whose file names no face is drawn from OpenSymbol, not from the
+    /// paragraph's face.</strong> <c>Outliner::ImpCalcBulletFont</c> takes
+    /// <c>pFmt-&gt;GetBulletFont()</c> for a <c>SVX_NUM_CHAR_SPECIAL</c> format and only falls back
+    /// to the paragraph's own font when there is none
+    /// (<c>editeng/source/outliner/outliner.cxx:828-847</c>) — and for Impress there always is one,
+    /// because the numbering rule is built over <c>SdStyleSheetPool::GetBulletFont</c>, which is
+    /// OpenSymbol at normal weight (<c>sd/source/core/stlpool.cxx:1169-1183</c>). The readers hand
+    /// a null <see cref="SlideMarker.Typeface"/> up for exactly the cases where nothing was named:
+    /// a DrawingML paragraph with no <c>a:buFont</c> in its chain or with <c>a:buFontTx</c>, a
+    /// SmartArt node, a binary outline whose level names no font.
+    /// </para>
+    /// <para>
+    /// Measured through <c>soffice</c> 26.2.4.2 on a probe deck of five paragraphs in one body,
+    /// read out of the PDF's own text operators: <c>a:buChar</c> with no <c>a:buFont</c> over text
+    /// in Courier New draws the bullet from <b>OpenSymbol</b>, the same over text in Times New
+    /// Roman draws it from <b>OpenSymbol</b>, <c>a:buFontTx</c> draws it from <b>OpenSymbol</b>,
+    /// <c>a:buFont typeface="Arial"</c> draws it from <b>Liberation Sans</b>, and an
+    /// <c>a:buAutoNum</c> with no font draws its number from <b>Liberation Mono</b> — the text's
+    /// own face, which is the fallback branch above and the reason this switches on
+    /// <see cref="SlideMarker.IsSymbol"/>.
+    /// </para>
+    /// <para>
+    /// <strong>The weight and the slope come from the bullet's face, not from the text's.</strong>
+    /// Both sources of a bullet font are normal and upright by construction — the oox import writes
+    /// <c>nBulletFontWeight = FontWeight::NORMAL</c> into the descriptor it pushes
+    /// (<c>oox/source/drawingml/textparagraphproperties.cxx:315</c>) and
+    /// <c>SdStyleSheetPool::GetBulletFont</c> sets <c>WEIGHT_NORMAL</c> and <c>ITALIC_NONE</c>. On
+    /// the same probe, a bold paragraph whose <c>a:buFont</c> is Arial draws its text from
+    /// Liberation Sans Bold and its bullet from Liberation Sans; its <c>a:buAutoNum</c> sibling
+    /// draws the number from Liberation Sans Bold, with the text.
+    /// </para>
     /// </remarks>
     private static MarkedParagraph? Shaped(
         SlideParagraph paragraph, Scaling scaling, SlideFonts fonts)
@@ -449,8 +502,17 @@ public static partial class SlideTextLayout
         if (paragraph.Runs.Count == 0) return null;
 
         SlideTextRun first = paragraph.Runs[0];
-        (OpenTypeFace? face, FontReference? reference) = fonts.Resolve(
-            marker.Typeface ?? first.Typeface, first.Weight, first.IsItalic);
+
+        // A character bullet has a face of its own whether or not the file names one, and it is
+        // never bold and never italic. A generated number has neither of those: it is drawn in
+        // the paragraph's own font, weight and slope included.
+        string? family = marker.IsSymbol
+            ? marker.Typeface ?? SymbolFontRecode.SubstituteFamily
+            : marker.Typeface ?? first.Typeface;
+        int weight = marker.IsSymbol ? MarkerWeight : first.Weight;
+        bool italic = !marker.IsSymbol && first.IsItalic;
+
+        (OpenTypeFace? face, FontReference? reference) = fonts.Resolve(family, weight, italic);
 
         if (face is null) return null;
 
@@ -461,7 +523,7 @@ public static partial class SlideTextLayout
             // OpenSymbol, so a resolution that failed leaves both alone rather than drawing it
             // out of whatever the request happened to land on.
             (OpenTypeFace? symbol, FontReference? symbolReference) = fonts.Resolve(
-                SymbolFontRecode.SubstituteFamily, first.Weight, first.IsItalic);
+                SymbolFontRecode.SubstituteFamily, weight, italic);
 
             if (symbol is not null)
             {
@@ -525,15 +587,11 @@ public static partial class SlideTextLayout
     private static string? Recoded(SlideMarker marker, FontReference? reference)
     {
         if (marker is not { IsSymbol: true, Text.Length: 1 }) return null;
-        if (!SymbolFontRecode.IsRecodeable(marker.Typeface)) return null;
 
-        // The face's own file is present, so its slots are drawable as they stand.
-        if (reference is not null
-            && !reference.IsSubstituted
-            && !SymbolFontRecode.IsSubstituteFamily(reference.FamilyName))
-        {
-            return null;
-        }
+        // The table, and the face's own file being absent. Shared with the run path rather than
+        // restated: `a:rPr/a:sym` reaches the same decision from the other end, and two copies of
+        // a rule whose second clause has already been got wrong once is one copy too many.
+        if (!SlideSymbolRuns.Recodes(marker.Typeface, reference)) return null;
 
         return SymbolFontRecode.TryRecode(marker.Typeface, marker.Text[0], out char recoded)
             ? recoded.ToString()
@@ -632,7 +690,7 @@ public static partial class SlideTextLayout
             runs.Add(new FormattedRun(run.Start, run.Length, face, escaped, Tracking: run.Tracking));
             styles.Add(new RunStyle(
                 run.Colour, reference, face, run.IsUnderlined, run.IsStruckThrough,
-                run.Escapement.RiseOf(size), size));
+                run.Escapement.RiseOf(size), size, run.IsShadowed));
         }
 
         if (first is null) return null;
@@ -654,7 +712,13 @@ public static partial class SlideTextLayout
             DefaultTabInterval = paragraph.DefaultTabInterval,
         };
 
-        MeasuredParagraph measured = MeasuredParagraph.Measure(paragraph.Text, runs);
+        // Itemised by face, so a character the run's own face cannot draw is measured and drawn
+        // from a face that can. It has to be stated here rather than left to the default, because
+        // the default is deliberately no fallback at all — see `ItemisationOptions`. Everything
+        // else about the cut is unchanged: a paragraph whose face covers its own text comes back
+        // as the same single sub-run per formatting run it did before, in the same shaping call.
+        MeasuredParagraph measured = MeasuredParagraph.Measure(
+            paragraph.Text, runs, itemisation: new ItemisationOptions { GlyphFallback = fonts.Fallback });
         ParagraphLayouter layouter = new(first);
         LaidOutParagraph laid = layouter.Layout(
             measured, format, width, paragraph.Language);
@@ -684,6 +748,15 @@ public static partial class SlideTextLayout
                 // 0.155 pt off LibreOffice's without it. The font-independent branch below is the
                 // one that needs finer units — see Spacing.
                 Length faceLine = paragraph.LineSpacing.Apply(faceHeight);
+
+                // …but a rule that changes nothing must not change the *unit* either. `Apply`
+                // works in whole twips and this branch's height is a whole hundredth of a
+                // millimetre, which is 0.567 of a twip — so single spacing, which is what nearly
+                // every paragraph asks for, would round the device's own answer off its own grid.
+                // Measured against LibreOffice on the 195-pair table: with the round trip 113 of
+                // 195 line heights are exact and the other 82 are out by one unit in both
+                // directions; without it, 195 of 195.
+                if (faceLine.Twips == faceHeight.Twips) faceLine = faceHeight;
 
                 lines.Add(Spaced(
                     new PlacedLine(
@@ -745,7 +818,7 @@ public static partial class SlideTextLayout
             paragraph, measured, styles, lines,
             total + ScaledSpace(paragraph.SpaceBefore, scaling)
                   + ScaledSpace(paragraph.SpaceAfter, scaling),
-            scaling, format);
+            scaling, format, fonts.Fallback);
     }
 
     /// <summary>
@@ -818,7 +891,7 @@ public static partial class SlideTextLayout
             bool contains = start == end && run.Covers(start);
             if (!touches && !contains) continue;
 
-            LineMetrics metrics = LineSpacing.Resolve(run.Face);
+            LineMetrics metrics = LineSpacing.Resolve(run.Face, MetricGrid.Presentation);
             Length up = Rounded(metrics.ScaledAscent(run.EmSize));
             Length down = Rounded(metrics.ScaledDescent(run.EmSize));
 
@@ -842,6 +915,15 @@ public static partial class SlideTextLayout
     /// reference device is in 1/100 mm — so an 18 pt Liberation Sans line is 575 + 135 units and
     /// not 574.79 + 134.55. Worth a tenth of a point over four lines, which is the difference
     /// between agreeing with the reference and not.
+    /// <para>
+    /// <b>Idempotent since <see cref="MetricGrid.Presentation"/> landed, and kept for that
+    /// reason rather than removed.</b> The grid already returns whole hundredths of a millimetre,
+    /// so this rounds nothing; what it still does is state the unit at the point the value is
+    /// consumed, and catch a caller that reaches this arithmetic without a grid. The rounding it
+    /// used to do on its own was the right unit and the wrong order — it rounded an exactly
+    /// scaled metric, where the device rounds the em to whole pixels first and then the metric,
+    /// which is worth a unit on 425 of 507 measured (face, size) pairs.
+    /// </para>
     /// </remarks>
     private static Length Rounded(Length metric)
         => Length.FromMm100((long)Math.Round((double)metric.Emu / Length.EmuPerMm100));
@@ -1203,7 +1285,7 @@ public static partial class SlideTextLayout
         foreach (FormattedRun run in block.Measured.RunsBetween(start, end))
         {
             string text = block.Measured.Text[run.Start..run.End];
-            ShapedText shaped = TextShaper.Default.Shape(run.Face, text, run.Shaping);
+            ShapedText shaped = TextShaper.Default.Shape(run.Face, text, run.EffectiveShaping);
             if (shaped.Glyphs.Count == 0) continue;
 
             // A superscript's own baseline, which the rules under and through it share:
@@ -1221,9 +1303,21 @@ public static partial class SlideTextLayout
             Length advance = Length.Zero;
             foreach (PositionedGlyph glyph in glyphs.Glyphs) advance += glyph.Advance;
 
+            Colour colour = block.ColourAt(run.Start);
+
+            // The shadow is the same glyphs drawn first, down and to the right, and it carries
+            // neither the underline nor the strikethrough — those are drawn once, over the top.
+            if (block.ShadowedAt(run.Start) && ShadowOffset(run.Face, run.EmSize) is { } offset)
+            {
+                placed.Add(new PlacedGlyphRun(
+                    glyphs with { Origin = new DocPoint(pen + offset, pitch + offset) },
+                    ShadowColour(colour),
+                    null));
+            }
+
             placed.Add(new PlacedGlyphRun(
                 glyphs,
-                block.ColourAt(run.Start),
+                colour,
                 Rules(block.DecorationAt(run.Start), run.Face, run.EmSize, pen, pitch, advance)));
 
             // The pen carries across the runs of a line, so the second run starts where the first
@@ -1231,6 +1325,91 @@ public static partial class SlideTextLayout
             pen += advance;
         }
     }
+
+    /// <summary>
+    /// How far down and right a shadowed run's second copy is drawn, or null when the offset
+    /// rounds to nothing.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>vcl/source/outdev/text.cxx:394-407</c> computes it in <em>device units</em> from the
+    /// font instance's line height:
+    /// <c>nOff = 1 + ((mnLineHeight − 24) / 24)</c>, with C's truncating division. PDF export runs
+    /// on a 720 dpi reference device, so one device unit is a tenth of a point and the ladder is
+    /// 0.1 pt wide.
+    /// </para>
+    /// <para>
+    /// <b>Which line height feeds it was the open question, and it is now measured rather than
+    /// read.</b> The three offsets a previous round took from two decks bounded the factor to
+    /// [1.073, 1.122] em, an interval containing both of Liberation Sans's candidate sums — its
+    /// <c>hhea</c> ascent+descent (1.1172) and its <c>OS/2</c> typo sum plus typo gap (1.0884) —
+    /// without separating them. A probe of 171 sizes from 10 to 95 pt in half-point steps,
+    /// authored as a flat ODF document with <c>fo:text-shadow</c> (which reaches this same vcl
+    /// code, the rule living at draw time rather than in any importer) and converted by the
+    /// reference binary, separates them decisively: the <c>hhea</c> sum mismatches 3 of 171 under
+    /// a naive single rounding and <b>0 of 171</b> under the rounding below, where the typo sum
+    /// mismatches 107. Repeated against DejaVu Sans, whose two candidates are further apart
+    /// (1.1641 against 1.2002), it is again 0 of 171 against 133. <b>342 of 342 exact.</b> The
+    /// same ladder reproduces the three <c>.ppt</c> offsets that posed the question — 14, 15 and
+    /// 17 device units at 32.00, 33.99 and 38.01 pt.
+    /// </para>
+    /// <para>
+    /// The rounding is <em>per metric, not on the sum</em>: rounding ascent and descent separately
+    /// is what makes it exact, and rounding their sum once misses 3 of 171 on Liberation Sans and
+    /// 4 on DejaVu. <b>The probe could not see the third rounding</b> — every size on its ladder
+    /// was a whole half-point, so the em was already a whole number of device units and rounding
+    /// it changed nothing. The corpus decided that one; see the comment on <c>perEm</c> below. <see cref="LineSpacing.Resolve(OpenTypeFace, MetricGrid?, bool)"/> is the
+    /// right source because it already implements vcl's own precedence — <c>hhea</c>, then
+    /// <c>OS/2</c>'s Windows metrics, then the typographic ones when the face asks for them by
+    /// name — which is exactly what fills <c>ImplFontMetricData</c>. The line <em>gap</em> is
+    /// excluded: <c>mnLineHeight</c> is ascent plus descent.
+    /// </para>
+    /// </remarks>
+    /// <param name="face">The face the run is drawn in.</param>
+    /// <param name="emSize">The size it is drawn at.</param>
+    private static Length? ShadowOffset(OpenTypeFace face, Length emSize)
+    {
+        LineMetrics metrics = LineSpacing.Resolve(face);
+        if (metrics.UnitsPerEm <= 0) return null;
+
+        // The reference device is 720 dpi, so a point is ten units and the font's size in them is
+        // the pixels-per-em the metric is scaled by. It is rounded to a whole unit first, because
+        // a device font is requested at an integer height and its metrics are scaled to that —
+        // and a slide's autofit routinely asks for a fractional size, so this is the common case
+        // rather than an edge. Thailand17's shadowed body text is drawn at 29.9906 pt, where
+        // rounding the em first gives 300 units and a 1.4 pt offset, which is the reference's, and
+        // not rounding gives 299.906 and 1.3 pt, which is a unit short on 38 runs of one deck.
+        double perEm = Math.Round(emSize.Points * DeviceUnitsPerPoint, MidpointRounding.AwayFromZero);
+        long lineHeight =
+            (long)Math.Round(metrics.Ascent * perEm / metrics.UnitsPerEm, MidpointRounding.AwayFromZero)
+            + (long)Math.Round(metrics.Descent * perEm / metrics.UnitsPerEm, MidpointRounding.AwayFromZero);
+
+        long units = 1 + ((lineHeight - 24) / 24);
+        return units <= 0 ? null : Length.FromPoints(units / DeviceUnitsPerPoint);
+    }
+
+    /// <summary>Device units in a point on the 720 dpi reference device PDF export runs on.</summary>
+    private const double DeviceUnitsPerPoint = 10.0;
+
+    /// <summary>
+    /// The colour a shadow is drawn in, which depends only on how dark the text is.
+    /// </summary>
+    /// <remarks>
+    /// <c>vcl/source/outdev/text.cxx:399-403</c> paints the shadow light grey under black or
+    /// near-black text and black under everything else, so the shadow of a black heading is
+    /// visible rather than invisible. <b>Measured over nineteen text colours</b> against the
+    /// reference binary: the cut is at <c>Color::GetLuminance</c> — <c>(B×29 + G×151 + R×76) >> 8</c>
+    /// — being under 8, which the <c>== COL_BLACK</c> half of the condition is subsumed by. The
+    /// probe pins the boundary on both sides: <c>#050505</c> (luminance 5) takes the grey branch
+    /// and <c>#0A0A0A</c> (luminance 10) the black one, and so do the two colours that separate
+    /// the luminance from a channel maximum — <c>#080000</c> (luminance 2, grey) and
+    /// <c>#001000</c> (luminance 9, black).
+    /// </remarks>
+    /// <param name="text">The colour the run itself is drawn in.</param>
+    private static Colour ShadowColour(Colour text)
+        => ((text.B * 29) + (text.G * 151) + (text.R * 76)) >> 8 < 8
+            ? Colour.FromRgb(0xC0C0C0)
+            : Colour.Black;
 
     /// <summary>
     /// The rectangles a run's underline and strikethrough fill, or null when it has neither.
@@ -1406,6 +1585,11 @@ public static partial class SlideTextLayout
     /// before it asks the font for a metric
     /// (<c>editeng/source/editeng/impedit3.cxx:3121-3126</c>).
     /// </param>
+    /// <param name="IsShadowed">
+    /// Whether the run casts the per-character drop shadow. Travels with the colour and the
+    /// decorations rather than with the measured run, because the shadow is drawn from the same
+    /// glyphs at an offset and so moves no line break.
+    /// </param>
     private readonly record struct RunStyle(
         Colour Colour,
         FontReference? Font,
@@ -1413,7 +1597,8 @@ public static partial class SlideTextLayout
         bool IsUnderlined = false,
         bool IsStruckThrough = false,
         Length Rise = default,
-        Length NominalSize = default);
+        Length NominalSize = default,
+        bool IsShadowed = false);
 
     /// <summary>One paragraph, measured and broken.</summary>
     private sealed record Block(
@@ -1423,7 +1608,8 @@ public static partial class SlideTextLayout
         IReadOnlyList<PlacedLine> Lines,
         Length Height,
         Scaling Scaling,
-        ParagraphFormat Format)
+        ParagraphFormat Format,
+        IGlyphFallbackResolver? Fallback = null)
     {
         /// <summary>The space above the paragraph, after the fit's spacing scale.</summary>
         /// <remarks>
@@ -1452,6 +1638,9 @@ public static partial class SlideTextLayout
             return (style.IsUnderlined, style.IsStruckThrough);
         }
 
+        /// <summary>Whether the character casts the per-character drop shadow.</summary>
+        public bool ShadowedAt(int index) => StyleAt(index).IsShadowed;
+
         /// <summary>
         /// How far above the line's baseline a character is drawn, zero for ordinary text.
         /// </summary>
@@ -1473,8 +1662,16 @@ public static partial class SlideTextLayout
         /// <para>
         /// Reference equality is the right test because the face cache hands back one instance
         /// per resolved request, and <c>FontItemiser</c> passes the primary face straight through
-        /// when it does not substitute. Nothing in this library turns glyph fallback on today, so
-        /// the guard costs a pointer comparison and buys the invariant outright.
+        /// when it does not substitute, so the guard costs a pointer comparison.
+        /// </para>
+        /// <para>
+        /// When the faces <em>do</em> differ the sub-run was substituted, and the resolver that
+        /// found the substitute is the only thing that can name the file it came from — an
+        /// <see cref="OpenTypeFace"/> is a parsed table directory with no memory of its own path,
+        /// so a reference built from the face alone reaches the PDF writer with no font program
+        /// behind it and is announced without being embedded, which the corpus gate scores as a
+        /// failure and rightly: a reader without that font installed sees nothing. This is the
+        /// same route <c>PageDrawing.ByFace</c> takes in the word processor.
         /// </para>
         /// </remarks>
         /// <param name="index">A character the sub-run covers.</param>
@@ -1482,7 +1679,7 @@ public static partial class SlideTextLayout
         public FontReference? FontFor(int index, OpenTypeFace face)
         {
             RunStyle style = StyleAt(index);
-            return ReferenceEquals(style.Face, face) ? style.Font : null;
+            return ReferenceEquals(style.Face, face) ? style.Font : Fallback?.ReferenceFor(face);
         }
 
         private RunStyle StyleAt(int index)

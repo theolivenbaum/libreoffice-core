@@ -1,12 +1,13 @@
 # Skills for developing Paperless
 
-Four skills covering development of the [Paperless](../../dotnet/) C# libraries against
+Six skills covering development of the [Paperless](../../dotnet/) C# libraries against
 headless LibreOffice as the reference implementation.
 
 | Skill | Use it when |
 |---|---|
 | [`libreoffice-reference`](libreoffice-reference/) | You need ground truth: reference PDFs, per-page PNGs, or reference text from a document. Also when `soffice --convert-to` misbehaves. |
 | [`render-comparison`](render-comparison/) | Comparing a Paperless rendering against the reference, and working out *why* it differs. |
+| [`page-vision`](page-vision/) | Actually *looking* at a page: getting it in front of a reader at a resolution where the defect survives, delegating the reading to an uncontaminated reviewer, and knowing what a visual reading can and cannot establish. |
 | [`extraction-comparison`](extraction-comparison/) | Comparing extracted text. Also the right first step for a visual bug — parsing bugs are far cheaper to find in text than in pixels. |
 | [`paperless-corpus`](paperless-corpus/) | Building or curating test documents. |
 | [`corpus-batches`](corpus-batches/) | Driving the 541-document sample corpus to parity, batch by batch — the ordering, the regression rule, and how to dispatch parallel agents across the three tracks. |
@@ -51,7 +52,17 @@ verified against LibreOffice 24.2.7.2 on real files.
 **`soffice` exits 0 even when it converts nothing.** Never trust its exit code — always check
 that the output file exists. The scripts here all do.
 
-**Rasterised LibreOffice output is byte-deterministic.** Verified: the same input converted
-twice and rasterised gives identical PNGs. So golden reference images can be committed and
-checksummed, and a changed checksum is a real signal. The PDFs themselves are *not*
-byte-identical — they embed a timestamp — so checksum the PNGs, never the PDFs.
+**Rasterised LibreOffice output is byte-deterministic — on the documents this was verified on,
+and not universally.** The original check stands: the same input converted twice and rasterised
+gave identical PNGs. But `fse_identification_form.xlsx` converted five times by one `soffice`
+26.2.4.2 gives 430, 430, 430, 430 and **443** words, the difference being one cell's sentence
+that LibreOffice draws in about one run in five. See the last section of
+`dotnet/TODO.raster-ceiling.md`. **Render a reference more than once before trusting a
+single-document figure**, and treat a golden image's checksum as a claim about that document
+rather than about the renderer.
+
+Within that limit the practice still holds: golden reference images can be committed and
+checksummed, and a changed checksum is a real signal — but it is now a signal to re-render and
+check whether the document is one of the unstable ones, not automatically evidence that
+something in the tree changed. The PDFs themselves are *not* byte-identical either way, since
+they embed a timestamp, so checksum the PNGs and never the PDFs.

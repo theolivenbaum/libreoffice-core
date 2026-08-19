@@ -29,7 +29,7 @@ namespace Paperless.Spreadsheets.Tests;
 /// ran straight through its empty <c>B1:D1</c> merge and onto the next column band: 554 words
 /// against LibreOffice's 541, and 541 now. Checked against LibreOffice 24.2.7.2's own PDF for the
 /// fixture — its first page carries "Blocked title that would otherw" and neither page carries
-/// "BLOCKEDTAIL".
+/// "BLOCKEDTAIL" — and re-checked against 26.2.4.2, which agrees word for word on both pages.
 /// </para>
 /// </remarks>
 public sealed class SheetEmptyMergeTests
@@ -63,18 +63,38 @@ public sealed class SheetEmptyMergeTests
     }
 
     /// <summary>
-    /// The control: the same string with nothing merged beside it still spills across the break.
+    /// The control: the same string with nothing merged beside it is not shortened at all.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// Without it the test above passes for a renderer that blocks every spill, which is a
-    /// different and larger defect than the one it is meant to catch.
+    /// different and larger defect than the one it is meant to catch. The discriminator is the
+    /// <em>tail</em>: a string stopped by the merge loses it, and a string with empty cells beside
+    /// it keeps it, because its output area was widened through them and nothing had to be cut.
+    /// </para>
+    /// <para>
+    /// <strong>The tail is on page 1, with the rest of the string, and not on page 2.</strong>
+    /// The whole run is painted once, at its anchor, and simply runs off the right-hand edge of
+    /// the paper — <c>bOutside</c> and the clip are both about the output area rather than about
+    /// the sheet of paper, so an unclipped run is not trimmed at the page edge either. Measured
+    /// through 26.2.4.2: page 1 reads "…until its tail reaches SPILLEDTAIL" and page 2 reads
+    /// "Delta Echo Foxtrot" and nothing else. This used to assert the tail onto page 2, which was
+    /// the untagged rendering — see <see cref="SheetOffPageCellTests"/>.
+    /// </para>
     /// </remarks>
     [Fact]
-    public void AStringWithNothingBesideItStillSpillsAcrossTheBreak()
+    public void AStringWithNothingBesideItIsNotShortenedAtAll()
     {
         IReadOnlyList<DrawnPage> pages = Draw("sheet-empty-merge.fods");
 
-        TextOf(pages[0]).ShouldContain("Spilling title");
-        TextOf(pages[1]).ShouldContain("SPILLEDTAIL");
+        string first = TextOf(pages[0]);
+        first.ShouldContain("Spilling title");
+        first.ShouldContain("SPILLEDTAIL");
+
+        // The page it spills over holds its own columns and no part of the spill.
+        string second = TextOf(pages[1]);
+        second.ShouldContain("Delta");
+        second.ShouldNotContain("SPILLEDTAIL");
+        second.ShouldNotContain("Spilling title");
     }
 }

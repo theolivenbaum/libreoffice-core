@@ -167,14 +167,39 @@ public readonly record struct NoteNumbering(NoteNumberFormat Format, int StartAt
     /// <remarks>
     /// Public and static because the sequences are not a note's: a page number is written in the same five
     /// (<c>w:pgNumType/@w:fmt</c>, <c>sprmSNfcPgn</c>, <c>style:num-format</c>), and duplicating the
-    /// switch is how the two would drift apart. A value below one is clamped, since none of the sequences
-    /// has a zeroth term.
+    /// switch is how the two would drift apart.
+    /// </remarks>
+    /// <remarks>
+    /// <para>
+    /// <strong>Arabic has a zeroth term and the other five do not, and LibreOffice answers accordingly
+    /// rather than clamping.</strong> This used to raise every value to one, which is safe for a note —
+    /// <see cref="Citation"/> clamps its own start and never reaches here below one — and wrong for a
+    /// page, because <c>w:pgNumType/@w:start</c> may legitimately be nought and three of the corpus's
+    /// documents say so.
+    /// </para>
+    /// <para>
+    /// Measured on 26.2.4.2 over the five formats, each with <c>w:start="0"</c>, reading the
+    /// <c>PAGE</c> field off the first three pages — see <c>probes/page-number-zero/</c>:
+    /// </para>
+    /// <list type="table">
+    /// <item><description><c>decimal</c> — <c>0</c>, <c>1</c>, <c>2</c></description></item>
+    /// <item><description><c>lowerRoman</c> — <em>empty</em>, <c>i</c>, <c>ii</c></description></item>
+    /// <item><description><c>upperRoman</c> — <em>empty</em>, <c>I</c>, <c>II</c></description></item>
+    /// <item><description><c>lowerLetter</c> — <em>empty</em>, <c>a</c>, <c>b</c></description></item>
+    /// <item><description><c>upperLetter</c> — <em>empty</em>, <c>A</c>, <c>B</c></description></item>
+    /// </list>
+    /// <para>
+    /// So a sequence with no zeroth term writes <em>nothing</em>, and never its first term. Clamping put
+    /// a <c>1</c> on <c>EHEST-SMS-Safety-Management-Manual-V2.docx</c>'s first page where the reference
+    /// prints <c>0</c>, and did it on that page alone, which is what made it look like a counter fault
+    /// rather than a formatting one.
+    /// </para>
     /// </remarks>
     /// <param name="format">The sequence to write it in.</param>
     /// <param name="value">The value, counted from one.</param>
     public static string Render(NoteNumberFormat format, int value)
     {
-        value = Math.Max(1, value);
+        if (value < 1 && format is not NoteNumberFormat.Arabic) return string.Empty;
 
         return format switch
         {

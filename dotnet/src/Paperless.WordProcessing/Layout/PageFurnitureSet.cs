@@ -135,12 +135,12 @@ public sealed class PageFurnitureSet
     /// <param name="collapsesSpacing">As <see cref="Header"/>'s.</param>
     /// <param name="addsCellLineSpacing">As <see cref="Header"/>'s.</param>
     /// <remarks>
-    /// The title-page suppression <see cref="Header"/> applies is deliberately <em>not</em> applied here.
-    /// It is measured for headers in both directions and the footer evidence contradicts itself: the
-    /// reference's first page of <c>final-technical-report-template.docx</c> has no footer, and its first
-    /// page of <c>Agile_Arc_SysDes.docx</c> — the same shape of section, a default header and footer with
-    /// <c>w:titlePg</c> and nothing named for a first page — has one. Suppressing both cost that document
-    /// eight words and bought nothing, so the half that is established is the half that is applied.
+    /// A footer is suppressed on a title page exactly as a header is. This used to pass
+    /// <c>mayBeSuppressed: false</c>, on the grounds that the corpus evidence for footers contradicted
+    /// itself — and it did, but the resolution was to measure rather than to apply the half that looked
+    /// established. The probe in <see cref="ChosenSlot"/>'s remarks shows the reference drawing no
+    /// page-one footer in three of its four cases, including the two where a first-page *header* is named
+    /// and where the old rule copied the default footer onto the title page.
     /// </remarks>
     public PlacedFlow? Footer(
         WritingSection section,
@@ -151,20 +151,8 @@ public sealed class PageFurnitureSet
         bool addsCellLineSpacing = false)
         => Resolve(
             _footers, _laidOutFooters, section, geometry.FooterArea, pageNumber, isFirstPageOfSection,
-            offsetFromTop: geometry.FooterOffset, collapsesSpacing, addsCellLineSpacing,
-            mayBeSuppressed: false);
+            offsetFromTop: geometry.FooterOffset, collapsesSpacing, addsCellLineSpacing);
 
-    /// <summary>
-    /// True when something — a header or a footer — was named for a first page.
-    /// </summary>
-    /// <remarks>
-    /// Asked of both maps together on purpose, and it is the whole of what distinguishes the two
-    /// behaviours below: a section that names <em>any</em> first-page part gets a first-page page style,
-    /// and the part it did not name is copied onto that style from the section's ordinary one. A section
-    /// that names none gets no such style, and its first page carries no furniture at all.
-    /// </remarks>
-    private bool HasFirstPageFurniture
-        => _headers.ContainsKey(PageFurnitureSlot.First) || _footers.ContainsKey(PageFurnitureSlot.First);
 
     private PlacedFlow? Resolve(
         Dictionary<PageFurnitureSlot, IReadOnlyList<PageBlock>> slots,
@@ -175,13 +163,11 @@ public sealed class PageFurnitureSet
         bool isFirstPageOfSection,
         Length? offsetFromTop,
         bool collapsesSpacing,
-        bool addsCellLineSpacing,
-        bool mayBeSuppressed = true)
+        bool addsCellLineSpacing)
     {
         PageFurnitureSlot? chosen = ChosenSlot(
             slots, pageNumber, isFirstPageOfSection,
-            section.HasDifferentFirstPage, section.HasDifferentEvenPages,
-            hasFirstPageFurniture: HasFirstPageFurniture || !mayBeSuppressed);
+            section.HasDifferentFirstPage, section.HasDifferentEvenPages);
 
         if (chosen is not { } slot) return null;
         if (!slots.TryGetValue(slot, out IReadOnlyList<PageBlock>? blocks)) return null;
@@ -205,7 +191,11 @@ public sealed class PageFurnitureSet
                 : blocks,
             area, offsetFromTop,
             collapsesSpacing: collapsesSpacing,
-            addsCellLineSpacing: addsCellLineSpacing);
+            addsCellLineSpacing: addsCellLineSpacing,
+
+            // A running head or foot is the one flow where a positioned table is a frame its neighbours do
+            // not move out of the way of — see `FlowLayouter.LayOut`, which carries the measurement.
+            floatsPositionedTables: true);
         cache[key] = placed;
         return placed;
     }
@@ -220,30 +210,29 @@ public sealed class PageFurnitureSet
     /// cache on a list that two slots could share.
     /// </para>
     /// <para>
-    /// Null means <em>no furniture at all</em>, which is not the same as "fall back to the default one",
-    /// and which of the two a title page gets is decided by a pair of corpus documents that differ in
-    /// exactly one thing. Both state <c>w:titlePg</c> and neither names a first-page <em>header</em>:
+    /// Null means <em>no furniture at all</em>, which is not the same as "fall back to the default one".
+    /// **A title page carries only what the section named for a first page, and nothing is copied onto it
+    /// from the ordinary slot.** Measured directly rather than inferred, with a four-document probe that
+    /// varies only which first-page parts a <c>w:titlePg</c> section names:
     /// </para>
-    /// <list type="bullet">
-    /// <item><description>
-    /// <c>batch-007/final-technical-report-template.docx</c> names a default header, a default footer and
-    /// nothing for a first page. LibreOffice's page one carries <em>neither</em> a running head nor a
-    /// footer.
-    /// </description></item>
-    /// <item><description>
-    /// <c>batch-016/JEMIT_Template.docx</c> names even and default headers, even and default footers, and
-    /// a <c>w:footerReference w:type="first"</c>. LibreOffice's page one carries the <em>default</em>
-    /// header — the one it never named for a first page — along with that first-page footer.
-    /// </description></item>
+    /// <list type="table">
+    /// <item><description>names neither → LibreOffice's page one carries <em>nothing</em>;</description></item>
+    /// <item><description>names a first <em>header</em> only → that header, and <em>no footer</em>;</description></item>
+    /// <item><description>names a first <em>footer</em> only → that footer, and <em>no header</em>;</description></item>
+    /// <item><description>names both → both.</description></item>
     /// </list>
     /// <para>
-    /// So the switch is whether the section named a first page part at all, of either kind: naming one
-    /// makes a first-page style and the other kind is copied onto it, naming none means the first page has
-    /// no furniture. That is the shape of writerfilter's <c>copyHeaderFooter</c>
-    /// (<c>writerfilter/dmapper/PropertyMap.cxx:1117-1125</c>), which links a section's page style to the
-    /// previous one's for the parts it did not set, beside the branch at <c>:594-598</c> that forces
-    /// <c>HeaderIsOn</c> false for a section that pushed no applicable header. Which of the two wins was
-    /// left unnamed by an earlier round; the pair above settles it by measurement.
+    /// This replaces a rule derived from three corpus documents that said naming any first-page part makes
+    /// a first-page style onto which the *other* kind is copied from the ordinary one — attributed to
+    /// writerfilter's <c>copyHeaderFooter</c> (<c>writerfilter/dmapper/PropertyMap.cxx:1117-1125</c>). The
+    /// probe contradicts it in three of its four cases, and the corpus evidence behind it was already
+    /// self-contradictory: two documents of *identical* shape (<c>final-technical-report-template.docx</c>
+    /// and <c>Agile_Arc_SysDes.docx</c>, both <c>w:titlePg</c> with default parts and nothing named for a
+    /// first page) were recorded as differing, one with a page-one footer and one without. Two documents
+    /// that differ in their output while agreeing in every input are a sign that the input being compared
+    /// is not the one that decides — not a fact to build a rule on. It was found from
+    /// <c>AC-150-5370-10G-updated-201604.docx</c>, whose first section names a first-page header and no
+    /// first-page footer, and whose reference page one carries no page number where ours drew <c>i</c>.
     /// </para>
     /// <para>
     /// Inheritance across sections is settled before this is asked — <c>DocxReader.Paginated</c> carries
@@ -256,17 +245,13 @@ public sealed class PageFurnitureSet
         int pageNumber,
         bool isFirstPageOfSection,
         bool hasDifferentFirstPage,
-        bool hasDifferentEvenPages,
-        bool hasFirstPageFurniture)
+        bool hasDifferentEvenPages)
     {
         if (isFirstPageOfSection && hasDifferentFirstPage)
         {
-            if (slots.ContainsKey(PageFurnitureSlot.First)) return PageFurnitureSlot.First;
-            if (!hasFirstPageFurniture) return null;
-
-            // The section named a first-page part of the other kind, so it has a first-page style and this
-            // kind is copied onto it from the ordinary one.
-            return PageFurnitureSlot.Default;
+            // Only what the section named for a first page. Nothing is copied from the ordinary slot —
+            // see the probe table in the remarks above.
+            return slots.ContainsKey(PageFurnitureSlot.First) ? PageFurnitureSlot.First : null;
         }
 
         if (hasDifferentEvenPages

@@ -45,6 +45,17 @@ public sealed record PptTextRun(
 /// <param name="BulletFont">The bullet's index into the document's font collection.</param>
 /// <param name="BulletHeight">The bullet's size as a percentage of the text's.</param>
 /// <param name="BulletColour">The bullet's packed colour word.</param>
+/// <param name="BulletFlags">
+/// The bullet-flags word the low four mask bits share, kept whole.
+/// <para>
+/// Bit 0 is already folded into <paramref name="HasBullet"/>, but the other three are not
+/// redundant with it: bits 1, 2 and 3 are <c>PPT_ParaAttr_BuHardFont</c>,
+/// <c>BuHardColor</c> and <c>BuHardHeight</c>, and each says whether the value beside it is the
+/// bullet's own or a word PowerPoint wrote and meant nothing by
+/// (<c>filter/source/msfilter/svdfppt.cxx:4881-4883</c>). Discarding them made every binary
+/// PowerPoint bullet take a colour the file had not asked for.
+/// </para>
+/// </param>
 public readonly record struct PptParagraphRun(
     int Length,
     int Depth,
@@ -59,7 +70,8 @@ public readonly record struct PptParagraphRun(
     ushort BulletOffset = 0,
     ushort BulletFont = 0,
     ushort BulletHeight = 0,
-    uint BulletColour = 0)
+    uint BulletColour = 0,
+    ushort BulletFlags = 0)
 {
     /// <summary>Whether the run's mask names a property, so its value is the run's own.</summary>
     /// <param name="bit">The mask bit, as <c>PPT_ParaAttr_*</c> numbers them.</param>
@@ -552,7 +564,8 @@ public static class PptTextReader
                 bulletOffset,
                 bulletFont,
                 bulletHeight,
-                bulletColour));
+                bulletColour,
+                bulletFlags ?? 0));
 
             if (count <= 0) break;
             covered += count;

@@ -123,6 +123,19 @@ public sealed class WordStyle
         ParagraphProperties = Word.Child(element, "pPr");
         RunProperties = Word.Child(element, "rPr");
         TableProperties = Word.Child(element, "tblPr");
+
+        Dictionary<string, XElement> conditional = new(StringComparer.Ordinal);
+        foreach (XElement layer in Word.Children(element, "tblStylePr"))
+        {
+            if (Word.Attribute(layer, "type") is not { Length: > 0 } type) continue;
+            if (Word.Child(layer, "rPr") is not { } runProperties) continue;
+
+            // First wins, because a style stating the same layer twice is stating it once and then
+            // contradicting itself, and Word keeps the first.
+            conditional.TryAdd(type, runProperties);
+        }
+
+        ConditionalRunProperties = conditional;
     }
 
     /// <summary>The identifier content refers to. Not the user-visible name.</summary>
@@ -154,6 +167,17 @@ public sealed class WordStyle
 
     /// <summary>The style's <c>w:rPr</c>, or null.</summary>
     public XElement? RunProperties { get; }
+
+    /// <summary>
+    /// A table style's conditional <c>w:rPr</c> layers, by the <c>w:tblStylePr w:type</c> that names
+    /// each region. Empty on every other kind of style.
+    /// </summary>
+    /// <remarks>
+    /// Indexed rather than kept as a list because a cell asks for named regions in a fixed order of
+    /// specificity — see <see cref="WordTableStyleConditions.Names"/> — and never enumerates them.
+    /// Layers carrying no <c>w:rPr</c> are absent: this round applies the run half only.
+    /// </remarks>
+    public IReadOnlyDictionary<string, XElement> ConditionalRunProperties { get; }
 
     /// <summary>
     /// A table style's <c>w:tblPr</c>, or null. Meaningless on any other kind of style.
@@ -291,6 +315,33 @@ public sealed class WordStyles
                 continue;
             }
 
+            // A style with no w:name is dropped outright on a DOCX import, so nothing can reference
+            // it — not by w:pStyle, w:rStyle, w:tblStyle or w:basedOn. StyleSheetTable::sprm
+            // (sw/source/writerfilter/dmapper/StyleSheetTable.cxx:774) appends the finished entry to
+            // neither the style table nor its identifier map unless
+            // `!IsOOXMLImport() || !m_sStyleName.isEmpty()`, and this class reads OOXML only.
+            //
+            // The citation is the hypothesis; `dotnet/probes/words-r47/unnamed-style.py` is the
+            // evidence. It authors a table, paragraph and character style stating w:sz 20 and
+            // applies each one, with and without a w:name: LibreOffice draws 10 pt with the name and
+            // 12 pt — the document default — without it, in all three families. The corpus half is a
+            // causal mutation of `template---tpr-technical-progress-report-with-guidance.docx`,
+            // sixteen of whose fifty-three styles carry a w:styleId and no w:name: adding
+            // `<w:name w:val="Table1"/>` to the one its tables name changes the reference's own
+            // output, and changing that style's own w:spacing changes nothing at all.
+            //
+            // Not a leniency question. A file stating a style it cannot name is malformed, and both
+            // readings are defensible — this one is what the reference does, and matching it is the
+            // whole point.
+            if (style.Name is not { Length: > 0 })
+            {
+                diagnostics?.Add(new Diagnostic(
+                    DiagnosticSeverity.Warning, "PL2102",
+                    $"w:style '{style.StyleId}' has no w:name; Word processors drop such a style "
+                    + "entirely, so it is ignored here too."));
+                continue;
+            }
+
             _styles[(style.Type, style.StyleId)] = style;
             if (style.IsDefault) _defaults[style.Type] = style.StyleId;
             if (style.Type == WordStyleType.Paragraph) declared.Add(style);
@@ -321,6 +372,59 @@ public sealed class WordStyles
     /// <c>heading 2</c> declared <em>after</em> it gets 12 pt above and never sees the 480; the
     /// same file with the parent declared <em>first</em> gets the 480. A custom parent gives
     /// zero, which is a suppression rather than a no-op for exactly the same reason.
+    /// </para>
+    /// <para>
+    /// <strong>An unrecognised parent is not the end of it.</strong> "Nought when Writer knows no
+    /// style of the parent's name" was fitted to a case that cannot test it — that probe's child
+    /// was a <c>heading 1</c> and its parent a <c>heading 2</c>, so the parent always answered —
+    /// and it is wrong wherever the child is itself one of Writer's headings. Then the style is
+    /// <em>found</em> in Writer's pool rather than created, with Writer's own hierarchy still
+    /// under it, and what it reads is its <c>Heading</c> base: 12 pt above, 6 pt below.
+    /// </para>
+    /// <para>
+    /// So the order is parent first, the style's own name only as a fallback. Measured on the
+    /// installed 26.2.4.2 by
+    /// <c>dotnet/probes/words-pagination-01/one-sided-spacing-source.py</c>, over four name
+    /// pairings times both declaration orders, reading <c>fo:margin-bottom</c> straight out of
+    /// <c>--convert-to fodt</c>. The child states <c>w:before="480"</c>, so "mirror the stated
+    /// value" would read 480 and is refuted outright:
+    /// </para>
+    /// <code>
+    ///   child          parent         child declared first    parent declared first
+    ///   heading 4      heading 2      120  (6 pt)             360  (the parent's own w:after)
+    ///   heading 4      Custom Par     120                     360
+    ///   Custom Kid     heading 2      120                     360
+    ///   Custom Kid     Custom Par       0                     360
+    /// </code>
+    /// <para>
+    /// The one cell that moves is row two, and it is the one four corpus documents sit in — both
+    /// FAA Holdover Tables and <c>EHEST-SMS-Safety-Management-Manual-V2</c> have a
+    /// <c>heading 4</c> based on a custom parent declared far later and stating only
+    /// <c>w:before</c>, and <c>03_Technical_Report_(progress)_template</c> has a <c>heading 1</c>
+    /// based on a <c>Body Text 2</c>, which Writer has no pool style for either. LibreOffice
+    /// resolves all four to 6 pt below where we resolved nought. For the Holdover pair that 6 pt
+    /// per NOTES heading, 214 of them, is the whole of their shared 13-page deficit.
+    /// </para>
+    /// <para>
+    /// <strong>Which names answer from the style's own end is narrower than which answer from the
+    /// parent's</strong>, and the same probe measures it over fifteen: only Heading 1-9, Title
+    /// and Subtitle do. <c>Caption</c>, <c>List</c>, <c>Quote</c> and <c>Body Text</c> read
+    /// nought from that end while still reading 120, 140 and 140 as a parent — see
+    /// <see cref="WriterPoolSpacing.TryForOwnName"/>. That asymmetry is why the two ends need two
+    /// tables rather than one.
+    /// </para>
+    /// <para>
+    /// The whole change is therefore <em>additive</em>: it fires only where the old reading
+    /// produced nought, so every document whose parent Writer does recognise —
+    /// <c>Press release_EUREKA labels ITEA 3 Cluster</c> and that same
+    /// <c>03_Technical_Report</c>'s <c>heading 2</c>, both over a <c>Body Text</c> — keeps the
+    /// answer it had, and LibreOffice's own import agrees with both of those at nought above and
+    /// 140 below respectively.
+    /// </para>
+    /// <para>
+    /// What is <em>not</em> measured here is a chain longer than one link — a custom child based
+    /// on a custom parent based on a <c>heading 2</c>. No corpus document takes that path and the
+    /// probe does not cover it, so the walk stops at the immediate parent.
     /// </para>
     /// <para>
     /// This is what puts a 12 pt space above every <c>Heading1</c> of
@@ -361,18 +465,85 @@ public sealed class WordStyles
             // Not handled here; no corpus document takes that path.
             if (!byId.TryGetValue(parentId, out WordStyle? parent)) continue;
 
-            (int above, int below) = WriterPoolSpacing.For(parent.Name);
+            // The parent still answers whenever Writer has a style of the parent's name. Only
+            // where it has none — where the old reading fell through to nought — does the style's
+            // own Writer hierarchy show through, and then only for the heading family.
+            if (!WriterPoolSpacing.TryFor(parent.Name, out (int Above, int Below) pool))
+                WriterPoolSpacing.TryForOwnName(style.Name, out pool);
+            (int above, int below) = pool;
 
             XElement replacementSpacing = new(spacing);
             replacementSpacing.SetAttributeValue(
                 Word.Name(before ? "after" : "before"),
                 (before ? below : above).ToString(System.Globalization.CultureInfo.InvariantCulture));
 
+            // Which half this synthesised, so that the one path that must not see it can tell it
+            // from a value the file states. See PoolCompletedSide.
+            replacementSpacing.SetAttributeValue(PoolCompleted, before ? "after" : "before");
+
             XElement replacement = new(style.ParagraphProperties!);
             replacement.Element(Word.Name("spacing"))?.ReplaceWith(replacementSpacing);
             style.ReplaceParagraphProperties(replacement);
         }
     }
+
+    /// <summary>
+    /// Marks the half of a <c>w:spacing</c> that <see cref="CompleteOneSidedSpacing"/> supplied
+    /// rather than the file stating.
+    /// </summary>
+    /// <remarks>
+    /// A private namespace on a detached copy of the style's <c>w:pPr</c>, so nothing that reads
+    /// <c>w:</c> attributes can see it and the loaded part is untouched. It exists because the
+    /// completion is a property of the <em>style</em> and one caller — a paragraph that triggers
+    /// tdf#118521 — has to resolve the same attribute as though the completion had never happened.
+    /// See <see cref="PoolCompletedSide"/>.
+    /// </remarks>
+    private static readonly XName PoolCompleted =
+        XName.Get("poolCompleted", "urn:paperless:word-styles");
+
+    /// <summary>
+    /// Which half of a <c>w:spacing</c> layer is Writer's pool default rather than a stated value —
+    /// <c>"before"</c>, <c>"after"</c>, or null when the layer states both halves itself.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>A paragraph that sets one of its two margins directly does not see this
+    /// completion at all.</strong> writerfilter's <c>tdf#118521</c> block
+    /// (<c>sw/source/writerfilter/dmapper/DomainMapper_Impl.cxx</c>:3110-3138) fires when the
+    /// paragraph's own <c>w:pPr</c> sets an unequal subset of {top margin, bottom margin,
+    /// contextual spacing}, and fills each unset margin <em>as direct formatting</em> from
+    /// <c>GetPropertyFromParaStyleSheet</c> — which walks the DOCX <c>w:basedOn</c> chain and then
+    /// <c>w:docDefaults</c> (<c>DomainMapper_Impl.cxx</c>:1556-1628) and never consults Writer's
+    /// pool. The pool completion lives on the Writer style, so that walk cannot reach it.
+    /// </para>
+    /// <para>
+    /// Measured on the installed 26.2.4.2 by
+    /// <c>dotnet/probes/words-p1-01/direct-one-sided-spacing.py</c>, which authors the chain both
+    /// declaration orders round because only one of them can answer the question — with the parent
+    /// declared first the completion never fires and every variant reads the same number whatever
+    /// the rule is. Child declared first, which is the arrangement the corpus document has:
+    /// </para>
+    /// <code>
+    ///   paragraph states               top   bottom
+    ///   nothing                        120      120     the completion
+    ///   w:spacing w:line only          120      120     an element is not a setting
+    ///   w:spacing w:before="80"         80       60     the DOCX chain, not the pool
+    ///   w:spacing w:before="0"           0       60     stated, not non-zero, is the trigger
+    ///   w:spacing before and after      80       40
+    ///   w:contextualSpacing only       120       60     no w:spacing at all, and it still fires
+    /// </code>
+    /// <para>
+    /// The bottom column is the whole of it: 120 is Writer's <c>Heading 4</c> pool row and 60 is
+    /// the parent style's own <c>w:after</c>, three points apart. In
+    /// <c>FAA 2025-26 Holdover Tables.docx</c> 31 of the 113 <c>NOTES</c> headings carry a direct
+    /// <c>w:spacing w:before="80"</c> and the other 76 carry nothing, and LibreOffice puts the
+    /// first note 3.00 pt closer on exactly those 31 — twenty pages' worth, because each of those
+    /// pages is one line from full.
+    /// </para>
+    /// </remarks>
+    /// <param name="spacing">A <c>w:spacing</c> layer.</param>
+    internal static string? PoolCompletedSide(XElement spacing)
+        => spacing?.Attribute(PoolCompleted)?.Value;
 
     /// <summary>The style with this id and type, or null.</summary>
     public WordStyle? Find(string? styleId, WordStyleType type)
@@ -515,11 +686,16 @@ public sealed class WordStyles
     /// <param name="directRunProperties">The run's own <c>w:rPr</c>, or null.</param>
     /// <param name="paragraphStyleId">The paragraph style in force, or null.</param>
     /// <param name="characterStyleId">The character style the run names, or null.</param>
+    /// <param name="tableStyleRunProperties">
+    /// The table style's <c>w:rPr</c> layers for this cell, most specific first, or null outside a
+    /// table. See <see cref="TableStyleRunProperties"/>.
+    /// </param>
     public List<XElement> RunPropertyLayers(
         string localName,
         XElement? directRunProperties,
         string? paragraphStyleId,
-        string? characterStyleId)
+        string? characterStyleId,
+        IReadOnlyList<XElement>? tableStyleRunProperties = null)
     {
         ArgumentException.ThrowIfNullOrEmpty(localName);
 
@@ -529,6 +705,16 @@ public sealed class WordStyles
 
         AddChain(characterStyleId, WordStyleType.Character);
         AddChain(paragraphStyleId, WordStyleType.Paragraph);
+
+        // Under both style chains and over the document defaults, which is where §17.7.2 puts a table
+        // style: a paragraph style's font wins over the table's, and the table's over the default.
+        if (tableStyleRunProperties is not null)
+        {
+            foreach (XElement layer in tableStyleRunProperties)
+            {
+                if (Word.Child(layer, localName) is { } found) layers.Add(found);
+            }
+        }
 
         if (Word.Child(DefaultRunProperties, localName) is { } fallback) layers.Add(fallback);
 
@@ -574,6 +760,56 @@ public sealed class WordStyles
         }
 
         return chain;
+    }
+
+    /// <summary>
+    /// The <c>w:rPr</c> layers a table style applies to one cell, most specific first.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The layer §17.7.2 puts between the document defaults and the paragraph style, and the one this
+    /// reader had no notion of at all: <c>w:tblStylePr</c> was read by nothing, so a table style could
+    /// make its heading row bold and the heading row came out plain. That is not a cosmetic loss —
+    /// bold is wider, so the header wraps onto more lines, so the row is taller, so fewer body rows
+    /// fit on the page. Measured on <c>airbus-pdf-information-package_v1-4.docx</c>, whose repeated
+    /// header was three lines here against the reference's four, which moved one body row onto every
+    /// page from the sixth and left the last page holding a fifth of what it should.
+    /// </para>
+    /// <para>
+    /// A style's own layers come before its parent's, and within a style the order is
+    /// <see cref="WordTableStyleConditions.Names"/>'s — so a <c>firstRow</c> layer on the style beats a
+    /// <c>firstRow</c> layer on the style it is based on, and beats its own <c>wholeTable</c>.
+    /// </para>
+    /// </remarks>
+    /// <param name="tableStyleId">The <c>w:tblStyle</c> the table names, or null.</param>
+    /// <param name="conditions">Which regions the cell is in, and which the table asked for.</param>
+    public List<XElement> TableStyleRunProperties(
+        string? tableStyleId, WordTableStyleConditions conditions)
+    {
+        List<XElement> layers = [];
+
+        WordStyle? current = Find(tableStyleId, WordStyleType.Table);
+        if (current is null) return layers;
+
+        IReadOnlyList<string> names = conditions.Names;
+        HashSet<string> visited = new(StringComparer.Ordinal);
+
+        for (int depth = 0; current is not null && depth < MaxBasedOnDepth; depth++)
+        {
+            foreach (string name in names)
+            {
+                if (current.ConditionalRunProperties.TryGetValue(name, out XElement? found))
+                    layers.Add(found);
+            }
+
+            // The unconditional half last, since every conditional layer refines it.
+            if (current.RunProperties is { } own) layers.Add(own);
+
+            if (!visited.Add(current.StyleId)) break;
+            current = Find(current.BasedOn, WordStyleType.Table);
+        }
+
+        return layers;
     }
 
     /// <summary>
@@ -625,11 +861,16 @@ public sealed class WordStyles
     /// <param name="characterStyleId">
     /// The character style the run names through <c>w:rStyle</c>, or null.
     /// </param>
+    /// <param name="tableStyleRunProperties">
+    /// The table style's <c>w:rPr</c> layers for this cell, most specific first, or null outside a
+    /// table. See <see cref="TableStyleRunProperties"/>.
+    /// </param>
     public WordProperty ResolveRunProperty(
         string localName,
         XElement? directRunProperties,
         string? paragraphStyleId,
-        string? characterStyleId)
+        string? characterStyleId,
+        IReadOnlyList<XElement>? tableStyleRunProperties = null)
     {
         ArgumentException.ThrowIfNullOrEmpty(localName);
 
@@ -647,6 +888,8 @@ public sealed class WordStyles
             // Ordinary properties: the innermost layer that sets one wins.
             if (fromCharacter.HasValue) return fromCharacter;
             if (fromParagraph.HasValue) return fromParagraph;
+            if (FromTableStyle(localName, tableStyleRunProperties) is { HasValue: true } table)
+                return table;
             return ResolveInDocumentDefaults(runProperty: true, localName);
         }
 
@@ -662,7 +905,32 @@ public sealed class WordStyles
 
         if (fromCharacter.HasValue) return fromCharacter;
         if (fromParagraph.HasValue) return fromParagraph;
+
+        // The table style does *not* take part in the toggle cancellation above, and that is a reading
+        // of §17.7.3 rather than a shortcut: the rule cancels a toggle set by a paragraph style and a
+        // character style, which are the two chains a run is in at once. A table style is a third,
+        // outer layer — the run is in it by where it sits rather than by naming it — and cancelling
+        // against it would turn a heading row's bold *off* in any table whose cells use a bold
+        // paragraph style, which is not what Word draws.
+        if (FromTableStyle(localName, tableStyleRunProperties) is { HasValue: true } fromTable)
+            return fromTable;
+
         return ResolveInDocumentDefaults(runProperty: true, localName);
+    }
+
+    /// <summary>The first table-style layer to state a property, or unset.</summary>
+    private static WordProperty FromTableStyle(
+        string localName, IReadOnlyList<XElement>? tableStyleRunProperties)
+    {
+        if (tableStyleRunProperties is null) return WordProperty.Unset;
+
+        foreach (XElement layer in tableStyleRunProperties)
+        {
+            if (Word.Child(layer, localName) is { } found)
+                return new WordProperty(found, WordPropertyOrigin.Inherited);
+        }
+
+        return WordProperty.Unset;
     }
 
     /// <summary>

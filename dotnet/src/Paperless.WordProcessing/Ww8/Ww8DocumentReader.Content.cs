@@ -103,7 +103,12 @@ public sealed partial class Ww8DocumentReader
                     continue;
 
                 case Special.SectionMark:
-                    if (!afterParagraphMark) EndParagraph(state, position);
+                    // Inside a table the character is dropped entirely, paragraph end and all —
+                    // "#i1909# section/page breaks should not occur in tables, word itself ignores
+                    // them in this case", `SwWW8ImplReader::HandlePageBreakChar`
+                    // (`sw/source/filter/ww8/ww8par.cxx`:3443), whose whole body is under
+                    // `if (!m_nInTable)`. See <see cref="IsInATable"/>.
+                    if (!afterParagraphMark && !IsInATable(position)) EndParagraph(state, position);
                     continue;
 
                 case Special.LineBreak:
@@ -378,6 +383,28 @@ public sealed partial class Ww8DocumentReader
     // ------------------------------------------------------------------- formatting
 
     /// <summary>
+    /// Whether the paragraph a character position falls in belongs to a table.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// LibreOffice's <c>m_nInTable</c>, asked of the paragraph rather than kept as walk state, which is
+    /// the same answer: the reader enters a table when the paragraph's own <c>sprmPFInTable</c> says so,
+    /// and it is that flag both walks already route cells and rows by.
+    /// </para>
+    /// <para>
+    /// It exists for one caller, U+000C. A page or section break inside a table is ignored outright by
+    /// Word and therefore by Writer, and treating it as an ordinary break character adds an empty
+    /// paragraph per occurrence. Measured on <c>A_320.doc</c>, whose "23-5" identification row holds
+    /// <em>four</em> consecutive U+000C between the row-end mark and <c>Aircraft:</c>: three of them
+    /// each opened a paragraph of their own, making that one row 83.7 pt tall against the reference's
+    /// 34.0 pt, pushing 26 pt of the page's filler row onto a page of its own and costing the document a
+    /// page — 119 against 118. One of its 106 identification cells is affected; the other 105 have no
+    /// U+000C in them at all, which is why the defect is a single page rather than a hundred.
+    /// </para>
+    /// </remarks>
+    private bool IsInATable(int position) => ResolveParagraphFormat(position).Level > 0;
+
+    /// <summary>
     /// The paragraph formatting at a paragraph mark.
     /// </summary>
     /// <remarks>
@@ -470,6 +497,10 @@ public sealed partial class Ww8DocumentReader
                     // Signed as the sprm gave it: positive is a floor and negative an exact height that
                     // clips, and the sign is the only thing that says which.
                     format = format with { RowHeightTwips = sprm.SignedWord };
+                    break;
+
+                case Ww8SprmReader.Ids.RowAlignment:
+                    format = format with { RowAlignment = sprm.Word & 3 };
                     break;
 
                 case Ww8SprmReader.Ids.TableDefinition:
@@ -782,6 +813,17 @@ public readonly record struct Ww8ParagraphFormat
     /// rather than anywhere a row begins.
     /// </remarks>
     public int RowHeightTwips { get; init; }
+
+    /// <summary>
+    /// <c>sprmTJc90</c>'s low two bits: 0 left, 1 centre, 2 right, 3 centre again.
+    /// </summary>
+    /// <remarks>
+    /// Zero when the document states nothing, which is the same answer as a stated left — WW8's own
+    /// default, and <c>WW8TabDesc</c> initialises <c>m_eOri</c> to <c>HoriOrientation::LEFT</c> for it.
+    /// On the paragraph format because it is a row property, and WW8 states those on the mark that ends
+    /// the row.
+    /// </remarks>
+    public int RowAlignment { get; init; }
 
     /// <summary>
     /// The cell padding the row declares, as the entries the document stated.

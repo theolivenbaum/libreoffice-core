@@ -40,7 +40,44 @@ public readonly record struct ShapingOptions(
     string? Script = null,
     bool DisableKerning = false,
     bool DisableLigatures = false,
-    bool RightToLeft = false);
+    bool RightToLeft = false)
+{
+    /// <summary>
+    /// These options as they apply to a run carrying <paramref name="tracking"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>Tracking suppresses the optional ligatures.</strong> A ligature exists to fix a
+    /// collision between two letters set at their natural distance; once a designer has pushed
+    /// them apart there is no collision, and drawing one anyway sets a joined pair inside a
+    /// line that is loose everywhere else. LibreOffice states the rule in one place —
+    /// <c>vcl/source/outdev/text.cxx:996-998</c> turns <c>Font::IsFixKerning()</c>, which is
+    /// <c>mnSpacing != 0</c>, into <c>SalLayoutFlags::DisableLigatures</c>, and
+    /// <c>CommonSalLayout.cxx:453</c> turns that into <c>liga=0, clig=0</c>. The item feeding
+    /// it is <c>RES_CHRATR_KERNING</c>/<c>EE_CHAR_KERNING</c>, which is exactly what
+    /// <c>w:spacing</c>, <c>\expndtw</c>, <c>a:rPr/@spc</c> and <c>fo:letter-spacing</c> all
+    /// land in.
+    /// </para>
+    /// <para>
+    /// It is not a cosmetic difference and it reaches further than the glyphs. Measured on
+    /// <c>words/batch-008/…/FAA-2017-0628-0002_attachment_1.docx</c>, whose cover footer is a
+    /// 10 pt Carlito-Bold run tracked at <c>w:spacing="60"</c>: forming Carlito's <c>t</c>+<c>i</c>
+    /// ligature there put <em>one</em> glyph in the PDF whose <c>ToUnicode</c> entry mapped to
+    /// two characters — and poppler responds to a multi-character entry by dropping its
+    /// intra-word gap tolerance from 0.400 em to 0.100 em for the whole line, below the 0.300 em
+    /// the tracking itself puts between every pair. The line's 45 glyphs then extracted as 45
+    /// separate words against the reference's 8, on a document whose whitespace-stripped
+    /// character stream was byte-identical to the reference's. So a single wrong ligature cost
+    /// 28 words of a 638-word document and made the run unsearchable.
+    /// </para>
+    /// <para>
+    /// The <em>required</em> ligatures are untouched, here as in LibreOffice: <c>rlig</c> is not
+    /// in the list, so tracked Arabic still joins.
+    /// </para>
+    /// </remarks>
+    public ShapingOptions WithTracking(Core.Units.Length tracking)
+        => tracking == Core.Units.Length.Zero ? this : this with { DisableLigatures = true };
+}
 
 /// <summary>
 /// Turns characters into positioned glyphs.

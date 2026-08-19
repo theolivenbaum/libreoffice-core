@@ -5,7 +5,7 @@ engine (`sw/source/core/layout`, `sw/source/core/text`), and the three main impo
 (DOCX/OOXML via `sw/source/writerfilter`, DOC/WW8 via `sw/source/filter/ww8`, ODF via
 `xmloff/source/text` + `sw/source/filter/xml`). Every non-obvious claim below is backed by a
 `path:line` citation into this checkout. Paths are relative to the repo root
-`/home/user/libreoffice-core`.
+`/c/sandbox/workdir/libreoffice-core`.
 
 NOTE ON THIS CHECKOUT'S LAYOUT: in current `libreoffice-core`, the `writerfilter` module that
 older docs refer to as top-level `writerfilter/` has been merged into

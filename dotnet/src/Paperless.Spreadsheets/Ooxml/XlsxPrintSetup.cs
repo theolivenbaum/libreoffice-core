@@ -148,8 +148,26 @@ internal static class XlsxPrintSetup
 
         string? headerText = Xlsx.Child(headerFooter, "oddHeader")?.Value;
         string? footerText = Xlsx.Child(headerFooter, "oddFooter")?.Value;
-        bool hasHeader = !string.IsNullOrEmpty(headerText);
-        bool hasFooter = !string.IsNullOrEmpty(footerText);
+
+        // `differentFirst` gives the first page its own pair. Reading the flag matters even when
+        // the file supplies no first-page strings, which is the only shape this corpus holds: all
+        // 49 workbooks that set it state no firstHeader or firstFooter, so their first page must
+        // print bare. Calc keeps the same distinction in `mbShareFirst = !bUseFirstContent`
+        // (sc/source/filter/oox/pagesettings.cxx:1019) rather than deriving it from the strings.
+        bool differentFirst = Xlsx.Flag(headerFooter, "differentFirst");
+        string? firstHeaderText = differentFirst
+            ? Xlsx.Child(headerFooter, "firstHeader")?.Value
+            : null;
+        string? firstFooterText = differentFirst
+            ? Xlsx.Child(headerFooter, "firstFooter")?.Value
+            : null;
+
+        // The band is sized from every variant that has content, not from the odd pair alone —
+        // `orHFData.mnHeight = max(nOddHeight, nEvenHeight, nFirstHeight)` and `mbHasContent` is
+        // the OR of the three (pagesettings.cxx:1017,1026). One height serves every page, which
+        // is why giving the first page different ink moves no page boundary.
+        bool hasHeader = !string.IsNullOrEmpty(headerText) || !string.IsNullOrEmpty(firstHeaderText);
+        bool hasFooter = !string.IsNullOrEmpty(footerText) || !string.IsNullOrEmpty(firstFooterText);
 
         // Only a header with content occupies a band. Calc's "header is on" flag is set from
         // whether any of the three header strings is non-empty, not from the margin being
@@ -160,12 +178,14 @@ internal static class XlsxPrintSetup
         // band grows by however much the real line height exceeds the bare point size. See
         // SheetBandHeight, which is the port.
         Length headerBand = hasHeader
-            ? SheetBandHeight.Printed(
-                headerText, Length.FromInches(Math.Max(0, top - header)), defaultFont)
+            ? Taller(
+                headerText, firstHeaderText, Length.FromInches(Math.Max(0, top - header)),
+                defaultFont)
             : Length.Zero;
         Length footerBand = hasFooter
-            ? SheetBandHeight.Printed(
-                footerText, Length.FromInches(Math.Max(0, bottom - footer)), defaultFont)
+            ? Taller(
+                footerText, firstFooterText, Length.FromInches(Math.Max(0, bottom - footer)),
+                defaultFont)
             : Length.Zero;
 
         bool landscape = string.Equals(
@@ -192,6 +212,13 @@ internal static class XlsxPrintSetup
             // the page's own margins, where the ODS twin indents by a further two centimetres.
             Header = headerText is null ? null : SheetHeaderFooter.ParseCodes(headerText),
             Footer = footerText is null ? null : SheetHeaderFooter.ParseCodes(footerText),
+            FirstHeader = firstHeaderText is null
+                ? null
+                : SheetHeaderFooter.ParseCodes(firstHeaderText),
+            FirstFooter = firstFooterText is null
+                ? null
+                : SheetHeaderFooter.ParseCodes(firstFooterText),
+            DifferentFirstPage = differentFirst,
 
             // Every Excel band is dynamic — see `SheetPrintSetup.HeaderIsDynamic`.
             HeaderIsDynamic = true,
@@ -286,34 +313,27 @@ internal static class XlsxPrintSetup
     /// </remarks>
     private static DocSize PaperSize(XElement? setup, bool landscape)
     {
-        if (setup is null || Xlsx.Flag(setup, "usePrinterDefaults"))
-        {
-            (Length defaultWidth, Length defaultHeight) = ExcelPaperSizes.A4;
-            return landscape
-                ? new DocSize(defaultHeight, defaultWidth)
-                : new DocSize(defaultWidth, defaultHeight);
-        }
-
-        Length width;
-        Length height;
+        // No page setup, or one that defers to the printer, leaves the application's own paper
+        // standing — and the orientation with it. See ExcelPaperSizes.Default: measured,
+        // `usePrinterDefaults="1"` with `orientation="landscape"` renders A4 portrait.
+        if (setup is null || Xlsx.Flag(setup, "usePrinterDefaults")) return ExcelPaperSizes.Default;
 
         Length? statedWidth = Measure(Xlsx.Attribute(setup, "paperWidth"));
         Length? statedHeight = Measure(Xlsx.Attribute(setup, "paperHeight"));
 
         if (statedWidth is { } explicitWidth && statedHeight is { } explicitHeight)
         {
-            width = explicitWidth;
-            height = explicitHeight;
-        }
-        else
-        {
-            // Index 9 is A4 and index 1 is Letter; the default is Letter, which is what Excel
-            // writes for an American workbook and what the OOXML importer defaults to
-            // (pagesettings.cxx:103, mnPaperSize(1)).
-            (width, height) = ExcelPaperSizes.Portrait(Xlsx.Integer(setup, "paperSize") ?? 1);
+            // An explicit measure is always honoured, so the orientation applies to it.
+            return landscape
+                ? new DocSize(explicitHeight, explicitWidth)
+                : new DocSize(explicitWidth, explicitHeight);
         }
 
-        return landscape ? new DocSize(height, width) : new DocSize(width, height);
+        // Index 9 is A4 and index 1 is Letter; the default is Letter, which is what Excel
+        // writes for an American workbook and what the OOXML importer defaults to
+        // (pagesettings.cxx:103, mnPaperSize(1)). An index outside the table takes the
+        // application's paper *unrotated* — see ExcelPaperSizes.Page.
+        return ExcelPaperSizes.Page(Xlsx.Integer(setup, "paperSize") ?? 1, landscape);
     }
 
     /// <summary>
@@ -500,6 +520,26 @@ internal static class XlsxPrintSetup
             "pc" => Length.FromPoints(number * 12),
             _ => null,
         };
+    }
+
+    /// <summary>The taller of the two bands a variant needs, in Calc's own terms.</summary>
+    /// <remarks>
+    /// One height serves every page of the sheet, so the band has to fit whichever variant is
+    /// tallest — <c>max(nOddHeight, nEvenHeight, nFirstHeight)</c> at
+    /// <c>sc/source/filter/oox/pagesettings.cxx:1026</c>. A first-page header of three lines over
+    /// an odd one of a single line reserves three lines on every page, blank ones included.
+    /// </remarks>
+    private static Length Taller(
+        string? odd, string? first, Length available, SheetDefaultFont? defaultFont)
+    {
+        Length forOdd = string.IsNullOrEmpty(odd)
+            ? Length.Zero
+            : SheetBandHeight.Printed(odd, available, defaultFont);
+        Length forFirst = string.IsNullOrEmpty(first)
+            ? Length.Zero
+            : SheetBandHeight.Printed(first, available, defaultFont);
+
+        return forOdd > forFirst ? forOdd : forFirst;
     }
 
     private static double Inches(XElement? element, string attribute, double fallback)

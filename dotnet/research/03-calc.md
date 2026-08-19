@@ -6,7 +6,7 @@ guide a from-scratch C# reimplementation that must (a) extract content
 faithfully and (b) produce headless, paginated visual output equivalent to
 LibreOffice's own screen/print rendering.
 
-All paths are relative to the repo root (`/home/user/libreoffice-core`)
+All paths are relative to the repo root (`/c/sandbox/workdir/libreoffice-core`)
 unless stated otherwise. Citations are `path:line`.
 
 ---

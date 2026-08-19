@@ -117,6 +117,60 @@ public sealed record SlideTextBody
     /// </remarks>
     public double FontScale { get; init; } = 1.0;
 
+    /// <summary>
+    /// The WordArt preset the body is warped along — <c>a:bodyPr/a:prstTxWarp/@prst</c> — or
+    /// null when it is ordinary text.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>textNoShape</c> is normalised to null on read: it is the value that means <em>no</em>
+    /// warp, and the reference tests for exactly that
+    /// (<c>oox/source/drawingml/textbodypropertiescontext.cxx:215-226</c> and
+    /// <c>oox/source/drawingml/shape.cxx:2202-2211</c>) before putting the shape into text-path
+    /// mode. So a non-null value here means Fontwork and nothing else does.
+    /// </para>
+    /// <para>
+    /// See <see cref="IsTextPath"/> for what that costs the text layer.
+    /// </para>
+    /// </remarks>
+    public string? WarpPreset { get; init; }
+
+    /// <summary>
+    /// Whether the body is Fontwork: drawn as glyph outlines rather than as text.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A warped body is not text in the reference's output. <c>putCustomShapeIntoTextPathMode</c>
+    /// turns the shape into a Fontwork custom shape, and
+    /// <c>svx/source/customshapes/EnhancedCustomShapeFontWork.cxx</c> converts its characters to
+    /// <c>tools::PolyPolygon</c> outlines, so what reaches a PDF is filled paths carrying no
+    /// glyph and no <c>ToUnicode</c>. Measured on the installed 26.2.4.2 rather than assumed:
+    /// the reference's page 13 of <c>FAAAIandtheArtandScienceofV&amp;Vfinal.pptx</c> holds 597
+    /// curve operators where ours holds 4, and neither <c>Automation</c> nor <c>Autonomy</c> —
+    /// words that exist only inside its warped bodies — appears anywhere in its text layer. The
+    /// same is true of <c>prst="textPlain"</c>, which curves nothing:
+    /// <c>redac-sas-201403-ppt-portfolio-rev-sim.pptx</c>'s <c>Fractographic Examinations</c>
+    /// is absent from the reference too. The test really is "not <c>textNoShape</c>".
+    /// </para>
+    /// <para>
+    /// <strong>Paperless draws nothing for such a body, which is deliberately a partial.</strong>
+    /// The arch geometry is not implemented, and until it is, the honest choice is between
+    /// leaving unwarped glyphs where they fall and drawing nothing. Measured on that document's
+    /// page 13, the four Fontwork outlines the reference draws sit 14 to 40 pt away from where
+    /// the unwarped runs land — always outward along the box's own local up for
+    /// <c>textArchUp</c> and down for <c>textArchDown</c>, which is the arch's radial
+    /// displacement. Ink in the wrong place counts twice in a comparison against the reference
+    /// and absent ink counts once, so drawing nothing is the nearer of the two; the measurement
+    /// that settles it is in <c>dotnet/probes/slides-extra-01/results.md</c>.
+    /// </para>
+    /// <para>
+    /// Extraction is unaffected. <c>paperless extract</c> reads the body through
+    /// <c>DrawingTextBody</c>, which never consults this, so the words stay in the content tree
+    /// — as they should: they are the document's own words, and it is only the *rendering* that
+    /// turns them into a picture.
+    /// </para>
+    /// </remarks>
+    public bool IsTextPath => WarpPreset is not null;
 
     /// <summary>
     /// Whether the text wraps at the shape's width.
@@ -310,10 +364,32 @@ public readonly record struct SlideEscapement(int Percent, int Proportion)
 /// break and is drawn from the face's own <c>post</c> metrics after the text is placed.
 /// </param>
 /// <param name="IsStruckThrough">Whether a rule is drawn through it.</param>
+/// <param name="IsShadowed">
+/// Whether the characters cast the legacy per-character drop shadow — bit 4 of a PPT
+/// character-property mask. Like the decorations above it moves no line break, because the
+/// shadow is the same glyphs drawn a second time at an offset derived from the font's line
+/// height rather than from anything the paragraph measured. See
+/// <see cref="SlideTextLayout"/>'s <c>ShadowOffset</c> for the rule and the probe behind it.
+/// </param>
 /// <param name="Escapement">
 /// How far off its baseline the run sits and how much it shrinks to sit there — a superscript or
 /// a subscript. Unlike the decorations above, this <em>does</em> move line breaks, because the
 /// shrink is what makes the run narrower.
+/// </param>
+/// <param name="SymbolFont">
+/// The face the run's <em>private-use</em> characters are drawn from, or null when it names none.
+/// <para>
+/// DrawingML's <c>a:rPr/a:sym</c>, and a second family rather than a replacement for
+/// <see cref="Typeface"/> because it governs only part of the run: LibreOffice switches the face
+/// over each maximal stretch of characters satisfying <c>(ch &amp; 0xff00) == 0xf000</c> and
+/// restores it after every one (<c>oox/source/drawingml/textrun.cxx:96-135</c>). A run reading
+/// "see &#xF0E0; overleaf" is set in its own face except for the arrow.
+/// </para>
+/// <para>
+/// It is resolved by <c>SlideSymbolRuns</c> before anything is measured, because whether the slot
+/// is drawn as it stands or recoded into OpenSymbol turns on whether the named face is installed
+/// — which a reader cannot know.
+/// </para>
 /// </param>
 public readonly record struct SlideTextRun(
     int Start,
@@ -326,11 +402,63 @@ public readonly record struct SlideTextRun(
     Length Tracking = default,
     bool IsUnderlined = false,
     bool IsStruckThrough = false,
-    SlideEscapement Escapement = default)
+    bool IsShadowed = false,
+    SlideEscapement Escapement = default,
+    SlideSymbolFont? SymbolFont = null)
 {
     /// <summary>One past the run's last character.</summary>
     public int End => Start + Length;
 }
+
+/// <summary>
+/// The face a run's private-use characters are drawn from — DrawingML's <c>a:rPr/a:sym</c>.
+/// </summary>
+/// <remarks>
+/// <para>
+/// The two halves are one value because the second decides what the first means, and separating
+/// them cost a measurement. <c>a:sym</c>'s <c>@charset</c> is what makes the request a
+/// <em>symbol-encoded</em> one — <c>TextFont::implGetFontData</c> reports
+/// <c>mnCharset == WINDOWS_CHARSET_SYMBOL</c>, which is the value 2, and nothing else
+/// (<c>oox/source/drawingml/textfont.cxx:87-94</c>) — and that flag decides which of two entirely
+/// different resolutions the face gets.
+/// </para>
+/// <para>
+/// <strong>A symbol-encoded request never reaches fontconfig at all.</strong>
+/// <c>FcPreMatchSubstitution::FindFontSubstitute</c> returns false immediately for one
+/// (<c>vcl/unx/generic/font/fontsubst.cxx:100-104</c>), so the request falls to
+/// <c>VCL.xcu</c>'s own chain, which names <c>opensymbol</c> for Wingdings and its relatives —
+/// and the recode follows. A request that is <em>not</em> symbol-encoded is answered by
+/// fontconfig first, and fontconfig has no idea the name meant a symbol font: it answers
+/// <c>Wingdings</c> with DejaVu Sans, and the slot is then drawn from DejaVu Sans as it stands.
+/// </para>
+/// <para>
+/// Measured against the banked 26.2.4.2 references rather than reasoned from the tree, on the
+/// three corpus decks that state the two combinations:
+/// </para>
+/// <list type="bullet">
+/// <item><description><c>Structural Testing.pptx</c> states <c>&lt;a:sym typeface="Symbol"
+/// charset="0"/&gt;</c> — <em>not</em> symbol-encoded — and the reference recodes all five of its
+/// slots anyway, because fontconfig answers the family "Symbol" with OpenSymbol on its own. Its
+/// OpenSymbol glyphs on pages 3, 4, 5, 6 and 26 sit within 0.3 pt of ours.</description></item>
+/// <item><description><c>16 - UTM - (NASA).pptx</c> and
+/// <c>Stakeholders-v08052017 - v5.pptx</c> both state <c>&lt;a:sym typeface="Wingdings"/&gt;</c>
+/// with no charset, and the reference draws those three slots in <b>DejaVu Sans</b> — at
+/// (175.9, 94.3) and (189.2, 29.1) on the latter's page 8, where we had put OpenSymbol.
+/// </description></item>
+/// </list>
+/// <para>
+/// So the rule is not "the charset decides whether to recode". It is "the charset decides
+/// whether fontconfig is consulted", and the recode then follows from where the face actually
+/// landed — which is the same rule the bullet path has always had.
+/// </para>
+/// </remarks>
+/// <param name="Typeface">The family <c>a:sym/@typeface</c> names.</param>
+/// <param name="IsMicrosoftEncoded">
+/// Whether <c>a:sym/@charset</c> is 2, VCL's <c>IsMicrosoftSymbolEncoded</c>. Absent and 0 both
+/// mean false; <c>WINDOWS_CHARSET_DEFAULT</c> is 1, so an unstated charset is not symbol-encoded
+/// either.
+/// </param>
+public readonly record struct SlideSymbolFont(string Typeface, bool IsMicrosoftEncoded);
 
 /// <summary>
 /// Resolves the faces a slide's text needs, once per distinct request.
@@ -352,21 +480,138 @@ public sealed class SlideFonts
     public SlideFonts(SystemFontResolver? fonts = null)
         => _fonts = fonts ?? new SystemFontResolver(SystemFontIndex.Build());
 
+    /// <summary>
+    /// The pitch the deck declares for a typeface, when its format states one.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Both binary formats carry it and neither was read until it was measured to matter: PPTX puts
+    /// it in the low two bits of <c>pitchFamily</c> on <c>&lt;a:latin&gt;</c>, PPT in
+    /// <c>lfPitchAndFamily</c> at the end of each <c>FontEntityAtom</c>. LibreOffice sends it to
+    /// fontconfig, and for a family fontconfig files under no generic it is the only thing that
+    /// says the text is meant to line up in columns.
+    /// </para>
+    /// <para>
+    /// <strong>Measured, on the corpus and then in isolation.</strong>
+    /// <c>airbus-powerpoint-presentation-2019-20…pptx</c> declares <c>Lucida Console</c> with
+    /// <c>pitchFamily="49"</c> — fixed pitch, modern family — and 26.2.4.2 draws it in DejaVu Sans
+    /// Mono. Re-zipping the same deck with that one attribute removed and nothing else changed, it
+    /// draws DejaVu Sans instead, which is fontconfig's answer for a name it files under nothing.
+    /// <c>introduction_to_bea_tuxedo.ppt</c> is the same fact in the binary format:
+    /// <c>lfPitchAndFamily</c> is <c>0x31</c> for Lucida Console and <c>0x12</c> for Times New
+    /// Roman in the same collection.
+    /// </para>
+    /// <para>
+    /// The pitch and not the family class, deliberately. The family bits are in the same byte and
+    /// the word processor's equivalent leaves them alone for the same reason — declaring a family
+    /// class changes the answer for every name in the deck and has never been measured on a slide,
+    /// where a declared *pitch* has now been measured twice.
+    /// </para>
+    /// </remarks>
+    /// <remarks>
+    /// Settable rather than <c>init</c>-only because a PPT's font collection lives inside the
+    /// <c>Environment</c> container, which is not read until layout starts and so is not available
+    /// where the cache is constructed. The delegate is wired once, before any request reaches it.
+    /// </remarks>
+    public Func<string, FontPitch>? DeclaredPitches { get; set; }
+
+    /// <summary>
+    /// The face the deck carries for a request, when it carries one.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Answers a path to the face, which is what <see cref="FontRequest.EmbeddedFaceKey"/> takes
+    /// and what every backend downstream of resolution can open. Null means the deck embeds
+    /// nothing usable for this family, which is true of all but three documents in the slides
+    /// track, so that is the path that has to stay cheap.
+    /// </para>
+    /// <para>
+    /// The weight and the slant are arguments rather than the family alone, because one
+    /// <c>p:embeddedFont</c> carries up to four styles under a single name and a run picks among
+    /// them. Beside <see cref="DeclaredPitches"/> and settable for the same reason: the deck's
+    /// font list lives on a part the format-specific layout owns.
+    /// </para>
+    /// </remarks>
+    public Func<string, int, bool, string?>? EmbeddedFaces { get; set; }
+
+    /// <summary>
+    /// The pitch in a Windows <c>LOGFONT.lfPitchAndFamily</c> byte.
+    /// </summary>
+    /// <remarks>
+    /// Shared by both readers because both formats carry the same byte: PPTX writes it as the
+    /// decimal <c>pitchFamily</c> attribute, PPT as the last byte of a <c>FontEntityAtom</c>, and
+    /// the WW8 font table as <c>FFN.prq</c>. The low two bits are the pitch and the high four the
+    /// family; only the pitch is read here.
+    /// </remarks>
+    /// <param name="pitchAndFamily">The byte, as written.</param>
+    public static FontPitch PitchIn(int pitchAndFamily)
+        => (pitchAndFamily & 0x03) switch
+        {
+            1 => FontPitch.Fixed,
+            2 => FontPitch.Variable,
+            _ => FontPitch.Unknown,
+        };
+
     /// <summary>The substitutions made so far, which is the first thing a comparison checks.</summary>
     public IReadOnlyList<FontSubstitution> Substitutions => _fonts.Substitutions;
+
+    /// <summary>
+    /// Where a run looks for a face when the one it named has no glyph for a character.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The resolver that chose the run's face in the first place, which is what
+    /// <see cref="IGlyphFallbackResolver"/> asks for: a fallback decided by a second index could
+    /// name a face this one would not have chosen, and the face decides the advance. The word
+    /// processor exposes the same thing off its own cache for the same reason
+    /// (<c>LayoutFonts.Fallback</c>).
+    /// </para>
+    /// <para>
+    /// Without it a character the run's face cannot draw is shaped to <c>.notdef</c> and drawn as
+    /// that face's missing-glyph box — which for a face that declines to draw one is nothing at
+    /// all, so the text is <em>invisible</em> and no gate column sees it: the code point still
+    /// reaches the PDF with a correct <c>ToUnicode</c>, so <c>pdftotext</c> extracts it and the
+    /// word count is unmoved. Measured on
+    /// <c>southern-classic-kennesaw-state-university-final.pptx</c>, whose body text holds 132
+    /// U+25D8 inverse bullets: LibreOffice falls back to DejaVu Sans and embeds it, and we kept
+    /// Carlito and drew 132 blanks. The one column that showed it was <c>fonts</c>, at 6/7.
+    /// </para>
+    /// </remarks>
+    public IGlyphFallbackResolver Fallback => _fonts;
+
+    /// <summary>The mid-run fallbacks made so far, resolved or not.</summary>
+    /// <remarks>
+    /// Beside <see cref="Substitutions"/> and for the same reason: a fallback face is almost never
+    /// metric-compatible with the one it replaces, so it moves the line breaks after it, and a
+    /// comparison against a reference renderer otherwise cannot tell that from a layout bug.
+    /// </remarks>
+    public IReadOnlyList<GlyphFallback> GlyphFallbacks => _fonts.GlyphFallbacks;
 
     /// <summary>The face and reference a request resolves to, both null when nothing could be read.</summary>
     public (OpenTypeFace? Face, FontReference? Reference) Resolve(
         string? family, int weight, bool isItalic)
     {
+        // The pitch is a property of the typeface rather than of the request, so it adds nothing to
+        // the key: two requests naming the same family declare the same pitch.
         (string?, int, bool) key = (family, weight, isItalic);
         if (_resolved.TryGetValue(key, out (OpenTypeFace?, FontReference?) cached)) return cached;
+
+        FontPitch pitch = family is { Length: > 0 } named && DeclaredPitches is { } declared
+            ? declared(named)
+            : FontPitch.Unknown;
+
+        // The deck's own copy of the face, when it has one. It wins over everything installed and
+        // over the whole substitution chain, because it is the face the author measured against —
+        // see `FontRequest.EmbeddedFaceKey`.
+        string? embedded = family is { Length: > 0 } carried && EmbeddedFaces is { } faces
+            ? faces(carried, weight, isItalic)
+            : null;
 
         (OpenTypeFace? Face, FontReference? Reference) resolved = default;
         try
         {
             FontReference reference = _fonts.Resolve(
-                new FontRequest(family ?? string.Empty, weight, isItalic));
+                new FontRequest(family ?? string.Empty, weight, isItalic, pitch, embedded));
             resolved = (_fonts.LoadOpenType(reference), reference);
         }
         catch (Exception exception) when (exception is Core.MalformedDocumentException

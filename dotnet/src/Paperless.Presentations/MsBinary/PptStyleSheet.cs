@@ -532,6 +532,7 @@ public static class PptCharacterStyle
         if ((flags & 0x0001) != 0) emphasis |= RunEmphasis.Bold;
         if ((flags & 0x0002) != 0) emphasis |= RunEmphasis.Italic;
         if ((flags & 0x0004) != 0) emphasis |= RunEmphasis.Underline;
+        if ((flags & 0x0010) != 0) emphasis |= RunEmphasis.Shadow;
         if ((flags & 0x0100) != 0) emphasis |= RunEmphasis.Strikethrough;
 
         if (escapement > 0) emphasis |= RunEmphasis.Superscript;
@@ -557,6 +558,7 @@ public static class PptCharacterStyle
         if ((mask & 0x0001) != 0) stated |= RunEmphasis.Bold;
         if ((mask & 0x0002) != 0) stated |= RunEmphasis.Italic;
         if ((mask & 0x0004) != 0) stated |= RunEmphasis.Underline;
+        if ((mask & 0x0010) != 0) stated |= RunEmphasis.Shadow;
         if ((mask & 0x0100) != 0) stated |= RunEmphasis.Strikethrough;
 
         // Escapement is one field carrying both directions, so stating it states both.

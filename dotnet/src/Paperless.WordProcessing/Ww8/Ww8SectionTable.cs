@@ -274,6 +274,15 @@ internal static class Ww8SectionTable
         Length footerDistance = DefaultHeaderDistance;
         Length columnGap = DefaultColumnGap;
         int columns = 1;
+
+        // sprmSFEvenlySpaced defaults to *on*, which is what `SwWW8ImplReader::SetCols` reads
+        // (`ww8par6.cxx`:996, `ReadBSprm(..., 1)`): a section that says nothing about its columns' widths
+        // wants them equal. The per-column widths and spacings are collected regardless and only used when
+        // the flag says they are meant to be, since a stale set left over from an earlier edit is common.
+        bool evenlySpaced = true;
+        SortedDictionary<int, Length> columnWidths = [];
+        SortedDictionary<int, Length> columnSpacings = [];
+
         bool landscape = false;
         bool rightToLeft = false;
         bool titlePage = false;
@@ -325,6 +334,21 @@ internal static class Ww8SectionTable
                     break;
                 case Sprms.ColumnGap:
                     columnGap = Twips(sprm);
+                    break;
+
+                case Sprms.EvenlySpacedColumns:
+                    evenlySpaced = sprm.Byte != 0;
+                    break;
+
+                // Three bytes, and the first of them is the column the other two are about: Word writes one
+                // of these per column rather than an array, so they arrive in no guaranteed order and a
+                // section can state a width for a column it does not have. Keyed by the stated index and
+                // sorted, which reads a well-formed section exactly and cannot mis-order a malformed one.
+                case Sprms.ColumnWidth:
+                    if (IndexedTwips(sprm) is { } stated) columnWidths[stated.At] = stated.Length;
+                    break;
+                case Sprms.ColumnSpacing:
+                    if (IndexedTwips(sprm) is { } spacing) columnSpacings[spacing.At] = spacing.Length;
                     break;
 
                 // sprmSFBiDi, one byte: the section reads right to left, which reverses the order
@@ -389,6 +413,7 @@ internal static class Ww8SectionTable
                 FooterHeight = Gap(footerDistance, margins.Bottom),
                 Columns = columns,
                 ColumnGap = columnGap,
+                ColumnRuler = Ruler(columns, evenlySpaced, columnWidths, columnSpacings),
                 IsLandscape = landscape,
                 IsRightToLeft = rightToLeft,
             },
@@ -418,10 +443,17 @@ internal static class Ww8SectionTable
     }
 
     /// <summary>A page dimension, or null when it is absent or implausible.</summary>
+    /// <remarks>
+    /// Fitted to the nearest standard paper dimension when it is within 0.44 mm of one, which is
+    /// what <c>ww8par6.cxx</c>:521 and :1083 do to <c>sprmSXaPage</c> and <c>sprmSYaPage</c> and to
+    /// no other section measurement — see <see cref="Model.PaperSizes"/>.
+    /// </remarks>
     private static Length? Dimension(Ww8Sprm sprm)
     {
         int twips = sprm.Word;
-        return twips is > 0 and <= 22 * 1440 ? Length.FromTwips(twips) : null;
+        return twips is > 0 and <= 22 * 1440
+            ? Model.PaperSizes.SloppyFit(Length.FromTwips(twips))
+            : null;
     }
 
     /// <summary>
@@ -432,6 +464,68 @@ internal static class Ww8SectionTable
     /// edge, and reading it unsigned turns minus a centimetre into most of a metre.
     /// </remarks>
     private static Length Twips(Ww8Sprm sprm) => Length.FromTwips(sprm.SignedWord);
+
+    /// <summary>
+    /// A three-byte operand that names a column and then measures it.
+    /// </summary>
+    /// <remarks>
+    /// <c>sprmSDxaColWidth</c> and <c>sprmSDxaColSpacing</c> are the only section sprms shaped this way,
+    /// and both are read exactly as <c>SwWW8ImplReader::SetCols</c> reads them: the index in the first
+    /// byte and an unsigned width in the two after it (<c>ww8par6.cxx</c>:1006-1030, which reaches for
+    /// them through <c>HasSprm(id, nColumn)</c> — a lookup by that first byte).
+    /// </remarks>
+    private static (int At, Length Length)? IndexedTwips(Ww8Sprm sprm)
+    {
+        if (sprm.Operand.Length < 3) return null;
+
+        ReadOnlySpan<byte> operand = sprm.Operand.Span;
+        int at = operand[0];
+
+        return at is >= 0 and < MaxColumns
+            ? (at, Length.FromTwips(BinaryPrimitives.ReadUInt16LittleEndian(operand[1..])))
+            : null;
+    }
+
+    /// <summary>
+    /// The stated column widths, when the section says its columns are not evenly spaced and states
+    /// enough of them to be believed.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Null unless every column has a width, which is the leniency this needs: Word writes one sprm per
+    /// column and a truncated or edited section can be missing some, in which case the count and the gap
+    /// still describe the section perfectly well and a half-filled ruler would not. LibreOffice's own
+    /// reader substitutes 1440 twips for a missing width — a plain inch, unrelated to the measure — which
+    /// is a worse answer than even columns for every page size but one.
+    /// </para>
+    /// <para>
+    /// The last column has no spacing after it, so a section states one fewer of those than of the widths.
+    /// </para>
+    /// </remarks>
+    private static ColumnRuler? Ruler(
+        int columns,
+        bool evenlySpaced,
+        SortedDictionary<int, Length> widths,
+        SortedDictionary<int, Length> spacings)
+    {
+        if (evenlySpaced || columns < 2) return null;
+
+        List<Length> stated = new(columns);
+        List<Length> gaps = new(columns - 1);
+
+        for (int i = 0; i < columns; i++)
+        {
+            if (!widths.TryGetValue(i, out Length width) || width <= Length.Zero) return null;
+            stated.Add(width);
+
+            if (i < columns - 1) gaps.Add(spacings.GetValueOrDefault(i));
+        }
+
+        return new ColumnRuler(stated, gaps);
+    }
+
+    /// <summary>The most columns a section can have, which is what <c>ccolM1</c> is clamped to above.</summary>
+    private const int MaxColumns = 64;
 
     /// <summary>
     /// The section sprms, from LibreOffice's <c>sprmids.hxx</c>.
@@ -446,6 +540,15 @@ internal static class Ww8SectionTable
         internal const ushort TitlePage = 0x300A;
         internal const ushort ColumnCount = 0x500B;
         internal const ushort ColumnGap = 0x900C;
+
+        /// <summary><c>sprmSDxaColWidth</c>: one column's own width, three bytes, index first.</summary>
+        internal const ushort ColumnWidth = 0xF203;
+
+        /// <summary><c>sprmSDxaColSpacing</c>: the gap after one column, in the same shape.</summary>
+        internal const ushort ColumnSpacing = 0xF204;
+
+        /// <summary><c>sprmSFEvenlySpaced</c>: off when the section states a width per column.</summary>
+        internal const ushort EvenlySpacedColumns = 0x3005;
         internal const ushort RestartsPageNumbering = 0x3011;
 
         /// <summary><c>sprmSNfcPgn</c>, the sequence the section's page numbers are written in.</summary>

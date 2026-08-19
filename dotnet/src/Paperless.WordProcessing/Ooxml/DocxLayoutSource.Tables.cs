@@ -74,6 +74,12 @@ public sealed partial class DocxLayoutSource
             Word.Child(properties, "tblCellMar"),
             StyleCellPadding(styleId, DefaultCellPadding));
 
+        // Taken before the rows are read, exactly as ReadParagraph takes it, and for the same reason: the
+        // walk over the cells reads paragraphs, and the first of them would otherwise eat the break that
+        // belongs to the table. Inside a cell it is inert, which is why the break simply vanished.
+        bool breaksPage = _pageBreakPending;
+        _pageBreakPending = false;
+
         List<PendingRow> rows = [];
 
         // Counted around the rows rather than around this table's own properties, because a cell's blocks
@@ -84,17 +90,24 @@ public sealed partial class DocxLayoutSource
         // sets `w:spacing w:after="0" w:line="240"`. Saved and restored so a nested table's style applies
         // only inside it.
         IReadOnlyList<XElement>? enclosing = _tableStyle;
+        IReadOnlyList<XElement>? enclosingRun = _tableStyleRun;
         _tableStyle = _styles.TableStyleParagraphProperties(styleId);
+
+        // Which conditional layers this table asked for, and how many rows there are — the second
+        // because `lastRow` cannot be decided while the rows are still being read.
+        WordTableLook look = WordTableLook.Read(properties);
+        int rowCount = CountRows(element, depth: 0);
 
         _tableDepth++;
         try
         {
-            ReadRows(element, rows, tablePadding, properties, depth: 0);
+            ReadRows(element, rows, tablePadding, properties, depth: 0, styleId, look, rowCount);
         }
         finally
         {
             _tableDepth--;
             _tableStyle = enclosing;
+            _tableStyleRun = enclosingRun;
         }
 
         if (rows.Count == 0) return null;
@@ -107,11 +120,16 @@ public sealed partial class DocxLayoutSource
             SectionIndex = _sectionIndex,
             ColumnWidths = columns,
             ColumnFit = Fit(declared, properties),
+            RelativeWidth = Percentage(Word.Child(properties, "tblW")),
             Rows = Resolved(rows),
             HeaderRowCount = HeadingRows(rows),
             LeftIndent = LeftEdge(properties, rows, isNested: _tableDepth > 0),
             HorizontalPosition = HorizontalPositionOf(properties),
+            IsPositioned = Word.Child(properties, "tblpPr") is not null,
+            LowerSpacing = Twips(Word.Child(properties, "tblpPr"), "bottomFromText") ?? Length.Zero,
             JoinsBordersLikeWord = true,
+            MinHeightIncludesInsets = true,
+            StartsNewPage = breaksPage,
         };
     }
 
@@ -287,6 +305,20 @@ public sealed partial class DocxLayoutSource
     {
         if (declared.All(width => width is not null)) return null;
 
+        // A percentage width is not a width the fit can honour, and it must not fall through to the grid
+        // sum either: the area it is handed has already been scaled to the stated percentage, so leaving
+        // the table's own width unstated is what makes it fill exactly that. See
+        // <see cref="PageTable.RelativeWidth"/>.
+        if (Percentage(Word.Child(properties, "tblW")) is not null)
+        {
+            return new TableColumnFit
+            {
+                IsAuto = [.. declared.Select(column => column is null)],
+                TableWidth = null,
+                Rule = TableWidthRule.Word,
+            };
+        }
+
         Length? width = Twips(Word.Child(properties, "tblW"));
         if (width is null || width <= Length.Zero)
         {
@@ -309,7 +341,10 @@ public sealed partial class DocxLayoutSource
         List<PendingRow> rows,
         CellPadding tablePadding,
         XElement? tableProperties,
-        int depth)
+        int depth,
+        string? styleId,
+        WordTableLook look,
+        int rowCount)
     {
         if (depth > 8) return;
 
@@ -319,7 +354,7 @@ public sealed partial class DocxLayoutSource
 
             if (Word.Is(child, "tr"))
             {
-                rows.Add(Row(child, tablePadding, tableProperties));
+                rows.Add(Row(child, tablePadding, tableProperties, styleId, look, rows.Count, rowCount));
                 continue;
             }
 
@@ -328,23 +363,75 @@ public sealed partial class DocxLayoutSource
             if (Word.Is(child, "sdt") || Word.Is(child, "sdtContent")
                 || Word.Is(child, "customXml") || Word.Is(child, "ins"))
             {
-                ReadRows(child, rows, tablePadding, tableProperties, depth + 1);
+                ReadRows(child, rows, tablePadding, tableProperties, depth + 1, styleId, look, rowCount);
             }
         }
     }
 
-    private PendingRow Row(XElement element, CellPadding tablePadding, XElement? tableProperties)
+    /// <summary>
+    /// How many <c>w:tr</c> the table holds, counted before any of them is read.
+    /// </summary>
+    /// <remarks>
+    /// Only <c>lastRow</c> needs this, and it needs it before the first row is read: a cell's
+    /// conditional formatting decides how its text is measured, so it cannot be settled afterwards.
+    /// Follows the same wrappers <see cref="ReadRows"/> does, since a row inside a tracked insertion is
+    /// still a row and miscounting by one puts <c>lastRow</c> on the wrong one.
+    /// </remarks>
+    private static int CountRows(XElement element, int depth)
+    {
+        if (depth > 8) return 0;
+
+        int count = 0;
+        foreach (XElement child in element.Elements())
+        {
+            if (Word.Is(child, "tr")) count++;
+            else if (Word.Is(child, "sdt") || Word.Is(child, "sdtContent")
+                     || Word.Is(child, "customXml") || Word.Is(child, "ins"))
+            {
+                count += CountRows(child, depth + 1);
+            }
+        }
+
+        return count;
+    }
+
+    private PendingRow Row(
+        XElement element,
+        CellPadding tablePadding,
+        XElement? tableProperties,
+        string? styleId,
+        WordTableLook look,
+        int rowIndex,
+        int rowCount)
     {
         XElement? properties = Word.Child(element, "trPr");
         List<PendingCell> cells = [];
         int column = SkippedBefore(properties);
 
-        foreach (XElement child in Cells(element, 0))
+        // The row's own cells, so that `lastCol` names the last one this row actually has rather than the
+        // grid's width — a row ending in a `w:gridSpan` reaches the grid's edge with fewer cells.
+        List<XElement> children = [.. Cells(element, 0)];
+        int lastIndex = children.Count - 1;
+        int index = -1;
+
+        foreach (XElement child in children)
         {
             if (column >= PageTable.MaxColumns) break;
 
+            index++;
             XElement? cellProperties = Word.Child(child, "tcPr");
             int span = Math.Max(1, Number(Word.Child(cellProperties, "gridSpan")) ?? 1);
+
+            // Set around `ReadCell` alone: the cell's paragraphs are read inside it, and a nested table
+            // there restores its own on the way out.
+            _tableStyleRun = _styles.TableStyleRunProperties(
+                styleId,
+                new WordTableStyleConditions(
+                    look,
+                    IsFirstRow: rowIndex == 0,
+                    IsLastRow: rowCount > 0 && rowIndex == rowCount - 1,
+                    IsFirstColumn: index == 0,
+                    IsLastColumn: index == lastIndex));
 
             cells.Add(new PendingCell(
                 new PageTableCell
@@ -354,6 +441,7 @@ public sealed partial class DocxLayoutSource
                     ColumnSpan = span,
                     Padding = Padding(Word.Child(cellProperties, "tcMar"), tablePadding),
                     VerticalAlignment = VerticalAlignment(cellProperties),
+                    TextDirection = TextDirection(cellProperties),
                     Shading = Shading(cellProperties),
                 },
                 Merge(cellProperties),
@@ -524,6 +612,31 @@ public sealed partial class DocxLayoutSource
 
         return padding;
     }
+
+    /// <summary>
+    /// Which way a cell's text runs — <c>w:textDirection</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Six values collapsing to three, reproducing LibreOffice's own mapping in
+    /// <c>DomainMapperTableManager.cxx</c>:325-350 rather than the specification's reading of them.
+    /// <c>tbRlV</c> is folded onto <c>tbRl</c> there and <c>tbLrV</c> is dropped with the comment "we
+    /// can't handle these"; both were re-measured against the installed 26.2.4.2 and both hold —
+    /// <c>tbRlV</c> renders identically to <c>tbRl</c>, and <c>tbLrV</c> identically to no attribute at
+    /// all. Following the specification instead would turn text the reference leaves upright.
+    /// </para>
+    /// <para>
+    /// The default when the attribute is absent or unrecognised is upright, which is also what
+    /// <c>w:val="lrTb"</c> asks for explicitly.
+    /// </para>
+    /// </remarks>
+    private static CellTextDirection TextDirection(XElement? properties)
+        => Word.Attribute(Word.Child(properties, "textDirection"), "val") switch
+        {
+            "btLr" => CellTextDirection.BottomToTopLeftToRight,
+            "tbRl" or "tbRlV" => CellTextDirection.TopToBottomRightToLeft,
+            _ => CellTextDirection.LeftToRight,
+        };
 
     private static CellVerticalAlignment VerticalAlignment(XElement? properties)
         => Word.Attribute(Word.Child(properties, "vAlign"), "val") switch
@@ -973,6 +1086,32 @@ public sealed partial class DocxLayoutSource
                && Word.Integer(text, out int twips)
             ? Length.FromTwips(twips)
             : null;
+    }
+
+    /// <summary>
+    /// A <c>w:tblW</c> stated as a percentage of the area the table sits in, or null when it is not one.
+    /// </summary>
+    /// <remarks>
+    /// The unit is fiftieths of a percent, so <c>5000</c> is 100%, and the result is clamped there:
+    /// <c>nPercent = pMeasureHandler-&gt;getValue() / 50; if (nPercent &gt; 100) nPercent = 100;</c>
+    /// (<c>DomainMapperTableManager.cxx</c>:193). A file writing <c>50%</c> instead of <c>2500</c> is
+    /// legal under <c>ST_MeasurementOrPercent</c> and read as the percentage it says. Zero is not a
+    /// width at all — <c>w:tblW w:w="0" w:type="pct"</c> is how a table says it has none — and a
+    /// negative one is nonsense, so both read as absent.
+    /// </remarks>
+    private static int? Percentage(XElement? element)
+    {
+        if (element is null || Word.Attribute(element, "type") is not "pct") return null;
+        if (Word.Attribute(element, "w") is not { } text) return null;
+
+        string trimmed = text.Trim();
+        bool literal = trimmed.EndsWith('%');
+        if (literal) trimmed = trimmed[..^1];
+
+        if (!Word.Integer(trimmed, out int stated)) return null;
+
+        int percent = literal ? stated : stated / 50;
+        return percent <= 0 ? null : Math.Min(percent, 100);
     }
 
     private static int? Number(XElement? element)

@@ -79,8 +79,11 @@ public readonly record struct Ww8DocumentProperties
     /// calls "use printer metrics to lay out document". LibreOffice honours it literally —
     /// <c>USE_VIRTUAL_DEVICE</c> becomes its negation (<c>ww8par.cxx</c>:2008) and the layout then formats
     /// against an <c>SfxPrinter</c>, whose pixel grid rounds every font metric. Eight of sixty-six DOC
-    /// files in the sample corpus set it, and on those the line pitch is up to 2.8% taller than the
-    /// design units alone give.
+    /// files in the sample corpus set it, and on those the line pitch differs from what the design
+    /// units alone give — by up to 1.5% of a line on the 600 dpi printer this container has, which is
+    /// what <c>A_320.doc</c>'s twenty-three spurious pages were made of. See
+    /// <see cref="Paperless.Text.Fonts.MetricGrid.Printer"/>: the resolution is a measurement of the
+    /// installed binary and not a property of the file.
     /// </remarks>
     public bool UsesPrinterMetrics { get; init; }
 
@@ -117,6 +120,33 @@ public readonly record struct Ww8DocumentProperties
     /// whatever its even stories hold, and a document with it has two.
     /// </para>
     /// </remarks>
+    /// <summary>
+    /// Whether the document asks for its tracked changes to be hidden — <c>fRMView</c> clear.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Writer reads this into the layout directly: <c>isHideRedlines = !m_xWDop-&gt;fRMView</c>
+    /// (<c>sw/source/filter/ww8/ww8par.cxx</c>:5262). So a deletion is drawn struck through when it is
+    /// set and is not drawn at all when it is clear, and the same document body renders two different
+    /// ways depending on one bit.
+    /// </para>
+    /// <para>
+    /// Both behaviours are in the corpus, which is what makes this a document property rather than a
+    /// policy: <c>tests/corpus/features/revisions.doc</c> has it set and LibreOffice's own PDF of it
+    /// reads "an inserted phrase and a deleted phrase in the middle", while
+    /// <c>150_5300_13_chg8.doc</c> has it clear and the reference shows none of its deletions.
+    /// Treating either as the rule for both is wrong in one direction or the other.
+    /// </para>
+    /// <para>
+    /// Stated as "hides" rather than "shows" so that the zero value is the safe one: this is a struct,
+    /// so a <c>default</c> instance cannot carry an initialiser, and a document whose <c>Dop</c> is too
+    /// short to reach the byte must show its changes rather than silently drop them. That also matches
+    /// <c>WW8Dop</c>'s own default constructor, which sets <c>fRMView(true)</c>
+    /// (<c>ww8scan.cxx</c>:7845).
+    /// </para>
+    /// </remarks>
+    public bool HidesTrackedChanges { get; init; }
+
     public bool HasFacingPages { get; init; }
 
     /// <summary>How the document's footnotes are numbered.</summary>
@@ -144,6 +174,17 @@ public readonly record struct Ww8DocumentProperties
             properties = properties with
             {
                 HasFacingPages = (BinaryPrimitives.ReadUInt16LittleEndian(dop) & 0x0001) != 0,
+            };
+        }
+
+        // fRMView, at 0x07 bit 0x08 — `ww8scan.cxx`:7681 in `WW8Dop::WW8Dop`, where the byte's other
+        // bits are fPagSuppressTopSpacing, fProtEnabled, fDispFormFieldSel, fRMPrint, fWriteReservation,
+        // fLockRev and fEmbedFonts.
+        if (dop.Length >= RevisionViewOffset + 1)
+        {
+            properties = properties with
+            {
+                HidesTrackedChanges = (dop[RevisionViewOffset] & RevisionViewMask) == 0,
             };
         }
 
@@ -270,6 +311,12 @@ public readonly record struct Ww8DocumentProperties
             9 => Layout.NoteNumberFormat.Chicago,
             _ => fallback,
         };
+
+    /// <summary>Where <c>fRMView</c>'s byte sits in the <c>Dop</c>.</summary>
+    private const int RevisionViewOffset = 0x07;
+
+    /// <summary>Which bit of that byte it is.</summary>
+    private const int RevisionViewMask = 0x08;
 
     /// <summary>Where the first footnote number sits in the <c>Dop</c>, above two bits of restart rule.</summary>
     private const int FootnoteNumberOffset = 0x02;

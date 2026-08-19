@@ -43,6 +43,7 @@ public sealed class Ww8Fib
     {
         Identifier = BinaryPrimitives.ReadUInt16LittleEndian(stream);
         Version = BinaryPrimitives.ReadUInt16LittleEndian(stream[2..]);
+        Product = BinaryPrimitives.ReadUInt16LittleEndian(stream[4..]);
         LanguageId = BinaryPrimitives.ReadUInt16LittleEndian(stream[6..]);
 
         ushort flags = BinaryPrimitives.ReadUInt16LittleEndian(stream[0x0A..]);
@@ -87,6 +88,15 @@ public sealed class Ww8Fib
             _fileOffsets[i] = BinaryPrimitives.ReadUInt32LittleEndian(stream[at..]);
             _lengths[i] = BinaryPrimitives.ReadUInt32LittleEndian(stream[(at + 4)..]);
         }
+
+        // FibRgCswNew's own count, immediately after the FC/LCB pairs. Its presence is the tell that
+        // the writer was Word 2000 or later even when `nProduct` is nought — `ww8scan.cxx`:5997 seeks
+        // past the pairs to read it and then seeks back, with the comment "read cswNew to find out if
+        // nFib should be ignored".
+        int cswNewOffset = pairsOffset + (8 * pairsCount);
+        CswNew = cswNewOffset + 2 <= stream.Length
+            ? BinaryPrimitives.ReadUInt16LittleEndian(stream[cswNewOffset..])
+            : (ushort)0;
 
         static int At(int[] values, int index) => index < values.Length ? values[index] : 0;
     }
@@ -135,6 +145,24 @@ public sealed class Ww8Fib
     /// 268 for Word 2003, 274 for Word 2007.
     /// </summary>
     public ushort Version { get; }
+
+    /// <summary>
+    /// <c>nProduct</c>: which Word wrote the file, in its top three bits — 0 for Word 97, 0x2000 for
+    /// Word 2000, and so on up to 0xE000 for Word 2013.
+    /// </summary>
+    /// <remarks>
+    /// Read because one import decision turns on the writing application rather than on the format
+    /// version: whether a shape anchored in a table cell is laid out inside that cell when it says
+    /// nothing about it. See <see cref="Ww8Frames.LaysOutInTableCell"/>.
+    /// </remarks>
+    public ushort Product { get; }
+
+    /// <summary>
+    /// <c>cswNew</c>: how many entries <c>FibRgCswNew</c> has, and zero on a Word 97 file that has
+    /// none at all.
+    /// </summary>
+    /// <inheritdoc cref="Product" path="/remarks"/>
+    public ushort CswNew { get; }
 
     /// <summary>
     /// The document's language id, which is how a WW8 file names its code page — indirectly.

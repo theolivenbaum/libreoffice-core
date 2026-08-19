@@ -62,6 +62,11 @@ public static class XlsReader
             XlsWorkbookReader reader = new(workbook, diagnostics)
             {
                 FileName = source.FileName ?? string.Empty,
+
+                // The workbook stream is not the whole file: a pivot cache lives in the
+                // `_SX_DB_CUR` storage beside it, and is the only copy of its source data when
+                // the pivot table's source range is in another document.
+                OpenStorageStream = name => ReadStream(file, name),
             };
             List<ContentSection> sheets = reader.Read();
 

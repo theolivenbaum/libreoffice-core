@@ -2100,6 +2100,120 @@ which is the honest state of them.
       glyph is selected rather than in which font is resolved. The word gate scores this document
       as agreeing, which is why only a human found it.
 
+- [x] **Slides had no glyph fallback at all — wired, and the blast radius is three documents.**
+      Found in round `slides-chart-01` (2026-08-15) on
+      `slides/chart-001/pptx/southern-classic-kennesaw-state-university-final.pptx`, and it very
+      probably *is* the item immediately above.
+
+      The deck puts a `U+25D8` INVERSE BULLET — a filled square with a white circle — in a
+      progress-indicator strip on the header of nearly every slide, **132 of them across 23
+      pages**. Carlito has no `U+25D8` (checked in its `cmap`). LibreOffice falls back to
+      **DejaVu Sans**, embeds it as a seventh face and draws the tiles; we keep Carlito, embed
+      six faces, and draw **nothing visible**. Three blind reviewers, given pages 2, 10 and 20
+      with no numbers, each independently reported the strip as present in the reference and the
+      same region as "completely empty white" in ours. `pdffonts` shows the difference as one
+      line: the reference has `GAAAAA+DejaVuSans`, we do not — which is also the `fonts 6/7`
+      column the sweep had been printing all along.
+
+      **The word gate cannot see this**, because we still emit the character with a correct
+      `ToUnicode`: both extractions contain 132 `U+25D8`. Only the ink is missing.
+
+      The machinery exists and is complete — `FontItemiser.Split`
+      (`src/Paperless.Text/Itemisation/FontItemiser.cs:94`) splits a run on `cmap` coverage,
+      `SystemFontResolver.FallbackFor` (`src/Paperless.Text/Fonts/SystemFontResolver.cs:292`)
+      picks the face off LibreOffice's own `ImplInitGenericGlyphFallback` chain
+      (`src/Paperless.Text/Fonts/GlyphFallback.cs:87`), and `ReferenceFor` gets it embedded.
+      **Word processing, spreadsheets and metafiles are all wired to it; slides are not.**
+      `SlideTextLayout.cs:661` calls `MeasuredParagraph.Measure(paragraph.Text, runs)` with no
+      `ItemisationOptions`, so `GlyphFallback` is null and `FontItemiser.Split` returns the run
+      whole; the draw path at `SlideTextLayout.cs:1228` then shapes it with
+      `TextShaper.Default`, which has no fallback wrapper. Any slide character outside the
+      resolved face goes straight to `.notdef`. The pattern to copy is `PageDrawing.ByFace`
+      (`src/Paperless.WordProcessing/Layout/PageDrawing.cs:1354-1381`) or
+      `SheetText.cs:331-334`.
+
+      **Censused, not guessed.** Comparing the embedded face sets of all 163 slide renderings
+      against the banked `refpdfs-26.2.4.2-fonts/slides` references:
+
+      | | documents |
+      |---|---:|
+      | reference embeds a face we do not | **44 of 163** |
+      | …missing *only* glyph-fallback-chain families (OpenSymbol, DejaVu Sans/Serif, Liberation) | **34** |
+      | …missing some other family — a separate family-resolution class | 10 |
+
+      Most common single miss is `OpenSymbol` on 24 documents, then `DejaVuSans` on 5 and
+      `DejaVuSerif` on 4.
+
+      **Treat this as a cascade before treating it as a cosmetic gap.** Adding fallback changes
+      advance widths on any run that currently hits `.notdef`, hence line breaks, hence shape
+      autofit — so it needs a full `slides/done-*` sweep, not a spot check.
+
+      **Fixed in `slides-glyph-fallback-01` (2026-08-15), and the feared cascade did not happen.**
+      Three lines, all in one seat, and none of them a second implementation of anything:
+
+      - `Layout/SlideText.cs` — `SlideFonts.Fallback` exposes the `SystemFontResolver` the cache
+        already holds as an `IGlyphFallbackResolver`, exactly as `LayoutFonts.Fallback` does for
+        the word processor. The resolver that chose the run's face has to be the one that chooses
+        the substitute, because the face decides the advance.
+      - `Layout/SlideTextLayout.cs:661` — `MeasuredParagraph.Measure` now takes
+        `new ItemisationOptions { GlyphFallback = fonts.Fallback }`.
+      - `Layout/SlideTextLayout.cs:1520` — `Block.FontFor` returns
+        `Fallback?.ReferenceFor(face)` for a sub-run drawn in a face the run did not name, so the
+        substitute is *embedded* rather than merely announced.
+
+      **`SlideTextLayout.cs:1228` did not need a `FallbackShaper` and must not get one.** The
+      note above read the draw path wrong. `MeasuredParagraph` itemises by face and
+      `RunsBetween` hands the drawing pass sub-runs that already carry the substitute, so
+      `TextShaper.Default` is shaping a run whose face covers it — which is why
+      `PageDrawing.cs:968` draws with the unwrapped default too. `FallbackShaper` is documented
+      as *for measuring, not for drawing*: it splices glyphs from several faces into one
+      `ShapedText` whose glyph ids are then meaningless. Using it here would draw confidently
+      wrong letters.
+
+      **Blast radius, measured rather than argued.** `slides/done-*` swept before and after with
+      `batch-check.sh` at `SOURCE_DATE_EPOCH`: **144 match before, 144 match after, nothing moved
+      in either direction**, and no page count and no word count changed on any document.
+      Comparing the two sets of rendered PDFs byte for byte, **141 of 144 are byte-identical**
+      and three changed:
+
+      | document | what changed |
+      |---|---|
+      | `done-010/Tax factsheet 2022 (1).pptx` | 3 × `U+2713` CHECK MARK were invisible in Carlito, now drawn from OpenSymbol; one line shifts, 31 word boxes move |
+      | `done-014/redac-nasops-201503-RIRP-portfolio-update.pptx` | 2 × `q` were `.notdef` in OpenSymbol, now drawn from DejaVu Sans; 4 word boxes move ~2.4 pt |
+      | `done-001/2015-Civil-Rights-Website-training.ppt` | 10 EN SPACEs move from Liberation Mono (which has no `U+2002`) to DejaVu Sans. **All 6592 word boxes and the whole extracted text are identical** — only which font object an invisible space is charged to |
+
+      The worked example closes exactly. `southern-classic-…final.pptx` now embeds
+      `DejaVuSans` as its seventh face and draws all **132** `U+25D8` from it, code `<01>` under
+      a `<01> <25D8>` `ToUnicode` — the same face, the same count and the same code as the
+      reference's own operators. A fourth blind reviewer, given the unfixed, fixed and reference
+      header strips as three unlabelled panels, reported "**Panels 2 and 3 agree completely on
+      the tiles — same count, same positions, same two-navy-then-three-pale colouring, same
+      overlap on the right bar**" and "Panel 1 has none of them".
+
+      **What it did *not* close, and why the 44 was the wrong number to expect.** Re-censused
+      with one instrument over all 168 slide renderings against the banked references: the
+      reference embeds a family we do not on **37** before and **35** after, and the only
+      document whose face set closed is the worked example. The residual is not glyph fallback
+      at all — **15 of the 25 remaining gaps on `done-*` are `OpenSymbol` alone**, and on
+      `Course Selection 2025-26 Current Grade 09.pptx` that is a `U+2022` bullet we draw from
+      DejaVu Sans and the reference draws from OpenSymbol. Both draw it. That is the *marker
+      face*, not a missing glyph, and it is the next item to work rather than this one.
+
+      One divergence this exposes is real and belongs to `Paperless.Text`, not to slides:
+      `Tax factsheet`'s check mark goes to OpenSymbol here and to DejaVu Sans in the reference,
+      because `GlyphFallbackFamilies.InOrder` puts `opensymbol` twentieth-from-last and
+      `dejavusans` after it, while LibreOffice asks fontconfig *first* and only falls to that
+      list when fontconfig fails. `GlyphFallback.cs` records taking the list as the main path as
+      a deliberate choice; it is shared with words and sheets, so changing it is its own round.
+
+- [ ] **`southern-classic-…final.pptx` page 10: a line chart's plot is missing and its axis top
+      is wrong.** Reported unprompted by the blind reviewer above, who was looking at the header
+      strip and not at the chart, and therefore had no way to be leading themselves. On the same
+      crop of the same page the reference shows the left chart's top axis label as **`$480`** with
+      a navy plotted line entering the strip below it; ours shows **`$520`** with a grey tick and
+      no plotted line at all. Present both before and after the glyph-fallback fix, so it is
+      independent of it. The deck is in `slides/chart-001`, which is where this belongs.
+
 ### Small differences that are measured and not yet closed
 
 - [ ] **The largest unexplained group on the track is not a chart at all: it is a `.ppt` outline

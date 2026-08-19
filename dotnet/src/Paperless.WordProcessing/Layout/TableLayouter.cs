@@ -54,13 +54,19 @@ public static class TableLayouter
     /// The cells with page-coordinate rectangles, and each row's height in order — the caller needs the
     /// heights to decide where the table ends and which rows fit on the page.
     /// </returns>
+    /// <param name="anchored">
+    /// The frames the flow's own paragraphs anchor, with the page coordinates its origin corresponds to,
+    /// or null when the caller does not know where the flow sits — which is every caller but a table
+    /// cell's. See <see cref="AnchoredObstacles"/> for why a cell needs its own route to them.
+    /// </param>
     public static (List<PlacedTableCell> Cells, List<Length> RowHeights) LayOut(
         PageTable table,
         DocPoint origin,
         int nesting = 0,
         Length? available = null,
         bool collapsesSpacing = false,
-        bool addsCellLineSpacing = false)
+        bool addsCellLineSpacing = false,
+        AnchoredObstacles? anchored = null)
     {
         ArgumentNullException.ThrowIfNull(table);
 
@@ -71,12 +77,29 @@ public static class TableLayouter
         List<Measured> measured = [];
         List<Length> heights = [.. Enumerable.Repeat(Length.Zero, rows)];
 
+        // Where the row about to be measured starts, in the table's own coordinates — the same running
+        // sum pass two makes into `tops`, kept here because a cell that has to flow round a frame it
+        // anchors needs to know where on the page it is *while* it is being measured. Only the rows above
+        // it are needed and they are already settled, so nothing is being read before it is written.
+        Length measuredRowTop = rows > 0 ? BorderHeight(table.Rows[0]) / 2 : Length.Zero;
+
         for (int row = 0; row < rows; row++)
         {
             foreach (PageTableCell cell in table.Rows[row].Cells)
             {
                 Length width = WidthOf(cell, lefts);
                 if (width <= Length.Zero) continue;
+
+                int last = Math.Min(row + Math.Max(1, cell.RowSpan), rows) - 1;
+
+                // A turned cell breaks its text at the cell's *height*, which is exactly what this pass is
+                // trying to work out — so it is not measured here at all. It does not have to be: it
+                // contributes nothing to the row's height, so the circle never closes. See `Turned`.
+                if (cell.IsTurned)
+                {
+                    measured.Add(new Measured(row, last, cell, width, null, Length.Zero));
+                    continue;
+                }
 
                 Length inner = width - cell.Padding.Horizontal;
                 PlacedFlow? content = inner > Length.Zero
@@ -86,7 +109,12 @@ public static class TableLayouter
                         Length.Zero,
                         nesting,
                         collapsesSpacing,
-                        addsCellLineSpacing)
+                        addsCellLineSpacing,
+                        anchored: anchored?.Below(new DocPoint(
+                            table.LeftWithin(available ?? table.Width)
+                            + lefts[cell.Column] + cell.Padding.Left,
+                            measuredRowTop + (BorderHeight(table.Rows[row]) / 2)
+                            + cell.Padding.Top)))
                     : null;
 
                 // The advance rather than the ink: a cell is as tall as its content plus the space after
@@ -98,29 +126,86 @@ public static class TableLayouter
                 // half of the same compatibility rule. See `CellLineSpacing`.
                 if (addsCellLineSpacing) text += CellLineSpacing(cell.Blocks);
 
-                int last = Math.Min(row + Math.Max(1, cell.RowSpan), rows) - 1;
                 measured.Add(new Measured(row, last, cell, width, content, text));
 
                 // A merged cell charges only its last row, and only for what one row's worth of it needs.
                 // Charging the whole height there would make that row as tall as the merge.
+                //
+                // The declared floor is deliberately *not* applied here. Two rounds found the same defect
+                // independently — a `w:trHeight` `atLeast` row resting on its floor is its floor plus its
+                // cell margins tall, not the greater of the floor and text-plus-margins — and wrote two
+                // different fixes. This one, applied in the per-cell loop and ungated, is the weaker of
+                // them: it reaches every format, and the setting it models is one the three Word filters
+                // set and the ODF filter does not. Applying it to all five was measured to fix
+                // `table-exact-row.{doc,docx,rtf}` and break `.odt` and `.fodt`.
+                //
+                // The floor is therefore applied once, per row, further down, gated on
+                // `PageTable.MinHeightIncludesInsets` and carrying the border term as well. Both rounds'
+                // evidence agrees and is recorded there: `template---tpr…docx`'s 460-twip rows with
+                // 100-twip margins measure 33.00 pt, and `FAA 2025-26 Holdover Tables.docx`'s Table 54
+                // measures 440 twips to the hundredth.
                 if (last == row)
                 {
                     heights[row] = Length.Max(heights[row], text + cell.Padding.Vertical);
                 }
             }
 
+            // The declared height, which is a floor unless the row says it is exact — in which case it is the
+            // height, and content taller than it is clipped rather than growing the row. Applied per row
+            // before the merge shortfall below, so that a merge spanning an exact row cannot stretch it.
+            //
             // A border takes space, and a row owns *half* of each of the two grid lines it sits between — the
             // line runs through the border's centre, so the other half belongs to the neighbour. The two
             // outermost halves, which have no neighbour, are added to the last row once the rectangles are
             // built; see there.
-            heights[row] += BorderHeight(table.Rows[row]);
+            //
+            // The `atLeast` floor sits *under* those borders rather than over them: it raises the content and
+            // the borders are then added on top, so a row resting on its floor is one border taller than the
+            // floor. Measured by sweeping the border width against a fixed w:trHeight — see
+            // `dotnet/probes/words-pagination-01/row-min-height-border.py`, which reads 24.00 / 24.50 / 25.00 /
+            // 26.00 / 27.00 pt out of the reference for w:sz 0 / 4 / 8 / 16 / 24 against a 24 pt floor, while
+            // we read 24.00 throughout. That the gap tracks the border exactly is what rules out the other
+            // reading of the same two corpus observations — both `ESPN-R - MCF - Manual` and the FAA Holdover
+            // Tables draw a w:sz="4" grid, so a flat half point fits them just as well and is refuted here.
+            //
+            // `exact` is the other branch and measured the other way: at w:sz="16" both sides read 24.00, so a
+            // clipped row's height really is the whole of it, borders included. Applying the border there too
+            // would be the obvious symmetry and is wrong.
+            //
+            // **The cell margins go on top of the floor as well**, and that probe could not see it because its
+            // cells had none. `lcl_CalcMinRowHeight` (`sw/source/core/layout/tabfrm.cxx`:5087-5097) is the
+            // whole rule, under `MIN_ROW_HEIGHT_INCL_BORDER` — which both Word filters turn on and neither ODF
+            // nor the Writer default does (`ww8par.cxx`:1966, `DomainMapper.cxx`:156, comment "handle MS Word
+            // 'atLeast' oddities"):
+            //
+            //     nHeight  = trHeight
+            //     nHeight += lcl_GetTopSpace(row)        // top border width *and* top margin
+            //     nHeight += lcl_GetBottomLineDist(row)  // the bottom margin, and not the bottom border
+            //
+            // and `lcl_GetFixedRowHeight` (:5058) does the second of those two for an `exact` row.
+            // Both maxima are over the row's cells, since one tall margin governs the row.
+            //
+            // `MIN_ROW_HEIGHT_INCL_BORDER` is a per-document setting and the three Word filters set it
+            // while the ODF one does not, so this is gated on `PageTable.MinHeightIncludesInsets` rather
+            // than applied to every table — measured, not assumed: applying it to all five formats fixed
+            // the `table-exact-row` fidelity fixture's `.doc`, `.docx` and `.rtf` and broke its `.odt`
+            // and `.fodt`, which is the setting's own split exactly.
+            //
+            // Measured on `FAA 2025-26 Holdover Tables.docx`, whose Table 54 rows state `w:trHeight
+            // w:val="397"` and `w:tcMar` top 23, bottom 0, under a `w:sz="8"` grid: 397 + (20 + 23) + 0 = 440
+            // twips = 22.00 pt, which is the reference's row pitch to the hundredth. Without the margins we
+            // read 417 twips = 20.85, and eleven rows of 1.15 pt is the 12.7 pt that lets a three-line
+            // paragraph onto a page the reference had to break before.
+            Length topInset = table.MinHeightIncludesInsets ? TopInset(table.Rows[row]) : Length.Zero;
+            Length bottomInset =
+                table.MinHeightIncludesInsets ? BottomInset(table.Rows[row]) : Length.Zero;
 
-            // The declared height, which is a floor unless the row says it is exact — in which case it is the
-            // height, and content taller than it is clipped rather than growing the row. Applied per row
-            // before the merge shortfall below, so that a merge spanning an exact row cannot stretch it.
             heights[row] = table.Rows[row].HasExactHeight
-                ? Length.Max(Length.Zero, table.Rows[row].MinHeight)
-                : Length.Max(heights[row], table.Rows[row].MinHeight);
+                ? Length.Max(Length.Zero, table.Rows[row].MinHeight + bottomInset)
+                : Length.Max(heights[row], table.Rows[row].MinHeight + topInset + bottomInset)
+                  + BorderHeight(table.Rows[row]);
+
+            measuredRowTop += heights[row];
         }
 
         // A merged cell may still need more room than the rows it covers add up to, so the last row it
@@ -166,15 +251,31 @@ public static class TableLayouter
                 cell.Width,
                 height);
 
+            Length bandAbove = BorderHeight(table.Rows[cell.Row]) / 2;
+            Length bandBelow = BorderHeight(table.Rows[cell.LastRow]) / 2;
+
+            if (cell.Cell.IsTurned)
+            {
+                (PlacedFlow? turned, AffineTransform? onto) = Turned(
+                    cell.Cell, area, bandAbove, bandBelow, nesting, collapsesSpacing, addsCellLineSpacing);
+
+                placed.Add(new PlacedTableCell
+                {
+                    Cell = cell.Cell,
+                    Area = area,
+                    Content = turned,
+                    ContentTransform = onto,
+                    Row = cell.Row,
+                });
+
+                continue;
+            }
+
             placed.Add(new PlacedTableCell
             {
                 Cell = cell.Cell,
                 Area = area,
-                Content = Positioned(
-                    cell,
-                    area,
-                    BorderHeight(table.Rows[cell.Row]) / 2,
-                    BorderHeight(table.Rows[cell.LastRow]) / 2),
+                Content = Positioned(cell, area, bandAbove, bandBelow),
                 Row = cell.Row,
             });
         }
@@ -244,8 +345,16 @@ public static class TableLayouter
     /// <param name="cells">Its cells as <see cref="LayOut"/> placed them.</param>
     /// <param name="drawn">How far into the row an earlier page already reached; nought at its first part.</param>
     /// <param name="room">How much height is left on this page.</param>
+    /// <param name="acrossRowSpans">
+    /// Whether a cell merged down past this row may be cut as well. False everywhere but the one case
+    /// where declining hides content — see the remark on the row-span test below.
+    /// </param>
     public static RowSlice? SliceRow(
-        PageTableRow row, IReadOnlyList<PlacedTableCell> cells, Length drawn, Length room)
+        PageTableRow row,
+        IReadOnlyList<PlacedTableCell> cells,
+        Length drawn,
+        Length room,
+        bool acrossRowSpans = false)
     {
         ArgumentNullException.ThrowIfNull(row);
         ArgumentNullException.ThrowIfNull(cells);
@@ -255,21 +364,44 @@ public static class TableLayouter
         Length rowTop = cells[0].Area.Y;
         foreach (PlacedTableCell cell in cells)
         {
-            // A cell covering more than this row cannot be cut here: its text belongs to a row further
-            // down, and half of its rectangle would be drawn on each of two pages.
-            if (Math.Max(1, cell.Cell.RowSpan) > 1) return null;
-            if (cell.Content is { Tables.Count: > 0 }) return null;
+            // A cell covering more than this row is normally not cut here: its text belongs to a row
+            // further down, and half of its rectangle would be drawn on each of two pages.
+            //
+            // The exception is the row that is taller than a whole column, where declining is worse than
+            // the artefact. Writer allows that row to split "regardless of setting, otherwise it has
+            // hidden content and that makes no sense" (`SwTabFrame::Split`, `tabfrm.cxx`:1161) and
+            // re-formats the spanned cells with `lcl_AdjustRowSpanCells`; declining leaves the row to be
+            // placed whole on a page it cannot fit, which draws it past the bottom of the paper and
+            // wastes the page before it. Measured on `ESPN-R - MCF - RA - Ed1.docx`, whose "Engine -
+            // Flight" row is 440.5 pt under a 422.2 pt landscape body and whose first cell is merged
+            // down into the rows after it: about 356 pt of page 27 went blank and the row was then drawn
+            // to y = 30.6 on a page whose bottom margin is at 56.7.
+            if (Math.Max(1, cell.Cell.RowSpan) > 1 && !acrossRowSpans) return null;
             rowTop = Length.Min(rowTop, cell.Area.Y);
         }
 
         Length border = BorderHeight(row);
         Length above = rowTop + drawn;
 
+        // The spans a cut may not fall inside: a table nested in a cell is placed as one rectangle and
+        // this function has no machinery to divide one, so a cut through it would draw the top half on
+        // one page and nothing on the other. See `Nested`.
+        List<(Length Top, Length Bottom)> whole = [];
+        foreach (PlacedTableCell cell in cells)
+        {
+            if (cell.ContentTransform is not null || cell.Content is not { } flow) continue;
+            foreach (PlacedTable nested in flow.Tables) whole.Add((nested.Area.Y, nested.Area.Bottom));
+        }
+
         // Every line that is not yet drawn, as the depth its bottom sits at. These are the only places the
-        // row may be cut, since a cut between two of them would draw half a line.
+        // row may be cut, since a cut between two of them would draw half a line — plus the bottom of each
+        // nested table, which is a legal cut and often the only one a densely nested cell offers.
         List<Length> candidates = [];
         foreach (PlacedTableCell cell in cells)
         {
+            // A turned cell offers no cuts: its lines run across the row rather than down it, so there is
+            // no depth at which cutting one would divide its text. It rides on the row's first part.
+            if (cell.ContentTransform is not null) continue;
             if (cell.Content is not { } flow) continue;
 
             foreach (PlacedLine line in flow.Lines)
@@ -277,7 +409,14 @@ public static class TableLayouter
                 Length bottom = flow.Area.Y + line.Top + line.Box.Height;
                 if (bottom > above) candidates.Add(bottom);
             }
+
+            foreach (PlacedTable nested in flow.Tables)
+            {
+                if (nested.Area.Bottom > above) candidates.Add(nested.Area.Bottom);
+            }
         }
+
+        candidates.RemoveAll(cut => Crosses(whole, cut));
 
         if (candidates.Count == 0) return null;
 
@@ -299,9 +438,82 @@ public static class TableLayouter
             height = needed;
         }
 
+        // Nothing was cuttable at this level. Descend into the nested tables and look for a cut inside
+        // one, which is the only thing that lets a row split when a cell holds a nested table taller than
+        // the page it must fit on.
+        //
+        // **Only when the ordinary search found nothing**, which confines this to exactly the rows that
+        // are broken today: a row with no legal cut is placed whole on a page that cannot hold it, and
+        // whatever runs past the bottom is neither drawn nor carried. Every row that splits today finds
+        // its cut in the list above and never reaches here, so no document that works can be moved by it.
+        // That is the same argument the row-span exception above already makes — declining is worse than
+        // the artefact when declining hides content.
+        //
+        // Measured on `May 25 bulletin focus on carers in the workplace.docx`, a chain of single-row,
+        // single-cell wrapper tables nested five deep. Every `SliceRow` call on it reported one cell, one
+        // nested span of 0.0..1126.4 and a single candidate at that span's bottom — against a body 697.9
+        // pt tall, so the one legal cut was unreachable even on a completely empty page and the row could
+        // never be split at all. 86 words fell off the end. See `probes/nested-table-slice/`.
+        //
+        // Writer never needs this: `bTableLayoutTooComplex` (`sw/source/core/layout/tabfrm.cxx`:586-594,
+        // gating the split at :611-613) makes it refuse to cut such a row too, but its nested table is a
+        // frame in its own right and splits across the page through its own follow. Ours is a rectangle
+        // inside a cell's flow, placed whole or not at all — so the recursion has to happen here instead.
+        bool fromDeepSearch = false;
+
+        if (chosen is null)
+        {
+            List<Length> deep = [];
+            foreach (PlacedTableCell cell in cells)
+            {
+                if (cell.ContentTransform is not null || cell.Content is not { } flow) continue;
+
+                foreach (PlacedTable nested in flow.Tables) DeepCuts(nested, above, deep);
+            }
+
+            deep.Sort();
+
+            foreach (Length candidate in deep)
+            {
+                if (chosen is { } already && already == candidate) continue;
+
+                Length needed = HeightAt(cells, rowTop, above, candidate, border);
+                if (needed > room) break;
+
+                chosen = candidate;
+                height = needed;
+                fromDeepSearch = true;
+            }
+        }
+
         if (chosen is not { } cut) return null;
 
-        bool complete = candidates[^1] <= cut;
+        // Whether anything is left over, asked of the content rather than of the candidate list: a cut a
+        // nested table forbade is absent from that list, and reading the deepest *legal* cut as the
+        // deepest content would report a part complete while a whole nested table still waited below it.
+        Length last = Length.Zero;
+        foreach (PlacedTableCell cell in cells)
+        {
+            if (cell.ContentTransform is not null || cell.Content is not { } flow) continue;
+
+            foreach (PlacedLine line in flow.Lines)
+            {
+                last = Length.Max(last, flow.Area.Y + line.Top + line.Box.Height);
+            }
+
+            foreach (PlacedTable nested in flow.Tables) last = Length.Max(last, nested.Area.Bottom);
+        }
+
+        // A nested table contributes its whole rectangle's bottom to `last`, which is right while a cut
+        // can only fall between nested tables: the part is incomplete exactly when one is still below it.
+        // A cut *inside* one breaks that reading — the rectangle's bottom stays where it always was
+        // however much of the table has been drawn, so the last part reports itself incomplete, the
+        // caller asks for one more page, and the band left over holds no lines and draws nothing.
+        //
+        // That is where the bulletin's spurious fifth page came from. Asked of the lines instead the
+        // answer is right, and it is asked only of a cut the deep search chose, so a row that splits the
+        // ordinary way keeps the rectangle test exactly as it was.
+        bool complete = last <= cut || (fromDeepSearch && !HasLinesBelow(cells, cut));
 
         // A part holding every remaining line is not a split at all; the caller places the whole row.
         if (complete && drawn <= Length.Zero) return null;
@@ -334,6 +546,11 @@ public static class TableLayouter
     /// <c>f445896eb008d14c1746fc37d412dc22.docx</c>, where 205.8 pt of a page went empty because the row
     /// was 211.8 pt tall and its lines measured 202.5.
     /// </para>
+    /// <para>
+    /// A <em>follow</em> part starts at the top of the block its first line belongs to and not at the top
+    /// of that line — see <see cref="UpperSpaceAbove"/>. That is one line of arithmetic and it is the
+    /// difference between a split row's parts adding up to the row and adding up to a point or two less.
+    /// </para>
     /// </remarks>
     private static Length HeightAt(
         IReadOnlyList<PlacedTableCell> cells, Length rowTop, Length above, Length cut, Length border)
@@ -345,27 +562,82 @@ public static class TableLayouter
 
         foreach (PlacedTableCell cell in cells)
         {
+            // Charges the part nothing, exactly as it charged the row nothing. See `Turned`.
+            if (cell.ContentTransform is not null) continue;
             if (cell.Content is not { } flow) continue;
 
             Length? top = null;
             Length bottom = Length.Zero;
+            PlacedLine? following = null;
 
             foreach (PlacedLine line in flow.Lines)
             {
                 Length end = flow.Area.Y + line.Top + line.Box.Height;
-                if (end <= above || end > cut) continue;
+                if (end <= above) continue;
 
-                top ??= isFirst ? flow.Area.Y : flow.Area.Y + line.Top;
+                if (end > cut)
+                {
+                    following ??= line;
+                    continue;
+                }
+
+                top ??= isFirst
+                    ? flow.Area.Y
+                    : flow.Area.Y + line.Top - UpperSpaceAbove(flow, line);
                 bottom = end;
+            }
+
+            // A nested table this part holds whole is as much of the cell's height as a line is, and it
+            // can be the *only* thing in the part — a cell that opens with a picture in a one-cell table
+            // has no line above it at all, so the part would otherwise measure nothing and be rejected.
+            bool tableBelow = false;
+            foreach (PlacedTable nested in flow.Tables)
+            {
+                if (nested.Area.Bottom > cut)
+                {
+                    // A nested table the cut falls *inside* contributes the part above the cut. Without
+                    // this the part measures nothing at a deep cut — a wrapper cell has no lines of its
+                    // own — so every candidate would appear to fit and the deepest would be chosen,
+                    // which is a part taller than the page. Only reachable through the deep-cut search
+                    // below; the ordinary candidate list never crosses a nested table.
+                    if (nested.Area.Y < cut)
+                    {
+                        Length straddleTop = isFirst ? flow.Area.Y : Length.Max(nested.Area.Y, above);
+                        top = top is { } sofar ? Length.Min(sofar, straddleTop) : straddleTop;
+                        bottom = Length.Max(bottom, cut);
+                    }
+
+                    tableBelow = true;
+                    continue;
+                }
+
+                if (nested.Area.Bottom <= above) continue;
+                if (nested.Area.Y < above && SliceNested(nested, above, cut) is null) continue;
+
+                Length nestedTop = isFirst ? flow.Area.Y : nested.Area.Y;
+                top = top is { } already ? Length.Min(already, nestedTop) : nestedTop;
+                bottom = Length.Max(bottom, nested.Area.Bottom);
             }
 
             if (top is not { } start) continue;
 
-            // Nothing of this cell is left over, so its part is as tall as the cell — the trailing
-            // spacing included, which is what `LayOut` charged the row for.
-            if (flow.Lines.Count > 0
-                && flow.Area.Y + flow.Lines[^1].Top + flow.Lines[^1].Box.Height <= cut)
+            if (following is { } next)
             {
+                // A part ends where the next block begins, not where its own last line does — so a part
+                // whose last line completes a paragraph is charged that paragraph's space-after, the same
+                // way `Advance` charges the cell for its final one. Within a paragraph the next line's
+                // block top *is* this line's bottom and this changes nothing.
+                bottom = Length.Max(bottom, flow.Area.Y + next.Top - next.UpperSpace);
+            }
+            else if (!tableBelow
+                     && flow.Lines.Count > 0
+                     && flow.Area.Y + flow.Lines[^1].Top + flow.Lines[^1].Box.Height <= cut)
+            {
+                // Nothing of this cell is left over, so its part is as tall as the cell — the trailing
+                // spacing included, which is what `LayOut` charged the row for. `tableBelow` is what
+                // keeps that from firing on a cell whose *lines* all fit while a nested table below them
+                // does not: charging the whole cell's advance there makes the part as tall as the row
+                // and nothing ever fits.
                 bottom = Length.Max(bottom, flow.Area.Y + flow.Advance);
             }
 
@@ -373,6 +645,224 @@ public static class TableLayouter
         }
 
         return text + border;
+    }
+
+    /// <summary>
+    /// The upper spacing a follow part re-applies above its first line.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A part of a split row that is not the row's first begins at the top of the <em>block</em> its first
+    /// line belongs to, which is one paragraph's space-before above the line. So a paragraph cut in half
+    /// by a page break pays its space-before twice — once on each part — and a paragraph that merely
+    /// starts a follow part pays it there rather than losing it.
+    /// </para>
+    /// <para>
+    /// Both halves of that are measured rather than reasoned, on 12 authored probes rendered through
+    /// LibreOffice 26.2.4.2 (<c>dotnet/probes/words-regress-01/probe-rowsplit-spacing.py</c> and
+    /// <c>probe-rowsplit-paras.py</c>). Sweeping <c>w:spacing w:before</c> and <c>w:after</c>
+    /// independently over a row cut across a page, the reference's follow part is
+    /// <c>before + remaining lines + after + border</c> in every combination, and the sum of a split
+    /// row's two parts therefore exceeds the unsplit row by exactly <c>before</c>. This is Writer's
+    /// <c>AddParaSpacingToTableCells</c> compatibility setting seen from the other end:
+    /// <see cref="PlacedFlow.Advance"/> already charges a cell for its last paragraph's space-after
+    /// because of it, and <c>SwFlowFrame::CalcUpperSpace</c> is why a follow keeps its upper space in a
+    /// table cell where an ordinary body paragraph would drop it.
+    /// </para>
+    /// <para>
+    /// Only a follow part is affected: the row's own first part starts at the flow's top, which already
+    /// holds the first paragraph's space-before.
+    /// </para>
+    /// </remarks>
+    /// <param name="flow">The cell's flow, for the paragraph the line belongs to.</param>
+    /// <param name="line">The first line the part holds.</param>
+    private static Length UpperSpaceAbove(PlacedFlow flow, PlacedLine line)
+    {
+        // Only a paragraph's first line carries it, so a line cut out of the middle of one has to be
+        // traced back to the line that does.
+        if (line.StartsParagraph) return line.UpperSpace;
+
+        foreach (PlacedLine other in flow.Lines)
+        {
+            if (other.ParagraphIndex != line.ParagraphIndex || !other.StartsParagraph) continue;
+            return other.UpperSpace;
+        }
+
+        return Length.Zero;
+    }
+
+    /// <summary>
+    /// Whether a cut would fall strictly inside one of the spans that must not be divided.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Writer's <c>bTableLayoutTooComplex</c> refuses to split a row holding a nested table at all; this
+    /// refuses only the cuts that would go <em>through</em> one, which is the same guarantee with the
+    /// rest of the row still available. Strict at both ends on purpose: a cut exactly at a nested
+    /// table's bottom leaves it whole on the part above, and one exactly at its top leaves it whole on
+    /// the part below, so both are legal and one of them is frequently the only cut a nested cell has.
+    /// </para>
+    /// <para>
+    /// It is not the whole of the follow-flow story. Writer builds a follow frame for the nested table
+    /// too and divides it in turn, so a document whose *one* nested table is taller than a page still
+    /// paginates differently from us. What this removes is the case where content vanished: a row that
+    /// cannot be cut anywhere is placed whole on a page of its own and everything past the page bottom
+    /// is never drawn. Measured on a two-file probe differing in one nested table — 90 body paragraphs
+    /// in a one-cell table render 2 pages and 90 lines both ways without it, and 1 page and 64 lines
+    /// with it, the last paragraph gone.
+    /// </para>
+    /// </remarks>
+    /// <summary>
+    /// Every depth at which a nested table could be divided, gathered through the tables inside it.
+    /// </summary>
+    /// <remarks>
+    /// The bottom of each of its lines, and the bottom of each table nested inside it — the same two
+    /// kinds of candidate <see cref="SliceRow"/> collects at the top level, read one level down. A
+    /// wrapper table holding a single row and a single cell offers no cut of its own, which is exactly
+    /// the shape this exists for, so the recursion has to reach the lines rather than stopping at the
+    /// rows.
+    /// </remarks>
+    /// <param name="nested">The table to look inside.</param>
+    /// <param name="above">Depths at or above this one are already drawn and are not candidates.</param>
+    /// <param name="into">The list being gathered into.</param>
+    /// <param name="depth">How far the recursion has gone; its guard.</param>
+    private static void DeepCuts(PlacedTable nested, Length above, List<Length> into, int depth = 0)
+    {
+        if (depth > FlowLayouter.MaxNesting) return;
+
+        foreach (PlacedTableCell cell in nested.Cells)
+        {
+            // A turned cell offers no cuts, for the reason `SliceRow` gives: its lines run across the row
+            // rather than down it.
+            if (cell.ContentTransform is not null || cell.Content is not { } flow) continue;
+
+            foreach (PlacedLine line in flow.Lines)
+            {
+                Length bottom = flow.Area.Y + line.Top + line.Box.Height;
+                if (bottom > above) into.Add(bottom);
+            }
+
+            foreach (PlacedTable inner in flow.Tables)
+            {
+                if (inner.Area.Bottom > above) into.Add(inner.Area.Bottom);
+
+                DeepCuts(inner, above, into, depth + 1);
+            }
+        }
+    }
+
+    /// <summary>
+    /// The part of a nested table lying between two depths, or null when none of it does.
+    /// </summary>
+    /// <remarks>
+    /// The counterpart of <see cref="Sliced"/> one level down, and it keeps page coordinates: the caller
+    /// shifts the whole thing by the same <c>dy</c> it shifts a nested table it kept whole, so nothing
+    /// here has to know where the part will land.
+    /// </remarks>
+    /// <param name="nested">The table being divided.</param>
+    /// <param name="above">The top of the band to keep.</param>
+    /// <param name="cut">Its bottom.</param>
+    /// <param name="depth">How far the recursion has gone; its guard.</param>
+    private static PlacedTable? SliceNested(PlacedTable nested, Length above, Length cut, int depth = 0)
+    {
+        if (depth > FlowLayouter.MaxNesting) return null;
+
+        List<PlacedTableCell> kept = [];
+
+        foreach (PlacedTableCell cell in nested.Cells)
+        {
+            // Undividable, so it rides on whichever part holds its top.
+            if (cell.ContentTransform is not null)
+            {
+                if (cell.Area.Y >= above && cell.Area.Y < cut) kept.Add(cell);
+                continue;
+            }
+
+            List<PlacedLine> lines = [];
+            List<PlacedTable> tables = [];
+
+            if (cell.Content is { } flow)
+            {
+                foreach (PlacedLine line in flow.Lines)
+                {
+                    Length bottom = flow.Area.Y + line.Top + line.Box.Height;
+                    if (bottom > above && bottom <= cut) lines.Add(line);
+                }
+
+                foreach (PlacedTable inner in flow.Tables)
+                {
+                    if (inner.Area.Bottom <= above || inner.Area.Y >= cut) continue;
+
+                    PlacedTable? part = inner.Area.Y >= above && inner.Area.Bottom <= cut
+                        ? inner
+                        : SliceNested(inner, above, cut, depth + 1);
+
+                    if (part is not null) tables.Add(part);
+                }
+            }
+
+            if (lines.Count == 0 && tables.Count == 0) continue;
+
+            Length top = Length.Max(cell.Area.Y, above);
+            Length bottom2 = Length.Min(cell.Area.Bottom, cut);
+
+            kept.Add(cell with
+            {
+                Area = new DocRect(cell.Area.X, top, cell.Area.Width, bottom2 - top),
+                Content = cell.Content is { } text
+                    ? text with { Lines = lines, Tables = tables }
+                    : null,
+            });
+        }
+
+        if (kept.Count == 0) return null;
+
+        Length areaTop = Length.Max(nested.Area.Y, above);
+        Length areaBottom = Length.Min(nested.Area.Bottom, cut);
+
+        return nested with
+        {
+            Area = new DocRect(nested.Area.X, areaTop, nested.Area.Width, areaBottom - areaTop),
+            Cells = kept,
+        };
+    }
+
+    /// <summary>Whether any line anywhere inside these cells ends below a depth.</summary>
+    /// <remarks>
+    /// The content test that <see cref="SliceRow"/>'s completeness check falls back on when the cut was
+    /// taken inside a nested table. Lines rather than rectangles, because a nested table's rectangle
+    /// tells you where it was laid out and not how much of it is still waiting.
+    /// </remarks>
+    private static bool HasLinesBelow(IReadOnlyList<PlacedTableCell> cells, Length cut, int depth = 0)
+    {
+        if (depth > FlowLayouter.MaxNesting) return false;
+
+        foreach (PlacedTableCell cell in cells)
+        {
+            if (cell.Content is not { } flow) continue;
+
+            foreach (PlacedLine line in flow.Lines)
+            {
+                if (flow.Area.Y + line.Top + line.Box.Height > cut) return true;
+            }
+
+            foreach (PlacedTable nested in flow.Tables)
+            {
+                if (HasLinesBelow(nested.Cells, cut, depth + 1)) return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool Crosses(List<(Length Top, Length Bottom)> spans, Length cut)
+    {
+        foreach ((Length top, Length bottom) in spans)
+        {
+            if (cut > top && cut < bottom) return true;
+        }
+
+        return false;
     }
 
     /// <summary>The cells of one part, holding its lines and positioned from the part's own top.</summary>
@@ -383,7 +873,27 @@ public static class TableLayouter
 
         foreach (PlacedTableCell cell in cells)
         {
+            // A turned cell goes whole onto the row's first part and is absent from every later one. It
+            // cannot be divided — see `SliceRow` — and drawing it twice would print the label on both
+            // pages. Its own rectangle still becomes the part's, so the borders round it are right.
+            if (cell.ContentTransform is { } onto)
+            {
+                bool isFirstPart = above <= rowTop;
+
+                sliced.Add(cell with
+                {
+                    Area = new DocRect(cell.Area.X, Length.Zero, cell.Area.Width, height),
+                    Content = isFirstPart ? cell.Content : null,
+                    ContentTransform = isFirstPart
+                        ? onto with { F = onto.F - rowTop.Emu }
+                        : null,
+                });
+
+                continue;
+            }
+
             List<PlacedLine> kept = [];
+            List<PlacedTable> keptTables = [];
             Length? first = null;
 
             if (cell.Content is { } flow)
@@ -393,15 +903,40 @@ public static class TableLayouter
                     Length end = flow.Area.Y + line.Top + line.Box.Height;
                     if (end <= above || end > cut) continue;
 
-                    first ??= line.Top;
+                    // Less the space the part is charged for above it, so the text lands where the height
+                    // `HeightAt` reported puts it. See `UpperSpaceAbove`.
+                    first ??= line.Top - UpperSpaceAbove(flow, line);
                     kept.Add(line);
+                }
+
+                // A nested table belongs to exactly one part — the one whose span holds it whole. `SliceRow`
+                // never chooses a cut that crosses one, so every nested table is above the cut or below it
+                // and none is drawn twice or lost between the two.
+                foreach (PlacedTable nested in flow.Tables)
+                {
+                    // Wholly outside the band this part covers.
+                    if (nested.Area.Bottom <= above || nested.Area.Y >= cut) continue;
+
+                    // Whole inside it, or divided by one end of it. The second case is new and is only
+                    // reachable through the deep-cut search in `SliceRow`: the ordinary candidate list
+                    // never crosses a nested table, so before that search existed every nested table was
+                    // wholly above the cut or wholly below it.
+                    PlacedTable? part = nested.Area.Y >= above && nested.Area.Bottom <= cut
+                        ? nested
+                        : SliceNested(nested, above, cut);
+
+                    if (part is null) continue;
+
+                    keptTables.Add(part);
+                    Length start = part.Area.Y - flow.Area.Y;
+                    first = first is { } already ? Length.Min(already, start) : start;
                 }
             }
 
             DocRect area = new(cell.Area.X, Length.Zero, cell.Area.Width, height);
             PlacedFlow? content = null;
 
-            if (cell.Content is { } text && kept.Count > 0)
+            if (cell.Content is { } text && (kept.Count > 0 || keptTables.Count > 0))
             {
                 // The remaining text starts at the top of the part rather than where it was measured, which
                 // is what a follow flow line is: the cell begins again on the next page. The first part
@@ -411,10 +946,23 @@ public static class TableLayouter
                     ? text.Area.Y - rowTop
                     : cell.Cell.Padding.Top - first!.Value;
 
+                // A line is positioned relative to the flow's rectangle and a nested table is not — its
+                // cells carry page coordinates, exactly as `ShiftFlow` records — so moving the flow's top
+                // takes the lines along and leaves the tables where the pre-layout pass put them. They are
+                // shifted by the same amount explicitly.
+                Length dy = top - text.Area.Y;
+
                 content = text with
                 {
                     Area = new DocRect(text.Area.X, top, text.Area.Width, height),
                     Lines = kept,
+                    Tables = keptTables.Count == 0
+                        ? []
+                        : [.. keptTables.Select(nested => nested with
+                        {
+                            Area = Shift(nested.Area, Length.Zero, dy),
+                            Cells = Offset(nested.Cells, Length.Zero, dy),
+                        })],
                 };
             }
 
@@ -444,6 +992,19 @@ public static class TableLayouter
         List<PlacedTableCell> moved = [];
         foreach (PlacedTableCell cell in cells)
         {
+            // A turned cell's content is in the cell's own coordinates, so moving the cell moves its
+            // *transform* and must not touch the flow: shifting both would move the text twice.
+            if (cell.ContentTransform is { } onto)
+            {
+                moved.Add(cell with
+                {
+                    Area = Shift(cell.Area, dx, dy),
+                    ContentTransform = onto with { E = onto.E + dx.Emu, F = onto.F + dy.Emu },
+                });
+
+                continue;
+            }
+
             moved.Add(cell with
             {
                 Area = Shift(cell.Area, dx, dy),
@@ -501,6 +1062,39 @@ public static class TableLayouter
         }
 
         return (top + bottom) / 2;
+    }
+
+    /// <summary>
+    /// The top margin a row's declared height is raised by, which is its cells' thickest.
+    /// </summary>
+    /// <remarks>
+    /// <c>lcl_GetTopSpace</c> (<c>sw/source/core/layout/tabfrm.cxx</c>:5175) takes the maximum over the
+    /// row's cells of the top border's <em>line space</em> — its width plus its distance — and adds the whole
+    /// of it to a <c>w:trHeight</c> floor. The border half of that is already
+    /// <see cref="BorderHeight"/>'s, which is added outside the floor and comes to the same total, so what is
+    /// left to charge here is the distance: the cell's top margin.
+    /// </remarks>
+    private static Length TopInset(PageTableRow row)
+    {
+        Length top = Length.Zero;
+        foreach (PageTableCell cell in row.Cells) top = Length.Max(top, cell.Padding.Top);
+        return top;
+    }
+
+    /// <summary>
+    /// The bottom margin a row's declared height is raised by, which is its cells' thickest.
+    /// </summary>
+    /// <remarks>
+    /// <c>lcl_GetBottomLineDist</c> (<c>tabfrm.cxx</c>:5245) — the distance alone, with no part of the bottom
+    /// border, which is the asymmetry the LibreOffice comment calls out: <em>"MS Word also adds the bottom
+    /// border padding (but not the bottom border line)"</em>. It is charged for an <c>exact</c> row as well
+    /// as for an <c>atLeast</c> one, which is the one thing <c>lcl_GetFixedRowHeight</c> does.
+    /// </remarks>
+    private static Length BottomInset(PageTableRow row)
+    {
+        Length bottom = Length.Zero;
+        foreach (PageTableCell cell in row.Cells) bottom = Length.Max(bottom, cell.Padding.Bottom);
+        return bottom;
     }
 
     /// <summary>
@@ -603,6 +1197,136 @@ public static class TableLayouter
 
         // The height comes from the cell rather than from the content, since the row may be taller.
         return moved with { Area = placed };
+    }
+
+    /// <summary>
+    /// Lays out a turned cell's text and works out the quarter turn that puts it on the page.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Everything here was measured against the installed LibreOffice 26.2.4.2 on generated probes, read
+    /// out of the PDF's own operators. Four facts, each of which the obvious implementation gets wrong:
+    /// </para>
+    /// <para>
+    /// <strong>The line breaks at the cell's inner height, and it is the same inner box an upright cell
+    /// uses</strong> — the height less the two half grid lines and less the <em>vertical</em> padding.
+    /// Horizontal padding does not shorten the line. Pinned by a five-twip sweep of <c>w:trHeight</c>: the
+    /// four-glyph to five-glyph boundary sits at exactly 500 twips in all three of {0.5 pt borders, no
+    /// borders, 10 pt top and bottom cell margin}, whose frames are 25.5, 25.0 and 45.5 pt tall. Reading
+    /// the turn as "swap the padding too" would have moved that boundary in two of the three.
+    /// </para>
+    /// <para>
+    /// <strong>A turned cell contributes nothing to its row's height.</strong> Not one line's worth,
+    /// nothing: a row holding only turned cells collapses to zero and LibreOffice draws neither its text
+    /// nor its borders. That is what makes the apparent circularity — the line length is the cell height,
+    /// the cell height is the tallest cell's line count — not a circle at all, and it is why this runs in
+    /// the second pass with the row heights already settled.
+    /// </para>
+    /// <para>
+    /// <strong>A line that starts outside the cell is not drawn at all.</strong> Dropped rather than
+    /// clipped: there is no text-showing operator for it in the reference's PDF, so it is absent from the
+    /// text layer as well as from the ink. A 50 pt column whose inner width is 38.7 pt draws four lines at
+    /// 11.55 pt each — the fourth overhanging — and not the fifth, which would start past the edge.
+    /// </para>
+    /// <para>
+    /// <strong><c>w:vAlign</c> places the line stack across the cell's width.</strong> Top puts the first
+    /// line against the left edge, bottom the last against the right, centre in the middle — measured at
+    /// 71.20, 148.80 and 110.00 pt on one fixture. It is the same axis in the cell's own frame, which is
+    /// why it is still called a vertical alignment.
+    /// </para>
+    /// <para>
+    /// What this deliberately does not do is measure the cell's <em>width</em> from the text. A turned
+    /// label wants the column to be one line thick and the document says how thick; nothing in Writer
+    /// widens a column to fit turned text either.
+    /// </para>
+    /// </remarks>
+    /// <param name="cell">The cell.</param>
+    /// <param name="area">Its rectangle on the page.</param>
+    /// <param name="bandAbove">Half the grid line above it.</param>
+    /// <param name="bandBelow">Half the grid line below it.</param>
+    /// <param name="nesting">How many tables enclose the one this cell is in.</param>
+    /// <param name="collapsesSpacing">Whether paragraphs collapse their spacing — see <see cref="LayOut"/>.</param>
+    /// <param name="addsCellLineSpacing">Whether a cell grows by its last line spacing — see <see cref="LayOut"/>.</param>
+    private static (PlacedFlow? Content, AffineTransform? Onto) Turned(
+        PageTableCell cell,
+        DocRect area,
+        Length bandAbove,
+        Length bandBelow,
+        int nesting,
+        bool collapsesSpacing,
+        bool addsCellLineSpacing)
+    {
+        CellPadding padding = cell.Padding;
+
+        // Along the text: the cell's inner height, which is what the lines break at.
+        Length along = area.Height - padding.Vertical - bandAbove - bandBelow;
+
+        // Across the stack: the cell's inner width, which is how many lines can be drawn.
+        Length across = area.Width - padding.Horizontal;
+
+        if (along <= Length.Zero || across <= Length.Zero) return (null, null);
+
+        PlacedFlow? flow = FlowLayouter.LayOut(
+            cell.Blocks,
+            new DocRect(Length.Zero, Length.Zero, along, Length.Zero),
+            Length.Zero,
+            nesting,
+            collapsesSpacing,
+            addsCellLineSpacing);
+
+        if (flow is null) return (null, null);
+
+        // The lines that begin inside the cell. A line starting past the edge is not drawn — see above —
+        // and the ones before it are kept whole even where they overhang, which is what the reference does.
+        List<PlacedLine> kept = [];
+        foreach (PlacedLine line in flow.Lines)
+        {
+            if (line.Top < across) kept.Add(line);
+        }
+
+        if (kept.Count == 0) return (null, null);
+
+        // How much of the width the stack actually uses, for the alignment below. The last line's box
+        // rather than the flow's advance: a turned cell has no space-after to charge across its width.
+        Length used = kept[^1].Top + kept[^1].Box.Height;
+        Length spare = across - used;
+
+        Length offset = spare <= Length.Zero
+            ? Length.Zero
+            : cell.VerticalAlignment switch
+            {
+                CellVerticalAlignment.Middle => spare / 2,
+                CellVerticalAlignment.Bottom => spare,
+                _ => Length.Zero,
+            };
+
+        // Where the flow's own origin lands. The text starts at whichever end of the cell it runs *from*:
+        // the bottom for a cell turned anticlockwise, the top for one turned clockwise.
+        Length left = area.X + padding.Left;
+        Length right = area.Right - padding.Right;
+        Length top = area.Y + bandAbove + padding.Top;
+        Length bottom = area.Bottom - bandBelow - padding.Bottom;
+
+        (double radians, Length x, Length y) = cell.TextDirection switch
+        {
+            CellTextDirection.TopToBottomRightToLeft => (Math.PI / 2, right - offset, top),
+            _ => (-Math.PI / 2, left + offset, bottom),
+        };
+
+        AffineTransform onto = AffineTransform.Concat(
+            AffineTransform.Rotation(radians),
+            AffineTransform.Translation(x.Emu, y.Emu));
+
+        // The flow keeps its own coordinates — the transform is what moves it — but it is trimmed to the
+        // lines that are drawn, and its rectangle is the whole inner box so that anything measuring the
+        // flow sees the room it had rather than the room it used.
+        return (
+            flow with
+            {
+                Lines = kept,
+                Area = new DocRect(Length.Zero, Length.Zero, along, across),
+            },
+            onto);
     }
 
     /// <summary>Where each grid column starts, measured from the table's left edge.</summary>

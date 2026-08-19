@@ -145,16 +145,22 @@ public sealed class ParagraphLayouter
     /// measuring text its face may not cover — see <see cref="FallbackShaper"/>, whose advances are
     /// usable and whose glyph identifiers are not.
     /// </param>
+    /// <param name="breaksOverflowingBlanks">
+    /// Whether a run of blanks wider than the line breaks inside rather than hanging past it. False
+    /// is Writer's rule and the default; EditEngine's is true, so a Calc cell sets it. See
+    /// <see cref="LineFiller.BreaksOverflowingBlanks"/>.
+    /// </param>
     public ParagraphLayouter(
         OpenTypeFace face,
         ILineBreaker? breaker = null,
         MetricGrid? grid = null,
         bool leadingAboveText = false,
-        ITextShaper? shaper = null)
+        ITextShaper? shaper = null,
+        bool breaksOverflowingBlanks = false)
     {
         ArgumentNullException.ThrowIfNull(face);
         _measurer = shaper is null ? new TextMeasurer(face) : new TextMeasurer(face, shaper);
-        _filler = new LineFiller(_measurer, breaker);
+        _filler = new LineFiller(_measurer, breaker, breaksOverflowingBlanks);
         _metrics = LineSpacing.Resolve(face, grid, leadingAboveText);
     }
 
@@ -520,6 +526,31 @@ public sealed class ParagraphLayouter
     /// and marks the line as clipping when the text does not fit. So a fixed-height line's baseline
     /// does not move when the font changes, which is what a form with fixed rows wants.
     /// </para>
+    /// <para>
+    /// <strong>Proportional spacing below one takes that same four-fifths ascent</strong>, which is
+    /// easy to miss because it sits in a different arm of the same function. Writer shrinks the box
+    /// and then overrides the ascent outright rather than scaling it with the box:
+    /// <code>
+    /// if (nTmp &lt; 100) { nTmp *= nLineHeight; nTmp /= 100; nLineHeight = nTmp;
+    ///                     SwTwips nAsc = (4 * nLineHeight) / 5; m_pCurr-&gt;SetAscent(nAsc); }
+    /// </code>
+    /// (<c>sw/source/core/text/itrform2.cxx</c>, the <c>SvxLineSpaceRule::Auto</c> arm). Above one the
+    /// slack goes above the text as the first paragraph says; below one the baseline is redefined.
+    /// </para>
+    /// <para>
+    /// Measured rather than assumed, because reading it off the source alone would not have said
+    /// whether it is live: twenty pages, one <c>w:line</c> value each from 50% to 97.5%, regressing the
+    /// first line's ink position on the line height gives the reference a slope of <strong>0.8030</strong>
+    /// and us <strong>0.0000</strong> — our first baseline sat in exactly the same place at every
+    /// spacing, because <c>extra</c> below is never positive here and the natural ascent fell through
+    /// untouched. Predicting each shrink as <c>naturalAscent - (4 * height) / 5</c> in truncating
+    /// integer arithmetic is exact on all twenty, residual nought. See
+    /// <c>probes/proportional-spacing-subunity/ascent-eighty-percent.py</c>.
+    /// </para>
+    /// <para>
+    /// This moves the text inside the box and not the box, so it changes no page break — which is
+    /// precisely why it survived: no column of the corpus gate can see it.
+    /// </para>
     /// </remarks>
     private (Length Baseline, Length SpaceAbove) BaselineIn(
         Length height, Length natural, Length emSize, LineSpacingMode mode)
@@ -541,7 +572,17 @@ public sealed class ParagraphLayouter
         }
 
         Length extra = height - natural;
-        return extra > Length.Zero ? (ascent + extra, extra) : (ascent, Length.Zero);
+        if (extra > Length.Zero) return (ascent + extra, extra);
+
+        // Proportional spacing that shrinks the box takes the same four-fifths ascent — the other arm
+        // of CalcRealHeight, and the reason this is not folded into the test above is that it must not
+        // catch AtLeast or Leading, neither of which can shrink a box in the first place.
+        if (mode == LineSpacingMode.Proportional && height < natural)
+        {
+            return (Length.FromTwips(4 * height.Twips / 5), Length.Zero);
+        }
+
+        return (ascent, Length.Zero);
     }
 
     /// <summary>

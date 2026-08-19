@@ -108,6 +108,10 @@ internal sealed class PptSlideLayout
         _diagnostics = diagnostics;
         _escher = new EscherDrawingReader(stream, diagnostics);
         _pictures = pictures ?? [];
+
+        // Through the field rather than through its value: the collection lives in the Environment
+        // container and is not read until `Layout` runs, which is still before any text is measured.
+        _fonts.DeclaredPitches = name => _fontTable.PitchOf(name);
     }
 
     /// <summary>Lays every slide out, in presentation order.</summary>
@@ -1030,18 +1034,34 @@ internal sealed class PptSlideLayout
     /// type.
     /// </para>
     /// <para>
-    /// The destination is the shape's placed rectangle, with no crop applied.
-    /// <c>cropFromTop</c> and its three siblings are recorded in the TODO rather than
-    /// approximated; a cropped picture drawn whole is the right picture in the right place at the
-    /// wrong scale, where dropping it is a hole.
+    /// The destination is the shape's placed rectangle grown by whatever <c>cropFromTop</c> and
+    /// its three siblings throw away, so the surviving part of the picture is what fills the
+    /// frame — <see cref="EscherPicture.Cropped"/>. The clip that makes it look cropped is the
+    /// shape's outline, which <see cref="Layout.SlideDrawing"/> applies to every picture anyway.
+    /// Measured on <c>Thailand17.ppt</c> page 22: an anchor of 655.63 × 528.25 pt under crops of
+    /// 8% left, 2.667% right and 10% bottom becomes 733.92 × 586.97, which is the reference's own
+    /// destination to 0.03 pt in three independent coordinates.
     /// </para>
     /// </remarks>
     private PlacedPicture? Picture(EscherShape shape, DocRect bounds)
     {
         PptPicture picture = PictureOf(shape);
-        return picture.IsEmpty
-            ? null
-            : new PlacedPicture(picture.Raster, bounds)
+        if (picture.IsEmpty) return null;
+
+        // Attached here rather than in PictureAt, because the knockout is a property of the
+        // *shape* and that cache is keyed by pib: two shapes may display one stored blip with
+        // different colours knocked out, and folding it into the cache would give the second
+        // shape the first shape's transparency. Vectors are excluded for the reason
+        // ColourKnockout records — the reference applies it only to a Bitmap graphic.
+        RasterImage? raster = picture.Raster;
+        if (raster is not null
+            && picture.Vector is null
+            && EscherPicture.TransparentColour(shape.Properties) is { } knockout)
+        {
+            raster = raster with { Knockout = knockout };
+        }
+
+        return new PlacedPicture(raster, EscherPicture.Cropped(shape.Properties, bounds))
             {
                 Vector = picture.Vector,
 

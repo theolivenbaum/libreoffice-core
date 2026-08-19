@@ -44,12 +44,49 @@ public interface IFontResolver
 /// A key into the document's own embedded fonts, when it embeds one for this request.
 /// Embedded faces always win: they are what the author saw.
 /// </param>
+/// <param name="DeclaredClass">
+/// The shape the <em>document</em> says the family has — <c>w:family</c> in a DOCX's font table,
+/// the <c>ff</c> bits of a DOC's <c>FFN</c>, <c>style:font-family-generic</c> in ODF,
+/// <c>&lt;family val="N"/&gt;</c> on a SpreadsheetML font. Distinct from the shape LibreOffice's
+/// substitution table files the <em>name</em> under, and it wins over it: measured on 26.2.4.2, a
+/// request for <c>Garamond</c> declared <c>swiss</c> falls back to DejaVu Sans where the same name
+/// undeclared falls back to DejaVu Serif, and <c>Futura</c> declared <c>roman</c> falls back to
+/// DejaVu Serif where undeclared it falls back to DejaVu Sans.
+/// <see cref="FontFamilyClass.Unknown"/> when the document says nothing, which is the common case.
+/// <para>
+/// <strong>It is consulted before the substitution chain, not after it.</strong>
+/// <c>FontConfigManager::Substitute</c> is LibreOffice's *pre-match* substitution and runs before
+/// <c>VCL.xcu</c> is read at all, appending the class as a second <c>FC_FAMILY</c>. The four names
+/// that can tell the two orderings apart — <c>Times</c>, <c>Helvetica</c>, <c>Albany</c> and
+/// <c>Thorndale</c>, each of which has an installed chain entry — all answer DejaVu once a class is
+/// declared. Two things survive it, both measured: a *strong* metric alias bound to the requested
+/// name itself, and a pi face. See <c>SystemFontResolver.DeclaredGenericFor</c>.
+/// </para>
+/// </param>
 public readonly record struct FontRequest(
     string FamilyName,
     int Weight = 400,
     bool IsItalic = false,
     FontPitch Pitch = FontPitch.Unknown,
-    string? EmbeddedFaceKey = null);
+    string? EmbeddedFaceKey = null,
+    FontFamilyClass DeclaredClass = FontFamilyClass.Unknown);
+
+/// <summary>
+/// The shape a document declares for one of the families it names, beside the name itself.
+/// </summary>
+/// <param name="Class">
+/// The generic family, or <see cref="FontFamilyClass.Unknown"/> when the document declares none.
+/// </param>
+/// <param name="Pitch">The declared pitch, or <see cref="FontPitch.Unknown"/>.</param>
+/// <remarks>
+/// A DOCX states this in <c>word/fontTable.xml</c>, a DOC in the <c>FFN</c> that names each family,
+/// and ODF in <c>office:font-face-decls</c>. All three carry the same two facts and all three are
+/// dropped on the floor by a resolver that only ever sees a family name — which is what
+/// <see cref="FontRequest"/> used to be handed.
+/// </remarks>
+public readonly record struct DeclaredFontShape(
+    FontFamilyClass Class = FontFamilyClass.Unknown,
+    FontPitch Pitch = FontPitch.Unknown);
 
 /// <summary>Whether a font is proportional or fixed-width.</summary>
 public enum FontPitch

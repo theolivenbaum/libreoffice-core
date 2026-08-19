@@ -186,6 +186,16 @@ public sealed record RasterImage
     /// </remarks>
     public LuminanceRecolour? Luminance { get; init; }
 
+    /// <summary>
+    /// A colour to be knocked out of the picture, or null when nothing is.
+    /// </summary>
+    /// <remarks>
+    /// Deferred to the decoder for the same reason <see cref="Duotone"/> is — matching a colour
+    /// needs pixels, and pixels need a codec. Applied <em>before</em> the other two, because the
+    /// colour it matches is the one the file stored. See <see cref="ColourKnockout"/>.
+    /// </remarks>
+    public ColourKnockout? Knockout { get; init; }
+
     /// <summary>True when <see cref="Pixels"/> holds the decoded image.</summary>
     public bool IsDecoded => !Pixels.IsEmpty;
 
@@ -201,6 +211,53 @@ public sealed record RasterImage
     /// </param>
     public static RasterImage Encoded(ReadOnlyMemory<byte> bytes, string? mediaType = null)
         => new() { EncodedBytes = bytes, EncodedMediaType = mediaType };
+}
+
+/// <summary>
+/// One colour of a picture made fully transparent — PowerPoint's <em>Set Transparent Color</em>.
+/// </summary>
+/// <remarks>
+/// <para>
+/// The binary formats state it as Escher property 263, <c>pictureTransparent</c>. LibreOffice
+/// reads it at <c>filter/source/msfilter/msdffimp.cxx:3894-3903</c> and applies it through
+/// <c>Bitmap::CombineMaskOr</c> (<c>vcl/source/bitmap/bitmap.cxx:2517</c>) into
+/// <c>Bitmap::CreateAlphaMask</c> (<c>vcl/source/bitmap/bitmappaint.cxx:684</c>).
+/// </para>
+/// <para>
+/// <b>The match is an independent per-channel box, not a distance.</b> A pixel is knocked out
+/// when each of its three channels is within <see cref="Tolerance"/> of the stated colour's,
+/// tested separately — so the matched region is a cube in RGB space rather than a sphere. The
+/// resulting alpha is <b>binary</b>: fully transparent or fully opaque, never in between. It is
+/// OR-combined with whatever alpha the picture already carried, so a knockout can only ever add
+/// transparency.
+/// </para>
+/// <para>
+/// <b>Bitmaps only.</b> The reference applies it under
+/// <c>aGraf.GetType() == GraphicType::Bitmap</c>, so a WMF or EMF carrying the property gets
+/// nothing — which is why this sits on <see cref="RasterImage"/> and has no vector counterpart.
+/// </para>
+/// </remarks>
+/// <param name="Colour">The colour to knock out.</param>
+/// <param name="Tolerance">
+/// How far each channel may differ and still match. LibreOffice passes 9
+/// (<c>CombineMaskOr(…, 9)</c>) and that number is read from source rather than measured: the one
+/// corpus deck that exercises the property knocks out pure white on a palette PNG, where any
+/// tolerance from 0 to 9 gives the same 51 361 pixels. Being wrong about it costs a fringe pixel
+/// on an anti-aliased edge.
+/// </param>
+public readonly record struct ColourKnockout(Colour Colour, int Tolerance)
+{
+    /// <summary>The tolerance LibreOffice's own call site passes.</summary>
+    public const int DefaultTolerance = 9;
+
+    /// <summary>Whether a pixel's three channels all fall inside the box.</summary>
+    /// <param name="red">The pixel's red channel.</param>
+    /// <param name="green">The pixel's green channel.</param>
+    /// <param name="blue">The pixel's blue channel.</param>
+    public bool Matches(byte red, byte green, byte blue)
+        => Math.Abs(red - Colour.R) <= Tolerance
+           && Math.Abs(green - Colour.G) <= Tolerance
+           && Math.Abs(blue - Colour.B) <= Tolerance;
 }
 
 /// <summary>

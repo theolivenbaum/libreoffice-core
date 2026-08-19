@@ -502,6 +502,15 @@ height is `fo:min-height` rather than `svg:height`, because a fixed 0.6 cm frame
 document exercises the dynamic-height path at the same time, and the body's first baseline moves with the
 header's real height.
 
+`textbox-overflow.docx` is three DrawingML text boxes holding the same six paragraphs of 8 pt text and
+differing only in stated height and autofit: 30 pt `a:noAutofit`, 8 pt `a:noAutofit`, and 15 pt
+`a:spAutoFit`. LibreOffice 26.2.4.2 draws **three, one and six** lines of them — the third box is the
+shortest and keeps the most, which is the whole point. It is the fixture for the rule that a box of stated
+height formats only the lines whose top is inside it, and always at least one; three boxes rather than one
+because a reader that truncates everything and a reader that truncates nothing each pass a third of them.
+Authored by `probes/words-extra-01/make-fixture.py`, whose heights come from a 60-box sweep of the same
+binary so that none of them sits on a rounding edge.
+
 `inherited-table-header.docx` is a header made only of a table, in a first section, with a second
 section that names an empty `even` and an empty `first` header and no default one — the shape Word writes
 when a user gives a later section no header of its own. It is the fixture for the one place Paperless

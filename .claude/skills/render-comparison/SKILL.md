@@ -28,6 +28,59 @@ Corollary: **fix cascades before chasing anything else.** A single wrong font me
 manufacture hundreds of unrelated-looking failures across a corpus, and fixing it makes
 them all disappear at once.
 
+## Look at the page. Start there, not with a number.
+
+**This is the default, not a last resort.** Every other instrument in this skill answers *how
+much* differs or *which element* differs. None answers **what is wrong**, and for a long stretch
+this project chased differences purely through numbers — which is how a corner-focus radial
+gradient drawn as a diagonal linear ramp sat unnoticed behind a 33% ink figure nobody had a
+reason to open.
+
+```bash
+S=.claude/skills/render-comparison/scripts
+export PAPERLESS_CLI=<the tree you mean to measure>/dotnet/tools/…/Paperless.Cli
+
+python3 $S/look.py "Thailand17__ppt" --worst          # most divergent page, both sides, as PNGs
+python3 $S/look.py <corpus/path.pptx> --page 8        # a page you already suspect
+```
+
+It prints `|ink|%`, the signed figure and two PNG paths. **Open both images and read them.**
+
+### What looking gives you that no number here does
+
+- **Direction.** "Text sizes are different" is a report. *"Every line breaks earlier in the
+  reference, so our glyphs are narrower"* is a lead. A 19.47% ink figure says nothing about which
+  side is bigger.
+- **Kind.** A missing custom bullet, an inverted axis and a flattened gradient all read as "ink
+  differs" and are three unrelated defects with three unrelated fixes.
+
+### What it does not give you: cause
+
+An image cannot tell a picture bullet from a character bullet in a substituted symbol font from
+an autonumber. **Name the causes the image cannot decide between, then go and measure.** A
+reading that quietly promotes itself into a diagnosis is worse than no reading.
+
+### How to use it well
+
+- **Run it on documents that PASS.** The failing set is picked over; the gate is page count,
+  extractable words within max(2%, 3) and unembedded fonts, and it is blind to most real defects. A
+  track can be 163 of 163 page-exact while three passing pages opened at random yield a missing
+  custom bullet, a hanging indent we invent, and glyphs a few percent narrow. Rank the *passing*
+  documents by `|ink|%` and open the worst.
+- **Describe before you check the record.** Reading blind and only then looking up what is known
+  is a control on the reading. A gradient description produced that way matched a diagnosis made
+  a week earlier from source, with no chance of having been led to it.
+- **Stack the pair vertically; do not put it side by side.** The same region has to land under
+  itself or you compare the wrong things.
+- **Check your own comparator on a known answer first.** `look.py`'s ink mask was wrong on its
+  first run — it averaged the RGB channels, so saturated yellow (average 170) counted as ink, and
+  a page whose background goes periwinkle-to-yellow scored **0.03% different when it was 33%**.
+  Rec. 601 luma puts that yellow at 226 and leaves it as paper. The known-answer check is the
+  only reason that was caught.
+- **A "total" disagreement is usually your instrument.** Two pages differing by 0.08 pt in width
+  round to different pixel counts, and a naive comparator calls that 100% different. `look.py`
+  reports a size difference as its own thing rather than as a percentage, deliberately.
+
 ## Running a comparison
 
 ```bash
@@ -190,7 +243,7 @@ Once a page differs, narrow it down before theorising:
    | `TabStop.Leader` | 51 of 136 corpus DOCX | every dotted table-of-contents line blank |
    | `IsCapitalised` (`w:caps`/`w:smallCaps`) | — | wrong advance widths, so wrong line breaks |
    | `a:rPr/@baseline` | 29 of 112 corpus PPTX | superscripts on the baseline at full size |
-   | `SheetGrid.IsOptimalSize` (`ht` without `customHeight`) | every XLSX with a height hint | row pitch 15.735 pt against 15.0 |
+   | `SheetGrid.IsOptimalSize` (`ht` without `customHeight`) | ~~every XLSX with a height hint~~ | **fixed — see below** |
    | `WritingFieldKind.PageNumber` (`PAGE`) | every DOC/DOCX with a page-number field | footers print the producer's last cached result — `9` on all nine pages |
 
    Grep for the property name: **if the only hits are the readers and the model, it does
@@ -199,9 +252,18 @@ Once a page differs, narrow it down before theorising:
 
    Note the last two entries are also a warning about *why* these survive. Escapement had
    nowhere to be stored (`SlideTextRun` carried a flag, not a magnitude) and the row-height flag
-   has nothing behind it to call (`ScColumn::GetNeededSize` is a feature, not a line). A field
+   had nothing behind it to call (`ScColumn::GetNeededSize` is a feature, not a line). A field
    read and never used is often blocked on something real rather than merely forgotten, so
    budget for the feature rather than expecting a wiring change.
+
+   **`SheetGrid.IsOptimalSize` is no longer an example of this and the row is kept only so that a
+   round briefed from it is not sent hunting.** The feature it was blocked on was built:
+   `SheetOptimalRowHeights` consults the property three times and exists to honour it. A round
+   dispatched in 2026-08-15 was told this document's page-count gap *was* the unwired flag, spent
+   its first hour looking for the missing consumer, and found the real seat somewhere else
+   entirely — a run of trailing blanks that EditEngine breaks inside and a word processor lets
+   hang (`dotnet/probes/sheets-rest-01/results.md` §1). **Re-run the grep before believing any
+   row of this table**; that is the whole method, and it applies to the table itself.
 
 ## Naming the element that differs: `pdf-ops.py`
 

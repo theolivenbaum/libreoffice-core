@@ -29,55 +29,297 @@ public enum LineMetricSource
 }
 
 /// <summary>
+/// The logical unit a reference device's map mode is set to.
+/// </summary>
+/// <remarks>
+/// <b>A resolution alone does not describe a device.</b> The quantisation a grid applies is the
+/// size of one device pixel expressed in the unit the application measures in, and that is the
+/// resolution <em>and</em> the map unit together: 8640 dpi in twips is six pixels to the unit,
+/// 8640 dpi in hundredths of a millimetre is 3.4, and 600 dpi in hundredths of a millimetre is
+/// 0.236 — a pixel worth 4.23 units, eighteen times the coarsest thing Writer ever sees.
+/// </remarks>
+public enum MetricUnit
+{
+    /// <summary>A twentieth of a point, 1440 to the inch. Writer's map mode.</summary>
+    Twip,
+
+    /// <summary>A hundredth of a millimetre, 2540 to the inch. The draw layer's, Calc's and Impress's.</summary>
+    Mm100,
+}
+
+/// <summary>
 /// The device a font's metrics are quantised through before layout sees them.
 /// </summary>
 /// <remarks>
 /// <para>
-/// Layout normally scales a font's design units straight to the size the document asks for, which is what
-/// LibreOffice does when it formats against a virtual reference device. A document can ask for the other
-/// behaviour: Word's "use printer metrics to lay out document" compatibility option makes Writer format
-/// against a real printer instead — <c>WW8Dop::fUsePrinterMetrics</c> becomes
-/// <c>!USE_VIRTUAL_DEVICE</c> in <c>sw/source/filter/ww8/ww8par.cxx</c>:2008, and
-/// <c>DocumentDeviceManager::getReferenceDevice</c> then hands out an <c>SfxPrinter</c>.
+/// <b>There is always a device.</b> Writer never scales a face's design units straight to the size the
+/// document asks for — it formats against a reference device, and every vertical metric is quantised
+/// onto that device's pixel grid on the way in and back onto the document's own unit on the way out.
+/// Which device it is depends on one compatibility flag:
+/// </para>
+/// <list type="bullet">
+/// <item><description>
+/// Normally a <c>VirtualDevice</c> in <c>VirtualDevice::RefDevMode::MSO1</c> with
+/// <c>MapUnit::MapTwip</c> — <c>DocumentDeviceManager::CreateVirtualDevice_</c>,
+/// <c>sw/source/core/doc/DocumentDeviceManager.cxx</c>:259. <c>MSO1</c> is <b><c>6*1440</c> = 8640
+/// dpi</b> (<c>vcl/source/gdi/virdev.cxx</c>:407), so one twip is exactly six device pixels. See
+/// <see cref="Reference"/>.
+/// </description></item>
+/// <item><description>
+/// A real printer when the document asks for one: Word's "use printer metrics to lay out document"
+/// makes <c>WW8Dop::fUsePrinterMetrics</c> into <c>!USE_VIRTUAL_DEVICE</c>
+/// (<c>sw/source/filter/ww8/ww8par.cxx</c>:2008) and <c>getReferenceDevice</c> hands out an
+/// <c>SfxPrinter</c>. See <see cref="Printer"/>.
+/// </description></item>
+/// </list>
+/// <para>
+/// The difference between the two is only the coarseness, and on the printer it is not small: at
+/// 600 dpi a pixel is 2.4 twips, so Liberation Serif at 9.5 pt measures 10.80 pt per line rather
+/// than the 10.95 pt its design units give, and Liberation Sans at 11 pt measures 12.60 against
+/// 12.65. On the virtual device a pixel is a sixth of a twip and the effect is worth exactly one
+/// twip, in either direction, on about one line height in nine. That one twip is what
+/// <c>dotnet/probes/lineheight-01/</c> is about: it moved 22 of 195 measured (face, size) pairs and
+/// two earlier rounds could not reconstruct it because they swept 72–6000 dpi and the answer is
+/// 8640.
 /// </para>
 /// <para>
-/// The difference is rounding, and it is not small. Every metric goes through the device's pixel grid
-/// twice — the em size is rounded to whole device pixels, the ascent, descent and line gap are each
-/// rounded to whole pixels at that size, and the sum is rounded back to whole twips. On a 300 dpi grid
-/// that is a pixel per 4.8 twips, so Liberation Sans at 11 pt measures 13.00 pt per line rather than the
-/// 12.65 pt its design units give — a 2.8% difference, which over a long document is many pages.
-/// Measured against LibreOffice on three sizes of two faces, the grid reproduces its line pitch exactly
-/// where unquantised scaling is out by up to 7 twips.
+/// <b>The printer's resolution has to be measured, not read.</b> This said 300 dpi and cited
+/// <c>PPDParser</c> defaulting both axes to 300 when the queue names no resolution and when there is
+/// no PPD at all (<c>vcl/unx/generic/printer/ppdparser.cxx</c>:1500 and :1524). That reading is not
+/// what the installed 26.2.4.2 does here: an authored pair differing only in
+/// <c>fUsePrinterMetrics</c> gives eight (face, size) line heights that 600 dpi reproduces on 8 of 8
+/// and 300 dpi on 3, and two corpus documents' banked references agree. The resolution is the whole
+/// of what the device contributes, nothing in the file decides it, and a machine whose default queue
+/// says otherwise would need a different number again — which is the honest cost of a document
+/// asking to be laid out against hardware. See <see cref="Printer"/> for the table.
 /// </para>
 /// <para>
-/// 300 dpi because that is what a headless LibreOffice's printer reports: <c>PPDParser</c> defaults both
-/// axes to 300 when the queue names no resolution and when there is no PPD at all
-/// (<c>vcl/unx/generic/printer/ppdparser.cxx</c>:1500 and :1524). The resolution is the whole of what the
-/// device contributes here, so a machine whose default queue says otherwise would need a different number
-/// — which is the honest cost of a document asking to be laid out against hardware.
+/// <b>Writer's logical unit is the twip and the other two applications' is the hundredth of a
+/// millimetre</b>, which is why this carries a <see cref="MetricUnit"/> as well as a resolution.
+/// See <see cref="Presentation"/> and <see cref="Spreadsheet"/>; both were measured on the
+/// installed binary rather than read out of the C++, and for Calc the two answers differ.
 /// </para>
 /// </remarks>
 /// <param name="Dpi">The device resolution the metrics are rounded onto.</param>
-public readonly record struct MetricGrid(int Dpi)
+/// <param name="Unit">The logical unit the device's map mode is set to.</param>
+/// <param name="QuantisesAdvances">
+/// Whether horizontal advances go through the grid as well as the vertical metrics.
+/// <para>
+/// True only for a real printer, and measured rather than assumed: <c>probes/printer-metric-advance.py</c>
+/// sweeps 96 authored rows with <c>fUsePrinterMetrics</c> varied on one body. Re-run on 26.2.4.2 at the
+/// 600 dpi the same probe establishes, the quantised rule reproduces 37 of the 96 exactly and the rest
+/// within two twips, where at 300 dpi it was out by as much as 137; with the flag clear, unquantised
+/// scaling is the right answer and this rule is not. The dominant term is the em rounding, which a
+/// 600 dpi device makes worth up to 0.4% of every advance and an 8640 dpi device makes exactly
+/// nothing — so on the virtual reference device the two rules differ by less than a twip and the
+/// evidence says to take the one that was measured.
+/// </para>
+/// <para>
+/// The two-twip residue is real and open: it is pinned by
+/// <c>MetricGridTests.TheAdvanceRuleIsNotExactAndTheResidueIsRecordedRatherThanHidden</c>. Dropping
+/// the truncation fits 52 of 96 rather than 37 but is <em>worse</em> on 17 of them, so the evidence
+/// does not choose between the two and the floor stays because it is what the C++ says.
+/// </para>
+/// </param>
+/// <param name="ScalesEastAsianFaces">
+/// Whether Word's <c>MS_WORD_COMP_GRID_METRICS</c> compatibility rule applies: a face declaring one of
+/// four East Asian code pages has its ascent, and its ascent and descent together, scaled by 127%
+/// before the leading is added. See <see cref="AsWordDocument"/> and <see cref="EastAsianScaled"/>.
+/// <para>
+/// <b>Only ever true on a Writer grid</b>, and the two rules on this type are orthogonal because of
+/// it: this one is <c>SwFntObj</c>'s, and the taller-of-two-roundings in
+/// <see cref="LineMetrics.ScaledLineHeight"/> is EditEngine's. See <see cref="EastAsianScaled"/>.
+/// </para>
+/// </param>
+public readonly record struct MetricGrid(
+    int Dpi, bool QuantisesAdvances, MetricUnit Unit, bool ScalesEastAsianFaces = false)
 {
+    /// <summary>A grid at a resolution in twips, quantising advances as a real device does.</summary>
+    public MetricGrid(int dpi) : this(dpi, true, MetricUnit.Twip) { }
+
+    /// <summary>A grid at a resolution in twips.</summary>
+    /// <param name="dpi">The device resolution.</param>
+    /// <param name="quantisesAdvances">Whether horizontal advances go through it too.</param>
+    public MetricGrid(int dpi, bool quantisesAdvances)
+        : this(dpi, quantisesAdvances, MetricUnit.Twip) { }
+
     /// <summary>The grid a document asking for printer metrics is laid out on.</summary>
-    public static MetricGrid Printer { get; } = new(300);
+    /// <remarks>
+    /// <para>
+    /// <b>600 dpi, and it was 300 until it was measured against this container's binary rather
+    /// than inherited.</b> `probes/printer-metric-advance.py` varies <c>fUsePrinterMetrics</c> on
+    /// one authored body and reads the baseline pitch off both renderings; run against the
+    /// installed 26.2.4.2 it gives eight (face, size) pairs that 600 dpi reproduces on **8 of 8**
+    /// and 300 dpi on 3:
+    /// </para>
+    /// <code>
+    ///   face              pt   printer   600 dpi   300 dpi
+    ///   Liberation Serif   9    10.300    10.30     10.60
+    ///   Liberation Serif  10    11.550    11.55     11.55
+    ///   Liberation Serif  11    12.750    12.75     12.75
+    ///   Liberation Serif  12    13.800    13.80     13.95
+    ///   Liberation Sans    9    10.350    10.35     10.35
+    ///   Liberation Sans   10    11.500    11.50     11.55
+    ///   Liberation Sans   11    12.600    12.60     13.00
+    ///   Liberation Sans   12    13.800    13.80     13.95
+    /// </code>
+    /// <para>
+    /// The 300 dpi figures are exactly what that probe's own write-up records as measured, so this
+    /// is a stored figure that no longer reproduces rather than a rule anyone read wrong — the
+    /// headless default printer is what decides it and it is not a property of the file. The same
+    /// re-run moves the probe's advance verdict the same way: <c>exact-em@600</c> is the best
+    /// rule at 0.022 pt mean error where every 300 dpi rule is above 0.68.
+    /// </para>
+    /// <para>
+    /// The correction is worth 2.8% of a line at 11 pt in Liberation Sans — 13.00 pt against 12.60 —
+    /// which is
+    /// what put 23 spurious pages into <c>A_320.doc</c>: its MMEL tables are padded to exactly one
+    /// page each, so a table 16.8 pt too tall no longer fits under the empty page-break paragraph
+    /// in front of it and every one of them was pushed onto a page of its own.
+    /// </para>
+    /// </remarks>
+    public static MetricGrid Printer { get; } = new(600, quantisesAdvances: true);
 
-    /// <summary>Twips per device pixel on this grid.</summary>
-    private double TwipsPerPixel => 1440.0 / Dpi;
+    /// <summary>
+    /// The virtual reference device Writer formats every other document against: 8640 dpi, six
+    /// device pixels to the twip.
+    /// </summary>
+    public static MetricGrid Reference { get; } = new(6 * 1440, quantisesAdvances: false);
 
-    /// <summary>A design-unit measurement in whole device pixels at an em size.</summary>
+    /// <summary>
+    /// The same grid with Word's East Asian line scale switched on.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>MS_WORD_COMP_GRID_METRICS</c> is a document compatibility setting rather than a property of
+    /// the device, and it is off by default — <c>DocumentSettingManager</c> initialises
+    /// <c>mbMsWordCompGridMetrics(false)</c>, and an ODF file carries its own value. So the DOC and
+    /// DOCX readers ask for this and the ODF one does not, which is measured rather than reasoned:
+    /// the same two lines of WenQuanYi Zen Hei at 12 pt are 406 twips apart when LibreOffice reads
+    /// them from a <c>.docx</c> and 325 apart when it reads them from a <c>.fodt</c>.
+    /// </para>
+    /// <para>
+    /// Applied to whichever grid the document already asked for, because the flag and the device are
+    /// independent in the C++ too: every call site of <c>lcl_ApplyCjkHeightAdjustment</c> passes the
+    /// reference device it happens to have and asks the document for the flag separately. The
+    /// printer combination is unmeasured — no corpus document sets <c>usePrinterMetrics</c> and
+    /// names an East Asian face — and is written this way because that is what the C++ does, not
+    /// because it has been seen.
+    /// </para>
+    /// </remarks>
+    public MetricGrid AsWordDocument() => this with { ScalesEastAsianFaces = true };
+
+    /// <summary>
+    /// The 127% East Asian line scale, or the value unchanged.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>lcl_ApplyCjkHeightAdjustment</c> (<c>sw/source/core/txtnode/fntcache.cxx</c>:270-292,
+    /// tdf#129808): with <c>MS_WORD_COMP_GRID_METRICS</c> set and the face declaring CP932, CP936,
+    /// CP949 or CP950, <c>(nBase * 127) / 100</c> — integer division, on the value in twips.
+    /// </para>
+    /// <para>
+    /// <b>What it multiplies is not the finished line height.</b> <c>GetFontHeight</c> reads
+    /// <c>lcl_ApplyCjkHeightAdjustment(m_nPrtHeight, …) + GetFontLeading(…)</c>, so the scale
+    /// reaches the device's ascent-plus-descent and the face's leading is added afterwards,
+    /// unscaled; <c>GetFontAscent</c> is the same shape. That distinction is invisible on IPAGothic,
+    /// whose <c>hhea</c> line gap is zero — which is why <c>probes/lineheight-01</c> §7(a) recorded
+    /// the rule as scaling the height itself and was exact on all 39 of its pairs anyway. WenQuanYi
+    /// Zen Hei has a gap of 92/1024 and separates them: at 12 pt the two rules give 412 twips and
+    /// 406, and LibreOffice draws 406. See <c>probes/words-metrics-01/probe-cjk127.py</c>, which
+    /// scores both against 117 measured pairs over three faces — this rule 117, the other 78.
+    /// </para>
+    /// </remarks>
+    /// <param name="value">The ascent, or the ascent and descent together, before the leading.</param>
+    /// <param name="face">Whether the face declares one of the four East Asian code pages.</param>
+    public Length EastAsianScaled(Length value, bool face)
+        => ScalesEastAsianFaces && face
+            ? FromLogical(ToLogical(value) * 127 / 100)
+            : value;
+
+    /// <summary>
+    /// The reference device Impress and Draw format against: <b>600 dpi in 1/100 mm</b>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>SdModule::SdModule</c> creates one <c>VirtualDevice</c> for the whole application, sets
+    /// its map mode to <c>MapUnit::Map100thMM</c> and then
+    /// <c>VirtualDevice::RefDevMode::Dpi600</c> — <c>sd/source/ui/app/sdmod.cxx</c>:83-85, whose
+    /// comment says it is for "a visually better formatting of text in small sizes". A device
+    /// pixel is therefore <b>4.233 hundredths of a millimetre</b>, 2.4 twips, where Writer's is a
+    /// sixth of a twip: the same class of quantisation worth eighteen times as much.
+    /// </para>
+    /// <para>
+    /// Measured, not read. <c>probes/refdev-01/probe-impress.py</c> puts six baselines on each of
+    /// 507 (face, size) slides and reads them out of the reference PDF's own text matrices: this
+    /// grid is exact on <b>507 of 507</b> ascents and 507 of 507 line heights, where 720 dpi
+    /// manages 75 and 8640 dpi 89, and exact scaling — what the tree did before — 82.
+    /// </para>
+    /// </remarks>
+    public static MetricGrid Presentation { get; } = new(600, false, MetricUnit.Mm100);
+
+    /// <summary>
+    /// The device a printed or exported Calc cell is formatted against: <b>720 dpi in 1/100 mm</b>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>This is not <c>ScDocument</c>'s own reference device and that is the whole point.</b>
+    /// <c>ScDocument::GetVirtualDevice_100th_mm</c> really is <c>RefDevMode::MSO1</c>, 8640 dpi
+    /// (<c>sc/source/core/data/documen8.cxx</c>:182-193), and it is not what draws a cell:
+    /// <c>ScOutputData</c> formats against the <em>output</em> device, which on a PDF export is
+    /// the PDF writer's own reference device, <c>RefDevMode::PDF1</c> = 720 dpi
+    /// (<c>vcl/source/gdi/virdev.cxx</c>:410). Reading the tree gives 8640 and the binary draws
+    /// 720; <c>probes/refdev-01/probe-calc.py</c> scores 92 of 273 for the first and
+    /// <b>273 of 273</b> for the second, and 468 of 468 ascents across both the multi-paragraph
+    /// <c>EditCell</c> path and the single-line <c>ScOutputData::LayoutStrings</c> one.
+    /// </para>
+    /// <para>
+    /// 720 dpi in 1/100 mm is the same device <c>SheetDeviceUnits.ReferenceDpi</c> already
+    /// carried for the font-size round trip. That it turned up independently from the line
+    /// metrics is a check on both.
+    /// </para>
+    /// </remarks>
+    public static MetricGrid Spreadsheet { get; } = new(720, false, MetricUnit.Mm100);
+
+    /// <summary>Logical units to the inch, for this grid's map unit.</summary>
+    private int UnitsPerInch => Unit == MetricUnit.Mm100 ? 2540 : 1440;
+
+    /// <summary>Logical units per device pixel on this grid.</summary>
+    private double UnitsPerPixel => (double)UnitsPerInch / Dpi;
+
+    /// <summary>A length in this grid's whole logical units.</summary>
+    private long ToLogical(Length value) => Unit == MetricUnit.Mm100 ? value.Mm100 : value.Twips;
+
+    /// <summary>Whole logical units back as a length.</summary>
+    private Length FromLogical(long units)
+        => Unit == MetricUnit.Mm100 ? Length.FromMm100(units) : Length.FromTwips(units);
+
+    /// <summary>
+    /// A design-unit measurement in whole device pixels at an em size.
+    /// </summary>
+    /// <remarks>
+    /// <c>FontMetricData::ImplCalcLineSpacing</c> ends with three separate <c>round()</c> calls, one
+    /// per metric (<c>vcl/source/font/fontmetric.cxx</c>:538-540). C++ <c>round</c> takes a half away
+    /// from zero; .NET's <c>Math.Round</c> takes it to even, and on a grid this fine the halves are
+    /// common rather than exotic — a sixth of the line gaps in the corpus land on one.
+    /// </remarks>
     public long ToPixels(int designUnits, int unitsPerEm, Length emSize)
     {
         if (unitsPerEm <= 0 || Dpi <= 0) return 0;
 
-        double em = Math.Round(emSize.Twips / TwipsPerPixel);
-        return (long)Math.Round(designUnits * em / unitsPerEm);
+        double em = Math.Round(ToLogical(emSize) / UnitsPerPixel, MidpointRounding.AwayFromZero);
+        return (long)Math.Round(designUnits * em / unitsPerEm, MidpointRounding.AwayFromZero);
     }
 
     /// <summary>Whole device pixels back in whole twips.</summary>
+    /// <remarks>
+    /// <c>CoordinateMapper::ViewToLogicDistanceY</c> is an <c>llround</c>
+    /// (<c>vcl/source/outdev/CoordinateMapper.cxx</c>:279), which is again half away from zero.
+    /// </remarks>
     public Length ToLength(long pixels)
-        => Dpi <= 0 ? Length.Zero : Length.FromTwips((long)Math.Round(pixels * TwipsPerPixel));
+        => Dpi <= 0
+            ? Length.Zero
+            : FromLogical((long)Math.Round(pixels * UnitsPerPixel, MidpointRounding.AwayFromZero));
 
     /// <summary>
     /// An advance width as the device measures it: the whole run's advance in device pixels,
@@ -87,8 +329,9 @@ public readonly record struct MetricGrid(int Dpi)
     /// <para>
     /// Two quantisations, and the first is much the larger. The em is rounded to whole device
     /// pixels before any advance is scaled through it — <see cref="ToEmSize"/>'s rounding — so at
-    /// 9 pt on a 300 dpi grid the device sets 38 pixels for 37.5 and <em>every</em> advance comes
-    /// out 1.33% wider than the size the document asked for. The truncation that follows is worth
+    /// 11 pt on a 600 dpi grid the device sets 92 pixels for 91.67 and <em>every</em> advance comes
+    /// out 0.36% wider than the size the document asked for, while at 10 pt it sets 83 for 83.33 and
+    /// they come out 0.4% narrower. The truncation that follows is worth
     /// at most one pixel, 0.24 pt, on a whole portion, and pulls the other way.
     /// </para>
     /// <para>
@@ -115,7 +358,7 @@ public readonly record struct MetricGrid(int Dpi)
     {
         if (unitsPerEm <= 0 || Dpi <= 0) return Length.Zero;
 
-        double em = Math.Round(emSize.Twips / TwipsPerPixel);
+        double em = Math.Round(ToLogical(emSize) / UnitsPerPixel, MidpointRounding.AwayFromZero);
         return ToLength((long)Math.Floor(designUnits * em / unitsPerEm));
     }
 
@@ -133,7 +376,7 @@ public readonly record struct MetricGrid(int Dpi)
     public Length ToEmSize(Length emSize)
         => Dpi <= 0 || emSize <= Length.Zero
             ? emSize
-            : ToLength((long)Math.Round(emSize.Twips / TwipsPerPixel));
+            : ToLength((long)Math.Round(ToLogical(emSize) / UnitsPerPixel, MidpointRounding.AwayFromZero));
 }
 
 /// <summary>
@@ -153,6 +396,11 @@ public readonly record struct MetricGrid(int Dpi)
 /// <b>This is a property of the application, not of the font</b>, and LibreOffice's two text engines
 /// disagree about it — see the remark on <see cref="ScaledAscent"/>.
 /// </param>
+/// <param name="DeclaresEastAsianCodePage">
+/// Whether the face claims coverage of CP932, CP936, CP949 or CP950, which is what
+/// <see cref="MetricGrid.ScalesEastAsianFaces"/> acts on. A property of the font rather than of the
+/// text: Word scales the line for such a face even where the run holds nothing but Latin.
+/// </param>
 public readonly record struct LineMetrics(
     int Ascent,
     int Descent,
@@ -160,7 +408,8 @@ public readonly record struct LineMetrics(
     LineMetricSource Source,
     int UnitsPerEm,
     MetricGrid? Grid = null,
-    bool LeadingAboveText = false)
+    bool LeadingAboveText = false,
+    bool DeclaresEastAsianCodePage = false)
 {
     /// <summary>The distance from one baseline to the next, in design units.</summary>
     public int LineHeight => Ascent + Descent + LineGap;
@@ -171,7 +420,10 @@ public readonly record struct LineMetrics(
     /// <param name="emSize">The font size the document asks for.</param>
     public Length ScaledLineHeight(Length emSize)
         => Grid is { } grid
-            ? TextHeightOn(grid, emSize) + LeadingOn(grid, emSize)
+            ? LeadingAboveText
+                ? grid.EastAsianScaled(TextHeightOn(grid, emSize), DeclaresEastAsianCodePage)
+                  + LeadingOn(grid, emSize)
+                : EditHeightOn(grid, emSize)
             : Scale(LineHeight, emSize);
 
     /// <summary>The ascent at an em size.</summary>
@@ -208,12 +460,36 @@ public readonly record struct LineMetrics(
     /// </para>
     /// </remarks>
     public Length ScaledAscent(Length emSize)
-        => Grid is { } grid
-            ? grid.ToLength(grid.ToPixels(Ascent, UnitsPerEm, emSize))
-              + (LeadingAboveText ? LeadingOn(grid, emSize) : Length.Zero)
-            : Scale(LeadingAboveText ? Ascent + LineGap : Ascent, emSize);
+    {
+        if (Grid is not { } grid)
+        {
+            return Scale(LeadingAboveText ? Ascent + LineGap : Ascent, emSize);
+        }
+
+        Length ascent = grid.ToLength(grid.ToPixels(Ascent, UnitsPerEm, emSize));
+
+        // Both of this type's application-specific rules hang off `LeadingAboveText`, and they are
+        // written on the same branch so that they are mutually exclusive *by construction* rather
+        // than merely unlikely to meet. Writer's ascent carries the external leading and is subject
+        // to the East Asian scale (`SwFntObj::GetFontAscent`); EditEngine's carries neither, and its
+        // line height is the taller of two roundings instead — see `EditHeightOn`.
+        //
+        // It matters because `ScaledDescent` is `height − ascent`: a grid that scaled the ascent
+        // while the height took EditEngine's branch could return a negative descent.
+        return LeadingAboveText
+            ? grid.EastAsianScaled(ascent, DeclaresEastAsianCodePage) + LeadingOn(grid, emSize)
+            : ascent;
+    }
 
     /// <summary>The descent at an em size.</summary>
+    /// <remarks>
+    /// Derived from the line height rather than measured, on a grid, so that the three quantities
+    /// close: the device rounds the ascent and the height, and whatever is left over is the
+    /// descent. It comes out right for both engines because <see cref="ScaledLineHeight"/> already
+    /// distinguishes them — Writer's leaves the leading in and EditEngine's takes the taller of two
+    /// roundings, and subtracting Writer's leading-bearing ascent or EditEngine's plain one gives
+    /// the descent each of them actually draws.
+    /// </remarks>
     public Length ScaledDescent(Length emSize)
         => Grid is { } grid
             ? ScaledLineHeight(emSize) - ScaledAscent(emSize)
@@ -233,6 +509,43 @@ public readonly record struct LineMetrics(
 
     private Length LeadingOn(MetricGrid grid, Length emSize)
         => grid.ToLength(grid.ToPixels(LineGap, UnitsPerEm, emSize));
+
+    /// <summary>
+    /// The line height EditEngine gives this face: the <b>taller</b> of the two roundings, and no
+    /// external leading.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// EditEngine measures a line twice and keeps the larger. The text portion's own height is
+    /// <c>OutputDevice::GetTextHeight</c>, which converts the summed device-pixel ascent and
+    /// descent in one step; the formatter metric is <c>FormatterFontMetric::GetHeight</c>, which
+    /// is <c>GetFontMetric().GetAscent() + GetDescent()</c> and so converts each on its own
+    /// (<c>vcl/source/outdev/font.cxx</c>:351-352). <c>ImpEditEngine::CreateLines</c> then does
+    /// <c>if (nLineHeight > pLine-&gt;GetHeight()) pLine-&gt;SetHeight(nLineHeight)</c> —
+    /// <c>editeng/source/editeng/impedit3.cxx</c>:1516-1518.
+    /// </para>
+    /// <para>
+    /// <b>Neither rounding fits on its own and the maximum of them fits exactly.</b> On Impress's
+    /// 600 dpi device, converting each separately is right on 274 of 312 measured (face, size)
+    /// pairs and converting the sum once is right on 270 — and the two disagree in opposite
+    /// directions, so their maximum is right on 312 of 312. The same holds on Calc's 720 dpi
+    /// device, 273 of 273. See <c>probes/refdev-01/</c>.
+    /// </para>
+    /// <para>
+    /// The external leading is absent because <c>IsAddExtLeading()</c> is false in every engine
+    /// that reaches here — see the remark on <see cref="ScaledAscent"/>, which is the same
+    /// discriminator: <see cref="LeadingAboveText"/> is Writer, and everything else is EditEngine.
+    /// </para>
+    /// </remarks>
+    private Length EditHeightOn(MetricGrid grid, Length emSize)
+    {
+        long ascent = grid.ToPixels(Ascent, UnitsPerEm, emSize);
+        long descent = grid.ToPixels(Descent, UnitsPerEm, emSize);
+
+        return Length.Max(
+            grid.ToLength(ascent) + grid.ToLength(descent),
+            grid.ToLength(ascent + descent));
+    }
 
     /// <summary>
     /// The internal leading at an em size: how much of the line height is above and below the em.
@@ -386,7 +699,9 @@ public static class LineSpacing
             source = LineMetricSource.Fallback;
         }
 
-        return new LineMetrics(ascent, descent, lineGap, source, unitsPerEm, grid, leadingAboveText);
+        return new LineMetrics(
+            ascent, descent, lineGap, source, unitsPerEm, grid, leadingAboveText,
+            DeclaresEastAsianCodePage: face.Os2?.DeclaresEastAsianCodePage ?? false);
     }
 
     /// <summary>

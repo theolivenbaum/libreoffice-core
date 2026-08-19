@@ -196,11 +196,22 @@ public sealed class Ww8Document : IWordProcessingDocument, IPaginatedDocument
     /// </remarks>
     public IPageSequence Layout(LayoutOptions? options = null)
     {
-        // A document asking for printer metrics is measured on the printer's pixel grid, which rounds every
-        // font metric and is worth up to 2.8% of a line's height. See Ww8DocumentProperties.UsesPrinterMetrics.
+        // Every document is measured on a device's pixel grid; the flag only chooses which. A document
+        // asking for printer metrics gets the printer's, which rounds every font metric and is worth up to
+        // 1.5% of a line's height; everything else gets Writer's 8640 dpi virtual reference device, worth
+        // one twip. See Ww8DocumentProperties.UsesPrinterMetrics and MetricGrid.
         LayoutFonts fonts = new()
         {
-            Metrics = _reader.DocumentProperties.UsesPrinterMetrics ? MetricGrid.Printer : null,
+            // `AsWordDocument` is the MS_WORD_COMP_GRID_METRICS compatibility flag, which a Word
+            // binary always carries: a face declaring an East Asian code page has its ascent and its
+            // ascent-plus-descent scaled by 127%. See MetricGrid.AsWordDocument.
+            Metrics = (_reader.DocumentProperties.UsesPrinterMetrics
+                ? MetricGrid.Printer
+                : MetricGrid.Reference).AsWordDocument(),
+
+            // The FFN's own pitch and family bits, which decide the fallback for a family that is
+            // neither installed nor substitutable. See Ww8FontTable.ShapeOf.
+            DeclaredShapes = _reader.Fonts.ShapeOf,
         };
 
         List<PageBlock> blocks = BlocksOf(fonts, _reader.ReadLayoutBlocks(), TextWidths());
@@ -208,6 +219,15 @@ public sealed class Ww8Document : IWordProcessingDocument, IPaginatedDocument
         PaginationOptions pagination = PaginationOptions.Word with
         {
             CollapsesSpacing = _reader.DocumentProperties.CollapsesSpacing,
+
+            // `SwWW8ImplReader::ReadDocInfo` sets `CONTINUOUS_ENDNOTES` on every DOC it opens
+            // (`ww8par.cxx`:2050), as `WriterFilter` does for every DOCX — and as neither the RTF
+            // filter nor either ODF one does. See PaginationOptions.UsesWordNoteSeparator.
+            UsesWordNoteSeparator = true,
+            NoteSeparatorHeight = NoteReservation(fonts) is { } reservation
+                ? reservation
+                : PaginationOptions.Word.NoteSeparatorHeight,
+
             MaxPages = options?.MaxPages is > 0 ? options.MaxPages : PaginationOptions.Word.MaxPages,
         };
 
@@ -218,12 +238,33 @@ public sealed class Ww8Document : IWordProcessingDocument, IPaginatedDocument
 
         for (int i = 0; i < Sections.Count; i++)
         {
-            sections.Add(new PaginatedSection(Sections[i], Furniture(fonts, i, carry)));
+            PageFurnitureSet? furniture = Furniture(fonts, i, carry);
+            sections.Add(new PaginatedSection(Sections[i], furniture, carry.OwnFurnitureOnContinuous));
         }
 
         return new WordProcessingPages(
             paginator.Paginate(blocks, sections),
             paginator.Blocks ?? blocks);
+    }
+
+    /// <summary>
+    /// The room Word leaves above a page's notes, or null when the default style's face cannot be read.
+    /// </summary>
+    /// <remarks>
+    /// The default paragraph style's line height, measured on the same faces and the same device grid
+    /// every other run in the document is measured on — see
+    /// <see cref="PaginationOptions.NoteSeparatorHeight"/> for why it is that style and not the note's.
+    /// Null rather than zero for an unreadable face, so that the caller falls back to Writer's fixed
+    /// reservation instead of reserving nothing at all.
+    /// </remarks>
+    private Length? NoteReservation(LayoutFonts fonts)
+    {
+        (string? family, Length size, int weight, bool italic) = _reader.DefaultStyleFont;
+
+        return fonts.Face(family, weight, italic) is { } face
+            ? LineSpacing.Resolve(face, fonts.Metrics, WriterLineBox.LeadingAboveText)
+                .ScaledLineHeight(size)
+            : null;
     }
 
     /// <summary>
@@ -301,6 +342,8 @@ public sealed class Ww8Document : IWordProcessingDocument, IPaginatedDocument
         bool ownFurniture =
             StoryLength(stated, 0) >= 2 || StoryLength(stated, 1) >= 2
             || StoryLength(stated, 2) >= 2 || StoryLength(stated, 3) >= 2;
+
+        carry.OwnFurnitureOnContinuous = continuous && ownFurniture;
 
         if (continuous && !ownFurniture)
         {
@@ -478,6 +521,13 @@ public sealed class Ww8Document : IWordProcessingDocument, IPaginatedDocument
 
         /// <summary>True when the section immediately before this one had a page descriptor.</summary>
         public bool IsImmediate { get; set; }
+
+        /// <summary>
+        /// True when the section just described is the continuous-with-its-own-running-head case, which is
+        /// the only one where <c>InsertSegments</c> builds a page descriptor for a continuous section — and
+        /// therefore the only one where such a section has anywhere to put a page-number restart.
+        /// </summary>
+        public bool OwnFurnitureOnContinuous { get; set; }
     }
 
     /// <summary>
@@ -583,12 +633,14 @@ public sealed class Ww8Document : IWordProcessingDocument, IPaginatedDocument
             Rows = rows,
             HeaderRowCount = table.HeaderRowCount,
             LeftIndent = table.LeftIndent,
+            HorizontalPosition = table.HorizontalPosition,
 
             // Every DOC is a Word document by definition, so the flag is not read from anything: it is
             // what LibreOffice's own filter sets on import, and it changes where the inner grid lines
             // stop. Measured on the corpus table — the reference's inner horizontals run 56.95 to 538.35
             // where the same table in ODF runs 56.45 to 538.85.
             JoinsBordersLikeWord = true,
+            MinHeightIncludesInsets = true,
         };
     }
 
@@ -632,8 +684,10 @@ public sealed class Ww8Document : IWordProcessingDocument, IPaginatedDocument
                 Language = paragraph.Language,
                 Shaping = new Text.Shaping.ShapingOptions(
                     Language: paragraph.Language, DisableKerning: !paragraph.AutoKerning),
+                Tracking = paragraph.Tracking,
                 Metrics = fonts.Metrics,
                 Fallback = fonts.Fallback,
+                AddsScriptSpace = true,
 
                 // #i3952#, which the WW8 importer turns on for every DOC without asking the file
                 // (`ww8par.cxx`:2041). See PageParagraph.BlanksAreTransparentToHeight.
@@ -641,7 +695,9 @@ public sealed class Ww8Document : IWordProcessingDocument, IPaginatedDocument
                 Runs = runs,
                 Fields = paragraph.Fields ?? [],
                 Notes = NotesOf(fonts, paragraph.Notes),
-                Frames = FramesOf(fonts, paragraph.Frames, paragraph.TextFrames, WidthFor(paragraph)),
+                Frames = FramesOf(
+                    fonts, paragraph.Frames, paragraph.TextFrames, WidthFor(paragraph),
+                    paragraph.IsInTable),
             });
         }
 
@@ -690,6 +746,7 @@ public sealed class Ww8Document : IWordProcessingDocument, IPaginatedDocument
 
         (string text, OpenTypeFace labelFace, FontReference? labelFont) =
             SymbolLabel(fonts, paragraph.ListLabelFamily, paragraph.ListLabelSlot)
+            ?? LevelLabel(fonts, paragraph.ListLabelFamily, marker)
             ?? (marker, face, font);
 
         return PageLabel.Measured(
@@ -779,6 +836,44 @@ public sealed class Ww8Document : IWordProcessingDocument, IPaginatedDocument
     /// indistinguishable from MIDDLE DOT and was drawn as one.
     /// </para>
     /// </remarks>
+    /// <summary>
+    /// The label set in the face the level names, when that face is an ordinary one.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <see cref="SymbolLabel"/> handles a level naming a <em>symbol</em> face, where the slot has to be
+    /// recoded before it means anything. This is the other half, and it was missing: a level naming
+    /// Courier New draws its label in Courier New, and nothing about that needs recoding.
+    /// </para>
+    /// <para>
+    /// LibreOffice makes no distinction between the two — <c>WW8ListManager::ReadLVL</c>
+    /// (<c>sw/source/filter/ww8/ww8par3.cxx</c>:1077-1095) reads the <c>SvxFontItem</c> out of the
+    /// level's character format and calls <c>SetBulletFont</c> whatever the character is. Measured on
+    /// <c>A320SimNotes.doc</c>, whose second-level bullet is Word's default <c>o</c> in Courier New:
+    /// LibreOffice's PDF embeds four cuts of Liberation Mono that the document names nowhere else, and
+    /// ours embedded none, drawing the bullet in the item's own Liberation Serif Bold instead.
+    /// </para>
+    /// <para>
+    /// Refused when the resolved face has no glyph for the marker, which is the guard the symbol path
+    /// gets from its recode table: a level naming a face that cannot draw its own label would put a
+    /// missing-glyph box where a bullet belongs, and the paragraph's face is the better answer.
+    /// </para>
+    /// </remarks>
+    private static (string Text, OpenTypeFace Face, FontReference? Font)? LevelLabel(
+        LayoutFonts fonts, string? family, string marker)
+    {
+        if (family is not { Length: > 0 } || marker.Length == 0) return null;
+        if (SymbolFontRecode.IsRecodeable(family)) return null;
+        if (fonts.Face(family, 400, false) is not { } levelFace) return null;
+
+        foreach (char character in marker)
+        {
+            if (!levelFace.HasGlyphFor(character)) return null;
+        }
+
+        return (marker, levelFace, fonts.Reference(family, 400, false));
+    }
+
     private static (string Text, OpenTypeFace Face, FontReference? Font)? SymbolLabel(
         LayoutFonts fonts, string? family, char slot)
     {
@@ -832,11 +927,16 @@ public sealed class Ww8Document : IWordProcessingDocument, IPaginatedDocument
     /// converted together and the layout engine sees one list.
     /// </param>
     /// <param name="textWidth">The section's text width, for an auto-width text frame.</param>
+    /// <param name="inTableCell">
+    /// True when the anchoring paragraph is inside a table cell, which is the one thing about the
+    /// paragraph a shape's own position depends on — see <see cref="Ww8Frames.LaysOutInTableCell"/>.
+    /// </param>
     private static List<PageFrame> FramesOf(
         LayoutFonts fonts,
         IReadOnlyList<Ww8LayoutFrame>? stated,
         IReadOnlyList<Ww8LayoutTextFrame>? textFrames = null,
-        Length textWidth = default)
+        Length textWidth = default,
+        bool inTableCell = false)
     {
         if ((stated is null || stated.Count == 0)
             && (textFrames is null || textFrames.Count == 0))
@@ -871,6 +971,7 @@ public sealed class Ww8Document : IWordProcessingDocument, IPaginatedDocument
                     IsImage = true,
                     Image = frame.Picture.Raster,
                     Vector = frame.Picture.Vector,
+                    Crop = frame.Picture.Crop,
                 });
 
                 continue;
@@ -878,13 +979,14 @@ public sealed class Ww8Document : IWordProcessingDocument, IPaginatedDocument
 
             PageFrame? built = Ww8Frames.Build(
                 frame.Anchor, frame.Shape, frame.Offset, BlocksOf(fonts, frame.Blocks),
-                frame.IsSetInLine);
+                frame.IsSetInLine, inTableCell, frame.WrittenByWord97);
             if (built is null) continue;
 
             PageFrame envelope = built with
             {
                 Image = frame.Picture.Raster,
                 Vector = frame.Picture.Vector,
+                Crop = frame.Picture.Crop,
             };
             frames.Add(envelope);
 
@@ -1005,6 +1107,9 @@ public sealed class Ww8Document : IWordProcessingDocument, IPaginatedDocument
                 // inside a paragraph that does not has to survive the shortcut or its width is the
                 // paragraph's answer rather than its own.
                 || run.AutoKerning != paragraph.AutoKerning
+                // And tracking for the same reason again, read the other way: a run condensed inside a
+                // paragraph that is not would otherwise be measured at the paragraph's own spacing.
+                || run.Tracking != paragraph.Tracking
                 // A symbol's face is its own even when it happens to equal the paragraph's: losing the
                 // runs here would draw its slot out of whatever the paragraph is set in.
                 || run.SymbolSlot is not null)
@@ -1027,7 +1132,8 @@ public sealed class Ww8Document : IWordProcessingDocument, IPaginatedDocument
                 run.CaseMap,
                 Highlight: run.Highlight ?? default,
                 IsUnderlined: run.IsUnderlined,
-                IsStruckThrough: run.IsStruckThrough));
+                IsStruckThrough: run.IsStruckThrough,
+                Tracking: run.Tracking));
         }
 
         return varies ? runs : [];

@@ -153,6 +153,7 @@ internal static class OdfParagraphFormats
             StartsNewPage = StartsNewPage(styles, styleName),
             TabStops = Tabs(styles, styleName),
             ClampsTabsAtLineEdge = true,
+            SpillsTrailingNoBreakSpace = true,
             DefaultTabInterval = TabInterval(styles),
         };
     }

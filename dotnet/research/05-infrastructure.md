@@ -10,7 +10,7 @@ document-metadata property sets. A C# port should build these layers
 *first*, since almost nothing else can be tested without them.
 
 All paths are relative to the repository root
-(`/home/user/libreoffice-core`) and citations use `path/file.cxx:line`.
+(`/c/sandbox/workdir/libreoffice-core`) and citations use `path/file.cxx:line`.
 
 ---
 

@@ -3,7 +3,7 @@
 Scope: this document maps the LibreOffice C++ architecture that a pure C# reimplementation
 needs to replicate for (a) content extraction from PPTX / legacy PPT / ODP, and (b) headless
 slide rendering to raster images / PDF. All paths are relative to the repo root
-(`/home/user/libreoffice-core`). Line numbers are approximate anchors, not guarantees against
+(`/c/sandbox/workdir/libreoffice-core`). Line numbers are approximate anchors, not guarantees against
 future refactors — search for the symbol if a line has drifted.
 
 ---

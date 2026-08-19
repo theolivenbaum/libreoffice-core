@@ -13,7 +13,17 @@ public sealed class WordNumberingLevel
                 && int.TryParse(ilvl, out int parsed) ? parsed : 0;
         NumberFormat = Word.Value(element, "numFmt") ?? "decimal";
         LevelText = Word.Value(element, "lvlText") ?? string.Empty;
-        Start = int.TryParse(Word.Value(element, "start"), out int start) ? start : 1;
+        // An absent `w:start` means zero, not one. Measured rather than read off the schema: four
+        // one-level lists differing only in this element render 0/1/2 in LibreOffice when it is
+        // omitted and 0/1/2, 1/2/3 and 3/4/5 for `w:val` of 0, 1 and 3 — and we agreed on all three
+        // explicit values and disagreed only on the omission. See
+        // `probes/numbering-start-default/`.
+        //
+        // `ABCD-FE-01-00 Flight Envelope` is the corpus document it decides: its heading list
+        // (abstractNum 9, level 0) carries no `w:start`, so LibreOffice numbers its sections from
+        // zero — "0. Introduction", "1. References" — and its own stored table of contents, which
+        // Word wrote, agrees. We numbered every section one higher.
+        Start = int.TryParse(Word.Value(element, "start"), out int start) ? start : 0;
         RestartAfterLevel = int.TryParse(Word.Value(element, "lvlRestart"), out int restart)
             ? restart
             : null;
@@ -299,7 +309,61 @@ public sealed class WordNumbering
             _counters.Remove((numId, deeper));
         }
 
+        SeedLevelsShownBy(numId, level, definition);
+
         return FormatLabel(numId, level, definition);
+    }
+
+    /// <summary>
+    /// Gives every shallower level this label shows a counter of its own, if it has none yet.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>A level shown inside a deeper item's number has been used, and the next item at that
+    /// level counts on from it.</strong> Without this, <see cref="FormatLabel"/> renders a missing
+    /// component from <see cref="StartOf"/> and throws the value away, so the level's first real item
+    /// takes the start value a second time and everything under that parent is one too low.
+    /// </para>
+    /// <para>
+    /// Measured on 26.2.4.2 with a four-level <c>multilevel</c> list, no <c>w:start</c> anywhere —
+    /// <c>probes/skipped-level-counter/</c>. Levels 0, 2, 1, 1 number
+    /// <c>0</c>, <c>0.0.0</c>, <c>0.1</c>, <c>0.2</c>; we gave the third item <c>0.0</c>. Skipping two
+    /// levels behaves the same way, and a run with no skip in it is untouched — which is why this had
+    /// gone unnoticed: it needs a deeper item to appear before its own parent does.
+    /// </para>
+    /// <para>
+    /// Only the levels the template actually shows are seeded. A level the deeper item does not
+    /// display was never rendered, so nothing says it was used, and the corpus holds no case that
+    /// separates the two — narrowing it to what was measured is the conservative reading.
+    /// </para>
+    /// <para>
+    /// The corpus document it decides is
+    /// <c>OM template for non-complex NCC operators_August 2016.docx</c>, whose <c>0.2</c> section
+    /// opens with a <c>Heading4</c> before any <c>Heading3</c>. The reference numbers the headings
+    /// that follow <c>0.2.2</c>, <c>0.2.3</c>, <c>0.2.4</c>, and the document's own stored table of
+    /// contents — written by Word — agrees; we numbered them one lower throughout.
+    /// </para>
+    /// </remarks>
+    private void SeedLevelsShownBy(string numId, int level, WordNumberingLevel definition)
+    {
+        ReadOnlySpan<char> template = definition.LevelText;
+
+        for (int at = 0; at + 1 < template.Length; at++)
+        {
+            if (template[at] != '%' || !char.IsAsciiDigit(template[at + 1])) continue;
+
+            // %1 is level zero: the placeholder is one-based, the level is not.
+            int shown = template[at + 1] - '1';
+            at++;
+
+            if (shown < 0 || shown >= level) continue;
+            if (_counters.ContainsKey((numId, shown))) continue;
+
+            if (FindLevel(numId, shown) is { } component)
+            {
+                _counters[(numId, shown)] = StartOf(numId, shown, component);
+            }
+        }
     }
 
     /// <summary>

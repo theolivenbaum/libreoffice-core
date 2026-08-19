@@ -1,5 +1,6 @@
 using Paperless.Core.Graphics;
 using Paperless.Core.Units;
+using Paperless.Text.Fonts;
 
 namespace Paperless.Spreadsheets.Layout;
 
@@ -122,6 +123,29 @@ public sealed record SheetCellFormat
     /// <summary>The font family the cell asks for, or null for the sheet's default.</summary>
     public string? FontFamily { get; init; }
 
+    /// <summary>
+    /// The shape the <em>workbook</em> declares for that family, beside the name.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>&lt;family val="N"/&gt;</c> inside a SpreadsheetML <c>&lt;font&gt;</c>, the family byte of
+    /// a BIFF <c>FONT</c> record, and <c>style:font-family-generic</c> on an ODF
+    /// <c>style:font-face</c> — the same fact three ways, and the same Windows <c>FF_*</c> codes in
+    /// the first two (<c>OOX_FONTFAMILY_ROMAN</c> and friends,
+    /// <c>sc/source/filter/oox/stylesbuffer.cxx:110-116</c>, read from the attribute at <c>:616</c>
+    /// and from the BIFF byte at <c>:672</c>).
+    /// </para>
+    /// <para>
+    /// It decides nothing for a family that is installed. It decides everything for one that is
+    /// not: measured on 26.2.4.2 against
+    /// <c>2017-04-27-Lease-Transition-Records-Checklist-FINAL-1.xlsx</c>, whose five Bell MT fonts
+    /// declare <c>family="1"</c>, deleting just those five attributes moves the whole rendering
+    /// from DejaVu Serif to DejaVu Sans and its extractable words from 2545 to 2366. The name alone
+    /// cannot decide it — <c>fc-match "Bell MT"</c> answers DejaVu Sans.
+    /// </para>
+    /// </remarks>
+    public FontFamilyClass DeclaredFontClass { get; init; }
+
     /// <summary>The em size.</summary>
     public Length FontSize { get; init; } = Length.FromPoints(10);
 
@@ -137,8 +161,15 @@ public sealed record SheetCellFormat
     /// <remarks>
     /// Not a property of the face: the three formats state it beside the weight and the slant and
     /// it is drawn as a rule rather than shaped, so it belongs to the format rather than to the
-    /// font resolution. Every workbook with a hyperlink has one, since the hyperlink style is an
-    /// underlined blue font, and a column heading ruled off from its data is the other common case.
+    /// font resolution. Every workbook with a hyperlink has one, since the built-in
+    /// <c>Hyperlink</c> style is an underlined blue font, and a column heading ruled off from its
+    /// data is the other common case.
+    /// <para>
+    /// <strong>The underline survives that style and the colour does not.</strong> A hyperlink
+    /// cell is drawn as an <c>SvxURLField</c> in the application's <c>LINKS</c> colour whatever
+    /// <see cref="Colour"/> says — see <c>SheetTextLayout</c>'s <c>LinkColour</c> — so the blue
+    /// half of "underlined blue font" never reaches the page and this half always does.
+    /// </para>
     /// </remarks>
     public SheetUnderline Underline { get; init; }
 

@@ -1,11 +1,13 @@
 using System.Globalization;
 using System.Xml.Linq;
+using Paperless.Containers;
 using Paperless.Core.Geometry;
 using Paperless.Core.Graphics;
 using Paperless.Core.Units;
 using Paperless.Ooxml;
 using Paperless.Ooxml.DrawingML;
 using Paperless.Presentations.Layout;
+using Paperless.Text.Fonts;
 using Paperless.Text.Layout;
 using Paperless.Vector;
 
@@ -83,6 +85,78 @@ internal sealed partial class PptxSlideLayout
     {
         _file = file;
         _fonts = fonts;
+        _fonts.DeclaredPitches = DeclaredPitchOf;
+        _fonts.EmbeddedFaces = EmbeddedFaceOf;
+    }
+
+    /// <summary>
+    /// The deck's own face for a request, from <c>p:embeddedFontLst</c>.
+    /// </summary>
+    /// <remarks>
+    /// Lazily and once, like <see cref="DeclaredPitchOf"/>: the list is on the presentation part,
+    /// a deck that never draws with an embedded family never opens one of the parts, and a deck
+    /// that embeds nothing pays a dictionary miss. See <see cref="PptxEmbeddedFonts"/> for why
+    /// the declared <c>typeface</c> and not the face's own family name is the key.
+    /// </remarks>
+    private string? EmbeddedFaceOf(string typeface, int weight, bool isItalic)
+        => (_embeddedFonts ??= PptxEmbeddedFonts.Read(_file)).FaceKeyFor(typeface, weight, isItalic);
+
+    private PptxEmbeddedFonts? _embeddedFonts;
+
+    /// <summary>
+    /// The pitch the deck declares for a typeface, from <c>pitchFamily</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A byte in Windows's <c>LOGFONT</c> encoding, written on every <c>&lt;a:latin&gt;</c>,
+    /// <c>&lt;a:ea&gt;</c> and <c>&lt;a:cs&gt;</c> PowerPoint emits: the low two bits are the pitch
+    /// (1 fixed, 2 variable) and the high four the family. Only the pitch is read — see
+    /// <see cref="SlideFonts.DeclaredPitches"/> for the measurement and for why the family is left.
+    /// </para>
+    /// <para>
+    /// Collected across the whole package rather than per slide, because the attribute is usually
+    /// written where the typeface is *introduced* — a theme's <c>a:fontScheme</c>, a master, a
+    /// layout — and the run that uses it names the family with no pitch beside it. Keyed on the
+    /// typeface name for the same reason: by the time the resolver is reached, a family name has
+    /// lost which part it came from.
+    /// </para>
+    /// <para>
+    /// Lazily, and once: a deck that never asks for a face never pays for the scan, and one that
+    /// does pays for it on the first run of the first slide.
+    /// </para>
+    /// </remarks>
+    private FontPitch DeclaredPitchOf(string typeface)
+        => (_declaredPitches ??= ReadDeclaredPitches(_file))
+            .TryGetValue(typeface, out FontPitch pitch)
+            ? pitch
+            : FontPitch.Unknown;
+
+    private Dictionary<string, FontPitch>? _declaredPitches;
+
+    private static Dictionary<string, FontPitch> ReadDeclaredPitches(PptxFile file)
+    {
+        Dictionary<string, FontPitch> pitches = new(StringComparer.OrdinalIgnoreCase);
+
+        foreach (IPackagePart part in file.Package.Parts)
+        {
+            if (!part.Name.EndsWith(".xml", StringComparison.OrdinalIgnoreCase)) continue;
+            if (file.Load(part.Name) is not { } root) continue;
+
+            foreach (XElement element in root.DescendantsAndSelf())
+            {
+                if (element.Attribute("typeface")?.Value is not { Length: > 0 } typeface) continue;
+                if (element.Attribute("pitchFamily")?.Value is not { Length: > 0 } declared) continue;
+                if (!int.TryParse(declared, CultureInfo.InvariantCulture, out int value)) continue;
+
+                FontPitch pitch = SlideFonts.PitchIn(value);
+
+                // A theme's own declaration comes first in part order and a run's repeats it; where
+                // they disagree the file is malformed and the first is as good an answer as any.
+                if (pitch != FontPitch.Unknown) pitches.TryAdd(typeface, pitch);
+            }
+        }
+
+        return pitches;
     }
 
     /// <summary>Lays one slide out.</summary>
@@ -682,6 +756,24 @@ internal sealed partial class PptxSlideLayout
         // colour or weight still wins, and this is what it wins over.
         IReadOnlyList<XElement> themed = CellTextStyle(cell);
 
+        // A table cell takes the same font-independent line spacing every other PPTX text body takes
+        // — one em of ascent and a 1.2 em box — so nothing is set below and SlideTextBody's default
+        // stands. It is worth saying why the *absence* of an override is the interesting part.
+        //
+        // This was an override, and against LibreOffice 24.2.7.2 it was right: that binary drew
+        // deck-features.pptx's first cell (18 pt Arial, substituted by Liberation Sans) with a
+        // 16.33 pt ascent, 0.907 em — the face's own, not the em's. Its own C++ said otherwise even
+        // then, and the note here recorded the disagreement rather than resolving it.
+        //
+        // `a47776a938c` (2025-03-27, tdf#165521, "pptx layout: don't use font's leading for cells
+        // too") resolved it the other way, and its commit message says why: "Microsoft just ignores
+        // the font metrics, and simply adds 20% to the font height." So the measurement that
+        // justified the override was a measurement of a defect, and the rule the rest of this
+        // library already implements — SlideTextLayout's 1.2 em box, reached only when
+        // FontIndependentLineSpacing is true — is now what the reference draws for cells as well.
+        //
+        // Not touched: the ODP path, which states the flag per paragraph style and usually does not
+        // set it (OdpSlideLayout), because ODF has no such compatibility default to follow.
         return PptxTextBody.Read(
             body, theme.Colours, theme.MinorLatin,
             themed.Count == 0 ? null : _ => themed) with
@@ -693,15 +785,6 @@ internal sealed partial class PptxSlideLayout
                 "b" => TextAnchor.Bottom,
                 _ => TextAnchor.Top,
             },
-
-            // Measured, and it is the opposite of what the current C++ says. A slide shape's line
-            // height is the em (FontIndependentLineSpacing); a table cell's is the face's own
-            // ascent. LibreOffice 24.2.7.2 draws deck-features.pptx's first cell — 18 pt Arial,
-            // substituted by Liberation Sans, in a cell whose top edge its own PDF puts at
-            // 170.079 pt — with a baseline 19.93 pt below that edge. Take off the 3.6 pt top
-            // margin and the ascent is 16.33 pt, which is 0.907 em: the font's, not the em's,
-            // which would have been 18.00.
-            FontIndependentLineSpacing = false,
         };
     }
 
@@ -1018,6 +1101,11 @@ internal sealed partial class PptxSlideLayout
     {
         if (BodyOf(shape, theme) is not { } body) return null;
 
+        // Fontwork is a picture of words rather than words, in the reference's output and so in
+        // ours. See SlideTextBody.IsTextPath for what LibreOffice does instead and for why the
+        // unwarped runs are not a better answer than none.
+        if (body.IsTextPath) return null;
+
         // The text area's own turn, outside the body's and inside the shape's — see
         // TextAreaTurn. Folding it into the placement is what puts it in that order.
         double areaTurn = TextAreaTurn(shape);
@@ -1247,7 +1335,7 @@ internal sealed partial class PptxSlideLayout
     /// <para>
     /// <c>a:srcRect</c> becomes a larger destination rectangle rather than a crop, because the
     /// drawing model has clipping and no crop and the two are the same thing — see
-    /// <see cref="SlideImages.Uncropped"/>. The clip is the shape's outline, applied by
+    /// <see cref="PictureCrop.Uncropped"/>. The clip is the shape's outline, applied by
     /// <see cref="SlideDrawing"/>, which also handles the picture-inside-a-preset-shape case for
     /// free.
     /// </para>
@@ -1283,11 +1371,11 @@ internal sealed partial class PptxSlideLayout
 
         DocRect area = blip.FillRect.IsWhole
             ? bounds
-            : SlideImages.Inset(
+            : PictureCrop.Inset(
                 bounds, blip.FillRect.Left, blip.FillRect.Top,
                 blip.FillRect.Right, blip.FillRect.Bottom);
 
-        DocRect? destination = SlideImages.Uncropped(
+        DocRect? destination = PictureCrop.Uncropped(
             area, blip.SourceRect.Left, blip.SourceRect.Top,
             blip.SourceRect.Right, blip.SourceRect.Bottom);
 
@@ -1611,9 +1699,10 @@ internal sealed partial class PptxSlideLayout
         public bool IsEmpty => Raster is null && Vector is null;
     }
 
-    private static Paint? SolidFill(XElement parent, DrawingTheme? theme, Colour? placeholder)
+    private static Paint? SolidFill(
+        XElement parent, DrawingTheme? theme, Colour? placeholder, string wrapper = "solidFill")
     {
-        XElement? solid = Drawing.Child(parent, "solidFill");
+        XElement? solid = Drawing.Child(parent, wrapper);
         if (solid is null) return null;
 
         foreach (XElement child in solid.Elements())
@@ -1668,7 +1757,7 @@ internal sealed partial class PptxSlideLayout
     /// </remarks>
     private static Stroke? Pen(XElement line, DrawingTheme? theme)
     {
-        if (SolidFill(line, theme, placeholder: null) is not { } paint) return null;
+        if (BestSolidLinePaint(line, theme) is not { } paint) return null;
 
         // The width rounds into the drawing layer's own unit before anything is drawn with
         // it: a stated 38100 EMU — three points — comes out of the reference's PDF as a
@@ -1682,10 +1771,70 @@ internal sealed partial class PptxSlideLayout
             width,
             cap,
             Join(line),
-            DashPattern: SlideDashes.Pattern(
+            DashPattern: DashPresets.Pattern(
                 Drawing.Attribute(Drawing.Child(line, "prstDash"), "val"),
                 width,
                 capExtendsDash: cap != LineCap.Butt));
+    }
+
+    /// <summary>
+    /// The one colour a line is stroked in, whichever kind of fill states it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>A line's paint is always one colour, whatever the file wraps it in.</b> LibreOffice's
+    /// core has no gradient-stroked line, so <c>LineProperties::pushToPropMap</c>
+    /// (<c>oox/source/drawingml/lineproperties.cxx:495</c>) reduces the <c>a:ln</c>'s fill to a
+    /// single colour through <c>FillProperties::getBestSolidColor</c>
+    /// (<c>oox/source/drawingml/fillproperties.cxx:402-425</c>) and strokes with that. Reading
+    /// only <c>a:solidFill</c> — which is what this did — threw the whole <c>a:ln</c> away when
+    /// its paint was anything else, taking the <em>width, cap and dash with it</em>, because they
+    /// are all carried on the one <see cref="Stroke"/> this returns. In the C++ they are set
+    /// before the colour is even looked at and survive a colour that cannot be resolved.
+    /// </para>
+    /// <para>
+    /// The visible cost was a 3 pt master connector on <c>16 - UTM - (NASA).pptx</c>, whose
+    /// <c>a:ln w="38100"</c> carries an <c>a:gradFill</c>. The shape's body is 1 588 EMU tall —
+    /// 0.125 pt — so with the stroke discarded all that survived was a sliver under a fifth of a
+    /// pixel at 300 dpi, in the shape's own <c>accent1</c> rather than the line's colour. The rule
+    /// is in the master, so it is on all thirty of that deck's pages.
+    /// </para>
+    /// <para>
+    /// <b>The stop it picks is the second, not the first</b>, and only when there are more than
+    /// two: <c>getBestSolidColor</c> takes <c>maGradientStops.begin()</c> and advances it once if
+    /// the map holds three or more. The map is keyed by position, so "second" means second-lowest
+    /// <c>pos</c> rather than second in document order. Note this is <em>not</em> the
+    /// nearest-the-middle rule <c>DrawingChartPlot.FillOf</c> uses; that one is a chart's own
+    /// approximation for a model that holds one colour per series, measured on its own deck, and
+    /// the two are left to differ rather than being merged onto one wrong answer.
+    /// </para>
+    /// <para>
+    /// A pattern fill resolves to its background colour, or its foreground when it states no
+    /// background — the same function, same order.
+    /// </para>
+    /// </remarks>
+    /// <param name="line">The resolved <c>a:ln</c>.</param>
+    /// <param name="theme">The theme its colour references resolve against.</param>
+    private static Paint? BestSolidLinePaint(XElement line, DrawingTheme? theme)
+    {
+        if (SolidFill(line, theme, placeholder: null) is { } solid) return solid;
+
+        if (DrawingFill.ReadGradient(Drawing.Child(line, "gradFill")) is { Stops.Count: > 0 } gradient)
+        {
+            IReadOnlyList<DrawingGradientStop> stops =
+                [.. gradient.Stops.OrderBy(stop => stop.Position)];
+
+            DrawingGradientStop chosen = stops[stops.Count > 2 ? 1 : 0];
+            if (chosen.Colour.Resolve(theme) is { } resolved) return Paint.Solid(resolved);
+        }
+
+        if (Drawing.Child(line, "pattFill") is { } pattern)
+        {
+            return SolidFill(pattern, theme, placeholder: null, wrapper: "bgClr")
+                   ?? SolidFill(pattern, theme, placeholder: null, wrapper: "fgClr");
+        }
+
+        return null;
     }
 
     /// <summary>The marker one end of a line carries, from its own <c>a:ln</c> or its placeholder's.</summary>

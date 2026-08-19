@@ -55,7 +55,9 @@ public sealed class DrawingStyleMatrix
     /// <param name="theme">The <c>a:theme</c> element, or null.</param>
     public static DrawingStyleMatrix? Read(XElement? theme)
     {
-        XElement? format = Drawing.Child(Drawing.Child(theme, "themeElements"), "fmtScheme");
+        // As DrawingTheme.Read: an a:themeOverride states its a:fmtScheme on the root.
+        XElement? format = Drawing.Child(Drawing.Child(theme, "themeElements"), "fmtScheme")
+                           ?? Drawing.Child(theme, "fmtScheme");
         if (format is null) return null;
 
         DrawingStyleMatrix matrix = new();
@@ -139,6 +141,28 @@ public sealed class DrawingStyleMatrix
     /// <param name="theme">The colour scheme the reference's colour resolves against.</param>
     public XElement? Line(XElement? style, DrawingTheme? theme)
         => Resolve(Drawing.Child(style, "lnRef"), _lines, theme);
+
+    /// <summary>
+    /// The theme's own <c>a:ln</c> at a one-based index, with its <c>phClr</c> left in place.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The raw entry rather than a resolved one, because the caller that needs it — a chart's
+    /// automatic series formatting — has no <c>a:lnRef</c> to take a placeholder from: the accent
+    /// cycle supplies it instead, and the caller substitutes it with <see cref="Substitute"/>
+    /// before reading either the width or the colour. Clamped to the last entry the way
+    /// <c>lclGetStyleElement</c> clamps (<c>oox/source/drawingml/theme.cxx:40-45</c>).
+    /// </para>
+    /// <para>
+    /// This comment used to say the caller "wants the width and supplies its own colour from the
+    /// accent cycle". That was the bug written down: the accent <em>is</em> the placeholder, and
+    /// the entry's own <c>a:shade</c>/<c>a:satMod</c> act on it. See
+    /// <see cref="DrawingChartAutoFormat.ThroughSubtleLineStyle"/>.
+    /// </para>
+    /// </remarks>
+    /// <param name="index">The one-based index into <c>a:lnStyleLst</c>.</param>
+    public XElement? LineStyle(int index)
+        => _lines.Count == 0 || index < 1 ? null : _lines[Math.Min(index, _lines.Count) - 1];
 
     /// <summary>
     /// The <c>a:effectLst</c> an <c>a:effectRef</c> names, or null when it names none.
