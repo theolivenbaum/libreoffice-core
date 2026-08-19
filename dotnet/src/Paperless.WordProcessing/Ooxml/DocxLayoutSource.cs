@@ -1221,11 +1221,8 @@ public sealed partial class DocxLayoutSource
             // it has a reader of its own rather than a branch inside `DocxFrames`.
             if (anchor.Element.Name.LocalName is "pict" or "object")
             {
-                if (DocxVmlFrames.Read(anchor.Element, anchor.Offset, Pictures) is { } vml)
-                {
-                    frames.Add(vml);
-                }
-
+                frames.AddRange(
+                    DocxVmlFrames.ReadAll(anchor.Element, anchor.Offset, Pictures, content));
                 continue;
             }
 

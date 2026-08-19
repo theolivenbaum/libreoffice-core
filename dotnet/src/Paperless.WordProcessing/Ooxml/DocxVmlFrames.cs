@@ -41,30 +41,180 @@ namespace Paperless.WordProcessing.Ooxml;
 /// </remarks>
 internal static class DocxVmlFrames
 {
-    /// <summary>
-    /// The frame a <c>w:pict</c> or <c>w:object</c> reserves, or null when it reserves nothing.
-    /// </summary>
+    /// <summary>Every frame a <c>w:pict</c> or <c>w:object</c> contributes.</summary>
+    /// <remarks>
+    /// A list rather than one frame because a single <c>w:pict</c> routinely holds several shapes —
+    /// the Work Breakdown Structure templates put 49 across 13 of them — and taking the first was how
+    /// the other 48 went missing.
+    /// </remarks>
     /// <param name="element">The <c>w:pict</c> or <c>w:object</c>.</param>
     /// <param name="anchorOffset">Where in the paragraph's text it sits.</param>
     /// <param name="pictures">How to resolve <c>v:imagedata</c> into bytes, or null for geometry only.</param>
-    public static PageFrame? Read(XElement element, int anchorOffset, DocxPictures? pictures)
+    /// <param name="content">How to read a <c>w:txbxContent</c> into blocks, or null to skip its text.</param>
+    public static List<PageFrame> ReadAll(
+        XElement element,
+        int anchorOffset,
+        DocxPictures? pictures,
+        Func<XElement, IReadOnlyList<PageBlock>>? content = null)
     {
         ArgumentNullException.ThrowIfNull(element);
 
-        XElement? shape = element
-            .Descendants(XName.Get("shape", OoxmlNamespaces.Vml))
-            .FirstOrDefault();
+        List<PageFrame> frames = [];
+        foreach (XElement top in TopLevel(element))
+        {
+            if (top.Name.LocalName is "group")
+            {
+                frames.AddRange(Group(top, anchorOffset, pictures, content));
+                continue;
+            }
 
+            if (One(top, element, anchorOffset, pictures, content) is { } frame) frames.Add(frame);
+        }
 
-        if (shape is null) return null;
+        return frames;
+    }
 
+    /// <summary>The VML shapes and groups of a <c>w:pict</c> that are not inside another group.</summary>
+    /// <remarks>
+    /// <para>
+    /// <c>v:shapetype</c> is excluded deliberately — it is the reusable geometry definition Word writes
+    /// ahead of the shape that uses it, it carries no <c>style</c>, and a reader that takes the first
+    /// VML element finds no size and silently reserves nothing.
+    /// </para>
+    /// <para>
+    /// Members of a <c>v:group</c> are excluded here and reached through <see cref="Group"/> instead,
+    /// because their coordinates are in the group's space and mean nothing on their own. Measured on
+    /// the Work Breakdown Structure templates: 18 of their 24 text boxes sit inside a group, so a
+    /// reader that walked every descendant placed three quarters of the document's text at the origin.
+    /// </para>
+    /// </remarks>
+    private static IEnumerable<XElement> TopLevel(XElement element)
+        => element.Descendants().Where(child =>
+            IsShape(child) is not false
+            && !child.Ancestors()
+                .TakeWhile(ancestor => ancestor != element)
+                .Any(ancestor => ancestor.Name == XName.Get("group", OoxmlNamespaces.Vml)));
+
+    /// <summary>True for a VML shape or group, false for anything else.</summary>
+    private static bool? IsShape(XElement child)
+        => child.Name.Namespace == OoxmlNamespaces.Vml
+           && child.Name.LocalName is "shape" or "rect" or "roundrect" or "oval" or "group"
+            ? true
+            : null;
+
+    /// <summary>
+    /// A <c>v:group</c> flattened into one frame per member, each mapped out of the group's own
+    /// coordinate space.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A group states where it sits and how big it is the way any floating shape does — in its
+    /// <c>style</c>, in real units — and then declares a <em>child</em> coordinate space with
+    /// <c>coordsize</c> (and <c>coordorigin</c>, which defaults to <c>0,0</c>). Its members'
+    /// <c>left</c>, <c>top</c>, <c>width</c> and <c>height</c> are bare numbers in that space, so a
+    /// member at <c>left:5400</c> in a group whose <c>coordsize</c> is <c>21600,21600</c> sits a
+    /// quarter of the way across the group, whatever the group's width in points happens to be.
+    /// </para>
+    /// <para>
+    /// Reading those bare numbers as points is the failure this exists to avoid: they are routinely
+    /// in the thousands, so every member lands metres off the page and its text is clipped away.
+    /// </para>
+    /// </remarks>
+    private static List<PageFrame> Group(
+        XElement group,
+        int anchorOffset,
+        DocxPictures? pictures,
+        Func<XElement, IReadOnlyList<PageBlock>>? content)
+    {
+        List<PageFrame> frames = [];
+
+        Dictionary<string, string> style = Style(group);
+        if ((style.TryGetValue("width", out string? gw) ? Css(gw) : null) is not { } groupWidth
+            || (style.TryGetValue("height", out string? gh) ? Css(gh) : null) is not { } groupHeight
+            || groupWidth <= Length.Zero
+            || groupHeight <= Length.Zero)
+        {
+            return frames;
+        }
+
+        Length originX = (style.TryGetValue("margin-left", out string? ml) ? Css(ml) : null)
+                         ?? Length.Zero;
+        Length originY = (style.TryGetValue("margin-top", out string? mt) ? Css(mt) : null)
+                         ?? Length.Zero;
+
+        (double spaceX, double spaceY) = Pair(group.Attribute("coordsize")?.Value) ?? (0, 0);
+        (double baseX, double baseY) = Pair(group.Attribute("coordorigin")?.Value) ?? (0, 0);
+        if (spaceX <= 0 || spaceY <= 0) return frames;
+
+        FrameHorizontalOrigin horizontal = HorizontalOriginOf(style);
+        FrameVerticalOrigin vertical = VerticalOriginOf(style);
+
+        foreach (XElement member in group.Elements().Where(child => IsShape(child) is not null))
+        {
+            if (member.Name.LocalName is "group") continue;   // nested groups: not measured, not guessed
+
+            Dictionary<string, string> box = Style(member);
+            if (Number(box.GetValueOrDefault("left", "")) is not { } left
+                || Number(box.GetValueOrDefault("top", "")) is not { } top
+                || Number(box.GetValueOrDefault("width", "")) is not { } wide
+                || Number(box.GetValueOrDefault("height", "")) is not { } tall)
+            {
+                continue;
+            }
+
+            if (wide <= 0 || tall <= 0) continue;
+
+            XElement? text = TextBox(member);
+            FramePicture picture = text is null && pictures is not null
+                ? pictures.ReadVml(member)
+                : FramePicture.None;
+
+            frames.Add(new PageFrame
+            {
+                Size = new DocSize(
+                    groupWidth * (wide / spaceX), groupHeight * (tall / spaceY)),
+                Anchor = FrameAnchor.Paragraph,
+                AnchorOffset = anchorOffset,
+                Wrap = TextWrap.Through,
+                HorizontalOrigin = horizontal,
+                HorizontalOffset = originX + (groupWidth * ((left - baseX) / spaceX)),
+                VerticalOrigin = vertical,
+                VerticalOffset = originY + (groupHeight * ((top - baseY) / spaceY)),
+                IsImage = text is null,
+                Image = picture.Raster,
+                Vector = picture.Vector,
+                Blocks = text is not null && content is not null ? content(text) : [],
+            });
+        }
+
+        return frames;
+    }
+
+    /// <summary>A VML <c>x,y</c> attribute pair, or null when it is not one.</summary>
+    private static (double X, double Y)? Pair(string? text)
+    {
+        if (text is null) return null;
+
+        string[] parts = text.Split(',', StringSplitOptions.TrimEntries);
+        return parts.Length == 2 && Number(parts[0]) is { } x && Number(parts[1]) is { } y
+            ? (x, y)
+            : null;
+    }
+
+    private static PageFrame? One(
+        XElement shape,
+        XElement element,
+        int anchorOffset,
+        DocxPictures? pictures,
+        Func<XElement, IReadOnlyList<PageBlock>>? content)
+    {
         Dictionary<string, string> style = Style(shape);
 
-        // Floating: the page places it, not the line. See the remarks.
+        // Floating: the page places it, not the line. It still gets drawn — see the remarks.
         if (style.TryGetValue("position", out string? position)
             && position.Equals("absolute", StringComparison.OrdinalIgnoreCase))
         {
-            return null;
+            return Floating(shape, style, anchorOffset, pictures, content);
         }
 
         Length? width = style.TryGetValue("width", out string? w) ? Css(w) : null;
@@ -78,8 +228,10 @@ internal static class DocxVmlFrames
         if (width is not { } across || height is not { } down) return null;
         if (across <= Length.Zero || down <= Length.Zero) return null;
 
-        FramePicture picture = pictures?.ReadVml(shape) ?? FramePicture.None;
-
+        XElement? box = TextBox(shape);
+        FramePicture picture = box is null && pictures is not null
+            ? pictures.ReadVml(shape)
+            : FramePicture.None;
 
         return new PageFrame
         {
@@ -87,11 +239,102 @@ internal static class DocxVmlFrames
             Anchor = FrameAnchor.AsCharacter,
             AnchorOffset = anchorOffset,
             Wrap = TextWrap.Through,
-            IsImage = true,
+            IsImage = box is null,
             Image = picture.Raster,
             Vector = picture.Vector,
+            Blocks = box is not null && content is not null ? content(box) : [],
         };
     }
+
+    /// <summary>
+    /// A floating VML shape: placed against its own origin, drawn, and reserving no line room.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The two halves have to be kept apart. <strong>Reserving room for a floating shape is wrong</strong>
+    /// — that is what added seven pages to <c>33004.docx</c> and got the first attempt reverted — but
+    /// <strong>not drawing it is equally wrong</strong>, and cost seven documents their entire text.
+    /// <c>TextWrap.Through</c> is what says both at once: the frame is placed and painted, and no line
+    /// makes room for it.
+    /// </para>
+    /// <para>
+    /// A shape with no size is skipped rather than drawn at nothing: VML writes <c>width:0</c> for the
+    /// bare connector lines these templates use as leader rules, and a zero-area frame has no text to
+    /// draw and nothing to paint.
+    /// </para>
+    /// </remarks>
+    private static PageFrame? Floating(
+        XElement shape,
+        Dictionary<string, string> style,
+        int anchorOffset,
+        DocxPictures? pictures,
+        Func<XElement, IReadOnlyList<PageBlock>>? content)
+    {
+        if ((style.TryGetValue("width", out string? w) ? Css(w) : null) is not { } across) return null;
+        if ((style.TryGetValue("height", out string? h) ? Css(h) : null) is not { } down) return null;
+        if (across <= Length.Zero || down <= Length.Zero) return null;
+
+        XElement? box = TextBox(shape);
+        FramePicture picture = box is null && pictures is not null
+            ? pictures.ReadVml(shape)
+            : FramePicture.None;
+
+        Length x = (style.TryGetValue("margin-left", out string? ml) ? Css(ml) : null) ?? Length.Zero;
+        Length y = (style.TryGetValue("margin-top", out string? mt) ? Css(mt) : null) ?? Length.Zero;
+
+        return new PageFrame
+        {
+            Size = new DocSize(across, down),
+            Anchor = FrameAnchor.Paragraph,
+            AnchorOffset = anchorOffset,
+
+            // No line makes room for a floating shape. See the remarks; this is the half of the rule
+            // the reverted attempt got right.
+            Wrap = TextWrap.Through,
+
+            HorizontalOrigin = HorizontalOriginOf(style),
+            HorizontalOffset = x,
+            VerticalOrigin = VerticalOriginOf(style),
+            VerticalOffset = y,
+            IsImage = box is null,
+            Image = picture.Raster,
+            Vector = picture.Vector,
+            Blocks = box is not null && content is not null ? content(box) : [],
+            Padding = box is null ? default : default,
+        };
+    }
+
+    /// <summary>The <c>w:txbxContent</c> a VML shape carries, or null when it carries none.</summary>
+    private static XElement? TextBox(XElement shape)
+        => shape.Descendants(Word.Name("txbxContent")).FirstOrDefault();
+
+    /// <summary>What <c>margin-left</c> is measured from.</summary>
+    /// <remarks>
+    /// <c>mso-position-horizontal-relative</c>, whose default is <c>text</c> — the column the anchor
+    /// sits in — and not the page. <c>char</c> is the anchor character's own position, which the column
+    /// is the nearest origin this model has.
+    /// </remarks>
+    private static FrameHorizontalOrigin HorizontalOriginOf(Dictionary<string, string> style)
+        => style.GetValueOrDefault("mso-position-horizontal-relative") switch
+        {
+            "page" => FrameHorizontalOrigin.Page,
+            "margin" => FrameHorizontalOrigin.PageMargin,
+            _ => FrameHorizontalOrigin.Column,
+        };
+
+    /// <summary>What <c>margin-top</c> is measured from.</summary>
+    /// <remarks>
+    /// <c>mso-position-vertical-relative</c>. Its default is <c>text</c>, which is the anchor
+    /// paragraph — the origin a negative <c>margin-top</c> is measured up from, and these templates
+    /// use negative ones freely.
+    /// </remarks>
+    private static FrameVerticalOrigin VerticalOriginOf(Dictionary<string, string> style)
+        => style.GetValueOrDefault("mso-position-vertical-relative") switch
+        {
+            "page" => FrameVerticalOrigin.Page,
+            "margin" => FrameVerticalOrigin.PageMargin,
+            _ => FrameVerticalOrigin.Paragraph,
+        };
 
     /// <summary>The declarations of a VML shape's <c>style</c> attribute, lower-cased and trimmed.</summary>
     private static Dictionary<string, string> Style(XElement shape)
