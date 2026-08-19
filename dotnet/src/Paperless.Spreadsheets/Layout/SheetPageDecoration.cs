@@ -382,7 +382,15 @@ internal sealed class SheetPageDecoration(SheetLayout sheet, SheetPagePlacement 
         // `2012-GA-Survey-Chapter-6-Tables-16Dec2013-V2.xls`, whose sheet has a 0.5 in bottom
         // margin and a 0.5 in footer margin: LibreOffice draws `Page 6 - 2` at y 575.95 on a
         // 612 pt page, which is the bottom margin line to a twentieth of a point.
-        if (setup.Header is { IsEmpty: false } header)
+        // `differentFirst` swaps the pair on the sheet's first page, and swapping it to *nothing*
+        // is the case the corpus holds: every workbook here that sets the flag supplies no
+        // first-page content, so the first page prints bare. The band is unchanged either way —
+        // Calc reserves max(odd, even, first) on every page — so nothing below moves.
+        bool first = setup.DifferentFirstPage && context.IsFirstPageOfSheet;
+        SheetHeaderFooter? bandHeader = first ? setup.FirstHeader : setup.Header;
+        SheetHeaderFooter? bandFooter = first ? setup.FirstFooter : setup.Footer;
+
+        if (bandHeader is { IsEmpty: false } header)
         {
             DrawBand(
                 header,
@@ -396,7 +404,7 @@ internal sealed class SheetPageDecoration(SheetLayout sheet, SheetPagePlacement 
                 sink);
         }
 
-        if (setup.Footer is { IsEmpty: false } footer)
+        if (bandFooter is { IsEmpty: false } footer)
         {
             // The footer's gap sits at the *top* of its band, between the last row and the text,
             // so the text starts that far below the band's top rather than at it.

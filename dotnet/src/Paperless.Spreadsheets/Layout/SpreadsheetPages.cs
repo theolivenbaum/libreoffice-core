@@ -42,6 +42,23 @@ public sealed class SheetPage : IPage
     /// <summary>True when the page lists the sheet's notes rather than its cells.</summary>
     public bool IsNotePage => _notes is not null;
 
+    /// <summary>
+    /// True on the first page of the whole printout, which is what
+    /// <c>headerFooter/@differentFirst</c> selects on.
+    /// </summary>
+    /// <remarks>
+    /// <strong>The printout's first page, not each sheet's.</strong> Calc decides with
+    /// <c>bFirst = 0 == nPageNo</c> (<c>sc/source/ui/view/printfun.cxx:1796</c>), and that
+    /// <c>nPageNo</c> counts across the whole print job rather than restarting per table — the
+    /// per-table value is <c>aTableParam.nFirstPageNo</c>, which is added to it a few lines later
+    /// to make the number that gets *printed* (<c>:1828</c>). Reading it as per-sheet is the
+    /// natural mistake and it is measurable: <c>042_Business_monthly_budget_4e4d092f.xlsx</c> has
+    /// four sheets of one page each, all four declaring <c>differentFirst</c>, and the reference
+    /// leaves page 1 bare while drawing the footer on pages 2, 3 and 4 — each of which is its own
+    /// sheet's first page. Suppressing per sheet costs that workbook 16 words instead of 4.
+    /// </remarks>
+    internal bool IsFirstPrintedPage { get; init; }
+
     /// <inheritdoc/>
     public int Index { get; }
 
@@ -109,6 +126,7 @@ public sealed class SheetPage : IPage
     {
         PageNumber = Number,
         PageCount = PageCount,
+        IsFirstPageOfSheet = IsFirstPrintedPage,
         SheetName = Sheet.Name,
         FileName = Sheet.FileName,
         FilePath = Sheet.FileName,
@@ -195,7 +213,9 @@ public sealed class SpreadsheetPages : IPageSequence
         List<SheetPage> pages = [];
 
         // The page number continues across sheets unless a sheet asks to restart, which is what
-        // Calc's nPageStart carries between tables (printfun.cxx:958).
+        // Calc's nPageStart carries between tables (printfun.cxx:958). Note that this is the
+        // number *printed*; which page counts as the printout's first, for `differentFirst`, is
+        // `pages.Count == 0` below and has nothing to do with it.
         int number = 1;
 
         foreach (SheetLayout sheet in sheets)
@@ -217,7 +237,10 @@ public sealed class SpreadsheetPages : IPageSequence
             {
                 if (options.MaxPages > 0 && pages.Count >= options.MaxPages) return pages;
 
-                pages.Add(new SheetPage(pages.Count, number, sheet, placement));
+                pages.Add(new SheetPage(pages.Count, number, sheet, placement)
+                {
+                    IsFirstPrintedPage = pages.Count == 0,
+                });
                 number++;
             }
 
@@ -228,7 +251,10 @@ public sealed class SpreadsheetPages : IPageSequence
             {
                 if (options.MaxPages > 0 && pages.Count >= options.MaxPages) return pages;
 
-                pages.Add(new SheetPage(pages.Count, number, sheet, notes));
+                pages.Add(new SheetPage(pages.Count, number, sheet, notes)
+                {
+                    IsFirstPrintedPage = pages.Count == 0,
+                });
                 number++;
             }
         }

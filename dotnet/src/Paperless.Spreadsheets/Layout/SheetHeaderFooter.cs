@@ -206,6 +206,16 @@ public sealed class SheetHeaderContext
     /// <summary>How many pages the printout has in total.</summary>
     public int PageCount { get; init; } = 1;
 
+    /// <summary>
+    /// True on the first page of the sheet this page belongs to.
+    /// </summary>
+    /// <remarks>
+    /// Not derivable from <see cref="PageNumber"/>, which is the number *printed* — a sheet
+    /// setting <c>firstPageNumber</c> starts at whatever it likes, and a sheet that does not
+    /// restart continues the workbook's count, so page one of the third sheet can print "17".
+    /// </remarks>
+    public bool IsFirstPageOfSheet { get; init; }
+
     /// <summary>The sheet's tab name.</summary>
     public string SheetName { get; init; } = string.Empty;
 

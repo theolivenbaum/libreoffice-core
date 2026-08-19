@@ -289,6 +289,41 @@ public sealed record SheetPrintSetup
     public SheetHeaderFooter? Footer { get; init; }
 
     /// <summary>
+    /// The first page's own header, when the sheet asks for a different one, else null.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// SpreadsheetML's <c>headerFooter/@differentFirst</c>. When it is set the first page draws
+    /// <c>firstHeader</c>/<c>firstFooter</c> instead of the odd pair — and, crucially, draws
+    /// <em>nothing</em> when the file states the flag and supplies no first-page content. That is
+    /// not a corner case: all 49 workbooks in this corpus that set <c>differentFirst</c> supply no
+    /// first-page content at all, so every one of them must print a bare first page.
+    /// </para>
+    /// <para>
+    /// <strong>The band is not resized.</strong> Calc takes one height for the whole sheet —
+    /// <c>orHFData.mnHeight = max(nOddHeight, nEvenHeight, nFirstHeight)</c>
+    /// (<c>sc/source/filter/oox/pagesettings.cxx:1026</c>) — and <c>mbHasContent</c> is true if
+    /// <em>any</em> of the three has content. So the space is reserved on every page and only the
+    /// ink differs, which is why honouring this moves no page boundary.
+    /// </para>
+    /// </remarks>
+    public SheetHeaderFooter? FirstHeader { get; init; }
+
+    /// <summary>The first page's own footer, or null. See <see cref="FirstHeader"/>.</summary>
+    public SheetHeaderFooter? FirstFooter { get; init; }
+
+    /// <summary>
+    /// True when the first page draws <see cref="FirstHeader"/> and <see cref="FirstFooter"/>
+    /// rather than <see cref="Header"/> and <see cref="Footer"/> — even when those are null.
+    /// </summary>
+    /// <remarks>
+    /// Separate from the two being non-null because "different, and empty" is the case the corpus
+    /// actually holds. Calc keeps the same distinction in <c>mbShareFirst</c>, which it sets from
+    /// <c>!bUseFirstContent</c> rather than from whether any first-page string was written.
+    /// </remarks>
+    public bool DifferentFirstPage { get; init; }
+
+    /// <summary>
     /// The gap between the header's text and the first printed row.
     /// </summary>
     /// <remarks>
