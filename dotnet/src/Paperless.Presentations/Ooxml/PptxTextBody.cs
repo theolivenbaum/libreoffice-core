@@ -328,7 +328,7 @@ internal static class PptxTextBody
                 runs.Add(Run(
                     Drawing.Child(child, "rPr"), sources, text.Length, content.Length,
                     theme, defaultTypeface));
-                text.Append(content);
+                text.Append(Capitalised(content, Drawing.Child(child, "rPr"), sources));
             }
             else if (Drawing.Is(child, "br"))
             {
@@ -352,7 +352,7 @@ internal static class PptxTextBody
                 runs.Add(Run(
                     Drawing.Child(child, "rPr"), sources, text.Length, content.Length,
                     theme, defaultTypeface));
-                text.Append(content);
+                text.Append(Capitalised(content, Drawing.Child(child, "rPr"), sources));
             }
         }
 
@@ -838,6 +838,54 @@ internal static class PptxTextBody
     /// it. Merging whole property sets gives the right answer on every run that states everything
     /// — which is every run LibreOffice writes — and the wrong one everywhere it matters.
     /// </remarks>
+    /// <summary>
+    /// A run's text as <c>a:rPr/@cap</c> draws it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// DrawingML's text capitalisation, which LibreOffice reads into <c>CharCaseMap</c>
+    /// (<c>oox/source/drawingml/textcharacterpropertiescontext.cxx:79-80</c> takes the attribute,
+    /// <c>textcharacterproperties.cxx:194</c> sets the property). It is inherited down the
+    /// layout/master chain like any other run property, so it is resolved through
+    /// <see cref="First{T}"/> rather than read off the run's own <c>a:rPr</c> — a deck that states
+    /// it once on its master and nowhere else is the common case, and 71 of the corpus's decks
+    /// state it at all.
+    /// </para>
+    /// <para>
+    /// <strong>This is presentation, not content.</strong> It is applied here, on the layout
+    /// path, and deliberately not in <c>PptxShapeReader</c>, which is what the extraction API
+    /// reads: copying an all-caps-formatted run out of a deck yields the case the author typed.
+    /// The reference's PDF holds the upper-case glyphs, which is why the rendering must match and
+    /// the extraction must not.
+    /// </para>
+    /// <para>
+    /// <strong>Only <c>all</c> is implemented.</strong> <c>small</c> needs real or synthesised
+    /// small capitals — a smaller face for the lower-case letters, not merely upper-casing them —
+    /// and LibreOffice's own behaviour has not been measured here, so it is left drawing the text
+    /// as authored, exactly as before. Seven corpus decks state it. Guessing at it would trade a
+    /// known-absent feature for a wrong one.
+    /// </para>
+    /// <para>
+    /// The length guard is not defensive padding. Run offsets index this same buffer, so a
+    /// casing that changed the length would silently desynchronise every run after it;
+    /// <see cref="string.ToUpperInvariant"/> maps one char to one char and cannot, but the guard
+    /// states the invariant the indices depend on rather than leaving it to be rediscovered.
+    /// Invariant casing is also what keeps a Turkish dotless i from turning into something the
+    /// reference did not draw.
+    /// </para>
+    /// </remarks>
+    private static string Capitalised(string content, XElement? runProperties, RunSources sources)
+    {
+        if (First(runProperties, sources.Defaults, element => Drawing.Attribute(element, "cap"))
+            is not "all")
+        {
+            return content;
+        }
+
+        string upper = content.ToUpperInvariant();
+        return upper.Length == content.Length ? upper : content;
+    }
+
     private static T? First<T>(XElement? own, XElement?[] defaults, Func<XElement, T?> read)
     {
         if (own is not null && read(own) is { } fromRun) return fromRun;
