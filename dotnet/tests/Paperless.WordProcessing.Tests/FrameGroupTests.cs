@@ -109,6 +109,81 @@ public sealed class FrameGroupTests
         placed.Width.ShouldBe(Length.FromPoints(100));
     }
 
+    /// <summary>
+    /// A nested group's own <c>a:off</c> moves its members: two identical sub-groups sitting side by
+    /// side do not land on top of one another.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>GroupTransform.Composed</c> added <c>inner.ShiftX</c>, and <c>TransformOf</c> never sets a
+    /// shift, so a nested <c>a:grpSpPr/a:xfrm/a:off</c> was dropped entirely. The scale composed
+    /// correctly throughout, so members came out the right size in the wrong place — every nested
+    /// group's members drawn as though the group sat at its parent's own origin.
+    /// </para>
+    /// <para>
+    /// The two sub-groups here are byte-identical apart from their <c>a:off</c>, which is the shape the
+    /// corpus's organogram templates actually have: <c>056_Organogram_Template_Square_Theme</c>'s five
+    /// text-bearing <c>a:grpSp</c> all state <c>chOff="0,0"</c> and a <c>chExt</c> equal to their
+    /// <c>ext</c>, and differ only in <c>a:off/@x</c> — 141890, 1623848, 3200400, 4761186, 6258911.
+    /// All five resolved to one rectangle, their twenty text boxes landed on each other at the
+    /// drawing's left edge, and the PDF's text layer held four of the twenty. Against 26.2.4.2:
+    /// <c>056</c> 24 words to <b>56</b> against 56, <c>057</c> 21 to <b>36</b> against 36,
+    /// <c>025</c> 126 to <b>141</b> against 141, <c>071</c> 11 to <b>41</b> against 41.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void ANestedGroupsOwnOffsetMovesItsMembers()
+    {
+        XElement drawing = XElement.Parse(
+            $"""
+            <w:drawing xmlns:w="{W}" xmlns:wp="{Wp}" xmlns:a="{A}" xmlns:wps="{Wps}" xmlns:wpg="{Wpg}">
+              <wp:anchor>
+                <wp:extent cx="2000000" cy="1000000"/>
+                <wp:wrapNone/>
+                <a:graphic><a:graphicData uri="{Wpg}">
+                  <wpg:wgp>
+                    <wpg:grpSpPr><a:xfrm>
+                      <a:off x="0" y="0"/><a:ext cx="2000000" cy="1000000"/>
+                      <a:chOff x="0" y="0"/><a:chExt cx="2000000" cy="1000000"/>
+                    </a:xfrm></wpg:grpSpPr>
+                    {Nested(0, "left")}
+                    {Nested(1000000, "right")}
+                  </wpg:wgp>
+                </a:graphicData></a:graphic>
+              </wp:anchor>
+            </w:drawing>
+            """);
+
+        IReadOnlyList<PageFrame> frames = DocxFrames.ReadAll(drawing, Blocks, anchorOffset: 0);
+
+        // The envelope, then one member per nested group.
+        frames.Count.ShouldBe(3);
+
+        frames.Skip(1).Select(member => ((PageParagraph)member.Blocks[0]).Text)
+            .ShouldBe(["left", "right"]);
+
+        // Each nested group states chOff="0,0" and puts its member at 100000 inside itself, so the two
+        // land 1000000 EMUs apart — which is the sub-groups' own offsets and nothing else.
+        frames[1].GroupOffset.X.ShouldBe(Length.FromTwips(Length.FromEmu(100000).Twips));
+        frames[2].GroupOffset.X.ShouldBe(Length.FromTwips(Length.FromEmu(1100000).Twips));
+        frames[1].GroupOffset.Y.ShouldBe(frames[2].GroupOffset.Y);
+    }
+
+    /// <summary>A sub-group at an offset, holding one text box 100000 EMUs inside itself.</summary>
+    private static string Nested(int x, string text)
+        => $"""
+           <wpg:grpSp>
+             <wpg:grpSpPr><a:xfrm>
+               <a:off x="{x}" y="0"/><a:ext cx="1000000" cy="1000000"/>
+               <a:chOff x="0" y="0"/><a:chExt cx="1000000" cy="1000000"/>
+             </a:xfrm></wpg:grpSpPr>
+             <wps:wsp>
+               <wps:spPr><a:xfrm><a:off x="100000" y="200000"/><a:ext cx="500000" cy="300000"/></a:xfrm></wps:spPr>
+               <wps:txbx><w:txbxContent><w:p><w:r><w:t>{text}</w:t></w:r></w:p></w:txbxContent></wps:txbx>
+             </wps:wsp>
+           </wpg:grpSp>
+           """;
+
     /// <summary>A drawing that is not a group is still exactly one frame.</summary>
     /// <remarks>
     /// The overwhelming majority of drawings, and what must not move: the single-frame path is the one

@@ -341,7 +341,7 @@ internal static class DocxFrames
                 switch (child.Name.LocalName)
                 {
                     case "grpSp" or "wgp" or "wpc":
-                        Walk(child, transform.Composed(TransformOf(child, size)), depth + 1);
+                        Walk(child, transform.Around(child, TransformOf(child, size)), depth + 1);
                         break;
 
                     case "wsp" or "pic" or "sp":
@@ -443,12 +443,52 @@ internal static class DocxFrames
         /// <summary>The identity, for a group that states no child space of its own.</summary>
         public static GroupTransform Identity => new(0, 0, 1, 1, 0, 0);
 
-        /// <summary>This transform applied inside an enclosing one.</summary>
-        public GroupTransform Composed(GroupTransform inner)
-            => new(
+        /// <summary>
+        /// A nested group's transform, composed inside this one — <em>including where the nested group
+        /// itself sits</em>.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// This used to be <c>Composed(inner)</c>, which added <c>inner.ShiftX</c> — and
+        /// <see cref="TransformOf"/> never sets a shift, so it added nought. A nested
+        /// <c>a:grpSpPr/a:xfrm/a:off</c>, which is where the nested group sits inside its parent, was
+        /// therefore **dropped**, and every nested group's members were laid out as though the group
+        /// were at the parent's own origin. The scale composed correctly throughout, so the members
+        /// came out the right size in the wrong place, which is the hardest kind of this defect to see.
+        /// </para>
+        /// <para>
+        /// Measured on <c>056_Organogram_Template_Square_Theme</c>, whose <c>wpg:wgp</c> holds five
+        /// text-bearing <c>a:grpSp</c> at <c>a:off/@x</c> 141890, 1623848, 3200400, 4761186 and
+        /// 6258911 EMU. Every one has <c>chOff="0,0"</c> and a <c>chExt</c> equal to its <c>ext</c>, so
+        /// all five resolved to the same rectangle: their twenty <c>Text here</c> boxes landed on top of
+        /// one another at the drawing's own left edge, and the PDF's text layer holds **four** of the
+        /// twenty. 26.2.4.2 draws them as a 5 × 5 lattice. A blind reviewer given only the image, and
+        /// told nothing, reported *"the surviving leaves are piled into the left edge of the page, a
+        /// single vertical stack … the remaining 20 leaves are absent as boxes"*.
+        /// </para>
+        /// <para>
+        /// The composition is the ordinary one. The nested group's own <c>off</c> is a point in
+        /// <em>this</em> group's child space, so it maps through this transform exactly as a leaf's
+        /// does; the mapped point is where the nested group's own child space starts.
+        /// </para>
+        /// </remarks>
+        /// <param name="group">The nested group, for its own <c>a:off</c>.</param>
+        /// <param name="inner">The nested group's own child-space transform.</param>
+        public GroupTransform Around(XElement group, GroupTransform inner)
+        {
+            XElement? properties = group.Elements()
+                .FirstOrDefault(child => child.Name.LocalName is "grpSpPr" or "spPr");
+            XElement? transformation = properties is null ? null : Child(properties, "xfrm");
+            XElement? offset = transformation is null ? null : Child(transformation, "off");
+
+            double x = offset is null ? OriginX : Raw(offset, "x");
+            double y = offset is null ? OriginY : Raw(offset, "y");
+
+            return new GroupTransform(
                 inner.OriginX, inner.OriginY,
                 inner.ScaleX * ScaleX, inner.ScaleY * ScaleY,
-                ShiftX + (inner.ShiftX * ScaleX), ShiftY + (inner.ShiftY * ScaleY));
+                ShiftX + ((x - OriginX) * ScaleX), ShiftY + ((y - OriginY) * ScaleY));
+        }
 
         /// <summary>A child rectangle mapped into the group's own.</summary>
         public DocRect Map(double x, double y, double cx, double cy)
