@@ -87,8 +87,18 @@ def resolve(doc: str) -> tuple[pathlib.Path, str]:
     if not m:
         sys.exit(f"not a file and not a stem__ext identity: {doc}")
     stem, ext = m.groups()
-    hits = [f for f in CORPUS.rglob(f"{stem}.{ext}")] + \
-           [f for f in CORPUS.rglob(f"{stem}.{ext.upper()}")]
+    # Walk the tree and match case-insensitively rather than probing two spellings of the
+    # name. `CORPUS.rglob("stem.EXT")` on a pattern with no wildcard resolves by *stat*, and
+    # `/c/sandbox/workdir` is a case-insensitive virtiofs mount, so that probe MATERIALISES a
+    # second directory entry for the same inode. `cmp` says identical, `git ls-files` sees one
+    # file, and every later directory glob then counts the document twice: a `words/*` sweep
+    # reported 355 rows for 337 documents, and a slides total went 305 to 311 with the corpus
+    # unchanged. Reading directory entries instead never names a path that does not exist.
+    want = f"{stem}.{ext}".lower()
+    hits = [pathlib.Path(root) / name
+            for root, _, names in os.walk(CORPUS)
+            for name in names
+            if name.lower() == want]
     if not hits:
         sys.exit(f"no corpus file for {doc} under {CORPUS}")
     return hits[0], doc
