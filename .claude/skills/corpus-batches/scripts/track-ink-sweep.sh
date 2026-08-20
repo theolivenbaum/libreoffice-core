@@ -49,6 +49,20 @@ mkdir -p "$OUT/ours" "$OUT/ref" "$OUT/cmp"
 : > "$OUT/rows.tsv"
 : > "$OUT/ink.tsv"
 
+# Extractable words, for check 2. A token counts as a word iff it carries at least one
+# Unicode letter or digit. Verbatim from `batch-check.sh` and `ref-baseline.sh`, and it must
+# stay verbatim: this script used a bare `pdftotext | wc -w` for eleven rounds after the gate
+# moved off it, so its `verdict` column silently disagreed with `MANIFEST.tsv`'s `status` and
+# with every batch-check sweep. A sweep whose verdict column is a different metric from the
+# scoreboard's looks exactly like a regression. Emits "<words> <rawwords>"; the raw figure is
+# kept as the last TSV column so an old run under this script is still reconcilable.
+words_of() {  # words_of <pdf> -> "<words> <rawwords>"
+  pdftotext "$1" - 2>/dev/null | python3 -c '
+import sys
+t = sys.stdin.buffer.read().decode("utf-8", "replace").split()
+print(sum(1 for w in t if any(c.isalnum() for c in w)), len(t))'
+}
+
 # shellcheck disable=SC2086  # the glob is meant to expand
 mapfile -t DIRS < <(cd "$ROOT_DIR" && ls -d $GLOB 2>/dev/null)
 [ "${#DIRS[@]}" -gt 0 ] || { echo "no batches matched $GLOB under $ROOT_DIR" >&2; exit 1; }
@@ -64,7 +78,7 @@ mapfile -t FILES < <(
 echo "documents: ${#FILES[@]}" >&2
 
 one() {  # one <index>
-  local idx="$1" i=-1 f base ext stem id o r op rp ow rw of rf un v ink major pages
+  local idx="$1" i=-1 f base ext stem id o r op rp ow rw of rf un v ink major pages owraw rwraw
   local prof="$OUT/prof$idx"
   mkdir -p "$prof" "$OUT/t$idx"
   for f in "${FILES[@]}"; do
@@ -86,16 +100,16 @@ one() {  # one <index>
       [ -f "$OUT/t$idx/$stem.pdf" ] && mv -f "$OUT/t$idx/$stem.pdf" "$r"
     fi
 
-    op="-"; rp="-"; ow="-"; rw="-"; of="-"; rf="-"; un="-"
+    op="-"; rp="-"; ow="-"; rw="-"; of="-"; rf="-"; un="-"; owraw="-"; rwraw="-"
     if [ -f "$o" ]; then
       op=$(pdfinfo "$o" 2>/dev/null | awk '/^Pages/{print $2}')
-      ow=$(pdftotext "$o" - 2>/dev/null | wc -w)
+      read -r ow owraw < <(words_of "$o")
       of=$(pdffonts "$o" 2>/dev/null | tail -n +3 | grep -c .)
       un=$(pdffonts "$o" 2>/dev/null | tail -n +3 | awk 'NF>=8 && $(NF-4)=="no"' | wc -l)
     fi
     if [ -f "$r" ]; then
       rp=$(pdfinfo "$r" 2>/dev/null | awk '/^Pages/{print $2}')
-      rw=$(pdftotext "$r" - 2>/dev/null | wc -w)
+      read -r rw rwraw < <(words_of "$r")
       rf=$(pdffonts "$r" 2>/dev/null | tail -n +3 | grep -c .)
     fi
 
@@ -114,9 +128,9 @@ one() {  # one <index>
       [ -n "$v" ] || v="match"
     fi
 
-    printf "%s\t%s\t%s/%s\t%s/%s\t%s/%s\t%s\t%s\n" \
+    printf "%s\t%s\t%s/%s\t%s/%s\t%s/%s\t%s\t%s\t%s/%s\n" \
       "${f#"$ROOT_DIR"/}" "${ext,,}" "$op" "$rp" "$ow" "$rw" "$of" "$rf" "$un" "$v" \
-      >> "$OUT/rows.tsv"
+      "$owraw" "$rwraw" >> "$OUT/rows.tsv"
 
     # Ink, whenever both sides rendered and the page counts agree. The tool refuses a
     # document whose counts differ, and rightly: page 3 against a different page 3 makes
@@ -142,7 +156,8 @@ for w in $(seq 0 $((WORKERS - 1))); do one "$w" & done
 wait
 
 {
-  printf "path\text\tpages\twords\tfonts\tunemb\tverdict\n"
+  printf "# words = tokens carrying at least one Unicode letter or digit; rawwords = pdftotext | wc -w\n"
+  printf "path\text\tpages\twords\tfonts\tunemb\tverdict\trawwords\n"
   sort "$OUT/rows.tsv"
 } > "$OUT/parity.tsv"
 sort -o "$OUT/ink.tsv" "$OUT/ink.tsv"

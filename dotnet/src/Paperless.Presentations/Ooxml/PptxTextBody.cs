@@ -152,15 +152,24 @@ internal static class PptxTextBody
 
         // The autofit choice is taken whole from the nearest a:bodyPr that states one of the
         // three: a slide's <a:bodyPr/> saying nothing is not the same as its saying a:noAutofit.
+        //
+        // `resizes` records *which* of the three that nearest one was, which @wrap needs and
+        // @fontScale does not — see Wraps below. Where one element states more than one, which is
+        // malformed, normAutofit wins over spAutoFit and both over noAutofit; the order of the
+        // tests is the precedence.
         XElement? autofit = null;
+        bool resizes = false;
         foreach (XElement source in bodyChain)
         {
-            if (Drawing.Child(source, "normAutofit") is { } stated) { autofit = stated; break; }
-            if (Drawing.Child(source, "spAutoFit") is not null
-                || Drawing.Child(source, "noAutofit") is not null)
+            if (Drawing.Child(source, "normAutofit") is { } stated)
             {
+                autofit = stated;
+                resizes = true;
                 break;
             }
+
+            if (Drawing.Child(source, "spAutoFit") is not null) { resizes = true; break; }
+            if (Drawing.Child(source, "noAutofit") is not null) break;
         }
 
         return new SlideTextBody
@@ -169,7 +178,22 @@ internal static class PptxTextBody
             Insets = Insets(bodyChain),
             Anchor = Anchor(Stated(bodyChain, "anchor")),
             Rotation = Rotation(bodyChain),
-            Wraps = Stated(bodyChain, "wrap") != "none",
+            // wrap="none" does not stand on its own: it suppresses wrapping only while the
+            // body's autofit leaves the shape alone. Measured on 26.2.4.2 with nine authored
+            // one-shape variants over both axes, a 236 pt box holding a 64-character line —
+            // `wrap="none"` draws one line with a:noAutofit and with no autofit element at all,
+            // and **four** lines with a:spAutoFit or a:normAutofit; `wrap="square"` draws four
+            // in all four autofit cases. So a fitting autofit beats the wrap, which is the one
+            // combination this read as unbounded.
+            //
+            // It is not a cosmetic difference. Treating a wrap="none" + spAutoFit body as
+            // unbounded runs its line off the *page*, not merely off the shape, and everything
+            // past the media box is lost from the text layer: 30 of the 305 baseline renderings
+            // drew text outside the page against the reference's 9, and one template family
+            // overhangs 720 pt by 8.7 pt so that `Google Slides` extracts as `Google Slid`.
+            // That two-character loss is the whole character difference on 15 of the 28
+            // documents filed as `text`.
+            Wraps = Stated(bodyChain, "wrap") != "none" || resizes,
             AutoFit = autofit is not null,
             FontScale = Thousandth(autofit, "fontScale", 1.0),
             WarpPreset = Warp(bodyChain),

@@ -176,9 +176,27 @@ public sealed record SlideTextBody
     /// Whether the text wraps at the shape's width.
     /// </summary>
     /// <remarks>
-    /// <c>a:bodyPr/@wrap="none"</c> means it does not: the line runs on past the shape and the
+    /// <para>
+    /// <c>a:bodyPr/@wrap="none"</c> asks that it does not: the line runs on past the shape and the
     /// shape grows around it. Modelled as an unbounded width rather than as clipping, which is
-    /// what makes a `wrap="none"` label come out on one line as its author saw it.
+    /// what makes a <c>wrap="none"</c> label come out on one line as its author saw it.
+    /// </para>
+    /// <para>
+    /// <strong>But the attribute does not stand on its own, and reading it as though it did loses
+    /// text.</strong> It suppresses wrapping only while the body's autofit leaves the shape alone.
+    /// Measured on 26.2.4.2 with nine authored one-shape variants over both axes — a 236 pt box
+    /// holding a 64-character line — <c>wrap="none"</c> draws **one** line with
+    /// <c>a:noAutofit</c> and with no autofit element at all, and **four** lines with
+    /// <c>a:spAutoFit</c> or <c>a:normAutofit</c>. <c>wrap="square"</c> draws four in all four
+    /// autofit cases. See <c>PptxTextBody</c>, where the two are combined.
+    /// </para>
+    /// <para>
+    /// The cost of the wrong reading is not cosmetic: an unbounded line runs off the *page*, not
+    /// merely off the shape, and everything past the media box is gone from the text layer. On the
+    /// 2026-08-19 baseline 30 of 305 slides renderings drew text outside the page where the
+    /// reference drew 9, and one template family overhangs a 720 pt page by 8.7 pt so that
+    /// <c>Google Slides</c> extracts as <c>Google Slid</c>.
+    /// </para>
     /// </remarks>
     public bool Wraps { get; init; } = true;
 

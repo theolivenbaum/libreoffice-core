@@ -226,6 +226,15 @@ dotnet/probes/slides-r39/slides-parity.tsv	2026-08-09	pre-container	24.2.7.2	unv
 dotnet/probes/slides-r41/base-ink.tsv	2026-08-09	pre-container	24.2.7.2	unverified	archival	-
 dotnet/probes/slides-r41/base-parity.tsv	2026-08-09	pre-container	24.2.7.2	unverified	archival	-
 dotnet/probes/slides-r41/prediction.md	2026-08-09	pre-container	24.2.7.2	unverified	archival	-
+dotnet/probes/slides-r50/charstream-after.tsv	2026-08-20	current	26.2.4.2	present	current	-
+dotnet/probes/slides-r50/charstream-before.tsv	2026-08-20	current	26.2.4.2	present	current	-
+dotnet/probes/slides-r50/ink-ranking-after.tsv	2026-08-20	current	26.2.4.2	present	current	-
+dotnet/probes/slides-r50/ink-ranking-before.tsv	2026-08-20	current	26.2.4.2	present	current	-
+dotnet/probes/slides-r50/offpage-ours-before.tsv	2026-08-20	current	26.2.4.2	present	current	-
+dotnet/probes/slides-r50/parity-after.tsv	2026-08-20	current	26.2.4.2	present	current	-
+dotnet/probes/slides-r50/parity-before.tsv	2026-08-20	current	26.2.4.2	present	current	-
+dotnet/probes/slides-r50/prediction.md	2026-08-20	current	26.2.4.2	present	current	-
+dotnet/probes/slides-r50/results.md	2026-08-20	current	26.2.4.2	present	current	-
 dotnet/probes/slides-rebase-01/prediction.md	2026-08-13	current	26.2.4.2	present	current	-
 dotnet/probes/slides-rebase-01/results.md	2026-08-13	current	26.2.4.2	present	current	-
 dotnet/probes/slides-solog-01/prediction.md	2026-08-14	current	26.2.4.2	present	current	-
