@@ -28,20 +28,22 @@ namespace Paperless.Presentations.Layout;
 /// Caladea is all of them. <c>@lnSpcReduction</c> is not read at all.
 /// </para>
 /// <para>
-/// <em>It is not the algorithm master has, and it is no longer the algorithm the reference has
-/// either.</em> LibreOffice 25.2 replaced the search with a walk down a fixed table of twelve
-/// scale levels (<c>editeng/source/editeng/impedit3.cxx</c>, <c>constScaleLevels</c>): format
-/// unscaled, then take the <em>first</em> level that fits. What is ported here is the bisection
-/// of 24.2.7.2, which was the installed <c>soffice</c> when it was written and is not the
-/// installed <c>soffice</c> now — this container's reference binary is <strong>26.2.4.2</strong>,
-/// so every claim below about what "the reference" does is a claim about 24.2.
+/// <em>It is not a search.</em> LibreOffice 25.2 replaced the bisection with a walk down a fixed
+/// table of twelve <c>(font, spacing)</c> levels (<c>editeng/source/editeng/impedit3.cxx</c>,
+/// <c>constScaleLevels</c>): format unscaled, and while that overflows take the <em>first</em>
+/// level that fits. What stood here for thirty rounds was the bisection of 24.2.7.2, which was
+/// the installed <c>soffice</c> when it was written and stopped being it when this container
+/// moved to <strong>26.2.4.2</strong> — the comment saying so was in this file the whole time.
+/// The table is now what is implemented; see <see cref="FitLevels"/> for the 36-deck measurement
+/// that establishes it against the installed binary rather than against this tree.
 /// <strong>Check which version wrote the reference before porting anything out of this tree.</strong>
 /// </para>
 /// <para>
-/// The one property of the level table reproduced here is its <em>floor</em>, because without it
-/// the bisection walks off the bottom of its own range and scales a body to nothing at all — see
-/// <see cref="FitFloor"/>. Replacing the search with the table proper subsumes that clamp rather
-/// than contradicting it: 0.250 is the table's last row.
+/// <strong>The level's second column is a line-spacing scale, and its first row uses it at full
+/// font size.</strong> So the reference's first answer to an overflow is not a smaller font, it
+/// is tighter leading and tighter paragraph spacing at the size the file states — which is the
+/// half of "the text sizes are different" that reads as inter-paragraph spacing rather than as
+/// size, and which two blind reviewers separated from the size question independently.
 /// </para>
 /// <para>
 /// <em>The fit measures the same line box it draws.</em> A slide's line is 1.2 em whatever face
@@ -69,56 +71,86 @@ namespace Paperless.Presentations.Layout;
 /// </remarks>
 public static partial class SlideTextLayout
 {
-    /// <summary>The slack the reference allows a text box, in hundredths of a millimetre.</summary>
-    private const long FitSlackMm100 = 50;
-
-    /// <summary>How many times the search halves its interval.</summary>
-    private const int FitIterations = 10;
-
-    /// <summary>The line-spacing scales the search may fall back on, in per cent.</summary>
+    /// <summary>
+    /// The twelve <c>(font, spacing)</c> rows the fit may answer with, in the order it tries them.
+    /// </summary>
     /// <remarks>
-    /// Tried in order at each candidate font scale and abandoned as soon as one fits, so a shape
-    /// that fits on font size alone never tightens its lines. They are part of the search even
-    /// when the answer is 100: a 90 per cent solution at a larger font can be a closer fit than a
-    /// 100 per cent one at a smaller font, and it is the closest fit that wins.
+    /// <para>
+    /// <c>constScaleLevels</c>, <c>editeng/source/editeng/impedit3.cxx</c>:286. The search formats
+    /// once unscaled, and if that overflows walks this table from the top and keeps the
+    /// <strong>first</strong> row that fits — so the answer is one of eleven font scales and never
+    /// anything between them, and each font scale carries its own line-spacing scale.
+    /// </para>
+    /// <para>
+    /// <strong>Measured against the installed 26.2.4.2, not read out of the tree.</strong>
+    /// 36 one-slide decks, one variable — box height 60…480 pt — each in its own file so the
+    /// reference's shared-outliner state leak cannot reach it, a single 40 pt paragraph in a
+    /// 360 pt box (<c>dotnet/probes/slides-r52/make-fit-probe.py</c>). The nine distinct sizes the
+    /// reference draws are exactly <c>40 ×</c> the first nine rows and nothing else, the spacing
+    /// beside them is 0.90 above 0.85 and 0.80 at and below it, and <em>both</em> 0.850 rows
+    /// appear: a 228 pt box takes <c>{0.850, 0.900}</c> and a 216 pt box <c>{0.850, 0.800}</c>.
+    /// </para>
+    /// <para>
+    /// <strong>Row 0 is not a no-op.</strong> Its font scale is one and its spacing scale is 0.9,
+    /// so the reference's first answer to an overflow is to tighten the leading and the paragraph
+    /// spacing at full size — which is the other half of "the text sizes are different": at a
+    /// 168 pt box both sides draw 28 pt and the reference's baseline pitch is 26.90 against our
+    /// 33.62.
+    /// </para>
+    /// <para>
+    /// This replaces the bisection of 24.2.7.2 that stood here for thirty rounds. That search
+    /// snapped its candidates to a tenth of a point of the body's own character height and kept
+    /// the closest fit at or above one, which is why it could answer with any whole point at all;
+    /// on the grid above it agreed with 26.2.4.2 on 13 of 36 boxes. Its <c>GridFontHeightPoints</c>
+    /// — the body's largest run height taken through hundredths of a millimetre, worth 33 of 33
+    /// probe boxes against a round twelve's 27 — was a property of that grid and has gone with it.
+    /// </para>
+    /// <para>
+    /// The 50 unit slack the 24.2 comparison allowed
+    /// (<c>aCurrentTextBoxSize.extendBy(0, -50)</c>) has gone too, and that is measured rather
+    /// than inferred from the function's disappearance: stepping the box 330…340 pt at one point,
+    /// the reference stops scaling at <strong>exactly 336</strong> and scales at 335, where
+    /// 1.417 pt of slack would have put the boundary at 334.
+    /// </para>
     /// </remarks>
-    private static readonly double[] FitSpacings = [1.0, 0.9, 0.8];
+    private static readonly (double Font, double Spacing)[] FitLevels =
+    [
+        (1.000, 0.900),
+        (0.925, 0.900),
+        (0.850, 0.900),
+        (0.850, 0.800),
+        (0.775, 0.800),
+        (0.700, 0.800),
+        (0.625, 0.800),
+        (0.550, 0.800),
+        (0.475, 0.800),
+        (0.400, 0.800),
+        (0.325, 0.800),
+        (0.250, 0.800),
+    ];
 
     /// <summary>The smallest font scale a fit may answer with; below it the reference gives up.</summary>
     /// <remarks>
     /// <para>
     /// <strong>An autofitted body never shrinks past a quarter — it overflows instead.</strong>
-    /// <c>constScaleLevels</c>' last row is <c>{0.250, 0.800}</c> and the walk stops there whether
+    /// <see cref="FitLevels"/>' last row is <c>{0.250, 0.800}</c> and the walk stops there whether
     /// or not the text fits, so a placeholder holding far more text than it has room for is drawn
-    /// at a quarter size and allowed to run past its own bottom edge. The bisection ported here
-    /// has no such stop: its interval is <c>[0, 1]</c> and it will happily answer a scale of a few
-    /// thousandths.
+    /// at a quarter size and allowed to run past its own bottom edge.
     /// </para>
     /// <para>
-    /// That is not merely "too small"; it is <em>nothing</em>, and the arithmetic that makes it
-    /// nothing is <see cref="Scaling.Scaled"/>'s rounding to a whole point. A 77 pt run at the
-    /// 0.003897 the search answered is 0.3 pt, which rounds to <strong>0</strong> hundredths of a
-    /// millimetre — so every run in the body is laid out and drawn at an em of zero and the page
-    /// receives no text-showing operator for it at all.
-    /// </para>
-    /// <para>
+    /// That is not merely "too small" for the search this replaced; it was <em>nothing</em>. The
+    /// bisection's interval was <c>[0, 1]</c> and a body overflowing twentyfold drove it into the
+    /// thousandths, where <see cref="Scaling.Scaled"/>'s rounding to a whole point rounds the em
+    /// to <strong>0</strong> and the page receives no text-showing operator for the body at all.
     /// Measured on <c>NWD-GLA-Community-Outreach-Day-Oct-2025.pptx</c>, whose slides 5, 6 and 12
     /// each put seventeen paragraphs of 52–88 pt text in a 1152128 EMU (90.7 pt) subtitle: we drew
     /// the title and nothing else, where 26.2.4.2 draws the body at stated × 0.250 exactly —
     /// 60 pt → 15, 52 → 13, 88 → 22, 72 → 18, 77 → 19 (<c>/F 18.992 Tf</c> in its page 12 stream).
-    /// The clamp reproduces all seven of those sizes through our own metrics.
+    /// The table reproduces all seven of those sizes through our own metrics, which is the sense
+    /// in which it subsumes the clamp rather than contradicting it.
     /// </para>
     /// </remarks>
     private const double FitFloor = 0.250;
-
-    /// <summary>The line-spacing scale that goes with <see cref="FitFloor"/>.</summary>
-    /// <remarks>
-    /// The floor is a whole row of <c>constScaleLevels</c>, not just a font multiplier: a body that
-    /// has run out of font scale has run out of leading too. Stated separately rather than left to
-    /// whatever the search last held, so the answer at the floor does not depend on the path taken
-    /// to it — though on all three measured bodies the search had already settled on 0.8 itself.
-    /// </remarks>
-    private const double FitFloorSpacing = 0.800;
 
     /// <summary>
     /// How a fit's answer is applied to a body: a font multiplier and a line-spacing multiplier.
@@ -171,9 +203,15 @@ public static partial class SlideTextLayout
                 return Quantised(Length.FromEmu((long)Math.Round(size.Emu * Font)));
             }
 
-            double points = Rounded((double)Quantised(size).Mm100 / Mm100PerPoint);
+            // ImpEditEngine::SeekCursor, impedit3.cxx:3005-3012. The height it scales is the
+            // one it read back off the device, and both roundings happen in hundredths of a
+            // millimetre rather than in points. The order is load-bearing: at a stated 30 pt the
+            // reference draws 25 at level 0.850 and 17 at level 0.550, and 25.5 rounding down
+            // while 16.5 rounds up is what 1058.333... x 0.85 = 25.49999999999999 and
+            // 1058.333... x 0.55 = 16.50000000000000 give. Multiplying in points gives 26 and 17.
+            double height = RoundedToPoints(DeviceRealised(Quantised(size)).Mm100);
 
-            return Length.FromMm100((long)Rounded(Rounded(points * Font) * Mm100PerPoint));
+            return Length.FromMm100((long)Rounded(RoundedToPoints(height * Font)));
         }
     }
 
@@ -222,8 +260,17 @@ public static partial class SlideTextLayout
         return Length.FromMm100(((twips * 127) + 36) / 72);
     }
 
-    /// <summary>Hundredths of a millimetre in a point, which is where the fit's rounding happens.</summary>
-    private const double Mm100PerPoint = 2540.0 / 72.0;
+    /// <summary>
+    /// <c>ImpEditEngine::roundToNearestPt</c>: a length in hundredths of a millimetre, rounded to
+    /// a whole number of points and converted straight back, still as a double.
+    /// </summary>
+    /// <remarks>
+    /// <c>o3tl::convert</c> multiplies before it divides, and the residue of that decides the
+    /// two cases where a level lands a size on exactly half a point — see <see cref="Scaling.Scaled"/>.
+    /// Keeping the expression in this shape is therefore not a style choice.
+    /// </remarks>
+    private static double RoundedToPoints(double mm100)
+        => Rounded(mm100 * 72.0 / 2540.0) * 2540.0 / 72.0;
 
     /// <summary>The draw layer's reference device resolution, which is what quantises an em.</summary>
     private const double ReferenceDeviceDpi = 600.0;
@@ -293,19 +340,20 @@ public static partial class SlideTextLayout
     /// </summary>
     /// <remarks>
     /// <para>
-    /// The search is a bisection on the font scale between nothing and the stated maximum, ten
-    /// halvings deep, exactly as the reference runs it — including the two details that decide
-    /// where it lands. Each candidate is snapped <em>down</em> to a tenth of a point of the body's
-    /// own font height before it is tried, so the scales visited are a grid rather than a
-    /// continuum; and the answer kept is not the last one tried but the <em>closest fit at or
-    /// above one</em> seen anywhere in the search, which is why the loop runs its full ten
-    /// iterations rather than stopping when the interval is small.
+    /// <c>ImpEditEngine::ScaleContentToFitWindow</c> (<c>impedit3.cxx</c>:303-333): format once
+    /// unscaled, and while the formatted height overflows the box walk <see cref="FitLevels"/>
+    /// from the top, taking the first row that fits. There is no search and no interval — the
+    /// answer is a row of the table or, when nothing fits, its last row.
     /// </para>
     /// <para>
-    /// Measurements are memoised by the pair they are made at. The bisection converges long before
-    /// its tenth iteration — on a 40 pt line the last four iterations all snap to the same tenth
-    /// of a point — so the cache turns thirty measurements per shape into six or seven, which on a
-    /// 48-node diagram is the difference between a second and half a minute.
+    /// <strong>The comparison is <c>height &gt; box</c>, so equality fits, and there is no
+    /// slack.</strong> The box is one hundredth of a millimetre taller than the shape states
+    /// because the reference measures it with <c>tools::Rectangle::GetSize()</c>, which counts
+    /// both edges.
+    /// </para>
+    /// <para>
+    /// Measurements are memoised by the pair they are made at, as they were for the bisection this
+    /// replaces; the walk visits at most thirteen and usually two or three.
     /// </para>
     /// </remarks>
     private static Scaling Solve(SlideTextBody body, DocRect area, SlideFonts fonts)
@@ -313,148 +361,26 @@ public static partial class SlideTextLayout
         if (!body.AutoFit) return Scaling.Stated(body);
         if (area.Height <= Length.Zero) return Scaling.None;
 
-        double fontHeightPoints = GridFontHeightPoints(body);
-
-        Dictionary<(double, double), double> measured = [];
-
         // The reference measures the box with tools::Rectangle, whose GetSize() counts both edges
         // — bottom - top + 1 — so the height it fits against is one hundredth of a millimetre
         // more than the shape states.
         long available = area.Height.Mm100 + 1;
 
-        double Fit(double font, double spacing)
+        bool Fits(double font, double spacing)
+            => Measure(body, area.Width, fonts, new Scaling(font, spacing, true),
+                       body.FontIndependentLineSpacing)
+                   .TotalToLastNonEmpty.Mm100 <= available;
+
+        if (Fits(1.0, 1.0)) return Scaling.None;
+
+        foreach ((double font, double spacing) in FitLevels)
         {
-            if (measured.TryGetValue((font, spacing), out double cached)) return cached;
-
-            long height =
-                Measure(body, area.Width, fonts, new Scaling(font, spacing, true), body.FontIndependentLineSpacing)
-                    .TotalToLastNonEmpty.Mm100
-                - FitSlackMm100;
-
-            double factor = height <= 0 ? double.MaxValue : (double)available / height;
-
-            measured[(font, spacing)] = factor;
-            return factor;
+            if (Fits(font, spacing)) return new Scaling(font, spacing, true);
         }
 
-        double current = Fit(1.0, 1.0);
-        if (current >= 1.0) return Scaling.None;
+        // The walk stops at the last row whether or not the text fits, and the body overflows.
+        (double floorFont, double floorSpacing) = FitLevels[^1];
 
-        double minimum = 0.0;
-        double maximum = 1.0;
-        double bestFont = 0.0;
-        double bestSpacing = 1.0;
-        double best = current;
-
-        for (int iteration = 0; iteration < FitIterations; iteration++)
-        {
-            double candidate = minimum + ((maximum - minimum) / 2);
-
-            // Snapped down to a tenth of a point of the body's own font height, which is what
-            // makes the search's grid the same grid the reference walks.
-            double points = Math.Floor(fontHeightPoints * candidate * 10.0) / 10.0;
-            double font = points / fontHeightPoints;
-
-            double fit = 0.0;
-            foreach (double spacing in FitSpacings)
-            {
-                if (fit >= 1.0) continue;
-
-                fit = Fit(font, spacing);
-
-                if (spacing == 1.0)
-                {
-                    if (fit > 1.0) minimum = font; else maximum = font;
-                }
-
-                if ((best < 1.0 && fit > best) || (fit >= 1.0 && fit < best))
-                {
-                    bestFont = font;
-                    bestSpacing = spacing;
-                    best = fit;
-                }
-            }
-        }
-
-        // Clamped rather than returned raw. The search is free to walk below the floor while it
-        // brackets — a degenerate measurement down there is what tells it to climb back up — but
-        // it may not answer with a scale the reference would never have reached, and it may not
-        // answer with none: a body that overflows still draws, at the floor, overflowing.
-        if (bestFont < FitFloor) return new Scaling(FitFloor, FitFloorSpacing, true);
-
-        return new Scaling(bestFont, bestSpacing, true);
-    }
-
-    /// <summary>
-    /// The pool default the reference falls back on: 24 pt, held as 847 hundredths of a
-    /// millimetre.
-    /// </summary>
-    /// <remarks>
-    /// <c>SdrEngineDefaults::GetFontHeight()</c> is <c>o3tl::convert(24, pt, mm100)</c>
-    /// (<c>include/svx/svdetc.hxx:69</c>) and <c>SdrModel</c> makes it the pool's
-    /// <c>EE_CHAR_FONTHEIGHT</c> (<c>svdmodel.cxx:133</c>, <c>SetTextDefaults</c>). 24 pt is
-    /// 846.67 hundredths of a millimetre, which that conversion rounds to <strong>847</strong> —
-    /// and the rounding is the point, not a detail. See <see cref="GridFontHeightPoints"/>.
-    /// </remarks>
-    private const long DefaultFontHeightMm100 = 847;
-
-    /// <summary>
-    /// The font height the search snaps its candidates to, in points.
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// The reference reads <c>EE_CHAR_FONTHEIGHT</c> off the <em>object's</em> item set and uses
-    /// it for one purpose: each candidate scale is floored to a tenth of a point <em>of that
-    /// height</em> before it is tried, so the search walks a grid of <c>0.1 / height</c> rather
-    /// than a continuum.
-    /// </para>
-    /// <para>
-    /// <strong>It is a length in hundredths of a millimetre, and it is therefore never a whole
-    /// number of points.</strong> That is the whole of this method, and getting it wrong was
-    /// worth six of thirty-three probe boxes. <c>autoFitTextForCompatibility</c> converts the
-    /// item's height from hundredths of a millimetre
-    /// (<c>svx/source/svdraw/svdotext.cxx</c>, 24.2.7), so a 20 pt default is 706 units and comes
-    /// back as <strong>20.0126 pt</strong>, not 20. The difference decides which candidates the
-    /// bisection ever visits: at the 87.5 per cent candidate a grid of exactly 12 puts the scaled
-    /// size on precisely 17.5 pt, which rounds <em>up</em> to 18, overshoots the box, and drops
-    /// the search's ceiling below every larger candidate; the reference's 11.99055 lands the same
-    /// candidate on 17.489, rounds <em>down</em> to 17, and the search keeps climbing. Every
-    /// disagreement measured was that shape — we settled for a looser fit than the reference.
-    /// </para>
-    /// <para>
-    /// Measured on two probe decks of 33 autofit boxes each, one stating 20 pt and one 40 pt,
-    /// simulating 24.2.7's search against its own rendering
-    /// (<c>research/probes/slides-r15/sim-autofit.py</c>). A round twelve agrees on
-    /// <strong>27 of 33 and 33 of 33</strong>; the body's own character height through hundredths
-    /// of a millimetre agrees on <strong>33 and 33</strong>. The pool default alone — 847 units,
-    /// 24.00945 pt — manages 33 and 30, which is what refutes reading a fixed default here.
-    /// </para>
-    /// <para>
-    /// <strong>Which run's height, when a body states several, is not separated by any probe
-    /// here.</strong> A deck putting a 20 pt paragraph in front of three 40 pt ones comes back
-    /// 33 of 33 under either reading, so first-run and largest-run are indistinguishable on the
-    /// evidence; the largest is taken because it is the more stable of the two — a body's leading
-    /// run is as often a stray label as its dominant size. Treat that half as inferred.
-    /// </para>
-    /// <para>
-    /// The predecessor of this note recorded the opposite conclusion — that a fixed twelve beat
-    /// the run's own size, 225 probe boxes to 210. It was measured with the run's size in
-    /// <em>points</em>, which for the 25, 32 and 40 pt boxes it used is a whole number every
-    /// time, so what that experiment actually compared was two whole-point grids.
-    /// </para>
-    /// </remarks>
-    private static double GridFontHeightPoints(SlideTextBody body)
-    {
-        long mm100 = 0;
-
-        foreach (SlideParagraph paragraph in body.Paragraphs)
-        {
-            foreach (SlideTextRun run in paragraph.Runs)
-            {
-                if (run.Size.Mm100 > mm100) mm100 = run.Size.Mm100;
-            }
-        }
-
-        return (mm100 > 0 ? mm100 : DefaultFontHeightMm100) / Mm100PerPoint;
+        return new Scaling(floorFont, floorSpacing, true);
     }
 }
