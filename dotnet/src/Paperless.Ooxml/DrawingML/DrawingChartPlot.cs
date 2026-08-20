@@ -1,9 +1,10 @@
 using System.Globalization;
+using System.Text;
 using System.Xml.Linq;
 using Paperless.Core.Charts;
 using Paperless.Core.Geometry;
-using Paperless.Core.Numbers;
 using Paperless.Core.Graphics;
+using Paperless.Core.Numbers;
 using Paperless.Core.Units;
 
 namespace Paperless.Ooxml.DrawingML;
@@ -1153,7 +1154,12 @@ public static class DrawingChartPlot
         // A percentage is a pie's business and nobody else's: bShowPercent is ANDed with
         // meTypeCategory == TYPECATEGORY_PIE (seriesconverter.cxx:141). Honouring it on a column
         // chart puts a second number on every bar of several corpus decks.
-        bool percent = kind == ChartPlotKind.Pie
+        //
+        // A bar-of-pie is in that category too, and leaving it out cost every label of
+        // 028_Unit_Circle_Chart_Optimized_Graph its percentage: TYPEID_OFPIE sits beside
+        // TYPEID_PIE and TYPEID_DOUGHNUT on TYPECATEGORY_PIE in the type table
+        // (oox/source/drawingml/chart/typegroupconverter.cxx:103-105).
+        bool percent = kind is ChartPlotKind.Pie or ChartPlotKind.OfPie
                        && (Flag(labels, "showPercent") ?? inherited?.ShowPercent ?? shown);
         bool category = Flag(labels, "showCatName") ?? inherited?.ShowCategory ?? shown;
         bool name = Flag(labels, "showSerName") ?? inherited?.ShowSeries ?? shown;
@@ -2007,12 +2013,18 @@ public static class DrawingChartPlot
             return ([.. live.Text], [.. live.Numbers]);
         }
 
+        // A multi-level cache before the flat ones, because it must not be walked as one: its
+        // c:lvl elements each restart at idx 0 and the flat walk below lets every level overwrite
+        // the one before it, so the last level written wins and a three-level category comes out
+        // as its outermost level alone.
+        if (Child(Child(source, "multiLvlStrRef"), "multiLvlStrCache") is { } levelled)
+            return ReadMultiLevel(levelled);
+
         XElement? cache =
             Child(Child(source, "strRef"), "strCache")
             ?? Child(source, "strLit")
             ?? Child(Child(source, "numRef"), "numCache")
-            ?? Child(source, "numLit")
-            ?? Child(Child(source, "multiLvlStrRef"), "multiLvlStrCache");
+            ?? Child(source, "numLit");
 
         if (cache is null) return ([], []);
 
@@ -2041,6 +2053,72 @@ public static class DrawingChartPlot
         }
 
         return (text, numbers);
+    }
+
+    /// <summary>
+    /// A <c>c:multiLvlStrCache</c> flattened into one label per point, outermost level first.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>This used to be read by the flat walk above and that was a silent defect.</strong>
+    /// Each <c>c:lvl</c> numbers its own points from zero, so walking every <c>c:pt</c> descendant
+    /// and assigning by <c>@idx</c> makes each level overwrite the one before it. Excel writes the
+    /// levels innermost first, so the survivor was the <em>outermost</em> level and every label
+    /// and legend entry of a three-level category came out as <c>Branch 1</c> where the reference
+    /// draws <c>Branch 1 Stem 2 Leaf 5</c>. Two blind reviewers, each given only a rendered page
+    /// and forbidden to read anything else, transcribed both halves of
+    /// <c>027_Unit_Circle_Chart_Graphical_Chart</c> and
+    /// <c>028_Unit_Circle_Chart_Optimized_Graph</c> and reported exactly that.
+    /// </para>
+    /// <para>
+    /// Joined with a space from the outermost level inwards, skipping the levels that state
+    /// nothing at an index — <c>lcl_getExplicitSimpleCategories</c>,
+    /// <c>chart2/source/tools/ExplicitCategoriesProvider.cxx:376-395</c>, which builds exactly
+    /// this string and is what <c>getSimpleCategories</c> hands to the legend and to every data
+    /// label. LibreOffice keeps the levels apart as well, as the rows of a complex category axis;
+    /// one label per point cannot hold that, and the join is what the reference draws wherever a
+    /// single string is drawn. <see cref="DrawingChart"/>'s extraction reader has always joined
+    /// them this way, so this also stops the two readers of one element disagreeing.
+    /// </para>
+    /// <para>
+    /// No numbers: a category level is a string, and parsing <c>Leaf 12</c> as a double gives
+    /// nothing anyway.
+    /// </para>
+    /// </remarks>
+    private static (string?[] Text, double?[] Numbers) ReadMultiLevel(XElement cache)
+    {
+        int declared = Drawing.Number(Child(cache, "ptCount"), "val") ?? -1;
+        if (declared < 0)
+        {
+            foreach (XElement point in cache.Descendants(Name("pt")))
+                declared = Math.Max(declared, (Drawing.Number(point, "idx") ?? -1) + 1);
+        }
+
+        int count = Math.Clamp(declared, 0, MaxPointCount);
+        List<XElement> levels = [.. cache.Elements(Name("lvl"))];
+        StringBuilder[] labels = new StringBuilder[count];
+        for (int at = 0; at < count; at++) labels[at] = new StringBuilder();
+
+        for (int level = levels.Count - 1; level >= 0; level--)
+        {
+            foreach (XElement point in levels[level].Elements(Name("pt")))
+            {
+                int index = Drawing.Number(point, "idx") ?? -1;
+                if (index < 0 || index >= count) continue;
+
+                string value = Child(point, "v")?.Value ?? string.Empty;
+                if (value.Length == 0) continue;
+
+                if (labels[index].Length > 0) labels[index].Append(' ');
+                labels[index].Append(value);
+            }
+        }
+
+        string?[] text = new string?[count];
+        for (int at = 0; at < count; at++)
+            text[at] = labels[at].Length == 0 ? null : labels[at].ToString();
+
+        return (text, new double?[count]);
     }
 
     /// <summary>The <c>c:f</c> a reference states, or null when the sequence is a literal.</summary>

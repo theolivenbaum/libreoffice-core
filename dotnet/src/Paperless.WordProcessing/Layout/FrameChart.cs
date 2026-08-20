@@ -107,6 +107,20 @@ internal static class FrameChart
     private static void Text(IDrawingSink sink, ChartLabel label, ChartFace face)
     {
         if (label.Text.Length == 0) return;
+
+        // A label that shows a percentage without a value is written on two lines — Office's own
+        // separator, `seriesconverter.cxx:168-172`, which `ChartDataLabel.Separator` already
+        // defaults to "\n". Shaping the whole string as one run drew the newline as a
+        // zero-width nothing and ran the two halves together, so `Leaf 11` and `15%` came out as
+        // the single token `Leaf 1115%` — 8 of the 16 labels of
+        // `027_Unit_Circle_Chart_Graphical_Chart`, and the whole of its remaining word gap once
+        // its categories were being read at every level.
+        if (label.Text.AsSpan().IndexOfAny('\n', '\r') >= 0)
+        {
+            Lines(sink, label, face);
+            return;
+        }
+
         if (face.Shape(label.Text, label.Size) is not { } run) return;
 
         Length line = face.LineHeightAt(label.Size);
@@ -152,6 +166,60 @@ internal static class FrameChart
         };
 
         sink.DrawGlyphRun(run.At(new DocPoint(x, top + ascent)), Paint.Solid(label.Colour));
+    }
+
+    /// <summary>
+    /// A label holding line breaks, drawn as a stack of lines about the same anchor point.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The block is as tall as its lines and each line keeps the whole label's horizontal
+    /// alignment, which is what <c>chart2</c>'s text shape does with a multi-paragraph label:
+    /// a centred label centres every line on the anchor, and a left- or right-anchored one
+    /// stacks them flush to that edge. The block's height replaces one line's in the vertical
+    /// anchoring, so a <c>CentreBottom</c> two-line label still ends at the point it is given.
+    /// </para>
+    /// <para>
+    /// Rotation is deliberately not handled here and falls back to the single-run path above:
+    /// no rotated label in this corpus carries a break, and stacking under a rotation needs the
+    /// lines offset along the rotated normal rather than down the page.
+    /// </para>
+    /// </remarks>
+    private static void Lines(IDrawingSink sink, ChartLabel label, ChartFace face)
+    {
+        string[] parts = label.Text.Split(['\n', '\r'], StringSplitOptions.RemoveEmptyEntries);
+        List<ChartRun> runs = [];
+        foreach (string part in parts)
+        {
+            if (face.Shape(part, label.Size) is { } shaped) runs.Add(shaped);
+        }
+
+        if (runs.Count == 0) return;
+
+        Length line = face.LineHeightAt(label.Size);
+        Length ascent = face.AscentAt(label.Size);
+        Length block = line * runs.Count;
+
+        Length top = label.Anchor switch
+        {
+            ChartLabelAnchor.CentreTop => label.At.Y,
+            ChartLabelAnchor.CentreBottom => label.At.Y - block,
+            _ => label.At.Y - (block / 2),
+        };
+
+        for (int at = 0; at < runs.Count; at++)
+        {
+            Length width = runs[at].Width;
+            Length x = label.Anchor switch
+            {
+                ChartLabelAnchor.RightMiddle => label.At.X - width,
+                ChartLabelAnchor.LeftMiddle => label.At.X,
+                _ => label.At.X - (width / 2),
+            };
+
+            sink.DrawGlyphRun(
+                runs[at].At(new DocPoint(x, top + (line * at) + ascent)), Paint.Solid(label.Colour));
+        }
     }
 }
 
