@@ -137,6 +137,44 @@ internal static class SheetBandHeight
     }
 
     /// <summary>
+    /// The distance a band keeps between its text and the sheet — Calc's <c>nDistance</c>, which
+    /// is a part of the band rather than an addition to it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>Zero on a pinned band</strong>, and that is a port rather than a simplification.
+    /// Both filters write the distance out as nothing when the band is already too short for its
+    /// own text — <c>orHFData.mnBodyDist = max(mnBodyDist, 0)</c>
+    /// (<c>sc/source/filter/oox/pagesettings.cxx:1040</c>) and
+    /// <c>lclPutMarginItem(rHdrItemSet, EXC_ID_BOTTOMMARGIN, 0.0)</c>
+    /// (<c>sc/source/filter/excel/xipage.cxx:322</c>) — because there is nothing left to give
+    /// away.
+    /// </para>
+    /// <para>
+    /// It matters because <see cref="SheetPrintSetup.FooterGap"/> is what separates a band's top
+    /// edge from its text, and <c>SheetPageDecoration.DrawBand</c> lays the text into
+    /// <c>bandHeight - gap</c>. <strong>XLSX and XLSB used to set no gap at all</strong> and so
+    /// inherited <see cref="SheetPrintSetup"/>'s ODF default of 142 twips, which made that
+    /// difference negative for every band under 7.1 pt and dropped the band outright — no ink and
+    /// no words. Measured on six authored margin variants of
+    /// <c>020_Free_Blood_Pressure_Chart…xlsx</c>, rendered both ways: at a stated band of 3.6 pt
+    /// LibreOffice draws the footer and we drew nothing; at 7.2 pt and above both draw. The
+    /// threshold was exactly 142 twips, which is the tell that the constant and not the geometry
+    /// was the cause.
+    /// </para>
+    /// </remarks>
+    /// <param name="codes">The band's own <c>&amp;</c>-code string.</param>
+    /// <param name="statedBand">The band the file's two margins imply.</param>
+    /// <param name="defaultFont">The workbook's own default cell font.</param>
+    /// <param name="dynamicGap">The gap a band whose text fits inside it keeps.</param>
+    public static Length BodyDistance(
+        string? codes, Length statedBand, SheetDefaultFont? defaultFont, Length dynamicGap)
+    {
+        Printed(codes, statedBand, defaultFont, out bool isDynamic);
+        return isDynamic ? dynamicGap : Length.Zero;
+    }
+
+    /// <summary>
     /// Walks the code string and totals both heights: the filters' nominal one and the laid-out
     /// one Calc re-measures at print time.
     /// </summary>
@@ -229,19 +267,12 @@ internal static class SheetBandHeight
                     break;
                 }
 
-                // &K is a colour and takes six hex digits with it; every other code is a toggle
-                // or one this does not know, and neither changes a height.
+                // &K is a colour and takes the six characters after it, hex or not — see the
+                // twin in `SheetHeaderFooter.ParseCodes` for why the distinction matters. Every
+                // other code is a toggle or one this does not know, and neither changes a height.
                 case 'K':
-                {
-                    int taken = 0;
-                    while (taken < 6 && at < codes.Length && Uri.IsHexDigit(codes[at]))
-                    {
-                        at++;
-                        taken++;
-                    }
-
+                    at = Math.Min(codes.Length, at + 6);
                     break;
-                }
 
                 default: break;
             }

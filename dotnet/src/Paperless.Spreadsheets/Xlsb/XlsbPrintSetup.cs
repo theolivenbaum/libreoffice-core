@@ -297,6 +297,20 @@ internal static class XlsbPrintSetup
                 ? SheetBandHeight.Printed(
                     footerText, Length.FromInches(Math.Max(0, bottom - footer)), defaultFont)
                 : Length.Zero,
+            // Calc's `nDistance`, zero when the band is pinned — see
+            // `SheetBandHeight.BodyDistance`, and the note beside the twin in `XlsxPrintSetup`
+            // for what leaving it at the ODF default cost.
+            HeaderGap = hasHeader
+                ? SheetBandHeight.BodyDistance(
+                    headerText, Length.FromInches(Math.Max(0, top - header)), defaultFont,
+                    SheetPrintSetup.Default.HeaderGap)
+                : SheetPrintSetup.Default.HeaderGap,
+            FooterGap = hasFooter
+                ? SheetBandHeight.BodyDistance(
+                    footerText, Length.FromInches(Math.Max(0, bottom - footer)), defaultFont,
+                    SheetPrintSetup.Default.FooterGap)
+                : SheetPrintSetup.Default.FooterGap,
+
             HeaderText = headerText,
             FooterText = footerText,
             Header = headerText is null ? null : SheetHeaderFooter.ParseCodes(headerText),
