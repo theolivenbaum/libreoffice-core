@@ -1115,6 +1115,15 @@ public sealed class Paginator
                     continue;
                 }
 
+                if (PlaceFloatedTable(
+                        table, paragraphIndex, blocks, Laid, body, column, used, tables, notes))
+                {
+                    paragraphIndex++;
+                    lineIndex = 0;
+                    rowDrawn = Length.Zero;
+                    continue;
+                }
+
                 Length before = columnIsEmpty && !_options.KeepsSpacingAtTopOfPage
                     ? Length.Zero
                     : table.SpaceBefore;
@@ -2718,6 +2727,182 @@ public sealed class Paginator
     /// </remarks>
     private static ParagraphFormat? PreviousFormat(IReadOnlyList<PageBlock> blocks, int index)
         => index > 0 && blocks[index - 1] is PageParagraph previous ? previous.Format : null;
+
+    /// <summary>
+    /// Whether the flow that follows a positioned table would put <em>ink</em> inside the rectangle the
+    /// table is about to be floated into — in which case it must not be floated.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Writer's body flies take the default parallel surround, so body text does not run through one: it
+    /// is pushed clear. Nothing here can wrap, and the whole point of floating is that the flow is
+    /// <em>not</em> pushed, so the two are only the same answer when no line would have landed in the
+    /// fly to begin with. This is that test, and it is the difference between the two graph-paper
+    /// templates that put a fly over the top of the body:
+    /// </para>
+    /// <para>
+    /// <c>084_…Editable_Layout</c> and <c>087_…Green_Theme</c> both anchor their grid to the page above
+    /// the top margin, so the fly covers the flow's own starting position in both. 084's flow after it is
+    /// a single empty paragraph and 26.2.4.2 draws the document on <b>one</b> page; 087's is an empty
+    /// paragraph followed by a <c>Title: ___ Date: ___</c> line and the reference takes <b>two</b>,
+    /// putting that line at the top of page 2. Emptying 087's two text runs and re-rendering brings it
+    /// back to one page — one variable, and the answer follows it. An empty paragraph has no ink to
+    /// displace, so it stays where it is; a line with ink does not.
+    /// </para>
+    /// <para>
+    /// The scan stops at the first block clear of the fly rather than running to the fly's bottom,
+    /// because a flow that starts <em>above</em> the fly has already been placed by the time it reaches
+    /// it — every one of the corpus's six passing floated templates and all five
+    /// <c>Project_Timeline_Template</c> documents are that shape, and running the scan on would refuse
+    /// them all. What is left unmodelled is the wrap itself: a line that starts clear of the fly and
+    /// grows into it is drawn through it, which is wrong and which no gate column can see.
+    /// </para>
+    /// </remarks>
+    /// <param name="blocks">Every block.</param>
+    /// <param name="laidAt">The layout of a block by index.</param>
+    /// <param name="from">The first block after the table.</param>
+    /// <param name="at">Where the flow has reached, in the same coordinates as the fly.</param>
+    /// <param name="flyTop">The fly's top.</param>
+    /// <param name="flyBottom">The fly's bottom.</param>
+    private static bool RunsIntoTheFly(
+        IReadOnlyList<PageBlock> blocks,
+        Func<int, LaidBlock> laidAt,
+        int from,
+        Length at,
+        Length flyTop,
+        Length flyBottom)
+    {
+        for (int i = from; i < blocks.Count; i++)
+        {
+            LaidBlock laid = laidAt(i);
+
+            Length height = Length.Zero;
+            if (laid.Paragraph is { } paragraph)
+            {
+                height = paragraph.Height;
+            }
+            else
+            {
+                foreach (Length row in laid.RowHeights) height += row;
+            }
+
+            // Clear of the fly: everything after this is further down still, so nothing can reach back.
+            if (at >= flyBottom || at + height <= flyTop) return false;
+
+            if (HasInk(blocks[i])) return true;
+
+            at += height;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Whether a block would draw anything a fly could displace.
+    /// </summary>
+    /// <remarks>
+    /// A table always would. A paragraph counts only when it holds a character that is neither
+    /// whitespace nor a control — the anchor character a frame, a field or a note citation occupies is
+    /// <c>U+0001</c>, and a paragraph holding nothing else is the empty spacer this has to let past.
+    /// </remarks>
+    private static bool HasInk(PageBlock block)
+        => block is not PageParagraph paragraph
+           || paragraph.Text.Any(c => !char.IsWhiteSpace(c) && !char.IsControl(c));
+
+    /// <summary>
+    /// Places a body table that names a position on the page rather than a place in the text, and
+    /// reports whether it did — in which case the flow is left exactly where it was.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>w:tblpPr</c>. Writer's DOCX importer turns such a table into a fly holding a table
+    /// (<c>TablePositionHandler::getTablePosition</c>), and a fly is not in the flow: the paragraphs
+    /// after it start where it started rather than below it. <see cref="FlowLayouter"/> has done this
+    /// for a running head since round 44 and its remarks said of the body *"no measurement was taken
+    /// there"*. This is that measurement.
+    /// </para>
+    /// <para>
+    /// Measured on <c>080_Printable_Graph_Paper_Template_Black_Theme</c> against 26.2.4.2, from the
+    /// PDFs' own operators. <b>Both sides draw the identical 86 strokes on page 1</b> — the table fits
+    /// either way — and then the reference draws the document's four remaining texts on page 1 at
+    /// y = 814.29, 783.09 and 765.94 and its logo image with them, while we drew the same four texts and
+    /// the same image on <b>page 2, at y = 814.30, 783.70 and 765.95</b>. The same offsets, one page
+    /// later: the table had consumed the flow, so the paragraphs after it — and the drawings they anchor
+    /// — were pushed off the page. Three of the corpus's failing graph-paper templates are that, and
+    /// their five passing siblings are the control that separates it from everything else about them.
+    /// </para>
+    /// <para>
+    /// <b>A table taller than the column is left in the flow, and that is a guard rather than the
+    /// rule.</b> Writer's fly-held table does split across pages; nothing here can, so floating one that
+    /// does not fit would draw it off the bottom of its page and lose the rest. Stacking it is what this
+    /// did before, so the guard can only be neutral or better — but it means a positioned table longer
+    /// than a page is still laid out wrongly, in a way no gate column will show.
+    /// </para>
+    /// <para>
+    /// Nothing about page breaking is decided here: the caller has already honoured
+    /// <see cref="PageTable.StartsNewPage"/>, and a floated table neither ends a page nor is moved to
+    /// one. <see cref="PageTable.SpaceBefore"/> and <see cref="PageTable.SpaceAfter"/> are deliberately
+    /// not applied — they are the table's spacing within a flow it is no longer in, and the frame
+    /// carries <see cref="PageTable.LowerSpacing"/> instead, which only a running head consults.
+    /// </para>
+    /// </remarks>
+    /// <param name="table">The table.</param>
+    /// <param name="index">Its index among the blocks, for <c>_nextTableOrigins</c>.</param>
+    /// <param name="blocks">Every block, so the flow after the table can be looked at.</param>
+    /// <param name="laidAt">The layout of a block by index.</param>
+    /// <param name="body">The page geometry the body actually got, the running head allowed for.</param>
+    /// <param name="column">The column the flow is in.</param>
+    /// <param name="used">How far down that column the flow has reached.</param>
+    /// <param name="tables">The page's placed tables, appended to.</param>
+    /// <param name="notes">The page's notes, appended to.</param>
+    /// <returns>True when the table was floated and the caller should move on without advancing.</returns>
+    private bool PlaceFloatedTable(
+        PageTable table,
+        int index,
+        IReadOnlyList<PageBlock> blocks,
+        Func<int, LaidBlock> laidAt,
+        PageGeometry body,
+        int column,
+        Length used,
+        List<PlacedTable> tables,
+        List<PageNote> notes)
+    {
+        if (!table.IsPositioned) return false;
+
+        LaidBlock laid = laidAt(index);
+        DocRect area = body.ColumnArea(column);
+
+        Length height = Length.Zero;
+        foreach (Length row in laid.RowHeights) height += row;
+
+        // The guard above: too tall to float, so it stays in the flow and paginates as it always did.
+        if (height > area.Height) return false;
+
+        // `w:vertAnchor`, resolved onto an offset from the top of the column the flow is in. `area.Y` is
+        // the body's own top, which a running head may already have pushed down, so the page-relative
+        // origins are converted through it rather than assumed equal to the section's stated margin.
+        Length top = table.VerticalOrigin switch
+        {
+            FrameVerticalOrigin.Page => table.VerticalOffset - area.Y,
+            FrameVerticalOrigin.PageMargin => table.VerticalOffset + (body.Margins.Top - area.Y),
+            _ => used + table.VerticalOffset,
+        };
+
+        if (RunsIntoTheFly(blocks, laidAt, index + 1, used, top, top + height)) return false;
+
+        TablePart part = PlaceTablePart(
+            table, laid, 0, Length.Zero, area, top, column, height, columnIsEmpty: true);
+
+        if (part.Placed is null) return false;
+
+        tables.Add(part.Placed);
+        notes.AddRange(PlacedNotes.In(part.Placed));
+
+        // Where the table's own zero landed, for the pass after this one — the same record an in-flow
+        // table leaves, and a cell's anchored frame is measured against it either way.
+        _nextTableOrigins[index] = new DocPoint(area.X, area.Y + top);
+        return true;
+    }
 
     /// <summary>
     /// One page's worth of a table: what was placed, how tall it is, and where the next page resumes.
