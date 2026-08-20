@@ -48,6 +48,7 @@ internal sealed class XlsxSheetReader(XlsxFile file, List<Diagnostic> diagnostic
     private readonly XlsxFile _file = file;
     private readonly List<Diagnostic> _diagnostics = diagnostics;
     private readonly Dictionary<int, SharedFormula> _sharedFormulas = [];
+    private XlsxHiddenValues _hidden = XlsxHiddenValues.None;
     private bool _reportedTruncation;
 
     /// <summary>Reads a sheet's cells.</summary>
@@ -57,6 +58,7 @@ internal sealed class XlsxSheetReader(XlsxFile file, List<Diagnostic> diagnostic
 
         _sharedFormulas.Clear();
         MergeMap merges = MergeMap.Read(worksheet);
+        _hidden = XlsxHiddenValues.Read(worksheet);
 
         List<ContentTableRow> rows = [];
         int columnCount = 0;
@@ -301,7 +303,10 @@ internal sealed class XlsxSheetReader(XlsxFile file, List<Diagnostic> diagnostic
             Formula = ReadFormula(element, row, column),
         };
 
-        AddText(cell, display);
+        // A conditional format may replace a cell's value with an icon or a bar rather than
+        // decorating it. The cell keeps its value — charts and the sheet's own formulas still
+        // read it — and draws no text at all.
+        if (!_hidden.Hides(row, column)) AddText(cell, display);
         return cell;
     }
 

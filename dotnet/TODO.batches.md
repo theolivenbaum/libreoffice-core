@@ -14753,3 +14753,86 @@ of 158, so the three `pages 1/2` documents are at least two causes.
 - Left open by words on purpose: `SheetChart`/`SlideChart` still run multi-line labels together.
   `FrameChart` was fixed for words only. **Sheets and slides both inherit this defect** and it is
   now a known, localised, cross-track item.
+
+## Round 52 — sheets — two rules, three verdicts, and a test that passed for the wrong reason
+
+`dotnet/probes/sheets-r52-condvalue/` — `prediction.md` (`6812e8ff019`) and
+`prediction-addendum.md` (`8e214f29695`) were each committed before the change they predict and
+before anything was rendered with it. **sheets 268 → 271 of 307**, predicted +1 then +1, measured
++1 then +2. Zero regressions; **0 of 307 page counts changed**; ten new tests, all detectors.
+
+### A conditional format can hide a cell's value — and does not hide all of them
+
+`showValue="0"` on an icon set or data bar suppresses the cell's **text**, not the icon
+(`output2.cxx:1691`). The subtlety that decides the corpus case: `GetIconSetInfo` returns
+**nullptr** when the band a value falls in has a `NoIcons` entry in a *custom* icon vector
+(`colorscale.cxx:1231`), and a cell with no icon information keeps its text. So one rule hides some
+of its cells and prints the rest — which is why `077_Inventory_list_with_highlighting` draws
+thirteen `0`s and replaces twelve `1`s with a red flag. Bands are the **last** threshold satisfied,
+not the first; `gte="0"` makes the boundary strict; `percent`/`percentile` resolve against the
+range's own sorted values. `showValue` occurs in exactly **3** of 946 corpus documents.
+
+**Two round-50 claims about `077` are refuted.** The reference *does* draw the thirteen `0`s — both
+sides do, `pdftotext` says so — so the whole 12-token gap is the twelve `1`s. And column B is
+`cellXfs[16]`, `numFmtId="0"`, **General**: `165` belongs to `cellXfs[19]`, column H. There is no
+number-format defect on that document; its open sub-puzzle had a false premise on both halves.
+
+### `Requires` names a vocabulary, not a capability
+
+`037`, `049` and `DynamicBubbleChart` write a slicer `graphicFrame` in a `Requires="a14"` choice
+beside a fallback rectangle reading *"This shape represents a slicer…"*. **`a14` is `DrawingML2010`,
+which is in `UnderstoodExtensions`** — so the choice won, the frame had no reader, and the anchor
+drew nothing at all. LibreOffice draws the rectangle: 3 / 2 / 1 advisories against 0 in ours.
+
+Round 50 wrote the chartex rule, left a comment saying the slicer must *not* follow it "because the
+reference draws that one", and a test asserting exactly that — **which passed for the wrong
+reason**, because its helper left the `a14` prefix unbound so the fallback won by the general rule
+and the corpus's actual shape was never exercised. The dominant pattern of this project, found in
+its own test rather than in a brief.
+
+Fixed by the exact mirror of the chartex constant: a choice whose `a:graphicData/@uri` is the 2010
+slicer URI loses to a sibling `mc:Fallback`. **Shared layer (`Paperless.Ooxml`)** — censused over
+946 documents, the URI occurs in 7, **all sheets, 0 words, 0 slides**; the parent still owes the
+cross-track sweep and the documents to watch are the 108 `wps` / 51 `wpg` / 4 `wpc` words documents
+that share the path but not the key.
+
+### The `057` legend hypothesis is confirmed, costed, and deliberately not implemented
+
+Two authored copies of `057` differing in **one thing** — a `c:tx` on each series — settle it:
+with names, both sides draw them; without, **the reference draws `Column C` / `Column D` and we
+draw no legend at all**. `ChartLayout.Entries:3198` drops an unnamed series; LibreOffice's names
+come from the Calc data provider (`chart2uno.cxx:3173`, `STR_COLUMN` + the values range's column
+letter). Worth **4 tokens**, on a document that fails on page count — and the only other corpus
+witness is a **passing slides deck**. A `Paperless.Core` change for zero verdict gain; measured and
+left with the mechanism written down.
+
+**And the round-50 "reverse direction" legend framing dies too.** `037` was never a legend defect —
+it was the slicer advisory, and it now matches. `029` is a **chart-data** defect: a blind reviewer
+of its page 2 found the reference plots **no bars at all** on one chart (axis collapsed to its
+`$0–$12` default) where we plot everything, and drops the `Total` category from the other, which is
+what rescales its axis from $3,000 to $900. The legend we draw and it does not *follows* from the
+empty series. All three charts state `<c:plotVisOnly val="1"/>`.
+
+### Method notes
+
+- **Blind readings, with the round-51 caveat applied.** Four reviewers, none on a `--worst` page —
+  each page was chosen because a per-page token count said it carried the document's whole deficit.
+  Two of them, on unrelated documents, named the **same object** (not merely the same sentence),
+  and `pdftotext` confirmed it independently before any code moved.
+- **And the page-choosing criterion has a failure mode.** On `048_Expense_trends_budget` the
+  reviewer's "~270 px horizontal offset" is real — both PDFs are 612×792 with 14 pages, and the
+  reference's page 1 starts at `TIPS` where ours starts at `TEMPLATE`. The two sides' **horizontal
+  strips do not line up**, so a per-page word comparison on such a document measures the tiling,
+  not the content.
+- Seven reference-side-only movements in the same sweeps (`047` went 818 → 838 → 819 across three)
+  were separated from the six real ones by splitting the diff by which side moved.
+
+### Sheets does next, in order
+
+1. **`029_Annual_budget` and `plotVisOnly`** — measure whether its source rows are hidden. One
+   mechanism would explain an empty plot, a missing category, an axis scale and a legend at once;
+   29 tokens against a band of 6.24.
+2. **`DynamicBubbleChart`** — now 8 words outside a band of 6.82, the nearest miss on the track.
+3. **The pie family's `bestFit` data-label placement** — 4 documents, ~2 words each past the band.
+4. **The eight-blank-line header** — `probes/sheets-r51-bands/` brackets it; 20 words on
+   `FAA-2019-0995-0002`.

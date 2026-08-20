@@ -101,6 +101,17 @@ public static class OoxmlNamespaces
     /// </remarks>
     public const string ExtendedChart = "http://schemas.microsoft.com/office/drawing/2014/chartex";
 
+    /// <summary>The graphic-data URI a slicer's <c>graphicFrame</c> carries.</summary>
+    /// <remarks>
+    /// Paired with <see cref="ExtendedChart"/> and used the opposite way round. Excel writes a
+    /// slicer as a <c>graphicFrame</c> in an <c>mc:Choice</c> beside a plain rectangle that says
+    /// the reader's Excel is too old — and LibreOffice 26.2.4.2 <strong>draws that rectangle</strong>,
+    /// measured on all three corpus witnesses. The choice therefore has to lose even though its
+    /// <c>Requires</c> names a namespace Paperless does understand, because what it wraps is a
+    /// slicer and there is no slicer reader.
+    /// </remarks>
+    public const string Slicer = "http://schemas.microsoft.com/office/drawing/2010/slicer";
+
     /// <summary>
     /// The ISO/IEC 29500 strict URIs, paired with the transitional URI each replaces.
     /// </summary>
