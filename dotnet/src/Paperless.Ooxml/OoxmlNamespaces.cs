@@ -91,6 +91,17 @@ public static class OoxmlNamespaces
     public const string DrawingML2010 = "http://schemas.microsoft.com/office/drawing/2010/main";
 
     /// <summary>
+    /// The <c>a:graphicData/@uri</c> of an extended ("chartex") chart — the family Excel 2016
+    /// added for Pareto, histogram, waterfall, treemap, sunburst, box-and-whisker and funnel.
+    /// </summary>
+    /// <remarks>
+    /// It is named here because it decides an <c>mc:AlternateContent</c> branch rather than
+    /// because anything reads the part yet. See
+    /// <see cref="OoxmlXml"/>'s note on preferring a choice whose content we cannot draw.
+    /// </remarks>
+    public const string ExtendedChart = "http://schemas.microsoft.com/office/drawing/2014/chartex";
+
+    /// <summary>
     /// The ISO/IEC 29500 strict URIs, paired with the transitional URI each replaces.
     /// </summary>
     /// <remarks>
