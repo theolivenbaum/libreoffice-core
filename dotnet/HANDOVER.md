@@ -70,6 +70,11 @@ merge, verify, record and re-dispatch**, one agent per track, indefinitely.
 Repository on `claude/paperless-odf-phase-1-rnyzcu`, pushed. Scoreboards measured at HEAD, not
 inherited from a round's report.
 
+> **Superseded by the 2026-08-19 sweep — read § 3a below before quoting any figure in this
+> section.** The corpus grew from 534 to 946 documents and the whole scoreboard was re-measured.
+> The per-track tables in § 3 and § 8 are the *pre-growth* record and are kept because the
+> refutations and mechanisms attached to them are still live; the counts are not.
+
 | track | verdicts |
 |---|---:|
 | words | **155 / 200** |
@@ -125,6 +130,67 @@ this way produced three findings, two previously unrecorded. See §9: the user's
 decks found **17 in a single class no gate column can see**.
 
 ---
+
+## 3a. The 2026-08-19 sweep, and the corpus growth that preceded it
+
+The corpus grew to **946 documents** (words 337, slides 302, sheets 307) with the addition of the
+`chartset-*` batches — 300 documents of chart-bearing and template material across all three
+tracks. Every batch was then swept against **26.2.4.2** and `MANIFEST.tsv` refreshed from it.
+
+| track | passing | of |
+|---|---:|---:|
+| words | 300 | 337 |
+| sheets | 265 | 307 |
+| slides | 198 | 302 |
+| **total** | **763** | **946** |
+
+What landed in that round: `batch-check.sh` measuring every in-scope extension rather than
+thirteen of thirty-four (two `.xlsm` were silently unmeasured); DrawingML `a:rPr/@cap`;
+`headerFooter/@differentFirst`; floating VML shapes and their text boxes.
+
+### Three findings from it that will mislead a round that does not know them
+
+**A real fix that moves no verdict.** `a:rPr/@cap` was a genuine defect — the reference drew
+`LOREM IPSUM` where we drew `Lorem Ipsum` — and fixing it moved **zero** gate verdicts, because
+the gate counts *words* and upper-casing a word does not change how many there are. The round
+predicted 20 documents and got none. **Do not go looking for the missing verdicts.** Character
+identity over the 100 new decks went 50/100 → 67/100, which is the only measurement that can see
+it. This is § 4's blind-spot rule arriving in its purest form yet.
+
+**Most of the slides failure pool is a measurement ceiling.** Those decks carry `spc="150"`
+letter spacing from their masters; LibreOffice positions each glyph separately enough that
+`pdftotext` splits *inside* words — `2-Way` extracts as `2` + `-W` + `ay` — so the reference is
+credited three tokens where we get one. 1585 phantom words. **Our output is the better one.**
+They are filed `kind=ceiling` in the manifest. No code change wins them; the honest reading of
+the new decks is 72 of 100 correct in content, not 12. The standing risk is the mirror of it:
+a *misfiled* ceiling hides a real defect behind a label that tells every future round not to
+look, so sample the class and re-check it rather than inheriting it.
+
+**Stored status decays.** `MANIFEST.tsv` was 41 rows behind a fresh sweep, all of them
+*understating* progress, and four were named open problems in the task list that earlier commits
+had already closed (`orbus_togaf_tool_csq.xls` 75/75, `sectors-defense-and-aerospace.xlsx`
+449/449, `grants-2005.xls` 201/201, `SIL_TDB648.xlsx` 90/90). **Re-sweep before trusting the
+manifest** — this is § 7's "stored evidence decays silently" with the manifest itself as the
+victim.
+
+### The method that found every fix in that round
+
+Not the gate. For each failing document, strip **all** whitespace from both `pdftotext`
+extractions and compare the characters that remain. That separates "we drew different text" from
+"we drew the same text and `pdftotext` tokenised it differently", and it is what turned an
+undifferentiated pile of 162 failures into four named mechanisms. It is sixty lines of shell and
+it is the first thing to run on any word-count failure.
+
+Then look for clusters in the **size** of the gap. Six sheets workbooks failing by exactly four
+words was `Page 1 of 1`. Seven words documents at exactly zero words was floating VML.
+
+### Two operational rules the round added
+
+- **Never `git add -A`.** This mount reports symlink size as 0, so git sees 57 symlinks as
+  emptied and staging everything replaces them with empty files. Stage explicit paths, then
+  verify `git ls-files -s <paths> | awk '$1=="120000"'` prints nothing.
+- **A session has a subagent cap** (200 was hit). Three parallel tracks is the intended shape;
+  budget the reviewers accordingly rather than discovering the ceiling mid-round.
 
 ## 4. The corpus and the gate
 
