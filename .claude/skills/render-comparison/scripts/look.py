@@ -87,8 +87,21 @@ def resolve(doc: str) -> tuple[pathlib.Path, str]:
     if not m:
         sys.exit(f"not a file and not a stem__ext identity: {doc}")
     stem, ext = m.groups()
-    hits = [f for f in CORPUS.rglob(f"{stem}.{ext}")] + \
-           [f for f in CORPUS.rglob(f"{stem}.{ext.upper()}")]
+    # Match the extension case-insensitively by FILTERING what the walk already found.
+    #
+    # This used to be two rglob calls, the second globbing `{ext.upper()}` to catch the
+    # handful of corpus files spelled `.PPTX`.  On this container that is actively harmful:
+    # `/c/sandbox/workdir` is a **case-insensitive virtiofs mount**, so `foo.pptx` and
+    # `foo.PPTX` are the same inode -- and globbing the upper-case spelling *materialises*
+    # it in the directory cache permanently.  Every later `find` then returns it as a
+    # second file, so a sweep total climbed 305 -> 311 with the corpus unchanged and the
+    # two runs were no longer reconcilable.  A glob that alters the thing it measures is
+    # not an instrument.
+    #
+    # Filtering a single case-sensitive walk cannot create a name, so it is safe on a
+    # case-insensitive mount and still correct on a case-sensitive one.
+    want = f"{stem}.{ext}".casefold()
+    hits = sorted(f for f in CORPUS.rglob(f"{stem}.*") if f.name.casefold() == want)
     if not hits:
         sys.exit(f"no corpus file for {doc} under {CORPUS}")
     return hits[0], doc
