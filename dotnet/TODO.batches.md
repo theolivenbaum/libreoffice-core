@@ -14028,3 +14028,146 @@ Worth recording separately, found on the way and not chased: EHEST's `w:sectPr` 
 on and the first page is numbered as though it were not. `DocxPageGeometry.RestartAt` reads the
 attribute and `Paginator.cs`:634 seeds `pageNumber` from it, so the zero survives the reader; the
 divergence is one page wide and sits somewhere after that.
+
+---
+
+## Merge note — round 50, sheets and slides (2026-08-20)
+
+Two tracks merged into `claude/paperless-odf-phase-1-rnyzcu` at `ac147b7e5bb`. Words was still
+running at the time of writing and is not in these figures.
+
+### Combined test counts at the merged tree, measured here rather than inherited
+
+```
+Core 337   Containers 109   Text 596   Vector 295   Rendering 150(1 skipped)   Markup 259
+OpenDocument 125   WordProcessing 1052   Spreadsheets 886   Presentations 747      = 4556
+0 failed
+```
+
+**Neither round's own count is the combined count, and the arithmetic says which base each was
+measured on.** Sheets reported 4545, slides reported 4552; the merged tree is 4556. The gap is
+exactly sheets' four `OoxmlAlternateContentTests` — slides measured before the sheets merge
+existed, so its "other tracks" columns were stale by construction. This is § 5 step 7's stated
+reason for recombining rather than quoting, and it reproduced on the first round it was applied to.
+
+### Verdict movement
+
+| track | before | after | source |
+|---|---|---|---|
+| sheets | 265 / 307 | **267 / 307** | `054_Problem_analysis_with_Pareto_chart`, `051_Manufacturer_defect_analysis` |
+| slides | 198 / 302 | **199 / 302** | `7-Zulkefli_Part147n66_IKMAS.pptx` |
+| words | 300 / 337 | — | round still running |
+
+Corpus total **763 → 766 of 946**.
+
+### Sheets: the briefed lead was refuted and the fix came from underneath it
+
+`[CELLRANGE]` chart data labels were the named next action on the track and the brief guessed
+they might explain the 30-document `text` pool. Censused prefix-independently over all 307 sheets
+documents, `c15:datalabelsRange` occurs in **5**, our renderings contain the literal
+`[CELLRANGE]` on exactly those 5, and the reference's contain it on **0**. So it is a real defect
+of ours reaching **4 of 42 open documents, not 30** — and `061_Regional_sales_chart` carries it and
+passes anyway, so closing it would not have bought four verdicts either. The round pivoted, which
+is what the brief asked for and what the pool deserved.
+
+Two further framing claims died with it: **7 of the 30 open `text` documents have no chart part of
+any kind**, and 2 carry `chartEx` rather than `c:chart`. "They all have a chart in them" was mine
+and it was wrong.
+
+What survived and shipped: Excel writes an extended (chartex) chart as a `Requires="cx1"` choice
+beside a generated rectangle whose only text is *"This chart isn't available in your version of
+Excel…"*. A reader that cannot draw the choice is otherwise supposed to take the fallback, so we
+drew **26 words of English advice** where the chart belongs, and they land in the extracted text of
+every downstream consumer. `OoxmlXml.ResolveAlternateContent` now lets a chartex choice win.
+Keyed on the chartex `graphicData/@uri` **only** — the slicer placeholder has an identical shape
+and the reference *does* draw that one, so suppressing advisories in general would be wrong.
+
+Also worth keeping: the charstream test returns `CONTENT` on **36 of 36** open sheets documents.
+Zero tokenisation ceilings on this track, independently confirming that its failure pool is real
+in a way slides' is not.
+
+### Slides: the brief's own ceiling mechanism was wrong, and the ceiling label was hiding a verdict
+
+**`spc="150"` does not explain the 75 ceilings.** That `spc` is not in the affected titles'
+inheritance chain at all. Six single-attribute re-zips isolate the cause to **`pitchFamily`'s
+family nibble** — 622.40 pt over 11 tokens with it, 541.55 over 6 without — reproduced on four
+substituted families and **inert on all five installed ones**. `SlideText.cs` already declined to
+implement it; the measurement it asked for now exists, and the answer is that implementing it
+would match LibreOffice at the cost of matching PowerPoint. **That is a decision to be taken, not
+a patch to be written.**
+
+**17 of the 75 `ceiling` documents are misfiled**, found by running the charstream test over all
+75 rather than the sampled 10 the brief asked for. Several are not marginal — `OnTrac` at 0.787
+jaccard, `Demick_JetBlue` 0.886, `W3_Case_Study` 0.899, `16 - UTM` 0.904. One of them,
+`7-Zulkefli`, was hiding a **winnable verdict** behind the label. This is the exact failure mode
+the brief named — a misfiled ceiling tells every future round not to look — and it was worth one
+verdict on its first application.
+
+**And the control that keeps it honest:** the same test over the 198 *passing* documents finds
+**138 with differing characters**. Character difference alone is therefore not a classifier, which
+is § 7's "run every classifier over the documents that already match" firing correctly for once —
+it caught the instrument before the instrument manufactured a class.
+
+The fix that shipped: `a:bodyPr/@wrap="none"` is honoured **only while the autofit leaves the shape
+alone**, established on nine authored variants over both axes (`none`+`spAutoFit`/`normAutofit`
+wrap; `none`+`noAutofit`/absent do not). We read the attribute alone, so unbounded lines ran off
+the **page** and everything past the media box vanished from the text layer — 30 of our renderings
+drew off-page text against the reference's 9.
+
+Prediction 0 verdicts, measured +1: wrong in the safe direction, and the round says why — it
+argued no document sat near the band from below and one did. Renderings predicted 30–60, measured
+59. All eight documents named in advance as the regression surface held `match`. Page counts moved
+on 0 of 302.
+
+The whole-track ink sweep round 41 never ran **has now been run**: |ink| 1419.70 → 1409.36, signed
+1041.64 → 1040.62, the `|signed| ≤ |ink|` invariant holding on both sides, 57 documents improved
+and 2 worsened. One honest regression recorded rather than buried: `iris07.12.12` 881/881 → 871/881
+(still passing), same 5010 characters, changed emission order on rotated labels.
+
+### Two instrument defects, one fixed
+
+`track-ink-sweep.sh` was still scoring the **retired raw `wc -w` metric**, so its verdict column
+disagreed with `MANIFEST.tsv`. Fixed and committed. Still open, and it is the two-measurements-one-name
+trap living *inside a single skill*: its `INK` summary sums the **signed** column while
+`ink-ranking.py` reports the **unsigned** one.
+
+### An environment fact that invalidates sweep totals
+
+**`/c/sandbox/workdir` is a case-insensitive virtiofs mount.** The `.pptx`/`.PPTX` pairs are one
+inode, not two files. `look.py`'s upper-case `rglob` *materialises* the second spelling
+permanently, so a sweep total went 305 → 311 with the corpus unchanged. **Any `find`-based sweep
+total on this mount is unstable and must be reconciled case-folded.** This also revises the
+`CLAUDE.md` note that four corpus files are upper-case on disk: on this mount that is not a second
+file to be missed by a case-sensitive glob, it is the same file under a second name.
+
+### Owed and pending
+
+- The sheets diff touches **`Paperless.Ooxml`**, which reaches all three tracks. A shared-layer
+  merge owes a **measurement, not an argument**; the cross-track render-and-compare over all 666
+  words and slides documents is running at the time of writing and its result belongs beside this
+  note. The round's own census — chartex in 2 documents, both sheets — is the hypothesis being
+  tested, not the answer.
+- The slides diff touches `Paperless.Presentations` only. Nothing owed.
+- **`MANIFEST.tsv` is stale again in three ways** and lives in the corpus repo, so neither agent
+  touched it: `054` and `051` (sheets) and `7-Zulkefli` (slides) now pass, and 17 slides documents
+  need re-filing off `kind=ceiling`.
+
+### What each track does next
+
+**Sheets** — the chart legend selection rule. Two blind reviewers, on unrelated documents
+(`003_advanced_excel_pie`, `057_Simple_balance_sheet`), independently named *"the reference draws a
+legend, ours draws none"* as the most prominent defect on their page, while two others saw the
+reverse. Legends are implemented and the selection disagrees in **both directions**. Independent
+agreement between two blind readers is this project's strongest evidence standard and this is
+unexplored. Then `077` (twelve extra `1` tokens, exactly the twelve column-B `=IF(...)*valHighlight`
+cells; and we draw a bare `1` where `numFmtId=165` says `$1`), then volatile-formula recalculation
+(`TODAY()`, ~7 documents, costs `071` a page). **Do not implement chartex expecting a scoreboard
+gain** — LibreOffice's own chartex rendering draws zero words, so a correct implementation with
+tick labels would overshoot the gate this round just closed.
+
+**Slides** — `social-media-app-bulletin-january__pptx` p3, where we paint an **opaque black
+rectangle** behind a transparent picture and occlude the title. Found blind, on a *passing*
+document, previously unrecorded. Then autofit on the `.ppt` path: two blind readings of passing
+documents found the same class with **opposite signs**, one reviewer naming "font scale applied
+without the matching spacing reduction" unprompted — HANDOVER § 8's largest named front,
+reproduced on two documents nothing had flagged.
