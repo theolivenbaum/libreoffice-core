@@ -14315,3 +14315,38 @@ sweep owed by the sheets round is recorded above: **666 of 666 byte-identical.**
    `showPercent` accounts for ~123 of the 136 missing words.
 4. The three `pages 1/2` timelines (`097`, `012`, `015`) are the **opposite sign** and were not
    investigated.
+
+### Parent verification of the round-50 manifest edits
+
+The manifest was updated from the three agents' reports rather than from the parent's own
+measurement, which by this project's own standards is a stored figure and not evidence. Re-swept
+in the **primary** tree at the merged commit, over the fifteen batches holding every edited row —
+`words/chartset-{005,006,007,008,009,012,013,014}`, `words/done-014`,
+`sheets/chartset-{007,008}`, `slides/ceiling-{001,002}`, `slides/chartset-{007,012}`:
+
+```
+TOTAL 152  MATCH 102  MISMATCH 50  REF-CANNOT-RENDER 0
+→ reconciled against MANIFEST.tsv path-by-path: 145 covered, AGREE 145, DISAGREE 0
+```
+
+All thirteen edited rows verified, and the 132 unedited neighbours swept with them are the
+regression control — none moved. The seven-row gap between the sweep's `TOTAL` of 152 and the 145
+manifest rows is the alias-spelling artifact below, not a discrepancy.
+
+### The alias entries are one file wearing two names, and they must not be "cleaned up"
+
+Both the words and slides agents hit this independently in round 50. Measured here to settle its
+shape: `grants-2005.xls` and `grants-2005.XLS` report the **same inode** (`35184372089472271`),
+the same size, and a **link count of 1**. `git ls-files` lists only the lower-case name and
+`git status` reports nothing untracked, so git resolves the second spelling to the tracked file.
+
+**There are 45 corpus-wide** — words 18, sheets 18, slides 9 — which is exactly the gap between
+`find` counts (355 / 325 / 311) and manifest rows (337 / 307 / 302).
+
+**Do not delete them.** `rm <NAME>.XLS` on a case-insensitive mount is a request to unlink that
+inode, and the inode is the corpus document. The corpus separately holds four documents whose only
+name *is* upper-case; they are manifest rows and are real, and telling them apart from an alias is
+precisely what the manifest is for. Verdicts are unaffected either way — per-format identity keys
+on the extension as spelled, so `report__xls` and `report__XLS` are two identities and neither
+overwrites the other. Only the counts inflate. **Score against `MANIFEST.tsv`, never a sweep
+`TOTAL`.**

@@ -620,6 +620,24 @@ the second one permanently: `look.py` resolves a document by `CORPUS.rglob(stem.
 because of it. Reconcile every `find`-based total case-folded, and treat a total that grew without
 a corpus commit as this until proven otherwise.
 
+Measured 2026-08-20, so the shape of it is not in doubt: `grants-2005.xls` and `grants-2005.XLS`
+report the **same inode** (`35184372089472271`), the same size, and a **link count of 1**. `git
+ls-files` lists only the lower-case name and `git status` reports **nothing untracked**, so git
+resolves the second spelling to the tracked file. There is one file wearing two names in
+`readdir`, and the `nlink` of 1 is the filesystem telling you so.
+
+**Do not try to clean them up.** `rm <NAME>.XLS` on a case-insensitive mount is a request to
+delete that inode, and the inode is the corpus document. There are **45** such entries corpus-wide
+(words 18, sheets 18, slides 9), which is exactly the gap between `find` counts (words 355, slides
+311, sheets 325) and manifest rows (337, 302, 307).
+
+The corpus *does* separately contain four documents whose only name is upper-case — they are rows
+in `MANIFEST.tsv` and are real. Distinguishing them from an alias is what the manifest is for,
+which is the whole mitigation: **score against `MANIFEST.tsv`'s path list, never against a sweep's
+own `TOTAL`.** Verdicts are unaffected either way, because per-format identity keys on the
+extension as spelled (`report__xls` and `report__XLS` are two identities, so neither overwrites the
+other) — it is only the counts that inflate.
+
 Canonical reference renderings for this environment, all 534 documents at 26.2.4.2 with the
 correct font set, are kept at `/c/sandbox/workdir/refpdfs-26.2.4.2-fonts/` with a
 `ref-baseline-all.tsv` beside them. Reuse them rather than re-rendering the reference.
