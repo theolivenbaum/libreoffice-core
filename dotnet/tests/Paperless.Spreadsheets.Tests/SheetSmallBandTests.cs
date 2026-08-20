@@ -33,6 +33,9 @@ namespace Paperless.Spreadsheets.Tests;
 /// spellings of <c>&amp;K</c> at once.</item>
 /// <item><c>Zero</c> — 0.30 in against 0.30 in, a stated band of exactly nothing.</item>
 /// <item><c>Roomy</c> — 0.60 in against 0.25 in, a stated band of 25.2 pt, which fits.</item>
+/// <item><c>Spill</c> — the pinned band again, but with a footer of <em>three</em> 9 pt lines.
+/// Two of them fit between the band's top at 770.4 pt and the 792 pt page edge; the third has its
+/// baseline past the paper and neither side's PDF holds it.</item>
 /// <item><c>Snug</c> — 0.30 in against 0.10 in, a stated band of 14.4 pt. This one exists to
 /// catch the <em>over-general</em> version of the clamp and nothing else: it fits, but only just,
 /// and a clamp taken against the text rectangle's top rather than the band's own edge moves it
@@ -114,6 +117,34 @@ public sealed class SheetSmallBandTests
         // 14.4 pt and the text fits it, so the clamp must not fire — and it does fire, putting
         // this 2.2 pt out, if it is taken against `top` rather than against the band's own edge.
         snug.Origin.Y.Points.ShouldBeInRange(781.5, 783.5);
+    }
+
+    [Fact]
+    public void AFooterThatOverflowsThePaperLeavesItsLastLineOffThePage()
+    {
+        IReadOnlyList<DrawnGlyphRun> runs = [.. Runs()];
+
+        runs.Select(run => run.Text).ShouldContain("SPILLONE");
+        runs.Select(run => run.Text).ShouldContain("SPILLTWO");
+
+        // **A drift guard, and it records a refutation.** LibreOffice's PDF of this sheet holds
+        // `SPILLONE` and `SPILLTWO` and not `SPILLTHREE`, and so does ours — but not because
+        // either of us decided not to draw it. The third line's baseline lands past the 792 pt
+        // page edge and the PDF writer drops it there.
+        //
+        // A round of this work spent a sweep on the wrong reading of that. Ten authored probes at
+        // a 3.6 pt band showed a header keeping all nine of its lines while a footer keeps two,
+        // which looks exactly like a per-line clip to the band — and clipping to the band drops
+        // the second line of any two-line footer, which cost `fm-provider-service-measures.xlsx`
+        // thirty words the reference does draw. Clipping to the *paper* instead was measured
+        // against those same twelve probes with the clip in and with it out: **the two agree on
+        // all twelve**, so the rule earns nothing that the page boundary does not already give.
+        //
+        // What is left genuinely unexplained is a header of eight empty lines followed by a text
+        // line, which LibreOffice draws as nothing at either band size tried and we draw in full.
+        // `FAA-2019-0995-0002_attachment_2.xlsx` is the corpus instance, at twenty words.
+        DrawnGlyphRun third = runs.Single(run => run.Text == "SPILLTHREE");
+        third.Origin.Y.Points.ShouldBeGreaterThan(792.0);
     }
 
     [Fact]
