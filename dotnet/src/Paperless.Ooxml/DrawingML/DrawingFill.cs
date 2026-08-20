@@ -99,6 +99,7 @@ public static class DrawingFill
             FillRect = RelativeRect(Drawing.Child(stretch, "fillRect"), whenAbsent: 0),
             Opacity = Percentage(Drawing.Attribute(Drawing.Child(blip, "alphaModFix"), "amt")) ?? 1,
             Duotone = Duotone(Drawing.Child(blip, "duotone")),
+            ColourChange = ColourChange(Drawing.Child(blip, "clrChange")),
             Brightness = WholePercent(Drawing.Child(blip, "lum"), "bright"),
             Contrast = WholePercent(Drawing.Child(blip, "lum"), "contrast"),
         };
@@ -131,6 +132,46 @@ public static class DrawingFill
         return Percentage(value) is { } fraction
             ? (int)Math.Clamp(Math.Truncate(fraction * 100), -100, 100)
             : 0;
+    }
+
+    /// <summary>
+    /// An <c>a:clrChange</c>, or null when the element is absent or does not carry both ends.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>The alpha is deliberately not parsed here.</strong> <c>a:clrTo</c>'s
+    /// <c>a:alpha</c> is an ordinary DrawingML colour transform and
+    /// <see cref="DrawingColourTransforms"/> already applies it, so
+    /// <c>To.Resolve(theme).A</c> is the opacity — reading the attribute a second time in this
+    /// method would put two readings of one value into circulation, which is the failure this
+    /// project has paid for repeatedly. Whether the change is a knockout is therefore decided
+    /// at resolution, in <see cref="DrawingPictureEffects"/>, where the theme exists.
+    /// </para>
+    /// </remarks>
+    private static DrawingColourChange? ColourChange(XElement? element)
+    {
+        if (element is null) return null;
+
+        XElement? fromElement = Drawing.Child(element, "clrFrom");
+        XElement? toElement = Drawing.Child(element, "clrTo");
+        if (fromElement is null || toElement is null) return null;
+
+        DrawingColour? from = fromElement.Elements()
+            .Select(DrawingColour.Read).FirstOrDefault(colour => colour is not null);
+        XElement? toColour = toElement.Elements()
+            .FirstOrDefault(child => DrawingColour.Read(child) is not null);
+        if (from is null || toColour is null) return null;
+        if (DrawingColour.Read(toColour) is not { } to) return null;
+
+        // useA="0" makes the reference throw the destination's transparency away outright --
+        // ColorChangeContext's destructor calls maColorChangeTo.clearTransparence()
+        // (oox/source/drawingml/misccontexts.cxx:266-270) -- after which from == to opaque and
+        // the transform is skipped. Absent everywhere in this corpus (93 of 93 state no useA
+        // and so default to true), so this reaches nothing today and is here because the
+        // attribute is the difference between "knock this out" and "do nothing".
+        bool useAlpha = Drawing.Flag(element, "useA") ?? true;
+
+        return new DrawingColourChange(from, to, useAlpha);
     }
 
     /// <summary>
@@ -383,6 +424,29 @@ public sealed record DrawingBlipFill
     /// </remarks>
     public (DrawingColour Dark, DrawingColour Light)? Duotone { get; init; }
 
+    /// <summary>
+    /// <c>a:blip/a:clrChange</c>: one colour of the stored picture replaced by another, still
+    /// unresolved against a theme, or null when the blip states none.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// PowerPoint's <em>Set Transparent Color</em>. Both ends are required, matching
+    /// <c>lclCheckAndApplyChangeColorTransform</c>, which tests
+    /// <c>maColorChangeFrom.isUsed() &amp;&amp; maColorChangeTo.isUsed()</c>
+    /// (<c>oox/source/drawingml/fillproperties.cxx</c>:236).
+    /// </para>
+    /// <para>
+    /// <strong>Equal colours do not make it a no-op.</strong> The reference applies the
+    /// transform when the two colours differ <em>or</em> when the destination carries
+    /// transparency (<c>:240</c>), so <c>black → black</c> with
+    /// <c>&lt;a:alpha val="0"/&gt;</c> is precisely how the format spells "knock this colour
+    /// out". All 93 occurrences in this corpus are exactly that shape — <c>from == to</c>,
+    /// destination fully transparent — and none uses anything but <c>a:srgbClr</c>. A reader
+    /// that skips equal colours therefore implements nothing while looking correct.
+    /// </para>
+    /// </remarks>
+    public DrawingColourChange? ColourChange { get; init; }
+
     /// <summary><c>a:blip/a:lum/@bright</c> as a whole number of per cent; 0 when absent.</summary>
     public int Brightness { get; init; }
 
@@ -394,6 +458,24 @@ public sealed record DrawingBlipFill
     /// </remarks>
     public int Contrast { get; init; }
 }
+
+/// <summary>
+/// An <c>a:clrChange</c>: one colour of a picture mapped to another.
+/// </summary>
+/// <remarks>
+/// Both ends are <see cref="DrawingColour"/>s and still unresolved, so the destination's
+/// opacity travels inside <paramref name="To"/> as an ordinary <c>a:alpha</c> transform rather
+/// than as a field beside it. <see cref="DrawingPictureEffects.Knockout"/> is where that is
+/// read, because resolving a colour needs the theme.
+/// </remarks>
+/// <param name="From">The colour matched in the stored picture — <c>a:clrFrom</c>.</param>
+/// <param name="To">The colour it becomes — <c>a:clrTo</c>, alpha included.</param>
+/// <param name="UseAlpha">
+/// <c>a:clrChange/@useA</c>, defaulting to true. When false the reference discards the
+/// destination's transparency entirely, which turns a knockout into nothing at all.
+/// </param>
+public readonly record struct DrawingColourChange(
+    DrawingColour From, DrawingColour To, bool UseAlpha = true);
 
 /// <summary>
 /// A rectangle stated as fractions inset from each edge of something else, which is how

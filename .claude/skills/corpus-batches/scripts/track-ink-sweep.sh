@@ -13,7 +13,16 @@
 # Writes:
 #   rows.tsv    the same seven columns batch-check.sh writes
 #   parity.tsv  those, sorted, with a header
-#   ink.tsv     path, pages, total unaccounted ink, major pages, verdict
+#   ink.tsv     path, pages, |ink|% (unsigned), ink% (signed), major pages, verdict
+#               Two ink columns, deliberately, and both are named in the file's own
+#               header row.  For eleven rounds this script wrote ONE column, summed the
+#               *signed* figure into it, and labelled the total `INK` -- while
+#               `probes/slides-r39/ink-ranking.py`, the other half of the same skill,
+#               headlined the *unsigned* one.  Two different measurements circulating
+#               under one name is the trap this project has paid for repeatedly, and
+#               here it lived inside a single skill.  Rank on unsigned; decide on
+#               signed.  A signed sum lets a deficit cancel a surplus, so filling the
+#               deficit reads as a regression.
 #   cmp/<id>.txt  the full per-page pdf-image-diff report for every document
 #
 # Three things it does that the obvious version does not:
@@ -135,20 +144,24 @@ one() {  # one <index>
     # Ink, whenever both sides rendered and the page counts agree. The tool refuses a
     # document whose counts differ, and rightly: page 3 against a different page 3 makes
     # every region it reports an artefact.
-    ink="-"; major="-"; pages="-"
+    ink="-"; sink="-"; major="-"; pages="-"
     if [ -f "$o" ] && [ -f "$r" ] && [ "$op" = "$rp" ]; then
       rm -rf "$OUT/c$idx"
       timeout 900 python3 "$DIFF" "$o" "$r" --outdir "$OUT/c$idx" > "$OUT/cmp/$id.txt" 2>&1
       rm -rf "$OUT/c$idx"          # the PNGs are large and disposable; the report is not
-      ink=$(awk -F'\t' '$1 ~ /^[0-9]+$/ && $3 ~ /^[0-9.]+$/ {s+=$3} END{printf "%.2f", s}' \
+      # pdf-image-diff.py prints: page  diff%  ink%(signed)  |ink|%(unsigned)  regions  verdict
+      ink=$(awk -F'\t' '$1 ~ /^[0-9]+$/ && $4 ~ /^[0-9.]+$/ {s+=$4} END{printf "%.2f", s}' \
+            "$OUT/cmp/$id.txt")
+      sink=$(awk -F'\t' '$1 ~ /^[0-9]+$/ && $3 ~ /^-?[0-9.]+$/ {s+=$3} END{printf "%.2f", s}' \
             "$OUT/cmp/$id.txt")
       major=$(awk '/pages, .* with major differences/{print $3}' "$OUT/cmp/$id.txt")
       pages="$op"
       [ -n "$ink" ] || ink="?"
+      [ -n "$sink" ] || sink="?"
       [ -n "$major" ] || major="?"
     fi
-    printf "%s\t%s\t%s\t%s\t%s\n" "${f#"$ROOT_DIR"/}" "$pages" "$ink" "$major" "$v" \
-      >> "$OUT/ink.tsv"
+    printf "%s\t%s\t%s\t%s\t%s\t%s\n" \
+      "${f#"$ROOT_DIR"/}" "$pages" "$ink" "$sink" "$major" "$v" >> "$OUT/ink.tsv"
   done
 }
 
@@ -160,7 +173,12 @@ wait
   printf "path\text\tpages\twords\tfonts\tunemb\tverdict\trawwords\n"
   sort "$OUT/rows.tsv"
 } > "$OUT/parity.tsv"
-sort -o "$OUT/ink.tsv" "$OUT/ink.tsv"
+{
+  printf "# abs_ink = sum of the per-page UNSIGNED |ink|%% column -- rank the track on this one\n"
+  printf "# signed_ink = sum of the per-page SIGNED ink%% column -- decide direction on this one\n"
+  printf "path\tpages\tabs_ink\tsigned_ink\tmajor\tverdict\n"
+  sort "$OUT/ink.tsv"
+} > "$OUT/ink.tsv.tmp" && mv -f "$OUT/ink.tsv.tmp" "$OUT/ink.tsv"
 
 total=$(wc -l < "$OUT/rows.tsv")
 match=$(awk -F'\t' '$7=="match"' "$OUT/rows.tsv" | wc -l)
@@ -168,6 +186,12 @@ reffail=$(awk -F'\t' '$7=="ref-failed" || $7=="both-failed"' "$OUT/rows.tsv" | w
 echo
 echo "BATCHES ${DIRS[*]}"
 echo "TOTAL $total  MATCH $match  REF-CANNOT-RENDER $reffail"
-awk -F'\t' '$3!="-" && $3!="?" {i+=$3; m+=$4; n++}
-            END{printf "INK %.2f  MAJOR PAGES %d  over %d documents\n", i, m, n}' "$OUT/ink.tsv"
+# Both figures, both labelled, and the invariant between them checked.  A sum of signed
+# page figures can never exceed the sum of the same pages taken unsigned; if it does, the
+# two columns were not read off the same pages and no ranking built on them means anything.
+awk -F'\t' '/^#/ || $1=="path" {next}
+            $3!="-" && $3!="?" {a+=$3; s+=$4; m+=$5; n++}
+            END{printf "ABS-INK %.2f (unsigned |ink|%%, ranks)  SIGNED-INK %.2f (ink%%, direction)  MAJOR PAGES %d  over %d documents\n", a, s, m, n;
+                if ((s<0?-s:s) > a + 0.01)
+                  printf "INVARIANT VIOLATED: |signed| %.2f > unsigned %.2f\n", (s<0?-s:s), a}' "$OUT/ink.tsv"
 echo "TSV $OUT/parity.tsv  $OUT/ink.tsv"

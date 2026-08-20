@@ -1382,7 +1382,12 @@ internal sealed partial class PptxSlideLayout
         return destination is { } placed
             ? new PlacedPicture(
                   picture.Raster is { } raster
-                      ? Duotoned(raster, blip, ThemeFor(slide).Colours)
+                      // The knockout is withheld when a vector is present, for the reason
+                      // ColourKnockout records: the reference applies the transform only to a
+                      // GraphicType::Bitmap, so a WMF or EMF carrying it gets nothing. This is
+                      // the same guard the binary path applies at PptSlideLayout.Picture.
+                      ? Duotoned(raster, blip, ThemeFor(slide).Colours,
+                                 knockout: picture.Vector is null)
                       : null,
                   placed,
                   Math.Clamp(blip.Opacity, 0, 1))
@@ -1411,9 +1416,10 @@ internal sealed partial class PptxSlideLayout
     /// </para>
     /// </remarks>
     private static RasterImage Duotoned(
-        RasterImage image, DrawingBlipFill blip, DrawingTheme? theme)
+        RasterImage image, DrawingBlipFill blip, DrawingTheme? theme, bool knockout = true)
     {
         image = Adjusted(image, blip);
+        if (knockout) image = KnockedOut(image, blip, theme);
 
         if (blip.Duotone is not { } pair) return image;
         if (pair.Dark.Resolve(theme, placeholder: null) is not { } dark) return image;
@@ -1448,6 +1454,44 @@ internal sealed partial class PptxSlideLayout
 
         return recolour.IsIdentity ? image : image with { Luminance = recolour };
     }
+
+    /// <summary>
+    /// The picture with its <c>a:clrChange</c> attached — PowerPoint's <em>Set Transparent
+    /// Color</em>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Attached rather than applied, for the reason <see cref="Duotoned"/> gives: matching a
+    /// colour needs pixels and a reader has no codec.
+    /// </para>
+    /// <para>
+    /// <strong>This was a route, not a rule, and it is the seventh instance of that shape
+    /// here.</strong> <see cref="ColourKnockout"/>, the per-channel box match, the binary alpha
+    /// and the decoder that applies it all already existed and all already worked — the binary
+    /// <c>.ppt</c> path has populated them from Escher property 263 for rounds
+    /// (<c>MsBinary/PptSlideLayout.cs</c>). Nothing anywhere in the tree read
+    /// <c>a:clrChange</c>, so the OOXML half of the same feature drew the stored pixels.
+    /// </para>
+    /// <para>
+    /// <c>social-media-app-bulletin-january.pptx</c> page 3 is the corpus instance that found
+    /// it, and it was found by a blind reviewer on a document that <em>passes</em> every gate
+    /// column. Its wordmark is a 450 × 95 PNG that is <strong>91.6% pure #000000</strong> with
+    /// no alpha channel and no <c>tRNS</c>, under a <c>clrChange</c> knocking black out. Drawn
+    /// as stored it is a 337.5 × 71.25 pt opaque black slab that covers the words
+    /// <em>Social Media</em> in the title. No gate column can see it: the title is still in the
+    /// text layer, so the word count is unmoved and the document passes while the page is
+    /// visibly wrong.
+    /// </para>
+    /// <para>
+    /// Excluded for vectors by the caller, because the reference applies the transform only to
+    /// a <c>GraphicType::Bitmap</c> — see <see cref="ColourKnockout"/>.
+    /// </para>
+    /// </remarks>
+    private static RasterImage KnockedOut(
+        RasterImage image, DrawingBlipFill blip, DrawingTheme? theme)
+        => DrawingPictureEffects.Knockout(blip, theme, image.EncodedBytes.Span) is { } knockout
+            ? image with { Knockout = knockout }
+            : image;
 
     /// <summary>
     /// An <c>a:gradFill</c>, resolved against the box it fills.
