@@ -104,8 +104,8 @@ def shape(idx, name, x, y, cx, cy, body, fit):
             f' anchor="t">{fit}</a:bodyPr><a:lstStyle/>{body}</p:txBody></p:sp>')
 
 
-def slide(height_pt, width_pt, size, paras, fit, spcbef):
-    body = ''.join(paragraph(WORDS, size, spcbef) for _ in range(paras))
+def slide(height_pt, width_pt, size, paras, fit, spcbef, text=None):
+    body = ''.join(paragraph(text or WORDS, size, spcbef) for _ in range(paras))
     parts = [shape(2, 'Spacer', 200000, 100000, 2000000, 400000,
                    paragraph('spacer', 1200), '<a:noAutofit/>'),
              shape(3, 'Fit', 200000, 700000,
@@ -122,6 +122,7 @@ if __name__ == '__main__':
     ap.add_argument('--step', type=float, default=4.0)
     ap.add_argument('--width', type=float, default=360.0)
     ap.add_argument('--paras', type=int, default=3)
+    ap.add_argument('--text', default=None, help='paragraph text; the long sentence by default')
     ap.add_argument('--spc-before', type=int, default=0,
                     help='hundredths of a point of spcBef on every paragraph')
     ap.add_argument('--font-scale', type=int, default=0, help='normAutofit/@fontScale, thousandths of a per cent')
@@ -179,7 +180,7 @@ if __name__ == '__main__':
         z.writestr('ppt/theme/theme1.xml', THEME)
         for i, hh in enumerate(heights):
             z.writestr(f'ppt/slides/slide{i + 1}.xml',
-                       slide(hh, a.width, a.size, a.paras, fit, a.spc_before))
+                       slide(hh, a.width, a.size, a.paras, fit, a.spc_before, a.text))
             z.writestr(f'ppt/slides/_rels/slide{i + 1}.xml.rels', SLIDE_RELS)
     print(f'{a.out}: {len(heights)} slides, heights {heights[0]}..{heights[-1]} pt, '
           f'size {a.size / 100} pt, {a.paras} paragraphs, bodyPr {fit}')

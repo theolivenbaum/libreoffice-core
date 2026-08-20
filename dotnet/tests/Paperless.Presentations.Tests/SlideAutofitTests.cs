@@ -21,20 +21,19 @@ namespace Paperless.Presentations.Tests;
 /// (<c>research/probes/slides-r15</c>), on 62.
 /// </para>
 /// <para>
-/// The sizes look arbitrary and are not. The search bisects a font scale between nothing and
-/// one, ten halvings deep, snapping each candidate down to a tenth of a point of the body's own
-/// character height, and keeps the <em>closest fit at or above one</em> it saw anywhere — not the
-/// last one it tried. So the answer is not monotonic in the box: a 28 pt box keeps 30 pt by
-/// tightening its lines to four-fifths, and a 32 pt box, which has more room, drops to 27 pt at
-/// full spacing because that is a closer fit than anything else the bisection visited. Both are
-/// what LibreOffice draws.
+/// <strong>Every expectation in this file was re-measured against 26.2.4.2 on 2026-08-20</strong>,
+/// and fourteen of them moved. They had been measured against 24.2.7.2, whose fit was a bisection
+/// over a font-scale grid; 25.2 replaced it with a walk down <c>constScaleLevels</c>, so the
+/// sizes the reference can answer with are now eleven and not a continuum. The old values are
+/// kept in the remarks beside each theory rather than deleted, because they are correct
+/// measurements of a binary this project no longer renders against and the difference between
+/// the two is the round's result.
 /// </para>
 /// <para>
-/// <strong>That grid is a length in hundredths of a millimetre and is therefore never a whole
-/// number of points</strong>, which decides four of the six cases in
-/// <see cref="AWrappingBodyLandsOnTheReferencesSizeAndSpacing"/>. The boxes above are all
-/// single-line or two-line bodies at one size and none of them turns on it, so they passed under
-/// the whole-point grid this file used to describe as well — which is why they did not catch it.
+/// The sizes still look arbitrary and still are not: they are <c>stated × level</c> rounded to a
+/// whole point in the hundredth-of-a-millimetre domain, which is why a stated 30 pt gives 25 at
+/// level 0.850 (25.5 rounding down) and 17 at level 0.550 (16.5 rounding up). The answer is
+/// monotonic in the box, which the bisection's was not.
 /// </para>
 /// <para>
 /// The sizes are reported in hundredths of a millimetre rather than in points because that is
@@ -63,19 +62,31 @@ public class SlideAutofitTests
     /// One 40 pt line, in boxes from 20 to 48 pt, comes out at the sizes LibreOffice draws.
     /// </summary>
     /// <remarks>
-    /// 48 pt is where the shrinking stops. A 40 pt line is 1.2 em — 48 pt — of box, and the
-    /// comparison allows it 50 hundredths of a millimetre of slack
-    /// (<c>aCurrentTextBoxSize.extendBy(0, -50)</c>), so 40 pt survives a box that is 1.417 pt
-    /// short of its own line.
+    /// <para>
+    /// 44 pt is where the shrinking stops, and it stops there rather than at 48 because
+    /// <c>constScaleLevels</c>' first row keeps the font at one and takes the line spacing to
+    /// nine-tenths: 40 pt of text on a 47.96 pt line does not fit a 44 pt box, and on a 43.17 pt
+    /// line it does.
+    /// </para>
+    /// <para>
+    /// <strong>Re-measured against the installed 26.2.4.2 on 2026-08-20.</strong> The previous
+    /// expectations — 670, 741, 1058, 953, 1094, 1199, 1305, 1411, 1411 — were read off
+    /// 24.2.7.2's own PDFs and are correct for the bisection that binary ran; they are not what
+    /// this container's reference draws. The fixture is nine one-slide decks, one box each, a
+    /// single "A" at 40 pt in a 60 pt-wide <c>a:normAutofit</c> box with zero insets
+    /// (<c>dotnet/probes/slides-r52/make-fit-probe.py --text A --width 60</c>), and the values
+    /// below are the <c>Tf</c> operators of <c>soffice --convert-to pdf</c>, converted to the
+    /// draw layer's unit. Only 20, 48 and 60 pt are unchanged.
+    /// </para>
     /// </remarks>
     [Theory]
     [InlineData(20, 670)]
-    [InlineData(24, 741)]
-    [InlineData(28, 1058)]
-    [InlineData(32, 953)]
-    [InlineData(36, 1094)]
-    [InlineData(40, 1199)]
-    [InlineData(44, 1305)]
+    [InlineData(24, 882)]
+    [InlineData(28, 988)]
+    [InlineData(32, 1094)]
+    [InlineData(36, 1199)]
+    [InlineData(40, 1305)]
+    [InlineData(44, 1411)]
     [InlineData(48, 1411)]
     [InlineData(60, 1411)]
     public void OneLineShrinksToTheSizeTheReferenceDraws(double boxHeightPoints, long expectedMm100)
@@ -87,13 +98,15 @@ public class SlideAutofitTests
     /// Two 40 pt lines need twice the box, and shrink on the same grid.
     /// </summary>
     /// <remarks>
-    /// The second line doubles the height the search compares but not the grid it walks, so the
-    /// answers are not simply half the one-line ones: a 60 pt box keeps 25 pt where a 30 pt box
-    /// on one line keeps 26.
+    /// The second line doubles the height compared but not the table walked, so the answers are
+    /// the one-line answers at half the box — 60 pt on two lines and 32 pt on one both land on
+    /// 1094 — which is what a table walk gives and a search over a font-height grid did not.
+    /// <strong>Re-measured against 26.2.4.2 on the same nine-deck fixture</strong>; the previous
+    /// 882, 1058, 1411 were 24.2.7.2's.
     /// </remarks>
     [Theory]
-    [InlineData(60, 882)]
-    [InlineData(72, 1058)]
+    [InlineData(60, 1094)]
+    [InlineData(72, 1199)]
     [InlineData(96, 1411)]
     public void TwoLinesShrinkToTheSizeTheReferenceDraws(double boxHeightPoints, long expectedMm100)
     {
@@ -276,12 +289,19 @@ public class SlideAutofitTests
     /// <c>1.2 x size x 0.8</c> — with <c>research/probes/slides-r15/read-autofit.py</c>.
     /// </para>
     /// <para>
-    /// <strong>Four of the six fail against a grid of exactly twelve points</strong>, which is
-    /// what this file's predecessor shipped: 110 pt comes out 15 pt at four-fifths spacing rather
-    /// than 14 at nine-tenths, 135 pt comes out 15 pt at full spacing rather than 17 at
-    /// nine-tenths, and 175 and 200 pt both come out 18 pt rather than 19. The other two are
-    /// controls that a whole-point grid already gets right, so the test distinguishes the change
-    /// from a blanket shift. See <c>SlideAutofit.GridFontHeightPoints</c>.
+    /// <strong>The seven heights are one per level the fixture can reach, and two of them are the
+    /// pair that separates a level table from anything else.</strong> 120 pt and 135 pt both draw
+    /// <em>17 pt</em> — level 0.850 — and differ only in the spacing that comes with it, 0.80 and
+    /// 0.90, because <c>constScaleLevels</c> holds 0.850 twice. No search over a font scale can
+    /// produce two different spacings at one size, so this pair fails against every reading of the
+    /// old bisection and against a font-scale table without the second column.
+    /// </para>
+    /// <para>
+    /// The whole fixture was re-measured on 26.2.4.2 and all 23 of its slides agree with us on
+    /// both size and pitch to 0.0007 pt. The previous six expectations — 90/459/10.006,
+    /// 110/494/12.103, 135/600/14.683, 150/600/16.327, 175/670/14.598, 200/670/16.412 — are
+    /// 24.2.7.2's, and three of the six heights it used (135, 150, 175) now give the same answer,
+    /// which is why the heights moved as well as the values.
     /// </para>
     /// <para>
     /// <strong>The pitch is asserted to a thousandth of a point, which is the precision the
@@ -306,11 +326,12 @@ public class SlideAutofitTests
     /// </list>
     /// </remarks>
     [Theory]
-    [InlineData(90, 459, 10.006)]
-    [InlineData(110, 494, 12.103)]
+    [InlineData(90, 388, 8.447)]
+    [InlineData(95, 459, 10.006)]
+    [InlineData(100, 494, 10.771)]
+    [InlineData(115, 564, 12.274)]
+    [InlineData(120, 600, 13.067)]
     [InlineData(135, 600, 14.683)]
-    [InlineData(150, 600, 16.327)]
-    [InlineData(175, 670, 14.598)]
     [InlineData(200, 670, 16.412)]
     public void AWrappingBodyLandsOnTheReferencesSizeAndSpacing(
         double boxHeightPoints, long expectedMm100, double expectedPitchPoints)
@@ -338,10 +359,12 @@ public class SlideAutofitTests
     /// <para>
     /// The body is <see cref="AWrappingBodyLandsOnTheReferencesSizeAndSpacing"/>'s — three
     /// wrapping paragraphs at 20 pt stating 80 per cent line spacing — with a 12 pt space above
-    /// each. <strong>The three box heights are one per spacing scale the search can settle on</strong>,
-    /// which is what makes this able to fail: at 175 pt it keeps full spacing and the space is
-    /// untouched, at 220 pt it takes nine-tenths and at 200 pt four-fifths. A box at full spacing
-    /// alone would pass under either reading.
+    /// each. <strong>The three box heights are one per spacing scale a level can carry</strong>,
+    /// which is what makes this able to fail: at 300 pt nothing overflows and the space is
+    /// untouched, at 220 pt the walk stops on a nine-tenths row and at 120 pt on a four-fifths
+    /// row. A box at full spacing alone would pass under either reading. The heights moved with
+    /// the level table (they were 175, 220 and 200); the three expectations did not, because they
+    /// are the wiring and not the fit.
     /// </para>
     /// <para>
     /// 12 pt is 423.33 hundredths of a millimetre; unscaled it reaches the page as 424 and the two
@@ -352,9 +375,9 @@ public class SlideAutofitTests
     /// </para>
     /// </remarks>
     [Theory]
-    [InlineData(175, 424)]
+    [InlineData(300, 424)]
     [InlineData(220, 381)]
-    [InlineData(200, 338)]
+    [InlineData(120, 338)]
     public void TheFitsSpacingScaleReachesAParagraphsOwnSpace(
         double boxHeightPoints, long expectedSpaceMm100)
     {
