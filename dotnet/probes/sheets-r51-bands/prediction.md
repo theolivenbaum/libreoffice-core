@@ -120,3 +120,50 @@ draw-time guard, none of which those two properties depend on.
 `Core`, `Containers`, `Text`, `Vector`, `Rendering`, `Markup` or `Paperless.Ooxml` is touched, so
 words and slides cannot be reached. That is a claim about the diff and it is checkable from the
 diff; the parent owes no cross-track sweep for it.
+
+---
+
+# Addendum, committed before the second post-change sweep
+
+The first sweep met the prediction (+1 verdict, `020` landing on 133/133 exactly) and turned up
+one movement the prediction had flagged as **at risk and unknown**:
+`FAA-2019-0995-0002_attachment_2.xlsx` went 9995/9995 → **10015/9995**, gaining five `PAGE`, five
+`OF` and ten page numbers the reference does not draw. It still matches — the band is 199.9 — but
+it is a real step away from the reference and it is being fixed rather than left.
+
+Three authored single-sheet probes, one variable at a time, all at the same pinned band of 3.6 pt
+and the same text, rendered both ways:
+
+| probe | band | text | reference | ours |
+|---|---|---|---|---|
+| `hA` | header, 3.6 pt | one line | **draws it** | draws it |
+| `hB` | header, 3.6 pt | **8 blank lines**, then the same line | **draws nothing** | draws it |
+| `hC` | footer, 3.6 pt | 8 blank lines, then the line | draws nothing | draws nothing |
+
+So it is not "an oversized band is suppressed" — `hA` and `020` both overflow their bands and are
+both drawn, `020`'s single line running 8.4 pt past a 3.6 pt band. The rule that fits all four
+measurements is per **line**: *a line whose origin falls inside the band is drawn in full; a line
+whose origin falls past the band's bottom edge is not drawn at all.* `hB`'s text line starts about
+100 pt below a band 3.6 pt tall, so it is dropped, and its eight blank lines carry no ink.
+
+## Predicted
+
+| document | now | predicted |
+|---|---|---|
+| `FAA-2019-0995-0002_attachment_2.xlsx` | 10015/9995 | **9995/9995** |
+| everything else | — | **no field changes** |
+
+**Verdict movement predicted: 0.** sheets stays at **268 of 307**. Page counts: 0 of 307.
+
+## What this cannot see
+
+- **Multi-line bands that fit.** For a dynamic band `FooterHeight` was grown to hold the text, so
+  the last line is inside by construction — *except* that `DrawBand`'s own `bandText` and
+  `SheetBandHeight.Measure`'s `measured` are computed by different code with different default
+  sizes (`SheetBandText.DefaultSize` against the workbook's own default font). Where they
+  disagree, a legitimate last line could fall marginally past the band bottom and be dropped.
+  `fm-provider-service-measures.xlsx`, whose footer is two lines, is the named case to watch.
+- `.xls`, `.xlsb` and ODF multi-line bands are not censused at all, for the same reason as before.
+- The probes vary the *header* case and infer the footer; `hC` is the only footer point with
+  leading blanks, and both sides draw nothing there for possibly different reasons — ours because
+  the ninth line lands off the page, not because it was clipped.
