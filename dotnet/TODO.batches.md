@@ -14541,3 +14541,105 @@ resolving it was worth more than either side:
    — **our table is ~20 pt too short**, and the reviewer measured where (the reference leaves
    ~78 px above the History and Approvals tables where we leave ~30). `012` and `015` do **not**
    share that shape, so it is at least two causes.
+
+---
+
+## Merge note — round 51, sheets (2026-08-20)
+
+**Sheets 267 → 268 of 307.** Corpus **783 of 946.** Combined test counts at the merged tree:
+
+```
+Core 337   Containers 109   Text 596   Vector 295   Rendering 150(1 skipped)   Markup 259
+OpenDocument 125   WordProcessing 1066   Spreadsheets 895   Presentations 772      = 4604
+0 failed
+```
+
+**Verified over the whole track, not per batch**, because the change reaches every workbook that
+has a header or a footer: all 307 sheets documents swept in the primary after the merge —
+**268 match, 1 newly matching, 0 regressions.** (The sweep's raw `TOTAL` is 325; 18 of those are
+alias spellings.)
+
+### What shipped
+
+`XlsxPrintSetup` and `XlsbPrintSetup` **never set `HeaderGap`/`FooterGap`**, so both inherited the
+ODF default of 142 twips. `DrawBand` lays text into `bandHeight − gap` and returns on a negative
+rectangle, so **every XLSX/XLSB band under 7.1 pt was dropped outright.** With it: a band shorter
+than its text starts at the band's top edge; a band whose margins are equal draws nothing; and
+`&K` consumed six characters whatever they were, so Excel's theme form `&K01+049` stopped drawing
+`+049` — 30 occurrences across five workbooks against a reference that draws it none. Six authored
+margin variants pin all of it, and the two previously-broken placements now sit **0.079 pt** from
+the reference.
+
+Prediction: nine documents named, **+1 verdict**, `020` landing on **133/133** derived rather than
+observed (the reference draws the footer on 4 of 6 pages at 4 word-tokens a page), 0 page-count
+changes, six stated blind spots. Measured: **+1, `020` at exactly 133/133**, 0 page counts, no
+regressions. Six of nine predicted to the digit. The one unpredicted mover — `PC1000.xls` — is the
+prediction's own **named blind spot #1**: the census parsed OPC worksheet XML and could not read
+BIFF `HEADER`/`FOOTER` records. It moved *toward* the reference and now matches it exactly.
+
+### The round refuted its own addendum, and kept the measurement
+
+A per-line clip against the band's bottom edge was implemented, swept, and **broke** `fm-provider`
+(two-line footer lost its second line). Twelve probes then showed a header keeps all nine lines out
+of a 3.6 pt band while a footer keeps two — so **the boundary is the paper, not the band**. The
+version was then measured with the clip in and out over all twelve probes: **identical**, because
+the PDF writer already drops off-page runs. Reverted; the probes stay.
+
+### The briefed chart-legend lead was an instrument artefact, and this revises an evidence standard
+
+I dispatched this round on "two blind reviewers, on unrelated documents, independently named *the
+reference draws a legend and we draw none*", calling that the project's strongest evidence
+standard. **Neither observation meant what the agreement implied.**
+
+- On `003_advanced_excel_pie` **both sides draw a five-entry legend** — on page 2. `--worst`
+  selects page 1, and the "legend swatch" described there is the reference's M1 data label. The
+  round's own fresh reviewer, given the same image, **reproduced the misreading** — which is what
+  identifies the instrument rather than the reader as the source.
+- On `057_Simple_balance_sheet` the observation is real but the mechanism is not selection: the
+  chart *declares* `<c:legend legendPos="b">`. Its series carry no `c:tx`, so the entries are
+  LibreOffice-synthesised `Column C`/`Column D` — a **naming** hypothesis, untested.
+
+The agreement was **on a description, not on a mechanism**. Two readers can produce the same
+sentence about two different causes, and one of them can be an artefact of which page the tooling
+chose. Written up in `HANDOVER.md` § 7 with what to do instead: ask for direction and location,
+check the two reports are about the same object before treating them as corroboration, and when a
+reading is going to launch a round, re-derive it from a page chosen for a stated reason rather than
+from `--worst`.
+
+The pie family's *real* defect, found underneath: the reference moves the M1 label outside the pie
+so it lands wholly on page 2, where the horizontal page split cuts ours — 4 documents, 5 words each.
+
+### The reference half of the gate is not reproducible for date-bearing sheets
+
+Across three sweeps hours apart, **four documents' reference counts moved with the wall clock while
+ours stayed pinned**. `batch-check.sh` renders the reference through `soffice` with no
+`SOURCE_DATE_EPOCH`, and a sheet whose header holds `&D`/`&T` or whose cells hold `TODAY()` prints
+today; `paperless render` honours the reproducible-builds convention on our side. **The two halves
+of the gate do not have the same reproducibility properties**, so a stored verdict can go stale
+with nobody touching the code. Split any sweep diff **by which side moved** — that separated nine
+real movements from three calendar ones here. **Volatile dates reach 16 of the 40 open documents**,
+not the ~7 previously carried. Recorded in `CLAUDE.md` § "This container".
+
+Also refuted: `SheetPinnedBandTests.AFooterPinnedAtNothingIsStillDrawnAtTheMargin`, a 24.2.7.2-era
+assertion, on four independent measurements including the project's own `sheet-zero-band-xls.xls`
+fixture.
+
+### Sheets does next, in order
+
+1. **`077_Inventory_list_with_highlighting`** — a blind reviewer named the mechanism, and it
+   answers round 50's sub-puzzle *on a false premise*. The reference **does** draw the thirteen
+   `0`s, replaces the twelve `1`s with a **red flag glyph**, shades those twelve rows full-width
+   olive, and strikes through the three discontinued rows. `numFmtId=165` is **not** in force; a
+   conditional format is. Twelve tokens against a band of 6.46 — one verdict, on a large template
+   family.
+2. **The `057` legend-entry hypothesis** — a legend whose series carry no `c:tx` losing its
+   entries — tested on an authored chart, together with the reverse direction on `037`/`029`.
+3. **The pie family's `bestFit` data-label placement** — 4 documents, one defect, two words each
+   past the band.
+4. **The eight-blank-line header** — twelve probes in `dotnet/probes/sheets-r51-bands/` bracket it
+   and none explains it; twenty words on `FAA-2019-0995-0002`.
+
+From the blind readings and not yet worked: `068_Blue_inventory_list`'s entire 10-word deficit is
+two undrawn arrow autoshapes (plus a grey-for-teal title colour); `017_Timeline_Templates` is
+missing its whole navy spine, five year badges and every leader line; and `065` draws the literal
+`aaaa` where the reference draws `Thursday`.

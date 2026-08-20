@@ -382,6 +382,34 @@ defect?"** A direct comparison of two font lists fired on 45% of matching docume
 *real* defect on half the corpus. A high rate on matching documents means the gate is blind to the
 class, which is worth knowing and is the opposite of a reason to drop it.
 
+### Two blind readers agreeing is weaker evidence than this project has been treating it as
+
+`page-vision` says a class showing up in several unrelated readings is worth more than one
+showing up in three pages a single reader looked at, and § 9 records the user's visual reports
+outperforming every metric. Both are true. But a round dispatched on the strength of *two blind
+reviewers, on unrelated documents, independently reporting "the reference draws a legend and we
+draw none"* found that neither observation meant what the agreement implied:
+
+- On `003_advanced_excel_pie` **both sides draw a five-entry legend** — on page 2. `--worst`
+  selects page 1, and the "legend swatch" the reviewer described there is the reference's M1 data
+  label. The round's own fresh reviewer, given the same image, **reproduced the misreading**, which
+  is what identifies it as the instrument rather than the reader.
+- On `057_Simple_balance_sheet` the observation is real but the mechanism is not selection at all:
+  the chart *declares* `<c:legend legendPos="b">`. Its series carry no `c:tx`, so the entries are
+  LibreOffice-synthesised `Column C` / `Column D` names — a naming hypothesis, not a selection one.
+
+**The agreement was on a description, not on a mechanism.** Two readers can produce the same
+sentence about two different causes, and one of them can be an artefact of which page the tooling
+chose to show. So:
+
+- Ask reviewers for **direction and location**, then check that the two reports are about the same
+  *object* before treating them as corroboration.
+- **A reading is an observation, never a diagnosis** — that is already in `page-vision`, and this
+  is what it costs when the step from one to the other is skipped.
+- When a reading is going to launch a round, **re-derive it from a page you chose for a stated
+  reason**, not from `--worst`. `--worst` ranks by ink and the largest ink difference on a document
+  is frequently not the defect being discussed.
+
 ### An instrument can manufacture a defect out of nothing
 
 `pdf-ops.py` anchored a stroke at its top-left corner, and the left and top edges of a rectangle

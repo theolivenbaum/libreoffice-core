@@ -611,6 +611,19 @@ apt-get update && apt-get install -y --no-install-recommends fonts-dejavu-core  
 The container's package index is stale, not the archive. `apt-get update` first, always, and
 re-check `fc-match` afterwards rather than trusting the installer's exit code.
 
+**The reference half of the gate is not reproducible for date-bearing sheets, and it decays the
+manifest on its own.** Measured across three sweeps hours apart in round 51: four documents'
+*reference* word counts moved with the wall clock while ours stayed pinned, because
+`batch-check.sh` renders the reference through `soffice` with no `SOURCE_DATE_EPOCH` and a sheet
+whose header holds `&D`/`&T`, or whose cells hold `TODAY()`, prints today. `paperless render`
+honours the reproducible-builds convention on our side, so **the two halves of the gate do not
+have the same reproducibility properties**, and a stored verdict on such a document can go stale
+with nobody touching the code.
+
+The practical rule when a sweep diff appears: **split it by which side moved.** Round 51 separated
+nine real movements from three calendar ones that way. Volatile dates reach **16 of the 40 open
+sheets documents**, not the ~7 previously carried.
+
 **`/c/sandbox/workdir` is a case-insensitive virtiofs mount, and this invalidates sweep totals.**
 The four corpus files described elsewhere as "upper-case on disk" are not a second file that a
 case-sensitive glob would miss — on this mount `049_….pptx` and `049_….PPTX` are the **same
