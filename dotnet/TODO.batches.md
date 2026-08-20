@@ -14437,3 +14437,107 @@ sweep is owed rather than the census accepted.
 - `look.py`'s upper-case `rglob`, which *materialised* the second spelling, is **fixed**.
 - New trap: **`sed -i` drops the exec bit on this mount.** It produced a silent `Permission
   denied` after every other check had passed. `chmod +x` after any in-place edit of a script.
+
+---
+
+## Merge note — round 51, words (2026-08-20)
+
+**Words 309 → 316 of 337.** Corpus **782 of 946.** Combined test counts at the merged tree:
+
+```
+Core 337   Containers 109   Text 596   Vector 295   Rendering 150(1 skipped)   Markup 259
+OpenDocument 125   WordProcessing 1066   Spreadsheets 886   Presentations 772      = 4595
+0 failed
+```
+
+**A load artifact worth recording, because it looked exactly like a regression.** The first run of
+the ten projects after this merge reported **`Vector: Failed 15, Passed 280`** — in a project the
+words diff cannot reach, with two agents mid-sweep. Re-run alone: **295 / 295, 0 failed**, with
+5.2 GB free on `/`. `CLAUDE.md` § "Under load a test run can also report failures that are not
+there" firing exactly as written. **A failure in a family the change cannot reach is the tell**;
+re-run before believing it, and do not start bisecting.
+
+### Both predictions came true to the document
+
+| | predicted | measured |
+|---|---|---|
+| fixes A+B (`prediction.md`, committed before any change) | +2 → 311 | **+2 → 311** |
+| fix C (`prediction-2.md`, committed before its sweep) | +5 → 316 | **+5 → 316** |
+| regressions | 0 | **0** |
+
+### The brief's own next-step was the thing that got refuted
+
+Round 50 recorded a regression honestly — `AFS-050-004-F2_0i` at 2503 words against 2228, **page
+count correct**, 318 extra tokens and none missing — and I briefed this round to implement the
+body-fly text wrap it appeared to demand. **That reading was wrong.**
+
+Not one of the 318 extra tokens is a string the reference never draws. **Our pages 2 and 3 differ
+by five tokens: it is the same positioned table drawn twice** — placed in the flow on page 2
+(`from=0 to=36`) and then floated whole on page 3, because `PlaceFloatedTable` never read
+`lineIndex`. A `w:tblpPr`-stripped variant renders the reference's exact raw total of 2384.
+
+**So there is no witness anywhere in this corpus for a missing body-fly wrap**, and implementing
+one would have moved all ten graph papers and five timelines with nothing asking for it — a change
+with reach and no evidence. That is the fifth consecutive round to refute its brief's central
+item, and the first where the brief was built on a *correctly measured* observable that had been
+read wrong.
+
+### Two more refutations, each closing a line the brief opened
+
+- **`MaxGroupNesting = 8` is not the organogram defect.** Raising it to 64 changes six documents'
+  word counts by **zero**.
+- **Six of the seven claimed `wpg:wgp` witnesses are not witnesses.** They keep their group inside
+  an `mc:Fallback`; deleting `056`'s entire fallback leaves its word count unchanged. **Exactly
+  one** words document holds a nested `v:group` our reader reaches. `065`/`068`/`069` are not one
+  class.
+
+### What shipped
+
+- `Paginator.Fill`: guard `PlaceFloatedTable` to `lineIndex == 0 && rowDrawn == Zero`.
+- `DocxVmlFrames`: recurse into a nested `v:group` instead of `continue`.
+- `DocxFrames`: `GroupTransform.Composed` added `inner.ShiftX`, which `TransformOf` never sets, so
+  a nested `a:grpSpPr/a:xfrm/a:off` was dropped entirely and nested members came out **the right
+  size in the wrong place**. Replaced with `Around(group, inner)`.
+
+Gains: `AFS-050-004-F2_0i` 2503/2228 → **2228/2228**; `068` 19/86 → 85/86; `056` 24/56 → 56/56;
+`057` 21/36 → 36/36; `025` 121/141 → 141/141; `030` 101/114 → 114/114; `071` 6/21 → 21/21.
+`008` improves 57/70 → 66/70 and stays open. Two already-passing documents became exact.
+
+**Verified by the parent** after the merge, in the primary tree: all seven confirmed, and the 73
+other manifest rows in the same batches unchanged.
+
+### `look.py` was fixed twice, independently, and neither fix was complete
+
+Both this round and slides r51 fixed the alias-materialising glob. The merge conflicted, and
+resolving it was worth more than either side:
+
+- **`os.walk` beats `rglob(f"{stem}.*")`** even though both are wildcard-safe, because the stem
+  goes into the pattern and two corpus documents have `[` in their names —
+  `[Christophe]NLP_reseau_inge_stat.pptx` and `Technical_Report_Elements[1].pptx`. fnmatch reads
+  those as character classes, so the glob form finds nothing and exits `no corpus file`, which
+  reads as a missing document rather than as a quoting bug. Verified: both now resolve to exactly
+  one hit.
+- **`casefold`, not `lower`** — the corpus holds `Elastizität` and `手机免提系统TSB`.
+- **`sorted`**, which neither side had: `os.walk` order is arbitrary and the function returns
+  `hits[0]`, so on an alias pair the same query could answer differently on two runs.
+
+### Words does next, in order
+
+1. **VML shapes are drawn with no fill and no stroke.** `068` now places all 41 labels correctly
+   and draws **0 boxes, 0 connectors**; its `v:rect`s carry theme-indexed
+   `fillcolor="#e2efd9 [665]"` and its connectors are `v:shape type="#_x0000_t32"`. `065` (28/41)
+   and `069` (108/117) are the same family. No gate column sees it.
+2. **DrawingML connectors dropped by a one-line predicate.** `056` is word-exact and still missing
+   ~15 lines: they are `wsp` with `ext cx="0"`, and `DocxFrames.Leaf` rejects any member whose
+   mapped rectangle has zero width or height.
+3. **Chart data labels — now the largest word gaps left.** `028` 191/327, `027` 261/378, plus
+   `029` and `024`. The blind reading transcribed both halves: reference labels read
+   `Branch 1 Stem 2 Leaf 5 / 15%` where ours read `Branch 1`, and our chart carries no percentages
+   at all.
+4. **The three `pages 1/2` documents, half-measured.** The reference's page 2 is **blank in all
+   three** — zero words, and zero non-white pixels at 30 dpi on `097` and `015`. All three end
+   with a table plus the mandatory empty `w:p`. On `097` the arithmetic fits: lowest page-1 ink at
+   758.2 pt against our 738.7, body bottom 770.4 pt, an empty 11 pt Cambria line needing ~12.7 pt
+   — **our table is ~20 pt too short**, and the reviewer measured where (the reference leaves
+   ~78 px above the History and Approvals tables where we leave ~30). `012` and `015` do **not**
+   share that shape, so it is at least two causes.
