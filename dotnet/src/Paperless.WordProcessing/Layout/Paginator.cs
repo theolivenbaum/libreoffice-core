@@ -1115,7 +1115,26 @@ public sealed class Paginator
                     continue;
                 }
 
-                if (PlaceFloatedTable(
+                // Only the table's *first* part may be floated. A fly is placed once, and a
+                // continuation is by construction not the table's start — the same qualification the
+                // `StartsNewPage` test above carries, and for the same reason.
+                //
+                // Without it a positioned table that does not fit its page is drawn **twice**: the flow
+                // arm below places rows 0..n on one page and leaves `paragraphIndex` on the table, which
+                // is how every split table continues, and the next page's visit to this arm then asks
+                // `PlaceFloatedTable` again — which reads neither `lineIndex` nor `rowDrawn` and floats
+                // the whole table from row 0.
+                //
+                // Measured on `AFS-050-004-F2_0i.docx`, whose first positioned table has 37 rows. Traced:
+                // block 23 placed in the flow on page 2 as `from=0 to=36 placed=True`, then floated whole
+                // on page 3, with no `MoveTrailingGroupToNextPage` between them. Its pages 2 and 3 differ
+                // by **five tokens** — a heading and the two page numbers — and a multiset diff against
+                // the reference gives 318 tokens only in ours, 0 only in the reference, and **not one of
+                // the 318 a string the reference never draws**. Deleting the document's four `w:tblpPr`
+                // elements and changing nothing else renders the reference's own raw total exactly.
+                if (lineIndex == 0
+                    && rowDrawn == Length.Zero
+                    && PlaceFloatedTable(
                         table, paragraphIndex, blocks, Laid, body, column, used, tables, notes))
                 {
                     paragraphIndex++;

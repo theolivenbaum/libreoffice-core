@@ -112,6 +112,73 @@ public sealed class VmlFloatingShapeTests
     }
 
     /// <summary>
+    /// A <c>v:group</c> inside a <c>v:group</c> is walked, and its members are mapped through both
+    /// coordinate spaces.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// This used to be a <c>continue</c> — <c>if (member.Name.LocalName is "group") continue;</c>,
+    /// commented "nested groups: not measured, not guessed" — so a nested group and its entire subtree
+    /// were discarded.
+    /// </para>
+    /// <para>
+    /// The arithmetic here composes twice. The outer group is 200 pt wide over a 21600-unit space; the
+    /// inner group sits at <c>left:5400</c> and is <c>width:10800</c>, so it occupies 50 pt to 150 pt.
+    /// It declares its own 1000-unit space, so its member at <c>left:500</c>, <c>width:250</c> sits half
+    /// way across it and is a quarter of it wide: 36 + 50 + 50 = 136 pt, 25 pt wide.
+    /// </para>
+    /// <para>
+    /// Measured on <c>068_Work_Breakdown_Structure_Template_Green_Theme</c>, whose five phase groups each
+    /// hold a connector and a nested group of seven task boxes: 19 words against the reference's 86
+    /// before, 86 after, and the words inside the nested groups number exactly 67.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void ANestedGroupIsWalkedThroughBothCoordinateSpaces()
+    {
+        List<PageFrame> frames = DocxVmlFrames.ReadAll(
+            Pict("<v:group style=\"position:absolute;margin-left:36pt;margin-top:72pt;"
+                 + "width:200pt;height:100pt\" coordsize=\"21600,21600\">"
+                 + "<v:group style=\"position:absolute;left:5400;top:0;width:10800;height:21600\""
+                 + " coordsize=\"1000,1000\">"
+                 + "<v:rect style=\"position:absolute;left:500;top:0;width:250;height:500\">"
+                 + "<v:textbox><w:txbxContent/></v:textbox></v:rect>"
+                 + "</v:group>"
+                 + "</v:group>"),
+            0, null, _ => []);
+
+        PageFrame frame = frames.ShouldHaveSingleItem();
+        frame.HorizontalOffset.Points.ShouldBe(36 + 50 + 50, 0.01);
+        frame.VerticalOffset.Points.ShouldBe(72, 0.01);
+        frame.Size.Width.Points.ShouldBe(25, 0.01);
+        frame.Size.Height.Points.ShouldBe(50, 0.01);
+        frame.Wrap.ShouldBe(TextWrap.Through);
+    }
+
+    /// <summary>
+    /// A group's own members and a nested group's are both read, and the flat one is not disturbed.
+    /// </summary>
+    [Fact]
+    public void AGroupsOwnMembersAreReadBesideItsNestedGroups()
+    {
+        List<PageFrame> frames = DocxVmlFrames.ReadAll(
+            Pict("<v:group style=\"position:absolute;margin-left:0;margin-top:0;"
+                 + "width:100pt;height:100pt\" coordsize=\"1000,1000\">"
+                 + "<v:rect style=\"position:absolute;left:0;top:0;width:100;height:100\"/>"
+                 + "<v:group style=\"position:absolute;left:500;top:500;width:500;height:500\""
+                 + " coordsize=\"100,100\">"
+                 + "<v:rect style=\"position:absolute;left:0;top:0;width:50;height:50\"/>"
+                 + "<v:rect style=\"position:absolute;left:50;top:50;width:50;height:50\"/>"
+                 + "</v:group>"
+                 + "</v:group>"),
+            0, null, _ => []);
+
+        frames.Count.ShouldBe(3, "the group\u2019s own member plus both of the nested group\u2019s");
+        frames.Select(f => f.HorizontalOffset.Points).ShouldBe([0, 50, 75], 0.01);
+        frames.Select(f => f.Size.Width.Points).ShouldBe([10, 25, 25], 0.01);
+    }
+
+    /// <summary>
     /// <c>coordorigin</c> shifts the child space, and a member is placed relative to it.
     /// </summary>
     [Fact]
