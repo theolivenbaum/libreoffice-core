@@ -245,19 +245,24 @@ internal static class XlsxDrawings
         // through the shared blip reader rather than off the attribute here because that reader is
         // already the one place the element's three wrappers — `a:`, `p:` and `xdr:blipFill` — are
         // known to carry identical content. See `SheetDrawing.Opacity`.
-        drawing = drawing with { Opacity = DrawingFill.ReadBlip(blipFill)?.Opacity ?? 1 };
+        DrawingBlipFill? fill = DrawingFill.ReadBlip(blipFill);
+        drawing = drawing with { Opacity = fill?.Opacity ?? 1 };
 
         (RasterImage? raster, Lazy<VectorImage>? vector) = Load(package, images, choice.RelationshipId);
 
         if (choice.IsVector && choice.FallbackRelationshipId is { } fallback)
         {
             (RasterImage? spare, Lazy<VectorImage>? _) = Load(package, images, fallback);
-            if (vector is null) return drawing with { Image = spare };
+            if (vector is null) return drawing with { Image = KnockedOut(fill, spare) };
 
             raster = spare;
         }
 
-        return drawing with { Image = raster, Vector = vector };
+        return drawing with
+        {
+            Image = vector is null ? KnockedOut(fill, raster) : raster,
+            Vector = vector,
+        };
     }
 
     /// <summary>
@@ -323,6 +328,23 @@ internal static class XlsxDrawings
     /// distinguishes an EMF from a WMF, let alone an EMF+ from an EMF.
     /// </para>
     /// </remarks>
+    /// <summary>
+    /// The picture with its <c>a:clrChange</c> attached — PowerPoint's <em>Set Transparent
+    /// Color</em>, which SpreadsheetML states on the same <c>a:blip</c>.
+    /// </summary>
+    /// <remarks>
+    /// Attached rather than applied, the same split <c>SheetDrawing.Opacity</c> makes: matching
+    /// a colour needs decoded pixels and a reader has no codec. Withheld from a picture that
+    /// resolved to a vector, because the reference applies the transform only to a
+    /// <c>GraphicType::Bitmap</c> — see <see cref="ColourKnockout"/>.
+    /// </remarks>
+    private static RasterImage? KnockedOut(DrawingBlipFill? fill, RasterImage? raster)
+        => raster is { } image
+           && DrawingPictureEffects.Knockout(fill, theme: null, image.EncodedBytes.Span)
+                  is { } knockout
+            ? image with { Knockout = knockout }
+            : raster;
+
     private static (RasterImage? Raster, Lazy<VectorImage>? Vector) Load(
         OpcPackage package, Dictionary<string, OpcXml.Relationship> images, string? id)
     {
