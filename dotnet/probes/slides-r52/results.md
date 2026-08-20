@@ -192,6 +192,13 @@ Three nearer, five further, none near its band edge. Our own extracted character
 **19 of 302** renderings, 15 of them by a single character — re-wrap moving a hyphen or a space.
 The change is geometric and the text layer barely notices, which is why the gate cannot see it.
 
+## The previously-passing batches were re-swept, and none moved
+
+The sweep glob was `slides/*`, so `slides/done-001` … `done-015` are inside both legs rather than
+checked afterwards: **144 rows, 144 `match`, identical before and after.** The whole-track
+reconciliation against `MANIFEST.tsv` covers the same ground document by document — 302 of 302
+agree in both sweeps — which is the statement that no batch was traded for another.
+
 ## Ink, per document, before → after
 
 Scored over `MANIFEST.tsv`'s 302 paths: `abs_ink` **1394.04 → 1238.64**, signed
