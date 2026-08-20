@@ -611,6 +611,29 @@ apt-get update && apt-get install -y --no-install-recommends fonts-dejavu-core  
 The container's package index is stale, not the archive. `apt-get update` first, always, and
 re-check `fc-match` afterwards rather than trusting the installer's exit code.
 
+**`grep -r` and `find` over this repository return exactly double. Use `git grep`.**
+The case-insensitive mount has produced alias directory entries *inside the checkout* as well as
+in the corpus: every project under `dotnet/src` now has a lower-case twin —
+`dotnet/src/paperless.core` beside `dotnet/src/Paperless.Core`, same inode
+(`4785074604717685`), link count 1. `git ls-tree` lists only the canonical spelling and
+`git status` is clean, so nothing is wrong with the tree; but anything that walks the filesystem
+visits both names.
+
+Measured 2026-08-20 on the same query:
+
+| | hits | files |
+|---|---:|---:|
+| `grep -rn … dotnet/src --include=*.cs` | 96 | 60 |
+| `git grep -n … -- 'dotnet/src/**/*.cs'` | **48** | **30** |
+
+**Exactly 2×.** A reach census run with `grep -r` is therefore inflated by a factor of two, and
+this project dispatches rounds on reach censuses. `git grep` and `git ls-files` operate on tracked
+paths and cannot see an alias, so they are the correct instruments here; if you must walk the
+filesystem, fold case and deduplicate before counting.
+
+**Do not delete the aliases.** As in the corpus, `rm -rf dotnet/src/paperless.core` is a request to
+unlink that inode, and the inode is the source tree.
+
 **The reference half of the gate is not reproducible for date-bearing sheets, and it decays the
 manifest on its own.** Measured across three sweeps hours apart in round 51: four documents'
 *reference* word counts moved with the wall clock while ours stayed pinned, because

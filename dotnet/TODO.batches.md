@@ -14643,3 +14643,113 @@ From the blind readings and not yet worked: `068_Blue_inventory_list`'s entire 1
 two undrawn arrow autoshapes (plus a grey-for-teal title colour); `017_Timeline_Templates` is
 missing its whole navy spine, five year badges and every leader line; and `065` draws the literal
 `aaaa` where the reference draws `Thursday`.
+
+---
+
+## Merge note — round 52, words and slides (2026-08-20)
+
+**Words 316 → 318 of 337. Slides 199 → 199 of 302, as predicted. Corpus 785 of 946.**
+
+```
+Core 337   Containers 109   Text 596   Vector 295   Rendering 150(1 skipped)   Markup 259
+OpenDocument 125   WordProcessing 1083   Spreadsheets 895   Presentations 780     = 4629
+0 failed
+```
+
+Verified after the merge by sweeping **all 639 words and slides documents** in the primary:
+two gains, **zero regressions**, and slides unchanged while its rendering moved more than the two
+preceding rounds combined.
+
+### Slides: a re-check of a superseded-binary claim was worth 11% of the track's ink
+
+`SlideAutofit` was a port of **24.2.7.2**'s bisection search. Its own remarks said so, and said to
+check the reference version first. The reference has been **26.2.4.2** for many rounds, and 25.2
+replaced the search with `constScaleLevels` — **twelve discrete `(font, spacing)` rows, first that
+fits**. Measured on 36 one-slide decks with one variable: the reference's nine distinct sizes are
+exactly `40 ×` the table and nothing else, with spacing 0.90 above 0.85 and 0.80 at and below, both
+0.850 rows present. Ours answered essentially every whole point and agreed on 13 of 36.
+
+| round | `abs_ink` movement |
+|---|---:|
+| r50 | −10.34 |
+| r51 | −15.33 |
+| **r52** | **−155.40 (−11.1%)** |
+
+Known-answer checks after the change: 36/36, 21/21, 12/12, 23/23. 101 renderings moved, 73 improved
+and 28 worsened; 14 test expectations moved, **all re-measured against 26.2.4.2, none adjusted to
+fit**. The discriminating pair the theory gained: 120 pt and 135 pt both draw 17 pt and differ only
+in spacing — **no font-scale search can produce that.**
+
+**Targets 1 and 2 turned out to be the same table.** The blind reviewer's "font scale applied
+without the matching spacing reduction" is height 168: both sides draw 28 pt, reference pitch 26.90
+against our 33.62, because our search chose `(0.700, 1.000)` — a pair **the table does not
+contain**.
+
+### And it refuted round 51's refutation
+
+Round 51 refuted the comment beside `PptSlideLayout.Autofits` ("no deck in the slides corpus holds
+that combination") with a census returning 36 documents. **Round 52 refutes the refutation.** Tying
+the OPT tables to their `TextHeaderAtom` kinds collapses 36 documents to **25 shapes in 1
+document**, and all 25 lack an `OEPlaceholderAtom` — the only condition under which
+`svdfppt.cxx:1052` reaches `bAutoGrowWidth = !bWordWrap`, since line 846 nulls `pRet` for any
+placeholder-bearing shape. On every one of the 25, LibreOffice suppresses autofit exactly as we do.
+
+**Known-answer control:** the same walker restricted to round 51's population returns 36, round 51's
+figure exactly — so the collapse is the Body-kind restriction and not a different parser. **The
+comment was right; round 51's refutation measured the wrong population.** A refutation is a claim
+like any other and inherits no privilege from being a refutation.
+
+Named regressions rather than netted: 8 word counts moved and **5 are worse** (`Framing Europe.ppt`
+2237→2245, `1200-Assigning-Club-officers` 165→163 both losing exactness), all inside the band; and
+28 ink regressions led by `Lepore.ppt` +4.69, all `.ppt`. A new instrument, `tf-agreement.py`,
+confirms they are real and independent: mean `/Tf` agreement 0.72571 → 0.75160, exact-size pages
+1388 → 1552 of 4515, 77 documents improved and **8 worsened — the same eight**.
+
+Two of the round's own claims died too: its "reference state leak" was an `awk` filter of its own
+that collapsed on the `/Tf` column; and "the reference draws fractional em sizes there" fails on
+the improved documents, 45 of 77 of which also carry >5% fractional sizes.
+
+### Words: a one-line fix would have shipped a confident zero
+
+The brief's item 2 said `056`'s ~15 missing connectors are `wsp` members with `ext cx="0"` rejected
+by `DocxFrames.Leaf`. **They are 39, not ~15, and 34 of them state no `a:ln` at all** — their line
+comes from `wps:style/a:lnRef` against the theme's `lnStyleLst`, which `DocxFrames.Appearance`
+deliberately does not read. Relaxing the predicate alone would have admitted 34 frames with
+`Fill=null, BorderColour=null` and **painted nothing**, while the gate and the verdict count both
+said the round had succeeded. The real seat is that **`DrawingStyleMatrix` never reaches
+`DocxFrames`** — 458 shapes across 40 documents, the *seventh* instance of "a route, not a rule".
+
+Also refuted: `024` is not a chart document at all (its graphic is `word/diagrams/` SmartArt), and
+`069`'s "PROJECT NAME" is not a regression from the new fills — `pdftotext -bbox` puts it at
+`yMin=156.128` before *and* after, to the thousandth, so the fills merely **exposed** a pre-existing
+77 pt misplacement.
+
+What shipped: VML `fillcolor`/`strokecolor`/`filled`/`stroked`/`strokeweight` and `v:fill`/`v:stroke`
+(establishing from the reference that a theme-indexed VML colour resolves to the **literal RGB
+beside the index** — the index is never consulted); a `c:multiLvlStrCache` joined outermost-first
+instead of each level overwriting the last; `ofPieChart` counted as a pie for `showPercent`; and a
+`\n`-separated label no longer shaped as one run, which had been fusing `Leaf 11` + `15%` into
+`Leaf 1115%`.
+
+### Measured and deliberately not shipped — the `w:br`-only paragraph
+
+**The reference gives a paragraph with N breaks N+1 lines. We agree in every case where the
+paragraph holds any other content — one space is enough. A paragraph whose whole content is breaks
+contributes 0.00 pt on our side against 25.30.** Nine authored variants, re-runs identical. The
+reader is fine; the seat is in layout.
+
+**Reach: 469 such paragraphs in 66 of 271 documents**, including several large page-count documents
+that currently pass — which is why it was measured and left rather than shipped at the end of a
+round. Correct call. It is `097`'s cause and **not** `012`'s or `015`'s, which hold 0 of 142 and 0
+of 158, so the three `pages 1/2` documents are at least two causes.
+
+### Cross-track
+
+- **Words** touched `Paperless.Ooxml/DrawingML/DrawingChartPlot.cs`, shared. The round swept the 7
+  affected batches both ways with the index asserted clean: of 71 rows **exactly one changed** —
+  `slides/done-011/171128IPAP.pptx` 4640 → 4653 against 4670, `match` → `match`. The parent's
+  639-document sweep above confirms slides verdicts are unmoved.
+- **Slides** touched one file, `Paperless.Presentations/Layout/SlideAutofit.cs`. Nothing owed.
+- Left open by words on purpose: `SheetChart`/`SlideChart` still run multi-line labels together.
+  `FrameChart` was fixed for words only. **Sheets and slides both inherit this defect** and it is
+  now a known, localised, cross-track item.
