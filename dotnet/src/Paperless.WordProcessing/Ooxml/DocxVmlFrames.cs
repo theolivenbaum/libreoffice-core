@@ -104,7 +104,7 @@ internal static class DocxVmlFrames
 
     /// <summary>
     /// A <c>v:group</c> flattened into one frame per member, each mapped out of the group's own
-    /// coordinate space.
+    /// coordinate space — nested groups included.
     /// </summary>
     /// <remarks>
     /// <para>
@@ -118,6 +118,28 @@ internal static class DocxVmlFrames
     /// <para>
     /// Reading those bare numbers as points is the failure this exists to avoid: they are routinely
     /// in the thousands, so every member lands metres off the page and its text is clipped away.
+    /// </para>
+    /// <para>
+    /// <strong>A nested group resolves to a rectangle by exactly that arithmetic, and is then the
+    /// origin and extent its own members are measured against.</strong> This used to skip one —
+    /// <c>if (member.Name.LocalName is "group") continue;</c> — and with it the whole subtree beneath
+    /// it. Measured on <c>068_Work_Breakdown_Structure_Template_Green_Theme</c>, which draws its 41
+    /// boxes as a root, five phase groups each holding a connector and a nested group, and 35 task
+    /// boxes inside those five nested groups: we drew the root and the five phase labels and nothing
+    /// deeper, 19 words against the reference's 86, and <b>the words inside the nested groups number
+    /// exactly 67</b>. A blind reviewer given only the rendered page, and knowing nothing about the
+    /// markup, reported the same shape from the other side — <em>"the surviving items are exactly the
+    /// top two levels of the tree, in tree order, not a random scatter and not a partial-column
+    /// truncation; there is no piling up and no overlapping, the failure is omission"</em> — and an
+    /// earlier reviewer proposed the discriminator itself: if every rendered item is at nesting depth
+    /// ≤ 1 and every missing one is ≥ 2, it is a recursion limit and not a fill problem.
+    /// </para>
+    /// <para>
+    /// One words document in 337 holds a nested <c>v:group</c> this reader reaches. Six others —
+    /// <c>056</c>, <c>057</c>, <c>025</c>, <c>030</c>, <c>008</c>, <c>071</c> — hold 19 to 40 of them
+    /// each, and every one is inside an <c>mc:Fallback</c> whose <c>mc:Choice</c> DrawingML is what we
+    /// read. Deleting <c>056</c>'s entire <c>mc:Fallback</c> leaves its rendering's word count
+    /// unchanged, which is what establishes that rather than the markup's shape.
     /// </para>
     /// </remarks>
     private static List<PageFrame> Group(
@@ -142,17 +164,58 @@ internal static class DocxVmlFrames
         Length originY = (style.TryGetValue("margin-top", out string? mt) ? Css(mt) : null)
                          ?? Length.Zero;
 
+        Flatten(
+            group,
+            new DocRect(originX, originY, groupWidth, groupHeight),
+            HorizontalOriginOf(style),
+            VerticalOriginOf(style),
+            depth: 0,
+            frames,
+            anchorOffset,
+            pictures,
+            content);
+
+        return frames;
+    }
+
+    /// <summary>How deep a <c>v:group</c> may nest before the walk gives up.</summary>
+    /// <remarks>
+    /// A bound against a file that says something absurd, not a modelled limit — the corpus's deepest
+    /// is two. The same number <c>DocxFrames</c> uses for the DrawingML side.
+    /// </remarks>
+    private const int MaxGroupNesting = 8;
+
+    /// <summary>
+    /// One group's members, resolved against the rectangle the group itself occupies.
+    /// </summary>
+    /// <param name="group">The <c>v:group</c> whose members are being walked.</param>
+    /// <param name="area">Where that group sits and how big it is, in real units.</param>
+    /// <param name="horizontal">What a member's horizontal offset is measured from.</param>
+    /// <param name="vertical">What a member's vertical offset is measured from.</param>
+    /// <param name="depth">How many groups deep this one is.</param>
+    /// <param name="frames">The frames collected so far, appended to.</param>
+    /// <param name="anchorOffset">Where in the paragraph's text the drawing sits.</param>
+    /// <param name="pictures">How to resolve <c>v:imagedata</c> into bytes, or null for geometry only.</param>
+    /// <param name="content">How to read a <c>w:txbxContent</c> into blocks, or null to skip its text.</param>
+    private static void Flatten(
+        XElement group,
+        DocRect area,
+        FrameHorizontalOrigin horizontal,
+        FrameVerticalOrigin vertical,
+        int depth,
+        List<PageFrame> frames,
+        int anchorOffset,
+        DocxPictures? pictures,
+        Func<XElement, IReadOnlyList<PageBlock>>? content)
+    {
+        if (depth > MaxGroupNesting) return;
+
         (double spaceX, double spaceY) = Pair(group.Attribute("coordsize")?.Value) ?? (0, 0);
         (double baseX, double baseY) = Pair(group.Attribute("coordorigin")?.Value) ?? (0, 0);
-        if (spaceX <= 0 || spaceY <= 0) return frames;
-
-        FrameHorizontalOrigin horizontal = HorizontalOriginOf(style);
-        FrameVerticalOrigin vertical = VerticalOriginOf(style);
+        if (spaceX <= 0 || spaceY <= 0) return;
 
         foreach (XElement member in group.Elements().Where(child => IsShape(child) is not null))
         {
-            if (member.Name.LocalName is "group") continue;   // nested groups: not measured, not guessed
-
             Dictionary<string, string> box = Style(member);
             if (Number(box.GetValueOrDefault("left", "")) is not { } left
                 || Number(box.GetValueOrDefault("top", "")) is not { } top
@@ -164,6 +227,20 @@ internal static class DocxVmlFrames
 
             if (wide <= 0 || tall <= 0) continue;
 
+            DocRect placed = new(
+                area.X + (area.Width * ((left - baseX) / spaceX)),
+                area.Y + (area.Height * ((top - baseY) / spaceY)),
+                area.Width * (wide / spaceX),
+                area.Height * (tall / spaceY));
+
+            if (member.Name.LocalName is "group")
+            {
+                Flatten(
+                    member, placed, horizontal, vertical, depth + 1,
+                    frames, anchorOffset, pictures, content);
+                continue;
+            }
+
             XElement? text = TextBox(member);
             FramePicture picture = text is null && pictures is not null
                 ? pictures.ReadVml(member)
@@ -171,23 +248,20 @@ internal static class DocxVmlFrames
 
             frames.Add(new PageFrame
             {
-                Size = new DocSize(
-                    groupWidth * (wide / spaceX), groupHeight * (tall / spaceY)),
+                Size = new DocSize(placed.Width, placed.Height),
                 Anchor = FrameAnchor.Paragraph,
                 AnchorOffset = anchorOffset,
                 Wrap = TextWrap.Through,
                 HorizontalOrigin = horizontal,
-                HorizontalOffset = originX + (groupWidth * ((left - baseX) / spaceX)),
+                HorizontalOffset = placed.X,
                 VerticalOrigin = vertical,
-                VerticalOffset = originY + (groupHeight * ((top - baseY) / spaceY)),
+                VerticalOffset = placed.Y,
                 IsImage = text is null,
                 Image = picture.Raster,
                 Vector = picture.Vector,
                 Blocks = text is not null && content is not null ? content(text) : [],
             });
         }
-
-        return frames;
     }
 
     /// <summary>A VML <c>x,y</c> attribute pair, or null when it is not one.</summary>

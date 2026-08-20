@@ -87,21 +87,38 @@ def resolve(doc: str) -> tuple[pathlib.Path, str]:
     if not m:
         sys.exit(f"not a file and not a stem__ext identity: {doc}")
     stem, ext = m.groups()
-    # Match the extension case-insensitively by FILTERING what the walk already found.
+    # Resolve the document by reading directory entries and matching case-insensitively.
     #
-    # This used to be two rglob calls, the second globbing `{ext.upper()}` to catch the
-    # handful of corpus files spelled `.PPTX`.  On this container that is actively harmful:
-    # `/c/sandbox/workdir` is a **case-insensitive virtiofs mount**, so `foo.pptx` and
-    # `foo.PPTX` are the same inode -- and globbing the upper-case spelling *materialises*
-    # it in the directory cache permanently.  Every later `find` then returns it as a
-    # second file, so a sweep total climbed 305 -> 311 with the corpus unchanged and the
-    # two runs were no longer reconcilable.  A glob that alters the thing it measures is
+    # Two rounds fixed this independently in the same session and neither fix was complete;
+    # this is both, plus the two things neither had.
+    #
+    # The defect being fixed: this used to be two `rglob` calls, the second globbing
+    # `{ext.upper()}` to catch the handful of corpus files spelled `.PPTX`. A `rglob` pattern
+    # with no wildcard in it resolves by *stat*, and `/c/sandbox/workdir` is a
+    # case-insensitive virtiofs mount, so that probe MATERIALISES a second directory entry
+    # for the same inode. `cmp` says identical and `git ls-files` sees one file, but every
+    # later directory walk counts the document twice: a `words/*` sweep reported 355 rows for
+    # 337 documents and a slides total went 305 to 311 with the corpus unchanged. There are
+    # 45 such entries in the corpus now and they cannot be deleted, because `rm` on the
+    # upper-case spelling unlinks the document. A glob that alters the thing it measures is
     # not an instrument.
     #
-    # Filtering a single case-sensitive walk cannot create a name, so it is safe on a
-    # case-insensitive mount and still correct on a case-sensitive one.
+    # Why `os.walk` and not `rglob(f"{stem}.*")`, which is also wildcard-safe: the stem goes
+    # into the pattern, and two corpus documents have `[` in their names —
+    # `[Christophe]NLP_reseau_inge_stat.pptx` and `Technical_Report_Elements[1].pptx`. fnmatch
+    # reads those as character classes, so the glob form finds nothing for them and says so by
+    # exiting "no corpus file", which reads as a missing document rather than as a quoting bug.
+    # Reading entries never interprets the name at all.
+    #
+    # `casefold`, not `lower`: the corpus holds `Elastizität` and `手机免提系统TSB`, and
+    # casefold is the Unicode-correct comparison. `sorted`, because `os.walk` order is
+    # arbitrary and this returns `hits[0]` — without it the same query can answer differently
+    # on two runs over one alias pair.
     want = f"{stem}.{ext}".casefold()
-    hits = sorted(f for f in CORPUS.rglob(f"{stem}.*") if f.name.casefold() == want)
+    hits = sorted(pathlib.Path(root) / name
+                  for root, _, names in os.walk(CORPUS)
+                  for name in names
+                  if name.casefold() == want)
     if not hits:
         sys.exit(f"no corpus file for {doc} under {CORPUS}")
     return hits[0], doc
