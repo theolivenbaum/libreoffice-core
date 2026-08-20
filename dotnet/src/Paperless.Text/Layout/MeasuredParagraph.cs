@@ -354,6 +354,36 @@ public sealed class MeasuredParagraph
             }
         }
 
+        // Every run itemised away, which happens when the paragraph's whole text is format control
+        // characters — a paragraph whose entire content is manual line breaks, since U+2028 is what all
+        // four word-processing readers and both DrawingML readers emit for one and
+        // `TextItemiser.IsFormatControl` cuts it out of every sub-run. The comment on that predicate
+        // states the consequence ("a paragraph that is nothing but control characters then has no run
+        // and no line") and moved the C0 range out to avoid it; this is the other half of the same
+        // repair, for the characters that must stay cut.
+        //
+        // Without it `MeasureLine` has nothing to be tall for: its fold finds no run, its
+        // blanks-refold finds no run, and its last resort — the empty-paragraph rule, which takes the
+        // first run's metrics — is guarded on there being one. Every line comes out nought points, so
+        // a paragraph holding one break contributes **nothing** where the reference gives it two
+        // lines. Measured on `probes/words-r52/br-paragraph-probe.py` against 26.2.4.2: a paragraph
+        // whose whole content is one `w:br` adds 25.30 pt there and added 0.00 here, while the same
+        // paragraph with a single space in front of the break added 23.00 — the space is not a
+        // control, so it left a run behind and the fallback fired.
+        //
+        // Zero length, so it is the fallback and nothing else that can see it: `Fold` matches on
+        // `touches` or `contains` and both are false for an empty range, `RunsBetween` clips it away,
+        // and the prefix table is not touched. The face and size are the first formatted run's, which
+        // for a paragraph the reader found no formatting for is the paragraph's own — see
+        // `PageParagraph.Measure`, which supplies exactly that.
+        if (measured.Count == 0 && formatted.Count > 0)
+        {
+            measured.Add(new MeasuredRun(
+                formatted[0] with { Start = 0, Length = 0 },
+                ShapedText.Empty,
+                LineSpacing.Resolve(formatted[0].Face, grid, leadingAboveText)));
+        }
+
         // Any position no sub-run covered — a text with no runs at all, a trailing gap, or a format
         // control character that was cut out — carries the width of the last position that was
         // covered, so the table stays monotonic and the control measures as nothing.
