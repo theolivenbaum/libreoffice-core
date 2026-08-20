@@ -154,3 +154,94 @@ both ways from here; the parent owns the full cross-track sweep.
 
 Every new test to be run through `verify-test.sh` by reintroduction — the mutation being the
 restoration of the `_runs.Length > 0` guard with no run kept.
+
+---
+
+# Second prediction — item 2, the frame anchor's font size
+
+Committed **before the second change and before anything was rendered against it**, and after the
+first change's sweep, whose result is in `results.md`. The first change measured **+1 `097` and
+−1 `096`, net 318**, which is what the first prediction named as its most likely regression.
+
+## What `096` and `097` now have in common
+
+With the break-only paragraphs fixed, `097`'s page-1 rows sit at a **uniform +34 pt** below the
+reference's — the two 27 pt deficits are gone and one discrete excess is left, in the gap between
+`Document Control` and `Document Information` where r52 localised it. `096`'s rows now carry the
+reference's *pitch exactly* (59.2, 59.2, 59.3, 59.2, 47.6, 47.6, 59.3 — the reference's figures to
+the tenth) and are pushed down by one 15 pt excess between `Email Address` and `Phone Number`.
+Both are one place where we are too tall, not a drift.
+
+## Mechanism, measured on ten authored variants
+
+Cutting `097`'s block-1 paragraph five ways and rendering each both ways gave the first cut:
+
+| variant | reference | ours | Δ |
+|---|---:|---:|---:|
+| as is (anchored drawing + `w:br`) | 136.4 | 173.6 | **+37.2** |
+| the `w:br` removed | 122.7 | 141.3 | +18.6 |
+| the drawing removed | 136.4 | 137.8 | +1.4 |
+| **the run's `w:sz w:val="52"` removed, nothing else** | 136.4 | **137.8** | **+1.4** |
+
+So the whole of `097`'s remaining error is one `w:sz` on a run whose only content is a drawing.
+
+Pinned properly, ten variants of the same paragraph — anchored against as-character, 10 pt against
+26 pt, alone against with text — reading the height the paragraph adds over an empty one:
+
+| case | reference | ours |
+|---|---:|---:|
+| a run of text at 26 pt | 20.60 | 19.10 |
+| **anchored** drawing, run at 10 pt | 0.00 | −1.10 |
+| **anchored** drawing, run at 26 pt | **0.00** | **17.25** |
+| anchored drawing at 10 pt, text beside it | 0.00 | 0.00 |
+| anchored drawing at 26 pt, text beside it | **0.00** | **17.25** |
+| **as-character** drawing, run at 10 pt | 7.00 | 6.95 |
+| **as-character** drawing, run at 26 pt | **7.00** | **17.25** |
+| as-character at 10 pt, text beside it | 9.70 | 9.70 |
+| as-character at 26 pt, text beside it | **9.70** | **17.25** |
+
+**The reference's answer does not depend on the run's size at all** — 0.00 at both sizes anchored,
+7.00 at both sizes as-character, 9.70 at both with text. Ours is the run's size in every row where
+it is large. Where the run's size happens to match the paragraph's we already agree, on all four of
+those rows, which is why this has never shown up as a systematic error. It is Writer's model
+exactly: a fly is a portion of its own and a run holding no text contributes no text portion, so
+its font never reaches `SwLineLayout::Height`.
+
+## The fix
+
+`PageParagraph.Measure`: a `PageRun` whose whole range is anchor characters is measured in the
+**paragraph's** face and size rather than its own. It keeps its own everything for drawing — the
+rewrite is on the measurement half only — and an anchor sharing a run with real text is untouched.
+That covers the as-character case too, where the picture's own height then decides, and the
+comment mark, which is the third thing U+0001 stands for and is likewise not text.
+
+Words-layer, not shared: `PageContent.cs` is `Paperless.WordProcessing`. The four
+word-processing readers all use the same U+0001 convention so all four are served.
+
+## Reach
+
+`anchor-run-size-census.py`: **85 anchor-only runs stating a size, of 324 anchor-only runs, in 40
+of the 337 words documents** — 38 of the 40 currently passing. What it cannot see is in the
+script's own header: it does not resolve styles, so a stated size equal to the paragraph's counts
+here and will not move (an **upper bound**), while a size arriving from a character style is
+missed (a **floor**); `.doc`, `.rtf` and `.odt` are not read at all; and nothing here says whether
+the run's line holds something else that is taller anyway.
+
+## Verdict movement predicted
+
+**318 → 320**: `097` and `096` both to `match`.
+
+* `097` — the only error left on it is this one, worth ~34 pt of the ~34 pt it is out by.
+* `096` — the regression the first change caused, worth ~19 pt of overshoot, and it holds two of
+  these runs.
+
+Named risks, stated so they cannot be netted away:
+
+* **38 passing documents hold one of these runs.** A page-exact document whose picture run is
+  oversized gets *shorter*, and shorter can lose a page as easily as taller gains one.
+  `090_Business_Case_Template_Blue_Theme` (9 runs), `HC-Bulletin-template` (8),
+  `t_TEMPforInvProgs` (5) and `ESPN-R - MCF - RA - Ed1` (5) are the four to watch.
+* `EHEST-SMS` (open, 80/82 pages) holds one; it could move either way.
+* The direction is always "we get shorter or stay the same", never taller, since the paragraph's
+  size replaces a run size that is only ever *different* — usually larger, because that is what a
+  logo or a signature block states.
