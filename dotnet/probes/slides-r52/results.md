@@ -394,10 +394,36 @@ the corpus repo, which was not touched.
 5. `038_Competitive_Advantage_Card` and `035_Chemistry_Column_PowerPoint_Chart` — still the only
    two genuine content differences in the old `text` pool, both in chart labels.
 
-## A note for whoever writes the next brief
+## The audit, run rather than recommended — and it is a corpus-wide finding, not a slides one
 
 The line in `SlideAutofit`'s remarks that said *"this is a port of 24.2 and the reference is now
 26.2.4.2, check which version wrote the reference before porting anything out of this tree"* had
 been sitting in the file, correct and unread, for the whole time the container has been on
-26.2.4.2. It cost the largest single ink movement this track has recorded. **`grep -rn "24\.2" dotnet/src`
-is a one-line audit and it has not been run.**
+26.2.4.2. It cost the largest single ink movement this track has recorded.
+
+So the one-line audit was run:
+
+```sh
+grep -rn "24\.2\.7" dotnet/src --include=*.cs
+```
+
+**47 hits in 29 files, and only one of them is the one this round fixed:**
+
+| project | files carrying a claim measured against 24.2.7.2 |
+|---|---:|
+| `Paperless.WordProcessing` | 8 |
+| `Paperless.Spreadsheets` | 8 |
+| **`Paperless.Presentations`** | **6** |
+| `Paperless.Text` | 4 |
+| `Paperless.Core`, `Paperless.Ooxml`, `Paperless.Rendering` | 1 each |
+
+`CLAUDE.md` § "This container" already says that *"individual claims calibrated to 24.2.7.2
+behaviour … are now claims about a superseded binary and each needs one re-check before it is
+relied on"*, and names three. There are forty-seven. This round re-checked one of them and it was
+wrong in a way worth 11% of the track's ink and 164 pages of exact font sizes.
+
+The remaining five in `Paperless.Presentations` are `SlideTextLayout.cs`, `PptxTextStyles.cs`,
+`SlideDrawing.cs`, `OdpSlideLayout.cs` and `PptxSlideLayout.cs`. **The other twenty-three files are
+words' and sheets' and are named here because no slides round will ever open them.** Each is a
+cheap, self-contained re-check of exactly the shape this round ran: read the claim, author the
+variant it was measured on, render it through the installed `soffice`, compare.
