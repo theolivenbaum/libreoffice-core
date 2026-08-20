@@ -14836,3 +14836,59 @@ empty series. All three charts state `<c:plotVisOnly val="1"/>`.
 3. **The pie family's `bestFit` data-label placement** — 4 documents, ~2 words each past the band.
 4. **The eight-blank-line header** — `probes/sheets-r51-bands/` brackets it; 20 words on
    `FAA-2019-0995-0002`.
+
+### Parent verification and the cross-track measurement — round 52 sheets
+
+**Sheets 268 → 271 of 307. Corpus 788 of 946.** Combined test counts at the merged tree:
+
+```
+Core 337   Containers 109   Text 596   Vector 295   Rendering 150(1 skipped)   Markup 259
+OpenDocument 125   WordProcessing 1083   Spreadsheets 905   Presentations 780     = 4639
+0 failed
+```
+
+Whole sheets track re-swept in the primary: **271 match, 3 gains, 0 regressions, 0 of 307 page
+counts moved.** Swept whole rather than by batch because one of the two changes is in a shared
+layer.
+
+The `Paperless.Ooxml` change then measured across the other two tracks — all 666 words and slides
+documents rendered at the merged commit and again with only that diff reversed (`git apply -R`, not
+`git checkout`, `obj`/`bin` deleted between legs, `SOURCE_DATE_EPOCH` pinned):
+
+```
+TOTAL compared=666  identical=666  changed=0  unrenderable=0
+worktree vs HEAD: clean      index vs HEAD: clean
+```
+
+Zero reach, matching the round's census (the 2010 slicer URI in 7 documents, all sheets). Two
+`Paperless.Ooxml` changes have now been measured this way and both came back at exactly zero, which
+is worth knowing about the *shape* of these fixes: they are keyed on a single literal URI and the
+key is doing its job.
+
+### A test that asserted the right thing and passed for the wrong reason
+
+Round 50 wrote `ASlicerChoiceStillLosesToItsFallback` and **asserted exactly the correct
+behaviour**. It passed. Its helper left `a14` unbound, so the fallback won by the general rule and
+**the corpus's actual shape was never exercised** — `Requires="a14"` resolves to `DrawingML2010`,
+which *is* in `UnderstoodExtensions`, so in the real documents the slicer choice won, had no
+reader, and the anchor drew nothing where the reference draws its green advisory.
+
+This is § 7's dominant pattern — *every predecessor claim reproduces and the sentence attached to
+it is wrong* — appearing **inside the project's own regression test**. The general lesson: a green
+test proves the code does what the test set up, and the setup is a claim about the corpus that
+nothing checks. When a test encodes a corpus shape, **assert the shape is present** (here: that the
+`Requires` token actually resolves to a namespace the reader understands), or the test silently
+becomes a test of a different case.
+
+### The blind-reader standard, with a positive control this time
+
+Round 51 produced a false lead from two blind reviewers agreeing, and § 7 of `HANDOVER.md` records
+why. **This round is the control that shows the rule is not "distrust blind readers".** Two
+reviewers, on unrelated documents *and unrelated pages, neither chosen by `--worst`*, named the
+**same object** — the reference's green slicer advisories, absent from ours — and `pdftotext`
+confirmed it independently at 3/2/1 against 0. It was real, and it was one of the round's two fixes.
+
+The discriminator between the two cases is not the number of readers. It is whether the reports are
+about the **same object**, whether the page was chosen for a stated reason rather than by maximum
+ink, and whether a **different instrument** confirms it. All three held here and none held in
+round 51.

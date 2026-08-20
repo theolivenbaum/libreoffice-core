@@ -410,6 +410,16 @@ chose to show. So:
   reason**, not from `--worst`. `--worst` ranks by ink and the largest ink difference on a document
   is frequently not the defect being discussed.
 
+**And the positive control, so this is not read as "distrust blind readers".** One round later,
+two reviewers on unrelated documents *and unrelated pages, neither chosen by `--worst`*, named the
+same object — the reference's green slicer advisories, absent from ours — and `pdftotext` confirmed
+it independently at 3/2/1 against 0. Real, and it became one of that round's two shipped fixes.
+
+**The discriminator is not the number of readers.** It is: are the reports about the *same object*;
+was the page chosen for a stated reason rather than by maximum ink; and does a *different
+instrument* confirm it. All three held there and none held in the false case. `--worst` ranks by ink and the largest ink difference on a document
+  is frequently not the defect being discussed.
+
 ### An instrument can manufacture a defect out of nothing
 
 `pdf-ops.py` anchored a stroke at its top-left corner, and the left and top edges of a rectangle
