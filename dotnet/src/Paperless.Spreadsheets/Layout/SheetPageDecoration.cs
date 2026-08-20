@@ -409,6 +409,7 @@ internal sealed class SheetPageDecoration(SheetLayout sheet, SheetPagePlacement 
                 setup.TopMargin,
                 setup.HeaderHeight - setup.HeaderGap,
                 setup.TopMargin,
+                setup.TopMargin + setup.HeaderHeight,
                 setup.HeaderIsDynamic,
                 false,
                 sink);
@@ -431,6 +432,7 @@ internal sealed class SheetPageDecoration(SheetLayout sheet, SheetPagePlacement 
                 // has to be against the band — a gap that is not the filter's own `nDistance`
                 // would otherwise move a footer that was already right.
                 page.Height - setup.BottomMargin - setup.FooterHeight,
+                page.Height - setup.BottomMargin,
                 setup.FooterIsDynamic,
                 true,
                 sink);
@@ -445,6 +447,7 @@ internal sealed class SheetPageDecoration(SheetLayout sheet, SheetPagePlacement 
         Length top,
         Length height,
         Length bandTopEdge,
+        Length bandBottomEdge,
         bool dynamic,
         bool fromBottom,
         IDrawingSink sink)
@@ -513,6 +516,25 @@ internal sealed class SheetPageDecoration(SheetLayout sheet, SheetPagePlacement 
             foreach (IReadOnlyList<SheetHeaderPiece> line in lines)
             {
                 Length lineHeight = LineHeight(line, zoom);
+
+                // A line that begins past the band's bottom edge is not drawn at all, and one
+                // that begins inside it is drawn whole however far it overflows. Three authored
+                // probes at one pinned 3.6 pt band, differing in one thing each: with the text on
+                // the first line both LibreOffice and we draw it, its ink running 8.4 pt past the
+                // band; with eight empty lines in front of it, so that its origin lands about
+                // 100 pt below a band 3.6 pt tall, LibreOffice draws nothing.
+                //
+                // So the reference is neither clipping the ink to the band nor suppressing an
+                // oversized band — it is deciding per line. Without this,
+                // `FAA-2019-0995-0002_attachment_2.xlsx`, whose header is eight blank lines and
+                // then `PAGE / &P OF &N` inside a 5.67 pt band, gained twenty words the reference
+                // does not draw.
+                if (pen >= bandBottomEdge)
+                {
+                    pen += lineHeight;
+                    continue;
+                }
+
                 if (line.Count == 0)
                 {
                     pen += lineHeight;
