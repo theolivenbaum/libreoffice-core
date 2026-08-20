@@ -372,16 +372,25 @@ internal sealed class SheetPageDecoration(SheetLayout sheet, SheetPagePlacement 
         SheetPrintSetup setup = sheet.Setup;
         DocSize page = setup.PageSize;
 
-        // A band of no height at all is still drawn, and that is not an edge case worth
-        // suppressing: three of this track's workbooks state a footer margin equal to the page
-        // margin, so Calc pins their band at nothing and draws the text starting *at* the margin
-        // and running down into it. `PrintHF` clips to `tools::Rectangle(aStart, aPaperSize)`,
-        // and a VCL rectangle built from a zero-height Size has no bottom edge at all — it is
-        // unbounded rather than empty — so a zero band suppresses the *space* and not the ink
-        // (`sc/source/ui/view/printfun.cxx:1870`). Measured on
-        // `2012-GA-Survey-Chapter-6-Tables-16Dec2013-V2.xls`, whose sheet has a 0.5 in bottom
-        // margin and a 0.5 in footer margin: LibreOffice draws `Page 6 - 2` at y 575.95 on a
-        // 612 pt page, which is the bottom margin line to a twentieth of a point.
+        // **A band of no height at all draws nothing, and the claim that stood here said the
+        // opposite.** It read: a zero-height VCL rectangle has no bottom edge, so `PrintHF`'s
+        // clip is unbounded and a zero band suppresses the space and not the ink — measured on
+        // `2012-GA-Survey-Chapter-6-Tables-16Dec2013-V2.xls` against LibreOffice **24.2.7.2**,
+        // which drew `Page 6 - 2` at y 575.95.
+        //
+        // Re-measured on **26.2.4.2**, the binary this tree is scored against, that same
+        // document's reference PDF contains **no footer at all** and ours contained four
+        // `Page 6 - N` lines — twelve words the reference does not have, on a document passing by
+        // 0.48 of its band. A second, independent measurement agrees: six authored margin
+        // variants of `020_Free_Blood_Pressure_Chart…xlsx` differing only in `bottom` and
+        // `footer`, where the reference draws the footer at every stated band above zero and
+        // draws nothing at a stated band of exactly zero.
+        //
+        // So the guard below is the *measured* behaviour of the reference binary rather than a
+        // reading of the C++, and it is a reminder that a stored figure is evidence about an
+        // environment: the mechanism the old note identified survived, the number attached to it
+        // did not.
+        //
         // `differentFirst` swaps the pair on the sheet's first page, and swapping it to *nothing*
         // is the case the corpus holds: every workbook here that sets the flag supplies no
         // first-page content, so the first page prints bare. The band is unchanged either way —
@@ -390,7 +399,7 @@ internal sealed class SheetPageDecoration(SheetLayout sheet, SheetPagePlacement 
         SheetHeaderFooter? bandHeader = first ? setup.FirstHeader : setup.Header;
         SheetHeaderFooter? bandFooter = first ? setup.FirstFooter : setup.Footer;
 
-        if (bandHeader is { IsEmpty: false } header)
+        if (bandHeader is { IsEmpty: false } header && setup.HeaderHeight > Length.Zero)
         {
             DrawBand(
                 header,
@@ -399,12 +408,13 @@ internal sealed class SheetPageDecoration(SheetLayout sheet, SheetPagePlacement 
                 page.Width - setup.RightMargin - setup.HeaderRightMargin,
                 setup.TopMargin,
                 setup.HeaderHeight - setup.HeaderGap,
+                setup.TopMargin,
                 setup.HeaderIsDynamic,
                 false,
                 sink);
         }
 
-        if (bandFooter is { IsEmpty: false } footer)
+        if (bandFooter is { IsEmpty: false } footer && setup.FooterHeight > Length.Zero)
         {
             // The footer's gap sits at the *top* of its band, between the last row and the text,
             // so the text starts that far below the band's top rather than at it.
@@ -415,6 +425,12 @@ internal sealed class SheetPageDecoration(SheetLayout sheet, SheetPagePlacement 
                 page.Width - setup.RightMargin - setup.FooterRightMargin,
                 page.Height - setup.BottomMargin - setup.FooterHeight + setup.FooterGap,
                 setup.FooterHeight - setup.FooterGap,
+
+                // The band's own top edge, which is the gap-free figure and not the text
+                // rectangle's. The two differ by exactly the gap, and the clamp inside `DrawBand`
+                // has to be against the band — a gap that is not the filter's own `nDistance`
+                // would otherwise move a footer that was already right.
+                page.Height - setup.BottomMargin - setup.FooterHeight,
                 setup.FooterIsDynamic,
                 true,
                 sink);
@@ -428,6 +444,7 @@ internal sealed class SheetPageDecoration(SheetLayout sheet, SheetPagePlacement 
         Length right,
         Length top,
         Length height,
+        Length bandTopEdge,
         bool dynamic,
         bool fromBottom,
         IDrawingSink sink)
@@ -456,6 +473,25 @@ internal sealed class SheetPageDecoration(SheetLayout sheet, SheetPagePlacement 
 
         Length drawn = dynamic ? bandText : height;
         Length bandTop = dynamic && fromBottom ? top + height - bandText : top;
+
+        // A footer sits on its own margin line, but **never above the top of its own band**:
+        // `PrintHF` offsets the text by `nDif = paperHeight - textHeight` and only when that is
+        // positive (`sc/source/ui/view/printfun.cxx:1876-1912`), so a band shorter than its own
+        // text starts at the top and overflows downwards rather than being lifted clear.
+        //
+        // Measured on two authored variants of `020_Free_Blood_Pressure_Chart…xlsx`: at a stated
+        // band of 3.6 pt the reference's first footer glyph tops out at 770.37 pt against a band
+        // top of 770.40, and at 7.2 pt at 766.77 against 766.80. Bottom-aligning them instead put
+        // our text 7.5 pt and 3.9 pt low.
+        //
+        // Clamping against `top` rather than the band's own edge is the version of this that does
+        // not work, and it is worth saying why. `top` is the *text rectangle's* top, which is the
+        // band's top plus the gap — and `height` is the rectangle, not the band. A reader whose
+        // gap is not the filter's own `nDistance` therefore has `height < bandText` on bands that
+        // fit perfectly well, and clamping against `top` moves them. One probe caught it: a
+        // 14.4 pt band went from 0.53 pt of the reference to 2.72 pt out. Against the band edge
+        // the clamp fires only when the text genuinely does not fit inside the band.
+        if (fromBottom && bandTop < bandTopEdge) bandTop = bandTopEdge;
 
         Place(band.Left, _ => left);
         Place(band.Centre, width => left + ((right - left - width) / 2));

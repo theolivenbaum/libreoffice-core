@@ -203,6 +203,24 @@ internal static class XlsxPrintSetup
             BottomMargin = Length.FromInches(hasFooter ? footer : bottom),
             HeaderHeight = headerBand,
             FooterHeight = footerBand,
+            // Calc's `nDistance`, and **zero when the band is pinned** — see
+            // `SheetBandHeight.BodyDistance`. Setting this at all is the fix: leaving it at
+            // `SheetPrintSetup`'s ODF default of 142 twips made `FooterHeight - FooterGap`
+            // negative for every band under 7.1 pt, and `SheetPageDecoration.DrawBand` returns on
+            // a negative text rectangle, so those bands were dropped with no ink and no words.
+            // `XlsPrintSetup` has had the rule since it was written; this reader and the XLSB one
+            // simply never called it.
+            HeaderGap = hasHeader
+                ? SheetBandHeight.BodyDistance(
+                    headerText, Length.FromInches(Math.Max(0, top - header)), defaultFont,
+                    SheetPrintSetup.Default.HeaderGap)
+                : SheetPrintSetup.Default.HeaderGap,
+            FooterGap = hasFooter
+                ? SheetBandHeight.BodyDistance(
+                    footerText, Length.FromInches(Math.Max(0, bottom - footer)), defaultFont,
+                    SheetPrintSetup.Default.FooterGap)
+                : SheetPrintSetup.Default.FooterGap,
+
             HeaderText = headerText,
             FooterText = footerText,
 

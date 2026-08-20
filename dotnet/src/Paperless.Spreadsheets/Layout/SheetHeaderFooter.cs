@@ -398,18 +398,23 @@ public sealed record SheetHeaderFooter(
                     break;
                 }
 
-                // &K is a colour, six hex digits of it, and none of them print.
+                // &K is a colour and it swallows the **six characters** that follow it,
+                // whatever they are. Calc does not check them:
+                //
+                //     case 'K':   // text color (not in BIFF)
+                //         if( pcChar + 6 < pcEnd ) { … convertFontColor(…, 6); pcChar += 6; }
+                //
+                // (`sc/source/filter/oox/pagesettings.cxx:639-647`.) Reading them as *hex digits*
+                // and stopping at the first one that is not looks equivalent and is not, because
+                // Excel writes a second, undocumented form: a theme index and a tint, as
+                // `&K01+049`. That is six characters and two of them are hex, so a hex scan eats
+                // `01`, leaves `+049` standing, and draws it. Measured over the 307 sheets
+                // documents: 16 of the 29 `&K` occurrences take the theme form, in 5 workbooks,
+                // and our renderings drew `+049`/`+034` **30 times** against the reference's
+                // **0**.
                 case 'K':
-                {
-                    int taken = 0;
-                    while (taken < 6 && at < text.Length && Uri.IsHexDigit(text[at]))
-                    {
-                        at++;
-                        taken++;
-                    }
-
+                    at = Math.Min(text.Length, at + 6);
                     break;
-                }
 
                 // Everything else is a toggle with no text — bold, italic, underline,
                 // strikeout, super and subscript, the picture placeholders — or a code this

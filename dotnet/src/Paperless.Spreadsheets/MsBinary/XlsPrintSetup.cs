@@ -468,12 +468,8 @@ internal sealed class XlsSheetPrintState
     /// <param name="fallback">The gap a dynamic band keeps.</param>
     private static Length Gap(
         double inches, string? codes, SheetDefaultFont? defaultFont, Length fallback)
-    {
-        SheetBandHeight.Printed(
-            codes, Length.FromInches(Math.Max(0, inches)), defaultFont, out bool isDynamic);
-
-        return isDynamic ? fallback : Length.Zero;
-    }
+        => SheetBandHeight.BodyDistance(
+            codes, Length.FromInches(Math.Max(0, inches)), defaultFont, fallback);
 
     /// <summary>Calc's default header and footer band: 0.5 cm of text and a 0.25 cm gap.</summary>
     private static readonly Length DefaultBandHeight = Length.FromTwips(425);

@@ -86,21 +86,37 @@ public class SheetPinnedBandTests
     }
 
     /// <summary>
-    /// A band pinned at no height at all still draws, starting at the margin it has no room
-    /// above.
+    /// A band pinned at no height at all draws nothing, and its height still comes off the body.
     /// </summary>
     /// <remarks>
-    /// <c>sheet-zero-band-xls.xls</c> is the same document with the footer band taken to nothing:
-    /// a 0.25 in bottom margin against a 0.25 in footer margin, so the two are equal and Calc
-    /// pins the band at zero. `PrintHF` clips the text to
-    /// <c>tools::Rectangle(aStart, aPaperSize)</c>, and a VCL rectangle built from a zero-height
-    /// <c>Size</c> is unbounded rather than empty, so the text is drawn and runs down into the
-    /// margin. LibreOffice 24.2.7.2 puts the top of `Zero band footer` at <strong>773.95 pt</strong>
-    /// on a 792 pt page, which is the bottom margin line; before this round we drew it 12.6 pt
-    /// higher, inside a band we had floored at 425 twips, and paginated the sheet on two pages.
+    /// <para>
+    /// <strong>This assertion is a reversal and the reversal is the point.</strong> It read
+    /// "a band pinned at no height at all still draws, starting at the margin it has no room
+    /// above", on the reasoning that <c>PrintHF</c> clips to
+    /// <c>tools::Rectangle(aStart, aPaperSize)</c> and a VCL rectangle built from a zero-height
+    /// <c>Size</c> is unbounded rather than empty — and on a measurement: LibreOffice
+    /// <strong>24.2.7.2</strong> put the top of <c>Zero band footer</c> at 773.95 pt on this very
+    /// fixture.
+    /// </para>
+    /// <para>
+    /// Re-measured against <strong>26.2.4.2</strong>, the binary this tree is scored against, this
+    /// fixture's reference PDF contains **no footer at all** — one page, thirty-four rows, and
+    /// nothing below the last of them. Three further measurements agree, and they were taken
+    /// independently and by different routes: an authored XLSX whose bottom and footer margins are
+    /// both 0.30 in draws no footer either, while every band above zero does; and the corpus
+    /// documents <c>2012-GA-Survey-Chapter-5-Tables-16Dec2013-V2.xls</c> and
+    /// <c>-Chapter-6-</c> have no footer in their reference PDFs while we drew two and four
+    /// <c>Page N - M</c> lines into them.
+    /// </para>
+    /// <para>
+    /// So the mechanism the old note identified survived the version move and the behaviour
+    /// attached to it did not. What is *unchanged*, and is still asserted below, is the part the
+    /// original round actually won: the band is pinned at nothing rather than floored at the page
+    /// style's 425 twips, so the sheet paginates on one page instead of two.
+    /// </para>
     /// </remarks>
     [Fact]
-    public void AFooterPinnedAtNothingIsStillDrawnAtTheMargin()
+    public void AFooterPinnedAtNothingIsNotDrawnAtAll()
     {
         using IPaginatedDocument document =
             (IPaginatedDocument)new SpreadsheetReader().Read(
@@ -119,11 +135,9 @@ public class SheetPinnedBandTests
         List<DrawnWord> footer =
             [.. DrawnWords.On(sink.Pages[0]).Where(word => word.Text.StartsWith("Zero", StringComparison.Ordinal))];
 
-        footer.Count.ShouldBe(1);
-
-        // The baseline is the pen, so the top of the line is a shade above it; the reference's
-        // own box starts at 773.95 on a 792 pt page whose bottom margin is 18.
-        footer[0].Baseline.ShouldBeInRange(774.0, 786.0);
+        // 26.2.4.2 draws none of it. The pagination and setup assertions above are what the
+        // round that wrote this test established and they still hold.
+        footer.ShouldBeEmpty();
     }
 
     [Fact]
