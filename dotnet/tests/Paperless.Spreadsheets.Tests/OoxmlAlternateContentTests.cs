@@ -31,13 +31,25 @@ public sealed class OoxmlAlternateContentTests
     private const string Mce = "http://schemas.openxmlformats.org/markup-compatibility/2006";
 
     /// <summary>Builds a spreadsheet drawing whose choice holds a graphic frame of one URI.</summary>
-    private static XElement Drawing(string choiceUri, string requires, string prefix = "mc")
+    /// <param name="choiceUri">The graphic-data URI the choice's frame carries.</param>
+    /// <param name="requires">The prefix the choice's <c>Requires</c> names.</param>
+    /// <param name="prefix">The prefix bound to the markup-compatibility namespace.</param>
+    /// <param name="requiresUri">
+    /// What the <c>Requires</c> prefix is bound to. The default is a namespace nothing here
+    /// understands, which is the ordinary "a choice we cannot read" case. Binding it to a
+    /// namespace that <em>is</em> understood is what the corpus actually contains for a slicer,
+    /// and leaving that untested is how the slicer assertion below passed for four rounds while
+    /// the defect it names was live on three documents.
+    /// </param>
+    private static XElement Drawing(
+        string choiceUri, string requires, string prefix = "mc",
+        string requiresUri = "urn:the-extension")
         => XElement.Parse($"""
             <xdr:wsDr xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing"
                       xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">
               <xdr:twoCellAnchor>
                 <{prefix}:AlternateContent xmlns:{prefix}="{Mce}">
-                  <{prefix}:Choice xmlns:cx1="urn:the-extension" Requires="{requires}">
+                  <{prefix}:Choice xmlns:{requires}="{requiresUri}" Requires="{requires}">
                     <xdr:graphicFrame>
                       <a:graphic><a:graphicData uri="{choiceUri}" /></a:graphic>
                     </xdr:graphicFrame>
@@ -80,11 +92,94 @@ public sealed class OoxmlAlternateContentTests
     public void ASlicerChoiceStillLosesToItsFallback()
     {
         // The reference draws the slicer placeholder, so this must NOT follow the chartex rule.
+        // Here the Requires prefix is bound to a namespace nothing understands, so the fallback
+        // wins by the *general* rule; the test below is the one that exercises the slicer key.
         XElement root = Drawing(SlicerUri, "a14");
         OoxmlXml.Normalise(root);
 
         root.Descendants().Any(e => e.Name.LocalName == "graphicFrame").ShouldBeFalse();
         root.Value.ShouldContain("too old");
+    }
+
+    /// <summary>
+    /// A slicer choice loses to its fallback even though its <c>Requires</c> names a namespace
+    /// Paperless understands.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// This is what the corpus contains and what the test above did not reach. All three witnesses
+    /// write <c>Requires="a14"</c> with <c>a14</c> bound to
+    /// <see cref="OoxmlNamespaces.DrawingML2010"/>, which <strong>is</strong> in
+    /// <c>UnderstoodExtensions</c> — so the choice was taken, the slicer frame inside it had no
+    /// reader, and the anchor drew nothing at all. LibreOffice 26.2.4.2 draws the fallback
+    /// rectangle: measured, its PDF holds the advisory 3 times on
+    /// <c>049_Expenses_calculator</c>, 2 on <c>037_Personal_money_tracker</c> and 1 on
+    /// <c>DynamicBubbleChart</c>, against 0 in ours.
+    /// </para>
+    /// <para>
+    /// The lesson generalises past this element: <c>Requires</c> names the <em>vocabulary</em> a
+    /// choice is written in, not whether its content is something a reader can draw, and for a
+    /// slicer the two answers differ.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void ASlicerChoiceLosesToItsFallbackEvenWhenItsRequiresIsUnderstood()
+    {
+        XElement root = Drawing(SlicerUri, "a14", requiresUri: OoxmlNamespaces.DrawingML2010);
+        OoxmlXml.Normalise(root);
+
+        root.Descendants().Any(e => e.Name.LocalName == "graphicFrame").ShouldBeFalse();
+        root.Value.ShouldContain("too old");
+    }
+
+    /// <summary>
+    /// An understood choice that is <em>not</em> a slicer still wins over its fallback.
+    /// </summary>
+    /// <remarks>
+    /// The guard against widening. 108 word-processing documents write a
+    /// <c>Requires="wps"</c> choice with a VML fallback beside it, and every one of them must keep
+    /// taking the choice — a rule that made any understood choice with a fallback lose would
+    /// silently swap the shape content of a third of the words corpus for its VML twin.
+    /// </remarks>
+    [Fact]
+    public void AnUnderstoodChoiceThatIsNotASlicerStillBeatsItsFallback()
+    {
+        XElement root = Drawing(
+            "http://schemas.microsoft.com/office/word/2010/wordprocessingShape", "wps",
+            requiresUri: OoxmlNamespaces.WordShape);
+        OoxmlXml.Normalise(root);
+
+        root.Descendants().Any(e => e.Name.LocalName == "graphicFrame").ShouldBeTrue();
+        root.Value.ShouldNotContain("too old");
+    }
+
+    /// <summary>
+    /// A slicer choice with no fallback beside it is still taken.
+    /// </summary>
+    /// <remarks>
+    /// The slicer rule is keyed on there being a fallback to fall back <em>to</em>. Four corpus
+    /// spreadsheets state the slicer URI under <c>Requires="sle15"</c>, which is not understood,
+    /// and reach their fallback by the general rule already; this pins the remaining shape, where
+    /// dropping the choice would lose an anchor rather than gain a placeholder.
+    /// </remarks>
+    [Fact]
+    public void ASlicerChoiceWithNoFallbackBesideItIsStillTaken()
+    {
+        XElement root = XElement.Parse($"""
+            <xdr:wsDr xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing"
+                      xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">
+              <mc:AlternateContent xmlns:mc="{Mce}">
+                <mc:Choice xmlns:a14="{OoxmlNamespaces.DrawingML2010}" Requires="a14">
+                  <xdr:graphicFrame>
+                    <a:graphic><a:graphicData uri="{SlicerUri}" /></a:graphic>
+                  </xdr:graphicFrame>
+                </mc:Choice>
+              </mc:AlternateContent>
+            </xdr:wsDr>
+            """);
+        OoxmlXml.Normalise(root);
+
+        root.Descendants().Any(e => e.Name.LocalName == "graphicFrame").ShouldBeTrue();
     }
 
     /// <summary>
