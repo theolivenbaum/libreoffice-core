@@ -2007,8 +2007,11 @@ public static class DrawingChartPlot
     {
         if (source is null) return ([], []);
 
+        // An *empty* resolved sequence is a real answer — a range every cell of which is an
+        // Excel table's totals row — and must not fall through to the cache. See
+        // ChartRangeResolver for the two states a resolver distinguishes.
         if (ranges is not null && FormulaOf(source) is { } formula
-            && ranges(formula) is { } live && live.Text.Count > 0)
+            && ranges(formula) is { } live)
         {
             return ([.. live.Text], [.. live.Numbers]);
         }

@@ -369,8 +369,10 @@ public static class DrawingChart
         if (source is null) return ([], []);
 
         // The c:f wins where the caller can resolve it, exactly as it does in the drawing reader.
+        // An *empty* resolved sequence is a real answer and must not fall through to the cache —
+        // see ChartRangeResolver.
         if (ranges is not null && FormulaOf(source) is { } formula
-            && ranges(formula) is { } live && live.Text.Count > 0)
+            && ranges(formula) is { } live)
         {
             return ([.. live.Text], [.. live.Numbers]);
         }

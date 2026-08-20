@@ -50,6 +50,9 @@ internal sealed class XlsxChartRanges(XlsxFile file, XlsxSheetReader reader)
     private readonly Dictionary<string, Dictionary<(int Row, int Column), ContentTableCell>> _cells =
         new(StringComparer.OrdinalIgnoreCase);
 
+    private readonly Dictionary<string, XlsxChartTotalsRows> _totals =
+        new(StringComparer.OrdinalIgnoreCase);
+
     /// <summary>
     /// A sheet's cells, read once however many times they are asked for.
     /// </summary>
@@ -109,24 +112,37 @@ internal sealed class XlsxChartRanges(XlsxFile file, XlsxSheetReader reader)
         if (sheet is null) return null;
 
         Dictionary<(int Row, int Column), ContentTableCell> index = IndexFor(sheet);
+        XlsxChartTotalsRows totals = TotalsFor(sheet);
 
-        string?[] labels = new string?[cells];
-        double?[] numbers = new double?[cells];
-        int at = 0;
+        List<string?> labels = new((int)cells);
+        List<double?> numbers = new((int)cells);
         bool any = false;
 
         for (int row = range.FirstRow; row <= range.LastRow; row++)
         {
-            for (int column = range.FirstColumn; column <= range.LastColumn; column++, at++)
+            for (int column = range.FirstColumn; column <= range.LastColumn; column++)
             {
+                // An Excel table's totals row is not chart data. The cell is dropped from the
+                // sequence rather than blanked, because LibreOffice's loop `break`s past it and
+                // the sequence it builds is genuinely one shorter.
+                if (totals.Skips(range, row, column)) continue;
+
+                labels.Add(null);
+                numbers.Add(null);
+
                 if (!index.TryGetValue((row, column), out ContentTableCell? cell)) continue;
 
                 string shown = cell.GetText();
-                if (shown.Length > 0) { labels[at] = shown; any = true; }
+                if (shown.Length > 0) { labels[^1] = shown; any = true; }
 
-                if (NumberOf(cell.Value) is { } number) { numbers[at] = number; any = true; }
+                if (NumberOf(cell.Value) is { } number) { numbers[^1] = number; any = true; }
             }
         }
+
+        // Every cell of the range was an Excel table's totals row. That is a *resolved* sequence
+        // with no points, not a failure to resolve, and the difference decides whether the chart
+        // draws nothing (Calc's answer) or draws the cache (which would be the whole plot).
+        if (labels.Count == 0) return new ChartRangeValues(labels, numbers);
 
         // Nothing at all in the range this names. That is what a reference to a sheet whose part
         // is missing looks like, and it is the case LibreOffice's own converter reaches by
@@ -160,6 +176,16 @@ internal sealed class XlsxChartRanges(XlsxFile file, XlsxSheetReader reader)
         // The phantom 29 February 1900 again: FromSerial adds a day below serial 61, so the
         // inverse takes it back off. 1900-03-01 is serial 61 and is where the two agree.
         return days < 61 ? days - 1 : days;
+    }
+
+    /// <summary>A sheet's totals-row tables, read once however many charts ask for them.</summary>
+    private XlsxChartTotalsRows TotalsFor(XlsxSheetEntry sheet)
+    {
+        if (_totals.TryGetValue(sheet.Name, out XlsxChartTotalsRows? known)) return known;
+
+        XlsxChartTotalsRows totals = XlsxChartTotalsRows.Read(file, sheet);
+        _totals[sheet.Name] = totals;
+        return totals;
     }
 
     private Dictionary<(int Row, int Column), ContentTableCell> IndexFor(XlsxSheetEntry sheet)

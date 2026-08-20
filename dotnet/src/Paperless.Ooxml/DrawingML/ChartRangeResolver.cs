@@ -21,7 +21,21 @@ public sealed record ChartRangeValues(IReadOnlyList<string?> Text, IReadOnlyList
 /// The <c>c:f</c> text as the file states it, sheet qualifier and dollars included —
 /// <c>'Literature Mapping'!$B$4:$B$16</c>.
 /// </param>
-/// <returns>The cells' values, or null when the reference cannot be resolved.</returns>
+/// <returns>
+/// The cells' values, or null when the reference cannot be resolved.
+/// <para>
+/// <strong>Null and empty are different answers and a caller must keep them apart.</strong> Null
+/// means the reference could not be resolved at all — a multi-area reference, a defined name, an
+/// external workbook, a sheet this reader does not hold — and is the state
+/// <c>ExcelChartConverter::createDataSequence</c> reaches by throwing, where the cached points
+/// stand. An <em>empty</em> sequence means the reference resolved and named no readable cell,
+/// which Calc really does produce: a range every cell of which is an Excel table's totals row is
+/// skipped outright by <c>ScChart2DataSequence::BuildDataCache</c>
+/// (<c>sc/source/ui/unoobj/chart2uno.cxx:2616-2632</c>), leaving a series with no points and a
+/// value axis at its default scale. Falling back to the cache there would draw a plot the
+/// reference leaves blank.
+/// </para>
+/// </returns>
 /// <remarks>
 /// <para>
 /// <strong>This is the seam between the two data providers LibreOffice keeps, and it exists

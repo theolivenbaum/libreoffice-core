@@ -206,6 +206,35 @@ public sealed class XlsxFile : IDisposable
         return null;
     }
 
+    /// <summary>
+    /// Loads the <c>table</c> roots a sheet relates to, in relationship order.
+    /// </summary>
+    /// <remarks>
+    /// A table part is reached from the <em>worksheet</em>, never from the workbook, and the
+    /// <c>tableParts/tablePart</c> elements inside the worksheet name the same relationships in
+    /// the same order — so the relationships alone are enough and the worksheet does not have to
+    /// be loaded to find them. This mirrors <c>sc/source/filter/oox/tablefragment.cxx</c>, which
+    /// reaches each table through <c>WorksheetHelper</c>'s relations for the same reason.
+    /// </remarks>
+    public IReadOnlyList<XElement> LoadTables(XlsxSheetEntry sheet)
+    {
+        ArgumentNullException.ThrowIfNull(sheet);
+        if (sheet.PartName is null) return [];
+
+        List<XElement> tables = [];
+        foreach (OpcXml.Relationship relationship in
+                 _package.GetRelationshipsByType(RelationshipBase + "table", sheet.PartName))
+        {
+            if (relationship.IsExternal) continue;
+            IPackagePart? part = _package.GetPart(relationship.Target);
+            if (part is null) continue;
+
+            using Stream content = part.Open();
+            if (OoxmlXml.TryLoad(content, out _) is { } root) tables.Add(root);
+        }
+        return tables;
+    }
+
     /// <inheritdoc/>
     public void Dispose() => _package.Dispose();
 
