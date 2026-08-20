@@ -117,6 +117,34 @@ internal static class DocxFrames
     }
 
     /// <summary>
+    /// Whether a <c>w:drawing</c> floats — a <c>wp:anchor</c> rather than a <c>wp:inline</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Asked by the reader that builds the paragraph, not by this one, and it is the difference between
+    /// a run that takes room on its line and a run that takes none. A <c>wp:inline</c> is laid out as a
+    /// character; a <c>wp:anchor</c> becomes a fly, and Writer's own import leaves the paragraph it was
+    /// written in **empty** — which is why an anchor character standing for one must not make the
+    /// paragraph count as having text.
+    /// </para>
+    /// <para>
+    /// Measured on <c>088_Printable_Graph_Paper_Template_Quality_layout</c>, whose last paragraph is a
+    /// 2 pt mark holding one anchored logo 8.45 pt above the bottom margin. Read as text-bearing it takes
+    /// the 11 pt body size, overflows, and costs the document a whole second page; read as empty it takes
+    /// the mark's 2 pt and fits, which is what 26.2.4.2 does. Eleven authored variants of that document
+    /// are in <c>dotnet/probes/words-r50-chartset/</c>: deleting the drawing run fixes it and no property
+    /// of the frame — offset, extent, <c>behindDoc</c>, wrap mode or anchor origin — changes anything.
+    /// </para>
+    /// </remarks>
+    /// <param name="drawing">A <c>w:drawing</c> element.</param>
+    /// <returns>True when it carries a <c>wp:anchor</c>.</returns>
+    public static bool IsFloating(XElement drawing)
+    {
+        ArgumentNullException.ThrowIfNull(drawing);
+        return Child(drawing, "anchor") is not null;
+    }
+
+    /// <summary>
     /// Whether an anchored drawing belongs on the layer Writer paints before the text.
     /// </summary>
     /// <remarks>
