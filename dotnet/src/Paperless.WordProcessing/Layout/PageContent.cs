@@ -574,7 +574,7 @@ public sealed record PageParagraph : PageBlock
     /// </remarks>
     internal MeasuredParagraph Measure()
     {
-        List<FormattedRun> runs = Coalesce(Runs);
+        List<FormattedRun> runs = Coalesce(AtParagraphSizeWhereOnlyAnAnchor(Runs));
 
         if (runs.Count == 0)
         {
@@ -584,6 +584,84 @@ public sealed record PageParagraph : PageBlock
         return MeasuredParagraph.Measure(
             Text, runs, shaper: null, Itemisation, MeasurementObjects(), Metrics,
             BlanksAreTransparentToHeight, WriterLineBox.LeadingAboveText, AddsScriptSpace);
+    }
+
+    /// <summary>
+    /// The runs, with any that holds nothing but frame anchors measured at the paragraph's own size.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// U+0001 stands for a thing that takes a position and is <em>not</em> text — a floating frame, an
+    /// as-character picture, a comment mark. The run around it still carries a font size, and a document
+    /// routinely states a large one there: a logo run set at 26 pt because that is what the heading beside
+    /// it was. **The reference does not let that size reach the line's height**, because Writer builds the
+    /// line out of portions and a run with no text makes no text portion — a fly is a
+    /// <c>SwFlyCntPortion</c> of its own height, and an at-character fly is not a portion at all.
+    /// </para>
+    /// <para>
+    /// Measured against 26.2.4.2 on ten authored variants of one real paragraph
+    /// (<c>probes/words-r53/</c>), reading the height the paragraph adds over an empty one:
+    /// </para>
+    /// <code>
+    ///   case                                       reference   before   after
+    ///   a run of text at 26 pt                         20.60    19.10   19.10
+    ///   anchored drawing, run at 10 pt                  0.00    -1.10   -1.10
+    ///   anchored drawing, run at 26 pt                  0.00    17.25   -1.10
+    ///   anchored drawing at 26 pt, text beside it       0.00    17.25    0.00
+    ///   as-character drawing, run at 10 pt              7.00     6.95    6.95
+    ///   as-character drawing, run at 26 pt              7.00    17.25    6.95
+    ///   as-character at 26 pt, text beside it           9.70    17.25    9.70
+    /// </code>
+    /// <para>
+    /// The reference's answer is the same at both sizes on every row, and the rows where the run's size
+    /// already matched the paragraph's are the rows we were already right on — which is why this never
+    /// showed as a systematic error and why it is worth 34 pt on one document and nothing on most.
+    /// </para>
+    /// <para>
+    /// The measurement half only. A <see cref="PageRun"/> also says what to <em>draw</em>, and an anchor
+    /// draws nothing, so nothing downstream of the drawing pass can see this. A run holding an anchor
+    /// <em>and</em> text keeps its own size, because then it really does make a text portion.
+    /// </para>
+    /// </remarks>
+    private IReadOnlyList<PageRun> AtParagraphSizeWhereOnlyAnAnchor(IReadOnlyList<PageRun> runs)
+    {
+        List<PageRun>? rewritten = null;
+
+        for (int i = 0; i < runs.Count; i++)
+        {
+            if (!HoldsNothingButAnchors(Text, runs[i])) continue;
+
+            rewritten ??= [.. runs];
+            rewritten[i] = runs[i] with { Face = Face, EmSize = EmSize, MetricEmSize = default };
+        }
+
+        return rewritten ?? runs;
+    }
+
+    /// <summary>The character a frame, a picture or a comment mark occupies.</summary>
+    /// <remarks>
+    /// The same one every word-processing reader emits — see <c>DocxLayoutSource.AnchorCharacter</c>,
+    /// <c>OdtLayoutSource</c>, <c>Ww8DocumentReader</c> and <c>RtfDocumentReader</c> — so the rule
+    /// serves all four formats rather than the one it was found on.
+    /// </remarks>
+    private const char AnchorCharacter = '\u0001';
+
+    /// <summary>True when a run's whole range is anchor characters.</summary>
+    /// <remarks>
+    /// An empty range is not: a zero-length run is dropped before it can be measured, and answering
+    /// true for one would rewrite a run that stands for nothing at all.
+    /// </remarks>
+    private static bool HoldsNothingButAnchors(string text, PageRun run)
+    {
+        int end = Math.Min(run.End, text.Length);
+        if (end <= run.Start) return false;
+
+        for (int at = Math.Max(run.Start, 0); at < end; at++)
+        {
+            if (text[at] != AnchorCharacter) return false;
+        }
+
+        return true;
     }
 
     /// <summary>

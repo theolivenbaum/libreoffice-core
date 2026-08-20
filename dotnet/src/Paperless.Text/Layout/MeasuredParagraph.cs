@@ -671,13 +671,13 @@ public sealed class MeasuredParagraph
         Length ascent = Length.Zero;
         Length descent = Length.Zero;
 
-        Fold(start, end, _blanksAreTransparentToHeight, ref height, ref ascent, ref descent);
+        Fold(start, end, skipTransparentRuns: true, ref height, ref ascent, ref descent);
 
         // A line holding nothing but tabs and blanks is as tall as those tabs and blanks: they are skipped
         // only while something else is there to be measured instead.
         if (height == Length.Zero && _blanksAreTransparentToHeight)
         {
-            Fold(start, end, skipBlankRuns: false, ref height, ref ascent, ref descent);
+            Fold(start, end, skipTransparentRuns: false, ref height, ref ascent, ref descent);
         }
 
         // No run at all, which happens for an empty paragraph. The first run's metrics are the
@@ -726,7 +726,7 @@ public sealed class MeasuredParagraph
             Length blankAscent = Length.Zero;
             Length blankDescent = Length.Zero;
 
-            Fold(start, end, skipBlankRuns: false, ref blankHeight, ref blankAscent, ref blankDescent);
+            Fold(start, end, skipTransparentRuns: false, ref blankHeight, ref blankAscent, ref blankDescent);
 
             textHeight = Length.Max(
                 textHeight, Length.Max(blankHeight, blankAscent + blankDescent));
@@ -838,15 +838,16 @@ public sealed class MeasuredParagraph
     /// <summary>Folds every run touching a range into the maxima a line's height is built from.</summary>
     /// <param name="start">Where the line starts.</param>
     /// <param name="end">Where the line's visible text ends.</param>
-    /// <param name="skipBlankRuns">
-    /// True to pass over a run whose share of the range is nothing but tabs and blanks, which is what
-    /// <see cref="HeightOf"/> documents.
+    /// <param name="skipTransparentRuns">
+    /// True to pass over a run that contributes no height: one whose share of the range is nothing but
+    /// tabs and blanks, which is what <see cref="HeightOf"/> documents, or one whose share is nothing
+    /// but frame anchors, which is <see cref="IsAllAnchors"/>.
     /// </param>
     /// <param name="height">The tallest run so far.</param>
     /// <param name="ascent">The largest ascent so far.</param>
     /// <param name="descent">The largest descent so far.</param>
     private void Fold(
-        int start, int end, bool skipBlankRuns,
+        int start, int end, bool skipTransparentRuns,
         ref Length height, ref Length ascent, ref Length descent)
     {
         foreach (MeasuredRun run in _runs)
@@ -855,14 +856,65 @@ public sealed class MeasuredParagraph
             bool contains = start == end && run.Run.Covers(start);
             if (!touches && !contains) continue;
 
-            if (skipBlankRuns
-                && IsAllBlanks(Text, Math.Max(start, run.Run.Start), Math.Min(end, run.Run.End)))
+            int from = Math.Max(start, run.Run.Start);
+            int to = Math.Min(end, run.Run.End);
+
+            // The anchor rule is not gated on the caller's flag the way the blanks rule is: #i3952 is a
+            // Word compatibility setting that the RTF and ODF filters leave off, while a run holding no
+            // text making no text portion is Writer's line model itself and is the same in every format.
+            if (skipTransparentRuns
+                && (IsAllAnchors(Text, from, to)
+                    || (_blanksAreTransparentToHeight && IsAllBlanks(Text, from, to))))
             {
                 continue;
             }
 
             Accumulate(run, ref height, ref ascent, ref descent);
         }
+    }
+
+    /// <summary>
+    /// Whether a stretch of the text is nothing but the anchors of things that are not text.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// U+0001 is what every word-processing reader puts where a floating frame, an as-character picture
+    /// or a comment mark sits. Writer builds a line out of portions and neither of the three is a text
+    /// portion — an as-character fly is a <c>SwFlyCntPortion</c> carrying its own height, an
+    /// at-character fly is not in the line at all, and a comment mark is a mark. So the run's font
+    /// never reaches <c>SwLineLayout::Height</c>, and a document that sets its logo run at 26 pt
+    /// because the heading beside it was does not thereby make the line 26 pt tall.
+    /// </para>
+    /// <para>
+    /// Measured against 26.2.4.2 on ten authored variants of one real paragraph
+    /// (<c>dotnet/probes/words-r53/</c>): the height a paragraph holding one drawing adds is
+    /// <b>the same at 10 pt and at 26 pt</b> — 0.00 anchored, 7.00 as-character, 9.70 as-character with
+    /// text beside it — while ours was the run's own size in every row where that size was large. It is
+    /// worth 34 pt on <c>097_Business_Case_Template_Elegant_Layout</c> and nothing at all on a document
+    /// whose picture run happens to be set in the size of the text around it, which is most of them.
+    /// </para>
+    /// <para>
+    /// Skipped only while something else is on the line, exactly as a blank run is: a line holding
+    /// nothing but an anchor falls back through the same refold, where the run is met again — by then
+    /// carrying the paragraph's own face and size, which the word-processing layer substitutes for a
+    /// run that holds nothing but anchors. That is the reference's answer for the alone case, 0.00 over
+    /// an empty paragraph at both sizes.
+    /// </para>
+    /// <para>
+    /// An empty stretch is not all anchors, for the reason <see cref="IsAllBlanks"/> gives: that is the
+    /// empty-line case and it must keep the run covering it.
+    /// </para>
+    /// </remarks>
+    private static bool IsAllAnchors(string text, int start, int end)
+    {
+        if (end <= start) return false;
+
+        for (int at = start; at < end && at < text.Length; at++)
+        {
+            if (text[at] != '\u0001') return false;
+        }
+
+        return true;
     }
 
     /// <summary>
