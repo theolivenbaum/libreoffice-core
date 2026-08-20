@@ -14214,3 +14214,104 @@ git diff --cached --stat -- <the files>     # must be empty; git reset HEAD -- <
 The general lesson stands where CLAUDE.md already puts it: **the numbers being right is not
 evidence you measured the right thing** — and here, the numbers being right was *produced by* the
 tree being wrong in a way only the index could show.
+
+---
+
+## Merge note — round 50, words (2026-08-20)
+
+Merged at `ac147b7e5bb`, on top of the sheets and slides rounds already merged above.
+
+### Combined test counts at the merged tree
+
+```
+Core 337   Containers 109   Text 596   Vector 295   Rendering 150(1 skipped)   Markup 259
+OpenDocument 125   WordProcessing 1061   Spreadsheets 886   Presentations 747      = 4565
+0 failed
+```
+
+Words' own report said 4550 — again a base-relative figure, short by sheets' 4 and slides' 11.
+Third round in a row where recombining changed the number.
+
+### Verdict movement — round 50 complete
+
+| track | start | end | Δ |
+|---|---:|---:|---:|
+| words | 300 / 337 | **309 / 337** | +10 −1 |
+| sheets | 265 / 307 | **267 / 307** | +2 |
+| slides | 198 / 302 | **199 / 302** | +1 |
+| **total** | 763 / 946 | **775 / 946** | **+12** |
+
+### The prediction missed *upwards*, and that is the round's most useful result
+
+Predicted +5 — the five `Printable_Graph_Paper_Template` documents — and **explicitly declined**
+the six `Project_Timeline_Template` documents, reasoning that they fail on *words* rather than
+*pages* so a pagination fix could not close them. Measured **+10**. The timelines' missing words
+were **falling off the page**; `011` went 41/158 → **158/158**.
+
+That is the brief's own "one cause seen through two gate columns" arriving and being argued away.
+It matters because § 7 warns that an under-reaching census *conceals itself* — a low prediction
+that comes true reads as well-calibrated. Here the round predicted low, was wrong, and only found
+out because it swept the whole batch instead of the five documents it had named. **Sweep the
+population, not the prediction.**
+
+### Two defects, not one, and the passing siblings are what separate them
+
+The brief asserted the five graph-paper documents were one defect with five witnesses. **They are
+two, with 3 and 2.** The control that establishes it is § 7's: `082`, `085`, `087` carry the same
+`w:tblpPr` and **pass**. Running the classifier over the documents that already match separated a
+class that the failing documents alone could not.
+
+- **A paragraph holding only a floating `w:drawing`** was sized by the body style rather than by
+  its own 2 pt paragraph mark, because the walk emitted an anchor character for a `wp:anchor`
+  exactly as for an inline drawing. Eleven authored variants of `088`, one variable each: deleting
+  the drawing run alone fixes it; raising the mark to 11 pt gives two pages on **both** stacks;
+  and offset, extent, `behindDoc`, wrap mode and anchor origin all change nothing.
+- **`w:tblpPr` makes a body table a fly.** Predicting the reference's first table rule from
+  `w:tblpY`/`w:vertAnchor` alone was within 1.15 pt on 7 of 8 documents and out by up to 26 pt on
+  the others; after the change all ten agree within 0.55 pt. The verdict cost was the **flow**,
+  not the position — on `080` both sides draw the identical 86 strokes on page 1 and the reference
+  then draws on page 1 what we had pushed to page 2, at the same offsets.
+
+### The regression, stated rather than netted
+
+`AFS-050-004-F2_0i.docx` goes `match` → `words`, 2503/2228. Its **pages are now right** (8/8;
+6/8 in the unguarded run). Page 3 holds 364 words against the reference's 53 — **318 extra tokens
+and none missing**. Its flow starts clear of a fly and grows into it, and we draw through where
+Writer wraps past. This document *is* the measurement for the next item on the track.
+
+### The alias-directory trap, found independently on two tracks in one round
+
+`look.py` resolves a document by `rglob(stem.ext)` **plus** `rglob(stem.EXT)`, and on this
+case-insensitive virtiofs mount the upper-case probe **materialises a second directory entry** for
+the same inode. `cmp` says identical, git sees one file, and every later glob double-counts:
+`words/*` swept **355 rows for 337 documents**, and a slides total went 305 → 311. **12 of the 18
+words aliases predate this round**, so they are already in the tree and will keep inflating totals.
+
+The mitigation is not to fix the totals but to stop trusting them: **score against `MANIFEST.tsv`'s
+path list, never against a sweep's own `TOTAL`.** Both agents reached this independently, which is
+the strongest form the evidence takes here.
+
+### Owed
+
+Nothing. The words diff is entirely inside `Paperless.WordProcessing` — 5 source files, 2 test
+files — so no shared layer is touched and no cross-track sweep is due. The `Paperless.Ooxml`
+sweep owed by the sheets round is recorded above: **666 of 666 byte-identical.**
+
+### Words does next, in order
+
+1. **The wrap.** A body fly takes Writer's parallel surround; we now place flies correctly and
+   never push text clear of them. The measurement is already banked (`AFS` page 3: 53 against
+   364). Implement in the paragraph arm of `Paginator.Fill`, then **re-measure the ten graph
+   papers and five timelines**, which is what it can break.
+2. **Shape text inside groups — seven witnesses.** `068` is 19/86, and its blind reviewer, given
+   the image alone, reported the reference drawing 41 boxes and the full connector tree against
+   our 0 boxes and 6 of 41 labels — then proposed the discriminator itself: *if every rendered
+   item is nesting depth ≤ 1 and every missing one is ≥ 2, it is a recursion limit rather than a
+   fill problem.* `056` (24/56) shows the same from the other side: 25 boxes against 5, ours piled
+   top-left. `057`, `025`, `030`, `008`, `071` all carry a `wpg:wgp` and are open on `text`.
+3. **Chart data labels — 4 documents, the largest word gaps left.** `028` is 191/327; its reviewer
+   read the reference's labels as `Branch 3 Stem 6 Leaf 14 / 15%` against our `Branch 3`, with no
+   percentages anywhere on our chart. `c:multiLvlStrRef` taken at one level plus an unread
+   `showPercent` accounts for ~123 of the 136 missing words.
+4. The three `pages 1/2` timelines (`097`, `012`, `015`) are the **opposite sign** and were not
+   investigated.
