@@ -14350,3 +14350,90 @@ precisely what the manifest is for. Verdicts are unaffected either way — per-f
 on the extension as spelled, so `report__xls` and `report__XLS` are two identities and neither
 overwrites the other. Only the counts inflate. **Score against `MANIFEST.tsv`, never a sweep
 `TOTAL`.**
+
+---
+
+## Merge note — round 51, slides (2026-08-20)
+
+Slides **199 / 302**, unchanged, **as predicted**. Prediction file committed before any
+post-change rendering: 0 verdict movement, 11 named documents, and an explicit statement of what
+the census could not see. Measured: **0 verdicts, 0 page counts, 0 word counts.** What moved is
+the rendering — `abs_ink` 1409.36 → **1394.03**, signed 1040.62 → 1026.61, major pages 498 → 494,
+16 documents moved, **13 improved and 3 worsened by ≤ 0.04**.
+
+Test counts at the merged tree: **4590 passed, 0 failed, 1 skipped** (Presentations 747 → 772,
+exactly the 25 new `BlipColourChangeTests`).
+
+### `a:clrChange` was a route, not a rule — the seventh instance
+
+`ColourKnockout`, its box match, its binary alpha and the decoder that applies it **all already
+existed**, and the `.ppt` path had been populating them from Escher for rounds. `grep clrChange
+dotnet/src` returned **0 hits**. On `social-media-app` page 3 the black slab covering the wordmark
+went **91.6% → 0.1%** of the region, ink 6.21 → 0.93 — on a document that passes every gate column.
+
+The blind reviewer named `a:clrChange` among its candidates **unprompted**, and the discriminating
+measurement it proposed was the one already run. That is the second round running in which a
+reviewer given only the image handed over the discriminator.
+
+**This shape now has seven instances on this project.** Before writing an implementation for a
+property that looks unimplemented, grep for it: it is more often unrouted than unwritten.
+
+### The round refuted its own fix, via its own sweep
+
+`vv_summit` went from an **exact** page 13 to 0.28. Two authored decks varying one thing show
+LibreOffice knocks out an **RGB** PNG and leaves an **RGBA** one alone — `Graphic::colorChange`
+branches on `HasAlpha()`. Implemented; both documents returned to their exact baseline with the
+wins retained.
+
+### Two further refutations worth keeping
+
+- **The comment beside `PptSlideLayout.Autofits`** said "no deck in the slides corpus holds that
+  combination". **36 of 51 `.ppt` documents do.** `2015-Civil-Rights` holds 14 and was
+  independently found overflowing by a blind reviewer; `ITE106` holds 0 and moves the **opposite**
+  way — so those are **two defects sharing a symptom**, not one. The 36 is an upper bound until
+  the Escher OPT tables are tied to `TextHeaderAtom` kinds, and the round said so rather than
+  quoting it as reach.
+- **A small ink rise is not automatically a regression.** On `system_design` the ink rose while
+  the colour the change controls went **3.374% → 0.048% against the reference's 0.040%** — our
+  stray grey had been *offsetting* a pre-existing deficit in the same regions. Check the quantity
+  the change controls, not the aggregate.
+
+And the prediction's stated limit came true as written: a tolerance-0 census is a **lower** bound,
+and 8 documents it called inert moved — all of them improving — because LibreOffice's JPEG
+tolerance is 15 where the census used 0.
+
+### The cross-track measurement, run by the parent
+
+The diff reaches `DocxPictures.cs` (words) and `XlsxDrawings.cs` (sheets) as well as the shared
+DrawingML fill path, so it owed a measurement over the other two tracks. Every words and sheets
+document rendered at the merged commit and again with the round's `dotnet/src` diff reversed —
+by `git apply -R` rather than `git checkout <commit> -- <path>`, deliberately, because checkout
+writes the index and that is what left a staged revert behind two rounds ago. Both legs pinned to
+`SOURCE_DATE_EPOCH`, `obj`/`bin` deleted between them:
+
+```
+TOTAL compared=680  identical=673  changed=7  unrenderable=0
+worktree vs HEAD: clean      index vs HEAD: clean
+```
+
+Then the gate over the seven documents' batches, because reach is not verdicts:
+
+```
+74 rows swept, 70 manifest rows covered, AGREE 70, DISAGREE 0
+```
+
+**All seven changed renderings are documents that were exact before and are exact after** — four
+`Business_Case_Template`, two `Volunteer_Sign_Up_Sheet_Template`, and `system_design`. Seven
+renderings moved and not one gate column did, which is round 44's shape reproduced exactly.
+
+The round's own census predicted 9 (7 words + 2 sheets); the measurement says **7** (5 words +
+2 sheets). The census over-reached by two, in the safe direction, and the difference is why the
+sweep is owed rather than the census accepted.
+
+### Instruments
+
+- `track-ink-sweep.sh`'s two-measurements-under-one-name defect is **fixed** — named columns, an
+  invariant check, and a known-answer check against the independent round-19 script.
+- `look.py`'s upper-case `rglob`, which *materialised* the second spelling, is **fixed**.
+- New trap: **`sed -i` drops the exec bit on this mount.** It produced a silent `Permission
+  denied` after every other check had passed. `chmod +x` after any in-place edit of a script.
