@@ -364,6 +364,7 @@ dotnet/probes/words-r47/after-label.tsv	2026-08-10	pre-container	24.2.7.2	unveri
 dotnet/probes/words-r47/after-unnamed.tsv	2026-08-10	pre-container	24.2.7.2	unverified	archival	-
 dotnet/probes/words-r47/baseline.tsv	2026-08-10	pre-container	24.2.7.2	unverified	archival	-
 dotnet/probes/words-r47/prediction.md	2026-08-10	pre-container	24.2.7.2	unverified	archival	-
+dotnet/probes/words-r50-chartset/prediction.md	2026-08-20	current	26.2.4.2	present	current	-
 dotnet/probes/words-rebase-01/results.md	2026-08-13	current	26.2.4.2	present	current	-
 dotnet/probes/words-rebase-02/gate.tsv	2026-08-13	current	26.2.4.2	present	current	-
 dotnet/probes/words-rebase-02/prediction.md	2026-08-13	current	26.2.4.2	present	current	-

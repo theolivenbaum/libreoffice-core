@@ -126,6 +126,8 @@ public sealed partial class DocxLayoutSource
             LeftIndent = LeftEdge(properties, rows, isNested: _tableDepth > 0),
             HorizontalPosition = HorizontalPositionOf(properties),
             IsPositioned = Word.Child(properties, "tblpPr") is not null,
+            VerticalOffset = Twips(Word.Child(properties, "tblpPr"), "tblpY") ?? Length.Zero,
+            VerticalOrigin = VerticalOriginOf(Word.Child(properties, "tblpPr")),
             LowerSpacing = Twips(Word.Child(properties, "tblpPr"), "bottomFromText") ?? Length.Zero,
             JoinsBordersLikeWord = true,
             MinHeightIncludesInsets = true,
@@ -153,11 +155,9 @@ public sealed partial class DocxLayoutSource
     /// the corpus's eighteen anchored tables say <c>page</c>.
     /// </para>
     /// <para>
-    /// The vertical half — <c>w:tblpY</c>, <c>w:tblpYSpec</c>, <c>w:vertAnchor</c> — is not read. Writer
-    /// makes a positioned table into a frame holding a table, and a frame here lays its content out with
-    /// <c>FlowLayouter</c>, which has no grid. Honouring the horizontal half alone is what stops an
-    /// over-wide table's right-hand columns falling off the paper, and that is the failure this was found
-    /// on.
+    /// The vertical half is read by <see cref="VerticalOriginOf"/> beside this — <c>w:tblpY</c> and
+    /// <c>w:vertAnchor</c>, but <em>not</em> <c>w:tblpYSpec</c>, which names an edge (<c>top</c>,
+    /// <c>center</c>, <c>bottom</c>) rather than a distance and which no corpus document states.
     /// </para>
     /// <para>
     /// The commoner mechanism by far is the plain <c>w:jc</c> beside it, which was not read either: 31 of
@@ -195,6 +195,31 @@ public sealed partial class DocxLayoutSource
             _ => null,
         };
     }
+
+    /// <summary>
+    /// What a positioned table's <c>w:tblpY</c> is measured from.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The three <c>w:vertAnchor</c> values map onto Writer's relation constants exactly as
+    /// <c>TablePositionHandler::getTablePosition</c> maps them
+    /// (<c>sw/source/writerfilter/dmapper/TablePositionHandler.cxx:133-141</c>): <c>page</c> is
+    /// <c>PAGE_FRAME</c>, <c>margin</c> is <c>PAGE_PRINT_AREA</c> and <c>text</c> is <c>FRAME</c>.
+    /// </para>
+    /// <para>
+    /// An absent attribute reads as <c>text</c>, which is ECMA-376's default and is what the two corpus
+    /// documents that omit it behave as: <c>083_Printable_Graph_Paper_Template_Customizable_Format</c>
+    /// states <c>w:tblpY="525"</c> with no anchor and 26.2.4.2 draws its first rule 26.25 twentieths of
+    /// a point below the flow's position, to 0.06 pt.
+    /// </para>
+    /// </remarks>
+    private static FrameVerticalOrigin VerticalOriginOf(XElement? position)
+        => Word.Attribute(position, "vertAnchor") switch
+        {
+            "page" => FrameVerticalOrigin.Page,
+            "margin" => FrameVerticalOrigin.PageMargin,
+            _ => FrameVerticalOrigin.Paragraph,
+        };
 
     /// <summary>
     /// Where the table's left edge goes, which is not what <c>w:tblInd</c> says.

@@ -832,8 +832,9 @@ public sealed partial class DocxLayoutSource
 
         // A paragraph with nothing in it is its mark, so that is what sizes it; one with text is
         // sized by the text, and its mark formats a pilcrow nobody draws.
-        WordTextStyle text = walker.Text.Length == 0 ? mark : body;
-        if (walker.Text.Length == 0) face = markFace ?? face;
+        bool empty = walker.Text.Length == 0 || HoldsOnlyFloatingFrames(walker);
+        WordTextStyle text = empty ? mark : body;
+        if (empty) face = markFace ?? face;
 
         PageParagraph read = new()
         {
@@ -1173,6 +1174,61 @@ public sealed partial class DocxLayoutSource
 
     /// <summary>One floating frame in a paragraph, with the character offset it is anchored at.</summary>
     private readonly record struct FrameAnchor(int Offset, XElement Element);
+
+    /// <summary>
+    /// Whether the paragraph produced nothing but the anchor characters of <em>floating</em> drawings —
+    /// in which case it is an empty paragraph, and its mark is what sizes it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The walk emits one <see cref="AnchorCharacter"/> per drawing, floating or inline, because an
+    /// offset has to mean the same thing wherever it was counted. That is right for the frame list and
+    /// wrong for the height: a <c>wp:inline</c> genuinely occupies its line, a <c>wp:anchor</c> does not
+    /// — Writer's import puts it in a fly and the paragraph it was written in is left empty, so the
+    /// paragraph's height is its mark's. Reading the anchor character as text instead takes the *body*
+    /// style, and where the mark states a smaller size than the document default the paragraph comes out
+    /// several times too tall.
+    /// </para>
+    /// <para>
+    /// Deliberately strict on all three counts, because the failure mode of getting this wrong is a
+    /// paragraph that silently loses height:
+    /// </para>
+    /// <list type="bullet">
+    ///   <item><description>every character must be the anchor character, so a caption beside a picture
+    ///   still measures its text;</description></item>
+    ///   <item><description>there must be exactly one frame anchor per character, so a field result, a
+    ///   note citation or a <c>w:commentReference</c> — which emit the same character and register no
+    ///   frame — keeps the paragraph text-bearing;</description></item>
+    ///   <item><description>and every anchor must be a floating <c>w:drawing</c>. A <c>w:pict</c> or
+    ///   <c>w:object</c> is excluded even when it floats: <c>DocxVmlFrames</c> already returns nothing
+    ///   for a floating VML shape, so its anchor character stands for something this reader never sized
+    ///   in the first place, and changing it would be a second rule with no measurement behind
+    ///   it.</description></item>
+    /// </list>
+    /// <para>
+    /// Reach over the corpus: 37 of 271 DOCX-family documents hold at least one such paragraph, 17 of
+    /// them with an explicit <c>w:pPr/w:rPr/w:sz</c> on it. Only those where the mark resolves to a
+    /// different height from the body can move at all.
+    /// </para>
+    /// </remarks>
+    private static bool HoldsOnlyFloatingFrames(RunWalker walker)
+    {
+        string text = walker.Text;
+        if (text.Length == 0 || walker.Frames.Count != text.Length) return false;
+
+        foreach (char character in text)
+        {
+            if (character != AnchorCharacter) return false;
+        }
+
+        foreach (FrameAnchor anchor in walker.Frames)
+        {
+            if (anchor.Element.Name.LocalName != "drawing") return false;
+            if (!DocxFrames.IsFloating(anchor.Element)) return false;
+        }
+
+        return true;
+    }
 
     /// <summary>
     /// How deeply a frame's own text may hold further frames before the innermost is dropped.
