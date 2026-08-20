@@ -162,5 +162,112 @@ public class BlipColourChangeTests
         knockout.Matches(2, 0, 0).ShouldBeFalse();
     }
 
-    private static ReadOnlySpan<byte> Png => [0x89, (byte)'P', (byte)'N', (byte)'G', 13, 10, 26, 10];
+    /// <summary>
+    /// A picture that already carries an alpha channel is not knocked out at all.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Measured, not reasoned. <c>Graphic::colorChange</c> branches on <c>aBitmap.HasAlpha()</c>
+    /// (<c>vcl/source/graphic/UnoGraphic.cxx</c>:188-208): an alpha-bearing bitmap takes
+    /// <c>ChangeColorAlpha</c>, and only a bitmap without alpha reaches the
+    /// <c>CreateAlphaMask(aColorFrom, nTolerance)</c> branch that is the knockout.
+    /// </para>
+    /// <para>
+    /// Confirmed on the installed 26.2.4.2 with two authored one-shape decks differing in
+    /// exactly one thing — the same pixels and the same <c>clrChange</c>, saved once as RGB PNG
+    /// and once as RGBA. The RGB deck renders the colour knocked out; the RGBA deck renders it
+    /// untouched.
+    /// </para>
+    /// <para>
+    /// Without this, <c>vv_summit_SAIC-PRESENTATION*.pptx</c> page 13 — an RGBA PNG that is
+    /// 66.1% <c>F4F4F4</c> — went from an <strong>exact</strong> page to 0.28 unaccounted ink.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void AnAlphaBearingPictureIsNotKnockedOut()
+        => DrawingPictureEffects.Knockout(
+               DrawingFill.ReadBlip(BlipFill("F4F4F4", "F4F4F4", "0")),
+               theme: null, Rgba).ShouldBeNull();
+
+    [Fact]
+    public void APictureWithoutAlphaIsKnockedOut()
+        => DrawingPictureEffects.Knockout(
+               DrawingFill.ReadBlip(BlipFill("F4F4F4", "F4F4F4", "0")),
+               theme: null, Rgb).ShouldNotBeNull();
+
+    [Theory]
+    [InlineData(6, true)]    // RGBA
+    [InlineData(4, true)]    // grey + alpha
+    [InlineData(2, false)]   // truecolour
+    [InlineData(0, false)]   // greyscale
+    [InlineData(3, false)]   // palette, no tRNS
+    public void APngsColourTypeDecidesWhetherItCarriesAlpha(byte colourType, bool expected)
+        => DrawingPictureEffects.HasAlphaChannel(PngHeader(colourType)).ShouldBe(expected);
+
+    /// <summary>A palette PNG carries alpha through a <c>tRNS</c> chunk rather than its type.</summary>
+    [Fact]
+    public void APaletteePngWithATrnsChunkCarriesAlpha()
+        => DrawingPictureEffects.HasAlphaChannel(PngHeader(3, "tRNS")).ShouldBeTrue();
+
+    /// <summary>No <c>tRNS</c> may follow the first <c>IDAT</c>, so the scan stops there.</summary>
+    [Fact]
+    public void ATrnsAfterTheFirstIdatIsNotLookedFor()
+        => DrawingPictureEffects.HasAlphaChannel(PngHeader(3, "IDAT", "tRNS")).ShouldBeFalse();
+
+    [Fact]
+    public void AJpegNeverCarriesAlpha()
+        => DrawingPictureEffects.HasAlphaChannel([0xFF, 0xD8, 0xFF, 0xE0, 0, 0, 0, 0]).ShouldBeFalse();
+
+    /// <summary>
+    /// <c>useA="0"</c> makes the reference discard the destination's transparency, so the
+    /// knockout becomes nothing.
+    /// </summary>
+    /// <remarks>
+    /// <c>ColorChangeContext::~ColorChangeContext</c> calls
+    /// <c>maColorChangeTo.clearTransparence()</c> when <c>useA</c> is false
+    /// (<c>oox/source/drawingml/misccontexts.cxx</c>:266-270). All 93 corpus occurrences state
+    /// no <c>useA</c> and so default to true, so this reaches nothing today — it is pinned
+    /// because the attribute is the whole difference between knocking a colour out and not.
+    /// </remarks>
+    [Fact]
+    public void UseAlphaFalseProducesNoKnockout()
+    {
+        XElement fill = BlipFill("000000", "000000", "0");
+        fill.Descendants().First(e => e.Name.LocalName == "clrChange")
+            .Add(new XAttribute("useA", "0"));
+
+        DrawingFill.ReadBlip(fill)!.ColourChange!.Value.UseAlpha.ShouldBeFalse();
+        DrawingPictureEffects.Knockout(DrawingFill.ReadBlip(fill), theme: null, Rgb).ShouldBeNull();
+    }
+
+    [Fact]
+    public void UseAlphaDefaultsToTrue()
+        => DrawingFill.ReadBlip(BlipFill("000000", "000000", "0"))
+               !.ColourChange!.Value.UseAlpha.ShouldBeTrue();
+
+    /// <summary>A PNG signature plus a complete IHDR, then the named zero-length chunks.</summary>
+    private static byte[] PngHeader(byte colourType, params string[] chunks)
+    {
+        List<byte> bytes =
+        [
+            0x89, (byte)'P', (byte)'N', (byte)'G', 13, 10, 26, 10,
+            0, 0, 0, 13, (byte)'I', (byte)'H', (byte)'D', (byte)'R',
+            0, 0, 0, 1, 0, 0, 0, 1,      // 1x1
+            8, colourType, 0, 0, 0,
+            0, 0, 0, 0,                  // CRC
+        ];
+
+        foreach (string chunk in chunks)
+        {
+            bytes.AddRange([0, 0, 0, 0]);
+            bytes.AddRange(chunk.Select(c => (byte)c));
+            bytes.AddRange([0, 0, 0, 0]);
+        }
+
+        return [.. bytes];
+    }
+
+    private static ReadOnlySpan<byte> Png => Rgb;
+    private static ReadOnlySpan<byte> Rgb => PngHeader(2);
+    private static ReadOnlySpan<byte> Rgba => PngHeader(6);
 }

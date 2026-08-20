@@ -163,7 +163,15 @@ public static class DrawingFill
         if (from is null || toColour is null) return null;
         if (DrawingColour.Read(toColour) is not { } to) return null;
 
-        return new DrawingColourChange(from, to);
+        // useA="0" makes the reference throw the destination's transparency away outright --
+        // ColorChangeContext's destructor calls maColorChangeTo.clearTransparence()
+        // (oox/source/drawingml/misccontexts.cxx:266-270) -- after which from == to opaque and
+        // the transform is skipped. Absent everywhere in this corpus (93 of 93 state no useA
+        // and so default to true), so this reaches nothing today and is here because the
+        // attribute is the difference between "knock this out" and "do nothing".
+        bool useAlpha = Drawing.Flag(element, "useA") ?? true;
+
+        return new DrawingColourChange(from, to, useAlpha);
     }
 
     /// <summary>
@@ -462,7 +470,12 @@ public sealed record DrawingBlipFill
 /// </remarks>
 /// <param name="From">The colour matched in the stored picture — <c>a:clrFrom</c>.</param>
 /// <param name="To">The colour it becomes — <c>a:clrTo</c>, alpha included.</param>
-public readonly record struct DrawingColourChange(DrawingColour From, DrawingColour To);
+/// <param name="UseAlpha">
+/// <c>a:clrChange/@useA</c>, defaulting to true. When false the reference discards the
+/// destination's transparency entirely, which turns a knockout into nothing at all.
+/// </param>
+public readonly record struct DrawingColourChange(
+    DrawingColour From, DrawingColour To, bool UseAlpha = true);
 
 /// <summary>
 /// A rectangle stated as fractions inset from each edge of something else, which is how
