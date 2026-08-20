@@ -414,6 +414,19 @@ cross-track sweep by checking `dotnet/src` out at the base commit, and a followi
 committed the revert. Twice. The branch held the round's tests and results with **none of its
 code**, and `git status` was clean throughout.
 
+**`git checkout <commit> -- <path>` writes the index too, so an A/B measurement leaves a staged
+revert behind.** This is a third route to the same destination and it was hit on 2026-08-20 while
+measuring a shared-layer change's cross-track reach. The before-leg checks the base version of the
+changed files out; the restore afterwards — done correctly, `cp` + `touch`, exactly as prescribed —
+makes `git diff HEAD` empty and rebuilds the right binary, while the **index still holds the base
+blob**. `git status --short` prints `MM`, which reads as ordinary local edits. Commit there and the
+round's own fix is reverted into the branch, with the full test suite green because it ran against
+the correct binary. Assert it away in the script rather than hoping to notice:
+
+```sh
+git diff --cached --stat -- <files>    # must be empty; `git reset HEAD -- <files>` if not
+```
+
 **The shell's working directory is not where the last `cd` put it.** A merge session ran
 `cd <primary> && git merge …` and then issued the next two merges with no `cd`. Both landed on the
 **agent worktree's** branch. `git log` in the primary showed a clean fast-forward of the first

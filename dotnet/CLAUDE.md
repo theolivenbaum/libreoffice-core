@@ -611,6 +611,15 @@ apt-get update && apt-get install -y --no-install-recommends fonts-dejavu-core  
 The container's package index is stale, not the archive. `apt-get update` first, always, and
 re-check `fc-match` afterwards rather than trusting the installer's exit code.
 
+**`/c/sandbox/workdir` is a case-insensitive virtiofs mount, and this invalidates sweep totals.**
+The four corpus files described elsewhere as "upper-case on disk" are not a second file that a
+case-sensitive glob would miss — on this mount `049_….pptx` and `049_….PPTX` are the **same
+inode**, one md5, one file. The live trap is that a tool which probes both spellings *materialises*
+the second one permanently: `look.py` resolves a document by `CORPUS.rglob(stem.ext)` **plus**
+`CORPUS.rglob(stem.EXT)`, and a slides sweep total went **305 → 311 with the corpus unchanged**
+because of it. Reconcile every `find`-based total case-folded, and treat a total that grew without
+a corpus commit as this until proven otherwise.
+
 Canonical reference renderings for this environment, all 534 documents at 26.2.4.2 with the
 correct font set, are kept at `/c/sandbox/workdir/refpdfs-26.2.4.2-fonts/` with a
 `ref-baseline-all.tsv` beside them. Reuse them rather than re-rendering the reference.

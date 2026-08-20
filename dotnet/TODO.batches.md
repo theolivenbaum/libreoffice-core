@@ -14171,3 +14171,46 @@ document, previously unrecorded. Then autofit on the `.ppt` path: two blind read
 documents found the same class with **opposite signs**, one reviewer naming "font scale applied
 without the matching spacing reduction" unprompted — HANDOVER § 8's largest named front,
 reproduced on two documents nothing had flagged.
+
+### The cross-track measurement owed by the Ooxml change — done, and it is zero
+
+All **666** words and slides documents rendered at the merged commit, and again with **only** the
+`Paperless.Ooxml` diff reverted (`OoxmlXml.cs` + `OoxmlNamespaces.cs` checked out at
+`ac147b7e5bb`, `obj`/`bin` deleted, rebuilt), `SOURCE_DATE_EPOCH=1700000000` and `TZ=UTC` pinned
+so the two runs are byte-comparable with nothing masked:
+
+```
+TOTAL compared=666  identical=666  changed=0  unrenderable_either_side=0
+```
+
+666 renderable both sides, 0 failures either leg. **The round's census predicted this** — chartex
+in 2 documents, both sheets — and the measurement agrees with it, which is the point: § 5 says a
+shared-layer merge owes a measurement *rather than* an argument, and the census was the argument.
+The documents named as sharing the code path but not the branch (109 words `wps`, 51 words `wpg`,
+4 words `wpc`, 1 words picture, 7 sheets slicer) are all inside the 666 and all byte-identical, so
+the narrowness of the URI key is measured rather than asserted.
+
+### A third variant of "a measurement of the wrong tree announces nothing", and this one nearly landed
+
+`CLAUDE.md` records two instances where a round's own code was reverted into the branch while
+`git status` stayed clean. This is a third route to the same place, and it is worth writing down
+because it is the *restore* step of the documented-safe procedure that produces it:
+
+**`git checkout <commit> -- <path>` writes the index as well as the working tree.** So the
+before-leg of any A/B measurement leaves the *base* blob staged. Restoring the working file
+afterwards — correctly, with `cp` + `touch`, exactly as CLAUDE.md prescribes — makes
+`git diff HEAD` empty and the rebuilt binary correct, while the index still holds a **staged
+revert of the round's fix**. `git status --short` shows `MM`, which reads as ordinary local edits.
+A commit at that moment lands the revert, the tests pass because they run against the correct
+binary, and nothing announces it.
+
+Caught here by an explicit post-restore assertion in the measurement script rather than by
+noticing. The check is one line and belongs in every A/B script:
+
+```sh
+git diff --cached --stat -- <the files>     # must be empty; git reset HEAD -- <files> if not
+```
+
+The general lesson stands where CLAUDE.md already puts it: **the numbers being right is not
+evidence you measured the right thing** — and here, the numbers being right was *produced by* the
+tree being wrong in a way only the index could show.
