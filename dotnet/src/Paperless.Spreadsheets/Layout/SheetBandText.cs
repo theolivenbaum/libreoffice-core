@@ -59,15 +59,47 @@ internal static class SheetBandText
             : null);
 
     /// <summary>
-    /// The same metrics with no device, which is what a chart's text is measured with.
+    /// The same metrics on <c>chart2</c>'s own device, which is what a chart's text is measured
+    /// with.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// A chart's labels are not laid out by Calc and so are not quantised onto Calc's output
-    /// device: <c>chart2</c>'s view makes them as plain text shapes and takes the face's metrics
-    /// whole. Dropping the grid here rather than never adding one keeps the two answers beside
-    /// each other and keeps <see cref="ChartLineHeightAt(Length)"/>'s line gap, which
-    /// <see cref="LineMetrics.ScaledLineHeight"/> only includes when there is no device to round
-    /// it onto.
+    /// device: <c>chart2</c>'s view makes them as plain text shapes on a <c>VirtualDevice</c> of
+    /// its own. <b>That device is 96 dpi in 1/100 mm</b> — see <see cref="MetricGrid.Chart"/>,
+    /// which carries the measurement — where Calc's is 720 and Impress' 600.
+    /// </para>
+    /// <para>
+    /// <b>Until round 60 this dropped the grid entirely</b>, on the reasoning that a text shape
+    /// takes the face's metrics whole. It does not: it takes them through a coarse device, and a
+    /// 96 dpi pixel is 0.75 pt. That is what made <see cref="ChartLineHeightAt(Length)"/> answer
+    /// Carlito's 1.2207 em at every size where 26.2.4.2 stacks it at 1.1219 em at 10 pt and
+    /// 1.2241 at 15.89 — sub-linear, because the em itself is rounded to 13 pixels at 10 pt and
+    /// to 21 at 16.
+    /// </para>
+    /// <para>
+    /// Going through the grid also drops the external leading, which is right for the same reason
+    /// it is right everywhere else <see cref="MetricGrid"/> is used: <c>IsAddExtLeading()</c> is
+    /// false in EditEngine, and a chart's text shape is an EditEngine text. Carlito's line gap is
+    /// zero so this is invisible on nearly every OOXML workbook; both Liberation faces' is not,
+    /// and they are what separated the two laws.
+    /// </para>
+    /// </remarks>
+    private static LineMetrics OnChartDevice(LineMetrics metrics)
+        => metrics with { Grid = MetricGrid.Chart };
+
+    /// <summary>
+    /// The same metrics with no device at all — the arithmetic chart text used before round 60,
+    /// kept for the <em>drawing shape</em> text that also asks for it.
+    /// </summary>
+    /// <remarks>
+    /// <b>This is a preserved behaviour and not a measured one.</b> A Calc drawing object's text
+    /// is an EditEngine text like a chart's, but it is formatted against the draw layer's own
+    /// reference device rather than <c>chart2</c>'s, and which device that is on 26.2.4.2 has not
+    /// been measured on this project. Round 60 moved chart text onto
+    /// <see cref="MetricGrid.Chart"/> and deliberately left shape text exactly where it was, so
+    /// that a chart fix could not silently move every text box in the corpus. Naming it separately
+    /// is what makes the untested half visible; see <see cref="ShapeLineHeightAt(Length, string?)"/>.
     /// </remarks>
     private static LineMetrics Ungridded(LineMetrics metrics) => metrics with { Grid = null };
 
@@ -102,26 +134,48 @@ internal static class SheetBandText
     /// rather than showing up in any one label.
     /// </remarks>
     /// <para>
-    /// <strong>Measured divergence, round 59, unfixed.</strong> This is right for Liberation Sans
-    /// and wrong for Carlito, and the error is not a constant factor. Read off
-    /// <c>003_advanced_excel_pie</c>'s reference rendering, where a wrapped pie data label gives
-    /// the line height directly: 26.2.4.2 stacks Carlito's lines <strong>11.23 pt apart at
-    /// 10.01 pt</strong> — 1.1219 em — and <strong>19.45 pt apart at 15.89 pt</strong> — 1.2241 em.
-    /// This function answers 1.2207 at both, which is what Carlito's hhea, OS/2 typo and OS/2 win
-    /// metrics all give, so the reference is not reading a different table; its line height is
-    /// <em>sub-linear</em> below about sixteen point and no scaled sum of the face's own metrics
-    /// can be right at both sizes.
+    /// <strong>Round 59 measured the divergence and round 60 closed it.</strong> Read off
+    /// <c>003_advanced_excel_pie</c>'s reference rendering, 26.2.4.2 stacks Carlito's lines
+    /// <strong>11.23 pt apart at 10.01 pt</strong> — 1.1219 em — and <strong>19.45 pt apart at
+    /// 15.89 pt</strong> — 1.2241 em, where this function used to answer 1.2207 at both. Carlito's
+    /// hhea, OS/2 typo and OS/2 win metrics all give 1.2207, so the reference was not reading a
+    /// different table: it was reading the same table <em>through a device</em>. A size series on
+    /// three faces (<c>probes/sheets-r60/probe-chartvmetrics2.py</c>) puts every one of 39 measured
+    /// pitches on an integer multiple of 0.75 pt — one pixel at 96 dpi — and
+    /// <see cref="MetricGrid.Chart"/> is that device.
     /// </para>
     /// <para>
-    /// It went unnoticed for as long as it did because it cancels: a chart label is drawn at
+    /// It went unnoticed for as long as it did because it cancelled: a chart label is drawn at
     /// <c>blockCentre − blockHeight/2 + ascent</c>, and <see cref="AscentAt(Length)"/> is 9.51 at
-    /// 10 pt where the reference's is 9.00, so a <em>single-line</em> label lands within 0.01 pt of
-    /// the reference's. The error is only visible once a label wraps or its box is measured for a
-    /// fit test — which is what a pie's best-fit placement does to every one of them.
+    /// 10 pt where the reference's is 9.00, so a <em>single-line</em> label landed within 0.01 pt of
+    /// the reference's while its box was 8.8% too tall. The error was only visible once a label
+    /// wrapped or its box was measured for a fit test — which is what a pie's best-fit placement
+    /// does to every one of them. <strong>The height and the ascent therefore had to move
+    /// together</strong>, which is why <see cref="ChartAscentAt(Length)"/> exists rather than the
+    /// drawing paths keeping <see cref="AscentAt(Length)"/>.
     /// </para>
     /// <param name="size">The em size.</param>
     public static Length ChartLineHeightAt(Length size)
-        => Metrics.Value is { } metrics ? Ungridded(metrics).ScaledLineHeight(size) : size * 1.15;
+        => Metrics.Value is { } metrics ? OnChartDevice(metrics).ScaledLineHeight(size) : size * 1.15;
+
+    /// <summary>How far above a chart line's top its baseline sits, at a size.</summary>
+    /// <remarks>
+    /// The chart-device counterpart of <see cref="AscentAt(Length)"/>, and it exists for the same
+    /// reason <see cref="ChartLineHeightAt(Length)"/> does: a chart's text is quantised onto
+    /// <see cref="MetricGrid.Chart"/>'s 96 dpi pixels and Calc's own text onto 720 dpi ones. At
+    /// ten point in Carlito this answers <b>9.01</b> where <see cref="AscentAt(Length)"/> answers
+    /// 9.52, and the reference draws 9.00.
+    /// <para>
+    /// <b>The two errors used to cancel and that is why this went unseen.</b> A chart label is
+    /// drawn at <c>blockCentre − blockHeight/2 + ascent</c>; the old height was 0.50 pt too tall
+    /// and the old ascent 0.51 pt too high, so a <em>single-line</em> label landed within 0.01 pt
+    /// of the reference's. Both have to move together or the labels that agree today stop
+    /// agreeing.
+    /// </para>
+    /// </remarks>
+    /// <param name="size">The em size.</param>
+    public static Length ChartAscentAt(Length size)
+        => Metrics.Value is { } metrics ? OnChartDevice(metrics).ScaledAscent(size) : size * 0.9;
 
     /// <summary>
     /// The metrics of a named face, or the furniture's own where it names none.
@@ -198,6 +252,38 @@ internal static class SheetBandText
     /// <param name="bold">Whether the family's bold face is wanted.</param>
     public static Length ChartLineHeightAt(Length size, string? family, bool bold)
         => FaceFor(family, bold).Metrics is { } metrics
+            ? OnChartDevice(metrics).ScaledLineHeight(size)
+            : size * 1.15;
+
+    /// <inheritdoc cref="ChartAscentAt(Length)"/>
+    /// <param name="size">The em size.</param>
+    /// <param name="family">The family name, or null for the furniture's own face.</param>
+    public static Length ChartAscentAt(Length size, string? family)
+        => ChartAscentAt(size, family, bold: false);
+
+    /// <inheritdoc cref="ChartAscentAt(Length)"/>
+    /// <param name="size">The em size.</param>
+    /// <param name="family">The family name, or null for the furniture's own face.</param>
+    /// <param name="bold">Whether the family's bold face is wanted.</param>
+    public static Length ChartAscentAt(Length size, string? family, bool bold)
+        => FaceFor(family, bold).Metrics is { } metrics
+            ? OnChartDevice(metrics).ScaledAscent(size)
+            : size * 0.9;
+
+    /// <summary>
+    /// How tall one line of a Calc <em>drawing shape's</em> text is, at a size.
+    /// </summary>
+    /// <remarks>
+    /// The arithmetic <see cref="ChartLineHeightAt(Length)"/> had before round 60 — the face's own
+    /// <c>ascent + descent + lineGap</c>, on no device — kept under its own name so that the shape
+    /// path is visibly a separate, <b>unmeasured</b> claim rather than an accident of sharing a
+    /// function with the chart path. See the remark on <see cref="Ungridded(LineMetrics)"/> for
+    /// what is and is not known about it.
+    /// </remarks>
+    /// <param name="size">The em size.</param>
+    /// <param name="family">The family name, or null for the furniture's own face.</param>
+    public static Length ShapeLineHeightAt(Length size, string? family)
+        => FaceFor(family).Metrics is { } metrics
             ? Ungridded(metrics).ScaledLineHeight(size)
             : size * 1.15;
 
