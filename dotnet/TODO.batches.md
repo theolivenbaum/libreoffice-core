@@ -15274,3 +15274,17 @@ ran first: the twelve-point single-line row reads the **300** twips the site alr
    two of their five tokens.
 4. **`SheetPageDecoration.cs`'s 24.2.7.2 site** — page furniture is what the remaining page-count
    outliers hang off and it has no probe harness yet.
+
+### The vision pass found two ink defects and one artefact
+
+Two paired images on pages chosen for a stated reason, each to a fresh blind subagent. **Both
+reviewers, on unrelated documents and unrelated pages, named the same object: the reference draws a
+thin light-grey border around every chart area and we draw none.** A third instrument agrees —
+`005_Contextures`'s reference sets a light-grey stroke colour **8** times and issues **387** stroke
+operators against our **0** and **155**. And its pie data labels are white in the reference and
+black in ours, where the part states `schemeClr val="bg1"`: **33** white fills against **0**.
+Neither can move a token.
+
+**One reading was an artefact and is recorded as one**: the reviewer's "the reference's charts sit
+6–8% further right" is contradicted by the bounding boxes (509.32 against 509.52), and comes from
+the composition scaling each half to 78%. Two of three real, which is § 7's ratio again.

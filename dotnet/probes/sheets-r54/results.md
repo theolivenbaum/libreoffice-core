@@ -281,6 +281,39 @@ Lives in the corpus repository and was not touched. Two rows change status and t
 And on the words track, `words/chartset-001/docx/pie-chart-result.docx` `open` → `done`, for the
 parent to confirm with its own sweep.
 
+## 10a. The vision pass, and two new defects no gate can see
+
+Two paired images, both on a page **chosen for a stated reason** rather than by `--worst`: page 1
+of `005_Contextures` (where three of the five new titles land) and page 4 of `013_Contextures` (the
+page whose tick set changed). Each went to a fresh subagent with no access to this project's
+documents, source or shell, asked to describe each half on its own terms before comparing.
+
+**Both reviewers, on unrelated documents and unrelated pages, named the same object: the reference
+draws a thin light-grey rectangle around every chart and we draw none.** That is the discriminator
+`HANDOVER.md` § 7 sets out — same object, pages chosen for a reason, and a *different instrument*
+to confirm — and the third instrument agrees: decompressing both PDFs' content streams,
+`005_Contextures`'s reference sets a light grey (0.8–0.95) stroke colour **8 times** and issues
+**387** stroke operators; ours sets it **0** times and issues **155**. Six charts, one frame each.
+Ink only; no token can move for it.
+
+**And a second, from the `005` reviewer alone but measured independently:** its pie data labels are
+white in the reference and black in ours. `chart1.xml` states
+`c:dLbls/c:txPr/…/a:defRPr/a:solidFill/a:schemeClr val="bg1"`, and the content streams say the
+reference emits **33** white fills on that document against our **0**. We are not honouring a data
+label group's stated fill colour.
+
+**One reading did not survive its own check, which is why it is written down.** The `005` reviewer
+reported the reference's two right-hand charts sitting "6–8% of page width further right" than
+ours. The bounding boxes say otherwise: the bar chart's title is at x = 509.32 in ours and 509.52 in
+the reference, and the pie's at 176.29 against 176.38. The composition scales each half to 78% of
+the composed image, and the apparent shift is the instrument. Two of the reviewers' three
+observations are real and one is an artefact — which is the same ratio § 7 records, and the reason
+its rule is "confirm with a different instrument", not "count readers".
+
+The `013` reviewer independently found the **9.8 pt** title offset of § 4, describing our title as
+"about 15 px higher" at 150 dpi — 7.2 pt, the same thing seen through a coarser ruler — on a page
+where nothing else about the chart differs.
+
 ## 11. What the next round should do first
 
 1. **`013`'s camera-tool picture (§ 6.1).** It is four tokens on a document that is otherwise
@@ -296,7 +329,11 @@ parent to confirm with its own sweep.
 4. **`SheetPageDecoration.cs`'s 24.2.7.2 site.** `SheetOptimalRowHeights` came back clean; page
    furniture is what the track's remaining page-count outliers hang off and it has no probe harness
    yet.
-5. The chart title's **9.8 pt** vertical offset (§ 4), of which 3.83 pt is explained and 6 pt is
+5. **The chart area's light-grey border (§ 10a)** — every chart in the corpus, two blind reviewers
+   and a stroke count agreeing, and nothing on the gate can see it. Ink, not tokens.
+6. **A data label group's stated fill colour (§ 10a)** — `005`'s pie labels are white in the
+   reference and black in ours, and the part says `bg1`.
+7. The chart title's **9.8 pt** vertical offset (§ 4), of which 3.83 pt is explained and 6 pt is
    not. It is worth no tokens and it is on every chart title in the corpus.
 
 Still unworked from earlier rounds' blind readings: `068_Blue_inventory_list`'s two undrawn arrow
