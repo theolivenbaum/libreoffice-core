@@ -78,6 +78,16 @@ public sealed partial class Ww8DocumentReader
     /// alias — so the character on its own cannot be told from MIDDLE DOT.
     /// </para>
     /// </param>
+    /// <param name="ListLabelItalic">
+    /// Whether the level leans its label, from <c>sprmCFItalic</c> in the level's
+    /// <c>grpprlChpx</c>, or null when the level states nothing about it.
+    /// <para>
+    /// Beside <paramref name="ListLabelSize"/> and <paramref name="ListLabelFamily"/> for the same
+    /// reason both of those are here: it is the level's own character formatting and not the
+    /// paragraph's, and a bullet's base font has had its posture reset before the level's set is
+    /// applied to it (<c>#i53199</c>), so the paragraph cannot supply it.
+    /// </para>
+    /// </param>
     /// <param name="ListLabelSlot">
     /// A bullet level's character exactly as the file states it, or <c>\0</c> when the level draws a
     /// counter rather than a bullet.
@@ -107,7 +117,8 @@ public sealed partial class Ww8DocumentReader
         int ListTabStop = 0,
         Length ListLabelSize = default,
         string? ListLabelFamily = null,
-        char ListLabelSlot = '\0')
+        char ListLabelSlot = '\0',
+        bool? ListLabelItalic = null)
     {
         /// <summary>
         /// True when <see cref="Text.Layout.ParagraphFormat.SpaceBefore"/> came from
@@ -1282,7 +1293,8 @@ public sealed partial class Ww8DocumentReader
             ListLabelFamily: level is { FontIndex: >= 0 } faced ? Fonts.Name(faced.FontIndex) : null,
             ListLabelSlot: level is { IsBullet: true, NumberText.Length: 1 } bullet
                 ? bullet.NumberText[0]
-                : '\0')
+                : '\0',
+            ListLabelItalic: level?.IsItalic)
         {
             HasAutoSpaceBefore = layout.HasAutoSpaceBefore ?? false,
             HasAutoSpaceAfter = layout.HasAutoSpaceAfter ?? false,
