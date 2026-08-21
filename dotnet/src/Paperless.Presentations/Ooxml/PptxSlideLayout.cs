@@ -954,6 +954,17 @@ internal sealed partial class PptxSlideLayout
     /// that states nothing, the shape with an empty list and the shape with a glow. The binary
     /// made the reference PDFs, so the binary wins.
     /// </para>
+    /// <para>
+    /// [24.2.7-audit: VERIFIED 2026-08-21, round 60 — re-run on 26.2.4.2 with this site's own
+    /// fixture, <c>tests/corpus/features/slide-drop-shadow.pptx</c>, through the reference
+    /// binary's flat-ODF export. Its five shapes come out
+    /// <c>Angled 0.149/0.149 #000000 100%</c>, <c>Themed 0/0.056 #000000 38%</c>,
+    /// <c>EmptyList 0/0.056 #000000 <b>38%</b></c>, <c>Glow 0/0.056 #000000 <b>38%</b></c>,
+    /// <c>Translucent 0/0 #000000 60%</c>. The two arms the rule exists for — the shape writing
+    /// an empty <c>a:effectLst</c> and the one holding only an <c>a:glow</c> — still keep the
+    /// theme's 38% shadow, so "the first source that states an <em>outer shadow</em>" holds and
+    /// <c>EffectProperties::assignUsed</c> still does not describe the binary. 3 of 3.]
+    /// </para>
     /// </remarks>
     private static SlideShadow? Shadow(
         XElement? properties, XElement?[] inherited, XElement? style, SlideTheme theme)
