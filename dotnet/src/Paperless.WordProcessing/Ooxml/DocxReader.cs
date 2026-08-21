@@ -348,6 +348,10 @@ public sealed class OoxmlWordDocument : IWordProcessingDocument, IPaginatedDocum
             // but the first drops its space-before even when it is the paragraph that broke the page.
             CollapsesUpperAtPageTop = compatibility.CompatibilityMode >= 15,
 
+            // The same flag the other way up — `TAB_OVER_MARGIN`, set at `compatibilityMode` 14 and
+            // below. See `PaginationOptions.FliesMayOverlapTheBottomMargin`, which measures it.
+            FliesMayOverlapTheBottomMargin = compatibility.CompatibilityMode < 15,
+
             JustifiesLinesEndedByBreak = !compatibility.DoNotExpandShiftReturn,
 
             // `WriterFilter::setTargetDocument` sets `ContinuousEndnotes` on every package it opens,

@@ -35,7 +35,64 @@ public sealed record PaginationOptions
         CollapsesSpacing = true,
         AddsCellLineSpacing = true,
         KeepsTableRowsWithNext = true,
+        FliesMayOverlapTheBottomMargin = true,
     };
+
+    /// <summary>
+    /// Whether a page-anchored fly may hang below the body into the bottom margin and the footer area
+    /// rather than being split there.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Writer's <c>TAB_OVER_MARGIN</c>, read by <c>isLegacyBehavior</c>
+    /// (<c>sw/source/core/layout/fly.cxx</c>:104) and by <c>GetFlyAnchorBottom</c> beneath it, whose own
+    /// comments name the two behaviours: <em>"Word &lt;= 2010 style: the fly can overlap with the bottom
+    /// margin / footer area in case the fly height fits the body height and the fly bottom fits the
+    /// page"</em> against <em>"Word &gt;= 2013 style: the fly has to stay inside the body frame"</em>.
+    /// </para>
+    /// <para>
+    /// It is the same flag <see cref="CollapsesUpperAtPageTop"/> reads the other way up:
+    /// <c>SettingsTable.cxx</c>:685 sets <c>TabOverMargin</c> for <c>compatibilityMode</c> 14 or less and
+    /// an absent mode means 12, a DOC always sets it (<c>ww8par.cxx</c>:2047) and a native ODF document
+    /// sets neither — so this is on in <see cref="Word"/> and off in <see cref="Default"/>, and the DOCX
+    /// reader turns it off again for a file stating mode 15 or more.
+    /// </para>
+    /// <para>
+    /// <b>Both halves of <c>isLegacyBehavior</c> are needed and each alone is insufficient</b>, measured
+    /// on the two corpus documents that disagree, one variable per rendering, against 26.2.4.2:
+    /// </para>
+    /// <list type="table">
+    ///   <item><description>
+    ///     <c>080_Printable_Graph_Paper_Template_Black_Theme</c> — <c>compatibilityMode</c> 14,
+    ///     <c>w:vertAnchor="page"</c>, a 691 pt table 17.3 pt below the top of a 697.9 pt body, so 10.5 pt
+    ///     past its bottom. The reference draws it whole on <b>one</b> page, and pushed to
+    ///     <c>w:tblpY="2886"</c> it draws it down to y = 835 on an 841.9 pt sheet — 65 pt past the body,
+    ///     6.5 pt from the paper's edge — still on one page.
+    ///   </description></item>
+    ///   <item><description>
+    ///     Raise that file to mode <b>15</b> and change nothing else: <b>two</b> pages.
+    ///   </description></item>
+    ///   <item><description>
+    ///     Change its anchor to <c>text</c> at the same position and change nothing else: <b>two</b>.
+    ///   </description></item>
+    ///   <item><description>
+    ///     <c>012_Project_Timeline_Template_Black_and_Brown_Theme</c> — mode 15, anchor <c>text</c>: two
+    ///     pages. Drop it to mode 14 alone: still two. Give it <b>both</b> mode 14 and
+    ///     <c>vertAnchor="page"</c> at the same position: <b>one</b>.
+    ///   </description></item>
+    /// </list>
+    /// <para>
+    /// The height test is the third term and it is measured too: doubling every row of <c>080</c>, so the
+    /// table is 1382 pt against a 697.9 pt page print area, brings the split back — which is
+    /// <c>nFlyHeight &lt;= nPageHeight</c> failing.
+    /// </para>
+    /// <para>
+    /// <b>Not implemented here:</b> <c>isLegacyBehavior</c>'s other arm, an anchor outside the document
+    /// body. A header or footer table is laid out by <see cref="FlowLayouter"/> and never reaches
+    /// <c>PlaceFloatedTable</c>, so the arm has no seat in this reader yet.
+    /// </para>
+    /// </remarks>
+    public bool FliesMayOverlapTheBottomMargin { get; init; }
 
     /// <summary>
     /// Whether a paragraph keeps its space-before when it starts a page.
@@ -1141,7 +1198,7 @@ public sealed class Paginator
                 if (lineIndex == 0
                     && rowDrawn == Length.Zero
                     && PlaceFloatedTable(
-                        table, paragraphIndex, blocks, Laid, body, column, used, tables, notes,
+                        table, paragraphIndex, blocks, Laid, body, page, column, used, tables, notes,
                         out FloatedTablePart? carried))
                 {
                     // What did not fit below `w:tblpY` goes at the top of the next page — see
@@ -2996,6 +3053,10 @@ public sealed class Paginator
     /// <param name="blocks">Every block, so the flow after the table can be looked at.</param>
     /// <param name="laidAt">The layout of a block by index.</param>
     /// <param name="body">The page geometry the body actually got, the running head allowed for.</param>
+    /// <param name="sheet">
+    /// The page's own geometry, head and foot <em>not</em> allowed for — Writer's
+    /// <c>SwPageFrame::getFramePrintArea</c>, which the legacy deadline is measured against.
+    /// </param>
     /// <param name="column">The column the flow is in.</param>
     /// <param name="used">How far down that column the flow has reached.</param>
     /// <param name="tables">The page's placed tables, appended to.</param>
@@ -3011,6 +3072,7 @@ public sealed class Paginator
         IReadOnlyList<PageBlock> blocks,
         Func<int, LaidBlock> laidAt,
         PageGeometry body,
+        PageGeometry sheet,
         int column,
         Length used,
         List<PlacedTable> tables,
@@ -3045,10 +3107,11 @@ public sealed class Paginator
         // or not the sheet is long enough to hold all of it.
         if (RunsIntoTheFly(blocks, laidAt, index + 1, used, top, top + height)) return false;
 
-        // How much of the fly this sheet can hold. A fly that starts below the body has no first part at
-        // all, and one that fits entirely is placed exactly as before — `room` is then the whole height
-        // and no cut can happen.
-        Length room = area.Height - top;
+        // How much of the fly this sheet can hold, which is Writer's `GetFlyAnchorBottom` deadline
+        // measured from the fly's own top. A fly that starts below the body has no first part at all,
+        // and one that fits entirely is placed exactly as before — `room` is then at least the whole
+        // height and no cut can happen.
+        Length room = DeadlineFor(table, area, sheet, top, height) - top;
         bool splits = room > Length.Zero && room < height;
 
         TablePart part = PlaceTablePart(
@@ -3069,6 +3132,54 @@ public sealed class Paginator
         // table leaves, and a cell's anchored frame is measured against it either way.
         _nextTableOrigins[index] = new DocPoint(area.X, area.Y + top);
         return true;
+    }
+
+    /// <summary>
+    /// How far down the page a floated table may reach before it must be split, as an offset from the
+    /// top of the column area.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>GetFlyAnchorBottom</c>, <c>sw/source/core/layout/fly.cxx</c>:114, transcribed. The ordinary
+    /// answer is the body's own bottom — Writer's <em>"Word &gt;= 2013 style: the fly has to stay inside
+    /// the body frame"</em>. The other one applies when
+    /// <see cref="PaginationOptions.FliesMayOverlapTheBottomMargin"/> is on <em>and</em> the fly is
+    /// positioned against the page frame, and then the fly may hang into the bottom margin and the
+    /// footer: the deadline is the sheet's own bottom edge, capped so that the fly's height never
+    /// exceeds the body's. The cap is Writer's, in as many words — <em>"If the fly would now grow to
+    /// nDeadline then it would not fit the body height, so limit the height"</em>.
+    /// </para>
+    /// <para>
+    /// The whole legacy branch is refused when the fly is taller than the sheet's print area, which is
+    /// what makes a table longer than a page split even in a Word 2010 file. See
+    /// <see cref="PaginationOptions.FliesMayOverlapTheBottomMargin"/> for the six renderings that
+    /// separate the three terms.
+    /// </para>
+    /// </remarks>
+    /// <param name="table">The table, for its vertical anchor.</param>
+    /// <param name="area">The column area, whose height is the body's.</param>
+    /// <param name="sheet">The page's own geometry, head and foot not allowed for.</param>
+    /// <param name="top">Where the fly's top sits, as an offset from the column area's top.</param>
+    /// <param name="height">The fly's whole height.</param>
+    private Length DeadlineFor(
+        PageTable table, DocRect area, PageGeometry sheet, Length top, Length height)
+    {
+        if (!_options.FliesMayOverlapTheBottomMargin
+            || table.VerticalOrigin != FrameVerticalOrigin.Page)
+        {
+            return area.Height;
+        }
+
+        // The part of the fly above the body's top does not count towards either figure — Writer's
+        // "Fly frame overlaps with the top margin area, ignore that part of the fly frame for
+        // top/height purposes", which is what a `w:tblpY` smaller than the top margin produces.
+        Length flyTop = top > Length.Zero ? top : Length.Zero;
+        Length flyHeight = height - (flyTop - top);
+
+        if (flyHeight > sheet.TextHeight) return area.Height;
+
+        Length deadline = sheet.Size.Height - area.Y;
+        return deadline - flyTop > area.Height ? flyTop + area.Height : deadline;
     }
 
     /// <summary>
