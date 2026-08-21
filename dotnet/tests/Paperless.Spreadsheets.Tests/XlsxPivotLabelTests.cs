@@ -61,9 +61,12 @@ public sealed class XlsxPivotLabelTests
     }
 
     /// <summary>Reads the one sheet, with the pivot parts given attached to it.</summary>
-    private static ContentTable Read(params string[] pivots)
+    private static ContentTable Read(params string[] pivots) => Read(Rows, pivots);
+
+    /// <summary>The same, over cells the caller states.</summary>
+    private static ContentTable Read(string rows, string[] pivots)
     {
-        MemoryStream stream = new(Package(Rows, pivots));
+        MemoryStream stream = new(Package(rows, pivots));
         XlsxFile file = XlsxFile.Open(stream);
         XlsxSheetReader reader = new(file, []);
         XlsxSheetEntry entry = file.Sheets[0];
@@ -145,6 +148,34 @@ public sealed class XlsxPivotLabelTests
 
         Cell(table, 0, 0).ShouldBe("Dept");
         Cell(table, 1, 0).ShouldBe("Finance");
+    }
+
+    /// <summary>
+    /// An outer label that is <em>already</em> blank stops the scan, so the columns to its right
+    /// keep their text.
+    /// </summary>
+    /// <remarks>
+    /// <strong>This is the property the whole census rests on and it is a deliberate choice, not
+    /// an accident of the loop.</strong> A pivot Excel laid out without "Repeat All Item Labels"
+    /// already has its repeats blank, and stopping at the first blank means this rule can only
+    /// ever remove text Excel <em>filled down</em> — it is a no-op on all ten of the corpus's other
+    /// pivot documents by construction rather than by luck. Continuing past the blank would let it
+    /// blank cells in a document that never asked for the repeats in the first place, which is the
+    /// only way this change could reach a document the census does not name.
+    /// </remarks>
+    [Fact]
+    public void AnOuterLabelThatIsAlreadyBlankStopsTheScan()
+    {
+        const string Gapped = """
+            <row r="1"><c r="A1" t="inlineStr"><is><t>Dept</t></is></c><c r="B1" t="inlineStr"><is><t>Item</t></is></c></row>
+            <row r="2"><c r="A2" t="inlineStr"><is><t>Finance</t></is></c><c r="B2" t="inlineStr"><is><t>Rent</t></is></c></row>
+            <row r="3"><c r="B3" t="inlineStr"><is><t>Rent</t></is></c></row>
+            """;
+
+        ContentTable table = Read(Gapped, [Pivot("A1:B3", firstDataCol: 2)]);
+
+        Cell(table, 2, 0).ShouldBeEmpty();
+        Cell(table, 2, 1).ShouldBe("Rent");
     }
 
     /// <summary>A pivot whose location does not cover the cells leaves them alone.</summary>
