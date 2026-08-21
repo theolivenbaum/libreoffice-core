@@ -31,6 +31,8 @@ namespace Paperless.Presentations.Layout;
 /// <em>It is not a search.</em> LibreOffice 25.2 replaced the bisection with a walk down a fixed
 /// table of twelve <c>(font, spacing)</c> levels (<c>editeng/source/editeng/impedit3.cxx</c>,
 /// <c>constScaleLevels</c>): format unscaled, and while that overflows take the <em>first</em>
+/// [24.2.7-audit: WRONG, fixed 2026-08-20, round slides-r52 — 25.2 replaced the bisection with
+/// constScaleLevels; worth -155.40 abs_ink, -11.1% of the slides track.]
 /// level that fits. What stood here for thirty rounds was the bisection of 24.2.7.2, which was
 /// the installed <c>soffice</c> when it was written and stopped being it when this container
 /// moved to <strong>26.2.4.2</strong> — the comment saying so was in this file the whole time.

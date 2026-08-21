@@ -2,7 +2,7 @@
 
 `CLAUDE.md` records that the reference binary moved from **24.2.7.2** to **26.2.4.2**, and that
 "individual claims calibrated to 24.2.7.2 behaviour … are now claims about a superseded binary and
-each needs one re-check before it is relied on". It named three. There are **48 such sites in 30
+each needs one re-check before it is relied on". It named three. There are **50 such sites in 30
 files**, and this is the list.
 
 It exists because round 52 (slides) stopped treating that sentence as advice. `SlideAutofit.cs`
@@ -11,63 +11,89 @@ check the reference version first. 25.2 had replaced the search with a twelve-ro
 `constScaleLevels` table. Re-checking that one site was worth **−155.40 `abs_ink`, −11.1% of the
 whole slides track** — where the two preceding rounds moved −10.34 and −15.33.
 
-**So the prior on these is not "probably still fine".** One in one has been wrong, and the one
-that was wrong announced itself in its own comment.
+**So the prior on these is not "probably still fine".** **Two of the first five re-checked were
+wrong**, and both announced themselves in their own comments.
 
-## Counting them: use `git grep`, not `grep -r`
+## Counting them: use `git grep`, not `grep -r` — and count the marker, not the string
 
 ```sh
-git grep -n "24\.2\.7" -- 'dotnet/src/**/*.cs'      # 48 hits, 30 files
-grep  -rn "24\.2\.7" dotnet/src --include=*.cs      # 96 hits, 60 files — exactly double
+git grep -n "24\.2\.7" -- 'dotnet/src/**/*.cs' | grep -v '24\.2\.7-audit'   # open sites
+grep  -rn "24\.2\.7" dotnet/src --include=*.cs                              # exactly DOUBLE — do not use
 ```
 
-Every project under `dotnet/src` has a lower-case alias directory entry on this case-insensitive
-mount (same inode, link count 1, untracked by git), so anything walking the filesystem visits both
-spellings. See `CLAUDE.md` § "This container".
+`grep -r` returns twice as many hits and files as `git grep`, because every project under
+`dotnet/src` has a lower-case alias directory entry on this case-insensitive mount (same inode,
+link count 1, untracked). See `CLAUDE.md` § "This container".
 
-## Where they are
+**And the string alone is not the metric — it self-corrupts.** The first two rounds to work this
+list annotated their sites with sentences like *"…was calibrated to 24.2.7.2 and has been
+re-checked"*, which **adds** matches for the very string being counted. The list appeared to grow
+while it was being worked. That is why a re-checked site now carries an explicit marker:
 
-| project | sites | files | reaches |
+```
+[24.2.7-audit: VERIFIED  <date>, <round> — …]     the claim still holds on 26.2.4.2
+[24.2.7-audit: WRONG     <date>, <round> — …]     it does not; say whether it was fixed
+[24.2.7-audit: UNDECIDED <date>, <round> — …]     the probe could not separate it; say why
+```
+
+Progress is `git grep -c '24\.2\.7-audit'`, never a count of `24.2.7`.
+
+## The measured size of the list
+
+Taken with `git grep` at the time of writing — **hits and files are different numbers and an
+earlier version of this table conflated them**, which a round caught:
+
+| project | hits | files | reaches |
 |---|---:|---:|---|
 | `Paperless.Presentations` | 17 | 6 | slides |
 | `Paperless.WordProcessing` | 11 | 8 | words |
 | `Paperless.Spreadsheets` | 10 | 9 | sheets |
-| **`Paperless.Text`** | **6** | **4** | **all three tracks** |
+| **`Paperless.Text`** | **8** | **4** | **all three tracks** |
 | `Paperless.Core` | 2 | 1 | all three tracks |
 | `Paperless.Rendering` | 1 | 1 | all three tracks |
 | `Paperless.Ooxml` | 1 | 1 | all three tracks |
+| **total** | **50** | **30** | |
 
-*Corrected 2026-08-21. The first cut of this table counted **files** for three of the rows and
-sites for the others; the totals it gave — Text 4, Presentations 15, Spreadsheets 9 — are file
-counts. The site counts are above and still sum to 48. **So the shared layer is ten sites, not
-eight**, and a brief that says eight is short by the two extra `Paperless.Text` ones.*
+**The shared layer is 12 hits in 7 files, not 8 sites.** (These totals include the marker lines
+added since; use the marker-excluding command above for the live figure.)
 
-```sh
-git grep -c "24\.2\.7" -- 'dotnet/src/**/*.cs' \
-  | awk -F'dotnet/src/' '{print $2}' \
-  | awk -F/ '{p=$1; split($0,a,":"); s[p]+=a[length(a)]; f[p]++} END{for(k in s) print k, s[k], f[k]}'
-```
+## Outcomes so far — two of five re-checked sites were wrong
 
-Densest files:
+| site | outcome |
+|---|---|
+| `SlideAutofit.cs` (4 hits, one claim) | **WRONG**, fixed r52 — 25.2 replaced 24.2's bisection with `constScaleLevels`. −155.40 `abs_ink`, **11.1% of the slides track** |
+| `SystemFontResolver.cs:406` | **VERIFIED** r53 — unrecognised families still all land on DejaVu |
+| `SystemFontResolver.cs:439` | **UNDECIDED** r53 — probe confounded, and it says why |
+| `SystemFontResolver.cs:637` | **WRONG** r53, **not fixed** — see below |
+| `MeasuredParagraph.cs:744` | **VERIFIED** r53 — unchanged on 26.2.4.2 |
 
-```
-6  Paperless.Presentations/Layout/SlideTextLayout.cs
-4  Paperless.Presentations/Layout/SlideAutofit.cs        <- re-checked r52, WAS WRONG
-3  Paperless.Text/Fonts/SystemFontResolver.cs
-3  Paperless.Presentations/Ooxml/PptxSlideLayout.cs
-2  Paperless.WordProcessing/OpenDocument/OdtLayoutSource.cs
-2  Paperless.WordProcessing/Ooxml/WriterPoolSpacing.cs
-2  Paperless.WordProcessing/Ooxml/WordStyles.cs
-2  Paperless.Spreadsheets/Layout/SheetFonts.cs
-2  Paperless.Presentations/Layout/SlideDrawing.cs
-2  Paperless.Core/Graphics/GlyphRun.cs
-```
+**Two of five.** The prior on an unverified site is not "probably fine".
 
-Full site list: `dotnet/probes/slides-r52/results.md`, and reproducible with the `git grep` above.
+### The open one, and it is the largest single finding on the list
+
+`SystemFontResolver.GenericFallbacks` says an unrecognised family resolves to **DejaVu Sans**.
+On 26.2.4.2 **all ten unrecognised families probed answer DejaVu *Serif*** — one authored DOCX per
+family through the installed `soffice`, face read out of the PDF, with four controls agreeing
+(Liberation Serif → itself, Calibri → Carlito, Cambria → Caladea, Arial → Liberation Sans). Two
+authored nonsense names, one with a serif hint and one without, **both** answer Serif, so the shape
+of the name does not decide it either.
+
+**The stated reason is falsified independently of the answer**: `fc-match Aptos` and `fc-match ""`
+both return `DejaVuSans.ttf`, so whatever 26.2.4.2 does here, it is not "ask fontconfig and take
+its default" — the second time this project has caught that assumption.
+
+Cost, measured rather than assumed: over all 337 words renderings, **86 disagree with the
+reference's embedded font list and 73 of those carry DejaVu Sans on our side**, mostly the plain
+pair `ours=DejaVuSans, ref=DejaVuSerif`. The two faces have different advances, so each is a
+line-breaking difference as well as a visible one.
+
+**It is deliberately not fixed.** A one-line change in `Paperless.Text` owes a measured sweep of
+all three tracks, and that is the parent's to run, not a track round's to slip in at the end.
 
 ## How to work it, and the order
 
-**The eight shared-layer sites first** — `Paperless.Text` 4, `Core` 2, `Rendering` 1, `Ooxml` 1.
+**The twelve shared-layer sites first** — `Paperless.Text` 8, `Core` 2, `Rendering` 1, `Ooxml` 1,
+across 7 files.
 They reach all three tracks, so one wrong calibration there is three tracks' worth of error, and
 `SystemFontResolver.cs` sits upstream of the font resolution that decides 267 reference renderings.
 A shared-layer re-check owes a **measurement** across the other two tracks, not an argument.

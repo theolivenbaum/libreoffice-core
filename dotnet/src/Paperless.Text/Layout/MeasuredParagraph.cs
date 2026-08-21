@@ -741,6 +741,7 @@ public sealed class MeasuredParagraph
         // Measured against the installed 26.2.4.2 by `dotnet/probes/words-r46/picture-alone-descent.py`
         // — **re-checked 2026-08-21 under `TODO.24-2-7-audit.md` and found unchanged**. All eight
         // DOCX rows and all four `fodt alone` rows come back exact, and the reference's own figures
+        // [24.2.7-audit: VERIFIED 2026-08-21, round words-r53 — unchanged on 26.2.4.2.]
         // are identical to the ones round 46 read off 24.2.7.2, to the tenth of a point, at 20, 50
         // and 150 pt. The four `fodt with-text` rows still come back 27.60 at every picture height:
         // that is round 46's own measured-and-deliberately-unfixed ODF defect (an as-character

@@ -14892,3 +14892,104 @@ The discriminator between the two cases is not the number of readers. It is whet
 about the **same object**, whether the page was chosen for a stated reason rather than by maximum
 ink, and whether a **different instrument** confirms it. All three held here and none held in
 round 51.
+
+---
+
+## Merge note — round 53, words (2026-08-21)
+
+**Words 318 → 318 of 337. Net zero, and the round is worth more than several that moved verdicts.**
+
+```
+Core 337   Containers 109   Text 611   Vector 295   Rendering 150(1 skipped)   Markup 259
+OpenDocument 125   WordProcessing 1096   Spreadsheets 905   Presentations 780     = 4667
+0 failed
+```
+
+### The verdict prediction was wrong; every mechanism prediction was right
+
+Predicted +2. Measured **0** — but not because nothing happened. `097` and `096` **traded places
+twice**: change 1 closed `097` and opened `096` (a regression the prediction had **named in
+advance**), change 2 recovered `096` and lost `097` again. Final state is byte-equal to baseline on
+every other document.
+
+**41 of 337 renderings moved: 27 towards the reference, 6 away, 8 neutral.** Mean vertical error:
+`644730BRI….doc` 59.25 → **6.04 pt**, `096` 39.09 → **0.38**, `097` 29.15 → **1.61**, `090`
+19.45 → **1.21**. The six that worsened are named, worst `098` at +1.34 pt.
+
+### Two fixes, both against a mechanism the previous round had located wrongly
+
+- **`TextItemiser` cuts U+2028 out of every sub-run**, so a paragraph made only of breaks reached
+  `MeasuredParagraph` with **zero runs**, and `MeasureLine`'s empty-paragraph fallback — guarded on
+  `_runs.Length > 0` — could not fire. Every line measured 0 pt. **`TextMeasurer` was never the
+  seat**, which is where round 52 put it.
+- **A run holding nothing but a frame anchor (U+0001) raised the line to its own font size.** Ten
+  authored variants: the reference's answer is identical at 10 pt and 26 pt on every row — 0.00
+  anchored, 7.00 as-character, 9.70 with text. Worth 34 pt on `097`.
+
+### The brief's reach figure was wrong by 20× and is not reproducible
+
+I briefed this round with round 52's "**469 such paragraphs in 66 of 271 documents**", called it
+the risk, and required a whole-track sweep because of it. The real figure is **22 in 13**. The named
+heavy witnesses hold 1, 1, 1 and 0; `OM template`'s "37" is its count of `w:br` *elements*, not of
+break-only paragraphs. **No census producing 469 was ever committed, and none the round could
+construct reproduces it.**
+
+That is a stored figure that decayed to zero evidential value in one round, inside this project's
+own probe record, and it propagated into a brief because it was quoted rather than re-derived. It
+is § 7's "stored evidence decays silently" in the shortest cycle yet observed: **one round.** The
+standing rule follows — *a figure that will steer a round must be re-derived by the round that
+steers on it, not quoted from the round that found it.*
+
+Two more refutations: **`068`'s strokes run the other way** — the reference strokes **71**, not 36
+(36 is its single-line count), and like for like we draw 6 *more* box outlines and 24 *fewer*
+connector strokes; and **`090`'s missing navy banners look exactly like the `DrawingStyleMatrix`
+item and are not** — three `#_x0000_t15` VML shapes with `fillcolor` stated literally, zero
+`wps:wsp`, zero `a:lnRef`. *A description matching a brief is not corroboration of its mechanism.*
+
+### Shared-layer reach, measured
+
+`MeasuredParagraph.cs` is shared. The **anchor half has no reach outside word processing** — no
+presentation or spreadsheet reader emits U+0001. The **break half was swept both ways** over the 6
+slides batches holding all 17 witnesses (55 documents; base via `git show` + `cp` + `touch`, index
+asserted empty): **0 gate rows and 0 renderings changed, byte for byte.** Sheets has no witness.
+Nothing further owed.
+
+### The 24.2.7.2 audit: two of the first five re-checked sites were wrong
+
+The round took four shared-layer sites and **found one wrong, one undecided, two verified** —
+recording all four **at the site, in both directions**, which is the convention that stops the next
+round re-checking them.
+
+**`SystemFontResolver.GenericFallbacks` is wrong and is deliberately not fixed.** It says an
+unrecognised family resolves to DejaVu **Sans**; on 26.2.4.2 all ten probed answer DejaVu
+**Serif** — one authored DOCX per family through the installed `soffice`, four controls agreeing,
+and two nonsense names (one with a serif hint, one without) **both** answering Serif, so the name's
+shape does not decide it. The **stated reason is falsified independently**: `fc-match Aptos` and
+`fc-match ""` both return `DejaVuSans.ttf`, so 26.2.4.2 is not "asking fontconfig and taking its
+default" — the second time this project has caught that assumption.
+
+Cost, measured: **86 of 337 words renderings disagree with the reference's embedded font list, and
+73 carry DejaVu Sans on our side**, mostly `ours=DejaVuSans, ref=DejaVuSerif`. Different advances,
+so each is a line-breaking difference as well as a visible one. **A one-line change in
+`Paperless.Text` owing a three-track sweep is the parent's to schedule, and it is now the largest
+single known defect on the project.**
+
+### The audit's own metric was self-corrupting, and its table was wrong
+
+Both caught by this round, and both are fixed in `TODO.24-2-7-audit.md`:
+
+- **The table conflated hits with files.** It is 50 hits in 30 files, and the shared layer is
+  **12 hits in 7 files**, not the "8 sites" the audit claimed.
+- **Counting the string `24.2.7` cannot measure progress**, because annotating a site with *"was
+  calibrated to 24.2.7.2, re-checked"* **adds** a match. The list appears to grow as it is worked —
+  it went 48 → 50 during this round for that reason alone. Re-checked sites now carry an explicit
+  marker, `[24.2.7-audit: VERIFIED|WRONG|UNDECIDED <date>, <round> — …]`, and progress is
+  `git grep -c '24\.2\.7-audit'`, never a count of `24.2.7`.
+
+### Words does next
+
+1. **`097` is now a 1.7 pt boundary case** — the standing line-height deficit (11.50 against 12.65
+   per empty paragraph) is all that is left on it, and it is worth 1.15 pt on **every** empty
+   paragraph in the corpus.
+2. `#_x0000_t15` VML (3 shapes, `090`), then the `DrawingStyleMatrix` route into `DocxFrames`
+   (458 shapes, 40 documents) — with arrow ends being **5** shapes, not a bulk job.

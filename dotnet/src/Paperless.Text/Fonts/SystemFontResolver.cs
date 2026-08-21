@@ -403,6 +403,8 @@ public sealed class SystemFontResolver : IFontResolver, IGlyphFallbackResolver
     /// the faces on the machine is where LibreOffice stops consulting its own table and asks
     /// fontconfig, and fontconfig's generic families resolve to DejaVu on a stock Linux
     /// configuration — <c>60-latin.conf</c> heads every one of its three preference lists with it.
+    /// [24.2.7-audit: VERIFIED 2026-08-21, round words-r53 — unrecognised families still all
+    /// land on DejaVu on 26.2.4.2. Which DejaVu is wrong; see GenericFallbacks.]
     /// Verified against LibreOffice 24.2.7.2 on this machine over fifty-five families: every single
     /// one that reached the generic path landed on DejaVu Sans, DejaVu Serif or DejaVu Sans Mono,
     /// and none landed on Liberation.
@@ -436,6 +438,9 @@ public sealed class SystemFontResolver : IFontResolver, IGlyphFallbackResolver
     /// than its <c>FontSubstitutions</c> node, and it is read from there rather than transcribed:
     /// the list is data in the tree, and a hand-copied prefix of it would silently diverge on a
     /// machine whose installed faces differ from this one's. Measured: a fixture declaring no font
+    /// [24.2.7-audit: UNDECIDED 2026-08-21, round words-r53 — the probe was confounded: a DOCX
+    /// with no styles.xml is given Word's default, not LibreOffice's. Needs a fixture that
+    /// reaches DefaultFonts rather than one that merely says nothing.]
     /// renders in Liberation Serif under LibreOffice 24.2.7.2 here, which is what this list heads
     /// with. <b>Still calibrated to 24.2.7.2 and still unverified.</b> The 2026-08-21 attempt
     /// (`probes/words-r53/font-fallback-recheck.py`) could not decide it and says so: a DOCX
@@ -634,6 +639,10 @@ public sealed class SystemFontResolver : IFontResolver, IGlyphFallbackResolver
     /// Where the table has never heard of the family the answer is sans-serif, and that is not a
     /// coin toss. This path is what LibreOffice reaches by asking fontconfig, and fontconfig's reply
     /// for a name it does not recognise is its default family — DejaVu Sans. Measured against
+    /// [24.2.7-audit: WRONG 2026-08-21, round words-r53, NOT FIXED — all ten unrecognised
+    /// families answer DejaVu SERIF on 26.2.4.2, and the stated fontconfig mechanism is
+    /// falsified too. 86 of 337 words renderings disagree with the reference's font list.
+    /// A change here owes a measured sweep of all three tracks.]
     /// LibreOffice 24.2.7.2 here, every unrecognised family probed resolved to DejaVu Sans: Aptos,
     /// Segoe UI, Roboto, Lato, Montserrat, Myriad Pro, Futura, Optima, Univers and the rest. The
     /// previous rule guessed serif for all of them, on the reasoning that a name carrying no hint is
