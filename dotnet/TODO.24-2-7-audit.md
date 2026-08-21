@@ -64,6 +64,8 @@ broken one, because it is the only thing that stops the next round paying for th
 | `Paperless.Spreadsheets` | `Ooxml/XlsxNoteCaptions.cs` (a VML anchor's offsets as 96-dpi screen pixels) | 57 | **verified 26.2.4.2, 2026-08-21** — control first (offset 0 lands on the row grid to 0.012 pt), then three steps of 14.998 pt for 20 px, i.e. 96.0 dpi. **And the probe exposed a rule the site does not state**: the offset is *clamped* to the anchored cell's own extent, which we do not do — 5 anchors of 365 in one document of fifteen |
 | `Paperless.Spreadsheets` | `Layout/SheetText.cs` (`MeasurePixels`, the per-glyph pixel rounding) | 58 | **verified 26.2.4.2, 2026-08-21** — the turned-cell fixture round-tripped through the installed binary gives **216 of 216** row heights unchanged, all 72 quarter-turn heights among them. The discriminator is in the fixture and not in an argument: rounding the *total* instead of per glyph breaks **26 of its 36 cases** through `verify-test.sh`, and the reference moved none of them. **The last unverified `Paperless.Spreadsheets` site.** |
 
+| `Paperless.Ooxml` | `DrawingML/DrawingFill.cs` :115 (`a:lum` as a whole per cent) | 61 | **verified 26.2.4.2, 2026-08-21** — the division is integer and truncating. Five authored `.docx` fixtures read off the reference alone: `70999/-70999` renders byte-for-byte as `70000/-70000` (mean channel 251.842/248.718/251.841 on both), which only truncation gives, while `69500/-69500` renders differently, which rounding could not. **The two cases fail under the two readings in opposite directions**, so neither is a one-sided test, and two controls ran first (`71000` differs; no `a:lum` differs from everything). `probes/sheets-r61/audit_lumpercent.py` |
+
 | `Paperless.Text` | `Layout/LineBreaker.cs` :473 (a hyphen never opens a number) | 58 | **WRONG, and now FIXED** — the sentence was inverted and the code implemented the inversion. 26.2.4.2 lets a hyphen open a number everywhere *except* after a digit, which is where i#83229 puts the break back. Ten authored packages, two controls, no width tuning: 7 of 10 agreed before, 10 of 10 after |
 
 | `Paperless.Presentations` | `Ooxml/PptxSlideLayout.cs` :763 (table cell line spacing) | 54 | **verified 26.2.4.2, 2026-08-21** — 6 of 6 stated sizes put the reference's first baseline one em below the cell's top |
@@ -77,6 +79,20 @@ by LibreOffice, so a font-size probe reads a constant 10 pt on the reference at 
 and reports 46 of 48 cases wrong. `dotnet/probes/sheets-r53-totalsrow/audit_mkwb.py` is a fixture
 generator that is known to be read correctly by 26.2.4.2; start from it. Confirm any new fixture by
 `soffice --convert-to fods` and reading `fo:font-size` back before trusting a single measurement.
+
+## The first site on this list that a probe settled without rendering our own side — round 61
+
+`DrawingFill.cs`'s `a:lum` claim is about **what the reference reads out of a file**, not about what
+we draw, so the whole discriminator lives on one side. Round 61 authored five minimal `.docx`
+packages around a saturated red/blue checkerboard and compared the reference's own mean channel
+across them; our renderer never ran. Two of the five cases are **controls whose answers were known
+before the probe**, and the two live cases fail under the two candidate readings *in opposite
+directions* — `70999` agrees with `70000` only under truncation, `69500` agrees with it only under
+rounding. A probe that can only fail one way is worth much less than one that can fail either.
+
+The claim held: the division is integer, the washout branch tests the integer for exactly 70 and
+−70, and C#'s truncation toward zero matches C++'s on the negative contrast without a second arm.
+**`Paperless.Ooxml` is now one of one re-checked.**
 
 ## A named next site that was not one — round 60 (sheets)
 

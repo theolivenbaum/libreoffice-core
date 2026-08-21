@@ -117,6 +117,22 @@ public static class DrawingFill
     /// fraction back to per cent in floating point would put 0.7 on either side of 70 depending
     /// on how the literal parsed, and the whole recolouring turns on which.
     /// </para>
+    /// <para>
+    /// [24.2.7-audit: VERIFIED 2026-08-21, sheets-r61 — the division is still integer on
+    /// 26.2.4.2, and the probe reads the answer off the reference alone.
+    /// <c>probes/sheets-r61/audit_lumpercent.py</c> authors five one-variable <c>.docx</c>
+    /// fixtures around a saturated red/blue checkerboard and compares the mean channel of the
+    /// rendered page: <c>bright="70999" contrast="-70999"</c> renders <strong>identically</strong>
+    /// to <c>70000/-70000</c> — 251.842 / 248.718 / 251.841 on both — which only truncation can
+    /// do, and <c>69500/-69500</c> renders <em>differently</em> (250.795 / 246.624), which
+    /// rounding could not. The two cases disagree under the two readings in opposite directions,
+    /// so neither is a one-sided test. Two controls ran first and both came out as they had to:
+    /// <c>71000/-71000</c> differs from the washout (251.117 / 247.268) and no <c>a:lum</c> at
+    /// all differs from everything (234.447 / 213.926). The washout branch itself is visible in
+    /// those numbers — <c>ColorMode_WATERMARK</c> is a near-neutral pale wash where
+    /// <c>applyBrightnessContrast</c> is not. C#'s integer division truncates toward zero for a
+    /// negative operand exactly as C++'s does, so the contrast half needs no separate arm.]
+    /// </para>
     /// </remarks>
     private static int WholePercent(XElement? element, string name)
     {
