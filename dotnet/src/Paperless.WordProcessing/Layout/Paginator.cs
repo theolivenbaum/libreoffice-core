@@ -842,6 +842,12 @@ public sealed class Paginator
         // splits when it has to, is nearly all of them.
         Length rowDrawn = Length.Zero;
 
+        // Floated tables whose rows ran past the bottom of the page they were floated on. A fly's follow
+        // is not in the flow either, so this is carried beside `used` rather than in it, and drained by
+        // `EmitPage` onto the sheet it has just started. Empty for every document but the two the census
+        // names — see `PlaceFloatedTable`.
+        List<FloatedTablePart> pendingFloats = [];
+
         // Blocks laid out a second time because they landed in a column narrower or wider than the one the
         // pass above assumed. Empty for every document whose columns are even, which is nearly all of them.
         Dictionary<(int Index, long Width), LaidBlock> reLaid = [];
@@ -1135,8 +1141,13 @@ public sealed class Paginator
                 if (lineIndex == 0
                     && rowDrawn == Length.Zero
                     && PlaceFloatedTable(
-                        table, paragraphIndex, blocks, Laid, body, column, used, tables, notes))
+                        table, paragraphIndex, blocks, Laid, body, column, used, tables, notes,
+                        out FloatedTablePart? carried))
                 {
+                    // What did not fit below `w:tblpY` goes at the top of the next page — see
+                    // `PlaceFloatedTable`, and `ContinueFloatedTables` for where it lands.
+                    if (carried is { } rest) pendingFloats.Add(rest);
+
                     paragraphIndex++;
                     lineIndex = 0;
                     rowDrawn = Length.Zero;
@@ -1516,6 +1527,13 @@ public sealed class Paginator
         // column one of a two-column section would advance to column two and never write the page at all.
         if (placed.Count > 0 || tables.Count > 0 || pages.Count == 0) FinishPage();
 
+        // The rest of a split fly, when the flow ran out before it did. `EmitPage` puts the waiting part
+        // on the sheet it starts, so after the last page is written `tables` holds a part that nothing
+        // has emitted yet — which is exactly `012`, whose body text ends on page 1 and whose ninth table
+        // row is the whole of the reference's page 2. It cannot spin: `PlaceTablePart` on an empty column
+        // always takes at least one row, so every pass shortens what is left.
+        while (tables.Count > 0 && pages.Count < _options.MaxPages) FinishPage();
+
         // A note that spilled off the *last* page has nowhere to go, and without this it is silently
         // dropped — a worse defect than the one spilling fixes, and one no page count can see. Writer's own
         // output shows the extra sheets: the footnote-deferral probe's reference runs to 14 pages for ten
@@ -1703,6 +1721,46 @@ public sealed class Paginator
             MeasureBody();
             columnTop = Length.Zero;
             columnBottom = bodyHeight;
+
+            // The rest of a split fly, at the top of the sheet this has just started — after MeasureBody,
+            // because the page it goes on is the one whose body was just measured, and a section boundary
+            // or a differently-sized running head makes that a different rectangle from the last page's.
+            ContinueFloatedTables();
+        }
+
+        // Places the waiting part of every split floated table at the top of the current page's text
+        // area, and carries whatever still does not fit to the page after it.
+        //
+        // The offset is nought: `w:tblpY` positions the fly's *first* part and Writer's follow starts at
+        // the top of the frame it moves into, which is what the reference draws — `012`'s ninth row sits
+        // at exactly the top margin. `columnIsEmpty: true` is right for the same reason it is right in
+        // `PlaceFloatedTable`: nothing of the flow is on the sheet yet as far as the fly is concerned,
+        // and it is what guarantees at least one row goes down, so this cannot spin.
+        void ContinueFloatedTables()
+        {
+            if (pendingFloats.Count == 0) return;
+
+            List<FloatedTablePart> waiting = pendingFloats;
+            pendingFloats = [];
+
+            foreach (FloatedTablePart rest in waiting)
+            {
+                DocRect area = body.ColumnArea(0);
+
+                TablePart part = PlaceTablePart(
+                    rest.Table, rest.Laid, rest.Row, rest.Drawn, area, Length.Zero, 0, area.Height,
+                    columnIsEmpty: true);
+
+                if (part.Placed is null) continue;
+
+                tables.Add(part.Placed);
+                notes.AddRange(PlacedNotes.In(part.Placed));
+
+                if (part.NextRow < rest.Laid.RowHeights.Count)
+                {
+                    pendingFloats.Add(rest with { Row = part.NextRow, Drawn = part.NextDrawn });
+                }
+            }
         }
 
         // Starts a balancing search if the section now current asks for one and there is room for it.
@@ -1735,7 +1793,8 @@ public sealed class Paginator
             if (band <= Length.Zero) return;
 
             balance = new BalanceSearch(
-                used, band, paragraphIndex, lineIndex, rowDrawn, column, placed, tables, notes);
+                used, band, paragraphIndex, lineIndex, rowDrawn, column, placed, tables, notes,
+                pendingFloats);
 
             balanceReach = used;
             balanceLineReach = used;
@@ -1758,6 +1817,7 @@ public sealed class Paginator
             placed = [.. state.Placed];
             tables = [.. state.Tables];
             notes = [.. state.Notes];
+            pendingFloats = [.. state.Floats];
             balanceReach = state.Top;
             balanceLineReach = state.Top;
             lineUsed = state.Top;
@@ -2896,11 +2956,32 @@ public sealed class Paginator
     /// their five passing siblings are the control that separates it from everything else about them.
     /// </para>
     /// <para>
-    /// <b>A table taller than the column is left in the flow, and that is a guard rather than the
-    /// rule.</b> Writer's fly-held table does split across pages; nothing here can, so floating one that
-    /// does not fit would draw it off the bottom of its page and lose the rest. Stacking it is what this
-    /// did before, so the guard can only be neutral or better — but it means a positioned table longer
-    /// than a page is still laid out wrongly, in a way no gate column will show.
+    /// <b>The fly splits.</b> 26.2.4.2 marks every DOCX floating table's frame splittable without
+    /// exception — <c>DomainMapperTableHandler.cxx</c>:1765, <em>"A text frame created for floating
+    /// tables is always allowed to split"</em> — and <c>SwFrame::GetNextFlyLeaf</c>
+    /// (<c>sw/source/core/layout/flycnt.cxx</c>:1575) gives the fly a follow on the next page. So the
+    /// rows that do not fit below <c>w:tblpY</c> are carried, and the caller places them at the top of
+    /// the next page's text area through <c>pendingFloats</c>.
+    /// </para>
+    /// <para>
+    /// <b>The continuation's offset is nought, and that is measured rather than assumed.</b> On
+    /// <c>012_Project_Timeline_Template_Black_and_Brown_Theme</c> — a 612 pt landscape sheet with 72 pt
+    /// margins, so a 468 pt body — the reference draws eight of the table's nine rows on page 1, the
+    /// first at <c>y</c> = 128.10 from the sheet's top, which is the 72 pt margin plus the 56.1 pt its
+    /// <c>w:tblpY="1122"</c> states. The ninth is <c>12.40 489.65 99.95 50.35 re f*</c> on page 2 —
+    /// a top edge at <b>72.00</b>, the top margin exactly, with no <c>w:tblpY</c> applied a second time.
+    /// </para>
+    /// <para>
+    /// <b>A table taller than a whole column is still left in the flow, and that is a guard rather than
+    /// the rule.</b> Writer floats and splits that one too. Two corpus documents are in that class and
+    /// both pass the gate today — <c>ESPN-R - MCF - RA - Ed1.docx</c>, 123 rows against a 481.90 pt body,
+    /// and <c>part-147_approval list_20230119.docx</c>, 782 pt against 714.30 — so the guard is kept
+    /// this round rather than traded blind. See <c>probes/words-r62/floattable-census.py</c>.
+    /// </para>
+    /// <para>
+    /// <b>A fly whose stated top is already past the bottom of the body</b> is also left as it was:
+    /// there is no first part to place, and every row of it would be carried onto pages of its own. No
+    /// corpus document does it and no measurement covers it, so it keeps the behaviour it had.
     /// </para>
     /// <para>
     /// Nothing about page breaking is decided here: the caller has already honoured
@@ -2919,6 +3000,10 @@ public sealed class Paginator
     /// <param name="used">How far down that column the flow has reached.</param>
     /// <param name="tables">The page's placed tables, appended to.</param>
     /// <param name="notes">The page's notes, appended to.</param>
+    /// <param name="carried">
+    /// The rows this page could not take, for the caller to place at the top of the next one, or null
+    /// when the whole table went here.
+    /// </param>
     /// <returns>True when the table was floated and the caller should move on without advancing.</returns>
     private bool PlaceFloatedTable(
         PageTable table,
@@ -2929,8 +3014,11 @@ public sealed class Paginator
         int column,
         Length used,
         List<PlacedTable> tables,
-        List<PageNote> notes)
+        List<PageNote> notes,
+        out FloatedTablePart? carried)
     {
+        carried = null;
+
         if (!table.IsPositioned) return false;
 
         LaidBlock laid = laidAt(index);
@@ -2952,21 +3040,53 @@ public sealed class Paginator
             _ => used + table.VerticalOffset,
         };
 
+        // The fly's own extent, not the part of it this page takes: the test asks whether the flow after
+        // the table would put ink where the table goes, and the table goes where `w:tblpY` says whether
+        // or not the sheet is long enough to hold all of it.
         if (RunsIntoTheFly(blocks, laidAt, index + 1, used, top, top + height)) return false;
 
+        // How much of the fly this sheet can hold. A fly that starts below the body has no first part at
+        // all, and one that fits entirely is placed exactly as before — `room` is then the whole height
+        // and no cut can happen.
+        Length room = area.Height - top;
+        bool splits = room > Length.Zero && room < height;
+
         TablePart part = PlaceTablePart(
-            table, laid, 0, Length.Zero, area, top, column, height, columnIsEmpty: true);
+            table, laid, 0, Length.Zero, area, top, column, splits ? room : height,
+            columnIsEmpty: true);
 
         if (part.Placed is null) return false;
 
         tables.Add(part.Placed);
         notes.AddRange(PlacedNotes.In(part.Placed));
 
+        if (splits && part.NextRow < laid.RowHeights.Count)
+        {
+            carried = new FloatedTablePart(table, laid, index, part.NextRow, part.NextDrawn);
+        }
+
         // Where the table's own zero landed, for the pass after this one — the same record an in-flow
         // table leaves, and a cell's anchored frame is measured against it either way.
         _nextTableOrigins[index] = new DocPoint(area.X, area.Y + top);
         return true;
     }
+
+    /// <summary>
+    /// The rest of a floated table, waiting for the top of the next page.
+    /// </summary>
+    /// <remarks>
+    /// It carries its own <see cref="LaidBlock"/> rather than looking the block up again, because the
+    /// look-up is <c>Fill</c>'s local <c>Laid</c> — which records the block whose placement is in flight
+    /// so the rest of it is cut from the same list of lines. Asking it for a table while a paragraph is
+    /// half-placed would overwrite that record from a page-emit, which is nowhere near the flow.
+    /// </remarks>
+    /// <param name="Table">The table.</param>
+    /// <param name="Laid">Its cells and row heights, relative to its own top-left.</param>
+    /// <param name="Index">Its index among the blocks.</param>
+    /// <param name="Row">The row the next page starts at.</param>
+    /// <param name="Drawn">How far into that row this page already reached; nought unless the row broke.</param>
+    private readonly record struct FloatedTablePart(
+        PageTable Table, LaidBlock Laid, int Index, int Row, Length Drawn);
 
     /// <summary>
     /// One page's worth of a table: what was placed, how tall it is, and where the next page resumes.
@@ -3406,7 +3526,8 @@ public sealed class Paginator
             int column,
             List<PlacedLine> placed,
             List<PlacedTable> tables,
-            List<PageNote> notes)
+            List<PageNote> notes,
+            List<FloatedTablePart> floats)
         {
             Top = top;
             Candidate = band;
@@ -3418,6 +3539,7 @@ public sealed class Paginator
             Placed = [.. placed];
             Tables = [.. tables];
             Notes = [.. notes];
+            Floats = [.. floats];
         }
 
         /// <summary>Where the section's columns start, as an offset from the body's top.</summary>
@@ -3458,6 +3580,9 @@ public sealed class Paginator
 
         /// <inheritdoc cref="ParagraphIndex"/>
         public List<PageNote> Notes { get; }
+
+        /// <inheritdoc cref="ParagraphIndex"/>
+        public List<FloatedTablePart> Floats { get; }
 
         /// <summary>Records that the section's whole content fitted in columns this tall.</summary>
         public void Fits(Length height)
