@@ -289,6 +289,10 @@ public static class DrawingChartPlot
             LegendSize = SizeOf(Child(Child(chart, "legend"), "txPr")),
             IsLegendBold = BoldOf(Child(Child(chart, "legend"), "txPr")),
 
+            // And the legend's own face, which FamilyOf's part-wide search gets wrong whenever
+            // some *other* element of the part states one. See LegendFamilyOf.
+            LegendFamily = LegendFamilyOf(chart, chartSpace, theme),
+
             // A series' c:dLbls/c:txPr, which is where a data label states its own size — not on
             // an axis. 20 of the corpus's 61 chart parts state one that differs from the axes'.
             DataLabelSize = DataLabelSizeOf(plotArea),
@@ -2029,6 +2033,34 @@ public static class DrawingChartPlot
     private static string? FamilyOf(XElement chartSpace, DrawingTheme? theme)
         => LiteralFamily(Child(chartSpace, "txPr"))
            ?? LiteralFamily(chartSpace)
+           ?? theme?.Fonts?.MinorLatin;
+
+    /// <summary>The face the legend's entries are set in.</summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>The legend's own <c>c:txPr</c>, then the chart space's, then the theme's minor
+    /// face — and never some other element's.</strong> <see cref="FamilyOf"/>'s middle term is a
+    /// search of the whole part, which is a reasonable approximation for a chart whose objects
+    /// all state the same thing and wrong for one whose axes state a face its legend does not.
+    /// </para>
+    /// <para>
+    /// <c>001_advanced_powerpoint_bar.pptx</c> is the case, and it is 33 of the corpus' slides
+    /// decks and 36 of its sheets ones: <c>c:catAx/c:txPr</c> and <c>c:valAx/c:txPr</c> state
+    /// <c>Arial</c>, <c>c:legend</c> and <c>c:chartSpace</c> state nothing, and 26.2.4.2 draws the
+    /// axis labels in LiberationSans and the legend in Carlito — the theme's Calibri. That is
+    /// <c>ObjectFormatter</c>'s automatic text table, which names <c>XML_minor</c> for every
+    /// automatic entry (<c>objectformatter.cxx</c>:415-434) and lets an object's own
+    /// <c>c:txPr</c> override it for that object alone.
+    /// </para>
+    /// <para>
+    /// Null when the part states nothing and there is no theme, which leaves
+    /// <see cref="ChartPlot.TextFamily"/> deciding exactly as before.
+    /// </para>
+    /// </remarks>
+    private static string? LegendFamilyOf(
+        XElement? chart, XElement chartSpace, DrawingTheme? theme)
+        => LiteralFamily(Child(Child(chart, "legend"), "txPr"))
+           ?? LiteralFamily(Child(chartSpace, "txPr"))
            ?? theme?.Fonts?.MinorLatin;
 
     /// <summary>The first literal <c>a:latin/@typeface</c> under an element, or null.</summary>
