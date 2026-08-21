@@ -28,7 +28,7 @@ fix reaches `Paperless.Core/Charts`) and 61 words landing on this track. Recorde
 
 | | base | final |
 |---|---:|---:|
-| passing over `MANIFEST.tsv` | **200 of 302** | **200 of 302** |
+| passing over `MANIFEST.tsv` | **200 of 302** | **200 of 302** (and **+1 on sheets**, see below) |
 | page counts changed | | **0 of 302** |
 | `abs_ink` | 990.51 | **989.29 (−1.22)** |
 | signed ink | 693.89 | 693.40 |
@@ -510,7 +510,65 @@ column against `MANIFEST.tsv`:
 | track | passing over `MANIFEST.tsv` at this tree | manifest disagreements |
 |---|---|---|
 | **words** | **321 of 337** (337 of 337 visited) | **0** |
-| **sheets** | see the report | |
+| **sheets** | **282 of 307** (307 of 307 visited) | **1 — and it is a gain** |
+
+**Words is unchanged and clean**, exactly as the census said it would be: no `.docx` chart part
+in the corpus has a legend whose face or order either census flags.
+
+**Sheets is 282 of 307 and the single disagreement is `+1`.**
+`064_Small_business_cash_flow_Use_this_template_0a640756.xlsx` is `open` in the manifest and
+reads **`match`** at this tree — 508 words against the reference's 520 before, **510** after, and
+the gate's band is `d > b × 0.02 && d > 3`, so 12 fails on a band of 10.4 and 10 passes.
+
+**And it is this round's, measured with a base-source control rather than argued.** The two
+strings that changed are `Cash flow projection` and `Cash on hand minimum alert` — the chart's
+two series names, which are its legend entries — and each gains its clipped leading `ash`. Its
+`xl/theme/theme11.xml` names **Arial** as the minor face while the part's first literal
+`a:latin` anywhere is **Sitka Heading**, so the legend was being measured in the wrong face and
+its box was the wrong width. The three changed sources were checked out at `337bc9fe17c`, the CLI
+rebuilt, the document rendered — **508 words, `flow projection` and `on hand minimum alert`** —
+and then restored and rebuilt, with the shipped state re-rendered to prove the restore
+(`001_advanced_powerpoint_bar`, `stacked_bar_chart` and `064` all byte-identical to their sweeps'
+own copies).
+
+**A census bug found on the way, and it did not change the count.** `legendfamily-census.py`
+looked for the theme at `theme1.xml`; two workbooks call theirs `theme11.xml`, and for those the
+census read no theme at all and reported the legend's new face as *nothing*. Both were already
+counted as changing, so the 33/36/0 reach figure stands — but the census was reporting the wrong
+*answer* for the very document that produced this round's cross-track verdict. Fixed in the
+committed script, with the reason written into it.
+
+## Tests
+
+Two new files, **23 new tests**, and the total reconciles: **5102 = 5079 + 23**.
+
+| test | mutation | outcome |
+|---|---|---|
+| `ChartLegendFaceAndOrderTests` (17) | `measurer.For(plot.LegendFamily)` → `measurer` | **DETECTED**, 2 of 17 |
+| `ChartLegendFaceAndOrderTests` (17) | the reversal gated on `Legend == None` | **DETECTED**, 4 of 17 |
+| `DrawingChartLegendFaceTests` (6) | `LegendFamilyOf(…)` → `FamilyOf(chartSpace, theme)` | **DETECTED**, 3 of 6 |
+
+Three mutations, three detected by reintroduction; neither class is a drift guard. The first
+mutation attempt — `if (false) entries.Reverse();` — was rejected by `verify-test.sh` itself with
+*"the mutated tree does not build — that is not a detection"*, which is the guard working: an
+unreachable-code error is not a behaviour change.
+
+Each class's inert cases are controls by design: a chart stating one face throughout, a legend
+stating `+mn-lt` (a theme reference is not a face name), a chart stating nothing with no theme at
+all, the column and area charts that must keep file order, a top or bottom legend on an unswapped
+chart, a line chart whose `Direction` defaulted to `Bar` and must not be treated as swapped, and
+a pie whose categories must not reverse.
+
+Ten non-Fidelity projects, one at a time, at the final tree, `--no-build` so that nothing could
+be rebuilt under a sweep:
+
+```
+Core 407   Containers 109   Text 624   Vector 302   Rendering 153(1 skipped)   Markup 259
+OpenDocument 125   WordProcessing 1225   Spreadsheets 1020   Presentations 878     = 5102
+0 failed
+```
+
+`cd dotnet && dotnet build -v q -nologo` → **0 warnings, 0 errors**.
 
 ## Left open, in the order the next round should take them
 

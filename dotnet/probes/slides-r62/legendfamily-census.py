@@ -35,12 +35,24 @@ def child(el, name):
 
 
 def minor(z):
-    for n in z.namelist():
-        if re.match(r"(ppt|word|xl)/theme/theme1\.xml$", n):
-            r = ET.fromstring(z.read(n))
+    """The theme's minor Latin face.
+
+    **Not `theme1.xml`.** A workbook names its theme part whatever it likes -- 
+    `064_Small_business_cash_flow_Use_this_template_0a640756.xlsx` calls it `theme11.xml` -- and
+    a census that hardcodes `theme1` reads *no theme at all* for it and then reports that the
+    legend's face does not change.  That miss cost this round one of its two cross-track
+    verdicts in the write-up before it was caught.  Every theme part is read; where they
+    disagree the first is taken and the caller is none the wiser, which is a known limit.
+    """
+    for n in sorted(z.namelist()):
+        if re.match(r"(ppt|word|xl)/theme/theme\d*\.xml$", n):
+            try:
+                r = ET.fromstring(z.read(n))
+            except Exception:
+                continue
             mn = r.find(f".//{A}fontScheme/{A}minorFont/{A}latin")
-            if mn is not None:
-                return (mn.get("typeface") or "").strip() or None
+            if mn is not None and (mn.get("typeface") or "").strip():
+                return mn.get("typeface").strip()
     return None
 
 
