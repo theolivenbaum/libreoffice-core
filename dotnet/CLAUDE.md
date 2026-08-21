@@ -634,6 +634,34 @@ filesystem, fold case and deduplicate before counting.
 **Do not delete the aliases.** As in the corpus, `rm -rf dotnet/src/paperless.core` is a request to
 unlink that inode, and the inode is the source tree.
 
+**`/tmp` is on the 20 GB overlay and this workflow fills it, which reads as an 11-verdict
+regression.** A words round's post-change sweep returned **`REF-CANNOT-RENDER 13`** with `/` at
+100%: **~120 000 stale entries, 17 GB**. It discarded that figure rather than reporting it, which is
+the right call and is `HANDOVER.md`'s "a full disk looks exactly like a catastrophic regression"
+arriving for the second time.
+
+Measured by the parent shortly afterwards, on a `/tmp` holding **119 512 entries and 14 GB**:
+
+| class | aged >2 h |
+|---|---:|
+| `MSBuildTemp*` | **114 122** |
+| `paperless-lo-*` (soffice profiles) | 759 |
+| `clr-debug-pipe-*` | 350 |
+
+**`MSBuildTemp*` is the bulk and it is ours** — every `dotnet build` leaves one, and this session
+runs a build per merge. Clearing entries older than two hours took `/` from 4.6 GB free to 5.4 GB
+and `/tmp` from 119 512 entries to 4 275, with a sweep running throughout and unaffected.
+
+```sh
+find /tmp -maxdepth 1 -name 'MSBuildTemp*'    -mmin +120 -print0 | xargs -0 -r rm -rf
+find /tmp -maxdepth 1 -name 'paperless-lo-*'  -mmin +120 -print0 | xargs -0 -r rm -rf
+find /tmp -maxdepth 1 -name 'clr-debug-pipe-*' -mmin +120 -print0 | xargs -0 -r rm -rf
+```
+
+**The age bound is what makes it safe to run beside a live sweep** — nothing the sweep owns is two
+hours old. Better still, point a sweep's `TMPDIR` at the host mount (`/c/sandbox/workdir/...`),
+which has 150 GB free where `/` has five.
+
 **`verify-test.sh` rebuilds twice, so running it during a sweep replaces the binary under that
 sweep.** The rule "a sweep and a rebuild must never overlap" has always been written as though the
 rebuild would be an explicit `dotnet build`. It need not be: the mutation harness builds on both
