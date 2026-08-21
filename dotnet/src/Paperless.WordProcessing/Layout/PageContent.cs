@@ -922,6 +922,43 @@ public readonly record struct PageRun(
     /// <summary>The measurement half of this run.</summary>
     public FormattedRun ToFormattedRun()
         => new(Start, Length, Face, EmSize, Shaping, MetricEmSize, Tracking);
+
+    /// <summary>
+    /// True when two resolved fonts disagree about whether their glyphs are drawn leaning.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The four readers each decide whether a paragraph's formatting <em>varies</em>, and fold it into
+    /// a single run when it does not. That fold drops everything the runs disagreed about, so every
+    /// property that has to reach the page has to be on the predicate — which is why highlight,
+    /// underline and strike-through are each on it with a sentence saying why. This is the same
+    /// sentence for the one that was missed.
+    /// </para>
+    /// <para>
+    /// <strong>It is invisible on nearly every family, which is why it survived.</strong> An italic run
+    /// of <c>Arial</c> resolves to <c>LiberationSans-Italic</c> — a different
+    /// <see cref="OpenTypeFace"/>, so <c>face != paragraphFace</c> already fires and the run survives
+    /// the fold. The families with <em>no</em> italic installed are exactly the fallback faces: DejaVu
+    /// Sans and DejaVu Serif ship Book and Bold and nothing else here. An italic run that falls back to
+    /// one of those resolves to the <em>same</em> face as its upright neighbour, passes every other
+    /// test, and loses its lean at the fold.
+    /// </para>
+    /// <para>
+    /// Measured, `probes/words-r56/oblique-uniform.py`, ten authored packages of one paragraph and two
+    /// runs. A run stating only <c>w:i</c> in a fallback family: reference 23 sheared glyphs, ours
+    /// <b>0</b>. The same run with a <c>w:sz</c> added — a property the predicate already tests —
+    /// reference 23, ours 22. The two differ by one thing and no reading of <c>w:i</c> predicts that.
+    /// </para>
+    /// <para>
+    /// Adding it costs no measurement. <see cref="ToFormattedRun"/> does not carry
+    /// <see cref="Font"/>, so a paragraph split only by this is rejoined by
+    /// <c>PageContent.Coalesce</c> into exactly the shaping it would have had — and the slant itself
+    /// moves no advance, since the reference hands it to HarfBuzz as a synthetic slant, which moves
+    /// outlines and leaves widths alone.
+    /// </para>
+    /// </remarks>
+    public static bool LeansDifferently(FontReference? run, FontReference? paragraph)
+        => (run?.SyntheticOblique ?? false) != (paragraph?.SyntheticOblique ?? false);
 }
 
 /// <summary>

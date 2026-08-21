@@ -583,10 +583,18 @@ foot of the page rather than assuming it, is the model.
   at all. We were honouring a table style the reference never resolved, setting cell text on a
   13.45 pt pitch against the reference's 15.45. **7/8 → match.** Also refuted there: that
   LibreOffice puts `w:docDefaults` *above* a table style — six authored variants say it does not.
-- **249 legacy `FORMCHECKBOX` fields across 16 documents** — established, deliberately not
+- ~~**249 legacy `FORMCHECKBOX` fields across 16 documents** — established, deliberately not
   implemented: the drawn square's size would not pin (9.0…15.9 pt, not following
-  `w:checkBox/w:size`; LibreOffice's own arithmetic gives 3.53 mm where the square measures
-  3.175 mm) and 12 of the 16 currently match.
+  `w:checkBox/w:size`).~~ **Both halves refuted and implemented, round 56.** The census is **675
+  boxes in 12 documents**, all `.docx`, counted over every part of every package. And the size pins
+  exactly: the portion is a square of `rInf.GetTextHeight()` with the line's own ascent
+  (`portxt.cxx`:1492) and the drawn rectangle is that square deflated by a hard **25 twips a side**
+  (`inftxt.cxx`:1247), crossed when ticked. **9.0…15.9 pt was a range of font sizes read as a
+  failure to pin**, and `w:checkBox/w:size` — which 109 of the 675 state — is inert on four values
+  from 5 to 40 pt. Drawn and, more to the point, *charged to the line*: 249/249, 152/152 and 48/48
+  squares against the reference on the three densest documents, sides identical to 0.000 pt, with
+  zero verdicts and zero page counts moved. The `.doc` and `.rtf` arms are still neither censused
+  nor implemented.
 - **An ODF end-of-paragraph inline object contributes no height** — measured and reproducing, not
   fixed; the fix needs a line list `MeasureLine` does not have, and no ODF document is in this
   track.
