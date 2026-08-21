@@ -308,8 +308,11 @@ internal static class XlsxDrawings
 
         return chartSpace is null
             ? null
+            // `automaticChartAreaLine`: the grey D9D9D9 default chart-area border is skipped only
+            // under the Impress filter (objectformatter.cxx:838-848, tdf#150176), and this is Calc.
             : DrawingChartPlot.Read(
-                chartSpace, theme, OoxmlMetadata.IsOffice2007(package), styles: null, ranges);
+                chartSpace, theme, OoxmlMetadata.IsOffice2007(package), styles: null, ranges,
+                automaticChartAreaLine: true);
     }
 
     /// <summary>

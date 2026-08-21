@@ -231,35 +231,54 @@ public static class ChartAxisLabels
         return smallest;
     }
 
+    /// <summary>
+    /// How much of one tick's worth of axis a label's word is given before it breaks inside
+    /// itself — <c>createTextShapes</c>'s own 5% reduction.
+    /// </summary>
+    /// <remarks>See <see cref="Wraps"/>, which is the only caller and carries the measurement.</remarks>
+    private const double WrapFraction = 0.95;
+
     /// <summary>Whether any label would wrap in the room one tick's worth of axis gives it.</summary>
     /// <remarks>
     /// <para>
-    /// <strong>The room is the tick spacing itself.</strong> The source says otherwise twice
-    /// over — <c>createTextShapes</c> reduces the limit by 5% "to have a visible distance between
-    /// the labels" (<c>VCartesianAxis.cxx:753-759</c>) and hands the result to the shape as
-    /// <c>TextMaximumFrameWidth</c>, whose text area is that width less
-    /// <c>ShapeFactory</c>'s two horizontal insets — and the running binary does neither.
+    /// <strong>The room is 0.95 of the tick spacing — the source's own constant, and it is not
+    /// fitted.</strong> <c>createTextShapes</c> reduces the limit by 5% "to have a visible
+    /// distance between the labels" (<c>VCartesianAxis.cxx:753-759</c>) and hands the result to
+    /// the shape as <c>TextMaximumFrameWidth</c>. Round 30 measured [0.990, 1.056] of the spacing
+    /// on <c>research/probes/slides-r30/make-rot-probe.py</c>'s decks and rejected 0.95 as "0.88
+    /// of it on those decks"; round 63 re-ran those decks against the reference and found that
+    /// what round 30 had located was not this boundary at all.
     /// </para>
     /// <para>
-    /// Measured on <c>research/probes/slides-r30/make-rot-probe.py</c>'s decks, at three
-    /// boundaries each crossed by a different variable, against the plot rectangle LibreOffice
-    /// states for each in <c>chart:coordinate-region</c>:
+    /// <strong>Passing this test does not turn the axis; it turns line breaking off.</strong>
+    /// <c>lcl_hasWordBreak</c> sets <c>m_bLineBreakAllowed = false</c> and restarts the layout
+    /// (<c>VCartesianAxis.cxx:888-903</c>), and the 45° only follows if the labels then
+    /// <em>collide</em> as single lines. Round 30's decks all carried a one-word label, for which
+    /// the two boundaries are 0.95 and 1.00 of the spacing and only the outer one is visible: a
+    /// single word wider than 0.95 of a tick but narrower than a whole one breaks, unbreaks and
+    /// comes out upright, so the deck turns at the collision and the wrap limit leaves no trace.
+    /// Round 63's decks separate them by giving one label a space in it.
     /// </para>
     /// <list type="table">
-    /// <item><description>26 six-character categories down to 12: LibreOffice's axis is upright
-    /// at 15 and turned at 16, so the limit is between 0.990 and 1.056 of the spacing.</description></item>
-    /// <item><description>20 categories, three characters up to six: upright at four and turned
-    /// at five, so between 0.880 and 1.100.</description></item>
-    /// <item><description>10 categories, seven characters up to eleven: upright at nine and
-    /// turned at ten, so between 0.990 and 1.100.</description></item>
+    /// <item><description><c>Middle Column</c> among twelve categories at 10 pt in Liberation
+    /// Sans, tick spacing swept continuously by the chart frame's own width: LibreOffice is
+    /// upright at 35.476 and turned at 35.348, and <c>Column</c> measures 33.597 on
+    /// <c>chart2</c>'s device — so the limit is in [0.9470, 0.9505) of the
+    /// spacing.</description></item>
+    /// <item><description>The same twelve at 11 pt, where the pixel em rounds the other way:
+    /// upright at 40.864, turned at 40.703, <c>Column</c> 38.765, so [0.9486, 0.9524).
+    /// <strong>The same two boundaries read on the unquantised metrics are [0.9713, 0.9748) and
+    /// [0.9276, 0.9312) and do not intersect at all</strong>, which is round 62's pixel-em law
+    /// arriving from a second, independent observable.</description></item>
+    /// <item><description>Replacing that label's second word so the first word decides
+    /// (<c>MiddleMiddleMi Column</c>), or shortening it (<c>Middle Colum</c>), or lengthening it
+    /// (<c>Middle Columnn</c>), moves the boundary to where <c>0.95 × spacing</c> puts it and
+    /// nowhere else; changing the <em>first</em> word alone (<c>Mi Column</c>) does not move it at
+    /// all.</description></item>
     /// </list>
     /// <para>
-    /// One is the only round number in the intersection, and the rule this replaces — 0.95 of the
-    /// spacing less 0.36 em — is 0.88 of it on those decks and turns the axis two categories
-    /// early. What the corpus cannot separate is <em>this</em> from
-    /// <c>0.95 × spacing + 2 × inset</c>, which fits all three boundaries equally: the two differ
-    /// by at most 0.36 em and no reachable category count lands between them. Recorded rather
-    /// than resolved.
+    /// The 5% is taken in integer 1/100 mm by the source and so is at most 0.08% larger than a
+    /// flat 0.95 at these spacings — a difference the decks cannot see and this does not model.
     /// </para>
     /// </remarks>
     private static bool Wraps(
@@ -273,19 +292,15 @@ public static class ChartAxisLabels
     {
         if (spacing <= Length.Zero) return false;
 
-        // The room a word has is the space between two ticks, and neither of the two corrections
-        // that were here survives measurement. See the remarks on this method.
-        //
-        // The measurer's own scale is applied because the 1.000 is *fitted*, and it was fitted
-        // against widths measured on the unquantised ruler. A consumer whose ruler has since moved
-        // onto a device - a sheet's chart text, on chart2's 96 dpi one - must be compared in the
-        // units the constant was found in or the boundary moves by the device's own correction.
-        // IChartTextMeasurer.AdvanceScale is one for every consumer whose ruler did not move.
-        Length limit = spacing * (staggered ? 2.0 : 1.0) * measurer.AdvanceScale(size);
+        Length limit = spacing * (staggered ? 2.0 : 1.0) * WrapFraction;
 
         if (limit <= Length.Zero) return false;
 
-        for (int at = 0; at < count; at++)
+        // The first label is not tested — `nTick > 0` guards the whole check
+        // (VCartesianAxis.cxx:892). It is not a detail. Round 63's `C` deck's widest word is its
+        // *first* label, `START` at 31.96 against a limit of 29.16, and LibreOffice leaves that
+        // axis upright; testing the first label turns it instead.
+        for (int at = 1; at < count; at++)
         {
             if (texts[at] is not { Length: > 0 } text) continue;
 
@@ -324,7 +339,14 @@ public static class ChartAxisLabels
         {
             if (text[at] is not (' ' or '\t' or '-' or '‐' or '/')) continue;
 
-            if (at > start) yield return text[start..(at + 1)];
+            // A hyphen or a slash is part of the run it ends — the break comes after it and its
+            // width is on the line. A blank is not: it hangs past the line's end, so counting it
+            // makes every space-separated label 0.28 em too wide for the test above. Measured on
+            // round 63's `C` deck, whose widest tested word `Middle` is 28.72 against a limit of
+            // 29.16: LibreOffice leaves it upright, and `Middle ` at 31.43 would turn it.
+            if (at > start)
+                yield return text[at] is ' ' or '\t' ? text[start..at] : text[start..(at + 1)];
+
             start = at + 1;
         }
 

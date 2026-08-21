@@ -96,6 +96,34 @@ The claim held: the division is integer, the washout branch tests the integer fo
 −70, and C#'s truncation toward zero matches C++'s on the negative contrast without a second arm.
 **`Paperless.Ooxml` is now one of one re-checked.**
 
+## Round 63 (sheets): the counters again, and the site round 62 named had already been done
+
+Re-derived at base `43142b73ccf` with this file's own commands: **37 open hits in 26 files** —
+unchanged — and **34 marker lines, 29 `VERIFIED`, 4 `FIXED`, 1 `WRONG`, 0 `UNDECIDED`**, where
+round 62 recorded 31 / 26 / 4 / 1. The three extra `VERIFIED` arrived with the slides and words
+branches merged beside it. **Sixth time a quoted number here has failed to reproduce.** The open
+count is again unchanged, so the drift is in the marker column alone.
+
+**Round 62 (sheets) named `Paperless.Core/Graphics/GlyphRun.cs` :347/:369 as the next site, and it
+already carries a `VERIFIED` marker of the same date from slides-r62.** The round that named it
+and the round that did it were the same round; the sheets write-up could not know, because the
+merge had not happened when it was written. **A "next site" is only useful if it is checked against
+the file at the moment of writing** — which is what this file already says about counters and now
+says about sites too.
+
+What is left there is claims **two and three**, and the marker itself says why they are open: no
+corpus document states a lone `a:lum` brightness or a non-washout pair, so they can only be settled
+by authored fixtures. `probes/sheets-r61/audit_lumpercent.py` is the harness. Three arms —
+brightness alone, contrast alone, and both — separate them outright, because
+`BColorModifier_RGBLuminanceContrast` spends the whole brightness *after* the contrast
+(`basegfx/source/color/bcolormodifier.cxx`:387-405) and `Bitmap::Adjust`'s `msoBrightness` branch
+spends half before and half after (`vcl/source/bitmap/bitmap.cxx`:1694-1698), and the two differ on
+every non-zero pair. `Paperless.Rendering/Images/RasterImageDecoder.cs`:239 is the same branch from
+the decoder's side and belongs in the same run.
+
+**Round 63 ran no re-check** and says so rather than filing a hurried one: its budget went to 328
+authored decks, four whole-track sweeps and a cross-track control.
+
 ## The next site, named with the command rather than from prose — round 62 (sheets)
 
 Round 62 ran **no** re-check: its budget went to the chart advance-width law and two whole-track

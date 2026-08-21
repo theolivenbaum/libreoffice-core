@@ -230,37 +230,6 @@ public interface IChartTextMeasurer
     /// <see cref="ChartLabel.IsBold"/> for which text is ever bold.
     /// </param>
     DocSize Measure(string text, Length size, string? family, bool bold);
-
-    /// <summary>
-    /// How much wider or narrower this consumer's device makes an advance than the stated size
-    /// alone would — one where it makes no difference.
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// <strong>This exists for exactly one caller and it is not a general scale factor.</strong>
-    /// <see cref="ChartAxisLabels"/>'s wrap limit is a <em>fitted</em> constant: three boundary
-    /// series on round 30's decks bracket it at [0.990, 1.056] of the tick spacing and 1.000 is
-    /// the only round number in the intersection. Every one of those boundaries was found by
-    /// comparing LibreOffice's own rotation decision against <em>our</em> word widths, so the
-    /// constant is only meaningful in the units those widths were in.
-    /// </para>
-    /// <para>
-    /// Round 62 moved a <em>sheet's</em> chart text onto <c>chart2</c>'s 96 dpi device, where an
-    /// advance is 2.5% narrower at 10 pt and 2.3% wider at 11, and left the other two consumers on
-    /// the unquantised metrics. Comparing a width measured on one ruler against a limit calibrated
-    /// on another is what turned twelve rotated category labels into six horizontal ones on
-    /// <c>023_Waterfall_Chart_Template_for_Excel</c>. This restores the calibration's units and
-    /// nothing else, and the default of one is what makes that true for the consumers whose ruler
-    /// did not move: a slide's and a document's chart text is measured exactly as it was.
-    /// </para>
-    /// <para>
-    /// <strong>It is a stop-gap and it says so.</strong> The right repair is to re-derive the
-    /// bracket against the reference with the corrected ruler — the decks and the generator both
-    /// still exist — after which this returns to being one everywhere and can go.
-    /// </para>
-    /// </remarks>
-    /// <param name="size">The em size the limit is being applied at.</param>
-    double AdvanceScale(Length size) => 1.0;
 }
 
 /// <summary>
@@ -287,10 +256,6 @@ public readonly record struct ChartText(IChartTextMeasurer Measurer, string? Fam
     /// <param name="bold">Whether it is set bold; only a chart's titles ever are.</param>
     public DocSize Measure(string text, Length size, bool bold = false)
         => Measurer.Measure(text, size, Family, bold);
-
-    /// <inheritdoc cref="IChartTextMeasurer.AdvanceScale"/>
-    /// <param name="size">The em size the limit is being applied at.</param>
-    public double AdvanceScale(Length size) => Measurer.AdvanceScale(size);
 
     /// <summary>The same measurer bound to another family, or this one when none is named.</summary>
     /// <remarks>

@@ -41,6 +41,38 @@ namespace Paperless.Ooxml.DrawingML;
 /// </remarks>
 public static class DrawingChartPlot
 {
+    /// <summary>
+    /// The line a chart space with no <c>a:ln</c> of its own is drawn with, outside Impress.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>LineFormatter</c>'s constructor (<c>oox/source/drawingml/chart/objectformatter.cxx:826-852</c>)
+    /// gives every <c>OBJECTTYPE_CHARTSPACE</c> a solid line of
+    /// <c>GraphicHelper::getDefaultChartAreaLineStyle()</c> at
+    /// <c>getDefaultChartAreaLineWidth()</c> — 9525 EMU, 0.75 pt, "what MSO 2016 writes fixing
+    /// incomplete MSO 2010 documents" — coloured <c>D9D9D9</c>, "what MSO 2016 use as a default
+    /// color for chartspace border". tdf#81437 and tdf#82217.
+    /// </para>
+    /// <para>
+    /// <strong>The Impress filter is the exception, not the rule</strong>, and reading it as the
+    /// rule is what left this unimplemented for two rounds: the guard is
+    /// <c>!aFilterName.startsWithIgnoreAsciiCase("Impress")</c> (tdf#150176), so a Calc or Writer
+    /// chart gets the border and a slide's does not. Four blind readers across rounds 61 and 62
+    /// reported it on three unrelated <em>spreadsheet</em> documents and <c>pdf-ops.py</c> agreed
+    /// every time; the reference's own stroke on <c>023_Waterfall_Chart_Template_for_Excel</c> is
+    /// at (68.17, 425.79)-(530.67, 755.77).
+    /// </para>
+    /// <para>
+    /// A stated <c>a:ln</c> still wins, because <c>convertFormatting</c> assigns the automatic
+    /// line first and the shape's own over it — and an <c>a:ln/a:noFill</c> is a line the file
+    /// turns off, which is why <see cref="SuppressesLine"/> and not <see cref="LineOf"/> decides.
+    /// </para>
+    /// </remarks>
+    private static readonly Colour AutomaticChartAreaLine = Colour.FromRgb(0xD9D9D9);
+
+    /// <summary>0.75 pt — <c>getDefaultChartAreaLineWidth()</c>'s 9525 EMU.</summary>
+    private static readonly Length AutomaticChartAreaLineWidth = Length.FromEmu(9525);
+
     /// <summary>How many <c>c:pt</c> a cache is trusted to declare.</summary>
     /// <remarks>The same ceiling <see cref="DrawingChart"/> applies, for the same reason.</remarks>
     private const int MaxPointCount = 65536;
@@ -66,12 +98,19 @@ public static class DrawingChartPlot
     /// word-processing readers pass — keeps the cached points as the only source. See
     /// <see cref="ChartRangeResolver"/> for why the two differ.
     /// </param>
+    /// <param name="automaticChartAreaLine">
+    /// Whether a chart space that states no line of its own gets the automatic grey one. True for
+    /// every host but Impress — see <see cref="ChartPlot.Border"/>. It defaults to the Impress
+    /// answer because the exception is Impress's and because this reader's fixtures are
+    /// presentations; the two hosts that want it pass it explicitly.
+    /// </param>
     public static ChartPlot? Read(
         XElement chartSpace,
         DrawingTheme? theme = null,
         bool office2007 = false,
         DrawingStyleMatrix? styles = null,
-        ChartRangeResolver? ranges = null)
+        ChartRangeResolver? ranges = null,
+        bool automaticChartAreaLine = false)
     {
         ArgumentNullException.ThrowIfNull(chartSpace);
 
@@ -240,8 +279,17 @@ public static class DrawingChartPlot
             Background = FillOf(Child(chartSpace, "spPr"), theme)
                          ?? DrawingChartAutoFormat.FrameFillOf(
                                 automatic.Style, ChartAutoFrame.ChartSpace, theme),
-            Border = LineOf(Child(chartSpace, "spPr"), theme),
-            BorderWidth = LineWidthOf(Child(chartSpace, "spPr")),
+            Border = LineOf(Child(chartSpace, "spPr"), theme)
+                     ?? (automaticChartAreaLine && !SuppressesLine(Child(chartSpace, "spPr"))
+                         ? AutomaticChartAreaLine
+                         : null),
+            BorderWidth = LineWidthOf(Child(chartSpace, "spPr")) is { } stated
+                          && stated > Length.Zero
+                ? stated
+                : automaticChartAreaLine && LineOf(Child(chartSpace, "spPr"), theme) is null
+                    && !SuppressesLine(Child(chartSpace, "spPr"))
+                    ? AutomaticChartAreaLineWidth
+                    : Length.Zero,
             PlotBackground = FillOf(Child(plotArea, "spPr"), theme)
                              ?? DrawingChartAutoFormat.FrameFillOf(
                                     automatic.Style, ChartAutoFrame.PlotArea, theme),

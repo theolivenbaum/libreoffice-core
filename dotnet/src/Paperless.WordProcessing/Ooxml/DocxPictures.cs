@@ -246,7 +246,10 @@ public sealed class DocxPictures
         if (chartSpace is null) return default;
 
         return new DocxChart(
-            DrawingChartPlot.Read(chartSpace, _file.Theme, _file.IsOffice2007),
+            // `automaticChartAreaLine`: the exception in objectformatter.cxx:838-848 is Impress's
+            // alone, so a Writer chart with no `a:ln` of its own carries the grey default border.
+            DrawingChartPlot.Read(chartSpace, _file.Theme, _file.IsOffice2007,
+                                  automaticChartAreaLine: true),
             LabelFamily(chartSpace));
     }
 
