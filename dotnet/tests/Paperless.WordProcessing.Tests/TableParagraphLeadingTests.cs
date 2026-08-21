@@ -89,6 +89,29 @@ public sealed class TableParagraphLeadingTests
         (Tables()[0].Points - 12.65).ShouldBe(6.30, tolerance: Tolerance);
     }
 
+    /// <summary>
+    /// An <c>atLeast</c> line keeps its raise even as a paragraph's first line, and hands none of it on.
+    /// </summary>
+    /// <remarks>
+    /// The fixture's third paragraph states <c>w:line="400" w:lineRule="atLeast"</c> over an 11 pt line
+    /// whose natural height is 12.65 pt, so the raise is 7.35 pt. It is the paragraph's <em>only</em>
+    /// line and it follows a table, which is both places this engine used to strip the raise: a
+    /// paragraph's first line and the first line after something that hands nothing down. The
+    /// reference draws its baseline 76.15 pt below the body's top edge — table 2's bottom at 58.90,
+    /// plus the 7.35 pt raise, plus the 9.90 pt ascent — and puts table 3's top at 78.90, i.e. exactly
+    /// 20.00 pt of paragraph and not a twip of leading beyond it, because
+    /// <c>SwTextFrame::GetLineSpace</c> answers for <c>Prop</c> and <c>Fix</c> and not for <c>Min</c>.
+    /// <para>
+    /// Two claims in one number, and they pull opposite ways: strip the raise and the table comes out
+    /// 7.35 pt high, hand the raise on as leading and it comes out 7.35 pt low.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void AnAtLeastParagraphKeepsItsRaiseAndHandsNoneOfItOn()
+    {
+        Tables()[2].Points.ShouldBe(78.90, tolerance: Tolerance);
+    }
+
     /// <summary>Where each table's top edge sits, relative to the body's top edge.</summary>
     private static List<Length> Tables()
     {

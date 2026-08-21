@@ -269,7 +269,8 @@ public static class FlowLayouter
                 LineBox box = ParagraphLeading.AsDrawn(
                     layout.Lines[line],
                     isFirstOfParagraph: line == 0,
-                    isFirstInFrame: placed.Count == 0 && stacked == 0);
+                    isFirstInFrame: placed.Count == 0 && stacked == 0,
+                    paragraph.Format.LineSpacing);
 
                 // `above` and not `above + leading`: the leading is the paragraph above's, and Writer's
                 // `GetTopForObjPos` keeps it in a paragraph-anchored frame's origin. See
@@ -285,7 +286,7 @@ public static class FlowLayouter
             }
 
             top += layout.SpaceAfter + paragraph.BorderBelow;
-            leading = ParagraphLeading.Below(layout);
+            leading = ParagraphLeading.Below(layout, paragraph.Format.LineSpacing);
             previousSpaceAfter = layout.SpaceAfter;
         }
 

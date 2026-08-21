@@ -1358,7 +1358,8 @@ public sealed class Paginator
             // the citing page at one body length and **17** at the next, which is a cut at the room left
             // and cannot be a whole move — that predicts nought or fifty-nine and never seventeen.
             int fitted = Fit(
-                layout, lineIndex, used + spaceAbove, columnBottom - NoteHeight(notes),
+                layout, paragraph.Format.LineSpacing, lineIndex, used + spaceAbove,
+                columnBottom - NoteHeight(notes),
                 atTopOfPage: columnIsEmpty, borderBelow: paragraph.BorderBelow);
 
             int allowed = Allowed(
@@ -1419,7 +1420,8 @@ public sealed class Paginator
                 LineBox box = ParagraphLeading.AsDrawn(
                     layout.Lines[lineIndex + i],
                     isFirstOfParagraph: firstLineOfParagraph,
-                    isFirstInFrame: firstLineHere);
+                    isFirstInFrame: firstLineHere,
+                    paragraph.Format.LineSpacing);
                 bool shares = box.SharesLineWithNext;
 
                 placed.Add(new PlacedLine(
@@ -1864,6 +1866,7 @@ public sealed class Paginator
     /// moves every break after it.
     /// </remarks>
     /// <param name="layout">The paragraph as it was laid out.</param>
+    /// <param name="spacing">Its line spacing, for which lines may drop their raise.</param>
     /// <param name="from">The first line still to place.</param>
     /// <param name="used">How much of the column is already spent.</param>
     /// <param name="available">Where the column ends.</param>
@@ -1883,6 +1886,7 @@ public sealed class Paginator
     /// </param>
     private static int Fit(
         LaidOutParagraph layout,
+        LineSpacingRule spacing,
         int from,
         Length used,
         Length available,
@@ -1902,7 +1906,8 @@ public sealed class Paginator
             LineBox box = ParagraphLeading.AsDrawn(
                 layout.Lines[last],
                 isFirstOfParagraph: i == 0,
-                isFirstInFrame: atTopOfPage && count == 0);
+                isFirstInFrame: atTopOfPage && count == 0,
+                spacing);
 
             if (box.Height > room) break;
 
@@ -2014,7 +2019,12 @@ public sealed class Paginator
         LaidOutParagraph layout, PageParagraph paragraph, Length used, Length available)
         => layout.Lines.Count == 0
            || used + layout.SpaceBefore + paragraph.BorderAbove
-              + layout.Lines[0].WithoutSpaceAbove().Height <= available;
+              + ParagraphLeading.AsDrawn(
+                      layout.Lines[0],
+                      isFirstOfParagraph: true,
+                      isFirstInFrame: false,
+                      paragraph.Format.LineSpacing)
+                  .Height <= available;
 
     /// <summary>
     /// The space above a paragraph, once collapsing and the top-of-page rule have applied.
@@ -2110,9 +2120,9 @@ public sealed class Paginator
         Func<int, LaidBlock> laidAt,
         int index,
         bool atFrameTop)
-        => atFrameTop || index == 0 || blocks[index - 1] is not PageParagraph
+        => atFrameTop || index == 0 || blocks[index - 1] is not PageParagraph above
             ? Length.Zero
-            : ParagraphLeading.Below(laidAt(index - 1).Paragraph);
+            : ParagraphLeading.Below(laidAt(index - 1).Paragraph, above.Format.LineSpacing);
 
     /// <summary>The gap above a paragraph, and how much of it is the paragraph above's leading.</summary>
     private Length Gap(
