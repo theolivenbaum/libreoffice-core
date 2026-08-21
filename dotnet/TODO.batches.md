@@ -18695,3 +18695,92 @@ the reference's at all (three horizontal bars against a stacked column, a value 
 against none, no connector). Then the rotated-label ellipsis, which `046` settles to the
 character. Then a chart **title**'s stated colour: two readers, two unrelated documents, same
 direction, no instrument yet — the shape the `D9D9D9` border had before it turned out to be exact.
+
+### Parent verification — round 63 sheets
+
+**803 of 946 unchanged: words 323, slides 200, sheets 280.** All 946 gated: **zero movement in either
+direction on any track.** Tests **5133, 0 failed** (Core 407 → 412, Presentations 878 → 882).
+
+### Round 30's wrap constant is refuted, and `AdvanceScale` is deleted
+
+The stop-gap round 62 shipped **with its own retirement written into the site** is gone —
+`IChartTextMeasurer.AdvanceScale`, `ChartText.AdvanceScale` and the `SheetChart` override all
+removed.
+
+**Round 30's fitted 1.000 measured the wrong boundary.** `lcl_hasWordBreak` does not turn the axis;
+it turns line breaking **off** and restarts, and the 45° follows only if the labels then collide as
+single lines. **Every deck round 30 used carried a one-word label** — for which the wrap limit (0.95)
+and the collision boundary (1.00) both exist but **only the outer one leaves a trace**. So those
+decks turn at 1.000 whatever the limit is, and the C++'s own 0.95 was rejected **for being
+invisible**.
+
+328 decks, tick spacing swept **continuously by the chart frame width**, LibreOffice's decision read
+**two independent ways** (its own `chart:coordinate-region`, and whether the labels survive in the
+PDF text layer) — agreeing on all 328:
+
+| decks | quantised ruler | unquantised |
+|---|---|---|
+| one word | [0.9805, 1.0102) | **empty** |
+| two words, 10 pt | **[0.9470, 0.9505)** | [0.9713, 0.9748) |
+| two words, 11 pt | **[0.9486, 0.9524)** | [0.9276, 0.9312) |
+
+**0.95 is in both two-word brackets, 1.000 in neither, nothing fitted.** And **the empty unquantised
+intersections are round 62's pixel-em law confirmed from a second, independent observable** — a
+stronger corroboration than the fourteen-size sawtooth that established it.
+
+It moves nothing: **0 of 307 sheets renderings byte-for-byte**, and 0 of the 34 slides/words
+documents with a labelled category axis. The live control that the constant is in the rendering path
+at all: our own boundary moves 34.46 → **36.30 = 33.597 / 0.95**.
+
+### The `#D9D9D9` border: the citation was an exception read as a rule
+
+`objectformatter.cxx:838-848` applies it for **every host but Impress** (tdf#150176) — **which is why
+four readers, all on spreadsheets, kept reporting it and the slides track never did.** Ten renderings
+change, each landing on the reference's **exact stroke count** (12/12, 8/8, 3/3, 2/2, 1/1).
+
+**The census over-reaches nine-fold**: 90 documents state it, the ink says 21 with a deficit, 12
+clean, 10 changed.
+
+**A deviation, stated plainly by the round rather than folded away**: the border was **not** in the
+committed prediction. It was implemented only after the wrap change had been proved **byte-null on
+all 307**, so attribution is clean — but those ten renderings were unpredicted. That is the
+acceptable form of a mid-round addition, and it is now written into `COMMON.md` as such.
+
+### The brief's witness was refuted, and the parent's proposal from it does not survive either
+
+I sent this round at `058_Social_media_engagement_data` on the grounds that "the reference draws ~24
+consecutive date labels where we draw ten". **Both draw 24, both rotated, neither truncated.** What
+the round found instead is **25 volatile calls**: the reference draws a date series starting *today*
+and we draw the cached series.
+
+It proposed re-filing the document `unstable`. **Measured by the parent, that does not hold either.**
+Both sides emit **24 whole date tokens**, so the volatility is **token-neutral and cannot move the
+gate**. The residual six-token gap is **differential fragmentation of the rotated date labels** —
+ours splits into `2/`, `/2`, `20`, `23`; the reference's into `1/2`, `2/2`, `3`, `02`. Both fragment,
+neither is right, and **the boundaries differ because the drawn glyph positions do**.
+
+So it stays `kind=text`: a real difference in drawn output, expressed through tokenisation, and
+**winnable by matching the geometry** — which is what the chart work is already doing. Filing it
+`unstable` would have told every future round to skip a document that is in fact on the critical
+path.
+
+### Confirmed independently
+
+The parent's `046` correction, to the character: ours 754 / reference 753, `only ours {t,n,e,m}`
+against `only ref {. . .}` — **the reference ellipsises a rotated category label.**
+
+### Vision
+
+`058` p1 produced the `TODAY()` lead **no metric found**, and **refuted the brief** in the same
+reading. `046` p1 confirmed the ellipsis object and **flagged her own inability to see the ellipsis
+at low confidence — correctly**. `023` p2 listed the chart outline among what is **identical**, an
+unprompted blind confirmation of this round's *own* border fix, and then found that **our page-2
+chart is a different chart entirely** from the reference's — three horizontal bars against a stacked
+column, value axis to 7000 against none, no connector, **on a document that passes**.
+
+### Sheets does next
+
+`023_Waterfall`'s page-2 chart — **the wrong chart, on a passing document**. Then the rotated-label
+ellipsis, the chart title colour (two readers, two documents, no instrument yet), the data-label
+colour, and the 96 dpi width law for `SlideChart`/`FrameChart` — **now the only reason the three
+chart rulers differ.**
