@@ -35,6 +35,20 @@ namespace Paperless.WordProcessing.Ooxml;
 /// Anything not named here measured as nought above and nought below, which is also the honest
 /// default: a name Writer does not recognise becomes a brand-new style with no spacing at all.
 /// </para>
+/// <para>
+/// [24.2.7-audit: VERIFIED 2026-08-21, round words-r56 — the whole table re-measured on 26.2.4.2,
+/// both halves of every row, by `probes/words-r56/audit_poolspacing.py`. 27 of the 28 names it
+/// tests answer exactly what this class claims, including the three that claim nothing (`Quote`,
+/// `Normal`, `List Paragraph`). The one exception is the row the paragraph on `ChildKeeps` had
+/// already put in doubt — lower-case `body text` answers nought on both sides, not 0/140 — and it
+/// is now removed rather than left standing, which is what that paragraph asked the round that
+/// re-measured the table to do. Zero corpus documents name a parent that way and 80 name
+/// `Body Text`, so the correction has no reach and is made because it is true.
+/// **The probe's own first run reported nine rows wrong and every one was an artefact**: it named
+/// the two case variants of a heading `heading-5` and `Heading-5`, which are one file on this
+/// mount, and a missing conversion reads as nought which reads as a finding. It now numbers its
+/// packages and refuses to print anything unless every conversion produced output.]
+/// </para>
 /// </remarks>
 internal static class WriterPoolSpacing
 {
@@ -72,7 +86,13 @@ internal static class WriterPoolSpacing
             ["caption"] = (Pt6, Pt6), ["Caption"] = (Pt6, Pt6),
 
             // "Text body", and "List", which Writer bases on it.
-            ["Body Text"] = (0, Pt7), ["body text"] = (0, Pt7),
+            //
+            // Only the capitalised spelling. Lower-case `body text` measures nought on both sides on
+            // 26.2.4.2 where `Body Text` measures 140 below, and the two are separate entries in
+            // `ConvertStyleName`'s ordinal map rather than one folded case — so this is not an
+            // inconsistency to be smoothed over, it is what that map says. See the audit marker on
+            // this class; the corpus names `Body Text` in 80 documents and `body text` in none.
+            ["Body Text"] = (0, Pt7),
             ["List"] = (0, Pt7),
         };
 
