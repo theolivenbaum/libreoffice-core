@@ -218,6 +218,39 @@ public static partial class SlideTextLayout
     }
 
     /// <summary>
+    /// The height a bullet or number is drawn at: the run's own height through the fit's font
+    /// scale and the marker's relative size, with <em>no</em> rounding to whole points.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>Outliner::ImpCalcBulletFont</c> (<c>editeng/source/outliner/outliner.cxx:851-855</c>)
+    /// is one multiplication and one <c>basegfx::fround</c>, taken on the paragraph font's height
+    /// in the model's own map unit:
+    /// <c>fround(aStdFont.GetFontSize().Height() × GetBulletRelSize()/100 × fFontY)</c>. The
+    /// whole-point rounding <see cref="Scaling.Scaled"/> transcribes belongs to
+    /// <c>Outliner::setRoundFontSizeToPt</c>, which sizes the text portions and which the bullet
+    /// path never reaches.
+    /// </para>
+    /// <para>
+    /// So a fitted paragraph draws its bullet and its text at <em>different</em> sizes, and that
+    /// pair is what identifies the rule rather than either figure alone. Measured on
+    /// <c>slides/done-006/ppt/Lepore.ppt</c> page 2 — one stated 24 pt body, a fit of 0.850 — the
+    /// reference draws eleven text baselines at <strong>20.013 pt</strong>, which is
+    /// <c>round(24 × 0.85) = 20</c>, and six bullets at <strong>20.409 pt</strong>, which is
+    /// <c>fround(847 × 0.85) = 720</c> hundredths of a millimetre.
+    /// </para>
+    /// </remarks>
+    private static Length ScaledMarker(Scaling scaling, Length runSize, double relative)
+    {
+        double factor = (scaling.Font is > 0 ? scaling.Font : 1.0)
+                        * (relative is > 0 ? relative : 1.0);
+
+        return factor == 1.0
+            ? Quantised(runSize)
+            : Length.FromMm100((long)Rounded(Quantised(runSize).Mm100 * factor));
+    }
+
+    /// <summary>
     /// A character height on the grid the draw layer can actually hold it on.
     /// </summary>
     /// <remarks>

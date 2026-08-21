@@ -57,6 +57,8 @@ broken one, because it is the only thing that stops the next round paying for th
 | `Paperless.Spreadsheets` | `Layout/SheetDeviceUnits.cs` | 53 | **verified 26.2.4.2, 2026-08-21** — 45 of 45 within 0.1% relative |
 | `Paperless.Spreadsheets` | `Layout/SheetOptimalRowHeights.cs` | 54 | **verified 26.2.4.2, 2026-08-21** — 30 of 30 wrapped row heights within half a twip, control at 300 |
 
+| `Paperless.Presentations` | `Ooxml/PptxSlideLayout.cs` :763 (table cell line spacing) | 54 | **verified 26.2.4.2, 2026-08-21** — 6 of 6 stated sizes put the reference's first baseline one em below the cell's top |
+
 **A trap the probe harness cost half an hour to find, before anyone else pays for it again.** A
 minimal authored `.xlsx` with no `<cellStyles>` element has its `cellXf` font **discarded entirely**
 by LibreOffice, so a font-size probe reads a constant 10 pt on the reference at every stated size
@@ -71,6 +73,8 @@ generator that is known to be read correctly by 26.2.4.2; start from it. Confirm
 | 52 (slides) | `SlideAutofit.cs`, 4 sites | **WRONG.** −155.40 `abs_ink`, −11.1% of the track |
 | 53 (slides) | `SlideTextLayout.cs`, **6 sites** | **all six still correct** — and the probes written to check them found a *fifth* branch none of the six described, worth another two fixes' worth of baseline accuracy. See `probes/slides-r53/results.md` § "The 24.2.7.2 audit" |
 | 54 (sheets) | `SheetOptimalRowHeights.cs`, the `WrappedHeight` fit | **still correct** — 30 of 30 authored wrapped rows within half a twip on 26.2.4.2, read twice over (marker deltas in both PDFs, and the reference's own `fods` `style:row-height`) with the site's own 300-twip figure as the control. `probes/sheets-r54/audit_rowheight.py` |
+
+| 54 (slides) | `PptxSlideLayout.cs` :763, 1 site | **still correct** — and the version bump is *why* it is correct: the site records that 24.2.7.2 drew a cell's first baseline at the face's own 0.907 em, `a47776a938c` (tdf#165521) removed the leading for cells, and 26.2.4.2 draws it at one em on 6 of 6 stated sizes from 10 to 40 pt. A site whose comment says "the running binary disagrees with its own C++" is the highest-prior kind on this list |
 
 **48 → 42 sites, 30 → 29 files.** Two in one: a re-check is worth running even when it comes back
 clean, because authoring the probe is what exposes what the site does *not* say. Round 53's
@@ -91,14 +95,14 @@ a round caught.
 
 | project | open hits | files with an open site | reaches |
 |---|---:|---:|---|
-| `Paperless.Presentations` | 11 | 4 | slides |
+| `Paperless.Presentations` | 12 | 5 | slides |
 | `Paperless.WordProcessing` | 11 | 8 | words |
 | `Paperless.Spreadsheets` | 10 | 9 | sheets |
 | `Paperless.Text` | 8 | 2 | **all three tracks** |
 | `Paperless.Core` | 2 | 1 | **all three tracks** |
 | `Paperless.Rendering` | 1 | 1 | **all three tracks** |
 | `Paperless.Ooxml` | 1 | 1 | **all three tracks** |
-| **total** | **44** | **26** | |
+| **total** | **44** | **29** | |
 
 Marked so far: **12** lines —
 9 verified,
@@ -109,6 +113,20 @@ The **open** count does not fall when a site is verified, and that is deliberate
 names 24.2.7.2 stays, because it records what the figure was fitted to. Round 54's marker is the
 twelfth and the open count held at 44. Read the two numbers as "how many sites still carry an
 unchecked 24.2.7.2 claim" and "how many have been checked", not as a total and a remainder.
+
+**9** verified,
+2 wrong,
+1 undecided.
+
+Recomputed 2026-08-21 after round 54 with the two commands below: **44 open hits in 29 files**.
+The file count stood at 26 here and was wrong; hits and files are different numbers and this table
+has now conflated them twice.
+
+**Round 54 tripped the self-corrupting-string trap this file warns about, in the marker itself.**
+Its `[24.2.7-audit: VERIFIED …]` block ran to a second line, and that continuation line named
+`24.2.7.2` in prose — so it did not carry the marker, and the open count went *up* by one while a
+site was being cleared. The rule is sharper than "annotate with a marker": **no line of a
+multi-line marker may contain the bare string.** Reworded to "the superseded note above".
 
 Reproduce both numbers with:
 
@@ -211,6 +229,7 @@ the site itself names **26.2.4.2** and the date — this table is the index, not
 | 2026-08-21 | `Paperless.Text/Fonts/SystemFontResolver.cs` :406 (DejaVu, never Liberation) | **verified in that respect** | `probes/words-r53/font-fallback-recheck.py`: ten unrecognised families, all land on DejaVu, none on Liberation |
 | 2026-08-21 | `Paperless.Text/Fonts/SystemFontResolver.cs` :629 (unrecognised → DejaVu **Sans**) | **WRONG — reported, not fixed** | same probe: all ten answer DejaVu **Serif**, with four controls agreeing; and `fc-match` answers Sans, so the stated mechanism ("fontconfig's default") is falsified too. **86 of 337 words renderings already disagree with the reference's font list and 73 carry DejaVu Sans on our side.** A change here owes a measured sweep of all three tracks |
 | 2026-08-21 | `Paperless.Text/Fonts/SystemFontResolver.cs` :435 (no family → Liberation Serif) | **undecided** | the probe's no-family DOCX carries no `styles.xml`, so LibreOffice applies *Word's* default (Carlito) and the case never reaches `DefaultFonts`. Needs a fixture that does |
+| 2026-08-21 | `Paperless.Presentations/Ooxml/PptxSlideLayout.cs` :763 (PPTX table cell line spacing) | **verified, and the claim had already been corrected** | `probes/slides-r54/make-cell-baseline-probe.py`: one table, one cell, zero margins, top-anchored, six stated sizes 10–40 pt. The reference's first baseline sits 1.0007 … 1.0002 ems below the cell's top edge on all six — one em, not the 0.907 em of 24.2.7.2 — and our own land on it to 0.000 pt. **The ODF half of the same claim, `OdpSlideLayout.cs:302`, is NOT covered** |
 | 2026-08-20 | `Paperless.Presentations/Layout/SlideAutofit.cs` ×4 | **WRONG, fixed** | round 52; −155.40 `abs_ink`, −11.1% of the slides track |
 
 **Two of the four shared-layer sites re-checked so far were wrong.** The prior on the remaining

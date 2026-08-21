@@ -190,6 +190,28 @@ internal static class PptTextBody
             Language: null,
             Marker: Marker(properties, level, scheme, fonts, runs))
         {
+            // Every binary paragraph, unconditionally -- and that is a measurement rather than a
+            // reading. `PPTParagraphObj::ApplyTo` puts the SvxLineSpacingItem (and with it
+            // SvxInterLineSpaceRule::Prop, which at a proportion of exactly 100 makes the fit's
+            // spacing reduction unreachable) behind `if (bIsHardAttribute)`, and that flag is set
+            // when the paragraph states a line feed or its first portion states a typeface index
+            // (svdfppt.cxx:6266-6288). Implementing exactly that disjunction was measured over the
+            // whole track and it is NOT what the reference draws: 13 documents moved for -13.06
+            // abs_ink, against -85.96 and 30 improvements for treating every .ppt paragraph as
+            // stating its spacing. `slides/done-006/ppt/Lepore.ppt` is the case that identifies
+            // it -- its body's paragraph mask is 0 and its character run states only a font
+            // HEIGHT, so the record makes it soft by both terms, and the reference still draws it
+            // at a pitch of 1.2 x em with the fit's 0.850 font scale applied.
+            //
+            // `GetAttrib` has two further hardness terms neither this reader nor the census can
+            // evaluate -- a destination instance of TSS_Type::Unknown, and a comparison of the
+            // source instance's master level against the destination instance's -- and the honest
+            // statement is that one of those fires far more often than the record suggests. What
+            // is measured is the outcome: on 26.2.4.2 no .ppt paragraph takes the ::Off arm.
+            //
+            // See probes/slides-r54/results.md for the A/B and for the authored known-answer deck.
+            LineSpacingStated = true,
+
             // The master's own value, which PowerPoint writes as 0x240 — one inch — and which the
             // record's default already is. Reading it matters for the deck that states something
             // else, and stating nothing must not fall back to a word processor's half inch.
