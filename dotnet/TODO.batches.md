@@ -17431,3 +17431,122 @@ title and gradient bars** where we draw none of the four.
 move on **31 of 57 chart pages, before and after**, and three independent sightings this round point
 at it. Then `8_P-Pavese_AIRBUS…pptx` (47.26, four unchecked claims from a page reading), then
 `N2_E_Maestroni`'s manual layout. **The fitted bullet's 1.9 pt is now untouched for five rounds.**
+
+## Round 60 — slides (not yet merged; branch `wt-slides-r60`)
+
+**Slides 200 → 200 of 302, 0 manifest disagreements.** `abs_ink` 1036.75 → **990.13**, major pages
+365 → **364**, differing pixels over 4530 pages 19402.35 → **19240.53 (−161.82)**. Page counts moved
+on 0 of 302. **26 documents moved on differing pixels — 24 improved, 2 worsened — and 26 on ink,
+22 improved and 4 worsened.**
+
+Baseline: the gate reproduced exactly; `abs_ink` measured **1036.75** against the briefed 1039.95
+and major pages 365 against 375. Reference reuse was excluded as the cause (two documents
+re-rendered give the *same* `|ink|%` on every page) and `dotnet/` was unmodified. Recorded.
+
+Three changes, each measured before it shipped, plus two audit re-checks.
+
+- **`c:crossBetween` decides shifted categories, not the chart type.** The brief's item 1 — the
+  plot rectangle's right edge — was not a right-edge reservation. `ChartPlot.ShiftedCategories`
+  read `Bar or Stock` and nothing else, so every OOXML line and area chart stating
+  `crossBetween="between"` was drawn a half-slot wrong: its categories as points on the plot's own
+  corners, its last label then overhanging, and half of that label taken off the right edge to make
+  room. **Nine probe arms, one property each, read back from the category labels' own pen
+  positions** (span/width is `(n−1)/n` shifted, 1 unshifted):
+
+  | | `between` | `midCat` | absent |
+  |---|---|---|---|
+  | `areaChart` | shifted | unshifted | unshifted |
+  | `lineChart` | shifted | unshifted | **shifted** |
+  | `barChart` | shifted | **shifted** | shifted |
+
+  **The 27.2 tree and the running binary disagree on the bar row** — `axisconverter.cxx:292-301`
+  reads the element ahead of the type for everything but a 3-D bar, and 26.2.4.2 renders a column
+  chart stating `midCat` byte-identically to the same chart stating `between`. The bar test now
+  runs first. The element is read from the axis the category axis *crosses*, not the first
+  `c:valAx`. Reach: **28 slides chart parts in 13 documents**, 12 sheets parts in 8, no words.
+  Worth 13 documents on differing pixels, 13 improved and none worsened.
+- **The automatic chart-space and plot-area fills above style 32, and five text colours.** The
+  brief's item 2 asked for the four claims on `8_P-Pavese_AIRBUS…pptx` page 8 to be *checked*
+  first. A fill census confirms three exactly — the reference paints `#000000` over
+  (0, 36.03)–(719.97, 427.49) and `#454545` over (68.74, 85.52)–(708.95, 377.18) where this reader
+  painted neither, and draws each bar as **16 nested rectangles** from `#FEFEFE` to `#DDDDDD` — and
+  a text-colour census confirms the fourth, **14 white runs against our 22 black**.
+  `ObjectFormatter`'s two fill tables are ported for styles 33 and up, where the pptx `noFill`
+  quirk stops applying (three corpus chart parts, all style 42), and `ChartLayout`'s one hardcoded
+  `AxisColour` black is split into five per-object colours read from the parts that state them,
+  each defaulting to black so no other format moves. Page 8: `|ink|% 43.67 → 0.23`, `diff% 51.45 →
+  3.53`, MAJOR → shifted; the document **47.26 → 3.92**, and it was the track's largest.
+  **And one claim is corrected**: our bars are near-white and so are the reference's — what made
+  the reference's visible was the black panel behind them, not the bars' own colour.
+- **An unstacked area chart paints its first series last.** Not in the plan; it came out of this
+  round's own page reading. `AreaChart::createShapes` reverses its slot list
+  (`AreaChart.cxx:565-568`). `006_advanced_powerpoint_area.pptx` page 1: `diff% 18.67 → 0.84`,
+  `|ink|% 1.54 → 0.03`, MAJOR → ok. **A stacked area is exempt and that is a measurement, not the
+  source**: `stacked_area_chart.pptx` is `1.82 / 0.16` in file order and `1.87 / 0.22` reversed.
+- **Audit: two re-checks, both VERIFIED.** `PptxSlideLayout.Shadow`'s three-arm rule re-run through
+  26.2.4.2's flat-ODF export of its own fixture — the empty `a:effectLst` and the lone `a:glow`
+  both still keep the theme's 38% shadow, 3 of 3. And `SlideAutofit.Quantised`'s
+  `(n * 127 + 36) / 72` still holds, but the expression has moved out of `textitem.cxx` into
+  `o3tl::convert`, and the citation is corrected. **37 open sites in 26 files, 25 markers.**
+  **First round in three where the audit did not outweigh the plan.**
+
+**Shared layers.** `Paperless.Core/Charts` and `Paperless.Ooxml`. Measured at this tree against
+`MANIFEST.tsv`: **words 319 of 337, 0 disagreements**; **sheets 279 of 307**, whose two
+disagreements are **stale manifest rows verified at the base commit** — `003_advanced_excel_pie`
+reads 143/143 (`match`, manifest `open`) and `011_advanced_excel_pie` reads 136/140 (`words`,
+manifest `done`) *both here and at `2870991a4dd`'s own chart sources*.
+
+### The right edge is now one number, and it is the legend
+
+`dRight` over 1 pt went **31 → 27** and the prediction said 20–24. The eight `line`/`area` template
+pages did not go to zero: they went from `−9.66/−9.68` to `−2.71/−2.73`, which is where the
+`column` and `bar` pages already sat. **Seventeen of the twenty-seven remaining pages are at
+exactly `−2.71`, `−2.73` or `−2.88`**, and `legend-census.py` locates it: the key's own size and
+the key-to-text gap agree with the reference to within 0.02 pt and the whole legend sits **2.70 pt
+to the left**, so the legend box is 2.70 pt too wide on its right and the plot gives that up. A
+second, smaller defect is in the same table — a *line* series' legend key is drawn 7.00 pt wide
+against the reference's 6.01.
+
+### A sweep spoiled by a rebuild, and the byte comparison that caught it
+
+Two cross-track sweeps were run while `verify-test.sh` — which mutates a source file, **rebuilds**,
+tests, restores and rebuilds again — was running, and its build replaced `Paperless.Core.dll` under
+them. It announced itself as **31 words documents moving between two sweeps**, one by 19.82 of ink
+on a questionnaire with no chart in it. Rendering is deterministic (the same document twice gives
+byte-identical PDFs); the *fresh* render matched one sweep's copy and not the other's, 157 696
+bytes against 157 807. Both were re-run clean. **The check is cheap and should be routine: re-render
+two or three of a finished sweep's documents and `cmp` them against the copies it kept.** The
+slides sweep was verified this way — eight documents, byte-identical.
+
+### `abs_ink` refuted again, and this time the mechanism is visible in one page's coordinates
+
+`006_advanced_powerpoint_area.pptx` went `|ink|% 0.19 → 1.54` for a change that moved its filled
+polygon from `x 85.99 … 572.84` onto the reference's `116.62 … 551.45` (`116.85 … 548.93`). The ink
+rose **because** the polygons came into register and exposed a paint-order difference that had been
+smeared across the page before; fixing that took the same page to `0.03`.
+
+### Vision, three readings committed, and one of them produced a change no metric found
+
+Pavese p8 re-read after the fix: a reader who had never seen round 59's claims lists the black
+panel, the charcoal wall, the white title and the bar geometry as **identical**, and ranks the
+missing bar **gradient** first — now measured as 16 bands from `#FEFEFE` to `#DDDDDD`. The area
+chart p1 reader answered the geometry question ("both left edges land on the M1 tick") and then,
+unprompted, ranked **"the dominant colour flips from blue to red … the two series are painted in
+opposite order"** first while noting the silhouettes and the crossing point are identical — which
+is the discriminator between a paint order and a value, and is the round's third change. JetBlue p4
+reports our rotated labels 25–30 px right of their ticks and the reference's 15–20 px left of
+theirs, ≈45 px apart — the size of an **anchor** rather than a category. **Not confirmed by a
+second instrument and left that way**: our rotated runs carry the rotation in the CTM and the
+reference's in the text matrix, so the naive pen census cannot band them.
+
+And one vision claim **refuted by an instrument**: "the top half's black panel extends further
+down" — the two panels are the same rectangle to 0.03 pt.
+
+### Slides does next
+
+**The legend's 2.70 pt**, which is 17 of 57 chart pages and one number. Then **Pavese's gradient
+bars** — the last of round 59's four claims, `Theme::getFillStyle`'s gradient for a chart above
+style 32, and what is left of that document. Then the **rotated category label's anchor**, with the
+instrument built before the hypothesis is believed. **The fitted bullet's 1.9 pt is now untouched
+for six rounds**; this round deferred it as a decision — three chart items with direct measurements
+outranked it — and the next round should either take it or say why in the same words.
