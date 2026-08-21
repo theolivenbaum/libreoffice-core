@@ -184,7 +184,11 @@ public static class DrawingChartPlot
         return new ChartPlot
         {
             DateAxis = dateAxis,
-            Title = TitleText(Child(chart, "title")),
+            // The automatic title LibreOffice substitutes when the part states an empty
+            // <c:title> — or none at all and has not deleted it. See DrawingChartTitle, which
+            // carries the rule, the corpus census and the four controls that measured it.
+            Title = TitleText(Child(chart, "title"))
+                    ?? DrawingChartTitle.Automatic(chart, office2007),
             // A scatter chart's horizontal axis is its domain and not its category axis, and its
             // title hangs off that element — so reading only c:catAx loses it entirely. The same
             // fallback CategoryAxisVisible already takes, and tdf127720.pptx is what shows it:

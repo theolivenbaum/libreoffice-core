@@ -639,6 +639,20 @@ internal static class SheetOptimalRowHeights
     /// lines, giving 805 twips where the arithmetic alone asks for 441.
     /// </para>
     /// <para>
+    /// [24.2.7-audit: VERIFIED 2026-08-21, round 54 — re-run against the installed
+    /// <strong>26.2.4.2</strong> on a freshly authored thirty of the same shape: six sizes (8, 10,
+    /// 11, 12, 14, 18 pt) against one to five words that cannot share a line, no <c>ht</c> and no
+    /// <c>customHeight</c> anywhere so Calc recomputes. <strong>30 of 30 agree to under half a
+    /// twip</strong>, the largest disagreement being 0.05. The instrument is two independent
+    /// readings of the same number — the y of an identical six-point marker in the next row less
+    /// this row's, off both PDFs, and the reference's own <c>--convert-to fods</c>
+    /// <c>style:row-height</c> — and the two agree to 0.6 twips throughout. The control ran first
+    /// and passed: the twelve-point single-line row reads <strong>300</strong> twips, which is the
+    /// figure this remark already states for <c>National-Reports.xlsx</c>. Twenty-four of the
+    /// thirty rows are genuinely multi-line and so exercise this method rather than
+    /// <c>lcl_GetAttribHeight</c>. <c>dotnet/probes/sheets-r54/audit_rowheight.py</c>.]
+    /// </para>
+    /// <para>
     /// A cell whose text is not all in one format is measured the same way with one difference:
     /// its lines are summed rather than counted, because EditEngine makes each line as tall as the
     /// tallest portion standing on it. See <see cref="RichPixels"/>.

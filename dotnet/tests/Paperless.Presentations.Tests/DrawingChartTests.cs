@@ -248,13 +248,23 @@ public class DrawingChartTests
 
         linked.ShouldNotBeNull().Name.ShouldBe("From a cell");
 
-        ContentSection? none = Read(
+        // A title the file leaves for the renderer to fill is filled, and this case used to
+        // assert the opposite. `autoTitleDeleted val="0"` over a single named series is
+        // `getSingleSeriesTitle`'s shape, and round 54 measured the reference drawing it —
+        // `Sales` thirteen times on `005_Contextures_chart_sample` where we drew six. See
+        // DrawingChartTitle for the rule and the four corpus controls behind it.
+        ContentSection? automatic = Read(
             "<c:autoTitleDeleted val=\"0\"/>"
             + "<c:plotArea><c:barChart><c:ser><c:tx><c:v>North</c:v></c:tx></c:ser></c:barChart></c:plotArea>");
 
-        // No title is invented. LibreOffice substitutes the single series' name, or the
-        // localised "Chart Title" (chartspaceconverter.cxx:185-204); reporting either would
-        // claim the file said something it does not.
+        automatic.ShouldNotBeNull().Name.ShouldBe("North");
+
+        // And then to nothing, which is the other half of this test and still holds: with no
+        // title element and no flag, the default is "deleted" for anything but an Office 2007
+        // package, so there is no title and no paragraph for one.
+        ContentSection? none = Read(
+            "<c:plotArea><c:barChart><c:ser><c:tx><c:v>North</c:v></c:tx></c:ser></c:barChart></c:plotArea>");
+
         none.ShouldNotBeNull().Name.ShouldBeNull();
         none.Children.OfType<ContentParagraph>().ShouldBeEmpty();
     }

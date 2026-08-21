@@ -55,6 +55,7 @@ broken one, because it is the only thing that stops the next round paying for th
 | `Paperless.Spreadsheets` | `Layout/SheetFonts.cs` (2 sites) | 53 | **verified 26.2.4.2, 2026-08-21** — 30 of 30 authored column widths exact to 0.001 pt |
 | `Paperless.Spreadsheets` | `Layout/SheetGeneralWidth.cs` | 53 | **verified 26.2.4.2, 2026-08-21** — 27 of 27, every `###` threshold crossing |
 | `Paperless.Spreadsheets` | `Layout/SheetDeviceUnits.cs` | 53 | **verified 26.2.4.2, 2026-08-21** — 45 of 45 within 0.1% relative |
+| `Paperless.Spreadsheets` | `Layout/SheetOptimalRowHeights.cs` | 54 | **verified 26.2.4.2, 2026-08-21** — 30 of 30 wrapped row heights within half a twip, control at 300 |
 
 **A trap the probe harness cost half an hour to find, before anyone else pays for it again.** A
 minimal authored `.xlsx` with no `<cellStyles>` element has its `cellXf` font **discarded entirely**
@@ -69,6 +70,7 @@ generator that is known to be read correctly by 26.2.4.2; start from it. Confirm
 |---|---|---|
 | 52 (slides) | `SlideAutofit.cs`, 4 sites | **WRONG.** −155.40 `abs_ink`, −11.1% of the track |
 | 53 (slides) | `SlideTextLayout.cs`, **6 sites** | **all six still correct** — and the probes written to check them found a *fifth* branch none of the six described, worth another two fixes' worth of baseline accuracy. See `probes/slides-r53/results.md` § "The 24.2.7.2 audit" |
+| 54 (sheets) | `SheetOptimalRowHeights.cs`, the `WrappedHeight` fit | **still correct** — 30 of 30 authored wrapped rows within half a twip on 26.2.4.2, read twice over (marker deltas in both PDFs, and the reference's own `fods` `style:row-height`) with the site's own 300-twip figure as the control. `probes/sheets-r54/audit_rowheight.py` |
 
 **48 → 42 sites, 30 → 29 files.** Two in one: a re-check is worth running even when it comes back
 clean, because authoring the probe is what exposes what the site does *not* say. Round 53's
@@ -98,10 +100,15 @@ a round caught.
 | `Paperless.Ooxml` | 1 | 1 | **all three tracks** |
 | **total** | **44** | **26** | |
 
-Marked so far: **11** lines —
-8 verified,
+Marked so far: **12** lines —
+9 verified,
 2 wrong,
 1 undecided.
+
+The **open** count does not fall when a site is verified, and that is deliberate: the sentence that
+names 24.2.7.2 stays, because it records what the figure was fitted to. Round 54's marker is the
+twelfth and the open count held at 44. Read the two numbers as "how many sites still carry an
+unchecked 24.2.7.2 claim" and "how many have been checked", not as a total and a remainder.
 
 Reproduce both numbers with:
 
@@ -190,6 +197,8 @@ the site itself names **26.2.4.2** and the date — this table is the index, not
 |---|---|---|---|
 | 2026-08-21 | `Paperless.Text/Fonts/SystemFontResolver.cs` `GenericFallbacks` (unrecognised → DejaVu Sans) | **VERIFIED, and round 53's WRONG reversed** | `probes/words-r54/font-fallback-rule.py` (98 authored files, 5 controls) + `cross-format-fallback.py` (28): the branch is right for every filter that reaches it undeclared — ODF text, XLSX, PPTX, flat ODS, all tracking fontconfig, `Consolas` → DejaVu Sans **Mono**. The DOCX/DOC/RTF answer is a **roman default applied by the reader**, now in `WordFallbackClass`. Cross-track evidence: 0 of 302 slides and 0 of 307 sheets renderings show the Sans-for-Serif pair |
 | 2026-08-21 | `Paperless.Text/Fonts/SystemFontResolver.cs` `DefaultFallbacks` (no family → Liberation Serif) | **VERIFIED** | round 54; two fixtures that reach `DefaultFonts` rather than Word's default — a flat ODF declaring no font anywhere, and a DOCX whose `docDefaults` state an empty `w:rFonts` — **both Liberation Serif** on 26.2.4.2. `w:ascii=""` is a third state and answers DejaVu Serif, because the filter reads it as a named family |
+
+| 2026-08-21 | `Paperless.Spreadsheets/Layout/SheetOptimalRowHeights.cs` (the thirty-row `WrappedHeight` fit) | **verified, unchanged** | `probes/sheets-r54/audit_rowheight.py`: six sizes x one-to-five unbreakable words, no `ht`/`customHeight`, marker-delta y off both PDFs cross-checked against the reference's `fods` `style:row-height`. 30 of 30 within 0.05 twips; the twelve-point single-line control reads the 300 the site already claims |
 | 2026-08-21 | `Paperless.Text/Layout/MeasuredParagraph.cs` (picture-alone descent) | **verified, unchanged** | `probes/words-r46/picture-alone-descent.py` re-run: 8 of 8 DOCX rows and 4 of 4 `fodt alone` rows exact, and the reference's own figures identical to round 46's 24.2.7.2 readings to the tenth at 20, 50 and 150 pt |
 | 2026-08-21 | `Paperless.Text/Fonts/SystemFontResolver.cs` :406 (DejaVu, never Liberation) | **verified in that respect** | `probes/words-r53/font-fallback-recheck.py`: ten unrecognised families, all land on DejaVu, none on Liberation |
 | 2026-08-21 | `Paperless.Text/Fonts/SystemFontResolver.cs` :629 (unrecognised → DejaVu **Sans**) | **WRONG — reported, not fixed** | same probe: all ten answer DejaVu **Serif**, with four controls agreeing; and `fc-match` answers Sans, so the stated mechanism ("fontconfig's default") is falsified too. **86 of 337 words renderings already disagree with the reference's font list and 73 carry DejaVu Sans on our side.** A change here owes a measured sweep of all three tracks |
@@ -199,12 +208,16 @@ the site itself names **26.2.4.2** and the date — this table is the index, not
 **Two of the four shared-layer sites re-checked so far were wrong.** The prior on the remaining
 44 is not "probably still fine".
 
-## Still unverified in `Paperless.Spreadsheets` (5 of the 9)
+## Still unverified in `Paperless.Spreadsheets` (4 of the 9)
 
-`Layout/SheetNotes.cs`, `Layout/SheetOptimalRowHeights.cs`, `Layout/SheetPageDecoration.cs`,
-`Layout/SheetShapeText.cs`, `Layout/SheetText.cs`, `Ooxml/XlsxNoteCaptions.cs`.
+`Layout/SheetNotes.cs`, `Layout/SheetPageDecoration.cs`, `Layout/SheetShapeText.cs`,
+`Layout/SheetText.cs`, `Ooxml/XlsxNoteCaptions.cs`.
 
-**`SheetOptimalRowHeights.cs` first.** Row heights — not column widths — are the axis this project
-established for a 14-document sheets cluster after a column-width hypothesis had been refuted, and
-that site claims thirty exact reproductions against a *24.2.7.2* flat ODF round trip. If any figure
-on this track has moved with the binary, that is where it costs the most.
+**`SheetOptimalRowHeights.cs` was round 54's and came back clean** — 30 of 30, with the control
+passing first. The next sheets round should take **`SheetPageDecoration.cs`**: page furniture is
+what the track's remaining page-count outliers hang off, and unlike the three text-metric sites it
+has no probe harness yet.
+
+The running score across all rounds is now **two wrong in ten**, and both wrong ones were shared-layer
+sites. Every `Paperless.Spreadsheets` site re-checked so far (five) has been correct, which is itself
+worth stating: the sheets metric work has held across the binary change.
