@@ -52,15 +52,49 @@ def page_streams(data, page_index):
     out = b''
     for i in ids:
         raw = objs.get(i, b'')
-        s = re.search(rb'stream\r?\n(.*?)\s*endstream', raw, re.S)
+        s = re.search(rb'stream\r?\n', raw)
         if not s:
             continue
-        chunk = s.group(1)
+        start = s.end()
+
+        # `/Length` first, and the trailing-whitespace search only as a fallback.
+        #
+        # **This is not a nicety: the greedy version silently loses whole pages.** Round 63 found
+        # `005_advanced_word_chart_report` and `007_…` reporting *zero* fill operators on a page
+        # their reference plainly paints, and reported two false regressions off it. The cause is
+        # that `(.*?)\s*endstream` eats any whitespace byte at the *end of the compressed data* —
+        # 0x0A is a perfectly ordinary deflate byte — so the stream is handed to zlib one byte
+        # short, `zlib.error` is raised, and the old code `continue`d past it. Two of 337 reference
+        # PDFs in this corpus end that way, which is why it survived several rounds.
+        # `/Length` is an *indirect* reference in every PDF LibreOffice writes — `/Length 3 0 R` —
+        # so it has to be resolved through the object table rather than read as a literal, which a
+        # first cut of this fix did and got zero bytes for every stream in the corpus.
+        length = None
+        indirect = re.search(rb'/Length\s+(\d+)\s+\d+\s+R', raw[:start])
+        direct = re.search(rb'/Length\s+(\d+)\s*[/>]', raw[:start])
+        if indirect:
+            target = objs.get(int(indirect.group(1)), b'')
+            number = re.search(rb'\d+', target)
+            length = int(number.group(0)) if number else None
+        elif direct:
+            length = int(direct.group(1))
+
+        if length is not None and start + length <= len(raw):
+            chunk = raw[start:start + length]
+        else:
+            end = raw.find(b'endstream', start)
+            chunk = raw[start:end if end >= 0 else len(raw)].rstrip(b'\r\n')
+
         if b'/FlateDecode' in raw:
             try:
                 chunk = zlib.decompress(chunk)
             except zlib.error:
-                continue
+                # A truncated tail is still worth what it decoded, and returning nothing at all is
+                # the failure this whole branch exists to stop.
+                try:
+                    chunk = zlib.decompressobj().decompress(chunk)
+                except zlib.error:
+                    continue
         out += chunk + b'\n'
     return out
 
