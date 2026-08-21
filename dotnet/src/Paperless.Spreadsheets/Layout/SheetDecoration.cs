@@ -201,6 +201,7 @@ public sealed class SheetFormatting
     private readonly Dictionary<(int Row, int Column), int> _cells = [];
     private readonly Dictionary<int, int> _rows = [];
     private readonly List<(int First, int Last, int Format)> _columns = [];
+    private readonly Dictionary<(int Row, int Column), Colour> _conditional = [];
     private int _default;
     private bool _hasDefaults;
 
@@ -213,7 +214,7 @@ public sealed class SheetFormatting
     /// dictionary lookup per cell per page.
     /// </remarks>
     public bool IsEmpty => _palette.Count == 1 && _cells.Count == 0 && _rows.Count == 0
-                           && _columns.Count == 0;
+                           && _columns.Count == 0 && _conditional.Count == 0;
 
     /// <summary>Interns a format and returns the handle the setters take.</summary>
     /// <param name="format">The format to intern.</param>
@@ -278,6 +279,37 @@ public sealed class SheetFormatting
 
         _columns.Add((first, last, format));
         _hasDefaults = true;
+    }
+
+    /// <summary>
+    /// Sets the fill a conditional format paints on one cell, over whatever it states.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A layer of its own rather than an interned format, for two reasons that pull the same way.
+    /// </para>
+    /// <para>
+    /// It has to <em>beat</em> the cell's own fill: Calc rebuilds the cell's
+    /// <c>ATTR_BACKGROUND</c> from the colour scale after the stated one and after any
+    /// style-named condition (<c>sc/source/core/data/fillinfo.cxx:776-781</c>), and an authored
+    /// scale over cells stating a solid green paints the scale on all eleven.
+    /// </para>
+    /// <para>
+    /// And it must <strong>not</strong> reach <see cref="Cells"/>, <see cref="Rows"/> or
+    /// <see cref="ColumnRuns"/>, which is what <see cref="SheetDecorationArea"/> reads to decide
+    /// how far the sheet prints. A conditional format is not a cell attribute and does not extend
+    /// the print area — measured, a scale declared over <c>B2:B40</c> on a sheet whose data stops
+    /// at <c>B12</c> still prints one page on 26.2.4.2 — and one corpus rule is declared over
+    /// <c>N18:Q1048576</c>, which would otherwise reformat a page count into a million rows.
+    /// </para>
+    /// </remarks>
+    /// <param name="row">The zero-based row.</param>
+    /// <param name="column">The zero-based column.</param>
+    /// <param name="colour">The colour the rule resolved to for this cell.</param>
+    public void SetConditionalBackground(int row, int column, Colour colour)
+    {
+        if (row < 0 || column < 0) return;
+        _conditional[(row, column)] = colour;
     }
 
     /// <summary>Sets the format everything with no other answer takes.</summary>
@@ -358,6 +390,16 @@ public sealed class SheetFormatting
     /// <param name="row">The zero-based row.</param>
     /// <param name="column">The zero-based column.</param>
     public SheetCellDecoration At(int row, int column)
+    {
+        SheetCellDecoration stated = Stated(row, column);
+
+        return _conditional.Count > 0 && _conditional.TryGetValue((row, column), out Colour fill)
+            ? stated with { Background = fill }
+            : stated;
+    }
+
+    /// <summary>What a cell states, before any conditional format is applied over it.</summary>
+    private SheetCellDecoration Stated(int row, int column)
     {
         if (_cells.TryGetValue((row, column), out int cell)) return _palette[cell];
         if (_rows.TryGetValue(row, out int inRow)) return _palette[inRow];
