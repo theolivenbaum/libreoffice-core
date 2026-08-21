@@ -235,6 +235,7 @@ public static class DrawingChartPlot
             ValueTicks = TicksOf(axes.Value),
             SecondaryTicks = TicksOf(axes.Secondary),
             CategoryTicks = TicksOf(axes.Domain ?? axes.Category),
+            CategoriesBetween = CrossBetween(axes, group),
             Legend = LegendOf(Child(chart, "legend")),
             Background = FillOf(Child(chartSpace, "spPr"), theme),
             Border = LineOf(Child(chartSpace, "spPr"), theme),
@@ -578,6 +579,46 @@ public static class DrawingChartPlot
     };
 
     /// <summary>
+    /// Whether the file says the categories occupy slots — <c>c:crossBetween</c> on the value
+    /// axis the category axis crosses — or null when it says nothing that reaches the question.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Feeds <see cref="ChartPlot.CategoriesBetween"/>, which carries the nine-arm measurement
+    /// this is written from. Three things happen here and each is one of that table's columns:
+    /// </para>
+    /// <list type="bullet">
+    /// <item>a chart with no <c>c:catAx</c> at all — a scatter, a bubble, a pie — has no category
+    /// axis to shift, and answers null;</item>
+    /// <item>a radar chart answers null whatever the element says, because
+    /// <c>axisconverter.cxx:295-296</c> forces <c>RADARLINE</c> and <c>RADARAREA</c> to unshifted
+    /// ahead of reading it — and the corpus holds three slides radar charts stating
+    /// <c>between</c>, which is exactly the case that would go wrong;</item>
+    /// <item>with the element absent, a <c>c:lineChart</c> or a <c>c:stockChart</c> is shifted and
+    /// everything else answers null and keeps the type test's own answer.</item>
+    /// </list>
+    /// <para>
+    /// A bar or column chart is not special-cased here: it is
+    /// <see cref="ChartPlot.ShiftedCategories"/> that ignores this value for one, and it does so
+    /// because the running binary does.
+    /// </para>
+    /// </remarks>
+    private static bool? CrossBetween(ChartAxes axes, XElement group)
+    {
+        if (axes.Category is null) return null;
+
+        string name = group.Name.LocalName;
+        if (name is "radarChart") return null;
+
+        return Value(Child(axes.Crossing, "crossBetween")) switch
+        {
+            "between" => true,
+            "midCat" => false,
+            _ => name is "lineChart" or "line3DChart" or "stockChart" ? true : null,
+        };
+    }
+
+    /// <summary>
     /// The date axis a <c>c:dateAx</c> asks for, or null when the category axis is an ordinary
     /// run of slots.
     /// </summary>
@@ -800,6 +841,18 @@ public static class DrawingChartPlot
         /// <summary>A scatter chart's X axis, or null for a category chart.</summary>
         public XElement? Domain { get; private init; }
 
+        /// <summary>
+        /// The value axis the category axis crosses — <c>c:catAx/c:crossAx</c> — or null.
+        /// </summary>
+        /// <remarks>
+        /// <c>c:crossBetween</c> is stated on this axis and on no other, and
+        /// <c>oox/source/drawingml/chart/plotareaconverter.cxx:229-231</c> hands exactly this
+        /// axis to the category axis' converter as its <c>pCrossingAxis</c>. On a chart with one
+        /// value axis it is <see cref="Value"/>; on a combination chart with a secondary axis it
+        /// need not be, and taking the primary would read the wrong element.
+        /// </remarks>
+        public XElement? Crossing { get; private init; }
+
         private readonly Dictionary<XElement, int> _byGroup = [];
 
         /// <summary>Which value axis a plot group is measured against: 0 or 1.</summary>
@@ -845,6 +898,8 @@ public static class DrawingChartPlot
                 Domain = axes.Domain,
                 Value = remaining.Count > 0 ? remaining[0] : null,
                 Secondary = remaining.Count > 1 ? remaining[1] : null,
+                Crossing = Matching(value, Value(Child(category, "crossAx")))
+                           ?? (remaining.Count > 0 ? remaining[0] : null),
             };
 
             if (resolved.Secondary is { } second && IdOf(second) is { } secondId)
