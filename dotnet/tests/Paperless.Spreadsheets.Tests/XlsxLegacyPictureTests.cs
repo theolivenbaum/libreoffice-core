@@ -223,6 +223,15 @@ public sealed class XlsxLegacyPictureTests
     /// This is where the legacy form controls fall out — a Button or a Scroll Bar is a VML shape
     /// with client data and no image, and LibreOffice rebuilds it as an OLE form control. The
     /// corpus holds one, hidden, in <c>015_Free_Gantt_Chart_Template</c>.
+    /// <para>
+    /// <strong>A drift guard, not a detector, and measured as one.</strong> Making the
+    /// <c>v:imagedata</c> requirement inert leaves this test passing, because a shape with no
+    /// image names no relationship and is dropped a few lines later by the guard that
+    /// <see cref="APictureWhoseImageIsMissingIsDropped"/> covers. It is kept because the two
+    /// guards say different things — "a control is not a picture" and "a picture whose bytes are
+    /// gone is not anchored" — and only one of them survives if the reader ever grows a control
+    /// arm.
+    /// </para>
     /// </remarks>
     [Fact]
     public void AShapeWithNoImageDataIsNotAPicture()
