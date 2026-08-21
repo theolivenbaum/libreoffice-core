@@ -15880,10 +15880,14 @@ it rather than quote it.
 1. **`.ppt` vertical text** — Escher `txflTextFlow` (0x88), 31 non-zero values in 4 documents,
    unread. `PptSlideLayout` has no `Turned` equivalent; the OOXML half of this round built
    everything else it needs.
-2. **Over-rotation is now the whole of the turn gap.** `Demick_JetBlue` 76 blocks to 8,
-   `8_P-Pavese_AIRBUS` 21 to 1, `171128IPAP` 45 to 70 the other way. Not `@vert`: shape rotation
-   reaching text that should stay upright. `Sylva` went **34-to-0 → 0-to-0** as a side effect of
-   `@vert` and `@rot` cancelling on one body — the shape of the fix the rest of them want.
+2. **Over-rotation is now the whole of the turn gap, and its biggest case is diagnosed.**
+   `Demick_JetBlue.pptx` is the track's **third-largest document — 26.10 `abs_ink`, 6 of 10 pages
+   major** — and its 76 turned blocks are **68 at 45° and 8 at 90°**. The eight match the
+   reference's eight exactly; the sixty-eight are a **chart's category axis** that the reference
+   **does not draw at all**: page 4 writes 52 `BT` to its 31 and extracts **163 words to its 79**,
+   one date fragment per rotated block. `SlideChart`'s axis-label placement, not `@vert`.
+   `8_P-Pavese_AIRBUS` 21 to 1 and `171128IPAP` 45 to 70 are next to classify. `Sylva` went
+   **34-to-0 → 0-to-0** as a side effect of `@vert` and `@rot` cancelling on one body.
 3. **The font-resolution divergence the shear exposed** — `2014BSA_Sunday_Killion` shears 948
    glyphs where the reference shears none, and 360 words pages disagree by more than 2%. Same face
    *lists* on both sides; the divergence is per-run.

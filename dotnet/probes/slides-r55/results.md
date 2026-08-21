@@ -341,11 +341,17 @@ track's to work, and this is the census that names it.
    4, `Thailand17` 4, `hofman` 1 — and the turn census still shows those documents short.
    `PptSlideLayout` has no `Turned` equivalent; giving `SlideTextBody.Rotation` the same quarter
    turn from Escher would reuse everything this round built.
-2. **Over-rotation, which is now the whole of the turn gap.** `Demick_JetBlue.pptx` turns 76
-   blocks where the reference turns 8, `8_P-Pavese_AIRBUS` 21 to 1, `171128IPAP` is the mirror at
-   45 to 70. None of these is `@vert`; they are shape rotation reaching text that should stay
-   upright. `Sylva`'s 34-to-0 went to **0 to 0** this round, as a side effect of `@vert` and
-   `@rot` cancelling on the same body — which is the shape of the fix the rest of them want.
+2. **Over-rotation, which is now the whole of the turn gap — and it is a chart defect, diagnosed.**
+   `Demick_JetBlue.pptx` is the track's **third-largest document at 26.10 `abs_ink` with 6 of its
+   10 pages major**, and its 76 turned blocks are **68 at 45° plus 8 at 90°**. The eight are the
+   reference's eight, matched exactly. The **sixty-eight are a chart's category axis**: on page 4
+   we write 52 `BT` to the reference's 31 and `pdftotext` reads **163 words to its 79** —
+   the reference **drops those labels** and we draw them, diagonally, one fragment per block
+   (`8 / 20 / 12 / - / 7 / 20 …`). So this is `SlideChart`'s axis-label placement and not a text
+   body's rotation at all, and it is worth a whole document's ink. `8_P-Pavese_AIRBUS` (21 to 1)
+   and `171128IPAP` (45 to 70, the mirror) are the next two to classify the same way.
+   `Sylva`'s 34-to-0 went to **0 to 0** this round, as a side effect of `@vert` and `@rot`
+   cancelling on the same body.
 3. **The font-resolution divergence the shear exposed.** `2014BSA_Sunday_Killion.pptx` (948
    sheared glyphs to the reference's 0), `16 - UTM - (NASA)`, `Sean Monogue` on slides, and 360
    words pages. Both sides embed the same face *lists*; the divergence is per-run. It has been
