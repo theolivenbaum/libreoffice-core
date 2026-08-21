@@ -199,8 +199,24 @@ internal static class XlsxPrintSetup
             IsLandscape = landscape,
             LeftMargin = Length.FromInches(left),
             RightMargin = Length.FromInches(right),
-            TopMargin = Length.FromInches(hasHeader ? header : top),
-            BottomMargin = Length.FromInches(hasFooter ? footer : bottom),
+
+            // The body starts at the **page** margin whatever the band margin says, and the
+            // `Math.Min` is what makes that true when a file states a `header` larger than its
+            // `top` — a negative band. With a band of zero or more, `min(header, top) + max(0,
+            // top - header)` is `top` either way and the clamp is inert; without it, a negative
+            // band pushes the body down to the band margin.
+            //
+            // Measured on 26.2.4.2 (`probes/sheets-r55/audit_pagedecoration.py`): with
+            // `top="0.75" header="1.00"` the reference starts the body at the top margin, exactly
+            // where it starts it at every non-negative band, and we started it **18 pt** lower.
+            // Two corpus worksheets state a negative band — `023_Waterfall_Chart_Template`'s
+            // header at −3.6 pt and `2025_Active_Civil_Airmen_Statistics`' footer at −5.76 pt —
+            // and **both render byte-identically with and without this clamp**, because neither
+            // sheet's negative band is on a page whose body position the gate can see. So it is a
+            // correctness fix with a measured mechanism and no corpus witness, which is worth
+            // saying rather than implying.
+            TopMargin = Length.FromInches(hasHeader ? Math.Min(header, top) : top),
+            BottomMargin = Length.FromInches(hasFooter ? Math.Min(footer, bottom) : bottom),
             HeaderHeight = headerBand,
             FooterHeight = footerBand,
             // Calc's `nDistance`, and **zero when the band is pinned** — see
