@@ -150,7 +150,7 @@ internal static class SheetChart
         if (SheetBandText.Shape(label.Text, label.Size, label.Family, bold) is not { } run) return;
 
         Length line = SheetBandText.ChartLineHeightAt(label.Size, label.Family, bold);
-        Length ascent = SheetBandText.AscentAt(label.Size, label.Family, bold);
+        Length ascent = SheetBandText.ChartAscentAt(label.Size, label.Family, bold);
 
         if (label.Rotation != 0.0)
         {
@@ -245,7 +245,7 @@ internal static class SheetChart
 
         double stretch = double.IsFinite(label.Stretch) && label.Stretch > 0.0 ? label.Stretch : 1.0;
         Length line = SheetBandText.ChartLineHeightAt(label.Size, label.Family, bold);
-        Length ascent = SheetBandText.AscentAt(label.Size, label.Family, bold);
+        Length ascent = SheetBandText.ChartAscentAt(label.Size, label.Family, bold);
         Length block = line * runs.Count;
 
         Length top = label.Anchor switch

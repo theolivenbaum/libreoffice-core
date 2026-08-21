@@ -154,7 +154,7 @@ internal static class SheetShapePainter
                     [],
                     Length.Zero,
                     SheetBandText.AscentAt(blank.Size, blank.Family),
-                    SheetBandText.ChartLineHeightAt(blank.Size, blank.Family),
+                    SheetBandText.ShapeLineHeightAt(blank.Size, blank.Family),
                     paragraph.Alignment));
                 continue;
             }
@@ -269,7 +269,7 @@ internal static class SheetShapePainter
             // The line's metrics come from the formats it spans and not from the pieces that
             // shaped, so a face that cannot be resolved loses its ink and not the line's height.
             Length pieceAscent = SheetBandText.AscentAt(format.Size, format.Family);
-            Length pieceHeight = SheetBandText.ChartLineHeightAt(format.Size, format.Family);
+            Length pieceHeight = SheetBandText.ShapeLineHeightAt(format.Size, format.Family);
             if (pieceAscent > ascent) ascent = pieceAscent;
             if (pieceHeight > height) height = pieceHeight;
 
