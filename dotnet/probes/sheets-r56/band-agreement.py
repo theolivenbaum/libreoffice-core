@@ -42,7 +42,7 @@ def band_documents():
             z = zipfile.ZipFile(p)
         except Exception:
             continue
-        top = bottom = 0.0
+        top = bottom = None
         content = False
         with z:
             for name in z.namelist():
@@ -58,8 +58,16 @@ def band_documents():
                 if not "".join((e.text or "") for e in hf).strip():
                     continue
                 content = True
-                top = max(top, float(m.get("top", 0.75)))
-                bottom = max(bottom, float(m.get("bottom", 0.75)))
+                # The *narrowest* strip any of the workbook's sheets states, not the widest.
+                # A first cut took the widest and a workbook whose sheets disagree then had one
+                # sheet's body rows inside another sheet's strip: `FY2023-AIP-grants` alone
+                # contributed 4616 "band" pairs over 33 pages, which is not a header. The
+                # narrowest strip under-covers a header on a sheet with roomier margins and
+                # never catches a body row, and only the first of those two errors is one this
+                # figure can survive.
+                top = float(m.get("top", 0.75)) if top is None else min(top, float(m.get("top", 0.75)))
+                bottom = (float(m.get("bottom", 0.75)) if bottom is None
+                          else min(bottom, float(m.get("bottom", 0.75))))
         if content:
             out[stem] = (top * 72, bottom * 72)
     return out
