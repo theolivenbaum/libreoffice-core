@@ -192,6 +192,37 @@ public sealed partial record ChartSeries(
     public Colour? MarkerLine { get; init; }
 
     /// <summary>
+    /// The marker's side, or null when the file states none.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>c:marker/c:size</c>, <strong>in whole points</strong>, which
+    /// <c>TypeGroupConverter::convertMarker</c> turns into a square symbol of
+    /// <c>convertPointToMm100(size)</c> hundredths of a millimetre
+    /// (<c>typegroupconverter.cxx:652-654</c>). A part that states no size still gets one:
+    /// <c>SeriesModel</c>'s constructor is <c>mnMarkerSize( 5 )</c>
+    /// (<c>seriesmodel.cxx:118</c>), so an OOXML marker is 5 pt unless the file says otherwise
+    /// and is never the 250 hundredths of a millimetre that <see cref="ChartLayout"/> falls back
+    /// to.
+    /// </para>
+    /// <para>
+    /// <strong>Null is not "5 pt", it is "no OOXML marker element reached here".</strong> That
+    /// distinction is the whole point of the property: an ODF or binary chart has no
+    /// <c>c:marker</c> to read and its symbol keeps chart2's own unset default of 250 × 250
+    /// (<c>VDataSeries::getSymbolProperties</c>), which is 7.09 pt and a different number. Giving
+    /// this a non-null default would silently move every ODF and <c>.ppt</c> chart in the corpus.
+    /// </para>
+    /// <para>
+    /// Measured on <c>003_advanced_powerpoint_line.pptx</c>, which states
+    /// <c>&lt;c:symbol val="circle"/&gt;&lt;c:size val="6"/&gt;</c>: <c>6 × 2540 / 72</c> rounds to
+    /// 212 hundredths of a millimetre, which is <b>6.01 pt</b> — exactly the width round 62
+    /// measured the reference drawing on that page, and exactly the figure it refuted as a
+    /// <em>legend key</em> claim while confirming it as a plot-marker one.
+    /// </para>
+    /// </remarks>
+    public Length? MarkerSize { get; init; }
+
+    /// <summary>
     /// The dash array the series' line is stroked with, or null for a solid line.
     /// </summary>
     /// <remarks>
