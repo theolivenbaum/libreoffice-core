@@ -1,6 +1,8 @@
 using System.IO.Compression;
 using System.Text;
 using System.Xml.Linq;
+using Paperless.Core.Documents;
+using Paperless.Core.Formats;
 using Paperless.Spreadsheets.Layout;
 using Paperless.Spreadsheets.Ooxml;
 using Shouldly;
@@ -272,4 +274,25 @@ public sealed class XlsxLegacyPictureTests
     [Fact]
     public void AWorksheetWithNoLegacyDrawingReadsNothing()
         => Read(PictureShape, element: "pageMargins").ShouldBeEmpty();
+
+    /// <summary>
+    /// The legacy picture reaches the sheet's drawings, and does so beside whatever the DrawingML
+    /// part put there rather than instead of it.
+    /// </summary>
+    /// <remarks>
+    /// The wiring test, and it is here because the reader can be entirely right and never be
+    /// called: every test above drives <see cref="XlsxLegacyPictures.Read"/> directly, so
+    /// replacing the call site in <c>XlsxReader</c> with an empty list breaks none of them.
+    /// Measured that way through <c>verify-test.sh</c> before this was written.
+    /// </remarks>
+    [Fact]
+    public void ALegacyPictureReachesTheSheetsDrawings()
+    {
+        using DocumentSource source = DocumentSource.FromBytes(
+            Package(PictureShape, "legacyDrawing", hasImagePart: true), "legacy.xlsx");
+        using OoxmlSpreadsheetDocument document =
+            XlsxReader.Read(source, DocumentFormat.Xlsx);
+
+        document.Sheets[0].Drawings.Items.Count(d => d.Name == "Picture 4").ShouldBe(1);
+    }
 }
