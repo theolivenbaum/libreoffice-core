@@ -403,6 +403,46 @@ public sealed partial record ChartPlot
     /// <remarks><c>c:valAx/c:tickLblPos</c>; see <see cref="ValueLabelsVisible"/>.</remarks>
     public bool SecondaryLabelsVisible { get; init; } = true;
 
+    /// <summary>Where the value axis puts its major tick marks.</summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>An axis reserves its tick length only when it actually draws a tick outside the
+    /// plot area.</strong> <c>c:majorTickMark</c> takes <c>out</c>, <c>cross</c>, <c>in</c> and
+    /// <c>none</c>; <c>lclGetTickMark</c>
+    /// (<c>oox/source/drawingml/chart/axisconverter.cxx:104-115</c>) maps the first two to a
+    /// style carrying <c>OUTER</c> and the last two to one that does not, and only an outward
+    /// tick extends past the plot area and is therefore charged to it by
+    /// <c>VDiagram::adjustInnerSize</c>.
+    /// </para>
+    /// <para>
+    /// Measured one property and one axis at a time on a corpus chart already stating
+    /// <c>none</c> on both axes — six arms, and the plot edge moves by <c>AXIS2D_TICKLENGTH</c>
+    /// exactly, on that axis' own edge and on no other:
+    /// <c>none 0.00 / in 0.00 / out +4.25 / cross +4.25</c>. The labels do not move with it: the
+    /// leftmost value label's pen sits at the same <c>x</c> in all four arms, so what the tick
+    /// buys is the gap between the label and the axis and not the label's own place.
+    /// </para>
+    /// <para>
+    /// The default is <see cref="ChartTickMark.Outer"/> because an <em>absent</em>
+    /// <c>c:majorTickMark</c> is not <c>none</c>: <c>AxisModel</c>'s constructor defaults it to
+    /// <c>out</c> for a 2007 chart and to <c>cross</c> for a later one
+    /// (<c>oox/source/drawingml/chart/axismodel.cxx:42-48</c>), and both of those reserve. Only a
+    /// stated <c>none</c> or <c>in</c> changes anything, and ODF — which has no census behind it
+    /// here — is left on the default.
+    /// </para>
+    /// </remarks>
+    public ChartTickMark ValueTicks { get; init; } = ChartTickMark.Outer;
+
+    /// <summary>Where the category axis puts its major tick marks.</summary>
+    /// <remarks><c>c:catAx/c:majorTickMark</c>; see <see cref="ValueTicks"/>.</remarks>
+    public ChartTickMark CategoryTicks { get; init; } = ChartTickMark.Outer;
+
+    /// <summary>Where the secondary value axis puts its major tick marks.</summary>
+    /// <remarks>
+    /// <c>c:majorTickMark</c> on the secondary <c>c:valAx</c>; see <see cref="ValueTicks"/>.
+    /// </remarks>
+    public ChartTickMark SecondaryTicks { get; init; } = ChartTickMark.Outer;
+
     /// <summary>Whether the chart has a pair of axes at all.</summary>
     /// <remarks>
     /// A pie has neither, so it gets no axis lines, no ticks, no gridlines and — the part that
@@ -1100,4 +1140,27 @@ public sealed partial record ChartPlot
         foreach (ChartSeries series in Series) count = Math.Max(count, series.Values.Count);
         return count;
     }
+}
+
+/// <summary>Where an axis draws its major tick marks.</summary>
+/// <remarks>
+/// <c>chart2::TickmarkStyle</c>, which is a flag pair — <c>INNER = 1</c>, <c>OUTER = 2</c> — and
+/// <c>c:majorTickMark</c>'s four tokens map onto it exactly
+/// (<c>oox/source/drawingml/chart/axisconverter.cxx:104-115</c>). Kept as four named states
+/// rather than as two booleans because the reservation asks only about <c>OUTER</c> and the
+/// drawing asks about both, and a pair of booleans lets the two questions drift apart.
+/// </remarks>
+public enum ChartTickMark
+{
+    /// <summary><c>none</c> — no tick drawn, and nothing reserved.</summary>
+    None,
+
+    /// <summary><c>in</c> — a tick inside the plot area. Reserves nothing.</summary>
+    Inner,
+
+    /// <summary><c>out</c> — a tick outside the plot area. Reserves its length.</summary>
+    Outer,
+
+    /// <summary><c>cross</c> — a tick on both sides. Reserves its outward half's length.</summary>
+    Cross,
 }

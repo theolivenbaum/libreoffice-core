@@ -318,6 +318,25 @@ public static partial class ChartLayout
     /// <remarks><c>AXIS2D_TICKLABELSPACING = 100</c> (<c>ViewDefines.hxx:31</c>).</remarks>
     private static readonly Length LabelSpacing = Length.FromMm100(100);
 
+    /// <summary>How far outside the plot area an axis' major ticks reach.</summary>
+    /// <remarks>
+    /// <strong>Only an outward tick is reserved, and only an outward tick moves the label away
+    /// from the axis.</strong> Measured on a six-arm probe over a corpus chart already stating
+    /// <c>c:majorTickMark val="none"</c> on both axes: <c>none</c> and <c>in</c> move the plot
+    /// edge by 0.00, <c>out</c> and <c>cross</c> move it by 4.25 pt — <c>AXIS2D_TICKLENGTH</c>
+    /// exactly — and on that axis' own edge only. See <see cref="ChartPlot.ValueTicks"/>.
+    /// </remarks>
+    private static Length OuterTick(ChartTickMark mark)
+        => mark is ChartTickMark.Outer or ChartTickMark.Cross ? TickLength : Length.Zero;
+
+    /// <summary>How far inside the plot area an axis' major ticks reach.</summary>
+    /// <remarks>
+    /// Drawn but never reserved: an inward tick lies inside a rectangle that already exists, so
+    /// <c>VDiagram::adjustInnerSize</c> is never charged for it. See <see cref="OuterTick"/>.
+    /// </remarks>
+    private static Length InnerTick(ChartTickMark mark)
+        => mark is ChartTickMark.Inner or ChartTickMark.Cross ? TickLength : Length.Zero;
+
     /// <summary>The extra gap below a main title, beyond the proportional one.</summary>
     /// <remarks>
     /// <c>lcl_createTitle</c> adds a flat 135 hundredths of a millimetre for a main title, on
@@ -1428,10 +1447,10 @@ public static partial class ChartLayout
                 : WidestCategoryLabel(plot, categories, measurer);
 
         Length valueSpace = plot.ValueAxisVisible
-            ? TickLength + (valueLabels ? LabelSpacing : Length.Zero)
+            ? OuterTick(plot.ValueTicks) + (valueLabels ? LabelSpacing : Length.Zero)
             : Length.Zero;
         Length categorySpace = plot.CategoryAxisVisible
-            ? TickLength + (categoryLabels ? LabelSpacing : Length.Zero)
+            ? OuterTick(plot.CategoryTicks) + (categoryLabels ? LabelSpacing : Length.Zero)
             : Length.Zero;
         Length valueHeight = valueLabels ? labelHeight : Length.Zero;
 
@@ -1472,8 +1491,8 @@ public static partial class ChartLayout
                     ? WidestValueLabel(
                           second, plot.SecondaryValueFormat, plot.LabelSize, measurer,
                       plot.IsLabelBold)
-                      + TickLength + LabelSpacing
-                    : TickLength;
+                      + OuterTick(plot.SecondaryTicks) + LabelSpacing
+                    : OuterTick(plot.SecondaryTicks);
             }
 
             // On an unshifted axis the first and the last label are centred on the plot area's own
@@ -1540,6 +1559,10 @@ public static partial class ChartLayout
         bool labelled = visible
                         && (secondary ? plot.SecondaryLabelsVisible : plot.ValueLabelsVisible);
 
+        ChartTickMark mark = secondary ? plot.SecondaryTicks : plot.ValueTicks;
+        Length outer = OuterTick(mark);
+        Length inner = InnerTick(mark);
+
         if (visible)
         {
             lines.Add(columns
@@ -1594,16 +1617,19 @@ public static partial class ChartLayout
 
                 if (!visible) continue;
 
-                lines.Add(new ChartLine(
-                    new DocPoint(axisX + TickLength * outward, y),
-                    new DocPoint(axisX, y),
-                    AxisColour));
+                if (outer + inner > Length.Zero)
+                {
+                    lines.Add(new ChartLine(
+                        new DocPoint(axisX + (outer * outward), y),
+                        new DocPoint(axisX - (inner * outward), y),
+                        AxisColour));
+                }
 
                 if (!labelled) continue;
 
                 labels.Add(new ChartLabel(
                     ChartDataLabel.Write(tick, format),
-                    new DocPoint(axisX + (TickLength + LabelSpacing) * outward, y),
+                    new DocPoint(axisX + ((outer + LabelSpacing) * outward), y),
                     secondary ? ChartLabelAnchor.LeftMiddle : ChartLabelAnchor.RightMiddle,
                     plot.LabelSize,
                     AxisColour));
@@ -1620,16 +1646,19 @@ public static partial class ChartLayout
 
                 if (!visible) continue;
 
-                lines.Add(new ChartLine(
-                    new DocPoint(x, axisY),
-                    new DocPoint(x, axisY - TickLength * outward),
-                    AxisColour));
+                if (outer + inner > Length.Zero)
+                {
+                    lines.Add(new ChartLine(
+                        new DocPoint(x, axisY + (inner * outward)),
+                        new DocPoint(x, axisY - (outer * outward)),
+                        AxisColour));
+                }
 
                 if (!labelled) continue;
 
                 labels.Add(new ChartLabel(
                     ChartDataLabel.Write(tick, format),
-                    new DocPoint(x, axisY - (TickLength + LabelSpacing) * outward),
+                    new DocPoint(x, axisY - ((outer + LabelSpacing) * outward)),
                     secondary ? ChartLabelAnchor.CentreBottom : ChartLabelAnchor.CentreTop,
                     plot.LabelSize,
                     AxisColour));
@@ -1655,6 +1684,9 @@ public static partial class ChartLayout
         List<ChartLine> lines,
         List<ChartLabel> labels)
     {
+        Length outer = OuterTick(plot.CategoryTicks);
+        Length inner = InnerTick(plot.CategoryTicks);
+
         if (plot.CategoryAxisVisible)
         {
             lines.Add(columns
@@ -1685,14 +1717,19 @@ public static partial class ChartLayout
 
                 if (!plot.CategoryAxisVisible) continue;
 
-                lines.Add(new ChartLine(
-                    new DocPoint(x, area.Bottom), new DocPoint(x, area.Bottom + TickLength), AxisColour));
+                if (outer + inner > Length.Zero)
+                {
+                    lines.Add(new ChartLine(
+                        new DocPoint(x, area.Bottom - inner),
+                        new DocPoint(x, area.Bottom + outer),
+                        AxisColour));
+                }
 
                 if (!plot.CategoryLabelsVisible) continue;
 
                 labels.Add(new ChartLabel(
                     text,
-                    new DocPoint(x, area.Bottom + TickLength + LabelSpacing),
+                    new DocPoint(x, area.Bottom + outer + LabelSpacing),
                     ChartLabelAnchor.CentreTop,
                     plot.LabelSize,
                     AxisColour));
@@ -1702,14 +1739,19 @@ public static partial class ChartLayout
                 Length y = area.Bottom - area.Height * along;
                 if (!plot.CategoryAxisVisible) continue;
 
-                lines.Add(new ChartLine(
-                    new DocPoint(area.Left - TickLength, y), new DocPoint(area.Left, y), AxisColour));
+                if (outer + inner > Length.Zero)
+                {
+                    lines.Add(new ChartLine(
+                        new DocPoint(area.Left - outer, y),
+                        new DocPoint(area.Left + inner, y),
+                        AxisColour));
+                }
 
                 if (!plot.CategoryLabelsVisible) continue;
 
                 labels.Add(new ChartLabel(
                     text,
-                    new DocPoint(area.Left - TickLength - LabelSpacing, y),
+                    new DocPoint(area.Left - outer - LabelSpacing, y),
                     ChartLabelAnchor.RightMiddle,
                     plot.LabelSize,
                     AxisColour));
@@ -1738,6 +1780,9 @@ public static partial class ChartLayout
         List<ChartLine> lines,
         List<ChartLabel> labels)
     {
+        Length outer = OuterTick(plot.CategoryTicks);
+        Length inner = InnerTick(plot.CategoryTicks);
+
         if (plot.CategoryAxisVisible)
         {
             lines.Add(columns
@@ -1801,11 +1846,11 @@ public static partial class ChartLayout
                         new DocPoint(x, area.Top), new DocPoint(x, area.Bottom), grid));
                 }
 
-                if (plot.CategoryAxisVisible)
+                if (plot.CategoryAxisVisible && outer + inner > Length.Zero)
                 {
                     lines.Add(new ChartLine(
-                        new DocPoint(x, area.Bottom),
-                        new DocPoint(x, area.Bottom + TickLength),
+                        new DocPoint(x, area.Bottom - inner),
+                        new DocPoint(x, area.Bottom + outer),
                         AxisColour));
                 }
             }
@@ -1819,11 +1864,11 @@ public static partial class ChartLayout
                         new DocPoint(area.Left, y), new DocPoint(area.Right, y), grid));
                 }
 
-                if (plot.CategoryAxisVisible)
+                if (plot.CategoryAxisVisible && outer + inner > Length.Zero)
                 {
                     lines.Add(new ChartLine(
-                        new DocPoint(area.Left - TickLength, y),
-                        new DocPoint(area.Left, y),
+                        new DocPoint(area.Left - outer, y),
+                        new DocPoint(area.Left + inner, y),
                         AxisColour));
                 }
             }
@@ -1877,7 +1922,7 @@ public static partial class ChartLayout
                 labels.Add(new ChartLabel(
                     text,
                     new DocPoint(
-                        area.Left - TickLength - LabelSpacing,
+                        area.Left - outer - LabelSpacing,
                         area.Bottom - area.Height * centre),
                     ChartLabelAnchor.RightMiddle,
                     plot.LabelSize,
@@ -1887,7 +1932,7 @@ public static partial class ChartLayout
             }
 
             Length x = area.Left + area.Width * centre;
-            Length top = area.Bottom + TickLength + LabelSpacing;
+            Length top = area.Bottom + outer + LabelSpacing;
 
             // The second row of a staggered axis sits one row below the first.
             if (layout.Staggered && at / rhythm % 2 == 1) top += layout.Reserved / 2;

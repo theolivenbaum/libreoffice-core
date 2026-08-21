@@ -232,6 +232,9 @@ public static class DrawingChartPlot
             ValueLabelsVisible = Labelled(axes.Value),
             SecondaryLabelsVisible = Labelled(axes.Secondary),
             CategoryLabelsVisible = Labelled(axes.Domain ?? axes.Category),
+            ValueTicks = TicksOf(axes.Value),
+            SecondaryTicks = TicksOf(axes.Secondary),
+            CategoryTicks = TicksOf(axes.Domain ?? axes.Category),
             Legend = LegendOf(Child(chart, "legend")),
             Background = FillOf(Child(chartSpace, "spPr"), theme),
             Border = LineOf(Child(chartSpace, "spPr"), theme),
@@ -504,6 +507,31 @@ public static class DrawingChartPlot
     /// </remarks>
     private static bool Labelled(XElement? axis)
         => !string.Equals(Value(Child(axis, "tickLblPos")), "none", StringComparison.Ordinal);
+
+    /// <summary>Where an axis puts its major tick marks — <c>c:majorTickMark</c>.</summary>
+    /// <remarks>
+    /// <para>
+    /// <c>lclGetTickMark</c> (<c>oox/source/drawingml/chart/axisconverter.cxx:104-115</c>):
+    /// <c>in</c> is <c>INNER</c>, <c>out</c> is <c>OUTER</c>, <c>cross</c> is both, and anything
+    /// else is neither. Only <c>OUTER</c> is charged to the plot area, which is why this is read
+    /// at all — see <c>ChartPlot.ValueTicks</c> and the six-arm probe behind it.
+    /// </para>
+    /// <para>
+    /// <strong>An absent element is not <c>none</c>.</strong> <c>AxisModel</c>'s constructor
+    /// defaults it to <c>out</c> for an MSO-2007 chart part and to <c>cross</c> for a later one
+    /// (<c>oox/source/drawingml/chart/axismodel.cxx:42-48</c>) — the two differ in where the tick
+    /// is drawn and not in what it reserves, so the distinction between them is invisible to the
+    /// plot rectangle and <c>Outer</c> is taken for both. The corpus states the element on 481 of
+    /// its 494 axes, so the default decides 13 of them, in two documents.
+    /// </para>
+    /// </remarks>
+    private static ChartTickMark TicksOf(XElement? axis) => Value(Child(axis, "majorTickMark")) switch
+    {
+        "none" => ChartTickMark.None,
+        "in" => ChartTickMark.Inner,
+        "cross" => ChartTickMark.Cross,
+        _ => ChartTickMark.Outer,
+    };
 
     /// <summary>
     /// The date axis a <c>c:dateAx</c> asks for, or null when the category axis is an ordinary
