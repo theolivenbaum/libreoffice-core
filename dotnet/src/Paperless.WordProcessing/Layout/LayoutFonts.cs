@@ -91,13 +91,20 @@ public sealed class LayoutFonts
         try
         {
             // The declared family, not the declared pitch. Both are in the table and only the first
-            // was measured to move LibreOffice — see DocxLayoutSource.Face for the probe. The DOC
-            // side has not been probed either way, so it follows the measured half rather than the
-            // guessed one.
-            FontFamilyClass declaredClass =
+            // was measured to move LibreOffice — see DocxLayoutSource.Face for the probe.
+            //
+            // The DOC side has now been probed and answers exactly as the DOCX one does: an
+            // unrecognised family falls back to DejaVu Serif, and only a swiss code moves it to
+            // DejaVu Sans. RTF reaches this with no `DeclaredShapes` at all and takes the same
+            // Serif default unconditionally, which is also measured — its own `\fnil`, `\froman`,
+            // `\fswiss` and `\fmodern` are all inert, so there is nothing here to read even when
+            // the file states one. See `WordFallbackClass` and
+            // `probes/words-r54/cross-format-fallback.py`.
+            FontFamilyClass declaredClass = WordFallbackClass.ForDeclared(
+                family,
                 family is { Length: > 0 } named && DeclaredShapes is { } declared
                     ? declared(named).Class
-                    : FontFamilyClass.Unknown;
+                    : FontFamilyClass.Unknown);
 
             FontReference reference = _fonts.Resolve(
                 new FontRequest(

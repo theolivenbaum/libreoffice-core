@@ -1,0 +1,86 @@
+using Paperless.Text.Fonts;
+
+namespace Paperless.WordProcessing.Layout;
+
+/// <summary>
+/// The generic class a word-processing filter hands the font matcher for a family it cannot find.
+/// </summary>
+/// <remarks>
+/// <para>
+/// <strong>This is a property of the filter, not of the resolver, and that is the whole point of
+/// the type.</strong> Asked the same question — an unrecognised family, which DejaVu? — the
+/// LibreOffice 26.2.4.2 filters give two different answers, so a rule put in
+/// <c>SystemFontResolver</c> would be right for one set of formats and wrong for the other.
+/// Measured 2026-08-21 with 98 authored one-line files plus 28 cross-format ones, every one
+/// converted by the installed <c>soffice</c> with the drawn face read out of the PDF
+/// (<c>probes/words-r54/font-fallback-rule.py</c>, <c>probes/words-r54/cross-format-fallback.py</c>):
+/// </para>
+/// <list type="table">
+/// <listheader><term>filter</term><description>an unrecognised family, nothing declared</description></listheader>
+/// <item><term>DOCX</term><description>DejaVu <b>Serif</b>; only <c>w:family="swiss"</c> moves it, to DejaVu Sans</description></item>
+/// <item><term>DOC</term><description>DejaVu <b>Serif</b>; the <c>FFN</c>'s swiss code moves it the same way</description></item>
+/// <item><term>RTF</term><description>DejaVu <b>Serif</b>; <c>\fnil</c>, <c>\froman</c>, <c>\fswiss</c> and <c>\fmodern</c> all answer Serif</description></item>
+/// <item><term>ODF text</term><description>fontconfig's own generic — <c>Aptos</c> → Sans, <c>Consolas</c> → <b>Mono</b>, <c>Garamond</c> → Serif</description></item>
+/// <item><term>XLSX, PPTX, FODS</term><description>fontconfig's own generic, matching <c>fc-match</c> exactly</description></item>
+/// </list>
+/// <para>
+/// So the answer does not depend on the request — bold, italic, 8 pt, 40 pt and an east-Asian hint
+/// all answer the same family — nor on the shape of the name, nor on what fontconfig files the name
+/// under. Twenty-one further names probed through the DOCX filter all answer DejaVu Serif,
+/// including the four <c>Times</c>, <c>Helvetica</c>, <c>Albany</c> and <c>Thorndale</c> whose chain
+/// entries <em>are</em> installed, and including <c>Consolas</c>, which fontconfig files under
+/// <c>monospace</c>. The only three that escape are the two strong metric aliases
+/// (<c>Times New Roman</c> → Liberation Serif, <c>Arial</c> → Liberation Sans) and the pi face
+/// (<c>Symbol</c> → OpenSymbol), which is exactly what <c>SystemFontResolver.DeclaredGenericFor</c>
+/// already exempts.
+/// </para>
+/// <para>
+/// The mechanism this states is Writer's own: <c>SvxFontItem</c>'s family defaults to
+/// <c>FAMILY_ROMAN</c>, and <c>FontConfigManager::Substitute</c> appends <c>"serif"</c> as a second
+/// <c>FC_FAMILY</c> for it — so the pre-match asks fontconfig for <c>"Aptos"</c>-or-<c>"serif"</c>
+/// and gets DejaVu Serif, where a bare <c>fc-match Aptos</c> gets DejaVu Sans. The DOCX and DOC
+/// filters overwrite that default from their font tables; the RTF filter does not, which is why its
+/// <c>\fswiss</c> is inert. The ODF and spreadsheet/presentation filters do not go through this
+/// default at all.
+/// </para>
+/// <para>
+/// <b>Only the declared class is read, never the declared pitch.</b> Both are in every one of these
+/// font tables and only the first moves the reference: <c>Aptos</c> declared <c>pitch="fixed"</c>
+/// answers DejaVu Serif, and so does <c>Consolas</c> declared <c>modern</c>. Passing the pitch on
+/// once put a corpus document into DejaVu Sans Mono that the reference sets in DejaVu Sans — see
+/// <c>DocxLayoutSource.Face</c>.
+/// </para>
+/// </remarks>
+internal static class WordFallbackClass
+{
+    /// <summary>
+    /// The class to hand <see cref="FontRequest"/> for a run asking for
+    /// <paramref name="familyName"/>, which the document declared <paramref name="declared"/> about.
+    /// </summary>
+    /// <param name="familyName">
+    /// The family the run asks for. <strong>A run that names none at all is the one case the roman
+    /// default must not reach</strong>, and getting that wrong cost a whole sweep: "no font named"
+    /// and "a font nobody has" are different questions, and the first is answered by LibreOffice's
+    /// <c>DefaultFonts</c> — Liberation Serif here — not by a fallback shape.
+    /// <c>SystemFontResolver.GenericFallbacks</c> makes exactly that distinction, but a declared
+    /// class is consulted <em>before</em> it, in the pre-match step, so handing one over for an
+    /// empty family bypasses the rule entirely. Measured: a DOCX whose <c>docDefaults</c> states an
+    /// empty <c>w:rFonts</c> renders in Liberation Serif on 26.2.4.2, and applying the default here
+    /// regardless of the name moved <b>29 corpus <c>.doc</c> documents</b> from Liberation Serif to
+    /// DejaVu Serif and lost 17 verdicts.
+    /// </param>
+    /// <param name="declared">
+    /// What the document's own font table says, or <see cref="FontFamilyClass.Unknown"/> when it
+    /// says nothing — which is the common case, and is the case this method exists for.
+    /// </param>
+    /// <returns>
+    /// <see cref="FontFamilyClass.Unknown"/> for a run naming no family at all;
+    /// <see cref="FontFamilyClass.SansSerif"/> for a family the document declares sans-serif;
+    /// <see cref="FontFamilyClass.Serif"/> for every other named family, including one the font
+    /// table never mentions.
+    /// </returns>
+    public static FontFamilyClass ForDeclared(string? familyName, FontFamilyClass declared)
+        => string.IsNullOrWhiteSpace(familyName) ? FontFamilyClass.Unknown
+            : declared == FontFamilyClass.SansSerif ? FontFamilyClass.SansSerif
+            : FontFamilyClass.Serif;
+}
