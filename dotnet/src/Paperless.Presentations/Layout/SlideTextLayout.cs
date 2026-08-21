@@ -170,6 +170,8 @@ public static partial class SlideTextLayout
     /// about two edges — and a table's own grid is a separate measurement.
     /// </para>
     /// <para>
+    /// [24.2.7-audit: VERIFIED 2026-08-21, round slides-r53 — probed against the
+    /// installed 26.2.4.2, not read from the C++; the claim still holds.]
     /// <strong>Re-checked against 26.2.4.2 on 2026-08-21</strong> (`TODO.24-2-7-audit.md`), by
     /// probe rather than by reading: twelve boxes whose top edge steps by 40 EMU — one ninth of a
     /// unit — from 1944.000 to 1945.222 hundredths of a millimetre. The reference draws its first
@@ -312,6 +314,8 @@ public static partial class SlideTextLayout
     /// Paperless produced for the untouched deck while it measured every paragraph.
     /// </para>
     /// <para>
+    /// [24.2.7-audit: VERIFIED 2026-08-21, round slides-r53 — probed against the
+    /// installed 26.2.4.2, not read from the C++; the claim still holds.]
     /// <strong>Re-checked against 26.2.4.2 on 2026-08-21</strong> (`TODO.24-2-7-audit.md`), on an
     /// authored deck rather than on the corpus document the original figure came from: one 40 pt
     /// three-paragraph body in one 240 pt autofit box, four slides differing only in where its four
@@ -813,6 +817,8 @@ public static partial class SlideTextLayout
             // factors in sequence rounds twice and lands a hundredth of a millimetre out — see
             // Spacing and Proportioned.
             //
+            // [24.2.7-audit: VERIFIED 2026-08-21, round slides-r53 — probed against the
+            // installed 26.2.4.2, not read from the C++; the claim still holds.]
             // Re-checked against 26.2.4.2 on 2026-08-21 (TODO.24-2-7-audit.md) together with
             // Proportioned and ProportionedAscent, on make-linespace-probe.py: 44 authored boxes,
             // four em sizes x (no a:lnSpc, ten a:lnSpc percentages from 40 to 200). The reference's
@@ -1044,6 +1050,8 @@ public static partial class SlideTextLayout
     /// (<c>editeng/source/editeng/impedit3.cxx:1553-1580</c>). <c>basegfx::fround</c> is
     /// <c>(Int)(x + 0.5)</c> for a positive value (<c>include/basegfx/numeric/ftools.hxx:39-50</c>),
     /// so the two branches round in opposite directions and both are reproduced here.
+    /// [24.2.7-audit: VERIFIED 2026-08-21, round slides-r53 — probed against the
+    /// installed 26.2.4.2, not read from the C++; the claim still holds.]
     /// <strong>Re-checked against 26.2.4.2 on 2026-08-21</strong> — see the note in
     /// <see cref="Proportioned"/>.
     /// </para>
@@ -1205,6 +1213,8 @@ public static partial class SlideTextLayout
     /// directions and both are reproduced here.
     /// </para>
     /// <para>
+    /// [24.2.7-audit: VERIFIED 2026-08-21, round slides-r53 — probed against the
+    /// installed 26.2.4.2, not read from the C++; the claim still holds.]
     /// <strong>Re-checked against 26.2.4.2 on 2026-08-21</strong> (<c>TODO.24-2-7-audit.md</c>) on
     /// <c>probes/slides-r53/make-linespace-probe.py</c>: forty <c>a:lnSpc/a:spcPct</c> boxes —
     /// 40, 50, 60, 80, 90, 93, 100, 110, 150 and 200 per cent at 11, 12, 24 and 40 pt, four lines
@@ -1251,6 +1261,8 @@ public static partial class SlideTextLayout
     /// (<c>editeng/source/editeng/impedit3.cxx:1564-1578</c>).
     /// </para>
     /// <para>
+    /// [24.2.7-audit: VERIFIED 2026-08-21, round slides-r53 — probed against the
+    /// installed 26.2.4.2, not read from the C++; the claim still holds.]
     /// <strong>Re-checked against 26.2.4.2 on 2026-08-21</strong> (<c>TODO.24-2-7-audit.md</c>) on
     /// the same forty boxes <see cref="Proportioned"/> names, whose first baseline is what this
     /// method decides. Below a hundred per cent the reference's ascent is

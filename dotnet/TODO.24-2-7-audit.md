@@ -58,22 +58,32 @@ rather than clamping. 26.2.4.2 has no such clamp either.
 
 ## The measured size of the list
 
-Taken with `git grep` at the time of writing — **hits and files are different numbers and an
-earlier version of this table conflated them**, which a round caught:
+Recomputed from the tree with `git grep`, excluding lines that carry a `[24.2.7-audit: …]` marker.
+**Hits and files are different numbers and an earlier version of this table conflated them**, which
+a round caught.
 
-| project | hits | files | reaches |
+| project | open hits | files with an open site | reaches |
 |---|---:|---:|---|
-| `Paperless.Presentations` | 17 | 6 | slides |
+| `Paperless.Presentations` | 11 | 4 | slides |
 | `Paperless.WordProcessing` | 11 | 8 | words |
 | `Paperless.Spreadsheets` | 10 | 9 | sheets |
-| **`Paperless.Text`** | **8** | **4** | **all three tracks** |
-| `Paperless.Core` | 2 | 1 | all three tracks |
-| `Paperless.Rendering` | 1 | 1 | all three tracks |
-| `Paperless.Ooxml` | 1 | 1 | all three tracks |
-| **total** | **50** | **30** | |
+| `Paperless.Text` | 8 | 2 | **all three tracks** |
+| `Paperless.Core` | 2 | 1 | **all three tracks** |
+| `Paperless.Rendering` | 1 | 1 | **all three tracks** |
+| `Paperless.Ooxml` | 1 | 1 | **all three tracks** |
+| **total** | **44** | **26** | |
 
-**The shared layer is 12 hits in 7 files, not 8 sites.** (These totals include the marker lines
-added since; use the marker-excluding command above for the live figure.)
+Marked so far: **11** lines —
+8 verified,
+2 wrong,
+1 undecided.
+
+Reproduce both numbers with:
+
+```sh
+git grep -n  '24\.2\.7' -- 'dotnet/src/**/*.cs' | grep -vc '24\.2\.7-audit'   # open
+git grep -c  '24\.2\.7-audit' -- 'dotnet/src/**/*.cs' | awk -F: '{s+=$2} END{print s}'  # done
+```
 
 ## Outcomes so far — two of five re-checked sites were wrong
 

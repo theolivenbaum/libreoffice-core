@@ -14993,3 +14993,113 @@ Both caught by this round, and both are fixed in `TODO.24-2-7-audit.md`:
    paragraph in the corpus.
 2. `#_x0000_t15` VML (3 shapes, `090`), then the `DrawingStyleMatrix` route into `DocxFrames`
    (458 shapes, 40 documents) — with arrow ends being **5** shapes, not a bulk job.
+
+---
+
+## Merge note — round 53, slides (2026-08-21)
+
+**Slides 199 → 199 of 302, predicted 0 and measured 0.** `abs_ink` 1238.56 → **1233.54**, major
+pages 434 → **432**, `tf-agreement` 0.75160 → 0.75210, exact-size pages 1552 → 1558 of 4515.
+**35 documents moved: 23 improved, 12 worsened.** Tests at the merged tree **4674, 0 failed**.
+
+The round reconciled its own baseline against two prior figures and explained a 0.08 discrepancy
+rather than ignoring it: r52 closed at `abs_ink` 1238.64 and this round's base leg reads 1238.56,
+the difference being the **words** track's `DrawingChartPlot.cs`, merged after r52's slides leg.
+`tf-agreement.py` on the base leg reproduced r52's closing 0.75160 to the digit.
+
+### Two fixes, and the second came out of the audit rather than the brief
+
+- **`PptTextBody.Runs` — a `.ppt` blank line takes the height of the run it sits in.** The
+  character-run walk broke one run early for a zero-length paragraph, so `atStart` was never found
+  and every blank line fell back to the master level's height. **Three independent routes agree** on
+  `ITE106` p7: the record (a Python parser sharing nothing with the C# reader), LibreOffice's own
+  flat-ODF export (`fo:margin-top="0.106cm"` = 12×20/80), and the rendered geometry
+  (`28.800+3.004+1.2×12+6.008 = 52.212` against the 52.214 drawn). **673 blank paragraphs in 26 of
+  51 `.ppt` documents.**
+- **`SlideTextLayout.Stated` — a stated line *height* moves the ascent with it.** EditEngine's
+  four-way chain has `SvxLineSpaceRule::Min` and `::Fix` *before* the two proportional arms the file
+  already transcribed, and **neither was implemented** — a stated height went through Writer's
+  whole-twip `Apply` and the ascent stayed at one em: **9.58 pt of vertical displacement** for 12 pt
+  text in an exact 24 pt line. **769 `a:lnSpc/a:spcPts` sites in 23 documents.**
+
+### An instrument built to check the round's own regressions, with a known-answer control
+
+Five documents' `abs_ink` rose. `baseline-agreement.py` pairs baselines **in order** within a `/Tf`
+bucket — never nearest-neighbour, which is the pairing that manufactured round 50's 142 phantom box
+notes — and only where line counts match. Known-answer control on two untouched documents:
+**identical to the digit on both legs.** Every document examined improved, *including all five ink
+rises*: `undp` mean |dy| **8.3728 → 1.2307**, `Lepore` **1.1579 → 0.0264**, `iep-amount-frequency`
+1.7024 → 0.0360, `AATF-Fact-Sheet` 40 → **68 of 69** baselines within 0.1 pt.
+
+`NAS` p8 worked through: its ten stated-height baselines were 1.58 pt out and are now within
+**0.014 pt**, one for one — while the page draws **66** text blocks to the reference's **61**. The
+surplus is what turns a correct move into a higher unsigned figure. That is round 52's "check the
+quantity the change controls, not the aggregate" holding on a second, independent case.
+
+### The brief's item 3 was stale, and it was stale in exactly the way this project has a rule about
+
+`8_P-Pavese_AIRBUS…pptx`'s missing table fills have been **drawn since `c2fa7537f6b`** — 30
+`#FBECE7` + 25 `#F8D7CD` counted off our own render, matching the reference exactly, route traced
+through `PptxSlideLayout.cs:737` → `DrawingTableStyle.cs:185` → the 74-entry built-in map, entry
+`{21E4AEA4-…}` = Medium-Style-2/accent2. Its 47.76 `abs_ink` is spread over 26 pages with **one**
+major page — never the shape of 55 missing fills.
+
+**I carried that item forward in three consecutive briefs.** `HANDOVER.md` § 8 records the identical
+failure — an arrow-shape entry that "outlived its fix by twenty-six handovers" — and states the
+lesson: *a defect list is not self-expiring; an item no round re-measures survives every handover it
+appears in.* Writing that down did not stop me repeating it. **The fix is procedural: an item quoted
+into a brief must carry the commit or measurement that last confirmed it is still open**, and if it
+cannot, the first thing the round does is re-measure it.
+
+Also refuted: **`SlideChart` does not have `FrameChart`'s run-fusing defect** — `FrameChart` shapes
+the label in one call, `SlideChart` routes it through `SlideTextLayout`, which breaks on `\n`.
+Measured on the 12 corpus documents with a two-line data label: no fused tokens. My cross-track
+claim was wrong. **This says nothing about `SheetChart`.**
+
+### The audit: all six `SlideTextLayout.cs` sites cleared, and a clean re-check still paid
+
+Each by a probe against the installed 26.2.4.2, not a reading. `:145 OnGrid` — twelve boxes stepping
+by 40 EMU draw at exactly two baselines 0.0280 pt apart, transition on the half: quantised by
+`round`. `:297 HeightToLastNonEmpty` — four trailing empty paragraphs fit at 18.992 pt/12 lines,
+three moved into the middle at 15.987/9. The four `a:lnSpc` sites — 44 authored boxes, pitch exact
+on **40 of 40** proportional cases.
+
+**And the round's second fix came out of writing that probe.** All six sites collectively described
+a chain and none implemented its first two arms. **A re-check is worth running even when it comes
+back clean, because authoring the probe is what exposes what the site does not say.** It also
+promoted a recorded *divergence* from judgement to measurement: at 40% the reference draws
+`fround(0.40 × natural)`, so 26.2.4.2 has no 50% clamp either.
+
+The brief's premise — "if one of the six is stale it *is* item 1's answer" — was **false**; item 1's
+answer was in `PptTextBody`, found by measuring the page.
+
+### A second test this session that asserted the right property and never reached the defect
+
+`PptBlankParagraphTests` **already asserted** that a blank line takes its run's height, and
+**passed before the fix**, because its fixture states one run over the whole text so the blank sits
+strictly inside it. Real decks split the runs at the blank. Round 52 found the same shape in
+`ASlicerChoiceStillLosesToItsFallback`. **Two instances in two rounds: when a test encodes a corpus
+shape, assert the shape is present, or the test quietly tests a different case.**
+
+### Audit bookkeeping fixed by the parent
+
+The slides round predated the marker convention and recorded its six clearances in prose, so
+`git grep -c '24\.2\.7-audit'` could not see them. Markers added. Live figures, recomputed from the
+tree rather than by hand: **44 open hits in 26 files; 11 marked — 8 verified, 2 wrong, 1 undecided.**
+
+### Slides does next
+
+1. **The `.ppt` autofit's spacing reduction is disabled by a hard font index** — the one understood
+   cause of a `tf-agreement` fall this round. `gfopportunities` p6: the reference draws 26/22/17
+   where the record states 28/24/18 (a 0.925 font scale) at a pitch of `1.2 × em`, spacing **1.000**
+   — a pair `constScaleLevels` does not contain. Nailed to three lines: `svdfppt.cxx:6267-6271` sets
+   `bIsHardAttribute` on a hard typeface index; `:6285` puts `SvxLineSpacingItem` with
+   `SetPropLineSpace(100)`, which `lspcitem.hxx:86-91` shows *also* sets
+   `eInterLineSpaceRule = Prop`; `impedit3.cxx:1553-1602` is an `else if` chain whose `Prop` arm does
+   nothing at 100, making the `::Off` arm — the only place the fit's `fSpacingY` is applied —
+   unreachable. Needs `LineSpacingRule` to distinguish "states exactly 100%" from "states nothing".
+2. **`Lepore.ppt` is half answered** — baselines now at 0.0264 pt mean error, from 1.1579. What
+   remains is purely the drawn size, and 20.4 = 24 × 0.850 exactly. A clean single-variable question.
+3. **`NAS-Infrastructure-Roadmaps-v16.0.pptx`**, `abs_ink` 159.88, twice the next document: page 8
+   draws 66 text blocks to the reference's 61. A visibility question, worth more than anything left
+   in text layout.
