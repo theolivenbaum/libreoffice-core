@@ -15432,3 +15432,114 @@ Neither can move a token.
 **One reading was an artefact and is recorded as one**: the reviewer's "the reference's charts sit
 6–8% further right" is contradicted by the bounding boxes (509.32 against 509.52), and comes from
 the composition scaling each half to 78%. Two of three real, which is § 7's ratio again.
+
+---
+
+## Merge note — round 54 sheets and round 55 words (2026-08-21)
+
+**Words 317 → 319. Sheets 274 → 274 (one gain, one regression). Slides 199. Corpus 792 of 946.**
+
+```
+Core 337   Containers 109   Text 611   Vector 295   Rendering 150(1 skipped)   Markup 259
+OpenDocument 125   WordProcessing 1155   Spreadsheets 925   Presentations 806     = 4772
+0 failed
+```
+
+The sheets round's diff is in `Paperless.Ooxml` and reaches all three tracks, so **the whole corpus
+was gated** — all 337 words, 302 slides and 307 sheets documents — rather than measuring reach and
+inferring verdicts. Words was then swept whole again after round 55.
+
+### A three-round refutation chain, and the middle link was the wrong one
+
+This is the clearest instance yet of § 7's dominant pattern, because it runs three deep:
+
+| round | claim | verdict |
+|---|---|---|
+| 53 | `SystemFontResolver.GenericFallbacks` is **WRONG**; unrecognised families answer DejaVu Serif | the observation was right, the **seat** was wrong |
+| 54 | the site is **correct**; the rule belongs to the *filter*. And **style inheritance is refuted** | the first half stands; the second half was **wrong** |
+| 55 | style inheritance **is** the mechanism | stands, on 28 authored packages with 3 controls |
+
+**Why round 54's refutation failed, and it is a reusable trap.** Its counter-measurement was the
+*whole document's* font list — and that document draws DejaVu Sans for **four other reasons**
+(`Century Gothic`, `Tahoma`, `Charlotte Sans Book` and a `Myriad` subset are all declared swiss).
+**The observable could not move whatever the edit did.** A null result from an instrument that
+cannot register the effect is not evidence of absence. Its authored run-level probe does not
+reproduce on 26.2.4.2 either.
+
+The fix in method, which round 55 used: **28 authored packages of one paragraph and one run each**,
+so the PDF's font list has exactly one entry that *can* move. Build the fixture so the observable is
+one-dimensional, and a null result means something.
+
+### The rule, now unified across three filters
+
+**The DOCX family class is an inherited property, and the family name is not a property of it.** It
+is set only where `w:rFonts/@w:ascii` names a font the table files under `roman` or `swiss`; `auto`,
+`modern`, `script`, `decorative`, a pitch-only entry, an absent entry and `w:asciiTheme` **all leave
+whatever an ancestor put there**. `24-25_FAA_Holdover_Tables` is exactly that shape — `Normal` names
+`Arial` (swiss), and `Heading2`/`Heading3`/`Caption` are `basedOn Normal` naming `Arial Bold` (auto).
+
+**The DOC arm is different again**, and round 54 had left it explicitly unmeasured: **only
+`ff = roman` gives Serif**; every other code *and no code at all* reaches fontconfig's own generic.
+Measured on nine flat-ODF fixtures exported to Word 97 and back — a route that reaches the WW8
+*import* with a genuine `ff = 0`, which a DOCX round trip **cannot**. `Garamond` is the control,
+forced ROMAN by `GetFontParams`'s fourteen-prefix name-override list, and it returns Serif where the
+otherwise identical `Aptos` returns Sans.
+
+**This unifies the three filters rather than adding a third rule.** `FAMILY_DONTKNOW` always reaches
+fontconfig; DOCX never *sets* it (it leaves an inherited value floored at Writer's roman pool
+default), RTF never sets the family at all — hence its inert `\fswiss` — and DOC sets it per font.
+
+Font-list disagreements: **86 → 66 → 53 → 52** of 337 across rounds 54 and 55. `ours=Sans/ref=Serif`
+8 → 2; `ours=Serif/ref=Sans` 6 → 1. **Zero documents newly disagree at any step.**
+
+### Sheets: the regression had been passing by cancellation
+
+`005_Contextures_chart_sample` closes (293 → 296 of 300) and `pie-chart-result.docx` closes on the
+**words** track as a measured side effect. `013_Contextures_chart_sample` re-opens, 168/169 →
+165/169 — and **it had been passing by error cancellation**: four spurious value-axis tick labels
+were masking four genuinely missing tokens. With the automatic title drawn, our interval law picks
+the reference's step and **our page 4 is now the reference's page 4**, same title, same five ticks.
+Measurably closer, one token the wrong side of a threshold. The round judged that the right trade
+and argued it rather than reverting.
+
+The change is LibreOffice's automatic chart title, censused over **946 documents / 307
+`c:chartSpace` parts**, with a second pass keying on the root element proving the filename filter
+misses none: **ten parts in five documents**, every one stating `<c:autoTitleDeleted val="0"/>`
+explicitly, so **no hit rests on a default**. Both arms measured on corpus documents, **and both
+negative arms too** — three documents whose suppressed string would have appeared read ours = ref,
+and one chart inside the target document is a negative control.
+
+### Audit
+
+`SheetOptimalRowHeights.cs` **VERIFIED** (30 of 30 wrapped rows within 0.05 twips, read twice over,
+**control ran first and passed**). `SystemFontResolver.GenericFallbacks` re-marked **VERIFIED** from
+a fifth caller, with an over-general sentence corrected — **re-verifying an already-`VERIFIED` site
+found a real correction.** `Ww8FontTable.ShapeOf`'s "the other family codes leave LibreOffice's
+answer unchanged" is measurably false and is corrected at the site. Markers 11 → 12; open hits 42.
+
+### Vision found three defects larger than the ones the rounds were pointed at
+
+- **675 undrawn legacy `FORMCHECKBOX` fields in 12 documents** (`FO.FCTOA.00010` 249,
+  `Form-SM-76A` 152, `FO.FCTOA_.000129` 60, `A1. EASA Form 2` 52…). Previously "established,
+  deliberately not implemented" at a count of 249 in 16; the real census is larger.
+- **`AFS-050-004-F2_0i` p2: five black banner rows whose white reversed-out text we do not draw at
+  all**, plus a missing page-border rectangle and a header row we set blue where the reference sets
+  black.
+- **A chart-area border and a data-label fill colour**, named by *two* reviewers on unrelated
+  documents and unrelated pages, neither chosen by `--worst`, and confirmed by a third instrument:
+  `005`'s reference issues **387 strokes against our 0** in a light grey it sets 8 times, and its pie
+  labels are white in the reference against **33 white fills to our 0**. Neither can move a token.
+
+### Next
+
+**Words** — the `ascii` slot fallback: our `Family()` falls `ascii` → `hAnsi` → `cs` → `eastAsia`,
+where `DomainMapper` treats `w:hAnsi` as unsupported and never takes a western family from
+`w:cs`/`w:eastAsia`. Four documents reach a family that way. Then the 675 checkboxes, the banner
+rows, and `097`'s 1.7 pt line-height deficit (untouched for three rounds). **`w:altName` needs
+re-checking before anyone acts on it** — *this* checkout's `FontTable.cxx` ignores it too
+(`case LN_CT_Font_altName: break;`), so round 54's claim that LibreOffice uses it is unverified.
+
+**Sheets** — `013`'s camera-tool picture (an `editAs="oneCell"` EMF we draw at the stated 326.25 pt
+where 26.2.4.2 draws ~100 pt wider; dropping `editAs` on our side reproduces the reference to 0.2 pt,
+and it must not break `SIL_TDB648`); then `ChartLayout.IntervalsThatFit`; then the four
+`_advanced_excel_pie` documents, where the gate needs only two of their five tokens.
