@@ -1240,13 +1240,31 @@ internal sealed class PptSlideLayout
         AffineTransform placement)
     {
         if (TextOf(shape, context) is not { } run) return null;
-        if (PptTextBody.Build(run, context.Styles, context.Scheme, _fontTable, Insets(shape),
-                              Anchor(shape), Wraps(shape), Autofits(shape, run)) is not { } body)
+
+        VerticalText flow = Flow(shape);
+        if (PptTextBody.Build(run, context.Styles, context.Scheme, _fontTable,
+                              Insets(shape), Anchor(shape), Wraps(shape),
+                              Autofits(shape, run)) is not { } body)
         {
             return null;
         }
 
+        if (flow != VerticalText.None)
+        {
+            body = body with { Rotation = Quarter(flow) };
+        }
+
         DocRect rectangle = SlidePresetGeometry.TextRectangle(preset, local.Size, Guides(adjustment));
+
+        // A body that turns its own text can never be laid out in the shape's own upright
+        // rectangle: the lines run down the shape and break at its height, and the runs have to
+        // travel with a matrix. This is the same construction as PptxSlideLayout.Turned and is
+        // deliberately not a second one — the two formats spell the turn differently and mean the
+        // same thing by it.
+        if (flow != VerticalText.None)
+        {
+            return Turned(body, rectangle, placement, transpose: flow == VerticalText.Clockwise);
+        }
 
         // Upright means "axis-aligned and not mirrored", not "the identity". A group scales its
         // children, so the factor is often neither one nor a rotation. Treating that as rotated
@@ -1278,6 +1296,152 @@ internal sealed class PptSlideLayout
         return runs.Count == 0 ? null : new PlacedText(runs, upright ? AffineTransform.Identity : placement);
     }
 
+    /// <summary>
+    /// Lays a body out in a text frame turned inside its shape, and gives it the matrix.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>The two arms are not the same construction and the format is the reason.</strong>
+    /// A <em>vertical</em> flow (<c>TtoBA</c>, <c>TtoBN</c>, <c>VertN</c>) makes the text object
+    /// vertical, so the lines run down the shape and break at its <em>height</em>: the rectangle
+    /// transposes about its own centre, exactly as <c>PptxSlideLayout.Turned</c> does for
+    /// <c>a:bodyPr/@vert</c>. <c>BtoT</c> does something else — <c>svdfppt.cxx:819-821</c> adds
+    /// 90° to the text object's angle and leaves it horizontal, and the object is laid out in the
+    /// shape's own rectangle and only then rotated (<c>svdfppt.cxx:1174-1188</c>,
+    /// <c>NbcRotate</c> about the bound rect's centre). So its lines break at the shape's
+    /// <em>width</em> and the rectangle does not transpose.
+    /// </para>
+    /// <para>
+    /// The corpus's 51 <c>.ppt</c> carry <b>33 non-zero flows and every one of them is
+    /// <c>TtoBA</c></b>, so the second arm has no corpus reach at all and is here because getting
+    /// it wrong silently is worse than not having it: it is measured on the same probe.
+    /// </para>
+    /// </remarks>
+    private PlacedText? Turned(
+        SlideTextBody body, DocRect rectangle, AffineTransform placement, bool transpose)
+    {
+        double centreX = rectangle.X.Emu + (rectangle.Width.Emu / 2.0);
+        double centreY = rectangle.Y.Emu + (rectangle.Height.Emu / 2.0);
+
+        DocRect area = transpose
+            ? new DocRect(
+                Length.FromEmu((long)(centreX - (rectangle.Height.Emu / 2.0))),
+                Length.FromEmu((long)(centreY - (rectangle.Width.Emu / 2.0))),
+                rectangle.Height,
+                rectangle.Width)
+            : rectangle;
+
+        List<PlacedGlyphRun> runs = SlideTextLayout.Place(body, area, _fonts);
+        if (runs.Count == 0) return null;
+
+        double halfWidth = rectangle.Width.Emu / 2.0;
+        double halfHeight = rectangle.Height.Emu / 2.0;
+        AffineTransform about = AffineTransform.Concat(
+            AffineTransform.Concat(
+                AffineTransform.Translation(-(rectangle.X.Emu + halfWidth), -(rectangle.Y.Emu + halfHeight)),
+                AffineTransform.Rotation(body.Rotation)),
+            AffineTransform.Translation(rectangle.X.Emu + halfWidth, rectangle.Y.Emu + halfHeight));
+
+        return new PlacedText(runs, AffineTransform.Concat(about, placement));
+    }
+
+    /// <summary>Which quarter turn <c>txflTextFlow</c> asks for, if any.</summary>
+    private enum VerticalText
+    {
+        /// <summary>The text reads across — <c>mso_txflHorzN</c> and <c>mso_txflHorzA</c>.</summary>
+        None,
+
+        /// <summary>The text reads downwards — <c>mso_txflTtoBA</c>, <c>TtoBN</c>, <c>VertN</c>.</summary>
+        Clockwise,
+
+        /// <summary>The text reads upwards — <c>mso_txflBtoT</c>.</summary>
+        Anticlockwise,
+    }
+
+    /// <summary>
+    /// Reads <c>txflTextFlow</c> as a quarter turn.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>SdrPowerPointImport::ImportShape</c> (<c>svdfppt.cxx:815-832</c>) splits the six values
+    /// three ways: <c>mso_txflBtoT</c> adds 90° to the text object's own angle, the three
+    /// top-to-bottom values set the object <em>vertical</em> instead, and the two horizontal ones
+    /// do nothing. A vertical text object is the same rendering as DrawingML's
+    /// <c>a:bodyPr/@vert</c> — the frame is transposed and the runs carry a quarter-turn matrix —
+    /// so this produces the same <see cref="SlideTextBody.Rotation"/> that reader produces.
+    /// </para>
+    /// <para>
+    /// <b>Measured on 26.2.4.2, six of six, and the fixture was built to discriminate.</b>
+    /// <c>probes/slides-r56/patch-textflow.py</c> rewrites the four value bytes of this property
+    /// in a corpus <c>.ppt</c> and leaves every other byte alone, so the six arms differ in
+    /// nothing else — and, unlike a fixture exported by the reference, none of them states the
+    /// reference's own default. On <c>concepts-surrounding-cloud-computing…ppt</c> page 11 the
+    /// two vertical labels come out:
+    /// </para>
+    /// <code>
+    ///   0 HorzN   upright        4 HorzA   upright
+    ///   1 TtoBA   0 1 -1 0       3 TtoBN   0 1 -1 0       5 VertN  0 1 -1 0
+    ///   2 BtoT    0 -1 1 0
+    /// </code>
+    /// <para>
+    /// 24 text blocks apiece and identical pens across 1, 3 and 5. That refutes both rivals: "any
+    /// non-zero value turns the same way" fails on 2, whose matrix is the other quarter and whose
+    /// first pen is (43.14, 349.00) against (34.81, 309.86); and "only <c>TtoBA</c> is vertical"
+    /// fails on 3 and 5. <c>0 1 -1 0</c> is the matrix the reference writes for
+    /// <c>a:bodyPr/@vert</c>, which is what says the two spellings are one rendering.
+    /// </para>
+    /// </remarks>
+    private static VerticalText Flow(EscherShape shape)
+        => (shape.Properties.Value(EscherPropertyIds.TextFlow, 0) & 0xFFFF) switch
+        {
+            1 or 3 or 5 => VerticalText.Clockwise,
+            2 => VerticalText.Anticlockwise,
+            _ => VerticalText.None,
+        };
+
+    /// <summary>The turn a flow asks for, clockwise, in radians.</summary>
+    private static double Quarter(VerticalText flow) => flow switch
+    {
+        VerticalText.Clockwise => Math.PI / 2.0,
+        VerticalText.Anticlockwise => -Math.PI / 2.0,
+        _ => 0,
+    };
+
+    /// <summary>
+    /// The four text insets, which on this path are <b>not</b> rotated with the flow.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>This is where the two formats genuinely differ, and reusing the DrawingML answer
+    /// here was wrong.</strong> <c>oox</c>'s <c>TextBodyProperties::pushTextDistances</c> shifts
+    /// the four cyclically before they become <c>SdrText*DistItem</c>s; <c>svdfppt.cxx:857-880</c>
+    /// hands <c>dxTextLeft</c>, <c>dyTextTop</c>, <c>dxTextRight</c> and <c>dyTextBottom</c>
+    /// straight to <c>makeSdrTextLeftDistItem</c> and its three siblings with no shift at all. The
+    /// dist items are then applied in the text object's <em>own</em> coordinates, which for a
+    /// vertical object are already the transposed frame — so the identity here is the whole of it.
+    /// </para>
+    /// <para>
+    /// Measured rather than argued, and by a fixture that isolates one slot at a time:
+    /// <c>probes/slides-r56/make-ppt-inset-probe.py</c> writes five <c>.ppt</c> — all four insets
+    /// zero, then 40 pt on exactly one edge — and differences each against the zero arm, which
+    /// cancels the first line's ascent instead of having to know it. On 26.2.4.2, with the flow
+    /// patched to <c>TtoBA</c> and then to <c>BtoT</c>:
+    /// </para>
+    /// <code>
+    ///                  TtoBA  (0 -1 1 0)        BtoT  (0 1 -1 0)
+    ///   lIns 40 pt     dx   0.00  dy -40.00     dx   0.00  dy +39.99
+    ///   tIns 40 pt     dx -39.99  dy   0.00     dx +40.00  dy   0.00
+    ///   rIns 40 pt     dx   0.00  dy   0.00     dx   0.00  dy   0.00
+    ///   bIns 40 pt     dx   0.00  dy   0.00     dx   0.00  dy   0.00
+    /// </code>
+    /// <para>
+    /// The left inset moves the block along the line and the top inset moves it across, in both
+    /// directions — which is the identity, and not the cyclic shift
+    /// <c>PptxTextBody.Insets</c> applies. A shifted reading puts every turned <c>.ppt</c> label
+    /// 3.4 pt out on both axes on a shape that states nothing, because this format's defaults are
+    /// 0.25 cm across and 0.13 cm down.
+    /// </para>
+    /// </remarks>
     private static Margins Insets(EscherShape shape) => new(
         Length.FromEmu(shape.Properties.SignedValue(EscherPropertyIds.TextInsetLeft, DefaultInsetAcross)),
         Length.FromEmu(shape.Properties.SignedValue(EscherPropertyIds.TextInsetTop, DefaultInsetDown)),
