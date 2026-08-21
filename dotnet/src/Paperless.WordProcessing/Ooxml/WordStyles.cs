@@ -278,9 +278,21 @@ public sealed class WordStyles
     /// <para>
     /// The citation is a hypothesis and the probes are the evidence:
     /// <c>dotnet/probes/words-r46/widow-orphan-default.py</c> authors nine variants at five straddle
-    /// positions and measures the installed 24.2.7.2, with a control variant that states
-    /// <c>w:widowControl w:val="0"</c> on the straddling paragraph so the room at the foot of the
-    /// page is measured rather than assumed.
+    /// positions, with a control variant that states <c>w:widowControl w:val="0"</c> on the straddling
+    /// paragraph so the room at the foot of the page is measured rather than assumed.
+    /// </para>
+    /// <para>
+    /// [24.2.7-audit: VERIFIED 2026-08-21, words-r62 — the same probe re-run unchanged against
+    /// <b>26.2.4.2</b>, 45 renderings, and the answer is the one measured on 24.2.7.2. The
+    /// discriminating pair is <c>no-pPrDefault</c> against <c>empty-pPrDefault</c>: at 14 and at 16
+    /// fillers the first puts 3 and 1 target lines on page one — the same as <c>para-off</c>, which is
+    /// what fits — and the second puts 2 and 0, the same as <c>para-on</c>. Presence alone, with no
+    /// <c>w:pPr</c> inside it, turns the control on. Three further arms say it is a default and not an
+    /// override: a <c>w:pPrDefault</c> that <em>states</em> <c>w:widowControl w:val="0"</c> is off, a
+    /// paragraph stating <c>w:val="0"</c> under an empty <c>w:pPrDefault</c> is off, and
+    /// <c>w:docDefaults</c> removed entirely is off. <c>settings-on</c> — a document-level
+    /// <c>w:settings/w:widowControl</c> — is <b>inert at every filler count</b>, which reconfirms
+    /// HANDOVER §7's refutation of it on the current binary.]
     /// </para>
     /// </remarks>
     public bool HasDefaultParagraphPropertiesElement { get; private set; }
