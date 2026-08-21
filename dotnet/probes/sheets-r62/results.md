@@ -333,13 +333,16 @@ believing on the things she does report.**
 
 ## 9. `MANIFEST.tsv`
 
-Lives in the corpus repository and was **not touched**. Two rows change, both **losses**, and both
-are proposed rather than made:
+Lives in the corpus repository and was **not touched**. **One** row changes, a loss, proposed
+rather than made:
 
 | path | proposed |
 |---|---|
-| `sheets/chartset-008/xlsx/023_Waterfall_Chart_Template_for_Excel_349f7689.xlsx` | `done` → **`open`** (843/868) |
 | `sheets/chartset-008/xlsx/046_Cost_analysis_with_Pareto_chart_7db5ef69.xlsx` | `done` → **`open`** (161/157) |
+
+`023_Waterfall_Chart_Template_for_Excel_349f7689.xlsx` stays `done` (872/868) and **no row is
+proposed for it** — but it should be read as a `done` document whose chart draws three of twelve
+bars, which § 5 and § 8 both say and the status column cannot.
 
 `fse_identification_form.xlsx` moved on the reference's side in both directions within this round
 and belongs with `ans_mappings_of_eccairs_terms.xlsx` under the `unstable` treatment; this round
