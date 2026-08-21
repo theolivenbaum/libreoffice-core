@@ -16983,3 +16983,61 @@ cause left. Then `cellIs` (18 documents, now cheap — reader, range walk, prior
 all exist), then `c:dPt` per-point fills (35 in 7 sheets documents; slides has 144 on pies and 31 on
 bars). **`.xls` colour scales are still uncensused** — they live in `CF12` 0x087A, which no census
 here has read — and the **`x14` extension arm is invisible to every census so far**.
+
+---
+
+## Round 59 — slides (not yet merged; branch `wt-slides-r59`)
+
+**Slides 199 → 200 of 302.** `abs_ink` 1107.04 → **1039.95**, major pages 385 → **375**, differing
+pixels over 4530 pages 19702.23 → **19414.43**. Page counts moved on 0 of 302. Verdict regained:
+`010605Vul.ppt` `words` → `match`, 963 → **947** extractable words against a 944 reference.
+
+Five changes, four of them measured against a probe built to discriminate before anything shipped.
+
+- **The plot rectangle was an unreserved tick length, not a displacement.** `c:majorTickMark` was
+  not read at all and `AXIS2D_TICKLENGTH` was reserved for every visible axis. Six probe arms on
+  one corpus chart: `none 0.00 / in 0.00 / out +4.25 / cross +4.25`, on that axis' own edge only,
+  and the labels' own pen does not move with it. An **absent** element is not `none` —
+  `axismodel.cxx` defaults it to `out` or `cross`, both of which reserve.
+- **The automatic gridline and axis line are the theme's subtle line style.** Major = `tx1` at
+  `tint 75000`, minor at `tint 50000`, axis line at `tint 75000`, each substituted for the
+  `phClr` inside `Theme::getLineStyle(THEMED_STYLE_SUBTLE)` so the theme's own `shade` acts on it,
+  and the same line style supplies the **width**. Five arms; a `tx1` of white gives `#BCBCBC` for
+  *both* tints, which no tint alone can produce. **Every axis line in this reader was black.**
+- **A symbol-charset metafile font stores a glyph slot, not a letter.** `010605Vul.ppt` page 9 is
+  an EMF whose 25 runs name `Monotype Sorts` at `lfCharSet = 2`; the charstream test shows both
+  extractions are 5989 characters and differ only by 25 substitutions of a Private Use Area code
+  point for a Latin letter. 92 font objects in 10 documents across all three tracks.
+- **The 24.2.7.2 audit was the largest single item.** `PptxSlideLayout.cs:1591`'s three rules,
+  re-run through round 39's own fixture on 26.2.4.2: the clamp and the truncation still hold, and
+  the branch they fed does **not** — a corner-focus circle gradient is `radial` now, not a 45°
+  linear ramp. `Wildlife for REDAC September 11.pptx` **61.92 → 7.66** ink, 346.73 → 102.53
+  differing pixels.
+- **`WmfReader`'s other fixed fields: asked and answered.** One real gap — a 32-byte face-name
+  read with no record bound — with 8 short records of 450 in the corpus and **no** document
+  drawing a wrong face because of it. Recorded, not fixed.
+
+**Shared layers.** `Paperless.Core/Charts`, `Paperless.Ooxml`, `Paperless.Vector`. Measured at
+this tree against `MANIFEST.tsv`: **words 319 of 337, 0 disagreements**; **sheets 275 of 307**,
+whose three disagreements are two *stale* manifest rows (both `advanced_excel_pie`, already
+`words` in round 58's own base and after sweeps with identical counts, and a pie takes no tick,
+no gridline and no axis line) and one **gain** — `044_Cash_flow_forecast…xlsx` 427/438 →
+**438/438**, the reference's count exactly.
+
+**`track-ink-sweep.sh` cannot see an `.xlsm`.** Its `find` filter lists `.xls`, `.xlsx`, `.ods`
+and `.csv`, so two sheets manifest paths are unreachable by it. The scorer beside it now refuses
+to print rather than silently scoring 305 of 307.
+
+**`tf-agreement.py` prints 0.77063 at this base**, reproducing the *original* briefed 0.77061 and
+not round 56's 0.85188. Two of three readings agree and round 56's is the outlier — most likely a
+different `ours` directory, since the script's mean is per document.
+
+### Next, slides
+
+**The plot rectangle's RIGHT edge.** Left and bottom are largely settled (`dLeft` over 1 pt on 22
+of 57 chart pages → 9; `dBottom` 23 → 11) and `dRight` did not move: **31 of 57, before and
+after**. Three independent sightings this round. Then `8_P-Pavese_AIRBUS…pptx` — now the track's
+largest at 47.26 — where a page reading says the reference draws a black chart background, a grey
+plot wall, a white title and gradient bars, and we draw none of the four. Then
+`N2_E_Maestroni`'s `c:manualLayout`, whose 15.6 pt is real, reproduces, and is **not** the defect
+this round fixed.
