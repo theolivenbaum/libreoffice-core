@@ -87,55 +87,51 @@ It also promoted one recorded *divergence* from a judgement to a measurement: `L
 50% clamp is Writer's and not EditEngine's, and at 40% the reference draws `fround(0.40 × natural)`
 rather than clamping. 26.2.4.2 has no such clamp either.
 
-## The measured size of the list
+## The size of the list — **run the command, do not read a number**
 
-Recomputed from the tree with `git grep`, excluding lines that carry a `[24.2.7-audit: …]` marker.
-**Hits and files are different numbers and an earlier version of this table conflated them**, which
-a round caught.
-
-| project | open hits | files with an open site | reaches |
-|---|---:|---:|---|
-| `Paperless.Presentations` | 12 | 5 | slides |
-| `Paperless.WordProcessing` | 11 | 8 | words |
-| `Paperless.Spreadsheets` | 10 | 9 | sheets |
-| `Paperless.Text` | 8 | 2 | **all three tracks** |
-| `Paperless.Core` | 2 | 1 | **all three tracks** |
-| `Paperless.Rendering` | 1 | 1 | **all three tracks** |
-| `Paperless.Ooxml` | 1 | 1 | **all three tracks** |
-| **total** | **44** | **29** | |
-
-Marked so far: **12** lines —
-9 verified,
-2 wrong,
-1 undecided.
-
-The **open** count does not fall when a site is verified, and that is deliberate: the sentence that
-names 24.2.7.2 stays, because it records what the figure was fitted to. Round 54's marker is the
-twelfth and the open count held at 44. Read the two numbers as "how many sites still carry an
-unchecked 24.2.7.2 claim" and "how many have been checked", not as a total and a remainder.
-
-**9** verified,
-2 wrong,
-1 undecided.
-
-Recomputed 2026-08-21 after round 54 with the two commands below: **44 open hits in 29 files**.
-The file count stood at 26 here and was wrong; hits and files are different numbers and this table
-has now conflated them twice.
-
-**Round 54 tripped the self-corrupting-string trap this file warns about, in the marker itself.**
-Its `[24.2.7-audit: VERIFIED …]` block ran to a second line, and that continuation line named
-`24.2.7.2` in prose — so it did not carry the marker, and the open count went *up* by one while a
-site was being cleared. The rule is sharper than "annotate with a marker": **no line of a
-multi-line marker may contain the bare string.** Reworded to "the superseded note above".
-
-Reproduce both numbers with:
+This file has carried a hand-maintained count three times and it has been wrong three times: it
+conflated hits with files, it grew while the list was being worked, and a marker's own prose put a
+cleared site back into the open count. **The count is not maintained here. It is computed.**
 
 ```sh
-git grep -n  '24\.2\.7' -- 'dotnet/src/**/*.cs' | grep -vc '24\.2\.7-audit'   # open
-git grep -c  '24\.2\.7-audit' -- 'dotnet/src/**/*.cs' | awk -F: '{s+=$2} END{print s}'  # done
+# open sites — a hit that is not itself a marker line
+git grep -n '24\.2\.7' -- 'dotnet/src/**/*.cs' | grep -v '24\.2\.7-audit' | wc -l
+
+# per project
+for p in dotnet/src/Paperless.*; do
+  n=$(git grep -n '24\.2\.7' -- "$p/**/*.cs" | grep -vc '24\.2\.7-audit')
+  [ "$n" -gt 0 ] && printf '%4d  %s\n' "$n" "$p"
+done | sort -rn
+
+# done, by outcome
+for k in VERIFIED WRONG UNDECIDED; do
+  printf '%-10s %s\n' "$k" "$(git grep -c "audit: $k" -- 'dotnet/src/**/*.cs' | awk -F: '{s+=$2} END{print s+0}')"
+done
 ```
 
-## Outcomes so far — eleven sites re-checked, **one** wrong
+**A marker's prose must not name `24.2.7.2`.** Round 54 wrote a marker whose second line did, which
+pushed the open count *up* at the moment a site was cleared — the file's own trap, sprung by the
+file's own convention. Say "the superseded binary", or name **26.2.4.2**, and put the old version
+only inside the `[24.2.7-audit: …]` bracket if it is needed at all.
+
+Snapshot at the time of writing, for orientation only — **do not quote it**:
+
+| project | open hits |
+|---|---:|
+| `Paperless.Presentations` | 11 |
+| `Paperless.WordProcessing` | 11 |
+| `Paperless.Spreadsheets` | 10 |
+| `Paperless.Text` | 6 |
+| `Paperless.Core` | 2 |
+| `Paperless.Rendering` | 1 |
+| `Paperless.Ooxml` | 1 |
+
+Total open **42**,
+marked **14**
+( verified,
+1 wrong).
+
+## Outcomes so far — **one** site wrong, of every one re-checked
 
 | site | outcome |
 |---|---|

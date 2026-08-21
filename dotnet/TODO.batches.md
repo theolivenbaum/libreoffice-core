@@ -15652,3 +15652,108 @@ files, 12 marked.
    `baseline-agreement` mean of 1.4915 over 1228 pairs — the largest single-document text residue.
 4. The audit: `PptxSlideLayout.cs` 2 left, `SlideDrawing.cs` 2, `PptxTextStyles.cs` 1,
    `OdpSlideLayout.cs` 1 — the last being the ODF half of the claim round 54 verified for OOXML.
+
+---
+
+## Merge note — round 54, slides (2026-08-21)
+
+**Slides 199 → 199 of 302, verified over all 302 documents: 0 gains, 0 regressions, 0 page counts
+moved.** And the largest rendering movement any round has produced on this track:
+
+| | base | after |
+|---|---:|---:|
+| `abs_ink` | 1233.54 | **1147.17** (−86.37, −7.0%) |
+| major pages | 432 | **403** |
+| `tf-agreement` | 0.75210 | **0.77053** |
+| exact `/Tf` pages | 1558 | **1709** of 4515 |
+
+42 documents moved, 38 improved, **4 worsened and all four are named**: `undp` 20.30→20.57,
+`ws_prod…European-Safety` 7.09→7.23, `pods05` 9.02→9.16, `Thailand17` 17.74→17.87. Two of the four
+are round 53's shape — `baseline-agreement.py` puts European-Safety at **1.0764 → 0.0282** mean |dy|
+and pods05 at 1.0251 → 0.7319 *while their ink rose*. Only `undp` and `Thailand17` are genuine, both
+under 0.3. Test counts at the merged tree **4790, 0 failed**.
+
+### The brief's condition was wrong and the corpus is what decided it
+
+I briefed the `.ppt` spacing-reduction rule as gated on a **hard font index**, from a three-line
+chain round 53 read out of the C++. The mechanism is right; **the condition is not**. Implementing
+the record's hardness disjunction in full: −13.06 `abs_ink` over 13 documents. Implementing it for
+**every `.ppt` paragraph**: **−85.96 over 34 documents**, 30 improvements, major pages 432 → 403.
+
+`Lepore.ppt` decides it — paragraph mask 0, character run stating only a font *height*, **soft by
+every term the record offers**, and the reference still draws it at `1.2 × em` under a 0.850 scale.
+
+**And the authored deck could not have chosen between the two rules**: LibreOffice's own exporter
+writes `lf=100` *and* `font=1` on every paragraph, so both candidate rules pass it 15 of 15. **A
+known-answer fixture built by round-tripping through the reference inherits the reference's
+defaults, and those defaults can make two rival rules indistinguishable.** The corpus A/B is what
+separated them. Worth remembering the next time a round authors a fixture instead of sweeping.
+
+Authoring that deck also needed a fact round 53's plan lacked: **`soffice --convert-to ppt` cannot
+preserve `a:normAutofit`** — autofit is inferred from the `TextHeaderAtom`'s instance, and a
+round-tripped text box comes back `TextInShape`. `ppt-patch-kind.py` flips the atom
+length-preservingly. We were 6 of 15 on that deck; we are now **15 of 15**.
+
+### `Lepore.ppt` closed, and the bullet was never the text
+
+20.4 × 6 are the **bullets**, 20.0 × 11 the text. `Outliner::ImpCalcBulletFont` never reaches
+`setRoundFontSizeToPt`, so `fround(847 × 0.85) = 720` units = **20.409 pt** against
+`round(24 × 0.85) = 20`. We now draw 20.4094 and 20.0126 against the reference's 20.409 and 20.013.
+Only −0.41 ink, but **+0.0119 `tf-agreement` and 144 more exact-`/Tf` pages** — the ink column is
+the wrong instrument for a change of this shape. Still open: the bullet sits 1.9 pt too high.
+
+### Both blind reviewers ranked the same finding first, and both were wrong
+
+**Third instance of § 7's blind-reading trap, and the strongest.** Two reviewers on `NAS` page 8
+independently and confidently ranked the same finding first — a pale-versus-saturated colour
+difference. **A colour histogram says the region is the same two colours in the same proportions**,
+in the rasters *and* in the composed image.
+
+Both discriminators § 7 offers held: the reports were about the same object, and the page was chosen
+for a stated reason. **Only a different instrument caught it.** That is now the operative rule —
+*agreement between readers, however independent, is not confirmation; an instrument that can see the
+claimed quantity is.*
+
+Reviewer B counted the inventories as matching, and our p8 writes **102 `BT` to the reference's 99**
+— so round 53's "66 blocks to 61, a visibility question" **is not what the page shows**. Reviewer C,
+on a different page, found the real defect and it was confirmed independently.
+
+### The real NAS defect: rotated text, in both directions, 197 pages
+
+`rotated-text-census.py` — **whose first cut was wrong and says so in its own remarks**: the two
+stacks rotate through different operators, and a `Tm`-only count reports 18832 to nought.
+Corrected: **73 of 302 documents, 1097 rotated blocks ours against 1905, and 197 pages where the
+reference rotates and we do not.** NAS is 307 of the shortfall over 33 pages. It runs **both ways** —
+`Demick_JetBlue` rotates 76 where the reference rotates 8.
+
+**`NAS-Infrastructure-Roadmaps-v16.0.pptx` is not a "we render better" false positive** — p8 3.18%
+differing pixels, p99 4.43%, 55 of 137 major. That entry on the do-not-work list is now measured
+and wrong.
+
+### The prediction failed 3× — in the opposite direction to round 53's
+
+`abs_ink` predicted −5…−25, measured **−86.37**. Round 53 extrapolated from candidates and
+over-shot 3×; this round censused *visible symptoms* and under-shot 3×, **because a rule that
+changes the fit search moves pages a symptom census cannot see**. The round's own stated control
+was refuted by its own measurement. Documents moved: predicted 18–30 "all `.ppt`", measured 13 for
+the briefed rule and **42 for what shipped, 8 of them `.pptx`**.
+
+### The audit sprang its own trap, and the file is now self-computing
+
+`PptxSlideLayout.cs:763` **VERIFIED** on 26.2.4.2 (six sizes, cell first baseline at one em, ours to
+0.000 pt). But the marker's *second line named `24.2.7.2` in prose*, which **pushed the open count
+up at the moment a site was cleared** — the file's own convention springing the file's own trap.
+
+`TODO.24-2-7-audit.md` now **carries the commands rather than a count**, because a hand-maintained
+figure has been wrong three times there: it conflated hits with files, it grew while being worked,
+and now a marker put a cleared site back. The rule added: **a marker's prose must not name the
+superseded version.** Live at this commit: **42 open, 14 marked — 13 verified, 1 wrong.**
+
+### Slides does next
+
+1. **Rotated text — 197 pages, both directions.** `a:bodyPr/@vert` and `@rot`, Escher
+   `txflTextFlow`. **Read `rotated-text-census.py`'s remarks before writing an instrument** — its
+   first cut was wrong in a way that reports a 18832-to-nothing gap.
+2. The fitted bullet's vertical placement (1.9 pt high, `ALIGN_BOTTOM` / `aBulletArea.Bottom()`).
+3. `2015-Civil-Rights-Website-training.ppt`, now second-largest at 30.32 `abs_ink`,
+   `baseline-agreement` 1.4915 over 1228 pairs.
