@@ -415,6 +415,22 @@ two reviewers on unrelated documents *and unrelated pages, neither chosen by `--
 same object — the reference's green slicer advisories, absent from ours — and `pdftotext` confirmed
 it independently at 3/2/1 against 0. Real, and it became one of that round's two shipped fixes.
 
+**And the mirror, found by the parent looking at a page directly on 2026-08-21 after the user asked
+whether vision was actually being used.** Three reviewers, over three rounds, reported *"the
+reference draws a legend and we draw none"* on one page. Three rounds refuted it — correctly, on
+the words used: **both sides draw the five-entry legend, on page 2.** The item was closed each time.
+
+**The readers were right about the observation and wrong about the name.** The reference draws a
+**legend-key swatch beside every data label** — `pdf-ops.py` counts 10 small filled rects on the
+reference's page 1 against our 5, the extra six sitting at the label positions in their series
+colours — from `c:showLegendKey val="1"`, which our source consults **only inside an existence
+test** and never draws. 68 elements in 5 documents, all sheets.
+
+**A refutation of the description is not a refutation of the observation.** And the *recurrence* was
+itself the signal: one sentence from three independent readers across three rounds is evidence that
+something real is there, not evidence of a reliably-wrong reviewer. When a reading keeps coming back
+after being refuted, re-read the page rather than the refutation.
+
 **The discriminator is not the number of readers.** It is: are the reports about the *same object*;
 was the page chosen for a stated reason rather than by maximum ink; and does a *different
 instrument* confirm it. All three held there and none held in the false case. `--worst` ranks by ink and the largest ink difference on a document
