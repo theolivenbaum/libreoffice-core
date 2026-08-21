@@ -24,6 +24,19 @@ internal readonly record struct PlacedRow(int Row, Length Y, Length Height)
     public Length Bottom => Y + Height;
 }
 
+/// <summary>The face one run of a header or footer is drawn in.</summary>
+/// <remarks>
+/// A band's face has three parts that arrive from two places — the workbook's own default cell
+/// font, and the band's own <c>&amp;"Family,Style"</c>, <c>&amp;B</c> and <c>&amp;I</c> codes —
+/// and every one of the four calls that lays a run out needs all three. Passing them as a triple
+/// rather than as three parameters keeps the resolution in one place
+/// (<see cref="SheetPageDecoration"/>'s <c>FaceOf</c>) rather than at each call.
+/// </remarks>
+/// <param name="Family">The family name, or null for the application's own default.</param>
+/// <param name="Bold">Whether the bold face is wanted.</param>
+/// <param name="Italic">Whether the italic face is wanted.</param>
+internal readonly record struct SheetBandFace(string? Family, bool Bold, bool Italic);
+
 /// <summary>
 /// Everything a printed sheet draws that is not the text of a cell.
 /// </summary>
@@ -485,7 +498,7 @@ internal sealed class SheetPageDecoration(SheetLayout sheet, SheetPagePlacement 
     /// draw, in 0.1 pt steps: 8 pt text turns over between 1.59 and 1.70 pt, 11 pt between 2.21
     /// and 2.30, 20 pt between 4.11 and 4.20. Those are not a threshold — they are
     /// <c>ascent - inkAscent</c>, the distance from a line's top to the top of its ink, and
-    /// <see cref="SheetBandText.CapHeightAt"/> carries that measurement. The same probe's decisive
+    /// <see cref="SheetBandText.CapHeightAt(Length, string?)"/> carries that measurement. The same probe's decisive
     /// case is one a threshold could never have produced:
     /// <c>FAA-2019-0995-0002_attachment_2</c>'s <c>ACC list</c> sheet has a
     /// <strong>5.67 pt</strong> band — comfortably above every bracket — whose header is
@@ -616,32 +629,44 @@ internal sealed class SheetPageDecoration(SheetLayout sheet, SheetPagePlacement 
                 }
 
                 Length width = Length.Zero;
-                List<(BandRun Run, Length Size, string? Family)> runs = [];
+                List<(BandRun Run, Length Size, SheetBandFace Face)> runs = [];
                 foreach (SheetHeaderPiece piece in line)
                 {
                     Length size = SizeOf(piece, zoom, bandFont);
-                    string? family = FamilyOf(piece, bandFont);
-                    if (SheetBandText.Shape(piece.Text, size, family) is not { } run) continue;
-                    runs.Add((run, size, family));
+                    SheetBandFace face = FaceOf(piece, bandFont);
+                    if (SheetBandText.Shape(piece.Text, size, face.Family, face.Bold, face.Italic)
+                        is not { } run)
+                    {
+                        continue;
+                    }
+
+                    runs.Add((run, size, face));
                     width += run.Width;
                 }
 
                 if (runs.Count > 0)
                 {
                     Length ascent = Length.Zero;
-                    foreach ((_, Length size, string? family) in runs)
-                        ascent = Length.Max(ascent, SheetBandText.AscentAt(size, family));
+                    foreach ((_, Length size, SheetBandFace face) in runs)
+                    {
+                        ascent = Length.Max(
+                            ascent,
+                            SheetBandText.AscentAt(size, face.Family, face.Bold, face.Italic));
+                    }
 
                     Length x = position(width);
-                    foreach ((BandRun run, Length size, string? family) in runs)
+                    foreach ((BandRun run, Length size, SheetBandFace face) in runs)
                     {
                         Length baseline = pen + ascent;
                         placed.Add((run, new DocPoint(x, baseline)));
 
-                        Length runTop = baseline - SheetBandText.CapHeightAt(size, family);
-                        Length runBottom = baseline
-                                           + SheetBandText.LineHeightAt(size, family)
-                                           - SheetBandText.AscentAt(size, family);
+                        Length runTop = baseline
+                                        - SheetBandText.CapHeightAt(
+                                            size, face.Family, face.Bold, face.Italic);
+                        Length runBottom =
+                            baseline
+                            + SheetBandText.LineHeightAt(size, face.Family, face.Bold, face.Italic)
+                            - SheetBandText.AscentAt(size, face.Family, face.Bold, face.Italic);
 
                         if (!anyInk)
                         {
@@ -710,8 +735,18 @@ internal sealed class SheetPageDecoration(SheetLayout sheet, SheetPagePlacement 
     /// cell family otherwise. A null answer means the furniture's own face, which is what
     /// <see cref="SheetBandText"/> resolves for a workbook that names nothing.
     /// </remarks>
-    private static string? FamilyOf(SheetHeaderPiece piece, SheetDefaultFont bandFont)
-        => piece.Family ?? bandFont.Family;
+    private static SheetBandFace FaceOf(SheetHeaderPiece piece, SheetDefaultFont bandFont)
+        => new(
+            piece.Family ?? bandFont.Family,
+            piece.Bold ?? bandFont.Weight >= BoldWeight,
+            piece.Italic ?? bandFont.IsItalic);
+
+    /// <summary>The weight at which a workbook's default font makes its band bold.</summary>
+    /// <remarks>
+    /// Six hundred, the CSS threshold, and it never has to discriminate on this corpus: both
+    /// Excel readers write 400 or 700 and nothing between.
+    /// </remarks>
+    private const int BoldWeight = 600;
 
     /// <summary>How tall one line of a band is: the tallest of the pieces on it.</summary>
     /// <remarks>
@@ -724,15 +759,20 @@ internal sealed class SheetPageDecoration(SheetLayout sheet, SheetPagePlacement 
         Length height = Length.Zero;
         foreach (SheetHeaderPiece piece in line)
         {
+            SheetBandFace face = FaceOf(piece, bandFont);
             height = Length.Max(
                 height,
                 SheetBandText.LineHeightAt(
-                    SizeOf(piece, zoom, bandFont), FamilyOf(piece, bandFont)));
+                    SizeOf(piece, zoom, bandFont), face.Family, face.Bold, face.Italic));
         }
 
         return height > Length.Zero
             ? height
-            : SheetBandText.LineHeightAt(bandFont.Size * zoom, bandFont.Family);
+            : SheetBandText.LineHeightAt(
+                bandFont.Size * zoom,
+                bandFont.Family,
+                bandFont.Weight >= BoldWeight,
+                bandFont.IsItalic);
     }
 
     /// <summary>One stroke of a border, with its ends extended to meet what it crosses.</summary>

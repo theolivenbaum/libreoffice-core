@@ -116,18 +116,20 @@ internal static class SheetBandText
     /// </remarks>
     /// <param name="family">The family name, or null for the furniture's own face.</param>
     /// <param name="bold">
-    /// Whether the family's bold face is wanted. The furniture never asks for one — a header and
-    /// a column heading are drawn in whatever a plain cell would be — but a chart's title does,
-    /// and asking for bold of a family that has no bold face resolves back to its regular one
-    /// rather than to nothing.
+    /// Whether the family's bold face is wanted. Asking for bold of a family that has no bold
+    /// face resolves back to its regular one rather than to nothing.
+    /// </param>
+    /// <param name="italic">
+    /// Whether its italic face is wanted, on the same terms. A band takes both from the
+    /// workbook's own default cell font, which the reference honours.
     /// </param>
     private static (OpenTypeFace? Face, FontReference Reference, LineMetrics? Metrics) FaceFor(
-        string? family, bool bold = false)
+        string? family, bool bold = false, bool italic = false)
     {
-        if (string.IsNullOrWhiteSpace(family) && !bold)
+        if (string.IsNullOrWhiteSpace(family) && !bold && !italic)
             return (Resolved.Value.Face, Description, Metrics.Value);
 
-        return SheetFonts.ForFamily(family, bold) is { } named
+        return SheetFonts.ForFamily(family, bold, italic) is { } named
             ? (named.Face, named.Reference, named.Metrics)
             : (Resolved.Value.Face, Description, Metrics.Value);
     }
@@ -138,11 +140,31 @@ internal static class SheetBandText
     public static Length AscentAt(Length size, string? family)
         => FaceFor(family).Metrics is { } metrics ? metrics.ScaledAscent(size) : size * 0.9;
 
+    /// <inheritdoc cref="AscentAt(Length, string?)"/>
+    /// <param name="size">The em size.</param>
+    /// <param name="family">The family name, or null for the furniture's own face.</param>
+    /// <param name="bold">Whether the family's bold face is wanted.</param>
+    /// <param name="italic">Whether its italic face is wanted.</param>
+    public static Length AscentAt(Length size, string? family, bool bold, bool italic)
+        => FaceFor(family, bold, italic).Metrics is { } metrics
+            ? metrics.ScaledAscent(size)
+            : size * 0.9;
+
     /// <inheritdoc cref="LineHeightAt(Length)"/>
     /// <param name="size">The em size.</param>
     /// <param name="family">The family name, or null for the furniture's own face.</param>
     public static Length LineHeightAt(Length size, string? family)
         => FaceFor(family).Metrics is { } metrics
+            ? metrics.ScaledAscent(size) + metrics.ScaledDescent(size)
+            : size * 1.15;
+
+    /// <inheritdoc cref="LineHeightAt(Length, string?)"/>
+    /// <param name="size">The em size.</param>
+    /// <param name="family">The family name, or null for the furniture's own face.</param>
+    /// <param name="bold">Whether the family's bold face is wanted.</param>
+    /// <param name="italic">Whether its italic face is wanted.</param>
+    public static Length LineHeightAt(Length size, string? family, bool bold, bool italic)
+        => FaceFor(family, bold, italic).Metrics is { } metrics
             ? metrics.ScaledAscent(size) + metrics.ScaledDescent(size)
             : size * 1.15;
 
@@ -199,8 +221,16 @@ internal static class SheetBandText
     /// <param name="size">The em size.</param>
     /// <param name="family">The family name, or null for the furniture's own face.</param>
     public static Length CapHeightAt(Length size, string? family)
+        => CapHeightAt(size, family, bold: false, italic: false);
+
+    /// <inheritdoc cref="CapHeightAt(Length, string?)"/>
+    /// <param name="size">The em size.</param>
+    /// <param name="family">The family name, or null for the furniture's own face.</param>
+    /// <param name="bold">Whether the family's bold face is wanted.</param>
+    /// <param name="italic">Whether its italic face is wanted.</param>
+    public static Length CapHeightAt(Length size, string? family, bool bold, bool italic)
     {
-        (OpenTypeFace? face, _, LineMetrics? metrics) = FaceFor(family);
+        (OpenTypeFace? face, _, LineMetrics? metrics) = FaceFor(family, bold, italic);
         Length ascent = metrics is { } resolved ? resolved.ScaledAscent(size) : size * 0.9;
 
         int units = face?.UnitsPerEm > 0 ? face.UnitsPerEm : 1000;
@@ -275,10 +305,19 @@ internal static class SheetBandText
     /// reserved — which is why <c>SheetChart</c> passes the same flag to both.
     /// </param>
     public static BandRun? Shape(string text, Length size, string? family, bool bold)
+        => Shape(text, size, family, bold, italic: false);
+
+    /// <inheritdoc cref="Shape(string, Length, string?, bool)"/>
+    /// <param name="text">The text.</param>
+    /// <param name="size">The em size.</param>
+    /// <param name="family">The family name, or null for the furniture's own face.</param>
+    /// <param name="bold">Whether to shape in the family's bold face.</param>
+    /// <param name="italic">Whether to shape in its italic face.</param>
+    public static BandRun? Shape(string text, Length size, string? family, bool bold, bool italic)
     {
         if (text.Length == 0) return null;
 
-        (OpenTypeFace? resolved, FontReference reference, _) = FaceFor(family, bold);
+        (OpenTypeFace? resolved, FontReference reference, _) = FaceFor(family, bold, italic);
         if (resolved is not { } face) return null;
 
         ShapedText shaped = TextShaper.Default.Shape(face, text);

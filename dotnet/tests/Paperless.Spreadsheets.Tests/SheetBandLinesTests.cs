@@ -221,14 +221,17 @@ public sealed class SheetBandLinesTests
         SheetHeaderFooter withDash = SheetHeaderFooter.ParseCodes(
             "&C&\"Courier New\"one&\"-,Bold\"two");
 
-        // One segment and not two: a `-` changes nothing, so nothing is flushed and the two
-        // literals stay one run — which is the same reason a `&B` does not split a run either.
-        withDash.Centre.Segments.Count.ShouldBe(1);
-        withDash.Centre.Segments[0].Text.ShouldBe("onetwo");
+        // Two segments: the `-` keeps the family and the `Bold` beside it changes the weight, so
+        // the run splits on the weight and both halves keep Courier.
+        withDash.Centre.Segments.Count.ShouldBe(2);
         withDash.Centre.Segments[0].Family.ShouldBe("Courier New");
+        withDash.Centre.Segments[0].Bold.ShouldBeNull();
+        withDash.Centre.Segments[1].Family.ShouldBe("Courier New");
+        withDash.Centre.Segments[1].Bold.ShouldBe(true);
 
         SheetHeaderFooter alone = SheetHeaderFooter.ParseCodes("&C&\"-,Bold\"only");
         alone.Centre.Segments[0].Family.ShouldBeNull();
+        alone.Centre.Segments[0].Bold.ShouldBe(true);
     }
 
     /// <summary>Two runs are one run only when they agree on the face as well as the size.</summary>
@@ -246,5 +249,47 @@ public sealed class SheetBandLinesTests
         line.Count.ShouldBe(2);
         line[0].Family.ShouldBeNull();
         line[1].Family.ShouldBe("Courier New");
+    }
+
+    /// <summary>
+    /// The weight and the slant come from the band's own codes, and from the workbook where the
+    /// codes say nothing.
+    /// </summary>
+    /// <remarks>
+    /// All three arms are measured on 26.2.4.2 (<c>probes/sheets-r56</c>, seven authored
+    /// workbooks): a workbook whose <c>fonts[0]</c> is bold draws its band in
+    /// <c>LiberationSans-Bold</c>, one whose <c>fonts[0]</c> is italic in
+    /// <c>LiberationSans-Italic</c>, <c>&amp;B</c> makes the band bold over a regular workbook
+    /// font, and <c>&amp;"Family,Regular"</c> makes it upright over a bold one.
+    /// <strong>Keyed on the PDF's font list and not on advance widths</strong>, because the
+    /// Liberation faces are metric-compatible: a bold band is exactly as wide as an upright one,
+    /// which is why an earlier reading of the same probe concluded the style was ignored.
+    /// </remarks>
+    [Fact]
+    public void TheToggleCodesSetTheWeightAndTheSlant()
+    {
+        SheetHeaderFooter band = SheetHeaderFooter.ParseCodes("&Cplain&Bbold&Iboth&Bitalic");
+        IReadOnlyList<SheetHeaderSegment> segments = band.Centre.Segments;
+
+        segments[0].Bold.ShouldBeNull();
+        segments[0].Italic.ShouldBeNull();
+        segments[1].Bold.ShouldBe(true);
+        segments[2].Italic.ShouldBe(true);
+
+        // `&B` flips rather than sets, which is the whole reason these are nullable.
+        segments[3].Bold.ShouldBe(false);
+        segments[3].Italic.ShouldBe(true);
+    }
+
+    /// <summary>A section switch puts the weight and the slant back to the workbook's.</summary>
+    [Fact]
+    public void ASectionSwitchResetsTheWeightAndTheSlantToo()
+    {
+        SheetHeaderFooter band = SheetHeaderFooter.ParseCodes("&L&B&Ileft&Rright");
+
+        band.Left.Segments[0].Bold.ShouldBe(true);
+        band.Left.Segments[0].Italic.ShouldBe(true);
+        band.Right.Segments[0].Bold.ShouldBeNull();
+        band.Right.Segments[0].Italic.ShouldBeNull();
     }
 }

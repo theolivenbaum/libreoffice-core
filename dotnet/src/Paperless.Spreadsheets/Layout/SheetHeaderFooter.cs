@@ -59,11 +59,21 @@ public enum SheetHeaderField
 /// has always been measured in the face the codes name — while this parser consumed it and threw
 /// it away, so a band was sized in one face and drawn in another.
 /// </param>
+/// <param name="Bold">
+/// Whether the segment is bold, or null for the workbook's own default cell font. Set by the
+/// style half of <c>&amp;"Family,Style"</c> and by the <c>&amp;B</c> toggle, both of which
+/// 26.2.4.2 honours: seven authored workbooks keyed on the PDF's font list rather than on
+/// advance widths, because the Liberation faces are metric-compatible and a bold band is exactly
+/// as wide as an upright one.
+/// </param>
+/// <param name="Italic">Whether it is italic, on the same terms and from <c>&amp;I</c>.</param>
 public readonly record struct SheetHeaderSegment(
     string? Text,
     SheetHeaderField Field = default,
     Length? Size = null,
-    string? Family = null)
+    string? Family = null,
+    bool? Bold = null,
+    bool? Italic = null)
 {
     /// <summary>A run of literal characters.</summary>
     /// <param name="text">The characters.</param>
@@ -75,8 +85,11 @@ public readonly record struct SheetHeaderSegment(
     /// <param name="text">The characters.</param>
     /// <param name="size">The em size it states, or null for the default.</param>
     /// <param name="family">The family it states, or null for the default.</param>
-    public static SheetHeaderSegment Literal(string text, Length? size, string? family)
-        => new(text, default, size, family);
+    /// <param name="bold">Whether it is bold, or null for the default.</param>
+    /// <param name="italic">Whether it is italic, or null for the default.</param>
+    public static SheetHeaderSegment Literal(
+        string text, Length? size, string? family, bool? bold = null, bool? italic = null)
+        => new(text, default, size, family, bold, italic);
 
     /// <summary>A field, resolved when the page it sits on is known.</summary>
     /// <param name="field">Which field.</param>
@@ -88,8 +101,12 @@ public readonly record struct SheetHeaderSegment(
     /// <param name="field">Which field.</param>
     /// <param name="size">The em size it states, or null for the default.</param>
     /// <param name="family">The family it states, or null for the default.</param>
-    public static SheetHeaderSegment Of(SheetHeaderField field, Length? size, string? family)
-        => new(null, field, size, family);
+    /// <param name="bold">Whether it is bold, or null for the default.</param>
+    /// <param name="italic">Whether it is italic, or null for the default.</param>
+    public static SheetHeaderSegment Of(
+        SheetHeaderField field, Length? size, string? family,
+        bool? bold = null, bool? italic = null)
+        => new(null, field, size, family, bold, italic);
 
     /// <summary>True when this is a field rather than literal text.</summary>
     public bool IsField => Text is null;
@@ -161,7 +178,8 @@ public sealed record SheetHeaderPart(IReadOnlyList<SheetHeaderSegment> Segments)
             if (segment.Text is null)
             {
                 current.Add(new SheetHeaderPiece(
-                    context.Value(segment.Field), segment.Size, segment.Family));
+                    context.Value(segment.Field), segment.Size, segment.Family,
+                    segment.Bold, segment.Italic));
                 continue;
             }
 
@@ -175,8 +193,8 @@ public sealed record SheetHeaderPart(IReadOnlyList<SheetHeaderSegment> Segments)
                 }
 
                 if (parts[at].Length > 0)
-                    current.Add(
-                        new SheetHeaderPiece(parts[at], segment.Size, segment.Family));
+                    current.Add(new SheetHeaderPiece(
+                        parts[at], segment.Size, segment.Family, segment.Bold, segment.Italic));
             }
         }
 
@@ -204,7 +222,9 @@ public sealed record SheetHeaderPart(IReadOnlyList<SheetHeaderSegment> Segments)
         {
             if (merged.Count > 0
                 && merged[^1].Size == piece.Size
-                && merged[^1].Family == piece.Family)
+                && merged[^1].Family == piece.Family
+                && merged[^1].Bold == piece.Bold
+                && merged[^1].Italic == piece.Italic)
                 merged[^1] = merged[^1] with { Text = merged[^1].Text + piece.Text };
             else
                 merged.Add(piece);
@@ -218,7 +238,10 @@ public sealed record SheetHeaderPart(IReadOnlyList<SheetHeaderSegment> Segments)
 /// <param name="Text">The text, fields already resolved.</param>
 /// <param name="Size">The em size it states, or null for the sheet default.</param>
 /// <param name="Family">The family it states, or null for the sheet default.</param>
-public readonly record struct SheetHeaderPiece(string Text, Length? Size, string? Family = null);
+/// <param name="Bold">Whether it is bold, or null for the sheet default.</param>
+/// <param name="Italic">Whether it is italic, or null for the sheet default.</param>
+public readonly record struct SheetHeaderPiece(
+    string Text, Length? Size, string? Family = null, bool? Bold = null, bool? Italic = null);
 
 /// <summary>What a header's fields stand for on one printed page.</summary>
 /// <remarks>
@@ -348,6 +371,8 @@ public sealed record SheetHeaderFooter(
         StringBuilder literal = new();
         Length? size = null;
         string? family = null;
+        bool? bold = null;
+        bool? italic = null;
         int at = 0;
 
         while (at < text.Length)
@@ -371,9 +396,30 @@ public sealed record SheetHeaderFooter(
                 // (pagesettings.cxx:868-876). Measured on `sheet-outline-collapse.xlsx`, whose
                 // footer is `&L&8… &RFoot right`: LibreOffice draws the right part at the
                 // workbook's ten point and carrying the eight across draws it at eight.
-                case 'L': Flush(); current = left; size = null; family = null; break;
-                case 'C': Flush(); current = centre; size = null; family = null; break;
-                case 'R': Flush(); current = right; size = null; family = null; break;
+                case 'L':
+                    Flush();
+                    current = left;
+                    size = null;
+                    family = null;
+                    bold = null;
+                    italic = null;
+                    break;
+                case 'C':
+                    Flush();
+                    current = centre;
+                    size = null;
+                    family = null;
+                    bold = null;
+                    italic = null;
+                    break;
+                case 'R':
+                    Flush();
+                    current = right;
+                    size = null;
+                    family = null;
+                    bold = null;
+                    italic = null;
+                    break;
 
                 case 'P': Field(SheetHeaderField.PageNumber); break;
                 case 'N': Field(SheetHeaderField.PageCount); break;
@@ -423,6 +469,20 @@ public sealed record SheetHeaderFooter(
                         family = named;
                     }
 
+                    // The style half sets both flags, so `&"Arial,Regular"` turns off a bold the
+                    // workbook's own default font would otherwise have given the band — measured
+                    // on 26.2.4.2, where a workbook whose `fonts[0]` is bold and whose header
+                    // states `,Regular` draws the band in the upright face and the body in the
+                    // bold one. A specification with no comma states no style and leaves both.
+                    if (comma >= 0)
+                    {
+                        string style = specification[(comma + 1)..];
+                        Flush();
+                        bold = style.Contains("bold", StringComparison.OrdinalIgnoreCase);
+                        italic = style.Contains("italic", StringComparison.OrdinalIgnoreCase)
+                                 || style.Contains("oblique", StringComparison.OrdinalIgnoreCase);
+                    }
+
                     break;
                 }
 
@@ -463,7 +523,21 @@ public sealed record SheetHeaderFooter(
                     at = Math.Min(text.Length, at + 6);
                     break;
 
-                // Everything else is a toggle with no text — bold, italic, underline,
+                // The two toggles that reach a face. `&B` and `&I` flip rather than set, and a
+                // band that has never stated one starts from the workbook's own default cell
+                // font — which is why these are nullable and why the flip is written against
+                // the effective value rather than against `false`.
+                case 'B' or 'b':
+                    Flush();
+                    bold = !(bold ?? false);
+                    break;
+
+                case 'I' or 'i':
+                    Flush();
+                    italic = !(italic ?? false);
+                    break;
+
+                // Everything else is a toggle with no text — underline,
                 // strikeout, super and subscript, the picture placeholders — or a code this
                 // does not know. Both are swallowed rather than printed, which is what Calc's
                 // own parser does with an unrecognised character: its switch has no default,
@@ -480,14 +554,15 @@ public sealed record SheetHeaderFooter(
         void Flush()
         {
             if (literal.Length == 0) return;
-            current.Add(SheetHeaderSegment.Literal(literal.ToString(), size, family));
+            current.Add(
+                SheetHeaderSegment.Literal(literal.ToString(), size, family, bold, italic));
             literal.Clear();
         }
 
         void Field(SheetHeaderField field)
         {
             Flush();
-            current.Add(SheetHeaderSegment.Of(field, size, family));
+            current.Add(SheetHeaderSegment.Of(field, size, family, bold, italic));
         }
     }
 }
