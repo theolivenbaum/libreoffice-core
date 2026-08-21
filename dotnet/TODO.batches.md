@@ -17126,3 +17126,148 @@ round stating that plainly is the behaviour wanted**; three earlier rounds commi
 section and did not say why. `briefs-r50/COMMON.md` now requires the vision section in `results.md`,
 with the page, the reason it was chosen, the direction reported, and what a second instrument said —
 or the sentence saying none was run and why.
+
+---
+
+## Merge note — round 59, words (2026-08-21)
+
+**Words 319 of 337, slides 199 of 302, sheets 276 of 307 — corpus 794 of 946, no movement in either
+direction on any track, which both predictions said in advance.** Gated over all 946 because the
+second change touches `Paperless.Core`.
+
+```
+Core 358   Containers 109   Text 624   Vector 298   Rendering 153(1 skipped)   Markup 259
+OpenDocument 125   WordProcessing 1220   Spreadsheets 980   Presentations 836     = 4962
+0 failed
+```
+
+### The list label's slant: round 58's five-row table was true and incomplete, in two ways
+
+**The level wins outright wherever it states a posture, in either direction.** `<w:i w:val="0"/>` on
+the level over an italic paragraph mark draws the label upright; `<w:i/>` on the level over
+`<w:i w:val="0"/>` on the mark draws it leaning. So it is *level-if-stated, else the mark*, and
+**13 of the corpus's 271 `.docx` write the first shape**. **And a bullet's base font is not a
+number's**: `#i53199` resets posture and weight for a bullet and only underline and overline for a
+number, so a paragraph *style*'s `w:i` leans a number label and leaves a bullet upright, while the
+same `w:i` written directly on `w:pPr/w:rPr` leans both. 16 authored packages in four formats,
+round-tripped through 26.2.4.2 itself: **docx 16 of 16 and doc 16 of 16 agreeing after, against 9
+and 11 before.**
+
+**The OpenSymbol column is 112 → 81, and the `.docx` arm 32 → 1.** The `.doc` arm did not move and
+the reason is now measured: `A320SimNotes.doc` round-tripped through the reference's own flat-ODF
+export has **1 014 `WW8Numz` character-style references and not one `fo:font-style`**, so its 75
+sheared bullets come from `RES_PARATR_LIST_AUTOFMT` — built by `ww8par.cxx`:2622 from the control
+stack at the **paragraph mark**, direct CHPX only. Substituting our resolved first-run posture
+overshoots in both directions (120 against 75, 4 against 2, 0 against 3), and the seat is named:
+`Ww8DocumentReader.Describe` resolves the character layout at the paragraph's **first character**
+despite its comment saying the mark.
+
+**A per-document net is the wrong statistic for a per-label change, and my own instrument said the
+opposite of the truth.** Five documents' aggregate lean counts fell and `facegap.py` read that as
+getting worse; every one of them moved *toward* the reference — `UG.CAO.00133` 306 → 259 against
+260, an error of 46 reduced to 1 — and the runs we stopped shearing are ones the reference never
+sheared. Round 58's summed census, arriving again, caught by asking the reference about the specific
+run rather than reading the aggregate.
+
+### The automatic font colour: 305 glyphs on one page, and three separate things had to be true
+
+The readers turned an unstated colour into opaque black; nothing carried the background to the
+drawing pass; and `w:shd` is a **pattern** rather than a fill. All three fixed. `AFS-050-004-F2_0i`
+goes from **0 white glyphs to 569** against the reference's 571 and now fills the same **8**
+rectangles on page 2, header cells included, to 0.05 pt. Corpus-wide, white glyphs the reference
+draws and we do not: **5 145 in 48 documents → 2 728 in 38**.
+
+Two rules no reading of the source gives you, both measured over 20 authored packages:
+
+- **`Color::IsDark()` is two formulas and 26.2.4.2 still has both.** `0x729FCF` —
+  `COL_DEFAULT_SHAPE_FILLING` — takes `GetLuminance() <= 62` and comes out **bright** where WCAG's
+  83 ≤ 87 says dark. The reference draws its text **black** and draws `6F9BCB` one step away white.
+  It is the only input in the domain that separates the two, and round 58's 22-fill ramp did not
+  contain it.
+- **A character highlight is not a background**, in both directions: yellow in a black cell is drawn
+  white, `darkBlue` in a white cell is drawn black.
+- **`w:shd` blends `w:color` (auto = black) over `w:fill` (auto = white) at a per-mille weight** —
+  `solid` 1000, `pctN` N×10, every striped value 333 — and `w:val="nil"` is *not* "no fill". All
+  eight patterns reproduce byte for byte.
+
+**And the LONG column caught a defect the gate cannot see, which is what it was for.** The first cut
+passed a floating frame's own fill down as the background, because `GetBackgroundBrush` walks fly
+frames. It turned **383 glyphs white that the reference draws black** — 371 in
+`docs-quality-MA.IMS.00001…docx` page 9 (`#0070C0`, WCAG 38) and 12 in
+`069_Work_Breakdown_Structure…`. Page count, word count and font list are all unchanged by painting
+text out of a page. The prediction named the risk and named the control; the arm is removed and the
+LONG column is back to **34 in 2, its exact pre-round value**.
+
+### The fallback-*order* census, all three tracks — and the largest item is not fallback order
+
+`facechoice.py`, per document and per face, printed as unique-to-reference, unique-to-us and
+**paired**, never netted. Three classes:
+
+1. **A font embedded in the package**, and it is the biggest single item anywhere in the census.
+   `Sean Monogue.pptx` carries four `ppt/fonts/*.fntdata` and a `p:embeddedFontLst`; the reference
+   draws **5 527 glyphs of Verdana** from them where `fc-match Verdana` answers `DejaVuSans.ttf`.
+   Plus `Liturgical-Commission-2025…pptx` and its embedded `Play`, 93. **Six slides documents embed
+   a font; no words or sheets document does.**
+2. **Serif against sans — the generic class, not the family.** `HC-Bulletin-template.docx` 2 315,
+   `template---tpr…` 23, and **five sheets documents** ~2 240, in both directions. On all three
+   tracks and the most repeated shape.
+3. **Carlito against Liberation Serif.** `AAC-AD-No-2021-01-Boeing-737-8-and-737-9-MAX.doc` alone is
+   **46 637 glyphs** — the single largest number in the words census, and one a slant-only view
+   never surfaced — plus `f111.doc` 275, `SPA-06` 313, `t_TEMPforInvProgs` 250 and two sheets files.
+
+Round 58's item, `outlook_of_nigerian_pension_sector.ppt` at 355 WQY glyphs, is **seventh** by size.
+
+### The vision round, and it earned its place three times
+
+- **`AFS-050-004-F2_0i` p2 before**: a blind reader named the defect — "all five black separator
+  bands on the left are blank black bars" — and its first unprompted candidate, "the text runs exist
+  but are drawn in a colour equal to the fill", is the truth. It described the reference's white
+  band text as "dark-on-dark"; **presence right, colour wrong**, which is the split the skill file
+  predicts at 9 pt in a composed half.
+- **The same page after**: the same defect appears under *identical* — "identical white bold centred
+  text" on both sides. And it raised two **pre-existing** items no metric had named: we draw
+  **9 runs** of `#0000FF` in the header row where the reference draws **2** (measured on the content
+  stream, unchanged by this round), and our intra-group separator rules are solid where the
+  reference's are dotted.
+- **`097` page 1**: the reviewer's first-ranked difference, blind, is "the reference creeps down the
+  page… the reference's rows are on average a hair taller" — the brief's line-height item, with the
+  direction, found without being told. A second instrument confirms the direction (`−2.06` pt by the
+  last band) and **refutes the shape**: the ramp is not monotonic, the whole deficit sits between
+  bands 3 and 4, which is where the reviewer's *fifth* item put it. **And it refutes the failure's
+  story**: `097` fails 1 page against 2 and the reference's **page 2 is empty** — every word is on
+  page 1 on both sides. The failure is a trailing empty page, and the per-empty-paragraph deficit is
+  what decides whether the final empty paragraph fits. `097`, `012_Project_Timeline…` and
+  `015_Project_Timeline…` are one class.
+
+### Also
+
+- **24.2.7-audit**: `WordCompatibility.AddsParagraphSpacing` **VERIFIED** on 26.2.4.2, four of four
+  arms to 0.00 pt, measured by baseline pitch. Base tree 38 open / 23 markers (19 V / 3 F / 1 W);
+  this tree 38 open / 24 markers (20 V / 3 F / 1 W), counted with the file's own commands. Round
+  58's quoted "17 VERIFIED" does not reproduce — trust the commands in `TODO.24-2-7-audit.md`.
+- **`MANIFEST.tsv`'s sheets status column over-counts by two** and has done since at least round 58:
+  it records 278 done where three consecutive sweeps measure 276.
+  `sheets/chartset-002/xlsx/003_advanced_excel_pie.xlsx` and
+  `sheets/chartset-004/xlsx/019_advanced_excel_pie.xlsx` should read `open`. Both are stable across
+  repeated renderings on both sides, so this is not the date-volatility trap. Not committed — the
+  corpus repo is not this branch's to write.
+- **`Paperless.Vector` reported phantom failures twice** under concurrent load (1 of 298, then 21 of
+  298) and passed 298 of 298 alone both times.
+- **`Paperless.Core` gains `Colour.IsDark`, `WcagLuminance`, `PerceivedLuminance`** — additive, no
+  consumer outside Core and WordProcessing by `git grep`, and both other tracks swept anyway.
+
+### Next
+
+1. **The empty-paragraph height, and it is now a class rather than a document.** `097`, `012` and
+   `015` each score 1 page against 2 and each of the reference's second pages is **empty**. Worth
+   1.15 pt on every empty paragraph in the corpus, and it decides three verdicts.
+2. **The `.doc` label slant, on a named seat.** `Ww8DocumentReader.Describe` resolves the character
+   layout at the paragraph's first character where the rule wants the mark's *direct* CHPX. 80 of
+   the 81 remaining OpenSymbol glyphs.
+3. **The Carlito-versus-Liberation-Serif and serif-versus-sans classes**, which between them are
+   ~50 000 glyphs across all three tracks, and **embedded package fonts**, which are 5 620 on slides
+   and the largest single item in the census.
+4. Then: the blue-versus-black header runs on `AFS-050-004-F2_0i` (9 runs against 2); solid versus
+   dotted table separators; the `.doc` `FORMCHECKBOX` arm (103 in 4, census exact); and the RTF
+   `{\listtext}` destination, which discards both the label's face and its slant and has no witness
+   in this corpus.
