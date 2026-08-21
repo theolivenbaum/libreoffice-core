@@ -17338,3 +17338,96 @@ largest at 47.26 — where a page reading says the reference draws a black chart
 plot wall, a white title and gradient bars, and we draw none of the four. Then
 `N2_E_Maestroni`'s `c:manualLayout`, whose 15.6 pt is real, reproduces, and is **not** the defect
 this round fixed.
+
+### Parent verification — round 59 slides
+
+**Slides 199 → 200, sheets 278 → 279, corpus 798 of 946.** All 946 documents gated: **two gains,
+zero regressions.** `abs_ink` 1107.04 → **1039.95 (−67.09)**, major pages 385 → **375**, differing
+pixels 19702 → **19414 (−288)**.
+
+```
+Core 355   Containers 109   Text 624   Vector 302   Rendering 153(1 skipped)   Markup 259
+OpenDocument 125   WordProcessing 1188   Spreadsheets 980   Presentations 846     = 4941
+0 failed
+```
+
+**Two projects reported failures in the ten-project run and neither is real** — `Text` returned
+**no output at all**, `Vector` reported **21 failures**; alone, 624 of 624 and 302 of 302. Seventh
+sighting, and the first time two appeared in one run.
+
+### The verdict comes back, and its "three words" were never words
+
+`010605Vul.ppt` `words` → `match`, 963 → **947** against 944. The charstream test settles what two
+rounds could not: **both extractions are 5989 characters**, differing only by **25 substitutions of
+a private-use code point for a Latin letter**. Page 9 is an **EMF whose 25 runs name `Monotype
+Sorts` at `lfCharSet = 2`**, and **the `.ppt` font table holds no symbol font at all** — which is
+exactly why every presentation-format census missed it. 92 font objects in 10 documents, all three
+tracks.
+
+### The audit produced the largest single item, again, and it was not in the plan
+
+`PptxSlideLayout.cs:1591`, re-run through **round 39's own four-arm fixture**: the clamp
+**VERIFIED**, the truncation **VERIFIED**, and **corner→linear is WRONG on 26.2.4.2** — all four arms
+export `radial`. `Wildlife for REDAC September 11.pptx` **61.92 → 7.66** ink and **346.73 → 102.53**
+differing pixels. That is 54 of the round's 67 ink points, from a site the brief never mentioned.
+
+**Second round running where a re-check of a superseded-binary claim outweighed the briefed target.**
+
+### The brief's item was half right, and the half it got wrong was mine
+
+**The plot rectangle is an unreserved tick length, not a displacement.** `c:majorTickMark` was not
+read at all, and **an absent element is not `none`** — `axismodel.cxx` defaults to `out`/`cross`,
+both of which reserve. Six probe arms, one property and one axis at a time, in a corpus chart already
+stating `none`: `none 0.00 / in 0.00 / out +4.25 / cross +4.25`, on that axis' own edge only.
+
+**And `N2_E_Maestroni` is not the same defect.** I briefed both ink regressions as one; its 15.6 pt
+reproduces exactly and is a **`c:manualLayout`** defect item 1 cannot reach. Round 56's "one defect"
+is two.
+
+**The automatic gridline colour is three things, not a tint.** `tx1` black → `#666666`/`#8B8B8B`;
+`2050C0` → `#676E9C`/`#8B8FA7`; **white → `#BCBCBC` for both tints**, which no tint alone can
+produce — the theme's own `shade 50000` around the substituted `phClr` is the other half. The same
+style supplies the **width** (9525/38100/4763 EMU → 0.73/3.00/0.37 pt). **Every axis line in this
+reader was black**, which the brief did not name.
+
+### `abs_ink` refuted as this round's instrument, on a case where the pixels disagree with it
+
+`bar_chart.pptx`: plot rect `dLeft +4.21, dBottom +4.89` → **`−0.05 / +0.64`**, and `diff%`
+**4.98 → 2.85** while `|ink|%` **0.24 → 0.34**. One one-sided offset became seventeen small
+two-sided ones. 41 documents moved on ink (22 improved, 19 worsened) against 42 on differing pixels
+(**39 improved, 3 worsened**). **The ink column reports the fix as a regression and the pixels
+refute it.**
+
+### A sibling instrument was blind in exactly the way its twin had been fixed for
+
+The round found **two sheets manifest paths `track-ink-sweep.sh` cannot reach**. The **first commit
+of this session** widened `batch-check.sh` from thirteen in-scope extensions to thirty-four, after
+two `.xlsm` in `sheets/chartset-*` turned out to have been silently unmeasured. `track-ink-sweep.sh`
+was written from the same list, **kept the narrow one, and stayed blind to the same two documents
+for a dozen rounds afterwards**.
+
+**Fixing an instrument does not fix its twin.** The list is now byte-identical in both, with a note
+in the sibling asking that any change be made in both places; verified reaching both `.xlsm`, and the
+two scripts now agree at 36 extensions each.
+
+### An instrument reading that disagrees three ways, reported not chased
+
+`tf-agreement.py` prints **0.77063** at this base — reproducing the *original* briefed 0.77061 and
+**not** round 56's 0.85188. Two of three readings agree and round 56's is the outlier, most likely a
+different `ours` directory since the mean is per document. Recorded as unresolved rather than
+explained away.
+
+### Vision, all three readings committed
+
+JetBlue p4 at a **200 dpi crop** independently found the **down-versus-up automatic marker** — round
+56's open item 8 — from a reader who had never seen it. `010605Vul` p9 named the **symbol-font
+fallback** from the pixels, with the right mechanism, which is §4 above. Pavese p8 (now the track's
+largest at 47.26) reports the reference drawing a **black chart background, a grey plot wall, a white
+title and gradient bars** where we draw none of the four.
+
+### Slides does next
+
+**The plot rectangle's right edge** — `dLeft` and `dBottom` are largely settled, `dRight` did not
+move on **31 of 57 chart pages, before and after**, and three independent sightings this round point
+at it. Then `8_P-Pavese_AIRBUS…pptx` (47.26, four unchecked claims from a page reading), then
+`N2_E_Maestroni`'s manual layout. **The fitted bullet's 1.9 pt is now untouched for five rounds.**
