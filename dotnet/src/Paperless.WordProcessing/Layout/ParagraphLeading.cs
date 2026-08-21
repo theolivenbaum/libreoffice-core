@@ -40,6 +40,26 @@ namespace Paperless.WordProcessing.Layout;
 /// <c>GetPrevFrameForUpperSpaceCalc_</c> finds a previous frame, and at the top of a page or a column
 /// there is none.
 /// </para>
+/// <para>
+/// <b>What is <em>below</em> the paragraph does not matter, and that half was missing for sixty rounds.</b>
+/// <c>CalcUpperSpace</c> adds <c>nPrevLineSpacing</c> to <c>nUpper</c> in all four of its branches before
+/// <c>pOwn</c> is looked at, and <c>pOwn-&gt;IsTextFrame()</c> guards only the frame's <em>own</em> leading
+/// — so a <c>SwTabFrame</c> takes the paragraph above's leading exactly as a text frame does. This engine
+/// handed it only from paragraph to paragraph, so every table under a proportionally-spaced paragraph
+/// started a point or so too high. Measured on
+/// <c>097_Business_Case_Template_Elegant_Layout_3ba9cbf2.docx</c>: four such boundaries, +0.95, +1.00,
+/// +1.05 and +1.00 pt, which is the whole of that document's 3.36 pt deficit and the reason its trailing
+/// empty paragraph fitted on page 1 here and takes a second page on the reference. 275 boundaries in 85
+/// of the corpus's 271 <c>.docx</c>; 80 renderings changed, one page count, no regression.
+/// <c>probes/words-r61/</c> and <see cref="Paperless.WordProcessing.Layout.PageTable"/>'s placement in
+/// <c>Paginator</c> and <c>FlowLayouter</c>.
+/// </para>
+/// <para>
+/// The converse is not true and is the control: <c>GetSpacingValuesOfFrame</c>
+/// (<c>sw/source/core/layout/frmtool.cxx</c>:4060) reads a line spacing only when
+/// <c>rFrame.IsTextFrame()</c>, so a <em>table</em> hands nothing down to whatever follows it. Both
+/// directions are in <c>table-paragraph-leading.docx</c>.
+/// </para>
 /// </remarks>
 internal static class ParagraphLeading
 {
