@@ -804,6 +804,16 @@ public static partial class SlideTextLayout
                 continue;
             }
 
+            // A stated line HEIGHT takes neither of those branches. EditEngine tests the four
+            // rules in order -- SvxLineSpaceRule::Min, then ::Fix, then InterLineSpaceRule::Prop,
+            // then ::Off -- so a fixed or minimum height is exclusive of the fit's ::Off scaling
+            // and of the four-fifths, and it moves the ascent by the whole of the height's change.
+            if (Stated(paragraph.LineSpacing, natural, scaling) is { } stated)
+            {
+                lines.Add(new PlacedLine(box, em + (stated - natural), stated, natural));
+                continue;
+            }
+
             // Nothing here states a proportion, so the ascent is one em: the ::Off branch is the
             // only one left to touch it, and Spaced is what transcribes that.
             lines.Add(Spaced(
@@ -1052,6 +1062,74 @@ public static partial class SlideTextLayout
         => Proportion(rule) is { } proportion ? Proportioned(natural, proportion)
             : Neutral(rule) ? natural
             : rule.Apply(natural);
+
+    /// <summary>
+    /// The height a paragraph <em>states</em>, when it states one, after the fit's spacing scale.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// EditEngine's <c>SvxLineSpaceRule::Fix</c> and <c>::Min</c> branches
+    /// (<c>editeng/source/editeng/impedit3.cxx:1530-1552</c>), which are the <em>first</em> two
+    /// arms of a four-way chain whose other two are the proportional rules
+    /// <see cref="Proportioned"/> and <see cref="Spaced"/> transcribe. A stated height therefore
+    /// excludes them both: no four-fifths, and no second application of the fit's scale.
+    /// </para>
+    /// <code>
+    /// nFixHeight = fround(scaleYSpacingValue(GetLineHeight()));
+    /// nTxtHeight = pLine-&gt;GetHeight();
+    /// pLine-&gt;SetMaxAscent(pLine-&gt;GetMaxAscent() + (nFixHeight - nTxtHeight));
+    /// pLine-&gt;SetHeight(nFixHeight, nTxtHeight);
+    /// </code>
+    /// <para>
+    /// <strong>The ascent moving with the height is the whole of this, and it was missing.</strong>
+    /// What stood here sent a stated height through <see cref="LineSpacingRule.Apply(Length)"/> —
+    /// Writer's whole-twip arithmetic — and left the ascent at one em, so a paragraph asking for
+    /// an exact 24 pt line in 12 pt text had its first baseline 9.58 pt above where the reference
+    /// draws it and every line after it with the same offset.
+    /// </para>
+    /// <para>
+    /// Measured against <strong>26.2.4.2</strong> on <c>make-linespace-probe.py</c>, twelve
+    /// <c>a:lnSpc/a:spcPts</c> boxes — 10, 24 and 50 pt of stated height in 11, 12, 24 and 40 pt
+    /// text, four lines each, <c>a:noAutofit</c> so no fit scale is in play. Every one of the
+    /// twelve now lands on the reference's pitch to a thousandth of a point and on its first
+    /// baseline to the same <strong>0.028 pt</strong> — one hundredth of a millimetre — that
+    /// every other case on that probe carries, stated-height or not, so nothing about the stated
+    /// height contributes to it. That residual is recorded in <c>probes/slides-r53/results.md</c>
+    /// as observed and unexplained; it does not appear on the corpus documents measured there.
+    /// </para>
+    /// <para>
+    /// The arithmetic can go negative — 40 pt text in a stated 10 pt line puts the ascent at
+    /// 2.0 pt, and a smaller stated height would put it below zero. EditEngine holds the ascent
+    /// in a <c>sal_uInt16</c> and wraps; that is deliberately not reproduced.
+    /// </para>
+    /// <para>
+    /// The unit is a whole hundredth of a millimetre, not a twip: the reference draws a stated
+    /// 24 pt line at 24.009 pt, which is 847 units, and <c>Apply</c>'s twip round trip gives
+    /// 24.000. Same reason <see cref="Spacing"/> gives.
+    /// </para>
+    /// <para>
+    /// Reach, censused over the corpus before the change: <strong>769 <c>a:lnSpc/a:spcPts</c>
+    /// sites in 23 distinct <c>.pptx</c> documents</strong> — 48 of them in
+    /// <c>NAS-Infrastructure-Roadmaps-v16.0.pptx</c>, the largest single <c>abs_ink</c> on the
+    /// track — plus 85 negative-line-feed paragraphs in one <c>.ppt</c>. No <c>.odp</c> in the
+    /// corpus states a fixed line height at all, and the ODF branch above does not come through
+    /// here.
+    /// </para>
+    /// </remarks>
+    private static Length? Stated(LineSpacingRule rule, Length natural, Scaling scaling)
+    {
+        if (rule.Mode is not (LineSpacingMode.Exact or LineSpacingMode.AtLeast)) return null;
+        if (rule.Value <= Length.Zero) return null;
+
+        // scaleYSpacingValue, which is the identity at one and is never above one here: the fit's
+        // table holds no spacing above 1.0.
+        double scale = scaling.Spacing is <= 0 or >= 1.0 ? 1.0 : scaling.Spacing;
+        Length stated = Length.FromMm100((long)Math.Floor((rule.Value.Mm100 * scale) + 0.5));
+
+        // ::Min grows a short line and leaves a tall one alone; ::Fix takes the stated height
+        // whichever way it falls.
+        return rule.Mode == LineSpacingMode.AtLeast && stated <= natural ? null : stated;
+    }
 
     /// <summary>Whether a rule leaves a natural line height alone.</summary>
     /// <remarks>
