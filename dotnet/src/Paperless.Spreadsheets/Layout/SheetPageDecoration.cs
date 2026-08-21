@@ -540,7 +540,23 @@ internal sealed class SheetPageDecoration(SheetLayout sheet, SheetPagePlacement 
 
         if (bandText <= Length.Zero) return;
 
-        Length drawn = dynamic ? bandText : height;
+        // What the three areas are centred *in*, which is `PrintHF`'s `aPaperSize.Height()` and
+        // never the text's own height: `nDif = paperHeight - textHeight`, applied only when it is
+        // positive (printfun.cxx:1876-1912). For a band that fits, `UpdateHFHeight` has already
+        // made the two equal, which is why a short area is lifted half the difference between
+        // itself and the tallest of the three — measured on `sheet-outline-collapse.xlsx`.
+        //
+        // **The `Min` is what makes a pinned band behave**, and it is measured rather than
+        // reasoned. `HeaderIsDynamic` is set true for every SpreadsheetML band, correctly, because
+        // Calc's own flag is about where the text sits rather than about whether the band grew;
+        // but on a band Calc has *pinned* the paper height is the stated band and not the text, so
+        // `nDif` is negative and nothing is centred at all. Without this clamp a short area in a
+        // pinned band is pushed down by half the tallest area's overhang.
+        // `tests/corpus/features/sheet-band-clip-xlsx.xlsx` sheet `Areas` is that case: a 7.2 pt
+        // band whose right area is eight lines and whose left is one. 26.2.4.2 puts `KEEPLEFT`'s
+        // ink at y 21.576 against a band top of 21.60; centring it in the right area's 124 pt put
+        // it 54 pt lower, and then the clip below deleted it.
+        Length drawn = dynamic ? Length.Min(bandText, height) : height;
         Length bandTop = dynamic && fromBottom ? top + height - bandText : top;
 
         // A footer sits on its own margin line, but **never above the top of its own band**:

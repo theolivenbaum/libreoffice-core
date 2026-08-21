@@ -184,4 +184,67 @@ public sealed class SheetBandLinesTests
         lines[1].ShouldBeEmpty();
         lines[2][0].Text.ShouldBe("two");
     }
+
+    /// <summary>
+    /// The <c>&amp;"Family,Style"</c> code names the face its own run is drawn in.
+    /// </summary>
+    /// <remarks>
+    /// It was read and thrown away until round 56 — the parser consumed the whole specification
+    /// so that <c>Arial,Bold</c> would not print, and then kept none of it. <see cref="SheetBandHeight"/>
+    /// has read the same code to size the band since it was written, so the band was measured in
+    /// one face and drawn in another. Null means the workbook's own default cell family, which is
+    /// what <see cref="SheetPrintSetup.BandFont"/> supplies.
+    /// </remarks>
+    [Fact]
+    public void AFaceCodeIsKeptOnTheSegmentsThatFollowIt()
+    {
+        SheetHeaderFooter band = SheetHeaderFooter.ParseCodes(
+            "&Lplain&C&\"Courier New\"named&Rafter");
+
+        band.Left.Segments[0].Family.ShouldBeNull();
+        band.Centre.Segments[0].Family.ShouldBe("Courier New");
+
+        // A section switch resets the face to the workbook's default, exactly as it resets the
+        // size — `ResetFontData` (xihelper.cxx:534-542), `setNewPortion` (pagesettings.cxx:868).
+        band.Right.Segments[0].Family.ShouldBeNull();
+    }
+
+    /// <summary>A leading <c>-</c> in the specification means "keep the face I already have".</summary>
+    /// <remarks>
+    /// Excel writes <c>&amp;"-,Bold"</c> when it states a style and no family, and Calc reads it
+    /// the same way. Taking the <c>-</c> as a family name puts every such band into a face that
+    /// does not exist.
+    /// </remarks>
+    [Fact]
+    public void ADashKeepsTheFaceTheBandAlreadyHas()
+    {
+        SheetHeaderFooter withDash = SheetHeaderFooter.ParseCodes(
+            "&C&\"Courier New\"one&\"-,Bold\"two");
+
+        // One segment and not two: a `-` changes nothing, so nothing is flushed and the two
+        // literals stay one run — which is the same reason a `&B` does not split a run either.
+        withDash.Centre.Segments.Count.ShouldBe(1);
+        withDash.Centre.Segments[0].Text.ShouldBe("onetwo");
+        withDash.Centre.Segments[0].Family.ShouldBe("Courier New");
+
+        SheetHeaderFooter alone = SheetHeaderFooter.ParseCodes("&C&\"-,Bold\"only");
+        alone.Centre.Segments[0].Family.ShouldBeNull();
+    }
+
+    /// <summary>Two runs are one run only when they agree on the face as well as the size.</summary>
+    /// <remarks>
+    /// <c>Lines</c> coalesces neighbouring pieces so that a PDF reader does not infer a word
+    /// boundary at every reposition. Coalescing on the size alone merges a Courier run into a
+    /// serif one and draws both in whichever came first.
+    /// </remarks>
+    [Fact]
+    public void PiecesAtDifferentFacesAreNotCoalesced()
+    {
+        SheetHeaderFooter band = SheetHeaderFooter.ParseCodes("&Cone&\"Courier New\"two");
+        IReadOnlyList<SheetHeaderPiece> line = band.Centre.Lines(new SheetHeaderContext())[0];
+
+        line.Count.ShouldBe(2);
+        line[0].Family.ShouldBeNull();
+        line[1].Family.ShouldBe("Courier New");
+    }
 }
