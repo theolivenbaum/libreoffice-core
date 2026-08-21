@@ -1143,9 +1143,21 @@ public sealed class Paginator
                     continue;
                 }
 
-                Length before = columnIsEmpty && !_options.KeepsSpacingAtTopOfPage
+                // The paragraph above's leading, which a table takes exactly as a paragraph does.
+                // `SwFlowFrame::CalcUpperSpace` adds `nPrevLineSpacing` to `nUpper` in all four of its
+                // branches and consults `pOwn->IsTextFrame()` only for the frame's *own* leading
+                // (`sw/source/core/layout/flowfrm.cxx`:1655-1739), so a `SwTabFrame` is handed the
+                // previous text frame's proportional line spacing like anything else. Only the table's
+                // first part, and only when it is not the first thing in the column: a continuation
+                // starts at a frame top, where `GetPrevFrameForUpperSpaceCalc_` finds no previous frame
+                // at all. See <see cref="ParagraphLeading"/>.
+                Length tableLeading = lineIndex == 0 && rowDrawn == Length.Zero
+                    ? LeadingAbove(blocks, Laid, paragraphIndex, columnIsEmpty)
+                    : Length.Zero;
+
+                Length before = (columnIsEmpty && !_options.KeepsSpacingAtTopOfPage
                     ? Length.Zero
-                    : table.SpaceBefore;
+                    : table.SpaceBefore) + tableLeading;
 
                 // The notes already on the page take their room out of the same column the table goes in,
                 // which is the paragraph arm's rule applied to the other kind of block. Before this, a
@@ -1346,7 +1358,8 @@ public sealed class Paginator
             // the citing page at one body length and **17** at the next, which is a cut at the room left
             // and cannot be a whole move — that predicts nought or fifty-nine and never seventeen.
             int fitted = Fit(
-                layout, lineIndex, used + spaceAbove, columnBottom - NoteHeight(notes),
+                layout, paragraph.Format.LineSpacing, lineIndex, used + spaceAbove,
+                columnBottom - NoteHeight(notes),
                 atTopOfPage: columnIsEmpty, borderBelow: paragraph.BorderBelow);
 
             int allowed = Allowed(
@@ -1407,7 +1420,8 @@ public sealed class Paginator
                 LineBox box = ParagraphLeading.AsDrawn(
                     layout.Lines[lineIndex + i],
                     isFirstOfParagraph: firstLineOfParagraph,
-                    isFirstInFrame: firstLineHere);
+                    isFirstInFrame: firstLineHere,
+                    paragraph.Format.LineSpacing);
                 bool shares = box.SharesLineWithNext;
 
                 placed.Add(new PlacedLine(
@@ -1852,6 +1866,7 @@ public sealed class Paginator
     /// moves every break after it.
     /// </remarks>
     /// <param name="layout">The paragraph as it was laid out.</param>
+    /// <param name="spacing">Its line spacing, for which lines may drop their raise.</param>
     /// <param name="from">The first line still to place.</param>
     /// <param name="used">How much of the column is already spent.</param>
     /// <param name="available">Where the column ends.</param>
@@ -1871,6 +1886,7 @@ public sealed class Paginator
     /// </param>
     private static int Fit(
         LaidOutParagraph layout,
+        LineSpacingRule spacing,
         int from,
         Length used,
         Length available,
@@ -1890,7 +1906,8 @@ public sealed class Paginator
             LineBox box = ParagraphLeading.AsDrawn(
                 layout.Lines[last],
                 isFirstOfParagraph: i == 0,
-                isFirstInFrame: atTopOfPage && count == 0);
+                isFirstInFrame: atTopOfPage && count == 0,
+                spacing);
 
             if (box.Height > room) break;
 
@@ -2002,7 +2019,12 @@ public sealed class Paginator
         LaidOutParagraph layout, PageParagraph paragraph, Length used, Length available)
         => layout.Lines.Count == 0
            || used + layout.SpaceBefore + paragraph.BorderAbove
-              + layout.Lines[0].WithoutSpaceAbove().Height <= available;
+              + ParagraphLeading.AsDrawn(
+                      layout.Lines[0],
+                      isFirstOfParagraph: true,
+                      isFirstInFrame: false,
+                      paragraph.Format.LineSpacing)
+                  .Height <= available;
 
     /// <summary>
     /// The space above a paragraph, once collapsing and the top-of-page rule have applied.
@@ -2071,6 +2093,37 @@ public sealed class Paginator
         return total;
     }
 
+    /// <summary>
+    /// What the block above hands down as leading, for either kind of block below it.
+    /// </summary>
+    /// <remarks>
+    /// Only when there is a previous <em>paragraph</em> in this frame. At the top of a page or a column
+    /// Writer finds no previous frame at all (<c>GetPrevFrameForUpperSpaceCalc_</c>) and never reaches
+    /// the line-spacing term, so a page that keeps its paragraph spacing still starts its first line
+    /// hard against the margin; and a table above hands nothing down either, because
+    /// <c>GetSpacingValuesOfFrame</c> reports a line spacing only for a text frame.
+    /// <para>
+    /// What is <em>below</em> it does not matter, and that is the half this used to miss: the term is
+    /// added to <c>nUpper</c> before <c>pOwn</c> is looked at, so a table takes it as readily as a
+    /// paragraph. Worth 1.00 pt at each of four boundaries on
+    /// <c>097_Business_Case_Template_Elegant_Layout</c>, which is the whole of that document's 3.36 pt
+    /// deficit against the reference and the reason its trailing empty paragraph fitted on page 1 here
+    /// and not there. See <see cref="ParagraphLeading"/> and <c>probes/words-r61/</c>.
+    /// </para>
+    /// </remarks>
+    /// <param name="blocks">The document's blocks.</param>
+    /// <param name="laidAt">Their laid-out forms, by index.</param>
+    /// <param name="index">The block the leading is being measured above.</param>
+    /// <param name="atFrameTop">True when nothing is in this column yet.</param>
+    private static Length LeadingAbove(
+        IReadOnlyList<PageBlock> blocks,
+        Func<int, LaidBlock> laidAt,
+        int index,
+        bool atFrameTop)
+        => atFrameTop || index == 0 || blocks[index - 1] is not PageParagraph above
+            ? Length.Zero
+            : ParagraphLeading.Below(laidAt(index - 1).Paragraph, above.Format.LineSpacing);
+
     /// <summary>The gap above a paragraph, and how much of it is the paragraph above's leading.</summary>
     private Length Gap(
         IReadOnlyList<PageBlock> blocks,
@@ -2089,15 +2142,7 @@ public sealed class Paginator
             return Length.Zero;
         }
 
-        // The previous paragraph's leading, and only when there is a previous paragraph in this frame:
-        // at the top of a page or a column Writer finds no previous frame at all
-        // (`GetPrevFrameForUpperSpaceCalc_`) and never reaches the line-spacing term, so a page that
-        // keeps its paragraph spacing still starts its first line hard against the margin. A table above
-        // hands nothing down either — `GetSpacingValuesOfFrame` reports a line spacing only for a text
-        // frame.
-        leading = atTopOfPage || index == 0 || blocks[index - 1] is not PageParagraph
-            ? Length.Zero
-            : ParagraphLeading.Below(laid[index - 1].Paragraph);
+        leading = LeadingAbove(blocks, i => laid[i], index, atTopOfPage);
 
         if (index == 0 || blocks[index - 1] is not PageParagraph previous) return before + leading;
 

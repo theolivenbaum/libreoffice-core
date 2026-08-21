@@ -151,7 +151,11 @@ public static class FlowLayouter
                 // horizontal half of that is read.
                 bool floats = floatsPositionedTables && nested.IsPositioned;
 
-                if (!floats) top += nested.SpaceBefore;
+                // The paragraph above's leading goes to the table, exactly as it goes to a paragraph:
+                // `SwFlowFrame::CalcUpperSpace` adds `nPrevLineSpacing` before it looks at what the
+                // frame below is (`flowfrm.cxx`:1655-1739). A floated one takes none of it, for the
+                // same reason it takes no space-before — it is not in the flow the leading belongs to.
+                if (!floats) top += nested.SpaceBefore + leading;
 
                 // The flow's width is what a table stating none of its own is fitted to, which for a cell is
                 // the cell and for a header the text area. It changes nothing for a table declaring a grid.
@@ -193,6 +197,8 @@ public static class FlowLayouter
                 // A table hands no leading down: `GetSpacingValuesOfFrame` reports a line spacing only
                 // for a text frame. Nor does it collapse against the paragraph after it — its space-after
                 // is a table property rather than a paragraph's, and the formats keep the two apart.
+                // The leading it was *given* is spent either way, floated or not, so it is cleared here
+                // rather than in the branch above.
                 leading = Length.Zero;
                 previousSpaceAfter = null;
                 continue;
@@ -263,7 +269,8 @@ public static class FlowLayouter
                 LineBox box = ParagraphLeading.AsDrawn(
                     layout.Lines[line],
                     isFirstOfParagraph: line == 0,
-                    isFirstInFrame: placed.Count == 0 && stacked == 0);
+                    isFirstInFrame: placed.Count == 0 && stacked == 0,
+                    paragraph.Format.LineSpacing);
 
                 // `above` and not `above + leading`: the leading is the paragraph above's, and Writer's
                 // `GetTopForObjPos` keeps it in a paragraph-anchored frame's origin. See
@@ -279,7 +286,7 @@ public static class FlowLayouter
             }
 
             top += layout.SpaceAfter + paragraph.BorderBelow;
-            leading = ParagraphLeading.Below(layout);
+            leading = ParagraphLeading.Below(layout, paragraph.Format.LineSpacing);
             previousSpaceAfter = layout.SpaceAfter;
         }
 

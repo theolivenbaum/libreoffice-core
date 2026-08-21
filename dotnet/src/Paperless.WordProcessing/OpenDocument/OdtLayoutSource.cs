@@ -154,6 +154,23 @@ public sealed partial class OdtLayoutSource
     /// Like the DOCX case it reaches nothing on the corpus — the 200-file words track holds no ODF
     /// document at all — so it is correctness rather than a measured win.
     /// </para>
+    /// <para>
+    /// [24.2.7-audit: VERIFIED 2026-08-21, round words-r61 — all three arms hold on 26.2.4.2, by
+    /// `probes/words-r61/audit_odfspacing.py`. The flag **false** gives 24.00 pt boundaries, **true**
+    /// gives 32.00, and the item **removed entirely** gives 32.00 — so absent is true, which is the
+    /// arm no stated value can imply and the one every real document takes. Both sides agree on all
+    /// three to 0.01 pt. Round 59 verified the DOCX twin
+    /// (`WordCompatibility.AddsParagraphSpacing`); this is the ODF path, which reaches the flag
+    /// through `SwXMLImport::SetConfigurationSettings` rather than through
+    /// `DomainMapper_Impl::ApplySettingsTable`, so the two are separate claims.
+    /// **A harness trap found on the way and worth more than the verification**: a minimal flat ODF
+    /// authored for the probe — correct namespaces, `ooo:configuration-settings`, the item spelled
+    /// as the fixture spells it — was read correctly by *this* reader and **ignored outright by
+    /// 26.2.4.2**, which answered 32.00 in all six arms including the two stating `false`. Had the
+    /// probe stopped there it would have reported the site WRONG. The arms are now one string
+    /// substitution each into round 53's own `paragraph-spacing-collapsed.fodt`, which the reference
+    /// demonstrably reads.]
+    /// </para>
     /// </remarks>
     /// <param name="settings">The document's <c>office:settings</c>, or null.</param>
     internal static bool AddsParagraphSpacing(XElement? settings)
@@ -184,6 +201,13 @@ public sealed partial class OdtLayoutSource
     /// points down an A4 page from LibreOffice 24.2.7.2: with the setting true the first baseline is at
     /// 93.60, with it false at 81.60, and <b>with the item removed entirely at 93.60</b> — so absent
     /// means true, which is the part that could not be inferred from the DOCX side.
+    /// </para>
+    /// <para>
+    /// [24.2.7-audit: VERIFIED 2026-08-21, round words-r61 — 93.60 / 81.60 / 93.60 reproduce exactly
+    /// on 26.2.4.2, all three, and the corner where both flags are off gives 81.60 with 24.00 pt
+    /// boundaries, which is the control that says the two settings are independent rather than one
+    /// flag read twice. `probes/words-r61/audit_odfspacing.py`; see the marker on
+    /// <see cref="AddsParagraphSpacing"/> for the authored-fixture trap that the derived arms avoid.]
     /// </para>
     /// </remarks>
     /// <param name="settings">The document's <c>office:settings</c>, or null.</param>
