@@ -235,11 +235,16 @@ public static class DrawingChartPlot
             ValueTicks = TicksOf(axes.Value),
             SecondaryTicks = TicksOf(axes.Secondary),
             CategoryTicks = TicksOf(axes.Domain ?? axes.Category),
+            CategoriesBetween = CrossBetween(axes, group),
             Legend = LegendOf(Child(chart, "legend")),
-            Background = FillOf(Child(chartSpace, "spPr"), theme),
+            Background = FillOf(Child(chartSpace, "spPr"), theme)
+                         ?? DrawingChartAutoFormat.FrameFillOf(
+                                automatic.Style, ChartAutoFrame.ChartSpace, theme),
             Border = LineOf(Child(chartSpace, "spPr"), theme),
             BorderWidth = LineWidthOf(Child(chartSpace, "spPr")),
-            PlotBackground = FillOf(Child(plotArea, "spPr"), theme),
+            PlotBackground = FillOf(Child(plotArea, "spPr"), theme)
+                             ?? DrawingChartAutoFormat.FrameFillOf(
+                                    automatic.Style, ChartAutoFrame.PlotArea, theme),
             ValueGrid = GridOf(axes.Value, theme, automatic),
             CategoryGrid = GridOf(axes.Category, theme, automatic)
                            ?? GridOf(axes.Domain, theme, automatic),
@@ -265,6 +270,18 @@ public static class DrawingChartPlot
             // titles this defaults to regular, because the auto-text table leaves spOtherTexts
             // regular — so an unstated weight and a stated b="0" mean the same thing here.
             IsLabelBold = AxisLabelBoldOf(plotArea) ?? false,
+
+            // The five text colours. Each is read where its own object states it, and each falls
+            // back to black — which is what every one of them was before round 60, and what a
+            // chart naming tx1 on a light theme resolves to anyway. See ChartPlot.LabelColour.
+            LabelColour = AxisLabelColourOf(plotArea, theme) ?? Colour.Black,
+            TitleColour = ColourOf(Child(chart, "title"), theme) ?? Colour.Black,
+            AxisTitleColour = AxisTitleColourOf(plotArea, theme)
+                              ?? ColourOf(Child(chart, "title"), theme) ?? Colour.Black,
+            DataLabelColour = DataLabelColourOf(plotArea, theme)
+                              ?? AxisLabelColourOf(plotArea, theme) ?? Colour.Black,
+            LegendColour = ColourOf(Child(chart, "legend"), theme)
+                           ?? AxisLabelColourOf(plotArea, theme) ?? Colour.Black,
 
             // The legend's own c:txPr, not the axes' — every length in the legend is a fraction
             // of it. Read from the legend element directly rather than through its descendants,
@@ -578,6 +595,46 @@ public static class DrawingChartPlot
     };
 
     /// <summary>
+    /// Whether the file says the categories occupy slots — <c>c:crossBetween</c> on the value
+    /// axis the category axis crosses — or null when it says nothing that reaches the question.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Feeds <see cref="ChartPlot.CategoriesBetween"/>, which carries the nine-arm measurement
+    /// this is written from. Three things happen here and each is one of that table's columns:
+    /// </para>
+    /// <list type="bullet">
+    /// <item>a chart with no <c>c:catAx</c> at all — a scatter, a bubble, a pie — has no category
+    /// axis to shift, and answers null;</item>
+    /// <item>a radar chart answers null whatever the element says, because
+    /// <c>axisconverter.cxx:295-296</c> forces <c>RADARLINE</c> and <c>RADARAREA</c> to unshifted
+    /// ahead of reading it — and the corpus holds three slides radar charts stating
+    /// <c>between</c>, which is exactly the case that would go wrong;</item>
+    /// <item>with the element absent, a <c>c:lineChart</c> or a <c>c:stockChart</c> is shifted and
+    /// everything else answers null and keeps the type test's own answer.</item>
+    /// </list>
+    /// <para>
+    /// A bar or column chart is not special-cased here: it is
+    /// <see cref="ChartPlot.ShiftedCategories"/> that ignores this value for one, and it does so
+    /// because the running binary does.
+    /// </para>
+    /// </remarks>
+    private static bool? CrossBetween(ChartAxes axes, XElement group)
+    {
+        if (axes.Category is null) return null;
+
+        string name = group.Name.LocalName;
+        if (name is "radarChart") return null;
+
+        return Value(Child(axes.Crossing, "crossBetween")) switch
+        {
+            "between" => true,
+            "midCat" => false,
+            _ => name is "lineChart" or "line3DChart" or "stockChart" ? true : null,
+        };
+    }
+
+    /// <summary>
     /// The date axis a <c>c:dateAx</c> asks for, or null when the category axis is an ordinary
     /// run of slots.
     /// </summary>
@@ -800,6 +857,18 @@ public static class DrawingChartPlot
         /// <summary>A scatter chart's X axis, or null for a category chart.</summary>
         public XElement? Domain { get; private init; }
 
+        /// <summary>
+        /// The value axis the category axis crosses — <c>c:catAx/c:crossAx</c> — or null.
+        /// </summary>
+        /// <remarks>
+        /// <c>c:crossBetween</c> is stated on this axis and on no other, and
+        /// <c>oox/source/drawingml/chart/plotareaconverter.cxx:229-231</c> hands exactly this
+        /// axis to the category axis' converter as its <c>pCrossingAxis</c>. On a chart with one
+        /// value axis it is <see cref="Value"/>; on a combination chart with a secondary axis it
+        /// need not be, and taking the primary would read the wrong element.
+        /// </remarks>
+        public XElement? Crossing { get; private init; }
+
         private readonly Dictionary<XElement, int> _byGroup = [];
 
         /// <summary>Which value axis a plot group is measured against: 0 or 1.</summary>
@@ -845,6 +914,8 @@ public static class DrawingChartPlot
                 Domain = axes.Domain,
                 Value = remaining.Count > 0 ? remaining[0] : null,
                 Secondary = remaining.Count > 1 ? remaining[1] : null,
+                Crossing = Matching(value, Value(Child(category, "crossAx")))
+                           ?? (remaining.Count > 0 ? remaining[0] : null),
             };
 
             if (resolved.Secondary is { } second && IdOf(second) is { } secondId)
@@ -2144,6 +2215,79 @@ public static class DrawingChartPlot
 
             if (Child(Child(group, "dLbls"), "txPr") is { } shared) yield return shared;
         }
+    }
+
+    /// <summary>
+    /// The colour a run of chart text states, resolved, or null when it states none.
+    /// </summary>
+    /// <remarks>
+    /// The same descent <see cref="SizeOf"/> makes — a real <c>a:rPr</c> first, then the
+    /// <c>a:defRPr</c> that stands in for one — because a <c>c:title</c> carries its colour on
+    /// its runs and a <c>c:txPr</c> carries it on the paragraph's default, and a title that
+    /// states both must answer with the run's.
+    /// </remarks>
+    private static Colour? ColourOf(XElement? element, DrawingTheme? theme)
+    {
+        foreach (XElement properties in RunProperties(element))
+        {
+            if (Drawing.Child(properties, "solidFill") is not { } fill) continue;
+
+            foreach (XElement child in fill.Elements())
+                if (DrawingColour.Read(child)?.Resolve(theme) is { } colour) return colour;
+        }
+
+        return null;
+    }
+
+    /// <summary>The tick-label colour, from whichever axis states one first.</summary>
+    /// <remarks>The shape of <see cref="AxisLabelSizeOf"/>, over <c>c:txPr</c>.</remarks>
+    private static Colour? AxisLabelColourOf(XElement plotArea, DrawingTheme? theme)
+    {
+        foreach (XElement axis in plotArea.Elements())
+        {
+            if (axis.Name.NamespaceName != OoxmlNamespaces.DrawingMLChart) continue;
+            if (!axis.Name.LocalName.EndsWith("Ax", StringComparison.Ordinal)) continue;
+            if (ColourOf(Child(axis, "txPr"), theme) is { } colour) return colour;
+        }
+
+        return null;
+    }
+
+    /// <summary>The axis-title colour, from whichever axis title states one first.</summary>
+    /// <remarks>The shape of <see cref="AxisTitleSizeOf"/>.</remarks>
+    private static Colour? AxisTitleColourOf(XElement plotArea, DrawingTheme? theme)
+    {
+        foreach (XElement axis in plotArea.Elements())
+        {
+            if (axis.Name.NamespaceName != OoxmlNamespaces.DrawingMLChart) continue;
+            if (!axis.Name.LocalName.EndsWith("Ax", StringComparison.Ordinal)) continue;
+            if (ColourOf(Child(axis, "title"), theme) is { } colour) return colour;
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// The data-label colour, from the plot area's own <c>c:dLbls</c> or from a group's.
+    /// </summary>
+    /// <remarks>
+    /// A <c>c:dLbls</c> hangs off the plot area, off a type group and off each <c>c:ser</c>, and
+    /// the outermost one that states a colour is taken. Per-series data-label colours are not
+    /// modelled: <see cref="ChartPlot.DataLabelColour"/> is one colour for the plot, which is
+    /// what every corpus chart that states one uses it as.
+    /// </remarks>
+    private static Colour? DataLabelColourOf(XElement plotArea, DrawingTheme? theme)
+    {
+        if (ColourOf(Child(plotArea, "dLbls"), theme) is { } stated) return stated;
+
+        foreach (XElement group in plotArea.Elements())
+        {
+            if (group.Name.NamespaceName != OoxmlNamespaces.DrawingMLChart) continue;
+            if (!group.Name.LocalName.EndsWith("Chart", StringComparison.Ordinal)) continue;
+            if (ColourOf(Child(group, "dLbls"), theme) is { } colour) return colour;
+        }
+
+        return null;
     }
 
     private static Length? AxisLabelSizeOf(XElement plotArea)

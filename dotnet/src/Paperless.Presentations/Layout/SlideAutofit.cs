@@ -281,6 +281,19 @@ public static partial class SlideTextLayout
     /// gives 470.
     /// </para>
     /// <para>
+    /// [24.2.7-audit: VERIFIED 2026-08-21, round 60 — and the <em>citation</em> has moved while
+    /// the arithmetic has not. <c>convertTwipToMm100</c> no longer spells <c>(n * 127 + 36) / 72</c>
+    /// out; it delegates to <c>o3tl::convert(n, twip, mm100)</c>
+    /// (<c>include/tools/UnitConversion.hxx:23-26</c>), whose positive branch is
+    /// <c>(n * num + den / 2) / den</c> with <c>num = 127</c> and <c>den = 72</c> — the same
+    /// expression, <c>den / 2</c> being the 36. <c>SvxFontHeightItem::PutValue</c> still rounds
+    /// through twips with <c>fPoint * 20.0 + 0.5</c>
+    /// (<c>editeng/source/items/textitem.cxx:943, 976</c>). The worked case still divides the two
+    /// readings: 13.33 pt is 267 twips, <c>(267 * 127 + 36) / 72 = 471</c> against the direct
+    /// ratio's 470. Nothing to change; recorded so the next reader is not sent to a line that no
+    /// longer holds the formula.]
+    /// </para>
+    /// <para>
     /// Applied here rather than in the three readers because this is the one place every measured
     /// and drawn em passes through — <c>LargestSize</c> reads it back off <c>RunStyle.Size</c>,
     /// the shaper takes it as <c>FormattedRun.EmSize</c>, and the sink writes it as <c>/Tf</c>.

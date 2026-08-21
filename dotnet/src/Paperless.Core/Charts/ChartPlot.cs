@@ -508,14 +508,57 @@ public sealed partial record ChartPlot
             // (CandleStickChart.cxx:160-180) — so a stock chart's categories are slots exactly as
             // a bar chart's are, and its whiskers stand in the middle of each rather than on the
             // plot area's edges.
+            //
+            // The bar test comes *first* and is not overridable, which is a measurement and not a
+            // reading of the source: on 26.2.4.2 a column chart stating c:crossBetween="midCat"
+            // renders byte-for-byte as the same chart stating "between". See CategoriesBetween.
             if (Kind is ChartPlotKind.Bar or ChartPlotKind.Stock) return true;
 
             foreach (ChartSeries series in Series)
                 if (series.Kind is ChartPlotKind.Bar or ChartPlotKind.Stock) return true;
 
-            return false;
+            return CategoriesBetween ?? false;
         }
     }
+
+    /// <summary>
+    /// Whether the file itself says the categories occupy slots — <c>c:crossBetween</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>The chart type is not the whole rule for an OOXML chart, and for a line or an area
+    /// chart it is not the rule at all.</strong> <c>c:crossBetween</c> is stated on the value axis
+    /// the category axis crosses, and
+    /// <c>oox/source/drawingml/chart/axisconverter.cxx:292-301</c> reads it into
+    /// <c>ScaleData::ShiftedCategoryPosition</c> ahead of the type, falling back to the first type
+    /// group's own type only when the element is absent.
+    /// </para>
+    /// <para>
+    /// Measured on the running binary rather than read off that source, because the two disagree
+    /// about one of the nine cases. Nine arms — three chart types by
+    /// <c>between</c> / <c>midCat</c> / element deleted, one property patched per arm in a corpus
+    /// deck, each rendered through 26.2.4.2 and read back from the category labels' own pen
+    /// positions (<c>probes/slides-r60/make-crossbetween-probe.py</c>, <c>cbread.py</c>):
+    /// </para>
+    /// <code>
+    ///                between    midCat     absent
+    ///   areaChart    shifted    unshifted  unshifted
+    ///   lineChart    shifted    unshifted  SHIFTED
+    ///   barChart     shifted    SHIFTED    shifted
+    /// </code>
+    /// <para>
+    /// So a bar or column chart ignores the element outright — which is why the test for it in
+    /// <see cref="ShiftedCategories"/> runs before this one — and a line chart with the element
+    /// absent is shifted while an area chart with it absent is not.
+    /// </para>
+    /// <para>
+    /// <see langword="null"/> means the format made no statement, which is the case for every ODF
+    /// chart: ODF has no such attribute and <c>ChartTypeTemplate::adaptScales</c> shifts Column,
+    /// Bar and Close alone, so leaving it null keeps an ODF plot on exactly the answer the type
+    /// test gives.
+    /// </para>
+    /// </remarks>
+    public bool? CategoriesBetween { get; init; }
 
     /// <summary>The series drawn as one kind against one value axis, in file order.</summary>
     /// <param name="kind">The geometry.</param>
@@ -690,6 +733,49 @@ public sealed partial record ChartPlot
     public ChartLegendPosition Legend { get; init; } = ChartLegendPosition.None;
 
     /// <summary>The chart area's own fill, or null when it states none.</summary>
+    /// <summary>The colour an axis' tick labels are drawn in — the axes' own <c>c:txPr</c>.</summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>A chart's text is not black because LibreOffice draws chart text black.</strong>
+    /// It is black because <c>tx1</c> usually resolves to black, and a chart that names anything
+    /// else gets it. This reader drew every piece of chart text in one hardcoded
+    /// <c>Colour.Black</c> until round 60, which is right for the majority and wrong for every
+    /// chart on a dark master: <c>8_P-Pavese_AIRBUS-ATB-journee-CRATB.pptx</c> names
+    /// <c>a:schemeClr val="bg1"</c> on its title, on both axes and on its data labels, and the
+    /// reference draws all fourteen of page 8's text runs white where this reader drew
+    /// twenty-two black ones.
+    /// </para>
+    /// <para>
+    /// Five separate properties rather than one, because the five objects state the colour in
+    /// five different places and a chart routinely states it in only some of them — a corpus
+    /// census over every OOXML chart part counts <c>c:valAx</c>, <c>c:catAx</c>, <c>c:title</c>,
+    /// <c>c:dLbls</c> and <c>c:legend</c> separately, and the commonest single statement
+    /// (<c>tx1</c>, 385 times) sits on an axis while the second (<c>bg1</c>, 45) is spread over
+    /// data labels and titles.
+    /// </para>
+    /// <para>
+    /// The default is black on all five, so a format that states nothing — every ODF chart, every
+    /// binary workbook chart — keeps exactly the answer it had.
+    /// </para>
+    /// </remarks>
+    public Colour LabelColour { get; init; } = Colour.Black;
+
+    /// <summary>The colour the chart's main title is drawn in.</summary>
+    /// <remarks>See <see cref="LabelColour"/>.</remarks>
+    public Colour TitleColour { get; init; } = Colour.Black;
+
+    /// <summary>The colour an axis title is drawn in.</summary>
+    /// <remarks>See <see cref="LabelColour"/>.</remarks>
+    public Colour AxisTitleColour { get; init; } = Colour.Black;
+
+    /// <summary>The colour a series' data labels are drawn in.</summary>
+    /// <remarks>See <see cref="LabelColour"/>.</remarks>
+    public Colour DataLabelColour { get; init; } = Colour.Black;
+
+    /// <summary>The colour a legend entry's name is drawn in.</summary>
+    /// <remarks>See <see cref="LabelColour"/>.</remarks>
+    public Colour LegendColour { get; init; } = Colour.Black;
+
     public Colour? Background { get; init; }
 
     /// <summary>
