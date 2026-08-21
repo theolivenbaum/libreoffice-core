@@ -15543,3 +15543,86 @@ re-checking before anyone acts on it** — *this* checkout's `FontTable.cxx` ign
 where 26.2.4.2 draws ~100 pt wider; dropping `editAs` on our side reproduces the reference to 0.2 pt,
 and it must not break `SIL_TDB648`); then `ChartLayout.IntervalsThatFit`; then the four
 `_advanced_excel_pie` documents, where the gate needs only two of their five tokens.
+
+---
+
+## Round 55 — sheets
+
+**274 → 276 of 307**, and **slides `ceiling-002` 0 → 1 of 5** as a measured side effect. No
+regression anywhere. `013_Contextures_chart_sample` closes (165/169 → **169/169**),
+`012_Contextures_chart_sample` closes (**5/6 pages** and 126/130 → 6/6 and 130/130), and
+`WiGr_2021W_1_…pptx` closes on the slides track (2157/1958 → **1956/1958**). Both `012` and `013`
+now reproduce the reference **token for token, page by page**, including the reference's own
+clipping artefact — page 2 of each holds `outh Jan Feb Mar` on both sides.
+
+### The brief's central item reproduced and its explanation was wrong
+
+Round 54 said `013`'s picture is an `editAs="oneCell"` EMF the reference draws ~100 pt wider than
+its stated `a:ext`, that the reference answers to neither `editAs` nor `a:ext` nor the anchor's
+second corner, and that dropping `editAs` reproduces it to 0.2 pt. **Every measurement
+reproduces.** The reference was not reading that anchor at all.
+
+`ContextHandler2Helper::prepareMceContext` keeps the list of MCE namespaces the `oox` filters
+honour and **`a14` is on it commented out** — `// We do not currently support inline formulas and
+other a14 stuff` — and writerfilter's own list (`wps`, `wpg`, `w14`, `wpc`) excludes it too. `013`'s
+whole `xdr:twoCellAnchor` is inside `mc:Choice Requires="a14"` beside an *empty* fallback, so Calc
+reads no DrawingML anchor and round 54's three variants could not have moved anything. The picture
+Calc draws is the `v:shape` in the sheet's legacy VML, sized by `x:ClientData/x:Anchor`.
+
+**The variant that settles it**: unwrap the `mc:AlternateContent` and the reference draws the
+picture **twice** — at 129.5 from the DrawingML anchor it can now see and at 133.8 from the VML
+shape it was already drawing, 41 extractable words against 23. 129.524 against our own 129.540, so
+the `editAs` reading `SIL_TDB648` depends on is *validated*, not merely unbroken.
+
+Five more variants on the VML side, one edit each with a stated expected direction: removing the
+sheet's `legacyDrawing` relationship makes the picture disappear (23 words → 5); moving the VML
+anchor's `to` column widens it; halving the VML CSS width changes nothing; deleting the `x:Anchor`
+narrows it to the CSS rectangle.
+
+### The change, and the trap it walked around
+
+`a14` out of `UnderstoodExtensions` (shared, `Paperless.Ooxml`), plus a legacy-VML picture reader
+keyed on the worksheet's own `<legacyDrawing r:id>`. **The relationship type is the wrong key**:
+`legacyDrawingHF` shares it and points at header watermarks, so keying on the type would have drawn
+`PBN Matrix NAAs (V01)`'s 24 header images and one each on two more **matching** documents as
+objects on the grid. That trap was written into the prediction file as blind spot 4 before the
+reader existed.
+
+The slicer special case in `OoxmlXml` is removed: it existed only because `a14` was understood, and
+the general rule now reaches all seven of the corpus's `a14` slicer choices with byte-identical
+output on all three documents.
+
+Census over 946 documents, keyed on the **resolved URI** of every `Requires` prefix and confirmed by
+a second, dumber instrument: 2324 choices, **34 resolve to `a14` in 10 documents** — 7 sheets, 3
+slides, **0 words**.
+
+### Prediction: eight of nine exact
+
+The miss is `WiGr`, predicted to stay open and measured closed — and the prediction file had already
+said its *direction* was unbounded, only its verdict claimed. That is the second round running in
+which the blind-spot section was the most accurate part of the prediction.
+
+### Audit
+
+`SheetPageDecoration.cs` **WRONG in half**. The zero-band guard holds on 26.2.4.2 (and every
+negative band); "the reference draws the footer at every stated band above zero" is false — nothing
+at 0.72 or 1.44 pt of 8 pt text, and the threshold *scales with the point size*. Reported, not
+implemented: four corpus worksheets have a positive band under 6 pt and all four pass today. The
+probe found a real **18 pt** body displacement at a *negative* band beside it, which is fixed and
+which moves **nothing** in the corpus — verified by a whole-track re-sweep in which all 8 differing
+rows differ on the reference side only. Markers 13 → 14; open hits 42. **The audit file's own
+`44`/`12` do not reproduce and are corrected to `42`/`13`.**
+
+### Vision: two of four readings refuted by a second instrument within a minute
+
+The `013` and `012` page-1 reviewers reported a missing legend and differently-spaced clusters;
+`pdftotext` puts every token within **0.12 pt** on both. The `FAA-2019-0995-0002_attachment_2`
+reviewer was right, and larger than it read: **five pages draw `PAGE n OF 33` in ours and none in
+the reference — twenty tokens, which is that document's entire word surplus (10015 against 9995)**.
+The string is in no cell, no `oddHeader` and no `oddFooter`, and it is pre-existing.
+
+### Next
+
+**Sheets** — the five `PAGE n OF 33` blocks on `FAA-2019-0995-0002_attachment_2`; then
+`ChartLayout.IntervalsThatFit` (still untouched, four tokens on `005`, a law reaching every column
+chart); then the four `_advanced_excel_pie` documents, where the gate needs two of five tokens.
