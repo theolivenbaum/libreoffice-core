@@ -15190,3 +15190,87 @@ not acted on: in that shape **we honour the font where LibreOffice does not**, a
 4. **`SheetOptimalRowHeights.cs`'s 24.2.7.2 site** — row heights are the axis this track already
    established for a 14-document cluster, and that site claims thirty exact reproductions against a
    *superseded* binary.
+
+## Round 54 — sheets — the automatic chart title, and a verdict that was passing by cancellation
+
+`dotnet/probes/sheets-r54/` — `prediction.md` (`22aa807a4de`) was committed before a line of the
+change was written. **sheets 274 → 274 of 307**: `005_Contextures_chart_sample` gained a verdict and
+`013_Contextures_chart_sample` lost one, both named below. **Zero page counts changed anywhere.**
+Cross-track, measured: `words/chartset-001` **9 → 10 of 10**, `slides/chartset-007` 1 → 1.
+Eighteen new tests, fifteen distinct mutations, all detected, no drift guards.
+
+### The rule, and both of its arms measured on corpus documents rather than authored ones
+
+`ChartSpaceConverter::convertFromModel` (`chartspaceconverter.cxx:177-208`) fills an empty
+`<c:title>` with the single series' name (`typegroupconverter.cxx:272`, only when the first axes set
+holds one type group, and a second axes set *clears* it at `plotareaconverter.cxx:491`), or failing
+that with the localized literal `Chart Title` — unless one of tdf#146487's two escapes says the
+author meant the title to stay empty. `DrawingChart` had said for eleven rounds that reporting
+either "would claim the file said something it does not"; the substitute is on the reference's page.
+
+The reference draws `Sales` **13** times on `005` where we drew 6, `East` **7** times on `013` where
+we drew 6, `Production in 2017` once on each of the two words pie-chart documents where we drew
+none, and `Chart Title` **twice** on `035_Chemistry_Column_PowerPoint_Chart` where we drew none.
+The two *negative* arms have controls too: three sheets documents whose census-named string would
+appear if the `autoTitleDeleted` default went the other way read ours = ref = one (the worksheet
+cell), and `005`'s own chart6 — not deleted, no title element, a series with no `c:tx` — reads ours
+= ref = one on its page.
+
+Censused over all 946 documents and all **307** `c:chartSpace` parts, with a second pass keying on
+the root element that confirms the filename filter misses none: **ten parts in five documents**,
+two sheets, two words, one slides, and **every one states `<c:autoTitleDeleted val="0"/>`
+explicitly**, so no corpus hit rests on the default. All fourteen chart parts in the twenty
+MSO-2007 documents already carry their own title text.
+
+### The regression is the gate, not the change, and the prediction named the gap it fell into
+
+`013` was **passing by error cancellation**. Four spurious value-axis tick labels were masking four
+genuinely missing tokens. Adding the title takes its height off the top of the diagram area, our
+interval law then picks the reference's step, and **page 4 of our rendering is now the reference's
+page 4** — same title, same five ticks. 168/169 (`d=1`) became 165/169 (`d=4`) and the band is 3.38.
+The document is measurably closer and one token the wrong side of a threshold. `005` moved the other
+way for the same reason, and its page 2 is now identical to the reference's.
+
+The prediction's blind spot 3 said in advance that the census counts titles and cannot see whether a
+shrunk plot moves anything, and called it "the regression risk". It is exactly what happened; the
+direction was the opposite of the one feared.
+
+### What that exposed, and two hypotheses refuted on the way
+
+`013`'s residual four tokens are its page-1 **camera-tool picture** — an `mc:AlternateContent`
+`twoCellAnchor editAs="oneCell"` holding an EMF of the chart on the other sheet. We draw it at the
+stated 326.25 pt; **26.2.4.2 draws it about 100 pt wider**, which is what puts the reference's legend
+across the page split. Four authored variants: the reference's width answers to **neither** `editAs`,
+`a:ext`, nor the anchor's second corner, and the one change on our side that reproduces it to 0.2 pt
+is honouring the two-cell span. Not implemented — the current behaviour was measured on
+`SIL_TDB648.xlsx` and a change owes a census and a full sweep. **Refuted on the way:** it is not the
+default column width (four authored workbooks, 48.13 pt on both sides in every case; markers in
+columns A–J of `013`'s own sheet agree to 0.0005 pt) and it is not a font-face divergence.
+
+`005`'s residual four are `ChartLayout.IntervalsThatFit`: its plot rectangle now agrees with the
+reference to 1.2 pt while `available / needed` gives 8 intervals where
+`estimateMaximumAutoMainIncrementCount` gives 9 on the same geometry.
+
+And, so it is not read as this round's doing: our chart title is drawn **9.8 pt above** the
+reference's on every chart measured, and that is pre-existing —
+`Keywords_Mapping_Graphs_and_Charts.xlsx`, which states its own titles and matches, shows the same
+9.78. `lcl_createTitle`'s `nYDistance` explains 3.83 pt of it; 6 pt is unexplained and untouched.
+
+### The 24.2.7.2 audit — `SheetOptimalRowHeights.cs`, still correct
+
+Thirty freshly authored wrapped rows on 26.2.4.2 — six sizes against one to five unbreakable words,
+no `ht` and no `customHeight` — **30 of 30 within 0.05 twips**. Read twice over (marker deltas off
+both PDFs, and the reference's own `fods` `style:row-height`, agreeing to 0.6 twips) and the control
+ran first: the twelve-point single-line row reads the **300** twips the site already claims.
+`Paperless.Spreadsheets` is now five of nine re-checked and all five still correct.
+
+### Sheets does next, in order
+
+1. **`013`'s camera-tool picture** — four tokens, four measured variants, the reproducing change
+   named; owes an `editAs` census and must not break `SIL_TDB648`.
+2. **`ChartLayout.IntervalsThatFit`** — four tokens on `005`, and a law that reaches every column
+   chart on the track.
+3. **The four `_advanced_excel_pie` documents** — the largest cluster left, and the gate needs only
+   two of their five tokens.
+4. **`SheetPageDecoration.cs`'s 24.2.7.2 site** — page furniture is what the remaining page-count
+   outliers hang off and it has no probe harness yet.
