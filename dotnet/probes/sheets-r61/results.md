@@ -124,6 +124,26 @@ residual is very nearly an **absolute** ascent offset that round 60's slope-base
 have seen. Naming a suspect is worth more than a constant: if it is real, round 60's chart ascent
 is about a third of a point out at every size, on every chart in the corpus.
 
+### The obvious extension was tested and does **not** close the rest of it
+
+Blind spot 4 of `prediction.md` said a pie whose labels are *not* best-fit still goes through the
+reference's reduce-and-regrow while our `HasBestFitLabels` gate skips it entirely, and the reader on
+`005_Contextures_chart_sample_6e279b08` reported exactly that shape — *"the right half's pie is
+smaller and sits lower and further right"*, high confidence. She is right and it is measured: that
+document's page-1 pie is `dLblPos="inEnd"`, our second pass never runs, and the wedge corner gives
+ours **radius 131.82 at centre (195.32, 437.91)** against the reference's **125.21 at
+(195.36, 436.45)** — 5.3% of radius, the same size of error the four best-fit pies carried before
+this round, and **byte-identical before and after the change**.
+
+**The obvious repair does not fix it.** Widening the gate to *any* drawn pie label was implemented,
+built and rendered: `005`'s pie moved **0.81 pt in x and did not shrink at all** (131.82 before and
+after), because our `PieLabels` places an `inEnd` label at half the radius along the bisector — the
+`CENTER` arm — so the consumed rectangle stays inside the reduced wall and `adjustInnerSize` grows
+it straight back to the full square. The missing piece is the **`INSIDE`/`OUTSIDE` placement
+geometry**, not the gate. The experiment was reverted, the tree restored by `cp` and `touch`,
+rebuilt, and the shipped state re-rendered to prove it: `003` back at centre (408.81, 464.81),
+radius 100.01.
+
 ## 5. Prediction against measurement — **12 of 13**
 
 | | predicted | measured |

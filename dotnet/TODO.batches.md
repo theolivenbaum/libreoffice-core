@@ -17838,5 +17838,14 @@ sheets / 14 slides / 3 words** documents have a titled chart; **7 / 5 / 2** have
 **`MANIFEST.tsv`** (not touched; proposed): `003_advanced_excel_pie.xlsx` and
 `027_advanced_excel_pie.xlsx` `open` → `done`.
 
+**A refutation the round paid for rather than reasoned about.** `005_Contextures`'s page-1 pie is
+`dLblPos="inEnd"`, so our gate skips the second pass entirely and its radius is **131.82 against the
+reference's 125.21** — 5.3%, the same class, unchanged by this round. Widening the gate to *any*
+drawn pie label was implemented and rendered: the pie moved **0.81 pt and did not shrink at all**,
+because we place an `inEnd` label at half the radius (the `CENTER` arm) so the consumed rectangle
+never leaves the reduced wall. **The missing piece is the `INSIDE`/`OUTSIDE` placement geometry, not
+the gate.** Reverted, restored by `cp` + `touch`, rebuilt, and the shipped state re-rendered to
+prove it.
+
 **Next**: the inner-fit test that rejects one label of five (`003`'s M3, ghost keys 2 against 1);
 the data-label text colour; the default chart border; then `cellIs`.
