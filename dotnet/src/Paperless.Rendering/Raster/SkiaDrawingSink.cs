@@ -220,6 +220,17 @@ internal sealed class SkiaDrawingSink : IDrawingSink, IDisposable
         font.Edging = _options.Antialias ? SKFontEdging.Antialias : SKFontEdging.Alias;
         font.Hinting = SKFontHinting.None;
 
+        // A run whose italic went unmet leans by hand. Negative because SkFont's skew runs with
+        // Skia's y-down axis and a forward slant needs the sign the other way; the magnitude is
+        // the reference's, and it is the same one the PDF sink writes into its text matrix —
+        // see FontReference.SyntheticObliqueShear. This backend is not what any corpus metric
+        // measures (`pdf-image-diff` rasterises our *PDF*), so it is here to keep the two sinks
+        // drawing the same page rather than to move a number.
+        if (run.Font.SyntheticOblique)
+        {
+            font.SkewX = -(float)FontReference.SyntheticObliqueShear;
+        }
+
         ushort[] ids = new ushort[run.Glyphs.Count];
         SKPoint[] positions = new SKPoint[run.Glyphs.Count];
 
