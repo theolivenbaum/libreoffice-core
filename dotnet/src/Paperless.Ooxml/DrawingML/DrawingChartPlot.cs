@@ -1715,18 +1715,56 @@ public static class DrawingChartPlot
     /// </remarks>
     private static Length? SizeOf(XElement? element)
     {
-        if (element is null) return null;
-
-        foreach (XElement properties in element.Descendants())
+        foreach (XElement properties in RunProperties(element))
         {
-            if (properties.Name.NamespaceName != OoxmlNamespaces.DrawingML) continue;
-            if (properties.Name.LocalName is not ("defRPr" or "rPr")) continue;
             if (Drawing.Number(properties, "sz") is not { } hundredths || hundredths <= 0) continue;
 
             return Length.FromPoints(hundredths / 100.0);
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// The character-property elements under a titled element, <strong>runs first</strong>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A <c>c:rich</c> writes its paragraph's <c>a:pPr/a:defRPr</c> before the runs it defaults,
+    /// so document order puts the *default* first and taking the first of either reads the value
+    /// the run overrides rather than the value the run states. That is not a corner: on
+    /// <c>003_advanced_excel_pie</c> the title's paragraph default is <c>sz="1300" b="0"</c> in
+    /// Arial and its single run is <c>sz="1800" b="1"</c> in Calibri, and LibreOffice 26.2.4.2
+    /// draws the run — <strong>18.01 pt Carlito Bold</strong>, measured off its own PDF, against
+    /// the 13.00 pt Liberation Sans this used to produce.
+    /// </para>
+    /// <para>
+    /// The fallback is what keeps every other caller unchanged: an axis' <c>c:txPr</c> and a
+    /// <c>c:dLbls</c> hold a paragraph and no runs at all, so there is no <c>a:rPr</c> to prefer
+    /// and the <c>a:defRPr</c> is read exactly as before. Censused over all 946 corpus documents:
+    /// 169 hold a chart part and <strong>39 hold a run that states something different from its
+    /// paragraph's default</strong> — 37 sheets, one deck and one document.
+    /// </para>
+    /// <para>
+    /// A title of several runs in different faces still collapses to one answer, because the
+    /// model carries one size, one weight and one family per titled element. The first run is a
+    /// better single answer than the paragraph default it overrides.
+    /// </para>
+    /// </remarks>
+    private static IEnumerable<XElement> RunProperties(XElement? element)
+    {
+        if (element is null) yield break;
+
+        foreach (bool runsOnly in (bool[])[true, false])
+        {
+            foreach (XElement properties in element.Descendants())
+            {
+                if (properties.Name.NamespaceName != OoxmlNamespaces.DrawingML) continue;
+                if (properties.Name.LocalName != (runsOnly ? "rPr" : "defRPr")) continue;
+
+                yield return properties;
+            }
+        }
     }
 
     /// <summary>
@@ -1785,17 +1823,30 @@ public static class DrawingChartPlot
     {
         if (element is null) return null;
 
+        // A run's own face before the paragraph default it overrides, for the reason
+        // `RunProperties` gives; then any other literal face under the element, which is what
+        // reaches a `c:txPr` that states one outside a run.
+        foreach (XElement properties in RunProperties(element))
+        {
+            if (Face(properties.Element(XName.Get("latin", OoxmlNamespaces.DrawingML))) is { } named)
+                return named;
+        }
+
         foreach (XElement latin in element.Descendants(
                      XName.Get("latin", OoxmlNamespaces.DrawingML)))
         {
-            string? typeface = latin.Attribute("typeface")?.Value;
-            if (string.IsNullOrWhiteSpace(typeface)) continue;
-            if (typeface[0] == '+') continue;
-
-            return typeface;
+            if (Face(latin) is { } named) return named;
         }
 
         return null;
+
+        static string? Face(XElement? latin)
+        {
+            string? typeface = latin?.Attribute("typeface")?.Value;
+            if (string.IsNullOrWhiteSpace(typeface)) return null;
+
+            return typeface[0] == '+' ? null : typeface;
+        }
     }
 
     /// <summary>
@@ -1846,12 +1897,8 @@ public static class DrawingChartPlot
     /// </remarks>
     private static bool? BoldOf(XElement? element)
     {
-        if (element is null) return null;
-
-        foreach (XElement properties in element.Descendants())
+        foreach (XElement properties in RunProperties(element))
         {
-            if (properties.Name.NamespaceName != OoxmlNamespaces.DrawingML) continue;
-            if (properties.Name.LocalName is not ("defRPr" or "rPr")) continue;
             if (properties.Attribute("b")?.Value is not { Length: > 0 } stated) continue;
 
             return stated is "1" or "true";
