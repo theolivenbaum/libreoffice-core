@@ -3,6 +3,7 @@ using System.Text;
 using Paperless.Core.Documents;
 using Paperless.Text.Fonts;
 using Paperless.WordProcessing.Layout;
+using Paperless.WordProcessing.Ww8;
 using Shouldly;
 
 namespace Paperless.WordProcessing.Tests;
@@ -127,20 +128,37 @@ public sealed class WordFallbackClassTests
 
     // ---------------------------------------------------- the DOC and RTF arm, via LayoutFonts
 
+    /// <summary>The two arms that reach <see cref="LayoutFonts"/> take <em>different</em> defaults.</summary>
+    /// <remarks>
+    /// <para>
+    /// Round 54 recorded them as the same and it was wrong, because its DOC probe was a DOCX round
+    /// trip through LibreOffice and the DOCX <em>import</em> had already applied the roman default —
+    /// so the <c>.doc</c> it measured declared <c>ff=roman</c>. A flat ODF file exported to Word 97
+    /// has no such default to bake in, and nine of them
+    /// (<c>probes/words-r55/doc-family-code.py</c>) say that through the DOC filter <b>only
+    /// <c>ff=roman</c> draws DejaVu Serif</b>: no code at all, <c>modern</c> and <c>decorative</c>
+    /// all reach fontconfig's own generic.
+    /// </para>
+    /// <para>
+    /// RTF is the arm that keeps the roman default, and for a reason that unifies the three rather
+    /// than adding a rule: its filter never sets the family at all — <c>\fnil</c>, <c>\froman</c>,
+    /// <c>\fswiss</c> and <c>\fmodern</c> are all inert — so Writer's roman pool default stands.
+    /// The DOCX filter leaves an inherited value whose floor is that same default. The WW8 filter is
+    /// the only one of the three that writes <c>FAMILY_DONTKNOW</c> onto the item.
+    /// </para>
+    /// </remarks>
     [Fact]
-    public void TheDocAndRtfArmTakesTheSameDefault()
+    public void TheRtfArmTakesTheRomanDefaultAndTheDocArmDoesNot()
     {
         SystemFontIndex index = InstalledIndex();
 
-        // RTF reaches LayoutFonts with no font table at all — `\fnil`, `\froman`, `\fswiss` and
-        // `\fmodern` were each measured through the reference and all four answer Serif, so there is
-        // nothing for the reader to carry and the default is the whole answer.
+        // RTF reaches LayoutFonts with no font table at all, so there is nothing to read and the
+        // roman default is the whole answer.
         LayoutFonts rtf = new(new SystemFontResolver(index));
         rtf.Reference("Aptos", 400, isItalic: false)!.FamilyName.ShouldBe("DejaVu Serif");
         rtf.Reference("Consolas", 400, isItalic: false)!.FamilyName.ShouldBe("DejaVu Serif");
 
-        // DOC carries the FFN's family code, and its swiss moves the answer exactly as the DOCX
-        // font table's does — measured by converting the authored DOCX pair to Word 97 and back.
+        // DOC carries the FFN's family code and it is the whole answer, `Unknown` included.
         LayoutFonts swiss = new(new SystemFontResolver(index))
         {
             DeclaredShapes = _ => new DeclaredFontShape(FontFamilyClass.SansSerif),
@@ -152,7 +170,45 @@ public sealed class WordFallbackClassTests
             DeclaredShapes = _ => new DeclaredFontShape(FontFamilyClass.Serif),
         };
         roman.Reference("Aptos", 400, isItalic: false)!.FamilyName.ShouldBe("DejaVu Serif");
+
+        // `ff` 0, 6 and 7 are FAMILY_DONTKNOW, which appends no generic and lands on fontconfig's
+        // own answer — DejaVu Sans for `Aptos`, DejaVu Sans **Mono** for `Consolas`. This is the
+        // case round 54 could not measure and got backwards.
+        LayoutFonts undeclared = new(new SystemFontResolver(index))
+        {
+            DeclaredShapes = _ => default,
+        };
+        undeclared.Reference("Aptos", 400, isItalic: false)!.FamilyName.ShouldBe("DejaVu Sans");
+        undeclared.Reference("Consolas", 400, isItalic: false)!.FamilyName.ShouldBe("DejaVu Sans Mono");
+
+        // And the guard survives it: a run naming no family at all still reaches DefaultFonts.
+        undeclared.Reference(null, 400, isItalic: false)!.FamilyName.ShouldBe("Liberation Serif");
+        undeclared.Reference("", 400, isItalic: false)!.FamilyName.ShouldBe("Liberation Serif");
     }
+
+    /// <summary>
+    /// The WW8 reader overrides the <c>FFN</c>'s code for fourteen name prefixes, and the DOCX one
+    /// does not.
+    /// </summary>
+    /// <remarks>
+    /// <c>SwWW8ImplReader::GetFontParams</c>'s own reason is that the code "might be set wrong when
+    /// Doc was not created by Winword but by third party program". Measured: a flat ODF declaring no
+    /// generic, exported to Word 97 and back, draws <c>Garamond</c> in DejaVu Serif and the otherwise
+    /// identical <c>Aptos</c> in DejaVu Sans; <c>Univers</c> and <c>Helvetica</c> both draw Sans.
+    /// </remarks>
+    [Theory]
+    [InlineData("Garamond", FontFamilyClass.Serif)]
+    [InlineData("CG Times", FontFamilyClass.Serif)]
+    [InlineData("Times New Roman Bold", FontFamilyClass.Serif)]
+    [InlineData("Helvetica", FontFamilyClass.SansSerif)]
+    [InlineData("Helv", FontFamilyClass.SansSerif)]
+    [InlineData("Univers", FontFamilyClass.SansSerif)]
+    [InlineData("Lucida Sans Unicode", FontFamilyClass.SansSerif)]
+    // No prefix matches, so the entry's own code — nothing — stands.
+    [InlineData("Aptos", FontFamilyClass.Unknown)]
+    [InlineData("Candara", FontFamilyClass.Unknown)]
+    public void TheWw8ReaderOverridesTheFfnCodeByName(string family, FontFamilyClass expected)
+        => Ww8FontTable.Empty.ShapeOf(family).Class.ShouldBe(expected);
 
     // ------------------------------------------------------------------- the reach control
 

@@ -65,16 +65,90 @@ public sealed class Ww8FontTable
     /// The shape the document declares for a family, or the default when it names no such family.
     /// </summary>
     /// <remarks>
-    /// The DOC counterpart of <c>WordFontTable.ShapeOf</c>, and it says the same two things: an
-    /// <c>FFN</c>'s first byte packs the pitch in its low two bits and the font family in bits 4-6,
-    /// which are the <c>prq</c> and <c>ff</c> fields LibreOffice reads at the top of
-    /// <c>WW8Fonts::WW8Fonts</c>. Only <c>FF_ROMAN</c> and <c>FF_SWISS</c> are carried across, for
-    /// the reason recorded there: the other family codes leave LibreOffice's answer unchanged.
+    /// <para>
+    /// The DOC counterpart of <c>WordFontTable.ShapeOf</c> for the reading: an <c>FFN</c>'s first
+    /// byte packs the pitch in its low two bits and the font family in bits 4-6, which are the
+    /// <c>prq</c> and <c>ff</c> fields LibreOffice reads at the top of <c>WW8Fonts::WW8Fonts</c>.
+    /// </para>
+    /// <para>
+    /// <strong>It is not its counterpart for the meaning, and the sentence that stood here — "the
+    /// other family codes leave LibreOffice's answer unchanged" — is measurably false.</strong>
+    /// <c>GetFontParams</c> maps <c>ff</c> 0, 6 and 7 onto <c>FAMILY_DONTKNOW</c> and
+    /// <c>SetNewFontAttr</c> <em>sets</em> that on the item, where the DOCX filter would have left
+    /// an inherited value; a <c>DONTKNOW</c> family appends no generic to the fontconfig pre-match,
+    /// so the answer is fontconfig's own rather than the roman default. Nine flat-ODF fixtures
+    /// exported to Word 97 and back (<c>probes/words-r55/doc-family-code.py</c>) say only
+    /// <c>roman</c> draws DejaVu Serif; <c>modern</c>, <c>decorative</c> and no code at all all draw
+    /// DejaVu Sans. The claim came from round 54's DOCX round trip, which could not produce an
+    /// undeclared <c>FFN</c> at all — the DOCX import applied the roman default before the export
+    /// ran. <see cref="Paperless.WordProcessing.Layout.WordFallbackClass.ForWw8Font"/> is where the
+    /// difference is acted on.
+    /// </para>
     /// </remarks>
     public DeclaredFontShape ShapeOf(string? name)
-        => name is not null && _shapes.TryGetValue(name, out DeclaredFontShape shape)
-            ? shape
-            : default;
+    {
+        if (name is null) return default;
+
+        DeclaredFontShape shape =
+            _shapes.TryGetValue(name, out DeclaredFontShape found) ? found : default;
+
+        return NameOverride(name) is { } forced ? shape with { Class = forced } : shape;
+    }
+
+    /// <summary>
+    /// The class a family's <em>name</em> forces regardless of its <c>FFN</c>, or null for the rest.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A DOC-only rule with no counterpart in the DOCX filter, and a real one:
+    /// <c>SwWW8ImplReader::GetFontParams</c> (<c>sw/source/filter/ww8/ww8par6.cxx</c>:3767) overrides
+    /// the code it has just read for fourteen name prefixes, because — in its own words — the code
+    /// "might be set wrong when Doc was not created by Winword but by third party program".
+    /// </para>
+    /// <para>
+    /// Measured rather than transcribed, on 26.2.4.2
+    /// (<c>probes/words-r55/doc-family-code.py</c>): a flat ODF file declaring no generic, exported
+    /// to Word 97 and back, draws <c>Garamond</c> in DejaVu <b>Serif</b> and the otherwise identical
+    /// <c>Aptos</c> in DejaVu <b>Sans</b>; <c>Univers</c> and <c>Helvetica</c> both draw Sans.
+    /// </para>
+    /// </remarks>
+    private static FontFamilyClass? NameOverride(string name)
+    {
+        foreach (string prefix in RomanPrefixes)
+        {
+            if (name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            {
+                return FontFamilyClass.Serif;
+            }
+        }
+
+        foreach (string prefix in SwissPrefixes)
+        {
+            if (name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            {
+                return FontFamilyClass.SansSerif;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>The seven prefixes <c>GetFontParams</c> forces to <c>FAMILY_ROMAN</c>.</summary>
+    private static readonly string[] RomanPrefixes =
+    [
+        "Tms Rmn", "Timmons", "CG Times", "MS Serif", "Garamond", "Times Roman", "Times New Roman",
+    ];
+
+    /// <summary>The seven it forces to <c>FAMILY_SWISS</c>.</summary>
+    /// <remarks>
+    /// <c>Helv</c> is a prefix and not a name: it catches <c>Helvetica</c> and <c>Helv</c> alike,
+    /// which is why <c>Helvetica</c> answers DejaVu Sans through this filter and DejaVu Serif through
+    /// the DOCX one.
+    /// </remarks>
+    private static readonly string[] SwissPrefixes =
+    [
+        "Helv", "Arial", "Univers", "LinePrinter", "Lucida Sans", "Small Fonts", "MS Sans Serif",
+    ];
 
     /// <summary>
     /// The family name at an index, or null when the table has no such entry.

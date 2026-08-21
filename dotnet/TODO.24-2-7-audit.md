@@ -126,7 +126,7 @@ git grep -c  '24\.2\.7-audit' -- 'dotnet/src/**/*.cs' | awk -F: '{s+=$2} END{pri
 | `SheetFonts.cs` (2), `SheetGeneralWidth.cs`, `SheetDeviceUnits.cs` | **VERIFIED** r53 — 30/30, 27/27, 45/45 authored cases exact |
 | `SystemFontResolver.cs:406` | **VERIFIED** r53 |
 | `SystemFontResolver.cs:441` | **VERIFIED** r54 — was UNDECIDED; settled with two fixtures that actually reach `DefaultFonts` |
-| `SystemFontResolver.cs:657` (`GenericFallbacks`) | **VERIFIED** r54 — **was recorded WRONG by r53 and is not.** See below |
+| `SystemFontResolver.cs:657` (`GenericFallbacks`) | **VERIFIED** r54 — **was recorded WRONG by r53 and is not.** See below. Re-confirmed r55 from a fifth caller: the DOC filter *does* reach it undeclared, and it answers correctly there too |
 | `MeasuredParagraph.cs` | **VERIFIED** r53 |
 
 ### The one that was recorded WRONG and was not — read this before trusting any entry here
@@ -164,6 +164,13 @@ slides and 130 sheets renderings, every one of them currently correct.** The fix
 3. **A figure quoted rather than re-derived decays.** Round 53's "73 of 337 carry DejaVu Sans"
    **does not reproduce at any reading** — the candidates are 70, 40 and 32. Its companion figure,
    86, reproduces exactly. I repeated the 73 in a brief and in a report.
+4. **A verified site can still carry a wrong sentence, and round 55 found one here.** Round 54's
+   own marker said the word-processing filters "do not reach this undeclared". Three of the four
+   filters it tested were not word-processing filters at all, and the DOC arm — the one it could
+   not measure, because its probe was a DOCX round trip — *does* reach it. The verdict was right
+   and the reason was over-general. **Re-verifying a site that is already VERIFIED found a real
+   correction**, which is the argument for re-marking with a date and round rather than treating
+   `VERIFIED` as terminal.
 
 ## How to work it, and the order
 
@@ -195,6 +202,7 @@ the site itself names **26.2.4.2** and the date — this table is the index, not
 
 | date | site | outcome | how |
 |---|---|---|---|
+| 2026-08-21 | `Paperless.Text/Fonts/SystemFontResolver.cs` `GenericFallbacks` (unrecognised → DejaVu Sans) | **VERIFIED again, from a fifth caller** | round 55. Round 54 verified it from four filters that reach it undeclared and stated that the word-processing filters never do. **The DOC filter does**: `GetFontParams` maps `ff` 0, 6 and 7 onto `FAMILY_DONTKNOW` and `SetNewFontAttr` sets it on the item, so those runs arrive here with no class and this switch answers them — DejaVu Sans, and DejaVu Sans *Mono* for `Consolas`, which is this switch's own column. Nine flat-ODF fixtures exported to Word 97 and back, `probes/words-r55/doc-family-code.py`; `Garamond` is the control, forced `FAMILY_ROMAN` by `GetFontParams`'s name-override list and drawn Serif where the otherwise identical `Aptos` is drawn Sans |
 | 2026-08-21 | `Paperless.Text/Fonts/SystemFontResolver.cs` `GenericFallbacks` (unrecognised → DejaVu Sans) | **VERIFIED, and round 53's WRONG reversed** | `probes/words-r54/font-fallback-rule.py` (98 authored files, 5 controls) + `cross-format-fallback.py` (28): the branch is right for every filter that reaches it undeclared — ODF text, XLSX, PPTX, flat ODS, all tracking fontconfig, `Consolas` → DejaVu Sans **Mono**. The DOCX/DOC/RTF answer is a **roman default applied by the reader**, now in `WordFallbackClass`. Cross-track evidence: 0 of 302 slides and 0 of 307 sheets renderings show the Sans-for-Serif pair |
 | 2026-08-21 | `Paperless.Text/Fonts/SystemFontResolver.cs` `DefaultFallbacks` (no family → Liberation Serif) | **VERIFIED** | round 54; two fixtures that reach `DefaultFonts` rather than Word's default — a flat ODF declaring no font anywhere, and a DOCX whose `docDefaults` state an empty `w:rFonts` — **both Liberation Serif** on 26.2.4.2. `w:ascii=""` is a third state and answers DejaVu Serif, because the filter reads it as a named family |
 

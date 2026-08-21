@@ -93,18 +93,24 @@ public sealed class LayoutFonts
             // The declared family, not the declared pitch. Both are in the table and only the first
             // was measured to move LibreOffice — see DocxLayoutSource.Face for the probe.
             //
-            // The DOC side has now been probed and answers exactly as the DOCX one does: an
-            // unrecognised family falls back to DejaVu Serif, and only a swiss code moves it to
-            // DejaVu Sans. RTF reaches this with no `DeclaredShapes` at all and takes the same
-            // Serif default unconditionally, which is also measured — its own `\fnil`, `\froman`,
-            // `\fswiss` and `\fmodern` are all inert, so there is nothing here to read even when
-            // the file states one. See `WordFallbackClass` and
+            // The two arms that reach here take *different* answers, and which one applies is
+            // decided by whether the document supplied a font table at all:
+            //
+            //   * DOC supplies one, and its `FFN` states a class per font. That class is the whole
+            //     answer, `Unknown` included — the WW8 reader sets `FAMILY_DONTKNOW` on the item for
+            //     `ff` 0, 6 and 7, which appends no generic to the fontconfig pre-match, so the
+            //     answer is fontconfig's own and not the roman default. Measured on nine flat-ODF
+            //     fixtures exported to Word 97 and back: only `roman` draws DejaVu Serif.
+            //   * RTF supplies none, and never states a class the filter acts on — `\fnil`,
+            //     `\froman`, `\fswiss` and `\fmodern` are all inert, measured — so the family is
+            //     never set and Writer's roman pool default stands.
+            //
+            // See `WordFallbackClass`, `probes/words-r55/doc-family-code.py` and
             // `probes/words-r54/cross-format-fallback.py`.
-            FontFamilyClass declaredClass = WordFallbackClass.ForDeclared(
-                family,
-                family is { Length: > 0 } named && DeclaredShapes is { } declared
-                    ? declared(named).Class
-                    : FontFamilyClass.Unknown);
+            FontFamilyClass declaredClass = DeclaredShapes is { } declared
+                ? WordFallbackClass.ForWw8Font(
+                    family, family is { Length: > 0 } named ? declared(named).Class : FontFamilyClass.Unknown)
+                : WordFallbackClass.ForDeclared(family, FontFamilyClass.Unknown);
 
             FontReference reference = _fonts.Resolve(
                 new FontRequest(

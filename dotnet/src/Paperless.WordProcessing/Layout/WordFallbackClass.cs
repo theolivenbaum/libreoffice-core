@@ -44,6 +44,18 @@ namespace Paperless.WordProcessing.Layout;
 /// default at all.
 /// </para>
 /// <para>
+/// <strong>And the declared class is inherited rather than looked up per name — measured in round
+/// 55, after round 54 shipped the per-name reading and lost a verdict to it.</strong> Through a
+/// DOCX the class is set only where <c>w:rFonts/@w:ascii</c> names a font the font table files
+/// under <c>roman</c> or <c>swiss</c>; <c>auto</c>, <c>modern</c>, a pitch-only entry, an absent
+/// entry and <c>w:asciiTheme</c> all leave whatever an ancestor put there, and nothing anywhere
+/// stating one leaves it roman. So this method's second argument is <em>the class in force at the
+/// run</em>, which <see cref="Ooxml.WordParagraphFormats.StatedClass"/> resolves from the layer
+/// stack — not the class of the family the run names. The DOC arm keeps handing over the
+/// named font's own <c>FFN</c> class, because <c>SwWW8ImplReader</c> builds an
+/// <c>SvxFontItem</c> per font there and there is no inheritance to model.
+/// </para>
+/// <para>
 /// <b>Only the declared class is read, never the declared pitch.</b> Both are in every one of these
 /// font tables and only the first moves the reference: <c>Aptos</c> declared <c>pitch="fixed"</c>
 /// answers DejaVu Serif, and so does <c>Consolas</c> declared <c>modern</c>. Passing the pitch on
@@ -70,8 +82,12 @@ internal static class WordFallbackClass
     /// DejaVu Serif and lost 17 verdicts.
     /// </param>
     /// <param name="declared">
-    /// What the document's own font table says, or <see cref="FontFamilyClass.Unknown"/> when it
-    /// says nothing — which is the common case, and is the case this method exists for.
+    /// <strong>The class in force at this run</strong>, or <see cref="FontFamilyClass.Unknown"/>
+    /// when nothing in the layer stack states one — which is the common case, and is the case this
+    /// method exists for. Through a DOCX that is
+    /// <see cref="Ooxml.WordParagraphFormats.StatedClass"/>'s answer and <em>not</em> the font
+    /// table's entry for <paramref name="familyName"/>; through DOC and RTF, which have no
+    /// inheritance to model, it is the named font's own.
     /// </param>
     /// <returns>
     /// <see cref="FontFamilyClass.Unknown"/> for a run naming no family at all;
@@ -83,4 +99,36 @@ internal static class WordFallbackClass
         => string.IsNullOrWhiteSpace(familyName) ? FontFamilyClass.Unknown
             : declared == FontFamilyClass.SansSerif ? FontFamilyClass.SansSerif
             : FontFamilyClass.Serif;
+
+    /// <summary>
+    /// The class to hand <see cref="FontRequest"/> for a <c>.doc</c> run, whose <c>FFN</c> states one
+    /// per font.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>The WW8 filter is the one of the three that can reach
+    /// <see cref="FontFamilyClass.Unknown"/>, so it does not take the roman default.</strong>
+    /// <c>SwWW8ImplReader::SetNewFontAttr</c> builds an <c>SvxFontItem</c> per font from the
+    /// <c>FFN</c>'s <c>ff</c> nibble, and <c>GetFontParams</c>'s table maps 0, 6 and 7 onto
+    /// <c>FAMILY_DONTKNOW</c> — which is *set on the item*, where the DOCX filter would have left an
+    /// inherited value and the RTF filter never sets one at all. A <c>DONTKNOW</c> family appends no
+    /// generic to the fontconfig pre-match, so the answer is fontconfig's own.
+    /// </para>
+    /// <para>
+    /// Measured on 26.2.4.2 with nine flat-ODF fixtures exported to Word 97 and back
+    /// (<c>probes/words-r55/doc-family-code.py</c>) — a route that reaches the WW8 import with a
+    /// genuinely undeclared <c>FFN</c>, which round 54's DOCX round trip could not:
+    /// <b>only <c>roman</c> draws DejaVu Serif</b>; no code at all, <c>modern</c> and
+    /// <c>decorative</c> all draw DejaVu Sans, and so does <c>swiss</c>.
+    /// </para>
+    /// <para>
+    /// So this hands the <c>FFN</c>'s own answer through untouched, and the one thing it does is the
+    /// guard <see cref="ForDeclared"/> carries for the same reason: a run naming <em>no</em> family
+    /// is answered by <c>DefaultFonts</c> — Liberation Serif — and must not be given a class at all.
+    /// </para>
+    /// </remarks>
+    /// <param name="familyName">The family the run asks for, or null when it names none.</param>
+    /// <param name="declared">The class the <c>FFN</c> states, including its overrides by name.</param>
+    public static FontFamilyClass ForWw8Font(string? familyName, FontFamilyClass declared)
+        => string.IsNullOrWhiteSpace(familyName) ? FontFamilyClass.Unknown : declared;
 }

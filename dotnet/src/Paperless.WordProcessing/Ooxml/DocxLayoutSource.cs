@@ -85,9 +85,10 @@ public sealed partial class DocxLayoutSource
     private readonly ConstantFields _constants;
 
     private readonly DrawingTheme? _theme;
-    private readonly Dictionary<(string? Family, int Weight, bool Italic), OpenTypeFace?> _faces = [];
-    private readonly Dictionary<(string? Family, int Weight, bool Italic), FontReference> _references =
-        [];
+    private readonly Dictionary<(string? Family, int Weight, bool Italic, FontFamilyClass Class),
+        OpenTypeFace?> _faces = [];
+    private readonly Dictionary<(string? Family, int Weight, bool Italic, FontFamilyClass Class),
+        FontReference> _references = [];
 
     /// <summary>Creates a source over a document's styles and settings.</summary>
     /// <param name="styles">The document's styles, including its <c>w:docDefaults</c>.</param>
@@ -253,7 +254,7 @@ public sealed partial class DocxLayoutSource
     {
         get
         {
-            WordTextStyle text = WordParagraphFormats.ResolveText(_styles, null, _theme);
+            WordTextStyle text = WordParagraphFormats.ResolveText(_styles, null, _theme, fontTable: _fontTable);
             if (Face(text) is not { } face) return Length.Zero;
 
             return LineSpacing.Resolve(face, _metrics, WriterLineBox.LeadingAboveText)
@@ -304,7 +305,9 @@ public sealed partial class DocxLayoutSource
             : LineNumbering.DefaultEmSize;
 
         WordTextStyle style = new(
-            Word.Attribute(fonts.Element, "ascii"), emSize, Weight: 400, IsItalic: false, Language: null);
+            Word.Attribute(fonts.Element, "ascii"), emSize, Weight: 400, IsItalic: false, Language: null,
+            DeclaredClass: WordParagraphFormats.StatedClass(
+                fonts.Element is { } element ? [element] : [], _fontTable));
 
         if (Face(style) is not { } face) return null;
 
@@ -779,9 +782,9 @@ public sealed partial class DocxLayoutSource
         // is the mark's. Same probe: the mark alone carrying `w:sz w:val="72"` gives the empty
         // paragraph 36 pt of height in the reference.
         WordTextStyle mark =
-            WordParagraphFormats.ResolveText(_styles, properties, _theme, _tableStyleRun);
+            WordParagraphFormats.ResolveText(_styles, properties, _theme, _tableStyleRun, _fontTable);
         WordTextStyle body =
-            WordParagraphFormats.ResolveRun(_styles, properties, null, _theme, _tableStyleRun);
+            WordParagraphFormats.ResolveRun(_styles, properties, null, _theme, _tableStyleRun, _fontTable);
 
         // Both are resolved, not only the one this paragraph draws its text in, because `Face` is
         // also what fills `_references` — and a `FontReference` is the only thing a PDF can turn
@@ -1078,7 +1081,8 @@ public sealed partial class DocxLayoutSource
             WordTextStyle style = range.RunProperties is null
                 ? paragraph
                 : WordParagraphFormats.ResolveRun(
-                    _styles, paragraphProperties, range.RunProperties, _theme, _tableStyleRun);
+                    _styles, paragraphProperties, range.RunProperties, _theme, _tableStyleRun,
+                    _fontTable);
 
             if (range.IsCitation) style = AsCitation(style);
 
@@ -1952,7 +1956,7 @@ public sealed partial class DocxLayoutSource
 
     private OpenTypeFace? Face(WordTextStyle text)
     {
-        (string? Family, int Weight, bool Italic) key = text.FaceKey;
+        (string? Family, int Weight, bool Italic, FontFamilyClass Class) key = text.FaceKey;
         if (_faces.TryGetValue(key, out OpenTypeFace? cached)) return cached;
 
         OpenTypeFace? face = null;
@@ -1972,7 +1976,7 @@ public sealed partial class DocxLayoutSource
             // comes out whatever fontconfig files it under. See `WordFallbackClass`, and
             // `probes/words-r54/font-fallback-rule.py` for the 98 files that measure it.
             FontFamilyClass declared = WordFallbackClass.ForDeclared(
-                text.FamilyName, _fontTable.ShapeOf(text.FamilyName).Class);
+                text.FamilyName, text.DeclaredClass);
 
             FontReference reference = _fonts.Resolve(
                 new FontRequest(

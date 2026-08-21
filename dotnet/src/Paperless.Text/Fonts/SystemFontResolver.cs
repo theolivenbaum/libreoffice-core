@@ -659,6 +659,13 @@ public sealed class SystemFontResolver : IFontResolver, IGlyphFallbackResolver
     /// seat: that is the word-processing filter's roman default, and it lives in
     /// Paperless.WordProcessing.WordFallbackClass. The stated fontconfig *reason* below is still
     /// falsified and is corrected in the paragraph after it.]
+    /// [24.2.7-audit: VERIFIED 2026-08-21, round words-r55 — re-confirmed from a *fifth* caller,
+    /// which is the useful part: the DOC filter reaches here undeclared after all. Its FFN sets
+    /// FAMILY_DONTKNOW on the item for ff 0, 6 and 7, and nine flat-ODF fixtures exported to Word 97
+    /// and back (probes/words-r55/doc-family-code.py) answer DejaVu Sans, and DejaVu Sans *Mono* for
+    /// Consolas — this switch's own column. The paragraph below, which says the word-processing
+    /// filters never arrive here undeclared, was true of what round 54 could measure and is not true
+    /// of DOC.]
     /// LibreOffice 26.2.4.2 here, an unrecognised family reaching this path undeclared resolves to
     /// DejaVu Sans through every one of those filters — <c>Aptos</c>, <c>Candara</c> and
     /// <c>Consolas</c> in authored PPTX, XLSX and flat ODS files answer DejaVu Sans, DejaVu Sans and
@@ -668,10 +675,15 @@ public sealed class SystemFontResolver : IFontResolver, IGlyphFallbackResolver
     /// show ours DejaVu Sans against the reference's DejaVu Serif.
     /// </para>
     /// <para>
-    /// <strong>The word-processing filters do not reach this undeclared, and round 53 caught that
-    /// as a defect here.</strong> DOCX, DOC and RTF default an unrecognised family's class to roman
-    /// before the request is ever built, so they arrive with <c>DeclaredClass = Serif</c> and are
-    /// answered by <see cref="DeclaredGenericFor"/> above rather than by this switch. That was
+    /// <strong>The DOCX and RTF filters do not reach this undeclared, and round 53 caught that
+    /// as a defect here.</strong> They default an unrecognised family's class to roman before the
+    /// request is ever built — DOCX because the class is inherited and its floor is Writer's roman
+    /// pool default, RTF because its filter never sets a family and that same pool default stands —
+    /// so they arrive with <c>DeclaredClass = Serif</c> and are
+    /// answered by <see cref="DeclaredGenericFor"/> above rather than by this switch.
+    /// <b>DOC is the exception and round 55 measured it</b>: the WW8 reader writes
+    /// <c>FAMILY_DONTKNOW</c> onto the item for an <c>ff</c> of 0, 6 or 7, so those runs do arrive
+    /// here undeclared and are answered by this switch, correctly. That was
     /// worth <b>32 of 337 words renderings</b> drawn in DejaVu Sans where the reference has DejaVu
     /// Serif. It is fixed in the reader, in
     /// <c>Paperless.WordProcessing.Layout.WordFallbackClass</c>, because the difference is a
