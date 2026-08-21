@@ -26,8 +26,21 @@ namespace Paperless.Presentations.Ooxml;
 /// into every <c>SlidePersist</c>). A second route reaches the same answer:
 /// <c>SlidePersist::createXShapes</c> pushes the master text styles into Impress's style
 /// families with <c>for (int i = 0; i &lt; 4; i++)</c> over a switch whose <c>case 4</c> is the
-/// style <c>p:otherStyle</c> parses into (<c>slidepersist.cxx:315</c>), so the loop stops one
-/// short and the style is read, stored and never used.
+/// style <c>p:otherStyle</c> parses into, so the loop stops one short and the style is read,
+/// stored and never used.
+/// </para>
+/// <para>
+/// [24.2.7-audit: VERIFIED 2026-08-21, slides-r62 — both halves still hold on 26.2.4.2, and the
+/// site's own fixture is what settles it. <c>tests/corpus/features/slide-other-style.pptx</c>
+/// states 12 pt magenta on the master's <c>p:otherStyle</c> and 24 pt green on the
+/// presentation's <c>p:defaultTextStyle</c>; the reference's PDF draws
+/// <c>0 0.5019607843 0 rg … 24.009 Tf</c> — the presentation's style in both size and colour,
+/// byte-for-byte the answer recorded above for the superseded binary. The source survives the
+/// version bump too, with <strong>both citations moved</strong>: <c>isOther</c> is
+/// <c>oox/source/ppt/pptshape.cxx:494-499</c> in this tree, not 424-429, and the
+/// <c>for (int i = 0; i &lt; 4; i++)</c> whose <c>case 4</c> is <c>maOtherTextStylePtr</c> is
+/// <c>slidepersist.cxx:315-345</c>, not the single line 315. The line numbers were the only
+/// thing wrong here.]
 /// </para>
 /// <para>
 /// Measured rather than only cited, because <c>deck-text-style.pptx</c> cannot separate the

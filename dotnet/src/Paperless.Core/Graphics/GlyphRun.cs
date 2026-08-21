@@ -373,6 +373,20 @@ public readonly record struct DuotoneRecolour(Colour Dark, Colour Light);
 /// for drawing the picture untouched. The mapping is the binary's, not just the source's.
 /// </para>
 /// <para>
+/// [24.2.7-audit: VERIFIED 2026-08-21, slides-r62 — case one still holds on 26.2.4.2, measured
+/// on the same document. <c>N2_E_Maestroni_Swarm_COP.pptx</c>'s title slide renders against the
+/// 26.2.4.2 reference at <c>diff% 1.71, |ink|% 0.01</c> with case one implemented, and at 100 dpi
+/// its mean channel is <strong>224.02 against the reference's 223.68</strong>, MAE 2.23 over the
+/// whole page and 4.75 over the middle band. The competing reading — the stated 70/−70 put
+/// through the same modifier — was measured at MAE <strong>30.98</strong> when this site was
+/// written, so the two readings are more than an order of magnitude apart and the page separates
+/// them outright. Cases two and three are <strong>not</strong> re-checked: no corpus document
+/// states a lone <c>a:lum</c> brightness or a non-washout pair on a slide, so there is nothing on
+/// this track to point a probe at. The sibling claim in
+/// <c>Paperless.Ooxml/DrawingML/DrawingFill.cs</c> — that <c>a:lum</c>'s division is integer and
+/// truncating — was verified independently by the words track in round 61.]
+/// </para>
+/// <para>
 /// Carried to the decoder rather than applied by the reader for the same reason
 /// <see cref="DuotoneRecolour"/> is, and applied after it.
 /// </para>
