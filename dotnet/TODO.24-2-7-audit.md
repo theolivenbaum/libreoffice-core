@@ -141,13 +141,33 @@ git grep -c  '24\.2\.7-audit' -- 'dotnet/src/**/*.cs' | awk -F: '{s+=$2} END{pri
 |---|---|
 | `SlideAutofit.cs` (4 hits, one claim) | **WRONG**, fixed r52 — 25.2 replaced 24.2's bisection with `constScaleLevels`. −155.40 `abs_ink`, **11.1% of the slides track** |
 | `SystemFontResolver.cs:406` | **VERIFIED** r53 — unrecognised families still all land on DejaVu |
-| `SystemFontResolver.cs:439` | **UNDECIDED** r53 — probe confounded, and it says why |
-| `SystemFontResolver.cs:637` | **WRONG** r53, **not fixed** — see below |
+| `SystemFontResolver.cs:439` | **UNDECIDED** r53 → **VERIFIED r54** — two fixtures that reach `DefaultFonts` both answer Liberation Serif |
+| `SystemFontResolver.cs:637` | **WRONG** r53 → **VERIFIED r54, and the seat was elsewhere** — see below |
 | `MeasuredParagraph.cs:744` | **VERIFIED** r53 — unchanged on 26.2.4.2 |
 
 **Two of five.** The prior on an unverified site is not "probably fine".
 
-### The open one, and it is the largest single finding on the list
+### And a re-check can be wrong in the other direction too
+
+Round 54 re-ran round 53's `GenericFallbacks` finding and **reproduced its measurement exactly**
+while **reversing its verdict**. Ten unrecognised families really do answer DejaVu Serif through
+the DOCX filter; `fc-match` really does answer Sans; the site really does disagree with the
+reference on 32 words renderings. What round 53 could not see, because every family it probed was
+one fontconfig files under *no* generic and every file it probed was a DOCX, is that **the answer
+belongs to the filter and not to the resolver**:
+
+| filter | an unrecognised family, nothing declared |
+|---|---|
+| DOCX, DOC, RTF | **DejaVu Serif** — a roman default applied before the request is built |
+| ODF text, XLSX, PPTX, flat ODS | **fontconfig's own generic** — `Consolas` → DejaVu Sans **Mono** |
+
+So `GenericFallbacks` is right for every caller that reaches it, and the one-line change the audit
+recommended would have set every slide and every sheet in a serif face that 26.2.4.2 sets in a
+grotesque. **A site can be simultaneously the right diagnosis and the wrong seat**, and the way
+that showed was varying the *format* — a variable the first probe held fixed without noticing it
+was one.
+
+### The one that was open, and how it closed
 
 `SystemFontResolver.GenericFallbacks` says an unrecognised family resolves to **DejaVu Sans**.
 On 26.2.4.2 **all ten unrecognised families probed answer DejaVu *Serif*** — one authored DOCX per
@@ -167,6 +187,18 @@ line-breaking difference as well as a visible one.
 
 **It is deliberately not fixed.** A one-line change in `Paperless.Text` owes a measured sweep of
 all three tracks, and that is the parent's to run, not a track round's to slip in at the end.
+
+> **Closed by round 54, and not where this section expected.** The measurement above reproduces —
+> 86 disagreeing font lists reproduces exactly; the "73 carry DejaVu Sans" does **not** reproduce
+> under any reading round 54 could construct (70 by the broadest, 40 by the strict difference,
+> 32 being the plain `ours=DejaVuSans, ref=DejaVuSerif` pair). The **seat** is
+> `Paperless.WordProcessing.Layout.WordFallbackClass`, not `Paperless.Text`: DOCX, DOC and RTF
+> default an unrecognised family's class to roman, while ODF text, XLSX, PPTX and flat ODS take
+> fontconfig's generic, so `GenericFallbacks` is correct for every caller that actually reaches it.
+> **The three-track sweep this section demanded was run anyway and is the evidence**: over 302
+> slides and 307 sheets renderings, *zero* show ours DejaVu Sans against the reference's DejaVu
+> Serif, and authored PPTX/XLSX/ODS files answer DejaVu Sans Mono for `Consolas` where a DOCX
+> answers DejaVu Serif. See `probes/words-r54/`.
 
 ## How to work it, and the order
 
@@ -198,6 +230,8 @@ the site itself names **26.2.4.2** and the date — this table is the index, not
 
 | date | site | outcome | how |
 |---|---|---|---|
+| 2026-08-21 | `Paperless.Text/Fonts/SystemFontResolver.cs` `GenericFallbacks` (unrecognised → DejaVu Sans) | **VERIFIED, and round 53's WRONG reversed** | `probes/words-r54/font-fallback-rule.py` (98 authored files, 5 controls) + `cross-format-fallback.py` (28): the branch is right for every filter that reaches it undeclared — ODF text, XLSX, PPTX, flat ODS, all tracking fontconfig, `Consolas` → DejaVu Sans **Mono**. The DOCX/DOC/RTF answer is a **roman default applied by the reader**, now in `WordFallbackClass`. Cross-track evidence: 0 of 302 slides and 0 of 307 sheets renderings show the Sans-for-Serif pair |
+| 2026-08-21 | `Paperless.Text/Fonts/SystemFontResolver.cs` `DefaultFallbacks` (no family → Liberation Serif) | **VERIFIED** | round 54; two fixtures that reach `DefaultFonts` rather than Word's default — a flat ODF declaring no font anywhere, and a DOCX whose `docDefaults` state an empty `w:rFonts` — **both Liberation Serif** on 26.2.4.2. `w:ascii=""` is a third state and answers DejaVu Serif, because the filter reads it as a named family |
 | 2026-08-21 | `Paperless.Text/Layout/MeasuredParagraph.cs` (picture-alone descent) | **verified, unchanged** | `probes/words-r46/picture-alone-descent.py` re-run: 8 of 8 DOCX rows and 4 of 4 `fodt alone` rows exact, and the reference's own figures identical to round 46's 24.2.7.2 readings to the tenth at 20, 50 and 150 pt |
 | 2026-08-21 | `Paperless.Text/Fonts/SystemFontResolver.cs` :406 (DejaVu, never Liberation) | **verified in that respect** | `probes/words-r53/font-fallback-recheck.py`: ten unrecognised families, all land on DejaVu, none on Liberation |
 | 2026-08-21 | `Paperless.Text/Fonts/SystemFontResolver.cs` :629 (unrecognised → DejaVu **Sans**) | **WRONG — reported, not fixed** | same probe: all ten answer DejaVu **Serif**, with four controls agreeing; and `fc-match` answers Sans, so the stated mechanism ("fontconfig's default") is falsified too. **86 of 337 words renderings already disagree with the reference's font list and 73 carry DejaVu Sans on our side.** A change here owes a measured sweep of all three tracks |

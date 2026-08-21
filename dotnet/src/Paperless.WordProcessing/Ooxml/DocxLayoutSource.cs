@@ -1965,7 +1965,14 @@ public sealed partial class DocxLayoutSource
             // Its ODF filter *does* honour `style:font-pitch`, so this is a difference between the
             // two importers rather than a property of the resolver, and passing the pitch here put
             // one corpus document into DejaVu Sans Mono that the reference sets in DejaVu Sans.
-            FontFamilyClass declared = _fontTable.ShapeOf(text.FamilyName).Class;
+            //
+            // And a family the table says nothing about is not undeclared as far as the *filter* is
+            // concerned: it takes Writer's roman default, which is why an unrecognised family drawn
+            // through this filter comes out DejaVu Serif where the same name through the ODF filter
+            // comes out whatever fontconfig files it under. See `WordFallbackClass`, and
+            // `probes/words-r54/font-fallback-rule.py` for the 98 files that measure it.
+            FontFamilyClass declared = WordFallbackClass.ForDeclared(
+                text.FamilyName, _fontTable.ShapeOf(text.FamilyName).Class);
 
             FontReference reference = _fonts.Resolve(
                 new FontRequest(

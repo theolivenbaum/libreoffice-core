@@ -438,16 +438,31 @@ public sealed class SystemFontResolver : IFontResolver, IGlyphFallbackResolver
     /// than its <c>FontSubstitutions</c> node, and it is read from there rather than transcribed:
     /// the list is data in the tree, and a hand-copied prefix of it would silently diverge on a
     /// machine whose installed faces differ from this one's. Measured: a fixture declaring no font
-    /// [24.2.7-audit: UNDECIDED 2026-08-21, round words-r53 — the probe was confounded: a DOCX
-    /// with no styles.xml is given Word's default, not LibreOffice's. Needs a fixture that
-    /// reaches DefaultFonts rather than one that merely says nothing.]
-    /// renders in Liberation Serif under LibreOffice 24.2.7.2 here, which is what this list heads
-    /// with. <b>Still calibrated to 24.2.7.2 and still unverified.</b> The 2026-08-21 attempt
-    /// (`probes/words-r53/font-fallback-recheck.py`) could not decide it and says so: a DOCX
-    /// carrying no <c>styles.xml</c> at all is given <em>Word's</em> default rather than
-    /// LibreOffice's, and the probe's no-family case duly came back Carlito. Deciding this needs a
-    /// fixture that reaches <c>DefaultFonts</c> rather than one that merely says nothing. Routing the blank case through the generic unknown-family rule instead sets every such
-    /// document in DejaVu Sans and reflows all of them.
+    /// [24.2.7-audit: VERIFIED 2026-08-21, round words-r54 — Liberation Serif on 26.2.4.2, by two
+    /// fixtures that reach DefaultFonts where round 53's reached Word's default instead.]
+    /// renders in Liberation Serif, and that now holds on <b>26.2.4.2</b> as well as on 24.2.7.2.
+    /// <para>
+    /// Round 53 could not decide this and said why: a DOCX carrying no <c>styles.xml</c> at all is
+    /// given <em>Word's</em> default rather than LibreOffice's, and its no-family case duly came
+    /// back Carlito. Round 54 built the two fixtures that do reach <c>DefaultFonts</c>
+    /// (<c>probes/words-r54/font-fallback-rule.py</c>, cases <c>odf:no-font-at-all</c> and
+    /// <c>nofamily:docx-empty-docdefaults</c>): a flat ODF file declaring no font anywhere, and a
+    /// DOCX whose <c>docDefaults</c> state an empty <c>w:rFonts</c>. <b>Both render in Liberation
+    /// Serif</b>, which is what this list heads with, and the DOCX case is the stronger of the two
+    /// because that filter's own default for a *named* family is roman — so this is not the roman
+    /// default arriving by another route.
+    /// </para>
+    /// <para>
+    /// The confounder round 53 hit has a third face worth recording: <c>w:ascii=""</c> — an empty
+    /// attribute rather than an absent element — comes back <b>DejaVu Serif</b>, because the filter
+    /// reads it as a named family that happens to be empty and applies its roman default to it. So
+    /// "the document says nothing" and "the document says nothing at all, in writing" are two
+    /// states in LibreOffice and one state here.
+    /// </para>
+    /// Routing the blank case through the generic unknown-family rule instead sets every such
+    /// document in DejaVu Sans and reflows all of them — and routing it through the word-processing
+    /// roman default instead moved <b>29 corpus <c>.doc</c> documents</b> off Liberation Serif and
+    /// lost 17 verdicts before <c>WordFallbackClass</c> was guarded on the name being non-empty.
     /// </remarks>
     private static IReadOnlyList<string> DefaultFallbacks => FontSubstitutions.DefaultLatinTextChain;
 
@@ -637,46 +652,40 @@ public sealed class SystemFontResolver : IFontResolver, IGlyphFallbackResolver
     /// </para>
     /// <para>
     /// Where the table has never heard of the family the answer is sans-serif, and that is not a
-    /// coin toss. This path is what LibreOffice reaches by asking fontconfig, and fontconfig's reply
-    /// for a name it does not recognise is its default family — DejaVu Sans. Measured against
-    /// [24.2.7-audit: WRONG 2026-08-21, round words-r53, NOT FIXED — all ten unrecognised
-    /// families answer DejaVu SERIF on 26.2.4.2, and the stated fontconfig mechanism is
-    /// falsified too. 86 of 337 words renderings disagree with the reference's font list.
-    /// A change here owes a measured sweep of all three tracks.]
-    /// LibreOffice 24.2.7.2 here, every unrecognised family probed resolved to DejaVu Sans: Aptos,
-    /// Segoe UI, Roboto, Lato, Montserrat, Myriad Pro, Futura, Optima, Univers and the rest. The
-    /// previous rule guessed serif for all of them, on the reasoning that a name carrying no hint is
-    /// probably a roman — which is the wrong default and, worse, wrong for the modern UI faces
-    /// documents actually name.
+    /// coin toss — but it is only the answer for the callers that arrive here <em>without</em> a
+    /// declared class, which is ODF text, XLSX, PPTX and flat ODS. Measured against
+    /// [24.2.7-audit: VERIFIED 2026-08-21, round words-r54 — correct for every format that reaches
+    /// it undeclared. Round 53's WRONG verdict was right about the DOCX answer and wrong about the
+    /// seat: that is the word-processing filter's roman default, and it lives in
+    /// Paperless.WordProcessing.WordFallbackClass. The stated fontconfig *reason* below is still
+    /// falsified and is corrected in the paragraph after it.]
+    /// LibreOffice 26.2.4.2 here, an unrecognised family reaching this path undeclared resolves to
+    /// DejaVu Sans through every one of those filters — <c>Aptos</c>, <c>Candara</c> and
+    /// <c>Consolas</c> in authored PPTX, XLSX and flat ODS files answer DejaVu Sans, DejaVu Sans and
+    /// DejaVu Sans <em>Mono</em>, tracking fontconfig's own filing exactly
+    /// (<c>probes/words-r54/cross-format-fallback.py</c>). Over all 302 slides and 307 sheets
+    /// renderings compared against the reference's own embedded font lists, <b>zero</b> documents
+    /// show ours DejaVu Sans against the reference's DejaVu Serif.
     /// </para>
     /// <para>
-    /// <strong>RE-CHECKED 2026-08-21 AGAINST 26.2.4.2 AND THE PARAGRAPH ABOVE IS WRONG. NOT FIXED
-    /// HERE — a change on this line owes a measured sweep of all three tracks, which is the
-    /// parent's to run. See <c>TODO.24-2-7-audit.md</c> and
-    /// <c>probes/words-r53/font-fallback-recheck.py</c>.</strong>
+    /// <strong>The word-processing filters do not reach this undeclared, and round 53 caught that
+    /// as a defect here.</strong> DOCX, DOC and RTF default an unrecognised family's class to roman
+    /// before the request is ever built, so they arrive with <c>DeclaredClass = Serif</c> and are
+    /// answered by <see cref="DeclaredGenericFor"/> above rather than by this switch. That was
+    /// worth <b>32 of 337 words renderings</b> drawn in DejaVu Sans where the reference has DejaVu
+    /// Serif. It is fixed in the reader, in
+    /// <c>Paperless.WordProcessing.Layout.WordFallbackClass</c>, because the difference is a
+    /// property of the *filter*: putting it here would have set every slide and every sheet in a
+    /// serif face that 26.2.4.2 sets in a grotesque.
     /// </para>
     /// <para>
-    /// The probe is one authored DOCX per family, converted by the installed <c>soffice</c>, with the
-    /// drawn face read out of the PDF. Four controls agree — Liberation Serif answers itself, Calibri
-    /// answers Carlito, Cambria answers Caladea, Arial answers Liberation Sans — and then <b>all ten
-    /// unrecognised families answer DejaVu <em>Serif</em></b>: the same list this paragraph names,
-    /// Aptos, Segoe UI, Roboto, Lato, Montserrat, Myriad Pro, Futura, Optima and Univers, plus two
-    /// authored nonsense names, one of which carries a serif hint and one of which carries none. Both
-    /// answer Serif, so the shape of the *name* is not what decides it either.
-    /// </para>
-    /// <para>
-    /// <b>And the stated reason is falsified independently of the answer.</b> <c>fc-match Aptos</c>
-    /// on this machine returns <c>DejaVuSans.ttf</c>, as does <c>fc-match ""</c>. So whatever
-    /// 26.2.4.2 is doing here, it is not "asking fontconfig and taking its default" — which is the
-    /// second time this project has caught that assumption (see <c>CLAUDE.md</c>, the eight
-    /// <c>FcNameParse</c> disagreements).
-    /// </para>
-    /// <para>
-    /// The cost is measured rather than assumed: comparing the embedded font list of all 337 words
-    /// renderings against the reference's, <b>86 disagree and 73 of those carry DejaVu Sans on our
-    /// side</b>, most of them the plain pair <c>ours=DejaVuSans, ref=DejaVuSerif</c>. The two faces
-    /// have different advances, so every one of those is a line-breaking difference as well as a
-    /// visible one.
+    /// <b>The reason originally given for this branch is falsified independently of the answer.</b>
+    /// <c>fc-match Aptos</c> on this machine returns <c>DejaVuSans.ttf</c>, as does
+    /// <c>fc-match ""</c> — but so it does for names fontconfig files under <c>monospace</c>, and
+    /// those answer DejaVu Sans Mono here. The branch is right because <c>49-sansserif.conf</c>
+    /// appends <c>sans-serif</c> to any pattern that has not already named a generic, which is a
+    /// statement about the *configuration* rather than about a "default family"; see
+    /// <see cref="FontconfigPreferences.GenericClassOf"/>, which is what actually answers.
     /// </para>
     /// </remarks>
     private IReadOnlyList<string> GenericFallbacks(FontRequest request)
@@ -723,6 +732,17 @@ public sealed class SystemFontResolver : IFontResolver, IGlyphFallbackResolver
     /// <c>ＭＳ 明朝</c> go the other way, unknown to the table and filed <c>serif</c> by
     /// fontconfig. Measured on the installed 26.2.4.2 with the 296-row face probe: the binary
     /// answers fontconfig's way on every one.
+    /// </para>
+    /// <para>
+    /// <strong>Through the filters that reach here undeclared, which is not all of them.</strong>
+    /// Round 54 measured the same question through six filters and found two answers: ODF text,
+    /// XLSX, PPTX and flat ODS track fontconfig exactly as this paragraph says, while DOCX, DOC and
+    /// RTF default the class to roman first and so never consult this at all — <c>Consolas</c>,
+    /// which fontconfig files under <c>monospace</c>, comes out DejaVu Sans Mono through the ODF
+    /// filter and DejaVu <em>Serif</em> through the DOCX one, from the same binary and the same
+    /// fontconfig. So "the binary answers fontconfig's way" is a claim about the *caller* as much as
+    /// about the name. See <c>Paperless.WordProcessing.Layout.WordFallbackClass</c> and
+    /// <c>probes/words-r54/font-fallback-rule.py</c>.
     /// </para>
     /// <para>
     /// The table is still the answer where there is no fontconfig to ask — Windows, most macOS —
