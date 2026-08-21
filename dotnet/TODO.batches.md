@@ -15893,3 +15893,105 @@ The round's first ten tests all drove the reader directly, so **blanking its cal
 them**. The wiring test exists because that mutation came back clean. This is the third distinct
 shape of "a test that passes without reaching the defect" found in four rounds — after the unbound
 namespace and the single-run fixture.
+
+---
+
+## Round 56 — sheets
+
+**276 → 276 of 307. Zero verdict movement, predicted and measured.** What moved is ink, and the
+round's own instrument says how much: **46 rows where our font count moved, every one towards the
+reference and none away**; **41 of 81 banded documents whose header/footer agreement moved, 39
+improved and 2 worsened**; median per-document band displacement **1.515 pt → 0.220 pt**. Base
+`d968553554e`, reproduced to the document (`TOTAL 325 MATCH 290`, 276/31 against `MANIFEST.tsv`,
+zero disagreements). `dotnet/probes/sheets-r56/`, `prediction.md` at `015ecc19c73`.
+
+### The `PAGE n OF 33` blocks are an `oddHeader`, and round 55 said they were not
+
+`sheet10` — the *ACC list* sheet, pages 28 to 32 — states
+`&R\n\n\n\n\n\n\n&9PAGE \n&P OF &N`: the right area, **seven empty leading lines**, then 9 pt text.
+Round 55's "the string is in no cell, no `oddHeader` and no `oddFooter`" is an artefact of the
+search: `PAGE.*OF` cannot match a string split by a newline and a `&9`. **10015 → 9995, which is
+the reference's figure exactly**, on both case aliases.
+
+### There is no text-fit threshold. There is a clip rectangle.
+
+`PrintHF` sets a clip of exactly `Rectangle(aStart, nHeight − nDistance)` (`printfun.cxx:1870`) and
+`DrawText_ToPosition` **emits nothing at all** for an area whose primitive range misses it
+(`impedit3.cxx:3367-3372`); an area that meets it partly is wrapped in a `MaskPrimitive2D` and
+keeps every line. Round 55's "threshold, about 0.27× the point size" is `ascent − inkAscent`, and a
+bisection in 0.1 pt steps at three sizes brackets it at **0.2056–0.2087 em** — 8 pt turns over
+between 1.59 and 1.70 pt, 11 pt between 2.21 and 2.30, 20 pt between 4.11 and 4.20. **Round 55's
+20 pt bracket is refuted**: 4.32 pt draws. The clip is **per area, not per line**, which one
+authored case discriminates and which the *existing* three-line footer test detects when mutated.
+
+**The case a threshold could never have produced** is the corpus one: a 5.67 pt band, far above
+every bracket, drawing nothing because empty lines put the ink 90 pt below it.
+
+### And the band's face is the workbook's own default cell font
+
+Family, size, weight and posture — plus the `&"Family,Style"`, `&B` and `&I` codes, all of which
+26.2.4.2 honours. We drew every band in a hard-coded ten-point upright Liberation Sans while
+`SheetBandHeight`, the file that decides how *tall* the same band is, had always used the
+workbook's own font and had always read the `&"Family"` code. **The two halves of the same band
+disagreed on all 81 corpus workbooks that state band content.**
+
+**Key the weight on the PDF's font list, not on advance widths.** The Liberation faces are
+metric-compatible, so a bold band is exactly as wide as an upright one; a first pass at this probe
+measured x positions, found them identical and concluded the style code was ignored. It is not.
+
+### Blind spot 1 fired exactly where it was pointed
+
+The prediction named `.xls` as invisible to both censuses. `NPIAS_App_A.xls` came out of the first
+sweep emitting a font the reference does not — its app font is **MS Sans Serif bold**, and drawing
+the family without the weight put `DejaVuSans` where the reference draws `DejaVuSans-Bold`. Three
+of the four word-count movements are `.xls` too, and none of the four is content: our base glued
+header tokens together (`PageII:6Architecture`) because a whole area was one run; the run now
+splits where the face changes and the tokens come apart — **towards** the reference's own
+tokenisation while the *count* moves away from it. Worth stating plainly: on those three the gate's
+metric is the worse of the two available readings.
+
+### Vision: two confirmed, two refuted, and a phantom that has now fooled two rounds
+
+Three blind reviewers, three pages. **Confirmed by a second instrument**: three `#C0C0C0` cell
+fills on `FAA…attachment_2` p28 that we do not draw at all; and an **18.46 pt uniform downward
+translation of the body** on `fm-provider-service-measures` p36 whose *band* agrees to 0.0005 pt —
+with `FY2023-AIP-grants` p1 showing the same defect at 18.49 pt, both pre-existing, both on
+passing documents. **Refuted**: "we draw vertical rules the reference does not" on `NPIAS_App_A`
+(we draw 22, it draws 24 — the claim points the wrong way); and "the reference runs
+`FILTER ASSY HYD291143 CMM` together where we break it", which is the **second round running** that
+a reviewer has reported that exact difference on that exact cell and been wrong.
+
+### Audit
+
+`SheetShapeText.cs`'s 12 pt default **VERIFIED** by two instruments with the control first;
+`SheetNotes.cs`'s column-major note order **VERIFIED** on its own witness, which discriminates
+(reading order would put `L1` second and both put it fifth); `SheetPageDecoration.cs` **re-marked**
+and now implemented. Counters re-derived: **42 open, 17 marker lines (15 verified, 2 wrong)** —
+the file's `14 — 9/3/1/1` reproduces at neither this tree nor the base. **One of the three commands
+that file gives is wrong under a tree-ish argument** and silently returns 0; fixed there.
+`Paperless.Spreadsheets` is **eight of ten** re-checked, seven correct, and the one wrong is still
+the only *furniture* claim among them — which is now a pattern and is why `XlsxNoteCaptions.cs`
+should be taken before `SheetText.cs`.
+
+### `IntervalsThatFit`: censused, not touched
+
+**256 automatic value axes against 30 stated ones, in 129 documents — 79 sheets, 47 slides, 3
+words** — and `ChartLayout` is in `Paperless.Core`. Not four tokens on `005`. The round leaves
+three candidate divergences with one already bounded: the mm100 truncation can only raise the
+quotient by `1/floor(needed)` ≈ 0.25%, and **the label shape's insets cannot be the explanation
+because the sign is wrong** — the reference gets *more* intervals than we do, so its divisor is
+smaller, not larger.
+
+### Tests and shared layer
+
+**4795 → 4811, 0 failed, 1 skipped**, all +16 in `Paperless.Spreadsheets`. Eight mutations through
+`verify-test.sh`, seven detected and the eighth an equivalent formulation (reported as such).
+**No shared layer touched** — every file is in `Paperless.Spreadsheets` — so no cross-track sweep
+is owed. `MANIFEST.tsv` unchanged: no row moves status.
+
+### Next
+
+The **18.46 pt body offset** (two witnesses, and `statedBand − nominal` is 18.4 on one of them, so
+test whether the header height is counted twice); then the **grey cell fills**; then
+`IntervalsThatFit` from authored charts rather than from `005`; then the four `_advanced_excel_pie`
+documents.
