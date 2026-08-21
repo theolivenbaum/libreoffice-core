@@ -2319,7 +2319,7 @@ public static partial class ChartLayout
                 // The marker's own colours first, and only then the series'. A symbol states its
                 // paint in c:marker/c:spPr and convertMarker reads it from there; the series
                 // colour is the fallback for a file that says nothing, not the rule.
-                Length size = plot.LabelSize * MarkerSize;
+                Length size = series.MarkerSize ?? plot.LabelSize * MarkerSize;
                 Colour marker = series.MarkerFill ?? series.Fill ?? stroke;
                 Colour outline = series.MarkerLine ?? stroke;
 
@@ -2417,10 +2417,22 @@ public static partial class ChartLayout
 
     /// <summary>A marker's side, as a fraction of the label size.</summary>
     /// <remarks>
+    /// <para>
     /// <c>VDataSeries::getSymbolProperties</c> defaults a symbol to 250 × 250 hundredths of a
     /// millimetre, which on the 10 pt labels every chart in the corpus uses is 0.71 of the em.
     /// Expressing it against the type rather than absolutely is what makes it survive the
     /// stretch an embedded chart goes through.
+    /// </para>
+    /// <para>
+    /// <strong>This is the fallback and not the rule.</strong> It is chart2's default for a
+    /// symbol nobody set, which is what an ODF or a binary chart leaves behind — and an OOXML
+    /// chart never gets here, because <c>TypeGroupConverter::convertMarker</c> always assigns a
+    /// size from <c>c:marker/c:size</c> or from <c>mnMarkerSize(5)</c>. See
+    /// <see cref="ChartSeries.MarkerSize"/>; using this for an OOXML series drew every marker in
+    /// the corpus at 7.00 pt where the reference drew the size the file stated — 6.01 on
+    /// <c>003_advanced_powerpoint_line</c>, and larger than 7.00 on the fourteen corpus series
+    /// that state 14 points or more.
+    /// </para>
     /// </remarks>
     private const double MarkerSize = 0.7;
 
@@ -3245,11 +3257,31 @@ public static partial class ChartLayout
             // Measuring from the frame instead put the title exactly where a bottom legend is:
             // on a probe with one, ours came out 30.3 pt below the reference's and did not move
             // at all when the legend was added.
+            // <strong>And it is centred on the diagram rectangle, not on the plot rectangle, with
+            // two per cent of the page's height between them.</strong> `lcl_createTitle`'s
+            // placement is only provisional: once the diagram exists,
+            // `changePositionOfAxisTitle` moves an auto-positioned axis title again
+            // (`ChartView.cxx:1996-1998`), and its `ALIGN_BOTTOM` arm is
+            // `diagramPlusAxes.X + Width/2` across and
+            // `diagramPlusAxes.Y + Height + h/2 + pageHeight * 0.02` down
+            // (`:1012-1015`). The distance there is `constPageLayoutDistancePercentage` and NOT
+            // the flat 420 the reservation used — two different constants for the two halves of
+            // the same title, which is why keeping only the reservation's one leaves the title
+            // flush against the label band.
+            //
+            // Measured on `Demick_JetBlue.pptx` page 4, whose chart carries a secondary value
+            // axis and so puts the plot well off the diagram rectangle's centre. Reference,
+            // by `pdftotext -bbox`: the title's ink runs x 294.39 … 411.17, centre **352.78**,
+            // and its top edge is at **389.79**. The inner plot rectangle's centre is 374.55 —
+            // which is exactly where we drew it — and this rectangle's centre is **352.80**.
+            // The vertical term is 6.50 pt measured against `frame.Height × 0.02` = 6.62.
             Length height =
                 Shape(measurer, under, plot.AxisTitleSize, plot.IsAxisTitleBold).Height;
             labels.Add(new ChartLabel(
                 under,
-                new DocPoint(area.X + area.Width / 2, diagram.Bottom + height / 2),
+                new DocPoint(
+                    diagram.X + diagram.Width / 2,
+                    diagram.Bottom + (frame.Height * PageMargin) + height / 2),
                 ChartLabelAnchor.Centre,
                 plot.AxisTitleSize,
                 plot.AxisTitleColour,

@@ -1183,6 +1183,7 @@ public static class DrawingChartPlot
                 Marker = MarkerOf(element, kind, scatterStyle, radarStyle, seriesIndex),
                 MarkerFill = MarkerFillOf(element, theme),
                 MarkerLine = LineOf(MarkerProperties(element), theme),
+                MarkerSize = MarkerSizeOf(element),
                 HasLine = scatterLine && !SuppressesLine(properties),
                 DashPattern = DashOf(properties),
                 LineCap = CapOf(properties),
@@ -1907,6 +1908,48 @@ public static class DrawingChartPlot
     /// <summary>A series' <c>c:marker/c:spPr</c>, or null when it states none.</summary>
     private static XElement? MarkerProperties(XElement? series)
         => Child(Child(series, "marker"), "spPr");
+
+    /// <summary>
+    /// The side of a series' marker, which an OOXML chart always has.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>c:marker/c:size</c> is in whole points and
+    /// <c>TypeGroupConverter::convertMarker</c> makes the symbol
+    /// <c>convertPointToMm100(nOoxSize)</c> square (<c>typegroupconverter.cxx:652-654</c>).
+    /// That conversion is <c>o3tl::convert(n, pt, mm100)</c>, which is
+    /// <c>round(n × 2540 / 72)</c> — so a stated 6 is 212 hundredths of a millimetre and
+    /// <b>6.0094 pt</b> rather than 6, and the hundredth matters because it is what the
+    /// reference's own operators carry.
+    /// </para>
+    /// <para>
+    /// <strong>This never returns null, and that is the rule rather than an oversight.</strong>
+    /// <c>SeriesModel</c>'s constructor is <c>mnMarkerSize( 5 )</c>
+    /// (<c>seriesmodel.cxx:118</c>) and <c>convertMarker</c> is reached for every series of a
+    /// chart type that is not a <c>seriesFrameFormat</c>, so an OOXML marker's size is stated or
+    /// it is five points — it is never chart2's unset 250 × 250 default. A series whose chart
+    /// type <em>is</em> a frame format never draws a marker at all, so the value is inert there.
+    /// The null that <see cref="ChartSeries.MarkerSize"/> documents belongs to the ODF and binary
+    /// readers, which have no such element and must keep the 250.
+    /// </para>
+    /// <para>
+    /// Out-of-range values are clamped the way the schema states the type: <c>c:size/@val</c> is
+    /// 2 … 72, and one corpus part states 62. Anything outside that is treated as unstated,
+    /// which is what a reader that cannot trust its input should do with a number it cannot draw.
+    /// </para>
+    /// </remarks>
+    private static Length MarkerSizeOf(XElement? series)
+    {
+        const int defaultPoints = 5;
+
+        double points = Number(Child(Child(series, "marker"), "size")) is { } stated
+                        && stated is >= 2 and <= 72
+            ? stated
+            : defaultPoints;
+
+        return Length.FromMm100((long)Math.Round(points * 2540.0 / 72.0,
+                                                 MidpointRounding.AwayFromZero));
+    }
 
     /// <summary>
     /// The colour a marker is filled in when it states shape properties of its own.
