@@ -257,6 +257,13 @@ Three other surpluses do **not** have this shape and are unexplained:
 `OnTrac_StarCertificationProgram-3Day` p10 (+249, no filled paths on either side),
 `16 - UTM - (NASA)` p7/p29 (+90, +103), `Thailand17` p8 (+88).
 
+**And this is a third class the charstream test does not name.** `COMMON.md` says: same
+characters with a failing word count is a tokenisation ceiling and our output may be the better
+one; different characters is a real content or layout defect. These pages have **different
+characters and no layout defect at all** — both stacks draw the same glyphs in the same places,
+and only one of the two PDFs carries them as text. The discriminator is not the text layer on its
+own; it is the text layer *against the ink*, which is what `outlined-text-census.py` pairs.
+
 ## 4. The fitted bullet: taken as a **decision**, with the number that has been missing
 
 Round 60 deferred this as an explicit decision and asked the next round to take it or say why in
