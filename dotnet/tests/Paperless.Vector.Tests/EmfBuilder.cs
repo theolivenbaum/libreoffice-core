@@ -162,13 +162,19 @@ internal sealed class EmfBuilder
     /// padding to be skipped", and real files exercise it — see
     /// <c>EmfFaceNameTests</c>.
     /// </param>
+    /// <param name="charSet">
+    /// <c>lfCharSet</c>. <c>0x02</c> is <c>SYMBOL_CHARSET</c>, which says the run's bytes are
+    /// glyph slots rather than characters — see <c>MetafileSymbolFontTests</c>. The default is
+    /// <c>DEFAULT_CHARSET</c>, which is what every other test here means.
+    /// </param>
     public EmfBuilder Font(
         int handle,
         string family,
         int height,
         int escapement = 0,
         int weight = 400,
-        ushort[]? faceTail = null)
+        ushort[]? faceTail = null,
+        byte charSet = 1)
     {
         ArgumentNullException.ThrowIfNull(family);
 
@@ -179,6 +185,10 @@ internal sealed class EmfBuilder
         BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(12), escapement);
         BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(16), escapement);
         BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(20), weight);
+
+        // lfCharSet is the fourth of the four bytes after lfWeight -- italic, underline,
+        // strikeOut, charSet -- so byte 23 of the LOGFONT and 27 of the payload.
+        payload[4 + 23] = charSet;
 
         for (int i = 0; i < family.Length && i < 31; i++)
         {
