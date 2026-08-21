@@ -18078,3 +18078,50 @@ the default `#D9D9D9` chart border.
 **Words** — `012` and `015`: **split a fly-held table across a page**. Two verdicts, fully
 characterised, and the overflowing row is **empty**, so word counts already match and only the page
 count is at stake.
+
+
+---
+
+## Round 62 — sheets — a chart's advance width goes through the same 96 dpi device its line height already did (2026-08-21)
+
+**282 → 279.** The round's named item closed exactly and the round cost two verdicts, and both
+facts are load-bearing.
+
+**The brief's item 1 had the wrong seat.** `BestFitInner` is a faithful port; it missed `003`'s
+`M3` by **0.33 of a degree** because its *input* was 1.7 pt too wide. Round 60 put a chart's
+vertical metrics on `MetricGrid.Chart` and left the advance width on the face's unquantised
+metrics. 26.2.4.2 instantiates the em at a whole number of 96 dpi pixels — 13 for 13.333 at 10 pt,
+**15 for 14.667 at 11**, so the correction is a **sawtooth** and not a narrowing.
+
+**Read off the reference at fourteen sizes, our renderer never running**, out of its own `TJ`
+adjustments, which are in thousandths of the text em and so are scale-free. Sign and size right at
+every one, residual ≤0.005, no free parameter. All five of `003`'s label boxes now match the
+reference's drawn width to **0.03 pt** and their centres to **0.16**, and the four corpus pies are
+**word-exact** where they were two over — round 61's one miss, closed.
+
+**The cost, stated and not netted.** `023_Waterfall` `match` → `words` (881 → 843, ref 868) and
+`046_Cost_analysis` `match` → `words` (159 → 161, ref 157). A third, `fse_identification_form`,
+moved on the **reference's** side. `046`'s character stream is **754 characters before and after** —
+pure re-ordering, a tokenisation ceiling. `023`'s pass was never agreement: the reference draws its
+nine `Delta` category labels **rotated** (three tokens each) and we draw them horizontally, and our
+881 was our own fragmentation making up the difference. Ink improved on 5 of the 6 documents
+measured, `023` among them.
+
+**The prediction named its own failure.** `prediction.md`: *"the thing most likely to be wrong is a
+regression among the other 93 chart-bearing documents … I predict 0 and I expect that to be the
+prediction that fails"*, with an accepted band of −2 to +1. Measured −2 on our side.
+
+**Four blind readers, and the instrument split them the right way.** Two on `003` now report the
+four in-pie labels as *identical* where round 61's reader called `M3` "placed completely
+differently". One ranked a chart-frame difference first at high confidence and was **refuted** —
+the two rectangles agree to 0.4 pt; the reader who flagged the same observation *low-to-medium and
+named the crop as the likely cause* was right. And round 61's attribution of `M1`'s truncation to
+the A4 MediaBox is **refuted by a column profile**: the reference's ink stops at **516.24 pt**, not
+595.
+
+**The `#D9D9D9` chart-area border is now four readers, two rounds, three documents**, with
+`pdf-ops.py` at 3-against-0 and 1-against-0.
+
+**Next**: the axis-label arrangement — rotation before thinning — which is what cost the two
+verdicts and which a reader gave the direction on at high confidence (twelve rotated against our
+six horizontal); then `023`'s nine undrawn bars; then the chart border; then the data-label colour.

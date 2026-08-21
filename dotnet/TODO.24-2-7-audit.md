@@ -94,6 +94,35 @@ The claim held: the division is integer, the washout branch tests the integer fo
 −70, and C#'s truncation toward zero matches C++'s on the negative contrast without a second arm.
 **`Paperless.Ooxml` is now one of one re-checked.**
 
+## The next site, named with the command rather than from prose — round 62 (sheets)
+
+Round 62 ran **no** re-check: its budget went to the chart advance-width law and two whole-track
+sweeps, and the audit's own rule is that a site cannot be trusted either way until a probe is
+pointed at it — so saying "none this round" is the honest entry rather than a hurried one.
+
+What it did do is name the next site *from the file* and not from a write-up, which is the failure
+this list records twice already. `git grep -n '24\.2\.7' -- 'dotnet/src/Paperless.Core/**/*.cs'
+| grep -v '24\.2\.7-audit'` gives exactly two hits, both in
+**`Paperless.Core/Graphics/GlyphRun.cs`** at :347 and :369, and they are **not** the claim round 61
+verified. Round 61 settled `Paperless.Ooxml/DrawingML/DrawingFill.cs`'s reading of `a:lum` as a
+*whole per cent* — the truncation and the exact ±70 test. `GlyphRun.cs` states three further claims
+about what is then *done* with the pair, and only the first overlaps:
+
+1. 70/−70 is thrown away and replaced by `ColorMode_WATERMARK`'s fixed **+50 luminance, −70
+   contrast** — round 61's five fixtures bear on this and do not settle it: `70/−70` and `71/−71`
+   render at mean channel 251.842/248.718 and 251.117/247.268, which separates them but does not by
+   itself show the *fixed* offsets;
+2. both non-zero otherwise goes through `Bitmap::Adjust`'s `msoBrightness` branch, half the
+   brightness before the contrast and half after;
+3. one alone goes through `BColorModifier_RGBLuminanceContrast`, whole brightness after.
+
+Claims 2 and 3 are two different arithmetics on the same inputs, so **one fixture set separates
+them outright**: brightness alone, contrast alone, and both together, compared against the two
+formulas' predicted mean channel. `probes/sheets-r61/audit_lumpercent.py` already authors the
+packages and reads the reference's mean channel, so the re-check is that generator plus two
+formulas. `Paperless.Rendering/Images/RasterImageDecoder.cs`:239 is the same `Bitmap::Adjust`
+branch seen from the decoder's side and should be re-checked in the same run.
+
 ## A named next site that was not one — round 60 (sheets)
 
 Round 59 named **`Paperless.Core/Graphics/GlyphRun.cs`** as the next site to re-check, "precisely
@@ -179,6 +208,17 @@ sites gives **23** files, not 26.
 paragraph below said `12` markers. Re-derived at commit `e11ee5ac386` with the commands this file
 itself gives: **42 open, 13 marked**. A figure quoted rather than re-derived decays — the same
 lesson this file records about round 53's "73 of 337", arriving again in the file that records it.
+
+**Re-derived at round 62's base `337bc9fe17c`** (the merge of slides r60, sheets r61 and words
+r61), with this file's own commands: **37 open hits in 26 files**, and **31 marker lines — 26
+`VERIFIED`, 4 `FIXED`, 1 `WRONG`, 0 `UNDECIDED`**. Round 61 recorded 26 marker lines (21/4/1) and
+that figure **does not reproduce here**: it was derived at that round's own pre-merge base, and the
+slides and words branches merged beside it carried five more marker lines in. The open count is
+unchanged at 37/26, which is why the discrepancy is in the marker column alone. *This is the fifth
+time a number in this file has failed to reproduce, and every one of them was a number that was
+quoted rather than computed — including this replacement, which is only worth anything until the
+next merge.* Per project, open hits: WordProcessing 11, Spreadsheets 9, Presentations 8, Text 5,
+Core 2, Rendering 1, Ooxml 1.
 
 Marked so far, re-derived at round 57's tree with the commands below: **19** marker lines —
 **16 `VERIFIED`, 2 `FIXED`, 1 `WRONG`, 0 `UNDECIDED`**. At round 57's base the same commands give
