@@ -562,10 +562,25 @@ public static partial class SlideTextLayout
 
         // The marker shrinks with the text it labels: the fit scales the whole outliner, and a
         // bullet left at its authored size on a node scaled to a third overwhelms its own line.
-        Length runSize = scaling.Scaled(first.Size);
-        Length size = marker.Scale is > 0 and not 1.0
-            ? Length.FromEmu((long)Math.Round(runSize.Emu * marker.Scale))
-            : runSize;
+        //
+        // But it does NOT take the run's rounding. A run's size goes through
+        // Outliner::setRoundFontSizeToPt, which rounds the scaled height to a whole point twice;
+        // the bullet is sized by Outliner::ImpCalcBulletFont, which the fit never reaches:
+        //
+        //     double fFontScaleY = pFmt->GetBulletRelSize() / 100.0 * getScalingParameters().fFontY;
+        //     double fScaledLineHeight = aStdFont.GetFontSize().Height() * fFontScaleY;
+        //     aBulletFont.SetFontSize(Size(0, basegfx::fround(fScaledLineHeight)));
+        //
+        // (editeng/source/outliner/outliner.cxx:851-855.) One multiplication, one fround, and it
+        // is taken on the item's own height in hundredths of a millimetre -- so a fitted bullet
+        // is not a whole number of points where its text is.
+        //
+        // Measured on `slides/done-006/ppt/Lepore.ppt` page 2, whose body states 24 pt and whose
+        // fit answers 0.850: the reference draws the TEXT at 20.013 pt -- round(24 x 0.85) = 20 --
+        // and the six BULLETS on the same page at 20.409, which is 847 x 0.85 = 719.95 -> 720
+        // hundredths of a millimetre, 24 x 0.85 unrounded. Two sizes on one page, from one stated
+        // size, and the pair is what identifies the rule.
+        Length size = ScaledMarker(scaling, first.Size, marker.Scale);
 
         ShapedText shaped = TextShaper.Default.Shape(face, text, default);
         return shaped.Glyphs.Count == 0
