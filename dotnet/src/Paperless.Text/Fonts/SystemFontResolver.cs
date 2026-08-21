@@ -624,6 +624,15 @@ public sealed class SystemFontResolver : IFontResolver, IGlyphFallbackResolver
             : (faceKey[..hash], index);
     }
 
+    /// <remarks>
+    /// <c>SyntheticOblique</c> is the whole of <c>LogicalFontInstance::NeedsArtificialItalic()</c>
+    /// — <em>italic was asked for and the face that answered has none</em> — and it belongs here
+    /// rather than at a call site because this is the one place that holds both halves at once.
+    /// Every other constructor of a <see cref="FontReference"/> in this file either has no request
+    /// to compare against (<see cref="ReferenceFor"/>, a reverse lookup from a face) or is
+    /// asserting the request onto the answer (the embedded-face arm, where the document supplied
+    /// the face and its own declaration is all there is), and neither can decide this.
+    /// </remarks>
     private static FontReference Reference(FontRequest request, InstalledFace face, string requested)
         => new()
         {
@@ -631,6 +640,7 @@ public sealed class SystemFontResolver : IFontResolver, IGlyphFallbackResolver
             RequestedFamily = requested,
             Weight = face.Weight,
             IsItalic = face.IsItalic,
+            SyntheticOblique = request.IsItalic && !face.IsItalic,
             FaceKey = face.FaceKey,
         };
 

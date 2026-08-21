@@ -15893,3 +15893,140 @@ The round's first ten tests all drove the reader directly, so **blanking its cal
 them**. The wiring test exists because that mutation came back clean. This is the third distinct
 shape of "a test that passes without reaching the defect" found in four rounds — after the unbound
 namespace and the single-run fixture.
+
+## Round 55 — slides — the brief's largest number was its own instrument, and the defect underneath it is project-wide
+
+**199 → 199 of 302, 0 page counts moved, 0 manifest disagreements.** `abs_ink` 1147.14 →
+**1136.53**, major pages 402 → **395**, `tf-agreement` 0.77054 → 0.77061.
+
+The largest of the eight ink regressions is **not one**: `Sylva introduction session.pptx` goes
+2.99 → 3.26 on unsigned ink while its **differing pixels fall 50.97 → 48.81** and its turn count
+goes from *34 blocks the reference does not turn* to **0, the reference's own figure**. By
+differing pixels only one document worsens by more than a quarter point:
+`ws_prod…M.017-(French)-France.ppt`, +1.04 on a deck already at 738.13.
+
+**And the headline number of this round is not in that table.** Summed differing-pixel percentage
+over the track's 4530 pages: **19823.86 → 19731.15, −92.71**, 46 documents moved, 38 better,
+8 worse. The synthetic-oblique fix alone is worth **−1.92 `abs_ink`** and **−76.89 differing
+pixels** over the same pages, because a leaning glyph and an upright one cover nearly the same
+area. Third round running in which the ink column is the wrong instrument for what shipped.
+
+### The brief's item 1 — "197 pages where the reference rotates and we do not" — is 43 + 157
+
+`rotated-text-census.py` calls a matrix rotated whenever `b` **or** `c` is non-zero. A
+synthetic-oblique text matrix is `[1 0 tan(θ) 1]` — `b` zero, `c` not — so **every fake-italic run
+counted as rotated.** Round 54 fixed one artefact in that instrument and left a second in place.
+
+The document that gives it away is the census's own **number two**:
+`section_1_our_rights_presentation.pptx`, 81 "rotated" blocks over 11 pages, of which the reference
+turns **zero** — all 81 read `c = 0.3462535606`. A scan of every text matrix in all 302 reference
+renderings finds **exactly one** non-zero shear value, repeated 587 times.
+
+Split properly: the reference **turns** 1318 blocks to our 1097 (43 pages we miss) and **shears**
+587 to our **0** (157 pages). And the shear is not a slides defect:
+
+| track | reference sheared **glyphs** | ours | pages | documents |
+|---|---:|---:|---:|---:|
+| slides | 16 008 | **0** | 157 | 44 |
+| **words** | **154 501** | **0** | **759** | 55 |
+| sheets | 15 497 | **0** | 106 | 10 |
+
+**186 006 glyphs over 1022 pages in 109 documents, and we drew none of them.** That is the largest
+single measured rendering defect the project has found.
+
+### Two instruments, both of which had to be replaced to get the number right
+
+`turn-census.py` separates turns from shears. Then `shear-chars.py` had to replace *it*, because
+counting text **blocks** is not comparable between the stacks — LibreOffice writes one `BT … ET`
+per text object with a `Tm` per run inside, we write one per glyph run, so a paragraph of three
+italic runs is one block there and three here. The block reading after the fix says we over-shear
+by 20%; the **glyph** reading says 16 740 to 16 008 and puts 1057 of that surplus in three named
+documents. The round nearly shipped "we over-shear" as a finding.
+
+### The rule, and a fixture built to discriminate
+
+`NeedsArtificialItalic()` is *the request is italic and the resolved face is not*, and
+`ARTIFICIAL_ITALIC_SKEW` is `float((1<<16)/3)/(1<<16)` handed to `Matrix3::skew`, **which takes it
+as an angle** — so the page gets `tan(0.3333333432674408) = 0.3462535606` and a shear of exactly
+one third would be wrong in the fourth decimal.
+
+Round 54's rule was taken seriously: the deck is authored by hand, and its columns give three
+candidate rules three different answers. **15 of 15 for "the face has no italic"**; refuted that
+the answer follows the *stated* family (`Verdana` substitutes onto DejaVu Sans and takes DejaVu
+Sans's answer) and that real italics lean too (Liberation Sans and Serif do not). The roman and
+italic halves carry the **same `TJ` array and the same pen origin**, so nothing reflows.
+
+### `a:bodyPr/@vert`, and the insets that travel with it
+
+−8.69 `abs_ink` and major 402 → 395 on six documents. `NAS-Infrastructure-Roadmaps-v16.0.pptx`
+turns **111 → 393 blocks** against the reference's 403, pages missing a turn **32 → 0**,
+159.88 → 151.76 with major 55 → 49.
+
+**`vert` and `eaVert` are one rendering** — different importer paths, 165 identical glyph matrices
+at identical positions. **The insets rotate with the turn**, which is not neutral on a body that
+states nothing: the DrawingML defaults come out 0.05 inch across and 0.1 inch down. The mapping
+derived from the C++ was **wrong by two slots** and an asymmetric 10/20/30/40 pt fixture corrected
+it. `mongolianVert` and `wordArtVert` are deliberately not turns and that too was measured.
+
+### The prediction failed a third time, and in a new way
+
+Documents moved: predicted 40–52, measured 32. Round 53 over-shot by extrapolating *candidates*,
+round 54 under-shot by censusing *visible symptoms*, and this round over-shot by censusing **the
+reference's own output** — the most direct census available. It was **right about the documents
+and wrong about the column**: 46 documents carry a reference shear, 27 moved on ink and 43 on
+differing pixels, because a deck with two sheared runs over thirty pages moves less ink than the
+column prints. The missing discipline is naming the *instrument* alongside the count, not a better
+census.
+
+The round's own stated control **held to the digit**: the oblique moved `tf-agreement` 0.77054 →
+0.77054 and exact-`/Tf` pages 1709 → 1709, exactly as predicted, which is what says the change did
+only what it was meant to.
+
+### The audit sprang its own trap for the second round running
+
+`OdpSlideLayout.cs:302` — **WRONG on 26.2.4.2, reported and not fixed.** The rule is no longer
+fixed at all: the reference obeys `style:font-independent-line-spacing` as stated, one em when
+true and the face's own 0.903 em when absent. **And the method is the finding**: `--convert-to
+odp` writes that attribute onto every cell it emits, so one rendering of a round-tripped fixture
+measures the exporter's habit and not the rule — round 54's lesson in a second form. A
+discriminating pair separates them on four sizes. Not fixed because **the slides corpus holds no
+ODF presentation at all** (251 `.pptx`, 51 `.ppt`).
+
+Open sites **42 → 40**. One of the two removed was a re-check; the other was **round 54's own
+marker prose naming the superseded version**, keeping a cleared site in the open count — the
+file's trap, sprung inside the file that documents it, one round after it was written down.
+
+### Cross-track, measured rather than argued
+
+The diff touches `Paperless.Core`, `Paperless.Text` and `Paperless.Rendering`. **Both other
+tracks were swept.** Words: **319 of 337, 0 manifest disagreements — no verdict moves**, sheared
+glyphs 0 → **158 673** against the reference's 154 501. Sheets: **272 `match` of 307**, sheared
+glyphs 0 → **15 509** against 15 497 with only **11 of 106** pages still disagreeing, and all ten
+affected documents `match` — the cleanest of the three. Of the 845 words pages with a shear on either side, we drew none
+on 759 before and **162** after. The 162 and a further 360 pages that differ by more than 2% are
+the **words track's own font-resolution divergence**, now visible for the first time because a
+wrong face and a right face both used to draw upright.
+
+Tests **4794 passed, 0 failed, 1 skipped** — and **the briefed base of 4790 does not reconcile**:
+4794 less this round's 14 new tests is 4780, with only three new test files in the diff. Re-derive
+it rather than quote it.
+
+### Slides does next
+
+1. **`.ppt` vertical text** — Escher `txflTextFlow` (0x88), 31 non-zero values in 4 documents,
+   unread. `PptSlideLayout` has no `Turned` equivalent; the OOXML half of this round built
+   everything else it needs.
+2. **Over-rotation is now the whole of the turn gap, and its biggest case is diagnosed.**
+   `Demick_JetBlue.pptx` is the track's **third-largest document — 26.10 `abs_ink`, 6 of 10 pages
+   major** — and its 76 turned blocks are **68 at 45° and 8 at 90°**. The eight match the
+   reference's eight exactly; the sixty-eight are a **chart's category axis** that the reference
+   **does not draw at all**: page 4 writes 52 `BT` to its 31 and extracts **163 words to its 79**,
+   one date fragment per rotated block. `SlideChart`'s axis-label placement, not `@vert`.
+   `8_P-Pavese_AIRBUS` 21 to 1 and `171128IPAP` 45 to 70 are next to classify. `Sylva` went
+   **34-to-0 → 0-to-0** as a side effect of `@vert` and `@rot` cancelling on one body.
+3. **The font-resolution divergence the shear exposed** — `2014BSA_Sunday_Killion` shears 948
+   glyphs where the reference shears none, and 360 words pages disagree by more than 2%. Same face
+   *lists* on both sides; the divergence is per-run.
+4. The fitted bullet's vertical placement (1.9 pt high, `ALIGN_BOTTOM` / `aBulletArea.Bottom()`),
+   untouched this round.
+5. `2015-Civil-Rights-Website-training.ppt`, 30.32 → 29.64 and still second largest.

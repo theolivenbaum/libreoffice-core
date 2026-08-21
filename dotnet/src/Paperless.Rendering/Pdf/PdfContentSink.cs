@@ -315,6 +315,7 @@ internal sealed class PdfContentSink(
         double lineX = 0, lineY = 0;
         bool positioned = false;
         string resource = string.Empty;
+        bool oblique = run.Font.SyntheticOblique;
 
         int at = 0;
         while (at < run.Glyphs.Count)
@@ -327,8 +328,25 @@ internal sealed class PdfContentSink(
             // Td is relative to the previous line's origin rather than to the page, so the first
             // one in a block is absolute — which is exactly what makes a pen position readable
             // out of a content stream without tracking a matrix, on our side and on LibreOffice's.
-            _content.Append(CultureInfo.InvariantCulture,
-                $"{N(positioned ? x - lineX : x)} {N(positioned ? y - lineY : y)} Td\n");
+            //
+            // A run whose italic went unmet takes a sheared Tm instead, which is the same choice
+            // the reference makes and in the same place: `drawHorizontalGlyphs` uses Td only when
+            // the angle, the x-scale AND the skew are all zero, and a Tm otherwise
+            // (`vcl/source/pdf/pdfwriter_impl.cxx:5770-5787`). The translation is applied last
+            // there, so the pen origin is untouched by the shear and only the glyph outlines
+            // lean; writing the same matrix here reproduces that exactly. See
+            // FontReference.SyntheticOblique.
+            if (oblique)
+            {
+                _content.Append(CultureInfo.InvariantCulture,
+                    $"1 0 {N(FontReference.SyntheticObliqueShear)} 1 {N(x)} {N(y)} Tm\n");
+            }
+            else
+            {
+                _content.Append(CultureInfo.InvariantCulture,
+                    $"{N(positioned ? x - lineX : x)} {N(positioned ? y - lineY : y)} Td\n");
+            }
+
             lineX = x;
             lineY = y;
             positioned = true;

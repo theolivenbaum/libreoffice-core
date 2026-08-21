@@ -298,10 +298,35 @@ internal sealed partial class OdpSlideLayout
     /// than through the frame's graphic style, which carries nothing about the table.
     /// </para>
     /// <para>
-    /// <c>FontIndependentLineSpacing</c> is off for the same measured reason it is off on the
-    /// OOXML side: LibreOffice 24.2.7.2 draws a table cell's first baseline at the face's own
-    /// ascent, not at one em, whatever <c>tablecellcontext.cxx:61</c> sets. Leaving it on puts
-    /// every cell's text 1.7 pt low in an 18 pt face.
+    /// <b><c>FontIndependentLineSpacing</c> is off here unconditionally and that is wrong on
+    /// 26.2.4.2 for any file that states the attribute.</b> The reference obeys
+    /// <c>style:font-independent-line-spacing</c> on the cell's style as stated: <b>one em</b> of
+    /// first-line ascent when it is <c>true</c> and <b>the face's own 0.903 em</b> when it is
+    /// absent. The old note here recorded a fixed 0.907 em under the superseded binary,
+    /// "whatever <c>tablecellcontext.cxx:61</c> sets"; that is no longer the behaviour.
+    /// </para>
+    /// <para>
+    /// The fix is to read the attribute off the <c>table-cell</c> cascade and set the flag from
+    /// it, defaulting to <c>false</c> as ODF does — and it matters in practice because
+    /// LibreOffice's own ODP export writes <c>style:font-independent-line-spacing="true"</c> on
+    /// every drawing cell it emits, so an Impress-authored deck takes the one-em arm and we draw
+    /// it 1.7 pt high in an 18 pt face. <b>It was not made in round 55 because the corpus cannot
+    /// see it</b>: the slides track is 251 <c>.pptx</c> and 51 <c>.ppt</c> and holds <b>no ODF
+    /// presentation at all</b>, so the change would ship unmeasured against the one instrument
+    /// that has caught every previous mistake here.
+    /// </para>
+    /// <para>
+    /// [24.2.7-audit: WRONG 26.2.4.2, 2026-08-21, round slides-r55 — reported, not fixed; see
+    /// above for why. Measured with a <b>discriminating pair</b> rather than one fixture, which
+    /// is what the OOXML half's probe could not do: round 54's six-size cell deck was converted
+    /// to <c>.odp</c> through the reference, and the exporter writes
+    /// <c>style:font-independent-line-spacing="true"</c> onto the cell style — so the exported
+    /// file alone cannot say what the default is. Rendering it beside a byte-identical copy with
+    /// that one attribute deleted separates them on the four of six sizes the extractor can
+    /// read cleanly: <b>10.013 / 11.997 / 18.006 / 40.003</b> pt of ascent at 10 / 12 / 18 / 40 pt
+    /// with the attribute — 1.0013, 0.9998, 1.0003 and 1.0001 ems — against <b>9.020 / 10.920 /
+    /// 16.334 / 36.120</b> without, which is 0.902 to 0.910 em, the face's own. This reader draws
+    /// the second in both cases. probes/slides-r55/odp-cell-baseline.py]
     /// </para>
     /// </remarks>
     private SlideTextBody? CellBody(DrawingTableCellBox cell)
