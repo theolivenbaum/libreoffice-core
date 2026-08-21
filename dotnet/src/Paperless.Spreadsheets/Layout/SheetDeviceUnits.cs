@@ -90,7 +90,16 @@ internal static class SheetDeviceUnits
     /// after it.
     /// </para>
     /// <para>
-    /// Measured against LibreOffice 24.2.7.2 on eight probe sheets — sixteen sizes at each of seven
+    /// <strong>Re-checked against LibreOffice 26.2.4.2 on 2026-08-21 and correct.</strong> Forty-five
+    /// authored workbooks — Calibri, Liberation Sans and Times New Roman at fifteen sizes from 6 pt
+    /// to 48 pt, each drawing <c>HAMBURGEFONSTIV</c> in a column wide enough not to clip it —
+    /// reproduce the reference's drawn width at every one, the largest disagreement being 0.47 pt
+    /// on a 484.81 pt line. The residual is a constant <em>relative</em> excess of about 0.1% with
+    /// a consistent sign (ours is fractionally the wider), which is a shaping residue and not a
+    /// calibration error: a wrong round trip would show as a size-dependent break, and there is
+    /// none. <c>dotnet/probes/sheets-r53-totalsrow/audit_two.py</c> reproduces it.
+    ///
+    /// Originally measured against LibreOffice 24.2.7.2 on eight probe sheets — sixteen sizes at each of seven
     /// print scales, plus two sweeps in 0.05 pt steps — this reproduces all 178 emitted sizes
     /// exactly, and nothing simpler does. Nine point at 75% is the case that names the class: the
     /// reference draws 6.803 pt, which is 240 hundredths, and 240 is not reachable by rounding

@@ -134,6 +134,19 @@ internal static class SheetChart
         // handed over — so a null surviving to here means no weight was ever stated.
         bool bold = label.IsBold ?? false;
 
+        // A label that shows a percentage beside a category or a series name is written on two
+        // lines — Office's own separator (`chart2/source/tools/…/seriesconverter.cxx:168-172`),
+        // which `ChartDataLabel.Separator` already defaults to "\n". Shaping the whole string as
+        // one run draws the newline as a zero-width nothing and runs the two halves together, so
+        // `East` and `26%` came out as the single token `East26%` on
+        // `005_Contextures_chart_sample`. The words track fixed the identical defect in
+        // `FrameChart` and left this one deliberately; `SlideChart` still has it.
+        if (label.Rotation == 0.0 && label.Text.AsSpan().IndexOfAny('\n', '\r') >= 0)
+        {
+            Lines(sink, label, bold);
+            return;
+        }
+
         if (SheetBandText.Shape(label.Text, label.Size, label.Family, bold) is not { } run) return;
 
         Length line = SheetBandText.ChartLineHeightAt(label.Size, label.Family, bold);
@@ -197,6 +210,73 @@ internal static class SheetChart
         sink.DrawGlyphRun(
             run.At(new DocPoint(x / stretch, top + ascent)), Paint.Solid(label.Colour));
         sink.Restore();
+    }
+
+    /// <summary>
+    /// A label holding line breaks, drawn as a stack of lines about the same anchor point.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The block is as tall as its lines and each line keeps the whole label's horizontal
+    /// alignment, which is what <c>chart2</c>'s text shape does with a multi-paragraph label: a
+    /// centred label centres every line on the anchor, a left- or right-anchored one stacks them
+    /// flush to that edge, and the block's height replaces one line's in the vertical anchoring so
+    /// a <c>CentreBottom</c> two-line label still ends where it was told to.
+    /// </para>
+    /// <para>
+    /// <strong>A rotated label never reaches here</strong> — the caller's guard sends it down the
+    /// single-run path, because stacking under a rotation needs the lines offset along the rotated
+    /// normal rather than down the page and no rotated label in this corpus carries a break. The
+    /// horizontal stretch is applied exactly as the single-run path applies it, for the same
+    /// reason: it is a residual factor a glyph run's single em cannot carry.
+    /// </para>
+    /// </remarks>
+    private static void Lines(IDrawingSink sink, ChartLabel label, bool bold)
+    {
+        string[] parts = label.Text.Split(['\n', '\r'], StringSplitOptions.RemoveEmptyEntries);
+        List<BandRun> runs = [];
+        foreach (string part in parts)
+        {
+            if (SheetBandText.Shape(part, label.Size, label.Family, bold) is { } shaped)
+                runs.Add(shaped);
+        }
+
+        if (runs.Count == 0) return;
+
+        double stretch = double.IsFinite(label.Stretch) && label.Stretch > 0.0 ? label.Stretch : 1.0;
+        Length line = SheetBandText.ChartLineHeightAt(label.Size, label.Family, bold);
+        Length ascent = SheetBandText.AscentAt(label.Size, label.Family, bold);
+        Length block = line * runs.Count;
+
+        Length top = label.Anchor switch
+        {
+            ChartLabelAnchor.CentreTop => label.At.Y,
+            ChartLabelAnchor.CentreBottom => label.At.Y - block,
+            _ => label.At.Y - (block / 2),
+        };
+
+        if (stretch != 1.0)
+        {
+            sink.Save();
+            sink.Transform(AffineTransform.Scale(stretch, 1.0));
+        }
+
+        for (int at = 0; at < runs.Count; at++)
+        {
+            Length width = runs[at].Width * stretch;
+            Length x = label.Anchor switch
+            {
+                ChartLabelAnchor.RightMiddle => label.At.X - width,
+                ChartLabelAnchor.LeftMiddle => label.At.X,
+                _ => label.At.X - (width / 2),
+            };
+
+            sink.DrawGlyphRun(
+                runs[at].At(new DocPoint(stretch == 1.0 ? x : x / stretch, top + (line * at) + ascent)),
+                Paint.Solid(label.Colour));
+        }
+
+        if (stretch != 1.0) sink.Restore();
     }
 
     /// <summary>

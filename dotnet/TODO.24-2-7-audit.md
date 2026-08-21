@@ -16,6 +16,30 @@ wrong**, and both announced themselves in their own comments.
 
 ## Counting them: use `git grep`, not `grep -r` — and count the marker, not the string
 
+**So the prior on these is not "probably still fine".** One in one had been wrong, and the one
+that was wrong announced itself in its own comment.
+
+Round 53 (sheets) then re-checked **four** and found **all four still correct** — so the running
+score is **one wrong in five**, and the useful reading is not "these are fine" but *"a site cannot
+be trusted either way until a probe has been pointed at it"*. A verified site is worth as much as a
+broken one, because it is the only thing that stops the next round paying for the same probe.
+
+| project | site | round | outcome |
+|---|---|---|---|
+| `Paperless.Presentations` | `Layout/SlideAutofit.cs` (4 sites) | 52 | **WRONG** — −155.40 `abs_ink`, 11.1% of the slides track |
+| `Paperless.Spreadsheets` | `Layout/SheetFonts.cs` (2 sites) | 53 | **verified 26.2.4.2, 2026-08-21** — 30 of 30 authored column widths exact to 0.001 pt |
+| `Paperless.Spreadsheets` | `Layout/SheetGeneralWidth.cs` | 53 | **verified 26.2.4.2, 2026-08-21** — 27 of 27, every `###` threshold crossing |
+| `Paperless.Spreadsheets` | `Layout/SheetDeviceUnits.cs` | 53 | **verified 26.2.4.2, 2026-08-21** — 45 of 45 within 0.1% relative |
+
+**A trap the probe harness cost half an hour to find, before anyone else pays for it again.** A
+minimal authored `.xlsx` with no `<cellStyles>` element has its `cellXf` font **discarded entirely**
+by LibreOffice, so a font-size probe reads a constant 10 pt on the reference at every stated size
+and reports 46 of 48 cases wrong. `dotnet/probes/sheets-r53-totalsrow/audit_mkwb.py` is a fixture
+generator that is known to be read correctly by 26.2.4.2; start from it. Confirm any new fixture by
+`soffice --convert-to fods` and reading `fo:font-size` back before trusting a single measurement.
+
+## Counting them: use `git grep`, not `grep -r`
+
 ```sh
 git grep -n "24\.2\.7" -- 'dotnet/src/**/*.cs' | grep -v '24\.2\.7-audit'   # open sites
 grep  -rn "24\.2\.7" dotnet/src --include=*.cs                              # exactly DOUBLE — do not use
@@ -34,6 +58,32 @@ while it was being worked. That is why a re-checked site now carries an explicit
 [24.2.7-audit: VERIFIED  <date>, <round> — …]     the claim still holds on 26.2.4.2
 [24.2.7-audit: WRONG     <date>, <round> — …]     it does not; say whether it was fixed
 [24.2.7-audit: UNDECIDED <date>, <round> — …]     the probe could not separate it; say why
+
+## Where they are
+
+| project | sites | reaches |
+|---|---:|---|
+| `Paperless.Presentations` | 15 | slides |
+| `Paperless.WordProcessing` | 11 | words |
+| `Paperless.Spreadsheets` | 9 | sheets — **4 re-checked r53, all still correct** |
+| **`Paperless.Text`** | **4** | **all three tracks** |
+| `Paperless.Core` | 2 | all three tracks |
+| `Paperless.Rendering` | 1 | all three tracks |
+| `Paperless.Ooxml` | 1 | all three tracks |
+
+Densest files:
+
+```
+6  Paperless.Presentations/Layout/SlideTextLayout.cs
+4  Paperless.Presentations/Layout/SlideAutofit.cs        <- re-checked r52, WAS WRONG
+3  Paperless.Text/Fonts/SystemFontResolver.cs
+3  Paperless.Presentations/Ooxml/PptxSlideLayout.cs
+2  Paperless.WordProcessing/OpenDocument/OdtLayoutSource.cs
+2  Paperless.WordProcessing/Ooxml/WriterPoolSpacing.cs
+2  Paperless.WordProcessing/Ooxml/WordStyles.cs
+2  Paperless.Spreadsheets/Layout/SheetFonts.cs          <- re-checked r53, still correct
+2  Paperless.Presentations/Layout/SlideDrawing.cs
+2  Paperless.Core/Graphics/GlyphRun.cs
 ```
 
 Progress is `git grep -c '24\.2\.7-audit'`, never a count of `24.2.7`.
@@ -156,3 +206,13 @@ the site itself names **26.2.4.2** and the date — this table is the index, not
 
 **Two of the four shared-layer sites re-checked so far were wrong.** The prior on the remaining
 44 is not "probably still fine".
+
+## Still unverified in `Paperless.Spreadsheets` (5 of the 9)
+
+`Layout/SheetNotes.cs`, `Layout/SheetOptimalRowHeights.cs`, `Layout/SheetPageDecoration.cs`,
+`Layout/SheetShapeText.cs`, `Layout/SheetText.cs`, `Ooxml/XlsxNoteCaptions.cs`.
+
+**`SheetOptimalRowHeights.cs` first.** Row heights — not column widths — are the axis this project
+established for a 14-document sheets cluster after a column-width hypothesis had been refuted, and
+that site claims thirty exact reproductions against a *24.2.7.2* flat ODF round trip. If any figure
+on this track has moved with the binary, that is where it costs the most.
