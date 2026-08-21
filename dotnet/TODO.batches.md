@@ -16571,3 +16571,151 @@ counted as detectors.
    five rounds.
 5. The `.doc` and `.rtf` arms of the form checkbox — WW8's `PLCF` of field characters and RTF's
    `\*\formfield`, neither censused. "675 in 12" is exact for OOXML and a floor for the corpus.
+
+---
+
+## Merge note — round 56 words and round 57 sheets (2026-08-21)
+
+**Words 319, sheets 276, slides 200. Corpus 795 of 946 — unchanged, and both rounds predicted
+that.** Verified over all 337 words and 307 sheets documents: **zero gains, zero regressions, zero
+page counts, zero word counts on the words track.**
+
+```
+Core 337   Containers 109   Text 617   Vector 295   Rendering 153(1 skipped)   Markup 259
+OpenDocument 125   WordProcessing 1180   Spreadsheets 961   Presentations 819     = 4855
+0 failed
+```
+
+`Paperless.Text` returned an **empty result** in the ten-project run and 617 of 617 alone — the
+load artefact in a new form: not a false failure but **no output at all**. Fifth sighting, first
+time silent. A blank cell in that column must be re-run, never read as zero.
+
+### Words: the over-shear and the under-shear were one line, and the brief said they were two
+
+Round 55 left the words track shearing **158 673 glyphs against the reference's 154 501**, with
+**162 pages** where the reference sheared and we drew none. I briefed those as two problems.
+
+**Synthetic oblique did not survive the uniform-paragraph shortcut**, at any of the four readers.
+Each site writes out longhand which properties count as "varying" — highlight, underline,
+strike-through, case map — and **slant was not on the list**. For most families it did not need to
+be: an italic `Arial` resolves to `LiberationSans-Italic`, a different face, so the fold already
+breaks. **But the families with no italic installed are exactly the fallback faces** — DejaVu Sans
+and Serif ship Book and Bold here and nothing else — so an italic run that falls back resolves to
+the *same* face as its upright neighbour and is folded away. **And the same fold read the other way
+drew whole paragraphs of upright prose leaning**, because an italic paragraph mark donates its font
+to every run folded into it. One clause at each of four sites moved both directions.
+
+| | before | after | reference |
+|---|---:|---:|---:|
+| sheared glyphs (ours) | 158 673 | **153 806** | 154 501 |
+| documents we shear more of | 8 (10 991 glyphs) | **5 (916)** | |
+| documents the reference shears more of | 38 (6 819) | **39 (1 611)** | |
+| pages the reference shears and we draw none | 162 | **148** | |
+
+Seated by a **discriminating pair**: a run stating only `w:i` in a fallback family is 23 sheared
+glyphs on the reference and **0** on ours; the same run with a `w:sz` added — a property the
+predicate already tests — is 23 and **22**.
+
+### The `FORMCHECKBOX` record was wrong in both halves, and the decision that rested on it was wrong
+
+The standing record said **249 fields in 16 documents**, and that they were *deliberately not
+implemented* because the drawn square would not pin — "9.0…15.9 pt, not following
+`w:checkBox/w:size`".
+
+- The census is **675 in 12**, all `.docx`, read over every part of every package.
+- **The size pins exactly.** The portion is a square of `rInf.GetTextHeight()` on the line's own
+  ascent, and the drawn rectangle is that square deflated by a hard **25 twips a side**: 184/134,
+  276/226, 552/502, 920/870 — **a constant 50 at every size**, over seven sizes and five faces with
+  a duplicate-input control that ran first. **"9.0…15.9 pt" was a range of font sizes read as a
+  failure to pin.**
+- `w:checkBox/w:size`, which 109 of the 675 state, is **inert** on four values from 5 to 40 pt.
+
+Implemented: `FO.FCTOA.00010` **249 of 249**, `Form-SM-76A` **152 of 152**, `te.iors.00048-002`
+**48 of 48**, sides identical to 0.000 pt. **675 positions had been reserving nothing**, and the
+width is the half that moves a line. Byte reach: exactly the 12 censused documents, nothing outside.
+
+### The round's own audit probe produced an artefact and recorded it as one
+
+It reported **nine pool-spacing rows wrong**. The probe named two case variants, `heading-5` and
+`Heading-5`, which are **one file on this mount**, losing 28 of 58 conversions — **a missing file
+read as nought read as a finding.** Caught by shape rather than by luck: *"`heading 5` wrong and
+`heading 4` right" is not a rule any binary implements.* It now numbers packages and refuses to
+print unless every conversion produced output. `WriterPoolSpacing.cs` is **VERIFIED**, 27 of 28
+names right; the lower-case `body text` row is wrong and removed (0 corpus documents name a parent
+that way, 80 name `Body Text`).
+
+### Sheets: the offset was the print scale, and two ports of one formula disagreed
+
+Not a header height counted twice — that was my lead and it was wrong. **Both witnesses are scaled
+worksheets** (`fitToHeight="17"`, `scale="43"`), and `ScPrintFunc::GetDocPageSize` builds the page
+rectangle in *document twips*, so the band reaches the paper at `nHeight × zoom/100`.
+`SheetPagination.DocPageSize` had ported that arithmetic correctly since it was written;
+**`SheetPrintSetup.PrintableArea` implemented `SheetPagination`'s *comment* instead.** Two ports of
+one formula, one written from the prose of the other — a failure mode worth naming, because the
+prose was not wrong, it was just not the arithmetic.
+
+Five authored scales with a 100% control first: `ours − ref` on the first body token went
+`0.03 / 6.86 / 13.65 / 20.44 / 25.57` → **`0.03 / 0.08 / 0.02 / 0.00 / 0.03`**. Corpus medians:
+`fm-provider` p36 **18.460 → 0.006** over 550 tokens, `FY2023-AIP-grants` p1 **18.489 → 0.035** over
+2242. `FY2023-AIP-grants` now reads **51045 words, the reference's figure exactly**.
+
+### The `_advanced_excel_pie` cluster is not clipping — and I briefed it as clipping three times
+
+**Both renderers emit every glyph.** `17%` → `7%` is `pdftotext` decoding a run whose origin is off
+the MediaBox. Two measured causes instead: the reference **wraps each pie data label onto two
+lines** (17 + 3 glyphs, 11.2 pt apart), which moves a centred label 27 pt sideways; and **every
+chart run is in the wrong face** — the title is **18.01 pt Carlito Bold** against our **13.00 pt
+Liberation Sans**.
+
+### A new subsystem, censused not started
+
+**Conditional formatting: 89 of 243 xlsx-family documents carry a `cfRule` and we draw none** —
+`colorScale` 38, `expression` 34, `cellIs` 18. The FAA grey fills are `cfRule type="expression"`
+with `MID($C5,1,7)="MISSING"`, which is the **hardest** arm. `colorScale` first: 38 documents and no
+formula evaluator needed.
+
+### The baseline refuted itself, correctly
+
+The sheets round measured **277**, one above the brief. The cause is the calendar plus the case
+alias: `batch-check.sh` rendered `fse_identification_form` **twice minutes apart** and the
+**reference's** count moved 427 → 440 while ours stayed pinned at 440. Reproducible baseline 276.
+That is the date-volatility trap and the alias trap arriving together, and the round separated them.
+
+### Two reviewer reports refuted, and a pattern in them
+
+*"Ours reads `Page 24 of 18`"* — **neither string exists**; both sides read `Page 34…37 of 38`
+identically. First invented **token** on this track. And *"ours draws a border the reference does
+not"* — the reference draws **90 h / 5 v** strokes against our **44 / 4**. **Second consecutive
+round a reviewer over-reports a border on our side and points the wrong way.**
+
+Against that: on `644730BRI…doc` p2 a reviewer reported an entire lead paragraph slanted on our side
+and upright on the reference's — **that reading is what turned the words round's hypothesis into the
+right one before the mechanism was understood.** Vision is still where the leads come from; it is
+confirmation it cannot supply.
+
+### The audit file no longer keeps a snapshot
+
+Three consecutive rounds re-derived its stored counts and found them wrong each time — 42 against 40
+against 39, with a per-project figure wrong alongside. **A number in that file is a number someone
+quotes instead of running the command.** Removed. Live at this commit: **39 open, 17 verified,
+2 fixed, 1 wrong.**
+
+`XlsxNoteCaptions.cs` **VERIFIED** (96 dpi exactly; the probe's first cut read "neither" at every
+step because 20 pt rows are 26.7 px and every offset saturated a clamp — **a clamp the site never
+stated and we do not implement**, recorded at 5 anchors of 365 in one document).
+`WriterPoolSpacing.cs` **VERIFIED**.
+
+### Next
+
+**Words** — synthetic oblique is lost a *second* time, on the glyph-fallback face:
+`SystemFontResolver.ReferenceFor` is a reverse lookup **with no request to compare against**, so a
+run whose glyph comes from a fallback face draws upright however italic it is. 289 of the residual
+1 611 short glyphs are in faces no document names (WenQuanYi Zen Hei 177, OpenSymbol 112). **This
+one is in `Paperless.Text` and owes a measured cross-track sweep.** Then `AFS-050-004-F2_0i`'s
+banner rows — and note the standing record's **direction is corrected: our rows are the looser
+ones**. Then `2024-12_Comlux…docx`, where the reference draws `LiberationSans-Italic` on 652 glyphs
+against our `DejaVuSans` — visible only now that both stacks no longer draw upright.
+
+**Sheets** — `colorScale` conditional formatting; the chart face (a font-resolution question before
+it is a layout one); then the pie data-label wrap, which is `Paperless.Core` and owes a corpus gate,
+and is what actually moves the four pie verdicts.

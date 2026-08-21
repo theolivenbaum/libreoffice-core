@@ -181,27 +181,12 @@ pushed the open count *up* at the moment a site was cleared — the file's own t
 file's own convention. Say "the superseded binary", or name **26.2.4.2**, and put the old version
 only inside the `[24.2.7-audit: …]` bracket if it is needed at all.
 
-Snapshot at the time of writing, for orientation only — **do not quote it**:
+**No snapshot is kept here, deliberately.** One was, and three consecutive rounds had to re-derive
+it and found it wrong each time — `42` against `40` against `39`, and a per-project figure wrong
+alongside them. A number in this file is a number someone will quote instead of running the command,
+and the whole point of the marker convention is that the command is cheap. **Run it.**
 
-| project | open hits |
-|---|---:|
-| `Paperless.WordProcessing` | 11 |
-| `Paperless.Spreadsheets` | 10 |
-| `Paperless.Presentations` | 9 |
-| `Paperless.Text` | 6 |
-| `Paperless.Core` | 2 |
-| `Paperless.Rendering` | 1 |
-| `Paperless.Ooxml` | 1 |
-
-Total open **40**, marked **15** (13 verified, 2 wrong) — computed with the commands above on
-2026-08-21 at the end of round 55, and **not maintained**: run them.
-
-Two of the two the round removed are worth naming, because only one of them was a re-check.
-`OdpSlideLayout.cs:302` was re-checked and marked. The other was **round 54's own marker at
-`PptxSlideLayout.cs:763`, whose prose named the superseded version** and so kept a cleared site
-in the open count — the trap this file describes, still live in the file it was described in.
-Rewriting one clause to say "the superseded binary" cleared it. **A rule written down is not a
-rule applied**; the count is the only thing that notices.
+If you want a figure for a report, run the command and date it in the report, not here.
 
 ## Outcomes so far — **one** site wrong, of every one re-checked
 
