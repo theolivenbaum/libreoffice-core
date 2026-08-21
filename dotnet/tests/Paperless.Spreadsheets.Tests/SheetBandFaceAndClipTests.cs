@@ -55,6 +55,9 @@ namespace Paperless.Spreadsheets.Tests;
 /// <item><c>Areas</c>, a 7.2 pt band: <c>KEEPLEFT</c>'s ink box tops out at
 /// <strong>21.576</strong> pt against a band top of 21.60, and <c>DROPRIGHT</c> is nowhere in the
 /// document.</item>
+/// <item><c>Sliver</c> and <c>Slice</c>, one 14 pt line in a <strong>2.0 pt</strong> and a
+/// <strong>4.0 pt</strong> band: the reference draws <c>WIDEBAND</c> and not <c>THINBAND</c>,
+/// which is the pair that pins where a line's ink begins.</item>
 /// <item><c>Face</c>, a roomy footer: <c>FACECODE</c> at x 50.400 in
 /// <c>LiberationMono</c>, <c>PLAINFACE</c> at 267.500 in <c>LiberationSerif</c>, and
 /// <c>BIGFACE</c> at 458.900 spanning 27 pt of height for its <c>&amp;24</c>. The reference's PDF
@@ -148,6 +151,27 @@ public sealed class SheetBandFaceAndClipTests
         setup.BandFont.ShouldNotBeNull();
         setup.BandFont.Size.Points.ShouldBe(14.0, 0.001);
         setup.BandFont.Family.ShouldBe("Times New Roman");
+    }
+
+    [Fact]
+    public void ABandNarrowerThanTheDistanceToTheInkDrawsNothing()
+    {
+        // `Sliver`: a 2.0 pt band with one 14 pt line, whose ink starts about 2.9 pt below the
+        // line's top. The reference's page 3 holds no `THINBAND`.
+        //
+        // **This is the pair that pins what "ink" means**, and neither half does it alone.
+        // Taking the line box's top instead would draw this one; taking the whole line height
+        // would drop `WIDEBAND` as well.
+        Runs().Select(run => run.Text).ShouldNotContain("THINBAND");
+    }
+
+    [Fact]
+    public void ABandWiderThanThatDistanceDrawsEverything()
+    {
+        // `Slice`: the same line in a 4.0 pt band, which the reference draws with its ink box
+        // topping out at 21.576 against a band top of 21.60 — hard against it, because a band
+        // this short centres nothing.
+        Run("WIDEBAND").Origin.Y.Points.ShouldBeInRange(33.0, 35.5);
     }
 
     [Fact]

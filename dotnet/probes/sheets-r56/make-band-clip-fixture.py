@@ -37,6 +37,18 @@ SHEETS = [
      dict(top=0.75, bottom=0.80, header=0.30, footer=0.30),
      None,
      '&L&"Courier New"FACECODE&CPLAINFACE&R&24BIGFACE'),
+    # The two that decide *where* a line's ink starts, and they are a pair on purpose. 14 pt
+    # Times New Roman puts its ink about 2.9 pt below the line's top, so a 2.0 pt band draws
+    # nothing and a 4.0 pt band draws everything. A rule that took the line box's top instead of
+    # the ink's would draw both; a rule that took the whole line height would draw neither.
+    ("Sliver",
+     dict(top=0.32778, bottom=0.75, header=0.30, footer=0.30),
+     "&CTHINBAND",
+     None),
+    ("Slice",
+     dict(top=0.35556, bottom=0.75, header=0.30, footer=0.30),
+     "&CWIDEBAND",
+     None),
 ]
 
 
