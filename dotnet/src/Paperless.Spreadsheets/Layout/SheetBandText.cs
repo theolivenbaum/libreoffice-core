@@ -258,6 +258,12 @@ internal static class SheetBandText
     /// <inheritdoc cref="ChartAscentAt(Length)"/>
     /// <param name="size">The em size.</param>
     /// <param name="family">The family name, or null for the furniture's own face.</param>
+    public static Length ChartAscentAt(Length size, string? family)
+        => ChartAscentAt(size, family, bold: false);
+
+    /// <inheritdoc cref="ChartAscentAt(Length)"/>
+    /// <param name="size">The em size.</param>
+    /// <param name="family">The family name, or null for the furniture's own face.</param>
     /// <param name="bold">Whether the family's bold face is wanted.</param>
     public static Length ChartAscentAt(Length size, string? family, bool bold)
         => FaceFor(family, bold).Metrics is { } metrics
