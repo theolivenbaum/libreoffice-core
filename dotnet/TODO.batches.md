@@ -16136,3 +16136,142 @@ marked 15 (13 verified, 2 wrong).
    where the reference shears none; same face *lists*, per-run divergence. **Invisible until now
    because a wrong face and a right face both drew upright.**
 4. The fitted bullet's vertical placement (1.9 pt high), untouched.
+
+## Round 56 — words — the over-shear and the under-shear were the same line of code
+
+`dotnet/probes/words-r56/` — `prediction.md` (`3c9619f3bd1`) and `prediction-checkbox.md`
+(`c7325332de9`), each committed before the change it covers and before any post-change rendering.
+Baseline reproduced exactly: **319 of 337, zero disagreements with `MANIFEST.tsv` document for
+document.** After both changes: **319 of 337, zero verdicts moved, zero page counts, zero word
+counts, zero font lists** — over the whole track, `done-*` included, swept three times.
+
+**The whole diff is confined to `Paperless.WordProcessing`.** No shared layer is touched, so slides
+and sheets cannot be reached and no cross-track sweep is owed.
+
+### Synthetic oblique did not survive the uniform-paragraph shortcut, at any of the four readers
+
+Every word-processing reader folds a paragraph whose formatting does not *vary* into a single run,
+and each of the four sites writes the list of properties that count out longhand — highlight,
+underline, strike-through and case map each with a sentence saying why it is there. Slant was not on
+it, and **for nearly every family it did not need to be**: an italic run of `Arial` resolves to
+`LiberationSans-Italic`, a different `OpenTypeFace`, so `face != paragraphFace` already fires. The
+families with **no italic installed at all** are exactly the fallback faces — DejaVu Sans and DejaVu
+Serif ship Book and Bold and nothing else here — so an italic run that falls back resolves to the
+*same* face as its upright neighbour and is drawn upright.
+
+**And the same fold read the other way drew whole paragraphs of upright prose leaning**, because an
+italic paragraph mark donates its own font to every run folded into it. **The brief posed the
+over-shear and the under-shear as two problems. They are one line of code**, and one clause at each
+of four sites moved both:
+
+| | baseline | after |
+|---|---:|---:|
+| sheared glyphs, ours (reference 154 501) | 158 673 | **153 806** |
+| documents the reference shears more of | 38 (6 819 glyphs) | **39 (1 611)** |
+| documents **we** shear more of | 8 (10 991 glyphs) | **5 (916)** |
+| documents where we shear none and it shears some | 15 | **11** |
+| pages where the reference shears and we draw none | 162 | **148** |
+| pages that agree outright | 4 382 | **4 394** |
+
+`644730BRI…doc` 6 643 → **2 124** against 2 171; `SPA-02_mcar` 58 011 → **54 175** against 54 694;
+`EHEST-SMS` 8 470 → **13 629** against 13 473; `review-welsh…mandelson` 0 → **105** against 105.
+
+Seated by a **discriminating pair**, ten authored one-paragraph two-run packages: a run stating only
+`w:i` in a fallback family is 23 sheared glyphs on the reference and **0** on ours; the same run with
+a `w:sz` added — a property the predicate already tests — is 23 and **22**. The two differ by one
+thing and no reading of `w:i` predicts it. Five negative controls are nought on both sides
+throughout, including `w:iCs`, which **does not lean Latin text on 26.2.4.2** and was a live
+candidate for the over-shear.
+
+### The prediction missed seven columns and was right about the two it staked its reasoning on
+
+Verdict movement 0 ✓ and page counts 0 ✓ — and the page-count zero was the *stated control*, because
+`FormattedRun` does not carry the font reference, so `PageContent.Coalesce` rejoins a paragraph split
+only by this into exactly the shaping it had. Everything else missed, **in the direction the
+prediction had written down as the thing it could not see**: blind spot 2 said it *"cannot rule out
+that this fix makes the over-shear worse"*, and the fix cured it. **Predicting a band for a defect
+while modelling only half of it produces a confident band that misses on both edges.**
+
+### The legacy `FORMCHECKBOX`: the record's premise was false and the fix shipped
+
+Since round 38: *"249 fields across 16 documents — deliberately not implemented: the drawn square's
+size would not pin (9.0…15.9 pt, not following `w:checkBox/w:size`)"*. **Both halves are wrong.**
+
+The census is **675 boxes in 12 documents**, all `.docx`, read over every part of every package. And
+the size pins exactly: the portion is a square of `rInf.GetTextHeight()` with the line's own ascent
+(`portxt.cxx`:1492) and the drawn rectangle is that square deflated by a hard **25 twips a side**
+(`inftxt.cxx`:1247), crossed corner to corner when ticked. **9.0…15.9 pt was a range of font sizes
+read as a failure to pin.** Measured on seven sizes and five faces with a duplicate-input control
+that ran first: 184/134, 276/226, 552/502, 920/870 twips — a constant 50 at every size — and the
+square changes with the *face* at one stated size. Four fixtures stating `w:size` of 5 to 40 pt all
+draw the run's own 11.300; **`w:size` is inert**, and 109 of the 675 state one.
+
+**The width is the half that moves a line**: 675 positions were reserving nothing where the reference
+reserves the line's whole text height. Against the reference: `FO.FCTOA.00010` **249 to 249**,
+`Form-SM-76A` **152 to 152**, `te.iors.00048-002` **48 to 48**, sides identical to 0.000 pt. Byte
+reach **exactly the 12 censused documents and nothing outside them**, which is the prediction hit
+outright — and all 12 were already passing, so the change could gain nothing on the gate and lost
+nothing either.
+
+### The audit, and a probe that manufactured nine findings before it manufactured none
+
+`WriterPoolSpacing.cs` **VERIFIED 2026-08-21, round 56** — the whole table re-measured on 26.2.4.2,
+28 names, both halves of every row, two controls first. **27 of 28 agree**; lower-case `body text`
+answers nought on both sides where the table claims 0/140 and is removed (zero corpus documents name
+a parent that way, 80 name `Body Text`). That row is the one the site's own prose had already put in
+doubt and left standing for whichever round re-measured the table.
+
+**The probe's first run reported nine rows wrong and every one was an artefact.** It named the two
+case variants of a heading `heading-5` and `Heading-5`, which are **one file** on this
+case-insensitive mount, so 28 of 58 conversions were silently missing — and a missing file reads as
+nought, which reads as a finding. The tell was the *shape*: `heading 5` and `heading 8` wrong,
+`heading 4` and `heading 6` right, which is not a rule any binary could implement. It now numbers its
+packages and refuses to print anything unless every conversion produced output. **Fourth instrument
+defect in three rounds on this project, and the fourth caught by the same control.**
+
+Counts re-derived, not quoted: **40 open sites in 21 files, markers 16 → 17 (14 verified, 3 wrong).**
+
+### Vision found the round's mechanism before the round did
+
+Three pages, each chosen for a stated reason, each handed to a reader forbidden from reading anything
+else. On `644730BRI…doc` page 2 the reviewer reported **an entire lead paragraph set slanted on our
+side and upright on the reference's** — which is what turned "we lose leans" into "the fold loses the
+disagreement in both directions", before the mechanism was understood. On `AFS-050-004-F2_0i` page 2
+the five undrawn banner rows are confirmed **and the standing record's direction is corrected**: our
+rows are the *looser* ones, and it is the reference that runs out of page a row earlier. On
+`FO.FCTOA.00010` page 3 the reader put the missing square at *"the cap-height of the adjacent bold
+label text"* — an independent reading of a rule this round then pinned to the twip.
+
+### Tests
+
+```
+Core 337   Containers 109   Text 617   Vector 295   Rendering 153(1 skipped)   Markup 259
+OpenDocument 125   WordProcessing 1180   Spreadsheets 940   Presentations 819     = 4834
+0 failed, 1 skipped
+```
+
+**4809 → 4834, +25**, all in `WordProcessing`. **Seven mutations, seven detected**, and all four
+reader arms individually. The fourth only became so inside the round: `verify-test.sh` first reported
+the `DocReader` site **not detected by any of the 1164 WordProcessing tests**, and it is the arm with
+the largest measured corpus effect. A `.doc` cannot be authored from a string, so the new fixture is
+LibreOffice's own Word 97 export of a flat ODF whose font face declares no generic — the one route
+that reaches the WW8 import with a real `ff = 0`. Two tests are labelled **drift guards** rather than
+counted as detectors.
+
+### Words does next
+
+1. **Synthetic oblique is lost a *second* time, on the glyph-fallback face.**
+   `SystemFontResolver.ReferenceFor` is a reverse lookup from a face with **no request to compare
+   against**, so a run whose glyph comes from a fallback face is drawn upright however italic it is.
+   289 of the residual 1 611 short glyphs are in faces no document names — WenQuanYi Zen Hei 177,
+   OpenSymbol 112 — led by `手机免提系统TSB.doc` 82 and `A320SimNotes.doc` 75. **In `Paperless.Text`;
+   owes a measured cross-track sweep.**
+2. `AFS-050-004-F2_0i` page 2's five banner rows — extract our text layer for `0.000 General
+   Information…` and `CE-1 …` and separate present-but-unpainted from never-read.
+3. `2024-12_Comlux…docx`: the reference draws `LiberationSans-Italic` on 652 glyphs where we draw
+   `DejaVuSans`. Same face *count*, different face — visible only because both stacks no longer draw
+   upright.
+4. The `ascii` slot fallback (four documents), then `097`'s 1.7 pt line-height deficit, untouched for
+   five rounds.
+5. The `.doc` and `.rtf` arms of the form checkbox — WW8's `PLCF` of field characters and RTF's
+   `\*\formfield`, neither censused. "675 in 12" is exact for OOXML and a floor for the corpus.
