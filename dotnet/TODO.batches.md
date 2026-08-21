@@ -17044,3 +17044,85 @@ The list label's slant, then the automatic font colour, then the fallback *order
 round's own `sym-italic` probe is a second, authored witness for the ordering question: the
 reference draws ☒ and ➢ from **DejaVu Sans** where we draw them from **OpenSymbol**, though
 LibreOffice's own list has `opensymbol` before `dejavusans`.
+
+---
+
+## Merge note — round 58, words (2026-08-21)
+
+**Words 319, slides 200→199 unchanged by this round, sheets 276. Corpus 794 of 946 — no movement
+in either direction, on any track, which the round predicted.** Gated over all 946 documents
+because the primary change is in `Paperless.Text`.
+
+```
+Core 337   Containers 109   Text 624   Vector 298   Rendering 153(1 skipped)   Markup 259
+OpenDocument 125   WordProcessing 1188   Spreadsheets 980   Presentations 836     = 4909
+0 failed
+```
+
+### The rule came out clean, and the discriminator could have refused it
+
+`SystemFontResolver.ReferenceFor` is a **reverse lookup from a face with no request to compare
+against**, so every glyph-fallback face was drawn upright however italic the run. 41 authored
+two-run packages over **six filters** — `.docx`, `.fodt`, `.fodp`, `.fods`, `.pptx`, `.xlsx` — with
+**format deliberately varied**, because round 53's error on this same file was holding format fixed
+without noticing it was the variable. The answer is identical in all six.
+
+**The discriminator was built to be able to say no.** Hebrew from an italic *Carlito* run is covered
+by DejaVu Sans (no italic) and by Liberation Sans (italic installed). Had 26.2.4.2 preferred the
+italic-bearing family, setting a synthetic lean would be wrong. It draws **DejaVu Sans, sheared** —
+fallback order wins over slant, so the face was already right and only the lean was missing.
+41 of 41 rows agree glyph for glyph after.
+
+### The census was wrong, and its shape is the result
+
+Predicted 190–210 words leans and 340–350 slides leans; measured **42** and **4**.
+`fallbackfaces.py` **summed** WQY + OpenSymbol + IPA Gothic per document. Per *face*: words
+**206 reachable / 83 unreachable**, slides **0 reachable / 341 unreachable**, sheets 4 / 0.
+`outlook_of_nigerian_pension_sector.ppt` draws **355 WQY glyphs on the reference and none at all on
+ours** — a fallback-**order** divergence no slant fix can reach, which a summing census read as a
+lean defect and predicted 345 glyphs where the answer was nought. The round's own blind spot 2 named
+that shape for words and it did not apply it to slides.
+
+**And of the 206 reachable, 42 moved.** The 164 that did not are, to the glyph, the OpenSymbol
+column (112, ten documents) plus 52 WQY — single `<01>` draws one per line at x≈104.5: **list
+bullets**, which reach the page through `PageDrawing`'s label branch and never through `ByFace`.
+
+### A shared-layer audit site was wrong, and it is fixed
+
+`Paperless.Text/Layout/LineBreaker.cs:473` said LibreOffice never lets a hyphen open a number, and
+that "dropping HY is the whole of the rule". **Three of its own five worked examples are false on
+26.2.4.2**, the code implemented the false version, **and a test asserted it.** Ten authored
+packages with **no width tuning** (each token longer than its line, so *where* it breaks decides) and
+two controls: `E-2222`, `$-2222`, `abc-22`, `-22222` do **not** break after the hyphen; `A -222`
+breaks at the *space*; only `10-`, `5-`, `222-abc` break. **One rule: a hyphen opens a number unless
+a digit precedes it.** The i#83229 case is the exception, not the instance. 7 of 10 before, **10 of
+10 after**; measured separately on all three tracks at zero verdict movement, with 14 of 16 moved
+word counts going **toward** the reference (`STC_WebList.xlsx` error 1102 → 46).
+
+### Refutations
+
+- **`AFS-050-004-F2_0i` p2 is neither "unpainted" nor "never read"** — my brief offered both. Both
+  strings are in our text layer at the reference's positions and we draw all five banner rectangles
+  to a twip. **The reference draws 305 glyphs `1 1 1 rg` there and we draw none — white on black.**
+  The rule is pinned over 22 fills: white when `Color::IsDark()` = `GetWCAGLuminance() <= 87`,
+  **confirmed to the single sRGB step** (grey `0x9E` white, `0x9F` black) and on all seven primaries.
+  Not implemented: it needs *the background behind a run* at the drawing pass, which the table
+  renderer owns.
+- **The list label's slant**: the level's `w:rPr` leans the bullet and the paragraph mark's leans it;
+  **a run's does not.** We lean it in none of the three.
+- **`FORMCHECKBOX` is no longer a floor — 778 in 16.** The `.doc` arm is 103 in 4, by two independent
+  instruments agreeing to the digit. **The `.rtf` arm needs no probe: the words corpus holds no
+  `.rtf` at all** (271 `.docx`, 66 `.doc`).
+- **`batch-check.sh`'s `TOTAL` moved with nothing moving** — slides 311 → 315, sheets 325 → 363.
+  Every extra row is an alias of a document already counted, and **which aliases a glob enumerates is
+  not stable between runs on this mount.** Scored against `MANIFEST.tsv`, every sweep gives
+  337/302/307 with exactly one row each.
+
+### The round ran no vision, and said so
+
+Its item 2 was settled by a text-layer extraction instead, which is the right instrument for
+"present but unpainted versus never read" — and it is what produced the white-on-black finding. **The
+round stating that plainly is the behaviour wanted**; three earlier rounds committed no vision
+section and did not say why. `briefs-r50/COMMON.md` now requires the vision section in `results.md`,
+with the page, the reason it was chosen, the direction reported, and what a second instrument said —
+or the sentence saying none was run and why.
