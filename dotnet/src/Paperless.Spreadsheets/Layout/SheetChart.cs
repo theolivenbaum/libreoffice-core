@@ -2,6 +2,7 @@ using Paperless.Core.Charts;
 using Paperless.Core.Geometry;
 using Paperless.Core.Graphics;
 using Paperless.Core.Units;
+using Paperless.Text.Fonts;
 
 namespace Paperless.Spreadsheets.Layout;
 
@@ -147,7 +148,8 @@ internal static class SheetChart
             return;
         }
 
-        if (SheetBandText.Shape(label.Text, label.Size, label.Family, bold) is not { } run) return;
+        if (SheetBandText.ChartShape(label.Text, label.Size, label.Family, bold) is not { } run)
+            return;
 
         Length line = SheetBandText.ChartLineHeightAt(label.Size, label.Family, bold);
         Length ascent = SheetBandText.ChartAscentAt(label.Size, label.Family, bold);
@@ -237,7 +239,7 @@ internal static class SheetChart
         List<BandRun> runs = [];
         foreach (string part in parts)
         {
-            if (SheetBandText.Shape(part, label.Size, label.Family, bold) is { } shaped)
+            if (SheetBandText.ChartShape(part, label.Size, label.Family, bold) is { } shaped)
                 runs.Add(shaped);
         }
 
@@ -336,7 +338,17 @@ internal static class SheetChart
             return text.Length == 0
                 ? new DocSize(Length.Zero, height)
                 : new DocSize(
-                    SheetBandText.Shape(text, size, family, bold)?.Width ?? Length.Zero, height);
+                    SheetBandText.ChartShape(text, size, family, bold)?.Width ?? Length.Zero,
+                    height);
         }
+
+        /// <inheritdoc cref="IChartTextMeasurer.AdvanceScale"/>
+        /// <remarks>
+        /// This is the one consumer whose ruler moved: <see cref="SheetBandText.ChartShape"/>
+        /// measures on <c>chart2</c>'s 96 dpi device, where the em is a whole number of pixels.
+        /// See the interface's remarks for why a fitted limit has to be told about it.
+        /// </remarks>
+        /// <param name="size">The em size the limit is being applied at.</param>
+        public double AdvanceScale(Length size) => MetricGrid.Chart.PixelEmScale(size);
     }
 }

@@ -410,6 +410,57 @@ public readonly record struct MetricGrid(
     }
 
     /// <summary>
+    /// How much narrower — or wider — every advance comes out because the device can only set the
+    /// em at a whole number of pixels.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>round(size × dpi / 72) / (size × dpi / 72)</c>. At 10 pt on a 96 dpi device that is
+    /// <b>13/13.333 = 0.975</b> and at 11 pt it is <b>15/14.667 = 1.023</b>, so the correction is a
+    /// <b>sawtooth in the size</b> and not a constant narrowing — which is the half of it that any
+    /// "charts measure narrow" rule gets wrong. At 9, 12 and 18 pt it is exactly one.
+    /// </para>
+    /// <para>
+    /// <b>Measured off 26.2.4.2 at fourteen sizes, and our renderer never ran.</b>
+    /// <c>probes/sheets-r62/probe-chartwidth.py</c> reads the drawn advance out of the reference's
+    /// own <c>TJ</c> arrays, whose per-glyph adjustments are in thousandths of the text em and are
+    /// therefore independent of the chart's scale, of the page and of the size the PDF writer
+    /// chose. The measured ratio follows this at every one of the fourteen, residual ≤0.005 and
+    /// almost always in the direction the estimator is known to be biased.
+    /// </para>
+    /// <para>
+    /// <b>The pixel count is taken from the size in points and not from the map unit, and that is a
+    /// decision rather than a shortcut.</b> Going through hundredths of a millimetre — as
+    /// <see cref="ToPixels"/> and <see cref="ToEmSize"/> do, because that is the device's own map
+    /// mode — makes 9 pt come out at 12.0189 pixels rather than 12, and so applies a 0.16%
+    /// correction at a size where the law says there is none. The probe cannot separate the two
+    /// readings: at 9, 12 and 18 pt they differ by less than the estimator's own 0.005 noise, while
+    /// the term this exists for is 2.5%. Taking the reading that leaves the exact sizes exactly
+    /// alone means a chart stating 9 pt renders byte for byte as it did before, which is a property
+    /// worth having when the alternative is unmeasurable either way.
+    /// </para>
+    /// <para>
+    /// <b>What is deliberately not here.</b> The reference also rounds <em>each glyph's</em>
+    /// advance to a whole hundredth of a millimetre: on <c>003_advanced_excel_pie</c>'s page 1
+    /// every one of the thirty <c>;</c> and twenty-two spaces carries an identical per-glyph
+    /// adjustment, which rounding the cumulative position cannot produce, and
+    /// <c>round(designUnits × ppem / upem)</c> matches 9 of 9 distinct glyphs where <c>floor</c>
+    /// fails 3. It is worth at most 0.014 pt a glyph and it is left out of the shipped rule,
+    /// because a perturbation that small moves knife-edge axis-label collision decisions in
+    /// documents where nothing else changed and this round has no measurement saying it moves them
+    /// the right way. See <c>probes/sheets-r62/results.md</c> § 6.
+    /// </para>
+    /// </remarks>
+    /// <param name="emSize">The font size the document asks for.</param>
+    public double PixelEmScale(Length emSize)
+    {
+        if (Dpi <= 0 || emSize <= Length.Zero) return 1.0;
+
+        double pixels = emSize.Points * Dpi / 72.0;
+        return pixels <= 0.0 ? 1.0 : Math.Round(pixels, MidpointRounding.AwayFromZero) / pixels;
+    }
+
+    /// <summary>
     /// An em size as the device can actually set it: rounded to whole pixels and back.
     /// </summary>
     /// <remarks>

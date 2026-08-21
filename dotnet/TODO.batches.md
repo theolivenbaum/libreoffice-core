@@ -18133,3 +18133,65 @@ Audit: `WordStyles.HasDefaultParagraphPropertiesElement` **VERIFIED** on 26.2.4.
 
 **Next on words**: the `w:tblStylePr` `w:tcPr` half; then round 59's counter-witness re-measured;
 then the tall-table guard, whose two protected documents are named and passing.
+
+
+---
+
+## Round 62 — sheets — a chart's advance width goes through the same 96 dpi device its line height already did (2026-08-21)
+
+**282 → 280.** The round's named item closed exactly and the round cost one verdict on our side,
+and both facts are load-bearing. (It read 279 before the wrap-limit units were restored — below.)
+
+**The brief's item 1 had the wrong seat.** `BestFitInner` is a faithful port; it missed `003`'s
+`M3` by **0.33 of a degree** because its *input* was 1.7 pt too wide. Round 60 put a chart's
+vertical metrics on `MetricGrid.Chart` and left the advance width on the face's unquantised
+metrics. 26.2.4.2 instantiates the em at a whole number of 96 dpi pixels — 13 for 13.333 at 10 pt,
+**15 for 14.667 at 11**, so the correction is a **sawtooth** and not a narrowing.
+
+**Read off the reference at fourteen sizes, our renderer never running**, out of its own `TJ`
+adjustments, which are in thousandths of the text em and so are scale-free. Sign and size right at
+every one, residual ≤0.005, no free parameter. All five of `003`'s label boxes now match the
+reference's drawn width to **0.03 pt** and their centres to **0.16**, and the four corpus pies are
+**word-exact** where they were two over — round 61's one miss, closed.
+
+**The cost, stated and not netted.** `046_Cost_analysis` `match` → `words` (159 → 161, ref 157),
+and its character stream is **754 characters before and after** — pure re-ordering, a tokenisation
+ceiling. A second, `fse_identification_form`, moved on the **reference's** side. `023_Waterfall`
+went `match` → `words` (881 → 843) and then **back to `match` at 872/868** once the cause was
+found; its pass at 881 was never agreement, because the reference draws its nine `Delta` category
+labels **rotated** into three tokens each and we drew them horizontally. Ink improved on 5 of the 6
+documents measured, `023` among them.
+
+**The prediction named its own failure.** `prediction.md`: *"the thing most likely to be wrong is a
+regression among the other 93 chart-bearing documents … I predict 0 and I expect that to be the
+prediction that fails"*, with an accepted band of −2 to +1. Measured −2 on our side.
+
+**Four blind readers, and the instrument split them the right way.** Two on `003` now report the
+four in-pie labels as *identical* where round 61's reader called `M3` "placed completely
+differently". One ranked a chart-frame difference first at high confidence and was **refuted** —
+the two rectangles agree to 0.4 pt; the reader who flagged the same observation *low-to-medium and
+named the crop as the likely cause* was right. And round 61's attribution of `M1`'s truncation to
+the A4 MediaBox is **refuted by a column profile**: the reference's ink stops at **516.24 pt**, not
+595.
+
+**The `#D9D9D9` chart-area border is now four readers, two rounds, three documents**, with
+`pdf-ops.py` at 3-against-0 and 1-against-0.
+
+**And the mechanism behind both losses is traced to the line, and it is a calibration and not a
+bug.** `ChartAxisLabels.Resolve`'s only route to auto-rotation runs through `Wraps`
+(`VCartesianAxis.cxx`:889-903); narrower labels stop wrapping, so the loop thins instead of
+rotating. The limit `Wraps` uses is a fitted **1.000 × tick spacing**, bracketed at [0.990, 1.056]
+on round 30's decks — **and every one of those boundaries was found with the ruler this round just
+corrected**, so the fit is a measurement of `true ÷ 0.975` and the true limit is near 0.975, which
+is where the C++'s own `0.95 × spacing` plus two text insets already sat. The decks and the
+generator still exist, so re-deriving it is a re-run rather than a new probe.
+
+**The shipped repair restores the calibration's units and is not a constant**: the same test in
+the new ruler is `w_new ≤ spacing × scale(size)`, an identity at every size.
+`IChartTextMeasurer` gains a **defaulted** `AdvanceScale => 1.0` overridden only by the sheets
+measurer, so slides and words are provably untouched. `023` comes back at 872/868 and `058` goes
+from 6.2% off the reference to 3.1%.
+
+**Next**: re-derive that bracket against the reference (round 30's decks and generator both still
+exist); then `023`'s nine undrawn bars; then the chart border (four readers, two rounds, three
+documents, `pdf-ops.py` at 3-0 and 1-0); then the data-label colour.

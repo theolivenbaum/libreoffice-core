@@ -1,3 +1,4 @@
+using Paperless.Core.Geometry;
 using Paperless.Core.Units;
 using Paperless.Spreadsheets.Layout;
 using Shouldly;
@@ -141,5 +142,105 @@ public sealed class SheetChartDeviceMetricTests
 
         SheetBandText.ChartLineHeightAt(size, "Arial").Points.ShouldBe(11.25, 0.05);
         SheetBandText.ShapeLineHeightAt(size, "Arial").Points.ShouldBe(11.50, 0.02);
+    }
+
+    /// <summary>The whole-pixel em a 96 dpi device sets, by stated size.</summary>
+    /// <remarks>
+    /// <c>round(size × 96/72)</c>, and the sizes are chosen so that the ratio it implies is
+    /// <b>above</b> one at 8, 11, 14 and 20 pt and <b>below</b> it at 10, 13, 16, 22 and 28 and
+    /// exactly one at 9, 12 and 18. A model that always narrows fails this, a model that never
+    /// quantises fails it, and a wrong constant fails it in a different place at each size.
+    /// </remarks>
+    public static TheoryData<double, int> ChartPixelEms => new()
+    {
+        { 6.0, 8 }, { 8.0, 11 }, { 9.0, 12 }, { 10.0, 13 }, { 11.0, 15 }, { 12.0, 16 },
+        { 13.0, 17 }, { 14.0, 19 }, { 16.0, 21 }, { 18.0, 24 }, { 20.0, 27 }, { 22.0, 29 },
+        { 28.0, 37 },
+    };
+
+    /// <summary>
+    /// A chart's advance width goes through the device's whole-pixel em, and it is a sawtooth.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The horizontal counterpart of <see cref="EveryChartLinePitchIsAWholeNumberOf96DpiPixels"/>,
+    /// and the ratios are the reference's own.
+    /// <c>probes/sheets-r62/probe-chartwidth.py</c> renders fourteen one-variable rewrites of
+    /// <c>003_advanced_excel_pie</c>'s chart part through the installed 26.2.4.2 and reads the
+    /// drawn advance out of the reference's own <c>TJ</c> arrays — whose per-glyph adjustments are
+    /// in thousandths of the text em and so are independent of the chart's scale, the page and the
+    /// size the PDF writer chose. Measured against <c>round(size × 96/72) / (size × 96/72)</c> the
+    /// residual is at most 0.005 at every one of the fourteen, and always in the direction the
+    /// estimator is known to be biased (it takes the modal adjustment per glyph, and a real kern
+    /// pair narrows one occurrence).
+    /// </para>
+    /// <para>
+    /// <b>The tolerance is not slack.</b> The step between adjacent laws here is 2 to 3 per cent —
+    /// 0.975 against 1.023 between 10 and 11 pt — so 0.006 cannot let a wrong law through; it is
+    /// there because the advance is rounded once per glyph and the sample string is twenty of them.
+    /// </para>
+    /// </remarks>
+    [Theory]
+    [MemberData(nameof(ChartPixelEms))]
+    public void AChartsAdvanceWidthGoesThroughTheDevicesWholePixelEm(double size, int pixels)
+    {
+        const string sample = "M3; Actual; 107; 20%";
+        Length em = Length.FromPoints(size);
+
+        double natural = SheetBandText.Shape(sample, em, "Calibri", false)!.Width.Points;
+        double chart = SheetBandText.ChartShape(sample, em, "Calibri", false)!.Width.Points;
+
+        (chart / natural).ShouldBe(pixels / (size * 96.0 / 72.0), 0.006, $"at {size} pt");
+    }
+
+    /// <summary>
+    /// The two labels that decide <c>003_advanced_excel_pie</c>'s best-fit test come out at the
+    /// widths the reference actually drew them, and the ungridded ruler does not.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Read off 26.2.4.2's own rendering of that document's page 1 with <c>pdftotext -bbox</c>:
+    /// the unwrapped label's ink is <b>79.66</b> pt wide and a wrapped line's <b>65.43</b>, against
+    /// our unquantised 81.55 and 67.08. That 1.7 pt is the whole of the defect this fixes —
+    /// <c>M3</c>'s block came out 75.90 wide against a threshold of 75.23 and missed the inner
+    /// placement by 0.33 of a degree, which put the label outside the slice the reference keeps it
+    /// in and three tokens rather than one onto the page-2 remainder of the chart.
+    /// </para>
+    /// <para>
+    /// Both answers are asserted, not only the right one: the old ruler is pinned as the number it
+    /// is so that a later change cannot quietly move the chart path back onto it.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void TheChartRunReproducesTheReferencesOwnDrawnLabelWidths()
+    {
+        Length ten = Length.FromPoints(10);
+
+        SheetBandText.ChartShape("M1; Actual; 93; 17%", ten, "Calibri", false)!.Width.Points
+            .ShouldBe(79.48, 0.30);
+        SheetBandText.ChartShape("M3; Actual; 107;", ten, "Calibri", false)!.Width.Points
+            .ShouldBe(65.37, 0.30);
+
+        SheetBandText.Shape("M1; Actual; 93; 17%", ten, "Calibri", false)!.Width.Points
+            .ShouldBe(81.55, 0.30);
+        SheetBandText.Shape("M3; Actual; 107;", ten, "Calibri", false)!.Width.Points
+            .ShouldBe(67.08, 0.30);
+    }
+
+    /// <summary>
+    /// A chart run's glyphs keep the size the file states; only the pen moves.
+    /// </summary>
+    /// <remarks>
+    /// The reference draws <c>003</c>'s labels at 10.008 pt with the narrower advances, not at
+    /// 9.75 pt — the em is quantised for <em>measuring</em> and not for drawing. Shaping at the
+    /// pixel em instead would scale the glyphs as well and is what this separates.
+    /// </remarks>
+    [Fact]
+    public void AChartRunsGlyphsKeepTheStatedSizeAndOnlyThePenMoves()
+    {
+        Length ten = Length.FromPoints(10);
+
+        SheetBandText.ChartShape("M1; Actual; 93; 17%", ten, "Calibri", false)!
+            .At(new DocPoint(Length.Zero, Length.Zero)).FontSize.ShouldBe(ten);
     }
 }

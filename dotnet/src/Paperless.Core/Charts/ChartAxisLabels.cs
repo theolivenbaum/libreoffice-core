@@ -275,7 +275,13 @@ public static class ChartAxisLabels
 
         // The room a word has is the space between two ticks, and neither of the two corrections
         // that were here survives measurement. See the remarks on this method.
-        Length limit = spacing * (staggered ? 2.0 : 1.0);
+        //
+        // The measurer's own scale is applied because the 1.000 is *fitted*, and it was fitted
+        // against widths measured on the unquantised ruler. A consumer whose ruler has since moved
+        // onto a device - a sheet's chart text, on chart2's 96 dpi one - must be compared in the
+        // units the constant was found in or the boundary moves by the device's own correction.
+        // IChartTextMeasurer.AdvanceScale is one for every consumer whose ruler did not move.
+        Length limit = spacing * (staggered ? 2.0 : 1.0) * measurer.AdvanceScale(size);
 
         if (limit <= Length.Zero) return false;
 

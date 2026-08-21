@@ -283,5 +283,38 @@ public class MetricGridTests
     {
         new MetricGrid(0).ToAdvance(1024, Upem, Length.FromPoints(11)).ShouldBe(Length.Zero);
         MetricGrid.Printer.ToAdvance(1024, 0, Length.FromPoints(11)).ShouldBe(Length.Zero);
+        new MetricGrid(0).PixelEmScale(Length.FromPoints(11)).ShouldBe(1.0);
+        MetricGrid.Chart.PixelEmScale(Length.Zero).ShouldBe(1.0);
+    }
+
+    /// <summary>
+    /// The chart device's em is a whole number of pixels, and the correction is a sawtooth.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// At 10 pt a 96 dpi device sets <b>13</b> pixels for 13.333, so every advance comes out 2.5%
+    /// narrower than the size the file states; at 11 pt it sets <b>15</b> for 14.667 and they come
+    /// out 2.3% <em>wider</em>. A rule that always narrows fails the second half and a rule that
+    /// never quantises fails both. At 9, 12 and 18 pt the device sets the size exactly and the
+    /// correction is one — which is what makes a chart at those sizes render as it did before.
+    /// </para>
+    /// <para>
+    /// The ratios are the reference's own, at fourteen sizes, read out of its own <c>TJ</c> arrays
+    /// with our renderer never running: <c>probes/sheets-r62/probe-chartwidth.txt</c>.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void TheChartDevicesEmIsAWholeNumberOfPixelsAndTheCorrectionIsASawtooth()
+    {
+        MetricGrid.Chart.PixelEmScale(Length.FromPoints(10)).ShouldBe(13 / (10 * 96.0 / 72.0), 1e-9);
+        MetricGrid.Chart.PixelEmScale(Length.FromPoints(11)).ShouldBe(15 / (11 * 96.0 / 72.0), 1e-9);
+
+        MetricGrid.Chart.PixelEmScale(Length.FromPoints(10)).ShouldBeLessThan(1.0);
+        MetricGrid.Chart.PixelEmScale(Length.FromPoints(11)).ShouldBeGreaterThan(1.0);
+        MetricGrid.Chart.PixelEmScale(Length.FromPoints(14)).ShouldBeGreaterThan(1.0);
+        MetricGrid.Chart.PixelEmScale(Length.FromPoints(16)).ShouldBeLessThan(1.0);
+
+        foreach (double exact in new[] { 9.0, 12.0, 18.0, 24.0 })
+            MetricGrid.Chart.PixelEmScale(Length.FromPoints(exact)).ShouldBe(1.0, 1e-12);
     }
 }
