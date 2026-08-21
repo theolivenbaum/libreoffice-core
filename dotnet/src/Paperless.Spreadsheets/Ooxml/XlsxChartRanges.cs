@@ -68,7 +68,7 @@ internal sealed class XlsxChartRanges(XlsxFile file, XlsxSheetReader reader)
         if (_tables.TryGetValue(sheet.Name, out ContentTable? known)) return known;
 
         XElement? root = worksheet ?? file.LoadSheet(sheet);
-        ContentTable table = root is null ? new ContentTable() : reader.ReadSheet(root);
+        ContentTable table = root is null ? new ContentTable() : reader.ReadSheet(root, sheet);
         _tables[sheet.Name] = table;
         return table;
     }

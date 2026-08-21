@@ -235,6 +235,33 @@ public sealed class XlsxFile : IDisposable
         return tables;
     }
 
+    /// <summary>
+    /// Loads the <c>pivotTableDefinition</c> roots a sheet relates to, in relationship order.
+    /// </summary>
+    /// <remarks>
+    /// Like a table part, a pivot table part hangs off the <em>worksheet</em> that shows its
+    /// output. What is needed from it here is only the <c>location</c>; the cache, the fields and
+    /// the items are not read, because the cells Excel already wrote are what gets drawn.
+    /// </remarks>
+    public IReadOnlyList<XElement> LoadPivotTables(XlsxSheetEntry sheet)
+    {
+        ArgumentNullException.ThrowIfNull(sheet);
+        if (sheet.PartName is null) return [];
+
+        List<XElement> pivots = [];
+        foreach (OpcXml.Relationship relationship in
+                 _package.GetRelationshipsByType(RelationshipBase + "pivotTable", sheet.PartName))
+        {
+            if (relationship.IsExternal) continue;
+            IPackagePart? part = _package.GetPart(relationship.Target);
+            if (part is null) continue;
+
+            using Stream content = part.Open();
+            if (OoxmlXml.TryLoad(content, out _) is { } root) pivots.Add(root);
+        }
+        return pivots;
+    }
+
     /// <inheritdoc/>
     public void Dispose() => _package.Dispose();
 
