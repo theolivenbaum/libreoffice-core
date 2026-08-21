@@ -676,7 +676,7 @@ public sealed class Ww8Document : IWordProcessingDocument, IPaginatedDocument
                 Text = CaseMapping.Apply(WithSymbols(fonts, paragraph), runs),
                 Face = face,
                 Font = font,
-                Colour = paragraph.Colour ?? Colour.Black,
+                Colour = paragraph.Colour ?? Colour.Transparent,
                 Format = paragraph.Format,
                 Label = Label(fonts, paragraph, face, font),
                 Borders = paragraph.Borders,
@@ -766,7 +766,7 @@ public sealed class Ww8Document : IWordProcessingDocument, IPaginatedDocument
                 Language: paragraph.Language, DisableKerning: !paragraph.AutoKerning)) with
         {
             Font = labelFont,
-            Colour = paragraph.Colour ?? Colour.Black,
+            Colour = paragraph.Colour ?? Colour.Transparent,
             Follow = paragraph.ListFollow switch
             {
                 1 => LabelFollow.Space,
@@ -1177,7 +1177,7 @@ public sealed class Ww8Document : IWordProcessingDocument, IPaginatedDocument
                 face,
                 size,
                 font,
-                run.Colour ?? paragraph.Colour ?? Colour.Black,
+                run.Colour ?? paragraph.Colour ?? Colour.Transparent,
                 new Text.Shaping.ShapingOptions(
                     Language: run.Language, DisableKerning: !run.AutoKerning),
                 rise,

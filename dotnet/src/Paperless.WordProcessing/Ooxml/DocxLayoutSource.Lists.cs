@@ -118,7 +118,7 @@ public sealed partial class DocxLayoutSource
             label with
             {
                 Font = labelFont,
-                Colour = text.Colour ?? Core.Graphics.Colour.Black,
+                Colour = text.Colour ?? Core.Graphics.Colour.Transparent,
                 Follow = follow,
                 TabStop = tabStop,
             },

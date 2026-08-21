@@ -257,7 +257,7 @@ public sealed partial class OdtLayoutSource
                 // to a name-only one, which can be drawn with and not embedded, and which also carries no
                 // synthetic lean — so the level's own slant was lost with it.
                 Font = _references.GetValueOrDefault((requested, text.Weight, italic)),
-                Colour = text.Colour ?? Core.Graphics.Colour.Black,
+                Colour = text.Colour ?? Core.Graphics.Colour.Transparent,
                 Follow = follow,
                 TabStop = tabStop,
                 MinimumGap = minimumGap,
