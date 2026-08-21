@@ -151,7 +151,17 @@ internal static class SheetNotePages
         List<SheetNote> notes = sheet.Notes.Printed(ranges);
         if (notes.Count == 0) return pages;
 
-        DocRect area = sheet.Setup.PrintableArea;
+        // Unscaled, which is what this path has always used and is **not** the reference's own
+        // rule: `ScPrintFunc::PrintNotes` shares `aPageRect` with `PrintPage`
+        // (`sc/source/ui/view/printfun.cxx:2004-2066`), so a note page's furniture bands are
+        // scaled by the sheet's print zoom exactly as a cell page's are. Left at 1.0 here because
+        // this round measured the cell page and not the note page, and because no xlsx-family
+        // document in the corpus sets `cellComments="atEnd"` at all — the arm is unreachable from
+        // 243 of the 307 sheets documents and unmeasured from the rest. See
+        // `probes/sheets-r57/prediction.md` blind spot 5, which also names the companion defect:
+        // `SheetPage`'s note constructor leaves `Placement` at its default, so the band on a note
+        // page is drawn at a one per cent zoom.
+        DocRect area = sheet.Setup.PrintableAreaAt(1.0);
         if (area.Width <= Length.Zero || area.Height <= Length.Zero) return pages;
 
         Length mark = MarkWidth(area.Width);
@@ -268,7 +278,8 @@ internal sealed class SheetNotePageDrawing(SheetLayout sheet, IReadOnlyList<Plac
         sink.BeginPage(sheet.Setup.PageSize);
         try
         {
-            DocRect area = sheet.Setup.PrintableArea;
+            // Unscaled, matching `SheetNotePages.Paginate`, which carries the reasoning.
+            DocRect area = sheet.Setup.PrintableAreaAt(1.0);
             Length mark = SheetNotePages.MarkWidth(area.Width);
             Length size = SheetBandText.DefaultSize;
             Length height = SheetBandText.LineHeightAt(size);

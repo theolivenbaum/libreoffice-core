@@ -401,25 +401,59 @@ public sealed record SheetPrintSetup
     /// </remarks>
     public SheetDefaultFont? BandFont { get; init; }
 
-    /// <summary>The rectangle the sheet's cells are printed into, headings included.</summary>
+    /// <summary>
+    /// The rectangle the sheet's cells are printed into at a given print scale, headings
+    /// included.
+    /// </summary>
     /// <remarks>
+    /// <para>
     /// The paper less the margins and the two furniture bands. Pagination does not use this —
     /// it needs the same rectangle in whole twips at the print scale, which
     /// <c>SheetPagination</c> derives itself so that its arithmetic matches Calc's roundings —
     /// so this is for placing what a page holds rather than for deciding what it holds.
+    /// </para>
+    /// <para>
+    /// <strong>The two bands are scaled by the page's print scale and the four margins are
+    /// not</strong>, which is the whole of the asymmetry and is not a simplification. Calc builds
+    /// the rectangle in <em>document twips</em> —
+    /// <c>aPageRect.SetTop( ( aPageRect.Top() + nTopMargin ) * 100 / nZoom + aHdr.nHeight )</c>
+    /// (<c>ScPrintFunc::GetDocPageSize</c>, <c>sc/source/ui/view/printfun.cxx:3002-3003</c>) —
+    /// dividing each margin by the zoom and adding each band whole. A document twip reaches the
+    /// paper at <c>zoom/100</c> of a physical twip, because the map mode the page is drawn
+    /// through carries the zoom as its scale fraction (<c>ScPrintFunc::InitModes</c>,
+    /// <c>printfun.cxx:2645</c>), so the margin comes back out at full size and the band arrives
+    /// at <c>nHeight × zoom/100</c>.
+    /// </para>
+    /// <para>
+    /// Measured on 26.2.4.2 with <c>probes/sheets-r57/probe-bandscale.py</c>: one 14 pt header
+    /// line over a 32.4 pt stated band, at five print scales, with the 100 % case as the control.
+    /// The reference's first body token sits at 56.18, 49.18, 42.33, 35.46 and 30.26 pt for 100,
+    /// 80, 60, 40 and 25 %; taking the band at full size puts it at 56.21 for all five. The
+    /// residual is <c>HeaderHeight × (1 − zoom)</c> to within 1.5 %, which is what identifies it —
+    /// a band counted twice would be a constant. Two corpus witnesses agree:
+    /// <c>fm-provider-service-measures</c> p36 at 18.46 pt and <c>FY2023-AIP-grants</c> p1 at
+    /// 18.49, on pages whose band text agrees to 0.0005 pt.
+    /// </para>
+    /// <para>
+    /// The band's <em>text</em> is a separate question and was already right:
+    /// <see cref="SheetPageDecoration"/> draws it at the same zoom, which is why a scaled sheet's
+    /// header is the correct size while the body under it is not.
+    /// </para>
     /// </remarks>
-    public DocRect PrintableArea
+    /// <param name="scale">
+    /// The page's print scale, 1.0 for an unscaled sheet. At 1.0 every term below is the term
+    /// this was before, so an unscaled sheet cannot move.
+    /// </param>
+    public DocRect PrintableAreaAt(double scale)
     {
-        get
-        {
-            Length width = PageSize.Width - LeftMargin - RightMargin;
-            Length height = PageSize.Height - TopMargin - BottomMargin - HeaderHeight - FooterHeight;
+        Length width = PageSize.Width - LeftMargin - RightMargin;
+        Length bands = (HeaderHeight + FooterHeight) * scale;
+        Length height = PageSize.Height - TopMargin - BottomMargin - bands;
 
-            return new DocRect(
-                LeftMargin,
-                TopMargin + HeaderHeight,
-                width > Length.Zero ? width : Length.Zero,
-                height > Length.Zero ? height : Length.Zero);
-        }
+        return new DocRect(
+            LeftMargin,
+            TopMargin + (HeaderHeight * scale),
+            width > Length.Zero ? width : Length.Zero,
+            height > Length.Zero ? height : Length.Zero);
     }
 }
