@@ -760,7 +760,7 @@ internal sealed partial class PptxSlideLayout
         // — one em of ascent and a 1.2 em box — so nothing is set below and SlideTextBody's default
         // stands. It is worth saying why the *absence* of an override is the interesting part.
         //
-        // This was an override, and against LibreOffice 24.2.7.2 it was right: that binary drew
+        // This was an override, and against the superseded binary it was right: that binary drew
         // deck-features.pptx's first cell (18 pt Arial, substituted by Liberation Sans) with a
         // 16.33 pt ascent, 0.907 em — the face's own, not the em's. Its own C++ said otherwise even
         // then, and the note here recorded the disagreement rather than resolving it.
@@ -772,8 +772,12 @@ internal sealed partial class PptxSlideLayout
         // library already implements — SlideTextLayout's 1.2 em box, reached only when
         // FontIndependentLineSpacing is true — is now what the reference draws for cells as well.
         //
-        // Not touched: the ODP path, which states the flag per paragraph style and usually does not
-        // set it (OdpSlideLayout), because ODF has no such compatibility default to follow.
+        // The ODP path is a different rule and is NOT the same answer, which round 55 measured
+        // rather than assumed: on 26.2.4.2 an ODF drawing cell obeys
+        // `style:font-independent-line-spacing` as stated — one em when it is true, the face's own
+        // 0.903 em when the attribute is absent. LibreOffice's own ODP export writes it `true` on
+        // every cell it emits, so a real Impress deck lands on the same em this side does.
+        // See OdpSlideLayout.CellBody, which does not read the attribute at all.
         //
         // [24.2.7-audit: VERIFIED 26.2.4.2, 2026-08-21, round slides-r54 -- probed against the
         // installed binary rather than read. probes/slides-r54/make-cell-baseline-probe.py: one

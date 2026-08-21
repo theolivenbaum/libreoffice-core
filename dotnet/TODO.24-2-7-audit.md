@@ -58,6 +58,7 @@ broken one, because it is the only thing that stops the next round paying for th
 | `Paperless.Spreadsheets` | `Layout/SheetOptimalRowHeights.cs` | 54 | **verified 26.2.4.2, 2026-08-21** — 30 of 30 wrapped row heights within half a twip, control at 300 |
 
 | `Paperless.Presentations` | `Ooxml/PptxSlideLayout.cs` :763 (table cell line spacing) | 54 | **verified 26.2.4.2, 2026-08-21** — 6 of 6 stated sizes put the reference's first baseline one em below the cell's top |
+| `Paperless.Presentations` | `OpenDocument/OdpSlideLayout.cs` :302 (the ODF half of the same claim) | 55 | **WRONG — reported, not fixed.** The rule is no longer fixed at all: 26.2.4.2 obeys `style:font-independent-line-spacing` as stated, one em when true and the face's own 0.903 em when absent. **Not fixed because the slides corpus holds no ODF presentation** — 251 `.pptx` and 51 `.ppt` — so the change would ship unmeasured |
 
 **A trap the probe harness cost half an hour to find, before anyone else pays for it again.** A
 minimal authored `.xlsx` with no `<cellStyles>` element has its `cellXf` font **discarded entirely**
@@ -118,18 +119,23 @@ Snapshot at the time of writing, for orientation only — **do not quote it**:
 
 | project | open hits |
 |---|---:|
-| `Paperless.Presentations` | 11 |
 | `Paperless.WordProcessing` | 11 |
 | `Paperless.Spreadsheets` | 10 |
+| `Paperless.Presentations` | 9 |
 | `Paperless.Text` | 6 |
 | `Paperless.Core` | 2 |
 | `Paperless.Rendering` | 1 |
 | `Paperless.Ooxml` | 1 |
 
-Total open **42**,
-marked **14**
-( verified,
-1 wrong).
+Total open **40**, marked **15** (13 verified, 2 wrong) — computed with the commands above on
+2026-08-21 at the end of round 55, and **not maintained**: run them.
+
+Two of the two the round removed are worth naming, because only one of them was a re-check.
+`OdpSlideLayout.cs:302` was re-checked and marked. The other was **round 54's own marker at
+`PptxSlideLayout.cs:763`, whose prose named the superseded version** and so kept a cleared site
+in the open count — the trap this file describes, still live in the file it was described in.
+Rewriting one clause to say "the superseded binary" cleared it. **A rule written down is not a
+rule applied**; the count is the only thing that notices.
 
 ## Outcomes so far — **one** site wrong, of every one re-checked
 
@@ -216,6 +222,7 @@ the site itself names **26.2.4.2** and the date — this table is the index, not
 
 | date | site | outcome | how |
 |---|---|---|---|
+| 2026-08-21 | `Paperless.Presentations/OpenDocument/OdpSlideLayout.cs` :302 (ODF drawing-cell first baseline) | **WRONG — reported, not fixed** | round 55, `probes/slides-r55/odp-cell-baseline.py`. **A discriminating pair, and the pair is the whole method here**: `soffice --convert-to odp` writes `style:font-independent-line-spacing="true"` onto every drawing cell it emits, so the round-tripped fixture states the very attribute under test and one rendering of it measures the exporter's habit rather than the rule. Rendering it beside a byte-identical copy with that one attribute deleted separates them on four of six sizes — 1.0013 / 0.9998 / 1.0003 / 1.0001 em with it, 0.9020 / 0.9100 / 0.9074 / 0.9030 em without. The site's claim was a *fixed* 0.907 em "whatever `tablecellcontext.cxx:61` sets"; the behaviour is now attribute-driven, and LibreOffice's own ODP export always writes `true`, so an Impress deck takes the one-em arm and this reader draws it 1.7 pt high in an 18 pt face |
 | 2026-08-21 | `Paperless.Text/Fonts/SystemFontResolver.cs` `GenericFallbacks` (unrecognised → DejaVu Sans) | **VERIFIED again, from a fifth caller** | round 55. Round 54 verified it from four filters that reach it undeclared and stated that the word-processing filters never do. **The DOC filter does**: `GetFontParams` maps `ff` 0, 6 and 7 onto `FAMILY_DONTKNOW` and `SetNewFontAttr` sets it on the item, so those runs arrive here with no class and this switch answers them — DejaVu Sans, and DejaVu Sans *Mono* for `Consolas`, which is this switch's own column. Nine flat-ODF fixtures exported to Word 97 and back, `probes/words-r55/doc-family-code.py`; `Garamond` is the control, forced `FAMILY_ROMAN` by `GetFontParams`'s name-override list and drawn Serif where the otherwise identical `Aptos` is drawn Sans |
 | 2026-08-21 | `Paperless.Text/Fonts/SystemFontResolver.cs` `GenericFallbacks` (unrecognised → DejaVu Sans) | **VERIFIED, and round 53's WRONG reversed** | `probes/words-r54/font-fallback-rule.py` (98 authored files, 5 controls) + `cross-format-fallback.py` (28): the branch is right for every filter that reaches it undeclared — ODF text, XLSX, PPTX, flat ODS, all tracking fontconfig, `Consolas` → DejaVu Sans **Mono**. The DOCX/DOC/RTF answer is a **roman default applied by the reader**, now in `WordFallbackClass`. Cross-track evidence: 0 of 302 slides and 0 of 307 sheets renderings show the Sans-for-Serif pair |
 | 2026-08-21 | `Paperless.Text/Fonts/SystemFontResolver.cs` `DefaultFallbacks` (no family → Liberation Serif) | **VERIFIED** | round 54; two fixtures that reach `DefaultFonts` rather than Word's default — a flat ODF declaring no font anywhere, and a DOCX whose `docDefaults` state an empty `w:rFonts` — **both Liberation Serif** on 26.2.4.2. `w:ascii=""` is a third state and answers DejaVu Serif, because the filter reads it as a named family |
