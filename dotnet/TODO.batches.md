@@ -14892,3 +14892,90 @@ The discriminator between the two cases is not the number of readers. It is whet
 about the **same object**, whether the page was chosen for a stated reason rather than by maximum
 ink, and whether a **different instrument** confirms it. All three held here and none held in
 round 51.
+
+## Round 53 — sheets — three chart rules, and two predecessor mechanisms replaced
+
+`dotnet/probes/sheets-r53-totalsrow/` — `prediction.md` (`409e444b85d`), `prediction-addendum.md`
+(`ffd41a33ad4`) and `prediction-newline.md` were each committed before the sweep that measures them.
+**sheets 271 → 274 of 307**, predicted +1 / +1 / 0, measured **+1 / +1 / +1**. Zero regressions;
+**0 of 307 page counts changed**; twenty-one new tests, all detectors bar two deliberate shape
+controls.
+
+### `plotVisOnly` is refuted; a chart range stops before an Excel table's totals row
+
+Round 52 handed over *"measure whether `029_Annual_budget`'s source rows are hidden"*. **They are
+not** — the sheet carries no `hidden` attribute anywhere and the reference prints rows 18 and 39 in
+its body — and an authored `plotVisOnly="0"` variant renders with the observable unchanged.
+
+The mechanism is `ScChart2DataSequence::BuildDataCache` (`chart2uno.cxx:2616-2632`), whose own
+comment reads *"Excel behavior: if the last row is the totals row, the data is not added to the
+chart"*. A SpreadsheetML `table` part becomes a **named** database range carrying `TotalsRow`
+(`tablebuffer.cxx:133-137`), and `GetDBAtCursor` searches the named ranges first — an `autoFilter`'s
+anonymous range never has totals, so a table is the only thing that can hide a cell from a chart.
+The test is **per column**, and only on the range's own last row.
+
+Flipping `totalsRowCount="1"` to `"0"` turns **both** of `029`'s observables on together — the empty
+plot *and* the missing `Total` category with its $3,000 → $900 axis. That is the single mechanism
+round 52 predicted, and not the one it named. **Excel's own caches corroborate it on three
+documents**: `ptCount` 17 for an 18-cell range on `029`, 8 for 9 on `040`, 3 for 4 on `041`.
+Censused over 946 documents: **3 hits, all sheets**.
+
+**Null and empty are different answers.** A resolver answering null means "cannot resolve" and the
+cache stands; a range every cell of which is a totals row **resolved** and named nothing, and
+falling back to the cache there draws the whole plot the reference leaves blank. That is the one
+`Paperless.Ooxml` edit — two gates drop a `Count > 0` clause — and its reach is zero *by type*: the
+clause only fires when a resolver is supplied and the only implementation is reached from
+`XlsxReader`.
+
+### Calc lays a pivot table out itself and does not print the cells Excel left behind
+
+`DynamicBubbleChart`'s rows 29–41 are a pivot table whose five row fields all carry
+`x14:pivotField/@fillDownLabels="1"`. Calc regenerates the output through `ScDPOutput` and writes a
+row field's label only where its group starts; **`fillDownLabels` is ignored**. Three variants
+settle it, the decisive one being that **removing the pivot part makes the reference print all three
+copies of each department** — exactly what we printed.
+
+The rule tests the whole row-field **prefix**, not the cell above: the `Cost` column holds `150`
+twice under two different risk values and the reference prints both. And **the scan stops at the
+first already-blank label**, which is what makes it a no-op on the ten corpus pivot documents Excel
+laid out normally — a property with a test rather than an argument. Censused: 11 pivot documents,
+**1** with `fillDownLabels`.
+
+### `SheetChart` fused a two-line label — predicted 0 verdicts, worth 1
+
+The defect the words track fixed in `FrameChart` in round 52 and left here deliberately.
+`005_Contextures_chart_sample` moved as predicted (289 → 293, still failing). The **unpredicted**
+gain is `019_Free_Blood_Sugar_Chart`, **798 → 870 against 872**, whose *multi-level category axis*
+joins a date and a time with a newline — 54 `0:00`, 18 `12:00` and a tail of `11/2`, `11/3` … all
+fused into `11/212:00`. The prediction's census keyed on `showPercent` and **named that exact gap as
+blind spot #1**. `SlideChart` still carries the defect; it is the slides track's.
+
+### The 24.2.7.2 audit — four sites re-checked, all four still correct
+
+`SheetFonts.cs` (2 sites) 30 of 30 authored column widths exact to 0.001 pt; `SheetGeneralWidth.cs`
+27 of 27 across every `###`/`1E+05` threshold crossing; `SheetDeviceUnits.cs` 45 of 45 within 0.1%
+relative. Comments now name **26.2.4.2** and **2026-08-21**. The running score on the audit is **one
+wrong in five** — see `TODO.24-2-7-audit.md`.
+
+**And the probe failed its own control first.** A minimal authored `.xlsx` with no `<cellStyles>`
+element has its `cellXf` font discarded outright by LibreOffice, so the device probe read a constant
+101.08 pt at every stated size and reported 46 of 48 cases wrong. `soffice --convert-to fods` and
+reading `fo:font-size` back is what caught it. An incidental real finding recorded and deliberately
+not acted on: in that shape **we honour the font where LibreOffice does not**, and 5 of the 242
+`.xlsx` sheets documents lack `<cellStyles>` — all five currently pass.
+
+### Sheets does next, in order
+
+1. **The automatic chart title.** `005_Contextures_chart_sample`'s remaining 7 words are five charts
+   stating `<c:title>` with no text and one series named `Sales`;
+   `chartspaceconverter.cxx:181-204` fills it from `getSingleSeriesTitle` and we draw nothing. It
+   lands the document exactly on 300/300 — and it is a `Paperless.Ooxml` change owing a cross-track
+   census first, because the same block substitutes a literal `Chart Title` when there is no single
+   series.
+2. **The four `_advanced_excel_pie` documents** — now known to be *clipping at the horizontal page
+   split* (our `17%` and `trend` come out `7%` and `rend`), not a fused label.
+3. **The eight-blank-line header** — `probes/sheets-r51-bands/` brackets it; 20 words on
+   `FAA-2019-0995-0002`, whose reference half is date-volatile.
+4. **`SheetOptimalRowHeights.cs`'s 24.2.7.2 site** — row heights are the axis this track already
+   established for a 14-document cluster, and that site claims thirty exact reproductions against a
+   *superseded* binary.
