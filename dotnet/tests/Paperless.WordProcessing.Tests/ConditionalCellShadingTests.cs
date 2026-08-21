@@ -96,19 +96,27 @@ public sealed class ConditionalCellShadingTests
     /// The heading row is excluded from the band count, not counted as band nought.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// The single assertion that separates the two readings, stated on its own so a failure names
-    /// it: counting the heading row would make the first body row band 1 rather than band 0 and
-    /// swap <c>band1Horz</c> for <c>band2Horz</c> on every body row of the fixture — and on
-    /// <c>012</c> it would move all 48 of its band fills from table rows 2, 4, 6 and 8 to rows
-    /// 3, 5, 7 and 9.
+    /// it. On <c>012</c>, whose band size is one, counting the heading row moves all 48 of its band
+    /// fills from table rows 2, 4, 6 and 8 to rows 3, 5, 7 and 9.
+    /// </para>
+    /// <para>
+    /// <strong>It has to be asked of the <em>second</em> body row, and the first draft asked the
+    /// first.</strong> The fixture's band size is two, so counting the heading row leaves row 1 in
+    /// band 0 either way and the test passed under its own mutation —
+    /// <c>verify-test.sh</c> caught that: the defect was detected only by the whole-fixture test
+    /// beside it, which is precisely the "assert the thing you named" failure. Rows 2 and 4 are the
+    /// two the shift moves.
+    /// </para>
     /// </remarks>
     [Fact]
     public void TheHeadingRowIsNotCountedAsABand()
     {
         Dictionary<string, Colour?> shading = FixtureShading();
 
-        shading["R1C1"].ShouldBe(Band1Fill, "the first body row is band 0, which is band1Horz");
-        shading["R1C1"].ShouldNotBe(Band2Fill);
+        shading["R2C1"].ShouldBe(Band1Fill, "body rows 1 and 2 are band 0 at a band size of two");
+        shading["R4C1"].ShouldBe(Band2Fill, "body rows 3 and 4 are band 1");
     }
 
     /// <summary>A cell in the heading row is in no band, whatever its position.</summary>
