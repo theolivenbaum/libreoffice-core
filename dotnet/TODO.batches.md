@@ -16868,3 +16868,118 @@ frame breaks at. That arm has zero corpus reach and is validated by the probe, n
    padded-versus-terminated confusion.
 4. `010605Vul.ppt`'s three extra words — the charstream test first.
 5. The fitted bullet's vertical placement, 1.9 pt high, untouched for three rounds.
+
+---
+
+## Merge note — round 56 slides and round 58 sheets (2026-08-21)
+
+**Words 319, slides 199, sheets 276. Corpus 794 of 946** — one down. Both rounds gated over all 946
+documents because both touch shared layers.
+
+```
+Core 337   Containers 109   Text 617   Vector 298   Rendering 153(1 skipped)   Markup 259
+OpenDocument 125   WordProcessing 1180   Spreadsheets 974   Presentations 831     = 4883
+0 failed
+```
+
+### The verdict lost, and what it cost to lose it
+
+`010605Vul.ppt` `match` → `words`: 960 → **963** extractable words against the reference's 944, on a
+band of **962.88**. **It crossed by twelve hundredths of a word.** On the same document our ink went
+1.90 → 1.07 and the embedded font count 7/6 → **6/6**, and two other documents became **exact** on
+the gate's own column in the same change — `introduction_to_bea_tuxedo` 1785 → 1767/1767 and
+`2014BSA` 3619 → 3559/3559. Re-opened in the manifest as `kind=text`.
+
+### One line, 1879 records, three tracks
+
+`EmfReader.CreateFont` treated the **NUL-terminated** `lfFaceName` as **NUL-padded** and skipped the
+terminators, so `Times New Roman\0\0` plus twelve code units of stack rubbish became an unrecognised
+family falling through to the generic sans. **`WmfReader` has always read the same field
+correctly** — two readers of one structure, disagreeing for as long as both have existed.
+**1879 records in 19 documents across all three tracks.** The affected words and sheets documents are
+all better or level on both instruments; `bulletin.docx` goes 0.37% → **0.00%** off the reference's
+word count.
+
+### Both of that brief's remaining items were refuted one level down
+
+- **The reference *does* draw JetBlue's 68 rotated labels, at our angle** — as **glyph outlines**
+  (1.9 MB stream, 1502 curves, 200 subpath moves in the label band against our 124 subpaths in
+  total). The page's real defect was **`c:minorGridlines`, unread**, which the diff report had been
+  calling "solid area drawn differently, 31.18% of page" all along. A value axis takes **five**
+  sub-intervals, not chart2's two (`axisconverter.cxx:405-409`, tdf#114168), confirmed on the
+  reference's own page. A minor gridline also states **width and dash**; reading only colour cost
+  0.66 ink elsewhere.
+- **The "per-run font-resolution divergence" was the EMF field**, not a resolver problem at all.
+
+### Reusing a rule across formats was wrong, and the probe said so in both directions
+
+Round 55 established that OOXML rotates a turned text frame's **insets** with the turn. Reusing that
+for `.ppt` was wrong: **`oox` shifts cyclically, `svdfppt` does not.** A one-inset-at-a-time probe
+differenced against an all-zero arm gives the identity in both directions; after correction, **18 of
+18 pen origins land on the reference's to 0.05 pt.**
+
+### Sheets: a whole subsystem, and the law read off the reference before the source
+
+**`colorScale` conditional formatting shipped.** 89 of 243 xlsx-family documents carry a `cfRule`
+and we drew none. **The interpolation law was read off a reference PDF *before* the C++ was
+consulted**: `c1 + (int)((v−v1)/(v2−v1) × (c2−c1))` — a truncation of the **delta**, exact on 36 of
+36 channel values and **exact only that way** (rounding the sum and flooring the sum each satisfy
+half). Colour-scale fill rectangles over the 35 computable documents: reference 452, **ours 22 →
+441**; 34 documents went 0-of-12 predicted colours to **12-of-12**, positions to 0.03 pt.
+
+**And the 27.2-alpha tree in this checkout is wrong about the running binary on two counts** —
+`fillinfo.cxx:776` applies a colour scale only when another style-named condition matched (26.2.4.2
+draws it alone, measured twice), and **priority, not document order**, decides between overlapping
+scales. Sixth or seventh time the checked-out source has contradicted the installed binary.
+
+**The chart face was one wrong element, not a fallback.** `SizeOf`/`BoldOf`/`LiteralFamily` took the
+first `a:defRPr`-or-`a:rPr` in document order, and a `c:rich` writes the paragraph default first —
+so they read exactly the value the run overrides. Title now **18.00 pt Carlito Bold** against the
+reference's 18.01, embedded font list identical. **Ten word counts moved on our side and all ten
+moved toward the reference, eight to exact agreement.**
+
+The round also **refuted its own first reach census** — 37/1/1 became **36/1/0** once *both* readers
+were simulated, because the old reader already skipped a `defRPr` stating nothing. Both cuts
+committed; the difference is the finding.
+
+### The alias count is not static, and that is now in `CLAUDE.md`
+
+The sheets round's third sweep reported `TOTAL 363` where its first two reported 325 — **38
+lower-case aliases materialised on the mount by `look.py`/`pair.sh` during the round.** The
+whole-corpus figure moved **991 → 1033 with the corpus unchanged and no commit to it**. Distinct
+lower-cased paths stayed 307, and both scorers key on the manifest, so **no reported figure moved**.
+**A sweep `TOTAL` is not comparable with the same sweep's `TOTAL` an hour earlier.** The scorer that
+refuses to print unless every manifest path found a row is what makes this safe.
+
+### Audit
+
+`SlideDrawing.cs` :341 and :360 **VERIFIED** — the inline arm needed a **discriminating pair**: the
+same 306 kB EMF as `office:binary-data` draws 108 304 red pixels, and moved to `Pictures/` by the
+reference's own exporter, **none**. `Layout/SheetText.cs` **VERIFIED** — 216 of 216 turned-cell row
+heights, the discriminator inside the fixture (rounding the total instead fails 26 of 36 through
+`verify-test.sh`). **`Paperless.Spreadsheets` is ten of ten re-checked, nine correct**, and round
+56's "furniture claims are the ones that break" prior is nine-to-one and dead.
+
+### Instruments
+
+**The paired composite is unreliable below about 10 pt.** Two independent reviewers, given only the
+composed pair, **both** reported our render had no markers and no vertical gridlines; a 200 dpi crop
+shows both. And a reviewer's "we draw no legend" was refuted for the **third round, third reader,
+same page, same sentence** — this time on a page chosen for a stated reason, so the cause is the
+horizontal page split rather than `--worst` selection.
+
+### Next
+
+**Slides** — the **chart plot rectangle**: both of round 56's ink regressions are that one defect
+(JetBlue's floor 5.5 pt low, N2's plot 15.6 pt right), and the minor-gridline mesh has made it
+measurable for the first time. Then the gridline colour (`tx1` tint 75000/50000 → `0x666666`/
+`0x8B8B8B`; we draw `0xB3B3B3` for both, predating this round), the other 11 EMF face-name
+documents, and `WmfReader`'s other fixed fields.
+
+**Sheets** — the pie data-label wrap, now with a second measured defect beside it: **our pie is 18%
+larger than the reference's**, 235.8 pt against 199.8, centre 6.4 pt left and 3.2 pt low.
+`Paperless.Core`, owes a corpus gate, and these four pies are the only sheets failures with a chart
+cause left. Then `cellIs` (18 documents, now cheap — reader, range walk, priority order and overlay
+all exist), then `c:dPt` per-point fills (35 in 7 sheets documents; slides has 144 on pies and 31 on
+bars). **`.xls` colour scales are still uncensused** — they live in `CF12` 0x087A, which no census
+here has read — and the **`x14` extension arm is invisible to every census so far**.
