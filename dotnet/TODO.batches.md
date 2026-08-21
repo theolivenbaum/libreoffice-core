@@ -16983,3 +16983,64 @@ cause left. Then `cellIs` (18 documents, now cheap — reader, range walk, prior
 all exist), then `c:dPt` per-point fills (35 in 7 sheets documents; slides has 144 on pies and 31 on
 bars). **`.xls` colour scales are still uncensused** — they live in `CF12` 0x087A, which no census
 here has read — and the **`x14` extension arm is invisible to every census so far**.
+
+---
+
+## Words, round 58 — handover (2026-08-21)
+
+**Words 319 of 337, slides 200 of 302, sheets 276 of 307 — measured before and after each of two
+changes, per document, zero gains and zero regressions on all three tracks.** Both changes are in
+`Paperless.Text` and both owed a cross-track measurement; both got one.
+
+1. **Synthetic oblique was lost a second time, at glyph fallback.**
+   `IGlyphFallbackResolver.ReferenceFor` is a reverse lookup from a face with no request to compare
+   against. Fixed by a default interface method carrying the request, with three call sites passing
+   it. Measured over **six** filters — `.docx`, `.fodt`, `.fodp`, `.fods`, `.pptx`, `.xlsx` — 41
+   authored two-run packages, four controls at nought on both sides in all six. **The reference does
+   not go looking for an italic face**: Hebrew from an italic Carlito run is drawn in DejaVu Sans
+   *sheared*, not Liberation Sans Italic upright, so the fallback order was already right.
+   Byte reach: words 2, slides 0, sheets 1.
+
+2. **`LineBreaker.cs`'s number-opening hyphen was calibrated backwards**, and the 24.2.7.2 audit is
+   what found it. Three of the site's own five worked examples are false on 26.2.4.2. The rule is
+   **a hyphen opens a number unless a digit precedes it** — 7 of 10 authored cases agreed before,
+   10 of 10 after. Byte reach words 15 / slides 11 / sheets 22, **zero page counts and zero fonts on
+   all three**, and extractable-word counts moved on 19 rows of which 3 are the reference moving and
+   14 of the remaining 16 move toward it — `STC_WebList.xlsx`'s error 1 102 → 46,
+   `MinCh-…-Report.xlsx` 90 → 2, `review-welsh-…-mandelson.docx` and `429_BLISc…pptx` to the exact
+   figure. **This is one commit, `91172e3b99c`, and separable.**
+
+**A census can be wrong in a way that hides itself, and this round's was.** `fallbackfaces.py`
+summed the pure-fallback faces per document, which turned a *face-selection* divergence into an
+apparent lean defect: `outlook_of_nigerian_pension_sector.ppt` draws 355 WenQuanYi Zen Hei glyphs on
+the reference and **none at all** on ours, and the census predicted 341 glyphs of slides movement
+where the answer was nought. Per face the words split is **206 reachable, 83 unreachable**; slides is
+**0 reachable, 341 unreachable**. The probe now prints the two separately.
+
+**`batch-check.sh`'s TOTAL moved without anything moving.** Slides enumerated 311 rows before and
+315 after; sheets 325 and 363. Every extra row is an upper-case alias entry of a document already
+counted, and which aliases a glob enumerates is **not stable between runs** on this mount. Read
+naively that is "+4 slides, +10 sheets". Scored against `MANIFEST.tsv` it is 200 and 276 both times.
+
+### Pinned this round, not implemented
+
+- **The list label's slant.** The level's own `w:rPr` leans the bullet and so does the paragraph
+  mark's; a run's does not. Five authored packages with a control. This is **164 of the 206
+  reachable glyphs** — the whole OpenSymbol column, ten documents, `A320SimNotes.doc` 75 — and it
+  reaches the page through `PageDrawing`'s label branch, never through `ByFace`.
+- **The automatic font colour on a dark background.** `AFS-050-004-F2_0i.docx` page 2's banner text
+  is present, painted and **black on black**: the reference draws 305 glyphs `1 1 1 rg` there and we
+  draw none. White when `Color::IsDark()`, which is `GetWCAGLuminance() <= 87` — confirmed to the
+  single sRGB step over 22 fills, grey `0x9E` white and `0x9F` black. The work is getting the
+  background behind a run to the drawing pass.
+- **The `FORMCHECKBOX` census is closed at 778 in 16.** The `.doc` arm is 103 in 4, by two
+  independent instruments that agree to the digit. **The `.rtf` arm has no witness**: the words
+  corpus is 271 `.docx` and 66 `.doc` and nothing else.
+
+### Next
+
+The list label's slant, then the automatic font colour, then the fallback *order*
+(`outlook_of_nigerian_pension_sector.ppt` 355 glyphs, `1228841571067…doc` 74) — and note that this
+round's own `sym-italic` probe is a second, authored witness for the ordering question: the
+reference draws ☒ and ➢ from **DejaVu Sans** where we draw them from **OpenSymbol**, though
+LibreOffice's own list has `opensymbol` before `dejavusans`.

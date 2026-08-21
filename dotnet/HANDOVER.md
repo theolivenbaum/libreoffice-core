@@ -593,8 +593,48 @@ foot of the page rather than assuming it, is the model.
   failure to pin**, and `w:checkBox/w:size` — which 109 of the 675 state — is inert on four values
   from 5 to 40 pt. Drawn and, more to the point, *charged to the line*: 249/249, 152/152 and 48/48
   squares against the reference on the three densest documents, sides identical to 0.000 pt, with
-  zero verdicts and zero page counts moved. The `.doc` and `.rtf` arms are still neither censused
-  nor implemented.
+  zero verdicts and zero page counts moved. **Censused in round 58**: the `.doc` arm is 103 boxes
+  in 4 documents and the `.rtf` arm has no witness in this corpus. Neither is implemented.
+- **Synthetic oblique was lost a *second* time, at glyph fallback — fixed, round 58, in
+  `Paperless.Text`.** `IGlyphFallbackResolver.ReferenceFor` is a reverse lookup from a face with no
+  request to compare against, so a run whose glyph came from a fallback face was drawn upright
+  however italic it was. Measured over **six** filters (`.docx`, `.fodt`, `.fodp`, `.fods`,
+  `.pptx`, `.xlsx`) on 41 authored two-run packages, four negative controls at nought on both sides
+  in all six. **The reference does not go looking for an italic face**: Hebrew from an italic
+  Carlito run is drawn in DejaVu Sans *sheared*, not in Liberation Sans Italic upright — so the
+  fallback order was already right and only the lean was missing. Reach measured, not argued:
+  words 2 renderings, slides 0, sheets 1; zero verdicts on all three tracks.
+- **The rest of the fallback-lean gap is two different things, and a summing census hid it.**
+  Per face (`probes/words-r58/fallbackfaces.py`): of the reference's 289 leaning glyphs in faces no
+  words document names, **206 are reachable** (we draw the same face, upright) and **83 are not**
+  (we do not draw that face at all — `1228841571067…doc` 74, `1257259179492…doc` 9, a
+  fallback-*order* divergence). On slides the split is **0 reachable and 341 unreachable**:
+  `outlook_of_nigerian_pension_sector.ppt` draws 355 WenQuanYi Zen Hei glyphs on the reference and
+  **none at all** on ours. A census that summed the fallback faces together read that as a lean
+  defect and predicted 345 glyphs of movement where the true answer was nought.
+- **164 of the 206 reachable glyphs are list bullets, and the label is a different seat.**
+  OpenSymbol's whole 112-glyph column across ten documents is single `<01>` draws one per line at
+  the left margin, which reach the page through `PageDrawing`'s label branch and never through
+  `ByFace`. The rule is pinned (`probes/words-r58/label-and-autocolour.py`, five authored
+  packages with a control): **the level's own `w:rPr` leans the bullet, the paragraph mark's
+  `w:rPr` leans it, a run's `w:rPr` does not.** We lean it in none of the three. Not implemented.
+- **`AFS-050-004-F2_0i.docx` page 2's banner rows are present, painted, and the wrong colour.**
+  The question the standing record could not answer — present-but-unpainted or never-read — is
+  answered: **neither.** Both strings are in our text layer at the reference's positions; the
+  reference draws **305 glyphs `1 1 1 rg`** on that page and we draw **none**, because we do not
+  resolve an automatic font colour against a dark cell fill. The rule is pinned exactly over 22
+  fills: **white when `Color::IsDark()`, which is `GetWCAGLuminance() <= 87`** — confirmed to the
+  single sRGB step, grey `0x9E` white and `0x9F` black, and correct on all seven primaries too.
+  Not implemented: it needs the *background behind a run* at the drawing pass, which the table
+  renderer owns and `PageDrawing.RunsIn` cannot see. The same page also shows three shaded header
+  cells the reference fills and we do not (8 filled rectangles against our 5).
+- **The `FORMCHECKBOX` corpus census is now complete: 778 boxes in 16 documents.** Round 56's
+  "675 in 12, a floor" is closed. The `.doc` arm is **103 boxes in 4 documents** — `f111.doc` 58,
+  `1528364855.doc` 37, `foca_form_1.doc` 4, `LHD-230-…-aircraftr.doc` 4 — by **two independent
+  instruments that agree to the digit**: a byte search for `FORMCHECKBOX` in both WW8 text
+  encodings, and LibreOffice's own reader via `.doc` → `.docx` counted by round 56's rule. **The
+  `.rtf` arm needs no probe at all: the words corpus holds no `.rtf`** — 271 `.docx` and 66
+  `.doc` — so it has zero witnesses. `probes/words-r58/doc-checkbox-census.py`.
 - **An ODF end-of-paragraph inline object contributes no height** — measured and reproducing, not
   fixed; the fix needs a line list `MeasureLine` does not have, and no ODF document is in this
   track.
