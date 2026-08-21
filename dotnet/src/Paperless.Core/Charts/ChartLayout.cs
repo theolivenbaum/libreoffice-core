@@ -848,8 +848,18 @@ public static partial class ChartLayout
         if (HasBestFitLabels(plot))
         {
             DocRect outer = DiagramAreaOf(plot, frame, measurer);
+
+            // And pass 1 is NOT drawn at `area`. `reduceToMinimumSize` has already shrunk the
+            // diagram to a fraction of the available rectangle before any series exists, and for
+            // a pie nothing grows it back before the labels are laid out — see
+            // <see cref="ReducedToMinimum"/>. Modelling pass 1 at full size is what made round
+            // 60's trace read `consumed.Left = 291.76` on `003_advanced_excel_pie`: at radius
+            // 110.72 four of the five labels fit inside their own slices and nothing reaches
+            // left of the pie, where the reference's pass 1 puts labels on both sides.
+            DocRect first = ReducedToMinimum(plot, outer);
+
             area = AdjustInnerSize(
-                plot, outer, area, PieConsumedRect(plot, area, outer, measurer));
+                plot, outer, first, PieConsumedRect(plot, first, outer, measurer));
 
             if (area.Width <= Length.Zero || area.Height <= Length.Zero)
                 return new ChartDrawing(DocRect.Empty, boxes, lines, labels, shapes);
@@ -3123,22 +3133,37 @@ public static partial class ChartLayout
             // Line by line, top down, from the same origin the reservation above measured from,
             // so a two-line title fills exactly the band that was kept for it.
             //
-            // MEASURED DIVERGENCE, round 60, unfixed and pre-existing. Our title's first baseline
-            // is 9.57 pt HIGHER than 26.2.4.2's, identically on two unrelated documents:
-            // `003_advanced_excel_pie` and `011_advanced_excel_pie` both draw it at 601.44 where
-            // the reference draws 591.87, while the title's x agrees to 0.10 pt and its size to
-            // 0.01 (`pdf-ops.py` on both halves). The reference puts the baseline 32.06 pt below
-            // the chart frame's own top edge and we put it 22.93 below; at 18 pt the chart-device
-            // ascent is 17.25, so the gap above the ascent is 14.81 there against our 5.68.
+            // <strong>Three terms, and for a long time only the first was here.</strong>
+            // `lcl_createTitle` puts a MAIN_TITLE shape's *top* at
+            // `rRemainingSpace.Y + int(pageHeight * 0.02) + 135` hundredths of a millimetre
+            // (`ChartView.cxx:1058-1069` — the flat 135 is added for `MAIN_TITLE` alone), and
+            // `ShapeFactory::createText` then insets the text inside that shape by
+            // `round(fontHeight_mm100 * 0.30)` (`ShapeFactory.cxx:2283-2286`). The reservation in
+            // `DiagramAreaOf` has always carried both — `TitleGap` and `Shape()`'s
+            // <see cref="TextShapeInsetY"/> — so until round 61 the band that was kept and the
+            // pen that drew into it disagreed by exactly those two terms.
             //
-            // `PageMargin` is what decides ours and it is not what decides the reference's. This
-            // is *not* round 60's line-height change — the same title was at 601.61 before it, so
-            // that moved it 0.17 pt. It reaches every chart title in the corpus (97 sheets
-            // documents, 67 slides, 10 words: `probes/sheets-r60/census-charttext.py`) and it was
-            // found by two blind page reviewers on two unrelated pages before any metric noticed
-            // it. Left unfixed because the rule behind 14.81 pt has not been measured, and a
-            // constant fitted to one size would be a fit rather than a law.
-            Length pen = frame.Y + (frame.Height * PageMargin);
+            // Measured on the binary rather than argued from the source
+            // (`probes/sheets-r61/probe-titlepos.py`): eighteen one-variable rewrites of
+            // `003_advanced_excel_pie`'s own chart part, nine title sizes from 6 to 36 pt in bold
+            // and regular, rendered through 26.2.4.2 and through this tree. `y_ours - y_ref` runs
+            // 6.040, 6.600, 7.220, 7.810, 8.390, 9.570, 10.780, 12.540, 14.920 pt against a
+            // predicted `(135 + round(0.30 * size)) / 100 mm` of 5.641, 6.236, 6.831, 7.427,
+            // 8.022, 9.213, 10.431, 12.217, 14.627 — no free parameter, and the slope and the
+            // constant are both right.
+            //
+            // <strong>A residual of 0.29-0.40 pt survives and is deliberately not fitted out.</strong>
+            // It shrinks slightly as the size grows, so it is neither a constant nor a proportion,
+            // and it is not the 0.75 pt quantum of the chart's 96 dpi grid. If it is an ascent
+            // difference then round 60's ascent law is about a third of a point out at every size,
+            // which that round's own control could not resolve. Whatever it is, correcting the two
+            // measured terms takes 9.57 pt of error down to 0.36 on the four corpus pies that
+            // carry an 18 pt title, and a constant fitted to close the rest would be a fit rather
+            // than a law.
+            Length pen = frame.Y + (frame.Height * PageMargin) + TitleGap
+                         + Length.FromMm100((long)Math.Round(
+                               plot.TitleSize.Mm100 * TextShapeInsetY,
+                               MidpointRounding.AwayFromZero));
             foreach (string line in LinesOf(
                          titles, title, plot.TitleSize, plot.IsTitleBold,
                          frame.Width * TitleWidthFraction))
