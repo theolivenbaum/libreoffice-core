@@ -634,6 +634,19 @@ filesystem, fold case and deduplicate before counting.
 **Do not delete the aliases.** As in the corpus, `rm -rf dotnet/src/paperless.core` is a request to
 unlink that inode, and the inode is the source tree.
 
+**An agent's cross-track figure is measured at its own base, and the manifest tracks HEAD. They
+disagree, and the disagreement is not an error.** Three times in one session a round has swept the
+other two tracks, found a manifest row it could not reproduce, and proposed a correction — each time
+because the round that closed that document merged *after* its own base commit. The clearest case:
+a words round proposed re-opening two documents on the grounds that "278 recorded against 276
+measured, three rounds running, both sides stable, so not date volatility". Its reasoning was sound
+and its conclusion wrong; the fix that closed them was three commits newer than its base.
+
+So: **a cross-track sweep from an agent's worktree is evidence about that worktree**, and only the
+parent's gate at HEAD settles a manifest row. Agents should say which commit they measured at — and
+when a cross-track figure disagrees with the manifest, `git log <agent-base>..HEAD -- <the relevant
+source>` is the first thing to run, not a manifest edit.
+
 **The reference half of the gate is not reproducible for date-bearing sheets, and it decays the
 manifest on its own.** Measured across three sweeps hours apart in round 51: four documents'
 *reference* word counts moved with the wall clock while ours stayed pinned, because
