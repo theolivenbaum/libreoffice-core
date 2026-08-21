@@ -348,7 +348,7 @@ Counters re-derived at both commits with the file's own commands, never quoted:
 
 ```
 Core 390   Containers 109   Text 624   Vector 302   Rendering 153(1 skipped)   Markup 259
-OpenDocument 125   WordProcessing 1231   Spreadsheets 1020   Presentations 872     = 5185
+OpenDocument 125   WordProcessing 1231   Spreadsheets 1020   Presentations 872     = 5085
 0 failed, 1 skipped
 ```
 
