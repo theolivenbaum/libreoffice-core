@@ -15190,3 +15190,42 @@ not acted on: in that shape **we honour the font where LibreOffice does not**, a
 4. **`SheetOptimalRowHeights.cs`'s 24.2.7.2 site** — row heights are the axis this track already
    established for a 14-document cluster, and that site claims thirty exact reproductions against a
    *superseded* binary.
+
+### Parent verification and cross-track measurement — round 53 sheets and slides
+
+**Sheets 271 → 274 of 307. Slides 199 → 199. Corpus 791 of 946.** Combined test counts at the
+merged tree:
+
+```
+Core 337   Containers 109   Text 611   Vector 295   Rendering 150(1 skipped)   Markup 259
+OpenDocument 125   WordProcessing 1096   Spreadsheets 925   Presentations 788     = 4695
+0 failed
+```
+
+All 307 sheets and 302 slides documents re-swept in the primary after the merge: **3 gains, 0
+regressions, 0 page counts moved on either track.**
+
+The sheets round's `Paperless.Ooxml` edit then measured across the other two tracks — 666 words and
+slides documents rendered at the merged commit and again with only that diff reversed (`git apply
+-R`, `obj`/`bin` deleted between legs, `SOURCE_DATE_EPOCH` pinned):
+
+```
+TOTAL compared=666  identical=666  changed=0  unrenderable=0
+worktree vs HEAD: clean      index vs HEAD: clean
+```
+
+The round predicted 0 of 666 and argued it **by type rather than by census** — the changed clause
+only fires when a `ChartRangeResolver` is supplied, and the only implementation is reached from
+`XlsxReader`, with words and slides passing `null`. The measurement agrees.
+
+**That is the third `Paperless.Ooxml` change measured this way and the third to come back at exactly
+zero.** Worth stating as a pattern rather than three coincidences: these fixes are each keyed on a
+single literal — a namespace URI, a graphic-data URI, a resolver's presence — and the key is doing
+its job. It does **not** license skipping the sweep. The rule is that a shared-layer merge owes a
+measurement rather than an argument, and the value of these three is precisely that they converted
+three good arguments into three measurements at a cost of about twenty minutes each.
+
+**A procedural fix, adopted after the AIRBUS item.** Round 53's slides brief carried a defect I had
+quoted into three consecutive briefs after it had been fixed. From here, **an item quoted into a
+brief carries the commit or measurement that last confirmed it is still open**, and where it cannot,
+the brief says so and the round re-measures it first. Both round-54 briefs are written that way.
