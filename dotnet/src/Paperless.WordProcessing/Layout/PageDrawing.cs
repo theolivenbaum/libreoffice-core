@@ -236,6 +236,17 @@ public static class PageDrawing
         Stroke stroke = new(Paint.Solid(colour), frame.Frame.BorderWidth);
         DocRect area = frame.Area;
 
+        // The border is stroked inside the room the frame took, where it says so. See
+        // PageFrame.BorderInset -- a form checkbox is the only thing that does.
+        if (frame.Frame.BorderInset > Length.Zero)
+        {
+            Length inset = frame.Frame.BorderInset;
+            area = new DocRect(
+                area.X + inset, area.Y + inset,
+                Length.Max(Length.Zero, area.Width - inset - inset),
+                Length.Max(Length.Zero, area.Height - inset - inset));
+        }
+
         // A line shape's outline is its diagonal rather than its rectangle: corner to opposite corner,
         // which is the two-point path `ImportShape` builds for it, with the mirror flags choosing which
         // pair of corners. Drawing the box instead puts three sides on the page that are not in the file.
@@ -256,6 +267,20 @@ public static class PageDrawing
                 .LineTo(new DocPoint(area.Right, area.Bottom))
                 .LineTo(new DocPoint(area.X, area.Bottom))
                 .Close(),
+            stroke);
+
+        if (!frame.Frame.IsCrossed) return;
+
+        // Both diagonals of the same rectangle, which is what a *checked* box is.
+        sink.StrokePath(
+            new GraphicsPath()
+                .MoveTo(new DocPoint(area.X, area.Y))
+                .LineTo(new DocPoint(area.Right, area.Bottom)),
+            stroke);
+        sink.StrokePath(
+            new GraphicsPath()
+                .MoveTo(new DocPoint(area.Right, area.Y))
+                .LineTo(new DocPoint(area.X, area.Bottom)),
             stroke);
     }
 
