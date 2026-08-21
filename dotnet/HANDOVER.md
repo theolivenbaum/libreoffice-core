@@ -424,7 +424,14 @@ the words used: **both sides draw the five-entry legend, on page 2.** The item w
 **legend-key swatch beside every data label** — `pdf-ops.py` counts 10 small filled rects on the
 reference's page 1 against our 5, the extra six sitting at the label positions in their series
 colours — from `c:showLegendKey val="1"`, which our source consults **only inside an existence
-test** and never draws. 68 elements in 5 documents, all sheets.
+test** and never draws. **62** elements in 5 documents, all sheets.
+
+**And the parent's own census of that figure was wrong, by the trap the parent had been warning
+every round about.** It first reported **68**, because the walk counted
+`003_advanced_excel_pie.XLSX` and `.xlsx` — one inode, two names — as two documents. The
+per-document listing beside it *had* case-folded and so read correctly at 5 documents; only the
+total summed over raw walked paths. The sheets round caught it within the hour. **Case-fold at the
+point you accumulate, not only at the point you print.**
 
 **A refutation of the description is not a refutation of the observation.** And the *recurrence* was
 itself the signal: one sentence from three independent readers across three rounds is evidence that
