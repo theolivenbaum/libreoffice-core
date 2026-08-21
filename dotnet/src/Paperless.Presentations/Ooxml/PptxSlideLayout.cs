@@ -774,6 +774,13 @@ internal sealed partial class PptxSlideLayout
         //
         // Not touched: the ODP path, which states the flag per paragraph style and usually does not
         // set it (OdpSlideLayout), because ODF has no such compatibility default to follow.
+        //
+        // [24.2.7-audit: VERIFIED 26.2.4.2, 2026-08-21, round slides-r54 -- probed against the
+        // installed binary rather than read. probes/slides-r54/make-cell-baseline-probe.py: one
+        // table, one cell, zero margins, top-anchored, six stated sizes from 10 to 40 pt. The
+        // reference draws its first baseline at 1.0007, 1.0005, 1.0003, 1.0003, 1.0002 and 1.0002
+        // ems below the cell's top edge -- one em, quantised, on all six, and NOT the 0.907 em the
+        // 24.2.7.2 note above records. Our own six land on the reference's to 0.000 pt.]
         return PptxTextBody.Read(
             body, theme.Colours, theme.MinorLatin,
             themed.Count == 0 ? null : _ => themed) with
