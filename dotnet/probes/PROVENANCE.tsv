@@ -163,7 +163,9 @@ dotnet/probes/sheets-r40/README.md	2026-08-09	pre-container	24.2.7.2	unverified	
 dotnet/probes/sheets-r40/base-whole-track.tsv	2026-08-09	pre-container	24.2.7.2	unverified	archival	-
 dotnet/probes/sheets-r50-chartex/prediction.md	2026-08-20	current	26.2.4.2	present	current	-
 dotnet/probes/sheets-r50-chartex/results.md	2026-08-20	current	26.2.4.2	present	current	-
+dotnet/probes/sheets-r51-bands/PROBES.md	2026-08-20	current	26.2.4.2	present	current	-
 dotnet/probes/sheets-r51-bands/prediction.md	2026-08-20	current	26.2.4.2	present	current	-
+dotnet/probes/sheets-r51-bands/results.md	2026-08-20	current	26.2.4.2	present	current	-
 dotnet/probes/sheets-rebase-01/prediction.md	2026-08-13	current	26.2.4.2	present	current	-
 dotnet/probes/sheets-rebase-01/results.md	2026-08-13	current	26.2.4.2	present	current	-
 dotnet/probes/sheets-rebase-02/parity-final.tsv	2026-08-13	current	26.2.4.2	present	current	-
@@ -236,6 +238,10 @@ dotnet/probes/slides-r50/parity-after.tsv	2026-08-20	current	26.2.4.2	present	cu
 dotnet/probes/slides-r50/parity-before.tsv	2026-08-20	current	26.2.4.2	present	current	-
 dotnet/probes/slides-r50/prediction.md	2026-08-20	current	26.2.4.2	present	current	-
 dotnet/probes/slides-r50/results.md	2026-08-20	current	26.2.4.2	present	current	-
+dotnet/probes/slides-r51/prediction.md	2026-08-20	current	26.2.4.2	present	current	-
+dotnet/probes/slides-r51/results.md	2026-08-20	current	26.2.4.2	present	current	-
+dotnet/probes/slides-r52/prediction.md	2026-08-20	current	26.2.4.2	present	current	-
+dotnet/probes/slides-r52/results.md	2026-08-21	current	26.2.4.2	present	current	dotnet/TODO.24-2-7-audit.md
 dotnet/probes/slides-rebase-01/prediction.md	2026-08-13	current	26.2.4.2	present	current	-
 dotnet/probes/slides-rebase-01/results.md	2026-08-13	current	26.2.4.2	present	current	-
 dotnet/probes/slides-solog-01/prediction.md	2026-08-14	current	26.2.4.2	present	current	-
@@ -371,6 +377,10 @@ dotnet/probes/words-r50-chartset/variants/README.md	2026-08-20	current	26.2.4.2	
 dotnet/probes/words-r51-flies/prediction-2.md	2026-08-20	current	26.2.4.2	present	current	-
 dotnet/probes/words-r51-flies/prediction.md	2026-08-20	current	26.2.4.2	present	current	-
 dotnet/probes/words-r51-flies/results.md	2026-08-20	current	26.2.4.2	present	current	-
+dotnet/probes/words-r52/prediction.md	2026-08-21	current	26.2.4.2	present	current	-
+dotnet/probes/words-r52/results.md	2026-08-21	current	26.2.4.2	present	current	-
+dotnet/probes/words-r53/prediction.md	2026-08-21	current	26.2.4.2	present	current	-
+dotnet/probes/words-r53/results.md	2026-08-21	current	26.2.4.2	present	current	-
 dotnet/probes/words-rebase-01/results.md	2026-08-13	current	26.2.4.2	present	current	-
 dotnet/probes/words-rebase-02/gate.tsv	2026-08-13	current	26.2.4.2	present	current	-
 dotnet/probes/words-rebase-02/prediction.md	2026-08-13	current	26.2.4.2	present	current	-
