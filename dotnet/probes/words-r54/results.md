@@ -286,6 +286,21 @@ for conflating filters: `ShapeOf`'s "the binary answers fontconfig's way on ever
 
 `Paperless.WordProcessing.Tests/WordFallbackClassTests.cs`, **27 tests**, all passing.
 
+Run through `verify-test.sh`, tree clean before each and restored after:
+
+| mutation | detected by |
+|---|---|
+| a declared `swiss` no longer escapes the default | `AnUnrecognisedFamilyInADocxFallsBackTheWayTheReferenceDoes` (2 cases), `OnlyADeclaredSansSerifEscapesTheRomanDefault` |
+| no roman default at all — every named family stays `Unknown` | 11 cases across those two plus `TheDocAndRtfArmTakesTheSameDefault` |
+| **the empty-family guard removed** — the exact defect the first sweep caught | `ARunNamingNoFamilyAtAllKeepsTheApplicationDefault` (all 3 cases) |
+
+**Three of the six test methods are detectors and three are deliberate controls**, labelled as
+such rather than counted as detectors: `AStrongMetricAliasStillBeatsTheDefault` and
+`AnInstalledFamilyIsNotSubstitutedAtAll` say the default is a *fallback* and not a blanket, and
+`ARequestThatDeclaresNothingStillGetsFontconfigsGeneric` is the reach control — it is the test that
+would have caught the tempting version of this fix, and no mutation of the word-processing reader
+can make it fail, which is exactly the point of it.
+
 ```
 Core 337  Containers 109  Text 611  Vector 295  Rendering 150(1 skipped)  Markup 259
 OpenDocument 125  WordProcessing 1123  Spreadsheets 905  Presentations 780   = 4694
