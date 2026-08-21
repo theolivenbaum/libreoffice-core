@@ -726,6 +726,7 @@ public sealed partial class OdtLayoutSource
     {
         List<PageRun> runs = new(ranges.Count);
         bool varies = false;
+        FontReference? paragraphFont = _references.GetValueOrDefault(paragraph.FaceKey);
 
         foreach (StyledRange range in ranges)
         {
@@ -733,6 +734,10 @@ public sealed partial class OdtLayoutSource
             if (range.IsCitation) style = AsCitation(style);
 
             OpenTypeFace face = Face(style) ?? paragraphFace;
+
+            // Resolved before the predicate rather than inside the constructor call below, because the
+            // predicate needs it: `Face` is what fills `_references`, so the lookup is only valid here.
+            FontReference? font = _references.GetValueOrDefault(style.FaceKey);
 
             // The escapement is resolved here rather than where it was read, because its rise is a fraction
             // of the face's height and the face is only known now.
@@ -757,7 +762,12 @@ public sealed partial class OdtLayoutSource
                 // Kerning, unlike the two rules, does change a measurement — so a run that kerns
                 // inside a paragraph that does not has to survive the shortcut or its width is the
                 // paragraph's answer rather than its own.
-                || style.AutoKerning != paragraph.AutoKerning)
+                || style.AutoKerning != paragraph.AutoKerning
+                // And a synthetic oblique, which is drawing-only in the same way and was the one
+                // missing from this list: an italic run whose family has no italic installed resolves to
+                // the *same* face as its upright neighbour, so nothing above can see it and the fold
+                // would draw it upright. See PageRun.LeansDifferently.
+                || PageRun.LeansDifferently(font, paragraphFont))
             {
                 varies = true;
             }
@@ -767,7 +777,7 @@ public sealed partial class OdtLayoutSource
                 range.Length,
                 face,
                 size,
-                _references.GetValueOrDefault(style.FaceKey),
+                font,
                 style.Colour ?? paragraph.Colour ?? Colour.Black,
                 new ShapingOptions(Language: style.Language, DisableKerning: !style.AutoKerning),
                 rise,

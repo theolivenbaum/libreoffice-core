@@ -1066,6 +1066,8 @@ public sealed class Ww8Document : IWordProcessingDocument, IPaginatedDocument
         IReadOnlyList<Ww8DocumentReader.Ww8LayoutRun> stated = paragraph.Runs ?? [];
         List<PageRun> runs = new(stated.Count);
         bool varies = false;
+        FontReference? paragraphFont =
+            fonts.Reference(paragraph.FamilyName, paragraph.Weight, paragraph.IsItalic);
 
         foreach (Ww8DocumentReader.Ww8LayoutRun run in stated)
         {
@@ -1081,6 +1083,9 @@ public sealed class Ww8Document : IWordProcessingDocument, IPaginatedDocument
             OpenTypeFace face = symbol?.Face
                 ?? fonts.Face(run.FamilyName, run.Weight, run.IsItalic)
                 ?? paragraphFace;
+            FontReference? font = symbol is { } named
+                ? named.Font
+                : fonts.Reference(run.FamilyName, run.Weight, run.IsItalic);
 
             // The escapement is resolved here rather than where it was read, because its rise is a
             // fraction of the face's height and the face is only known now.
@@ -1112,7 +1117,12 @@ public sealed class Ww8Document : IWordProcessingDocument, IPaginatedDocument
                 || run.Tracking != paragraph.Tracking
                 // A symbol's face is its own even when it happens to equal the paragraph's: losing the
                 // runs here would draw its slot out of whatever the paragraph is set in.
-                || run.SymbolSlot is not null)
+                || run.SymbolSlot is not null
+                // And a synthetic oblique, which is drawing-only in the same way and was the one
+                // missing from this list: an italic run whose family has no italic installed resolves to
+                // the *same* face as its upright neighbour, so nothing above can see it and the fold
+                // would draw it upright. See PageRun.LeansDifferently.
+                || PageRun.LeansDifferently(font, paragraphFont))
             {
                 varies = true;
             }
@@ -1122,9 +1132,7 @@ public sealed class Ww8Document : IWordProcessingDocument, IPaginatedDocument
                 run.Length,
                 face,
                 size,
-                symbol is { } named
-                    ? named.Font
-                    : fonts.Reference(run.FamilyName, run.Weight, run.IsItalic),
+                font,
                 run.Colour ?? paragraph.Colour ?? Colour.Black,
                 new Text.Shaping.ShapingOptions(
                     Language: run.Language, DisableKerning: !run.AutoKerning),

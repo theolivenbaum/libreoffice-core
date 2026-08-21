@@ -1075,6 +1075,7 @@ public sealed partial class DocxLayoutSource
     {
         List<PageRun> runs = new(ranges.Count);
         bool varies = false;
+        FontReference? paragraphFont = _references.GetValueOrDefault(paragraph.FaceKey);
 
         foreach (StyledRange range in ranges)
         {
@@ -1090,6 +1091,12 @@ public sealed partial class DocxLayoutSource
             // chosen. Everything else about the run — its size, its colour, its escapement — still comes
             // from the run, so only the face is taken from the symbol.
             OpenTypeFace face = range.Symbol?.Face ?? Face(style) ?? paragraphFace;
+
+            // Resolved before the predicate rather than inside the constructor call below, because the
+            // predicate needs it: `Face` is what fills `_references`, so the lookup is only valid here.
+            FontReference? font = range.Symbol is { } named
+                ? named.Font
+                : _references.GetValueOrDefault(style.FaceKey);
 
             // The escapement is resolved here rather than where it was read, because its rise is a fraction
             // of the face's height and the face is only known now.
@@ -1121,7 +1128,12 @@ public sealed partial class DocxLayoutSource
                 || style.AutoKerning != paragraph.AutoKerning
                 // And tracking, for the same reason and more sharply: it is a distance per character,
                 // so a run that disagrees with its paragraph mark is wrong by its own length.
-                || style.Tracking != paragraph.Tracking)
+                || style.Tracking != paragraph.Tracking
+                // And a synthetic oblique, which is drawing-only in the same way and was the one
+                // missing from this list: an italic run whose family has no italic installed resolves to
+                // the *same* face as its upright neighbour, so nothing above can see it and the fold
+                // would draw it upright. See PageRun.LeansDifferently.
+                || PageRun.LeansDifferently(font, paragraphFont))
             {
                 varies = true;
             }
@@ -1131,7 +1143,7 @@ public sealed partial class DocxLayoutSource
                 range.Length,
                 face,
                 size,
-                range.Symbol is { } symbol ? symbol.Font : _references.GetValueOrDefault(style.FaceKey),
+                font,
                 style.Colour ?? paragraph.Colour ?? Colour.Black,
                 new ShapingOptions(Language: style.Language, DisableKerning: !style.AutoKerning),
                 rise,
