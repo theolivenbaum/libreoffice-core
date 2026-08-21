@@ -70,6 +70,14 @@ public sealed record SlideTextBody
     /// the same way, as <c>TextPreRotateAngle</c> beside <c>RotateAngle</c>.
     /// </para>
     /// <para>
+    /// <c>a:bodyPr/@vert</c> arrives here too, as a quarter turn added to <c>@rot</c> — a body
+    /// that reads downwards is a body whose frame is transposed and whose runs travel with a
+    /// quarter-turn matrix, which is the same quantity by a different spelling. <c>vert</c> and
+    /// <c>eaVert</c> add a quarter clockwise and <c>vert270</c> a quarter the other way; see
+    /// <c>PptxTextBody.Vertical</c> for what was measured and for the two values that are
+    /// deliberately not turns.
+    /// </para>
+    /// <para>
     /// A quarter turn swaps the text rectangle's width and height about its centre, because the
     /// lines then run down the shape rather than across it; a half turn leaves the rectangle
     /// alone. Only multiples of a quarter turn arise: <c>autoTxRot</c> produces nothing else.
