@@ -515,6 +515,12 @@ internal sealed class XlsSheetPrintState
             HeaderText = _header,
             FooterText = _footer,
 
+            // The face the band's own codes fall back to: the workbook's app font, which is what
+            // `Band` and `Gap` above are already given. Until round 56 the drawing used a fixed
+            // ten-point Liberation Sans while the sizing used this, so the two disagreed on every
+            // workbook whose FONT record zero is not that. See `SheetPrintSetup.BandFont`.
+            BandFont = DefaultFont,
+
             // BIFF's HEADER and FOOTER records carry the same &-code language SpreadsheetML
             // does, which is not a coincidence: the OOXML spelling was inherited from it.
             Header = _header is null ? null : SheetHeaderFooter.ParseCodes(_header),

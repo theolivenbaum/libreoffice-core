@@ -367,6 +367,40 @@ public sealed record SheetPrintSetup
     /// <summary>The footer's own right margin.</summary>
     public Length FooterRightMargin { get; init; }
 
+    /// <summary>
+    /// The face a header or footer is drawn in when it names none of its own: the workbook's
+    /// <em>default cell font</em>, family and size both.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Not a fixed ten-point Liberation Sans, which is what this file assumed until round 56.
+    /// <c>ScPrintFunc::MakeEditEngine</c> fills the band's EditEngine defaults from
+    /// <c>getDefaultCellAttribute</c> and overrides only the height <em>unit</em>
+    /// (<c>sc/source/ui/view/printfun.cxx:1769-1774</c>), so a band with no <c>&amp;"…"</c> and
+    /// no <c>&amp;12</c> is drawn in whatever a plain cell of that workbook would be.
+    /// </para>
+    /// <para>
+    /// <see cref="SheetBandHeight"/> has taken the workbook's default font since it was written —
+    /// it is what makes <c>NAARMO_Mexico_RVSM_Approvals.xlsx</c>'s band 11.0 pt of nominal
+    /// height and not 10 — so the two halves of the same question disagreed: the band was
+    /// <em>sized</em> for the workbook's font and <em>drawn</em> in a constant one.
+    /// </para>
+    /// <para>
+    /// Measured on 26.2.4.2 with <c>probes/sheets-r56/probe-bandclip.py</c>: five workbooks
+    /// differing only in the default font's stated size, one 11 pt header line each, no size
+    /// code. The reference's right-aligned run starts at 508.90, 499.95, 495.45, 481.95 and
+    /// 454.90 pt for 8, 10, 11, 14 and 20 point; ours started at 500.09 for all five. Five more
+    /// differing only in the family put <c>Carlito</c>, <c>LiberationSerif</c>,
+    /// <c>LiberationMono</c> and <c>DejaVuSerif</c> in the reference's PDF where ours wrote
+    /// <c>LiberationSans</c> every time.
+    /// </para>
+    /// <para>
+    /// Null means the application's own default, which is what an ODF spreadsheet gets: ODF
+    /// states the band's face in its own page style and <c>OdsPrintSetup</c> does not set this.
+    /// </para>
+    /// </remarks>
+    public SheetDefaultFont? BandFont { get; init; }
+
     /// <summary>The rectangle the sheet's cells are printed into, headings included.</summary>
     /// <remarks>
     /// The paper less the margins and the two furniture bands. Pagination does not use this —

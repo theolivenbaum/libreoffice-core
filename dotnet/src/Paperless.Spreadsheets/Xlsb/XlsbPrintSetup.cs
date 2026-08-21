@@ -316,6 +316,13 @@ internal static class XlsbPrintSetup
             Header = headerText is null ? null : SheetHeaderFooter.ParseCodes(headerText),
             Footer = footerText is null ? null : SheetHeaderFooter.ParseCodes(footerText),
 
+            // The face the band's own codes fall back to: the workbook's default cell font,
+            // family and size. `SheetBandHeight` above is already given the same object to size
+            // the band with; until round 56 the *drawing* used a fixed ten-point Liberation Sans
+            // instead, so the two halves of the same band disagreed on every workbook whose
+            // default is not that. See `SheetPrintSetup.BandFont`.
+            BandFont = defaultFont,
+
             // Every Excel band is dynamic — see `SheetPrintSetup.HeaderIsDynamic`.
             HeaderIsDynamic = true,
             FooterIsDynamic = true,

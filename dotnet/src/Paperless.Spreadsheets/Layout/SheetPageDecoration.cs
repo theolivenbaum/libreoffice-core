@@ -391,29 +391,20 @@ internal sealed class SheetPageDecoration(SheetLayout sheet, SheetPagePlacement 
         // environment: the mechanism the old note identified survived, the number attached to it
         // did not.
         //
-        // [24.2.7-audit: WRONG 2026-08-21, round 55 — reported, not fixed. The zero-band half is
-        // right and the "above zero" half is not.] Re-checked from scratch on 26.2.4.2 with
-        // authored fixtures rather than corpus variants, `probes/sheets-r55/audit_pagedecoration.py`.
-        // The control ran first and passed: at Excel's own 0.4 in band both sides draw both bands,
-        // agreeing to 1.2 pt. At a stated band of exactly zero, and at every negative band, the
-        // reference draws nothing — as this guard says.
+        // [24.2.7-audit: WRONG 2026-08-21, round 55 — re-marked 2026-08-21, round 56: the
+        // zero-band half was right, the "above zero" half was wrong, and the rule that replaces
+        // it is implemented below rather than reported.] Round 55 re-checked this on 26.2.4.2
+        // with `probes/sheets-r55/audit_pagedecoration.py`, found the reference drew nothing at
+        // 0.72 or 1.44 pt of 8 pt text, and recorded a "text-fit threshold" scaling at about
+        // 0.27x the point size.
         //
-        // But the reference does not draw at "every stated band above zero". It draws nothing at
-        // **0.72 pt and 1.44 pt** either, and where it starts depends on the text: the threshold
-        // is between 1.44 and 2.16 pt for 8 pt header text and between 4.32 and 5.76 pt for 20 pt
-        // text — about 0.27x the point size, over two points, so it is a *text-fit* rule and not a
-        // constant and certainly not zero. Fourteen renderings, one variable each.
+        // **There is no threshold. There is a clip rectangle**, and the apparent threshold is
+        // just how far below a line's top its ink starts. See `DrawBand`, which carries the
+        // citations and the bisection that measures it — and which reproduces round 55's own 8 pt
+        // bracket with nothing fitted, while refuting its 20 pt one (4.32 pt draws).
         //
-        // Not implemented, and the reason is the reach rather than the difficulty:
-        // `probes/sheets-r55/census-bands.py` reads all 267 corpus worksheets that state header or
-        // footer content and finds **four** with a positive band under 6 pt —
-        // `085_Simple_Gantt_chart`, `020_Free_Blood_Pressure_Chart`, `fm-provider-service-measures`
-        // and `FAA-2019-0995-0002_attachment_2`, all at 3.6 to 5.67 pt and all on documents that
-        // match today. At 3.6 pt with ordinary 10 or 11 pt header text the bracket above puts the
-        // threshold at roughly 2.7 to 3.2 pt, so the reference draws them and so do we; guessing
-        // the exact law to move four passing worksheets is the trade this project's rules say not
-        // to make. What the probe *did* fix is beside it — see `XlsxPrintSetup`'s `Math.Min` on
-        // the two margins, a measured 18 pt body displacement at a negative band.
+        // What survives unchanged: a band of exactly zero draws nothing, and so does every
+        // negative band. Both now fall out of the rectangle rather than being asserted.
         //
         // `differentFirst` swaps the pair on the sheet's first page, and swapping it to *nothing*
         // is the case the corpus holds: every workbook here that sets the flag supplies no
@@ -435,6 +426,7 @@ internal sealed class SheetPageDecoration(SheetLayout sheet, SheetPagePlacement 
                 setup.TopMargin,
                 setup.HeaderIsDynamic,
                 false,
+                setup.BandFont ?? SheetDefaultFont.Calc,
                 sink);
         }
 
@@ -457,10 +449,62 @@ internal sealed class SheetPageDecoration(SheetLayout sheet, SheetPagePlacement 
                 page.Height - setup.BottomMargin - setup.FooterHeight,
                 setup.FooterIsDynamic,
                 true,
+                setup.BandFont ?? SheetDefaultFont.Calc,
                 sink);
         }
     }
 
+    /// <summary>
+    /// Lays one band's three areas into the rectangle the band gives them, and clips.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>The rectangle is the whole of the rule that decides whether a short band draws
+    /// anything.</strong> <c>ScPrintFunc::PrintHF</c> sets a clip region of exactly
+    /// <c>Rectangle(aStart, Size(nLineWidth, nHeight - nDistance))</c> before it draws the three
+    /// areas (<c>sc/source/ui/view/printfun.cxx:1870</c>) — which is
+    /// <paramref name="left"/>..<paramref name="right"/> by <paramref name="top"/> plus
+    /// <paramref name="height"/>, the two figures this method is already given. Each area then
+    /// goes through <c>ImpEditEngine::DrawText_ToPosition</c>, which takes the area's whole
+    /// primitive range and <em>returns having emitted nothing at all</em> when that range does
+    /// not meet the clip (<c>editeng/source/editeng/impedit3.cxx:3367-3372</c>). Only when the
+    /// two overlap partly does it wrap the area in a <c>MaskPrimitive2D</c>, which keeps every
+    /// line — so this is all-or-nothing per area and never per line.
+    /// </para>
+    /// <para>
+    /// A band is only ever shorter than its text when the file's own margins make it so, and both
+    /// Excel readers already model that: <c>convertHeaderFooterData</c> sets
+    /// <c>mbDynamicHeight = false</c> and pins <c>mnHeight</c> at the stated band when
+    /// <c>statedBand - textHeight</c> is negative (<c>pagesettings.cxx:1030-1041</c>), and
+    /// <c>UpdateHFHeight</c> returns before it can grow a pinned band
+    /// (<c>printfun.cxx:789-793</c>). See <see cref="SheetBandHeight"/>, which is that port.
+    /// </para>
+    /// <para>
+    /// <strong>Measured, and it replaces a rule that was fitted.</strong>
+    /// <c>probes/sheets-r56/probe-bandclip.py</c> bisects the band at which 26.2.4.2 begins to
+    /// draw, in 0.1 pt steps: 8 pt text turns over between 1.59 and 1.70 pt, 11 pt between 2.21
+    /// and 2.30, 20 pt between 4.11 and 4.20. Those are not a threshold — they are
+    /// <c>ascent - inkAscent</c>, the distance from a line's top to the top of its ink, and
+    /// <see cref="SheetBandText.CapHeightAt"/> carries that measurement. The same probe's decisive
+    /// case is one a threshold could never have produced:
+    /// <c>FAA-2019-0995-0002_attachment_2</c>'s <c>ACC list</c> sheet has a
+    /// <strong>5.67 pt</strong> band — comfortably above every bracket — whose header is
+    /// <c>&amp;R</c>, seven empty lines, then <c>PAGE </c> and <c>&amp;P OF &amp;N</c> at 9 pt.
+    /// The ink lands 90 pt below the band, the reference draws none of it, and we drew twenty
+    /// tokens across five pages that the reference does not have.
+    /// </para>
+    /// </remarks>
+    /// <param name="band">The three areas and their codes.</param>
+    /// <param name="context">What the fields resolve to on this page.</param>
+    /// <param name="left">The band's left edge.</param>
+    /// <param name="right">The band's right edge.</param>
+    /// <param name="top">The top of the band's <em>text</em> rectangle, which is Calc's <c>aStart.Y</c>.</param>
+    /// <param name="height">That rectangle's height, which is Calc's <c>nHeight - nDistance</c>.</param>
+    /// <param name="bandTopEdge">The band's own top edge, gap included.</param>
+    /// <param name="dynamic">Whether the band grew to fit its text.</param>
+    /// <param name="fromBottom">Whether the band hangs from the page's bottom, as a footer does.</param>
+    /// <param name="bandFont">The face an area's pieces are drawn in when they name none.</param>
+    /// <param name="sink">Receives the drawing commands.</param>
     private void DrawBand(
         SheetHeaderFooter band,
         SheetHeaderContext context,
@@ -471,6 +515,7 @@ internal sealed class SheetPageDecoration(SheetLayout sheet, SheetPagePlacement 
         Length bandTopEdge,
         bool dynamic,
         bool fromBottom,
+        SheetDefaultFont bandFont,
         IDrawingSink sink)
     {
         if (right <= left || height < Length.Zero) return;
@@ -491,7 +536,7 @@ internal sealed class SheetPageDecoration(SheetLayout sheet, SheetPagePlacement 
         // line 3.35 pt above it, which is half the difference between the two.
         Length bandText = Length.Zero;
         foreach (SheetHeaderPart part in (SheetHeaderPart[])[band.Left, band.Centre, band.Right])
-            bandText = Length.Max(bandText, TextHeight(part, context, zoom));
+            bandText = Length.Max(bandText, TextHeight(part, context, zoom, bandFont));
 
         if (bandText <= Length.Zero) return;
 
@@ -529,14 +574,25 @@ internal sealed class SheetPageDecoration(SheetLayout sheet, SheetPagePlacement 
             if (lines.Count == 0) return;
 
             Length text = Length.Zero;
-            foreach (IReadOnlyList<SheetHeaderPiece> line in lines) text += LineHeight(line, zoom);
+            foreach (IReadOnlyList<SheetHeaderPiece> line in lines)
+                text += LineHeight(line, zoom, bandFont);
 
             Length spare = drawn - text;
             Length pen = bandTop + (spare > Length.Zero ? spare / 2 : Length.Zero);
 
+            // Everything the area would draw, laid out but not yet emitted, together with the
+            // rectangle its ink occupies. `DrawText_ToPosition` asks that question of the area as
+            // a whole, so it has to be answered before a single run is written.
+            List<(BandRun Run, DocPoint Origin)> placed = [];
+            Length inkLeft = Length.Zero;
+            Length inkRight = Length.Zero;
+            Length inkTop = Length.Zero;
+            Length inkBottom = Length.Zero;
+            bool anyInk = false;
+
             foreach (IReadOnlyList<SheetHeaderPiece> line in lines)
             {
-                Length lineHeight = LineHeight(line, zoom);
+                Length lineHeight = LineHeight(line, zoom, bandFont);
                 if (line.Count == 0)
                 {
                     pen += lineHeight;
@@ -544,66 +600,123 @@ internal sealed class SheetPageDecoration(SheetLayout sheet, SheetPagePlacement 
                 }
 
                 Length width = Length.Zero;
-                List<(BandRun Run, Length Size)> runs = [];
+                List<(BandRun Run, Length Size, string? Family)> runs = [];
                 foreach (SheetHeaderPiece piece in line)
                 {
-                    Length size = SizeOf(piece, zoom);
-                    if (SheetBandText.Shape(piece.Text, size) is not { } run) continue;
-                    runs.Add((run, size));
+                    Length size = SizeOf(piece, zoom, bandFont);
+                    string? family = FamilyOf(piece, bandFont);
+                    if (SheetBandText.Shape(piece.Text, size, family) is not { } run) continue;
+                    runs.Add((run, size, family));
                     width += run.Width;
                 }
 
                 if (runs.Count > 0)
                 {
                     Length ascent = Length.Zero;
-                    foreach ((_, Length size) in runs)
-                        ascent = Length.Max(ascent, SheetBandText.AscentAt(size));
+                    foreach ((_, Length size, string? family) in runs)
+                        ascent = Length.Max(ascent, SheetBandText.AscentAt(size, family));
 
                     Length x = position(width);
-                    foreach ((BandRun run, _) in runs)
+                    foreach ((BandRun run, Length size, string? family) in runs)
                     {
-                        sink.DrawGlyphRun(
-                            run.At(new DocPoint(x, pen + ascent)), Paint.Solid(Colour.Black));
+                        Length baseline = pen + ascent;
+                        placed.Add((run, new DocPoint(x, baseline)));
+
+                        Length runTop = baseline - SheetBandText.CapHeightAt(size, family);
+                        Length runBottom = baseline
+                                           + SheetBandText.LineHeightAt(size, family)
+                                           - SheetBandText.AscentAt(size, family);
+
+                        if (!anyInk)
+                        {
+                            (inkLeft, inkRight, inkTop, inkBottom) =
+                                (x, x + run.Width, runTop, runBottom);
+                            anyInk = true;
+                        }
+                        else
+                        {
+                            inkLeft = Length.Min(inkLeft, x);
+                            inkRight = Length.Max(inkRight, x + run.Width);
+                            inkTop = Length.Min(inkTop, runTop);
+                            inkBottom = Length.Max(inkBottom, runBottom);
+                        }
+
                         x += run.Width;
                     }
                 }
 
                 pen += lineHeight;
             }
+
+            if (!anyInk) return;
+
+            // The clip. `PrintHF`'s rectangle is `[left, right] x [top, top + height]`, and an
+            // area whose ink misses it entirely is not drawn — not the ink and not the text.
+            bool overlaps = inkLeft < right
+                            && inkRight > left
+                            && inkTop < top + height
+                            && inkBottom > top;
+
+            if (!overlaps) return;
+
+            foreach ((BandRun run, DocPoint origin) in placed)
+                sink.DrawGlyphRun(run.At(origin), Paint.Solid(Colour.Black));
         }
     }
 
     /// <summary>How tall one part of a band is: the sum of its lines.</summary>
     private static Length TextHeight(
-        SheetHeaderPart part, SheetHeaderContext context, double zoom)
+        SheetHeaderPart part, SheetHeaderContext context, double zoom, SheetDefaultFont bandFont)
     {
         if (part.IsEmpty) return Length.Zero;
 
         Length height = Length.Zero;
         foreach (IReadOnlyList<SheetHeaderPiece> line in part.Lines(context))
-            height += LineHeight(line, zoom);
+            height += LineHeight(line, zoom, bandFont);
 
         return height;
     }
 
     /// <summary>The em size one piece of a band is drawn at, the page's zoom applied.</summary>
-    private static Length SizeOf(SheetHeaderPiece piece, double zoom)
-        => (piece.Size ?? SheetBandText.DefaultSize) * zoom;
+    /// <remarks>
+    /// The fallback is the <em>workbook's</em> default cell font and not a fixed ten point — see
+    /// <see cref="SheetPrintSetup.BandFont"/>, which carries the measurement. This read
+    /// <c>SheetBandText.DefaultSize</c> until round 56, which made every band in the corpus
+    /// 10 pt whatever its workbook said, while <see cref="SheetBandHeight"/> — the file that
+    /// decides how tall the same band is — had always used the workbook's own.
+    /// </remarks>
+    private static Length SizeOf(SheetHeaderPiece piece, double zoom, SheetDefaultFont bandFont)
+        => (piece.Size ?? bandFont.Size) * zoom;
+
+    /// <summary>The family one piece of a band is drawn in.</summary>
+    /// <remarks>
+    /// The piece's own <c>&amp;"Family,Style"</c> if it states one, and the workbook's default
+    /// cell family otherwise. A null answer means the furniture's own face, which is what
+    /// <see cref="SheetBandText"/> resolves for a workbook that names nothing.
+    /// </remarks>
+    private static string? FamilyOf(SheetHeaderPiece piece, SheetDefaultFont bandFont)
+        => piece.Family ?? bandFont.Family;
 
     /// <summary>How tall one line of a band is: the tallest of the pieces on it.</summary>
     /// <remarks>
     /// An empty line — a bare break, which a footer written as <c>&amp;RPage &amp;P\n\nrest</c>
     /// contains — still takes a line, at the sheet's default height.
     /// </remarks>
-    private static Length LineHeight(IReadOnlyList<SheetHeaderPiece> line, double zoom)
+    private static Length LineHeight(
+        IReadOnlyList<SheetHeaderPiece> line, double zoom, SheetDefaultFont bandFont)
     {
         Length height = Length.Zero;
         foreach (SheetHeaderPiece piece in line)
-            height = Length.Max(height, SheetBandText.LineHeightAt(SizeOf(piece, zoom)));
+        {
+            height = Length.Max(
+                height,
+                SheetBandText.LineHeightAt(
+                    SizeOf(piece, zoom, bandFont), FamilyOf(piece, bandFont)));
+        }
 
         return height > Length.Zero
             ? height
-            : SheetBandText.LineHeightAt(SheetBandText.DefaultSize * zoom);
+            : SheetBandText.LineHeightAt(bandFont.Size * zoom, bandFont.Family);
     }
 
     /// <summary>One stroke of a border, with its ends extended to meet what it crosses.</summary>
