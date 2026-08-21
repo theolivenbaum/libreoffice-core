@@ -406,6 +406,10 @@ public sealed class SystemFontResolver : IFontResolver, IGlyphFallbackResolver
     /// Verified against LibreOffice 24.2.7.2 on this machine over fifty-five families: every single
     /// one that reached the generic path landed on DejaVu Sans, DejaVu Serif or DejaVu Sans Mono,
     /// and none landed on Liberation.
+    /// <strong>Re-checked against 26.2.4.2 on 2026-08-21 (`TODO.24-2-7-audit.md`,
+    /// `probes/words-r53/font-fallback-recheck.py`) and still correct in this respect:</strong> ten
+    /// unrecognised families, four installed controls, and every unrecognised one landed on DejaVu.
+    /// <b>But which DejaVu is wrong — see <see cref="GenericFallbacks"/>.</b>
     /// </para>
     /// <para>
     /// Preferring Liberation here looked right and is not: Liberation is the metric-compatible
@@ -433,7 +437,11 @@ public sealed class SystemFontResolver : IFontResolver, IGlyphFallbackResolver
     /// the list is data in the tree, and a hand-copied prefix of it would silently diverge on a
     /// machine whose installed faces differ from this one's. Measured: a fixture declaring no font
     /// renders in Liberation Serif under LibreOffice 24.2.7.2 here, which is what this list heads
-    /// with. Routing the blank case through the generic unknown-family rule instead sets every such
+    /// with. <b>Still calibrated to 24.2.7.2 and still unverified.</b> The 2026-08-21 attempt
+    /// (`probes/words-r53/font-fallback-recheck.py`) could not decide it and says so: a DOCX
+    /// carrying no <c>styles.xml</c> at all is given <em>Word's</em> default rather than
+    /// LibreOffice's, and the probe's no-family case duly came back Carlito. Deciding this needs a
+    /// fixture that reaches <c>DefaultFonts</c> rather than one that merely says nothing. Routing the blank case through the generic unknown-family rule instead sets every such
     /// document in DejaVu Sans and reflows all of them.
     /// </remarks>
     private static IReadOnlyList<string> DefaultFallbacks => FontSubstitutions.DefaultLatinTextChain;
@@ -631,6 +639,35 @@ public sealed class SystemFontResolver : IFontResolver, IGlyphFallbackResolver
     /// previous rule guessed serif for all of them, on the reasoning that a name carrying no hint is
     /// probably a roman — which is the wrong default and, worse, wrong for the modern UI faces
     /// documents actually name.
+    /// </para>
+    /// <para>
+    /// <strong>RE-CHECKED 2026-08-21 AGAINST 26.2.4.2 AND THE PARAGRAPH ABOVE IS WRONG. NOT FIXED
+    /// HERE — a change on this line owes a measured sweep of all three tracks, which is the
+    /// parent's to run. See <c>TODO.24-2-7-audit.md</c> and
+    /// <c>probes/words-r53/font-fallback-recheck.py</c>.</strong>
+    /// </para>
+    /// <para>
+    /// The probe is one authored DOCX per family, converted by the installed <c>soffice</c>, with the
+    /// drawn face read out of the PDF. Four controls agree — Liberation Serif answers itself, Calibri
+    /// answers Carlito, Cambria answers Caladea, Arial answers Liberation Sans — and then <b>all ten
+    /// unrecognised families answer DejaVu <em>Serif</em></b>: the same list this paragraph names,
+    /// Aptos, Segoe UI, Roboto, Lato, Montserrat, Myriad Pro, Futura, Optima and Univers, plus two
+    /// authored nonsense names, one of which carries a serif hint and one of which carries none. Both
+    /// answer Serif, so the shape of the *name* is not what decides it either.
+    /// </para>
+    /// <para>
+    /// <b>And the stated reason is falsified independently of the answer.</b> <c>fc-match Aptos</c>
+    /// on this machine returns <c>DejaVuSans.ttf</c>, as does <c>fc-match ""</c>. So whatever
+    /// 26.2.4.2 is doing here, it is not "asking fontconfig and taking its default" — which is the
+    /// second time this project has caught that assumption (see <c>CLAUDE.md</c>, the eight
+    /// <c>FcNameParse</c> disagreements).
+    /// </para>
+    /// <para>
+    /// The cost is measured rather than assumed: comparing the embedded font list of all 337 words
+    /// renderings against the reference's, <b>86 disagree and 73 of those carry DejaVu Sans on our
+    /// side</b>, most of them the plain pair <c>ours=DejaVuSans, ref=DejaVuSerif</c>. The two faces
+    /// have different advances, so every one of those is a line-breaking difference as well as a
+    /// visible one.
     /// </para>
     /// </remarks>
     private IReadOnlyList<string> GenericFallbacks(FontRequest request)
