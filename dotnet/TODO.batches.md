@@ -16030,3 +16030,109 @@ it rather than quote it.
 4. The fitted bullet's vertical placement (1.9 pt high, `ALIGN_BOTTOM` / `aBulletArea.Bottom()`),
    untouched this round.
 5. `2015-Civil-Rights-Website-training.ppt`, 30.32 → 29.64 and still second largest.
+
+### Parent verification — round 55 slides
+
+**795 of 946 unchanged: words 319, slides 200, sheets 276. Zero gains, zero regressions, all 946
+documents gated** (the diff reaches `Paperless.Core`, `Paperless.Text` and `Paperless.Rendering`).
+That settles the round's own sheets figure of 272, which was harness loss — two `.xlsm` dropped
+under load and one 4372-page workbook timed out — not a regression.
+
+```
+Core 337   Containers 109   Text 617   Vector 295   Rendering 153(1 skipped)   Markup 259
+OpenDocument 125   WordProcessing 1155   Spreadsheets 940   Presentations 819     = 4809
+0 failed
+```
+
+`Vector` reported 1 failure in the ten-project run and **295 of 295 alone** — the load artifact,
+**fourth sighting**. The round independently re-derived the base as 4780 and said so, confirming the
+parent's own correction of 4790.
+
+### The largest defect found this session, and no gate column can see it
+
+**We drew zero synthetic-oblique glyphs. Anywhere.** The reference shears **186 006 glyphs across
+1022 pages in 109 documents** — slides 16 008, words 154 501, sheets 15 497 — and our output had
+none. After the fix: slides 16 740 against 16 008, words 158 673 against 154 501, sheets 15 509
+against 15 497; pages where the reference shears and we draw none fall from 157/759/106 to
+**3/162/11**.
+
+`NeedsArtificialItalic()` fires when the request is italic and the **resolved face** is not. The
+constant is `float((1<<16)/3)/(1<<16)` handed to `Matrix3::skew`, **which takes it as an angle**, so
+the page carries `tan(0.3333333432674408) = 0.3462535606` — exactly a third would be wrong in the
+fourth decimal.
+
+The hand-authored five-family deck was built to **discriminate** rather than to confirm (round 54's
+lesson, applied): 15 of 15 for *"the face has no italic"*, refuting *"by stated family"* — `Verdana`
+substitutes onto DejaVu Sans and takes its answer — and *"real italics lean too"*. The roman and
+italic halves carry the **same `TJ` array and the same pen origin**, so nothing reflows, which is
+why the gate is blind to all 186 006 glyphs.
+
+### The brief's item 1 was an artefact of the instrument round 54 had already fixed once
+
+`rotated-text-census.py` called a matrix rotated whenever `b` **or** `c` was non-zero. A synthetic
+oblique is `[1 0 tan θ 1]` — `b` zero, `c` not — so **every fake-italic run counted as rotated**.
+Round 54 fixed one artefact in that instrument and left a second.
+
+The giveaway was the census's own number two: 81 "rotated" blocks on a deck where the reference
+turns **zero**, all 81 reading the identical `c = 0.3462535606`, and a scan of every text matrix in
+all 302 reference renderings finding exactly **one** shear value, 587 times.
+
+Split properly: the reference **turns** 1318 blocks to our 1097, and **shears** 587 to our 0.
+
+**And the replacement instrument was nearly wrong too.** `turn-census.py` counts *blocks*, which are
+not comparable between the stacks — the reference writes one `BT` per text object with a `Tm` per
+run, we write one per glyph run — and it reads as a 20% over-shear that is **entirely granularity**.
+`shear-chars.py` counts glyphs. **The round nearly shipped "we over-shear" as a finding.** Three
+instrument defects in two rounds on the same question; the discipline that caught each was running
+it on a case whose answer was already known.
+
+### `a:bodyPr/@vert`, and a C++ derivation corrected by a fixture
+
+`vert`/`eaVert` turn a quarter clockwise, `vert270` the other way; `vert` and `eaVert` are **one
+rendering** (different importer paths, 165 identical glyph matrices at identical positions).
+`mongolianVert` and `wordArtVert` measured as **not** turns. **The insets rotate with the turn** —
+the round's first derivation from the C++ was **wrong by two slots**, and an asymmetric
+10/20/30/40 pt fixture corrected it. Cite the C++ for intent, measure for truth, again.
+
+Turned blocks 1097 → **1385** (reference 1318); pages the reference turns and we do not, 43 → **7**.
+Differing pixels over 4530 pages: 19823.86 → **19731.15**.
+
+**Eight ink regressions, named — and the largest is not one.** `Sylva` +0.27 ink while its differing
+pixels *fall* 50.97 → 48.81 and its turn count goes from **34 blocks the reference does not turn**
+to **0, its exact figure**. By differing pixels only one deck worsens by more than a quarter point.
+**The ink column is the wrong instrument for this class**, as it was for round 54's bullet.
+
+### Prediction
+
+Verdicts 0 ✓, page counts 0 ✓, `abs_ink` direction ✓, and **the stated control held to the digit** —
+the oblique moved `tf-agreement` 0.77054 → 0.77054 and exact-`/Tf` 1709 → 1709 exactly as predicted.
+Failed on documents-moved: predicted 40–52, measured 32. **Third consecutive miss on that quantity
+and a new failure mode** — this round censused the *reference's own output*, the most direct census
+available, and was **right about the documents and wrong about the column**: a deck with two sheared
+runs over thirty pages moves less ink than the column prints.
+
+### Audit
+
+`OdpSlideLayout.cs:302` **WRONG on 26.2.4.2, reported not fixed** — the reference obeys
+`style:font-independent-line-spacing` as stated (one em true, 0.903 em absent). Not fixed because
+**the slides corpus holds no ODF presentation at all**.
+
+**The method is the finding**: `--convert-to odp` writes that attribute onto every cell, so a
+round-tripped fixture measures the *exporter's habit* — round 54's lesson in a second form. A
+**discriminating pair** (byte-identical copy, one attribute deleted) separates them at four sizes.
+Round 54's own marker prose naming the superseded version was also cleared. Open **42 → 40**,
+marked 15 (13 verified, 2 wrong).
+
+### Slides does next
+
+1. **`.ppt` vertical text** — Escher `txflTextFlow` (0x88), 31 non-zero in 4 documents, unread;
+   `PptSlideLayout` has no `Turned` equivalent and everything else is built.
+2. **Over-rotation, and its biggest case is diagnosed**: `Demick_JetBlue.pptx` is third-largest at
+   26.10 ink with 6 of 10 pages major, and its 76 turned blocks are **68 at 45° + 8 at 90°**. The
+   eight match the reference; the sixty-eight are a **chart category axis the reference does not
+   draw at all** — p4 writes 52 `BT` to its 31 and extracts 163 words to its 79. **`SlideChart`, not
+   `@vert`.**
+3. **A font-resolution divergence the shear exposed** — `2014BSA_Sunday_Killion` shears 948 glyphs
+   where the reference shears none; same face *lists*, per-run divergence. **Invisible until now
+   because a wrong face and a right face both drew upright.**
+4. The fitted bullet's vertical placement (1.9 pt high), untouched.
