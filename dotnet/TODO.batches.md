@@ -18195,3 +18195,117 @@ from 6.2% off the reference to 3.1%.
 **Next**: re-derive that bracket against the reference (round 30's decks and generator both still
 exist); then `023`'s nine undrawn bars; then the chart border (four readers, two rounds, three
 documents, `pdf-ops.py` at 3-0 and 1-0); then the data-label colour.
+
+---
+
+## Merge note — round 62, words and sheets (2026-08-21)
+
+**Words 323, slides 200, sheets 280. Corpus 803 of 946.** Both rounds gated over all 946 documents.
+
+```
+Core 390   Containers 109   Text 625   Vector 302   Rendering 153(1 skipped)   Markup 259
+OpenDocument 125   WordProcessing 1231   Spreadsheets 1035   Presentations 872     = 5101
+0 failed
+```
+
+### Words +2: a Word 2010 page-anchored fly hangs into the margin instead of splitting
+
+**Two conditions, each alone insufficient**, on eight one-variable renderings in both directions:
+`compatibilityMode ≤ 14` **and** a fly anchored to the **page frame**. Raise `080` to mode 15 alone →
+splits. Move its anchor to `text` alone → splits. Give `012` both → holds. Nine renderings at rising
+`w:tblpY` put a table at y = 835 on an 841.9 pt sheet and it still holds one page; doubling its rows
+brings the split back, so the third term is **content height, not position**.
+
+**The round falsified its own zero-regression prediction mid-flight and caught it with an
+intermediate sweep.** The first cut gained 2 and **lost 2**, on documents with content-sized rows —
+**the census's largest stated blind spot, named in the prediction file before the sweep ran**.
+
+**The lesson, now in `COMMON.md`: state a changed-rendering band per direction, not as a magnitude.**
+"2–6 renderings change" was satisfied by 2 gains and 2 losses. **A band a regression cannot violate
+is not a control.**
+
+Two more instrument lessons from the same round: **a non-discriminating probe arm reads exactly like
+a confirmation** (one arm used a colour dark under *both* hypotheses, so both predicted white and it
+proved nothing while looking like evidence); and **assert the baseline, not only the consequence** —
+a continuation placed wrongly a second time produces the same page count, so every consequence-level
+assertion passes.
+
+The `COL_AUTO` rule is established on four inverted arms — **a shape's own fill wins when it has one;
+with `noFill` the walk continues to the anchor's background** — and **deliberately not implemented**,
+because it contradicts round 59's counter-witness. Nothing ships until that document is re-measured.
+
+### Sheets: four documents become exact, and one pays for it
+
+**Chart advances are quantised to a whole number of device pixels.** Round 60 put a chart's
+*vertical* metrics through `chart2`'s 96 dpi device and left the **advance width** on the face's
+unquantised metrics — 13 px for 13.333 at 10 pt (2.5% narrow), **15 for 14.667 at 11 pt (2.3%
+wide)**, so the error **alternates in sign with size**.
+
+Fourteen one-variable rewrites, with the drawn advance read out of **the reference's own `TJ`
+adjustments** — thousandths of the text em, and therefore independent of the chart's scale, the page
+and the writer's chosen size. **The sawtooth reproduces at all fourteen**, residual ≤ 0.005, no free
+parameter. All five labels on the target document now match the reference's drawn width to **0.03 pt**
+and their centres to **0.16 pt**; one had been **60 pt** away.
+
+**The brief's item was a real observation with the wrong seat, and the round proved it without
+running our code**: fed **our** block, the `BestFitInner` port answers `FAIL(CM 36.33 > 36.00)` — it
+misses by **0.33 of a degree**; fed the reference's box, it fits. **The port is faithful and its
+input was 1.7 pt too wide.**
+
+`003` 145→**143/143**; `011`/`019`/`027` 142→**140/140**. `023_Waterfall` went through `words` and
+came back at 872/868, now drawing the reference's **twelve rotated category labels instead of six
+horizontal ones** — a different thing from passing at 881, which was our own fragmentation making up
+the difference.
+
+### The re-opened document is filed `text`, not `ceiling`, and the parent's own check is why
+
+`046_Cost_analysis_with_Pareto_chart` `match` → `words`, 161/157. The round reported it as **pure
+re-ordering**, on the grounds that our character count is **754 before and after its change** — which
+is true, and is a statement about **our side only**.
+
+Measured against the **reference**: **754 against 753**, the multisets **differ**, and the difference
+is exactly **`ment` on our side against three full stops on theirs**. **The reference truncates a
+rotated category label with an ellipsis where we draw the word in full.** Pre-existing, real, and it
+belongs with the axis-label fitting work the next round is already taking.
+
+**A "ceiling" claim has to be made against the reference, not against our own previous output.**
+
+### `AdvanceScale` is a stop-gap and the round said so at the site
+
+`023`'s route from "the labels collide" to "turn them 45°" runs through `Wraps`
+(`VCartesianAxis.cxx`:889-903), and **the limit it uses is a fitted 1.000 × tick spacing, bracketed
+on round 30's decks by comparing LibreOffice's rotation against *our* word widths — the ones this
+round just corrected.** So that fit is a measurement of `true ÷ 0.975`. The repair shipped is an
+**identity** (`w_old ≤ spacing` becomes `w_new ≤ spacing × scale(size)`) via a **defaulted**
+interface method, so words and slides take 1.0 and are provably unchanged. **Re-deriving the bracket
+retires it entirely**, and that is the next round's first item.
+
+### Refuted, and each by a different instrument
+
+- **The reference does not clip page 1 at the A4 media box.** A 200 dpi column profile puts its last
+  ink at **516.24 pt**, zero from 517 to 560 — it clips at the **last printed column's own right
+  edge**; we run on to 550.80. Moves no words, which is why it needed a raster.
+- **A high-confidence blind reading refuted**: "the reference closes the chart frame with a right
+  border and ours does not" — the same rectangle to **0.4 pt**, both running past the media box. The
+  reader who reported it at *low-to-medium* and named the crop as the likely cause was right; the one
+  who ranked it first at high confidence was not. **Confidence self-reports are carrying real
+  information and should keep being asked for.**
+- **Per-glyph rounding** — measured on the reference, implemented, swept, and **removed**: worth
+  ≤0.014 pt a glyph, and it moved a word count with no measurement saying it moved it the right way.
+
+### The `#D9D9D9` chart border has now been reported by four readers across two rounds
+
+Three unrelated documents, `pdf-ops.py` agreeing every time (reference 3 strokes to our 0; reference
+1 to our 0). **The strongest-shaped reading this project records, arrived a fourth time**, and still
+unimplemented: 10 sheets / 23 parts, 2 slides, 1 words.
+
+### Next
+
+**Sheets** — re-derive the axis wrap-limit bracket against the reference with the corrected ruler
+(round 30's decks and generator both still exist; `058` is the document that says whether it worked,
+200 against 194). Then `023_Waterfall`'s chart, which draws **three of twelve bars**, no connectors,
+and a value axis to 25000 against 8000 — **on a document that passes**.
+
+**Words** — `012`'s 56 missing fills and 8 missing strokes (`w:tblStylePr`'s `w:tcPr` half, which
+this reader never reads), then round 59's counter-witness re-measured, then the tall-table guard
+whose two protected documents are named and passing.
