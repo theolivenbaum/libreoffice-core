@@ -17968,3 +17968,113 @@ prove it.
 
 **Next**: the inner-fit test that rejects one label of five (`003`'s M3, ghost keys 2 against 1);
 the data-label text colour; the default chart border; then `cellIs`.
+
+---
+
+## Merge note — round 60 slides, round 61 sheets, round 61 words (2026-08-21)
+
+**Words 321, slides 200, sheets 281. Corpus 802 of 946** — up four, **zero regressions anywhere**,
+each round gated over all 946 documents.
+
+```
+Core 390   Containers 109   Text 624   Vector 302   Rendering 153(1 skipped)   Markup 259
+OpenDocument 125   WordProcessing 1225   Spreadsheets 1020   Presentations 872     = 5079
+0 failed
+```
+
+### Slides r60 — zero verdicts, and the track's largest document fell by an order of magnitude
+
+`abs_ink` 1036.75 → **990.13**, differing pixels −161.82, **24 of 26 moved documents improved**.
+`8_P-Pavese_AIRBUS…pptx` **47.26 → 3.92**, page 8 `|ink|%` **43.67 → 0.23**, its only major page
+gone.
+
+**The brief's item was wrong and the real seat was `c:crossBetween`.** `ShiftedCategories` read the
+chart *type* only, so every OOXML line/area chart stating `between` was drawn a **half-slot** wrong.
+Nine probe arms, one property each: area `shifted/unshifted/unshifted`, line
+`shifted/unshifted/**shifted**`, bar `shifted/**shifted**/shifted`. 13 documents, 13 improved, 0
+worsened.
+
+**Pavese's four claims were checked before anything was fixed** — a fill census confirmed three
+exactly and a text-colour census the fourth. That is the discipline the earlier "legend" episode
+called for, applied unprompted.
+
+**And its own page reading found what no metric had**: an unstacked area chart **paints its first
+series last**. `006_advanced_powerpoint_area` p1 `diff% 18.67 → 0.84`.
+
+### Sheets r61 — a pie's first pass runs at half the diagram, and only a pie's
+
+**279 → 281**, and the last two of the pie cluster close. Round 60 solved the arithmetic backwards
+from the reference's own answer and named the unknown right; what it assumed wrong is that pass 1
+runs at the full diagram. **`ChartView.cxx:557-560` reduces the diagram to `round(side/2.2)` before
+any series exists**, and the axis-label pass that would grow it back is guarded by `!bIsPieOrDonut`
+— so a pie lays its first-pass labels around radius **50.33 instead of 110.72**. `git blame` dates
+that line to 2019, so it is in 26.2.4.2. `adjustInnerSize` needed no change, exactly as round 60
+said.
+
+**26.04 pt of centre error to 0.03, on all four corpus pies at once, nothing fitted.** Prediction
+**12 of 13**, and the one miss is systematic and understood.
+
+**The 9.57 pt chart title closed with it, and both its terms were already in the tree** — a flat
+`135` for a main title and `round(fontHeight × 0.30)` — carried by the *reservation* since the
+layout was written and by the *pen* never. Eighteen one-variable rewrites, nine sizes × both
+weights, no free parameter. It reaches **four** documents, not the two the vision reading found.
+
+### Words r61 — a table takes the leading of the paragraph above it
+
+**319 → 321.** `SwFlowFrame::CalcUpperSpace` adds `nPrevLineSpacing` in all four branches and its
+`pOwn->IsTextFrame()` guard covers only the frame's *own* leading, so a `SwTabFrame` takes it. 275
+sites in 85 of 271 `.docx`. With it: an `atLeast` line keeps its raise on a **first** line, because
+`SvxLineSpaceRule::Min` sits *outside* `CalcRealHeight`'s `IsParaLine` guard.
+
+**Seven refutations, and the brief's central grouping is one of them.** `012` and `015` are **not**
+in `097`'s class — their reference page 2 carries a **positioned table's ninth row**, not a trailing
+empty paragraph. The round predicted them unchanged and they were. The deficit is **not** 1.15 pt
+per empty paragraph but **1.00 pt per paragraph-then-table boundary**, and **`097`'s failure was
+never a line height** — our per-line and per-paragraph costs were already exact to 0.01 pt.
+
+**A control that paid twice**: `012` p1 was read blind *because* it was predicted not to move. Its
+reader's first finding — "the reference is missing the entire title block" — is confirmed **and
+corrected** by a second instrument: both text layers hold the title, and the reference draws 433
+dark pixels in the top 125 rows against our 13 669. **We draw it black where the reference draws it
+white**, which points the *opposite* way to the frame-fill arm round 59 measured and removed.
+
+### Three instrument failures, all found and handled correctly
+
+- **`verify-test.sh` rebuilds twice, so it voids a sweep it runs beside.** Round 60 ran it during
+  two cross-track sweeps and `Paperless.Core.dll` was replaced under them; it announced itself as
+  **31 words documents moving between two sweeps of the same unmodified tree**, one by 19.82 of ink
+  on a chartless questionnaire. Rendering is deterministic, so a fresh render matching one copy and
+  not the other is what identified it. Now in `CLAUDE.md` with the one-render check.
+- **`/tmp` is on the 20 GB overlay and this workflow fills it.** Words r61's sweep returned
+  **`REF-CANNOT-RENDER 13`** with `/` at 100% — ~120 000 entries, 17 GB — and it **discarded that
+  figure rather than reporting it**, which would otherwise have read as an 11-verdict regression.
+  The parent then measured the classes: **114 122 aged `MSBuildTemp*`**, ours, one per `dotnet
+  build`. Clearing entries older than two hours freed 0.8 GB and dropped `/tmp` from 119 512 entries
+  to 4 275 **with a sweep running throughout, unaffected** — the age bound is what makes it safe.
+  Later gates run with `TMPDIR` on the host mount.
+- **A reviewer refuted by an instrument**, again: "the black panel extends further down" — the two
+  panels are the same rectangle to **0.03 pt**.
+
+### Two `abs_ink` refutations in one cycle
+
+Slides r60, **third round running**, and this time visible in coordinates:
+`006_advanced_powerpoint_area` went `0.19 → 1.54` for a change that moved its polygon **onto** the
+reference's, and fixing the paint order it exposed took it to `0.03`. Sheets r61 refuted the obvious
+gate widening by **measurement** — implemented, built, rendered, moved a pie 0.81 pt without
+shrinking it, reverted with `cp` + `touch` and the shipped state re-rendered to prove it.
+
+### Next
+
+**Slides** — the legend's **2.70 pt** (17 of 57 chart pages, one number, instrument written), then
+Pavese's gradient bars, then the rotated label's anchor (**build the instrument before believing the
+hypothesis**). **The fitted bullet's 1.9 pt is untouched for six rounds and round 60 deferred it as
+a stated decision; the next round takes it or says why in the same words.**
+
+**Sheets** — the inner-fit test rejecting one label of five the reference keeps (`003`'s M3; ghost
+keys 2 against 1) — it is what makes all four pies two words over. Then a data label's stated text
+colour (**no colour field in the model at all**; 22 sheets / 49 slides / 7 words documents), then
+the default `#D9D9D9` chart border.
+
+**Words** — `012` and `015`: **split a fly-held table across a page**. Two verdicts, fully
+characterised, and the overflowing row is **empty**, so word counts already match and only the page
+count is at stake.
