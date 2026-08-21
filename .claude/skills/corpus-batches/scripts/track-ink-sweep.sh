@@ -78,10 +78,23 @@ mapfile -t DIRS < <(cd "$ROOT_DIR" && ls -d $GLOB 2>/dev/null)
 
 mapfile -t FILES < <(
   for d in "${DIRS[@]}"; do
+    # The in-scope extension list, kept identical to batch-check.sh's. It was NOT identical
+    # until 2026-08-21: batch-check.sh was widened from thirteen extensions to thirty-four at
+    # the start of this session, after two `.xlsm` in sheets/chartset-* turned out to have been
+    # silently unmeasured -- and this sibling, written from the same list, kept the narrow one
+    # and stayed blind to the same two documents for a dozen rounds. Fixing an instrument does
+    # not fix its twin. If this list changes, change it in both.
     find "$ROOT_DIR/$d" -type f \
-      \( -iname '*.doc'  -o -iname '*.docx' -o -iname '*.rtf'  -o -iname '*.odt' -o -iname '*.ott' \
-      -o -iname '*.xls'  -o -iname '*.xlsx' -o -iname '*.ods'  -o -iname '*.csv' \
-      -o -iname '*.ppt'  -o -iname '*.pptx' -o -iname '*.odp'  -o -iname '*.otp' \) 2>/dev/null
+      \( -iname '*.doc'  -o -iname '*.docx' -o -iname '*.docm' -o -iname '*.dot' \
+      -o -iname '*.dotx' -o -iname '*.dotm' -o -iname '*.rtf'  -o -iname '*.odt' \
+      -o -iname '*.ott'  -o -iname '*.fodt' -o -iname '*.sxw' \
+      -o -iname '*.xls'  -o -iname '*.xlsx' -o -iname '*.xlsm' -o -iname '*.xlsb' \
+      -o -iname '*.xlt'  -o -iname '*.xltx' -o -iname '*.xltm' -o -iname '*.ods' \
+      -o -iname '*.ots'  -o -iname '*.fods' -o -iname '*.csv'  -o -iname '*.sxc' \
+      -o -iname '*.ppt'  -o -iname '*.pptx' -o -iname '*.pptm' -o -iname '*.pot' \
+      -o -iname '*.potx' -o -iname '*.potm' -o -iname '*.ppsx' -o -iname '*.ppsm' \
+      -o -iname '*.pps'  -o -iname '*.odp'  -o -iname '*.otp'  -o -iname '*.fodp' \
+      -o -iname '*.sxi' \) 2>/dev/null
   done | sort
 )
 echo "documents: ${#FILES[@]}" >&2
