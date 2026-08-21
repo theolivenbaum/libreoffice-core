@@ -15671,7 +15671,7 @@ moved.** And the largest rendering movement any round has produced on this track
 `ws_prod…European-Safety` 7.09→7.23, `pods05` 9.02→9.16, `Thailand17` 17.74→17.87. Two of the four
 are round 53's shape — `baseline-agreement.py` puts European-Safety at **1.0764 → 0.0282** mean |dy|
 and pods05 at 1.0251 → 0.7319 *while their ink rose*. Only `undp` and `Thailand17` are genuine, both
-under 0.3. Test counts at the merged tree **4790, 0 failed**.
+under 0.3. Test counts at the merged tree **4780, 0 failed**. *(Corrected: this note first said 4790, which is an addition slip by the parent — the ten project figures sum to 4780. The round-55 slides brief was dispatched carrying the wrong figure and will report its delta against it.)*
 
 ### The brief's condition was wrong and the corpus is what decided it
 
@@ -15840,3 +15840,56 @@ The string is in no cell, no `oddHeader` and no `oddFooter`, and it is pre-exist
 **Sheets** — the five `PAGE n OF 33` blocks on `FAA-2019-0995-0002_attachment_2`; then
 `ChartLayout.IntervalsThatFit` (still untouched, four tokens on `005`, a law reaching every column
 chart); then the four `_advanced_excel_pie` documents, where the gate needs two of five tokens.
+
+### Parent verification — round 55 sheets
+
+**Sheets 274 → 276, slides 199 → 200, words 319. Corpus 795 of 946.** Whole corpus gated (all 946
+documents) because the diff is in `Paperless.Ooxml`: **three gains, zero regressions.**
+
+```
+Core 337   Containers 109   Text 611   Vector 295   Rendering 150(1 skipped)   Markup 259
+OpenDocument 125   WordProcessing 1155   Spreadsheets 940   Presentations 814     = 4795
+0 failed
+```
+
+The first ten-project run reported `Vector: Failed 1` — a project the diff cannot reach. Alone:
+**295 of 295**, 4.9 GB free. The documented load artifact, third sighting; the tell is unchanged.
+
+**An arithmetic correction of the parent's own.** The round-54 slides note recorded the merged tree
+as **4790**; the ten project figures sum to **4780**. The round-55 slides brief was dispatched
+carrying the wrong figure, so that round will report its delta against 4790 and be ten out. Fixed at
+the note. Same failure class as the quoted-not-re-derived figures the last three rounds have caught,
+with the parent as the source this time.
+
+**The cross-track measurement this diff owed was folded into the corpus gate** rather than run as a
+separate byte-reach pass — the change alters which `mc:AlternateContent` branch is taken, so
+verdicts are the quantity of interest and reach alone would not have shown the slides gain.
+
+### A dead special case removed, one round after it shipped
+
+Round 52 added a slicer exemption to `OoxmlXml` so a slicer `graphicFrame` would lose to its
+fallback. This round removed it as **unreachable**: with `a14` no longer in `UnderstoodExtensions`,
+the general rule already produces that outcome, and its three documents render **byte-identically**
+either way. A special case that was correct when written and became dead when the general rule was
+fixed — worth removing rather than leaving as a second, silent authority on the same question.
+
+### The audit's numbers were wrong in this file too
+
+The round found the audit file's `44` open / `12` marked did not reproduce at its base (`42`/`13`).
+That file now carries the **commands rather than counts**, for exactly this reason; any figure
+quoted from it elsewhere — including in this scoreboard — is a snapshot and should be re-run.
+
+`SheetPageDecoration.cs` is **WRONG in half**, marked at the site and **reported rather than
+implemented**. The zero-band guard and every negative band hold on 26.2.4.2, but *"the reference
+draws at every stated band above zero"* is false: nothing at 0.72 or 1.44 pt of 8 pt text, and the
+threshold **scales with the point size** (1.44–2.16 pt at 8 pt, 4.32–5.76 pt at 20 pt) — a text-fit
+rule. Four corpus worksheets have a positive band under 6 pt, all passing today, all above the
+bracket. **The probe found a real defect beside it, and that one is fixed**: at a *negative* band the
+reference starts the body at the page margin where we started it 18 pt lower.
+
+### `verify-test.sh` earned its place again
+
+The round's first ten tests all drove the reader directly, so **blanking its call site broke none of
+them**. The wiring test exists because that mutation came back clean. This is the third distinct
+shape of "a test that passes without reaching the defect" found in four rounds — after the unbound
+namespace and the single-run fixture.
