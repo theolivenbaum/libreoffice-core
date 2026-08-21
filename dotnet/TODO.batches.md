@@ -16136,3 +16136,152 @@ marked 15 (13 verified, 2 wrong).
    where the reference shears none; same face *lists*, per-run divergence. **Invisible until now
    because a wrong face and a right face both drew upright.**
 4. The fitted bullet's vertical placement (1.9 pt high), untouched.
+
+## Round 56 — slides — the brief's items 2 and 3 were both real signals read one level too high
+
+**200 → 199 of 302, 0 page counts moved, one named verdict regression.** `abs_ink` 1131.78 →
+**1106.97 (−24.81)**, major pages 390 → **385**, differing pixels over 4530 pages 19735.47 →
+**19702.17**. Eight documents moved; two of them land on the **reference's own extractable word
+count exactly**, which is the gate's own column saying so.
+
+The briefed `abs_ink` of 1136.53 is the **pre-merge** figure. `ink.tsv` at this base is
+byte-identical to round 55's final sweep on 306 of 311 rows, and the five that differ are round 55
+*sheets*' `mc:AlternateContent` change arriving through the merge — including the parent's own
+199 → 200. The baseline reproduces at **200 of 302, 0 manifest disagreements**.
+
+### The largest single fix is one line in the EMF reader, and the brief pointed at its shadow
+
+The brief: *`2014BSA_Sunday_Killion` shears 948 glyphs where the reference shears none — same face
+lists, per-run divergence.* The face lists are not the same: we embedded a `DejaVuSans` roman the
+reference never embeds. All 469 of its uses are the text of one EMF chart, whose 28
+`EMR_EXTCREATEFONTINDIRECTW` records all name **`Times New Roman`** — followed, inside the 64-byte
+`lfFaceName` field, by **twelve code units of stack rubbish** behind the terminator.
+`EmfReader.CreateFont` *skipped* the NULs instead of stopping at one, so it asked for
+`"Times New Roman፿䍥…"`, which nothing recognises and which fell through to the generic sans.
+`WmfReader.CreateFont` has always read the same field correctly. **Two readers of one structure
+disagreed and the wrong one had the corpus behind it.**
+
+`if (c == 0) continue;` → `break;`
+
+| `2014BSA_Sunday_Killion.pptx` | before | after |
+|---|---:|---:|
+| `abs_ink` | 19.39 | **6.89** |
+| differing pixels | 158.26 | **113.12** |
+| major pages | 6 | **1** |
+| sheared glyphs (reference 0) | 948 | **0** |
+| extractable words (reference 3559) | 3619 | **3559** |
+| embedded font list | one face more | **the reference's exactly** |
+
+**Invisible for thirty rounds because a wrong face and a right face both drew upright.** Round 55
+taught the stack to synthesise an oblique; the wrong face, having no italic, began to lean where
+the reference does not, and that lean is what led here. Reach over the whole corpus: **1879
+records in 19 documents** — 13 slides decks, 4 words documents, 2 workbooks.
+
+### `Demick_JetBlue` page 4 is a gridline mesh, not a rotated axis
+
+The reference **does** draw all 21 rotated category labels, at our angle, as **glyph outlines** —
+1.9 MB of content stream, 1502 curve operators, 200 subpath moves in the label band against 124
+subpaths on our whole page. So "52 `BT` to 31" and "163 words to 79" are a *representation*
+difference and the block-counting turn census makes exactly the granularity mistake round 55
+nearly shipped.
+
+What the page was missing is `c:minorGridlines`, unread in `Core/Charts` — which is the diff
+report's own *"a solid area drawn differently (31.18% of page)"*. **26.10 → 12.85, major 6 → 5.**
+
+The sub-interval count is **not** chart2's default of 2: `AxisConverter` sets **5** for a value
+axis stating no `c:minorUnit` (`axisconverter.cxx:405-409`, its own comment cites `tdf#114168`),
+`round(major/minor)` when both are stated, 9 for a log axis; the `CATEGORY` branch sets nothing, so
+2 stands there. The reference's own page confirms both — 25.97 pt majors, 5.19 pt minors, one
+category minor per interval at the midpoint. A minor gridline also states a **width and a dash**,
+and reading only its colour cost 0.66 ink on `N2_E_Maestroni` for two attributes.
+
+**It costs differing pixels on two documents and that is a different defect made visible**: our
+plot rectangles are displaced from the reference's — JetBlue's floor 5.5 pt low against a top edge
+agreeing to 1 pt, N2's whole plot 15.6 pt right — so a mesh right in count, pitch, dash and width
+lands beside the reference's. Coverage improved and placement did not; both instruments are
+telling the truth.
+
+### `.ppt` `txflTextFlow`, and the DrawingML answer was the wrong one to reuse
+
+Six values, three answers, 6 of 6 on a fixture whose arms differ in **four bytes**: 1, 3 and 5 are
+vertical, 2 is the other quarter, 0 and 4 are not turns. Refutes "any non-zero turns the same way"
+and "only `TtoBA`".
+
+**The insets are where reuse would have been wrong.** `oox`'s `pushTextDistances` shifts them
+cyclically; `svdfppt.cxx` does not, and a probe isolating **one inset at a time against an all-zero
+arm** — which cancels the first line's ascent instead of having to know it — says the identity in
+both directions to the hundredth of a point. After the correction, **18 of 18 pen origins on the
+reference's to 0.05 pt** over three anchors and two directions. Pages the reference turns and we
+do not: 7 → 2, and `introduction_to_bea_tuxedo.ppt` goes 1785 words to **1767/1767**.
+
+Reach is small and the census says so in both directions: 5 documents carry a non-zero flow and 4
+moved; the one that did not carries **22 of the 33** and states no `TextId`. And
+`concepts-surrounding-cloud-computing…ppt` states the property on **106** shapes of which **104
+state `HorzN`** — counting "states the property" would over-report reach 50:1.
+
+### The one verdict regression, named rather than netted
+
+`010605Vul.ppt` **`match` → `words`**: 960 → 963 extractable words against the reference's 944,
+where the 2% band is 962.88. **It crossed by 0.12 of a word.** Its unsigned ink went 1.90 → 1.07
+and its embedded-font count 7/6 → **6/6** — the font list is now the reference's exactly, which is
+the change that caused it.
+
+### The composed page pair is not an instrument below ten points
+
+Two independent reviewers, given only the pair image and forbidden the source, **both** reported
+that our render of `Demick_JetBlue` page 4 had no data-point markers and no vertical gridlines. A
+200 dpi crop of the same PDF shows squares, diamonds and triangles at every vertex and a full
+major grid. The pair is a good instrument for structure and a bad one for small marks, and the
+round nearly took "we draw no markers" as a finding. **Two observers making the identical error is
+a property of the instrument, not of the observers.**
+
+### Prediction
+
+Verdicts **−1** against a predicted 0 in a −2…+1 band; page counts **0** ✓; documents moved **8**
+against a predicted 4–8 — **inside the band for the first time in four rounds, and the composition
+is wrong**: the prediction named eight documents, five moved, and three more came from a change
+that did not exist when it was written. A count landing in its band is not a census being right.
+
+**The stated control earned its keep by failing.** `tf-agreement` held (0.85188 → 0.85173, exact
+`/Tf` pages 1678 unmoved) but the sheared-glyph count was predicted to stay at 16740 exactly and
+moved to **15792** — and the whole −948 is the EMF fix, a change made after the prediction. The
+column named the third change's entire effect on it.
+
+### Audit
+
+`Layout/SlideDrawing.cs` :341, :360 (`FillReachesThePage`) — **VERIFIED on 26.2.4.2, both halves.**
+Open **40** unchanged, marked 15 → **17** (14 verified, 3 wrong), re-derived with the file's own
+commands. The package-entry arm is three byte-identical page images of one corpus deck under three
+different stated fills. The inline arm is the half a single rendering cannot settle, so it took a
+**discriminating pair**: the same 306 kB EMF as `office:binary-data` draws **108 304 red pixels**
+and, moved to `Pictures/` by the reference's own exporter with nothing else changed, **none**.
+Second re-check in three to turn on a discriminating pair.
+
+### Cross-track — measured, not argued
+
+`c:minorGridlines` reaches `Paperless.Core/Charts` and `Paperless.Ooxml`: **4 sheets documents and
+1 words document**, all named and rendered before and after, two moving by +0.04 and +0.14 ink and
+none changing a page count or a major page. `EmfReader` reaches `Paperless.Vector`: **4 words
+documents and 2 workbooks**, all six better or level on both instruments, none crossing a
+word-count band, and `bulletin.docx` going from 0.37% off the reference's word count to **0.00%**.
+The parent still owes both tracks a whole sweep.
+
+### Tests
+
+**4824 passed, 0 failed, 1 skipped**, and it reconciles: 4809 + **15 new**. Four mutations
+detected; **one came back clean and is reported as such** — collapsing the `BtoT` arm onto the
+transposing one breaks no test, because the fixture's two-glyph line never shows the width the
+frame breaks at. That arm has zero corpus reach and is validated by the probe, not by the suite.
+
+### Slides does next
+
+1. **The chart plot rectangle.** Both of this round's ink regressions are that one defect, and the
+   mesh has made it measurable for the first time.
+2. **The gridline colour** — the OOXML automatic-format layer for gridlines. `objectformatter.cxx`
+   says major = `tx1` at `tint 75000` and minor at `tint 50000`; the reference draws `0x666666`
+   and `0x8B8B8B` and we draw `0xB3B3B3` for both, which predates this round and reaches every
+   OOXML chart with a grid.
+3. **The other 11 EMF face-name documents**, and `WmfReader`'s *other* fixed fields for the same
+   padded-versus-terminated confusion.
+4. `010605Vul.ppt`'s three extra words — the charstream test first.
+5. The fitted bullet's vertical placement, 1.9 pt high, untouched for three rounds.
