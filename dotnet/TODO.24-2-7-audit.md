@@ -56,6 +56,7 @@ broken one, because it is the only thing that stops the next round paying for th
 | `Paperless.Spreadsheets` | `Layout/SheetGeneralWidth.cs` | 53 | **verified 26.2.4.2, 2026-08-21** — 27 of 27, every `###` threshold crossing |
 | `Paperless.Spreadsheets` | `Layout/SheetDeviceUnits.cs` | 53 | **verified 26.2.4.2, 2026-08-21** — 45 of 45 within 0.1% relative |
 | `Paperless.Spreadsheets` | `Layout/SheetOptimalRowHeights.cs` | 54 | **verified 26.2.4.2, 2026-08-21** — 30 of 30 wrapped row heights within half a twip, control at 300 |
+| `Paperless.Spreadsheets` | `Layout/SheetPageDecoration.cs` | 55 | **WRONG, half of it** — the zero-band guard holds; "draws at every stated band above zero" does not. Reported, not fixed; a `Math.Min` defect the probe found beside it *was* fixed |
 
 | `Paperless.Presentations` | `Ooxml/PptxSlideLayout.cs` :763 (table cell line spacing) | 54 | **verified 26.2.4.2, 2026-08-21** — 6 of 6 stated sizes put the reference's first baseline one em below the cell's top |
 
@@ -73,6 +74,7 @@ generator that is known to be read correctly by 26.2.4.2; start from it. Confirm
 | 52 (slides) | `SlideAutofit.cs`, 4 sites | **WRONG.** −155.40 `abs_ink`, −11.1% of the track |
 | 53 (slides) | `SlideTextLayout.cs`, **6 sites** | **all six still correct** — and the probes written to check them found a *fifth* branch none of the six described, worth another two fixes' worth of baseline accuracy. See `probes/slides-r53/results.md` § "The 24.2.7.2 audit" |
 | 54 (sheets) | `SheetOptimalRowHeights.cs`, the `WrappedHeight` fit | **still correct** — 30 of 30 authored wrapped rows within half a twip on 26.2.4.2, read twice over (marker deltas in both PDFs, and the reference's own `fods` `style:row-height`) with the site's own 300-twip figure as the control. `probes/sheets-r54/audit_rowheight.py` |
+| 55 (sheets) | `SheetPageDecoration.cs`, the header/footer band guard | **WRONG in half.** The zero-band claim holds and every negative band too; "the reference draws the footer at every stated band above zero" is false — nothing is drawn at 0.72 or 1.44 pt of 8 pt text, and the threshold *scales with the point size* (1.44–2.16 pt at 8 pt, 4.32–5.76 pt at 20 pt). A text-fit rule, not a constant. Reported and not implemented: four corpus worksheets have a positive band under 6 pt and all four pass today. The probe also found a **real 18 pt body displacement** at a *negative* band, which is fixed. `probes/sheets-r55/audit_pagedecoration.py`, `census-bands.py` |
 
 | 54 (slides) | `PptxSlideLayout.cs` :763, 1 site | **still correct** — and the version bump is *why* it is correct: the site records that 24.2.7.2 drew a cell's first baseline at the face's own 0.907 em, `a47776a938c` (tdf#165521) removed the leading for cells, and 26.2.4.2 draws it at one em on 6 of 6 stated sizes from 10 to 40 pt. A site whose comment says "the running binary disagrees with its own C++" is the highest-prior kind on this list |
 
@@ -92,6 +94,39 @@ rather than clamping. 26.2.4.2 has no such clamp either.
 This file has carried a hand-maintained count three times and it has been wrong three times: it
 conflated hits with files, it grew while the list was being worked, and a marker's own prose put a
 cleared site back into the open count. **The count is not maintained here. It is computed.**
+
+Recomputed from the tree with `git grep`, excluding lines that carry a `[24.2.7-audit: …]` marker.
+**Hits and files are different numbers and an earlier version of this table conflated them**, which
+a round caught.
+
+| project | open hits | files with an open site | reaches |
+|---|---:|---:|---|
+| `Paperless.Presentations` | 11 | 4 | slides |
+| `Paperless.WordProcessing` | 11 | 8 | words |
+| `Paperless.Spreadsheets` | 10 | 9 | sheets |
+| `Paperless.Text` | 8 | 2 | **all three tracks** |
+| `Paperless.Core` | 2 | 1 | **all three tracks** |
+| `Paperless.Rendering` | 1 | 1 | **all three tracks** |
+| `Paperless.Ooxml` | 1 | 1 | **all three tracks** |
+| **total** | **42** | **26** | |
+
+**The two figures above did not reproduce and are corrected.** This table said `44` open and the
+paragraph below said `12` markers. Re-derived at commit `e11ee5ac386` with the commands this file
+itself gives: **42 open, 13 marked**. A figure quoted rather than re-derived decays — the same
+lesson this file records about round 53's "73 of 337", arriving again in the file that records it.
+
+Marked so far: **14** lines —
+9 verified,
+3 wrong,
+1 undecided,
+1 half-wrong (`SheetPageDecoration.cs`, round 55, marked `WRONG`).
+
+The **open** count does not fall when a site is verified, and that is deliberate: the sentence that
+names 24.2.7.2 stays, because it records what the figure was fitted to. Round 55's marker is the
+fourteenth and the open count held at 42. Read the two numbers as "how many sites still carry an
+unchecked 24.2.7.2 claim" and "how many have been checked", not as a total and a remainder.
+
+Reproduce both numbers with:
 
 ```sh
 # open sites — a hit that is not itself a marker line
@@ -231,16 +266,19 @@ the site itself names **26.2.4.2** and the date — this table is the index, not
 **Two of the four shared-layer sites re-checked so far were wrong.** The prior on the remaining
 44 is not "probably still fine".
 
-## Still unverified in `Paperless.Spreadsheets` (4 of the 9)
+## Still unverified in `Paperless.Spreadsheets` (3 of the 9)
 
-`Layout/SheetNotes.cs`, `Layout/SheetPageDecoration.cs`, `Layout/SheetShapeText.cs`,
-`Layout/SheetText.cs`, `Ooxml/XlsxNoteCaptions.cs`.
+`Layout/SheetNotes.cs`, `Layout/SheetShapeText.cs`, `Layout/SheetText.cs`,
+`Ooxml/XlsxNoteCaptions.cs`.
 
-**`SheetOptimalRowHeights.cs` was round 54's and came back clean** — 30 of 30, with the control
-passing first. The next sheets round should take **`SheetPageDecoration.cs`**: page furniture is
-what the track's remaining page-count outliers hang off, and unlike the three text-metric sites it
-has no probe harness yet.
+**`SheetPageDecoration.cs` was round 55's and came back half wrong** — see the log above. The next
+sheets round should take `SheetNotes.cs` or `SheetShapeText.cs`; `XlsxNoteCaptions.cs`'s claim (a
+VML anchor's offsets are 96-dpi screen pixels) was exercised in passing by round 55's legacy-picture
+reader, which shares that arithmetic and reproduces the reference to 0.12 pt on two documents, but it
+has not been probed in its own right and is **not** marked.
 
-The running score across all rounds is now **two wrong in ten**, and both wrong ones were shared-layer
-sites. Every `Paperless.Spreadsheets` site re-checked so far (five) has been correct, which is itself
-worth stating: the sheets metric work has held across the binary change.
+The running score across all rounds is now **three wrong in eleven**. Two of the three were
+shared-layer sites; the third is this one. **Six** `Paperless.Spreadsheets` sites have been
+re-checked and five were correct, so the sheets metric work has mostly held across the binary
+change — but "mostly" is now the honest word, and the first sheets site to be found wrong was the
+first one that was about page furniture rather than text metrics.

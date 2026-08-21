@@ -119,10 +119,17 @@ public static class XlsxReader
                 // cover whatever they overlap.
                 SheetDrawings drawings = XlsxDrawings.Read(
                     file.Package, entry.PartName, theme, themeFonts, ranges.Resolve);
+
+                // The legacy VML drawing beside it, which holds the camera-tool pictures and OLE
+                // previews Calc draws and the DrawingML part does not reach — its `a14` twin is
+                // skipped by Markup Compatibility. Added after the DrawingML drawings and before
+                // the captions, which is the z-order Calc gives them.
+                List<SheetDrawing> legacy =
+                    XlsxLegacyPictures.Read(file.Package, entry.PartName, worksheet);
                 List<SheetDrawing> captions =
                     XlsxNoteCaptions.Read(file.Package, entry.PartName);
-                if (captions.Count > 0)
-                    drawings = new SheetDrawings([.. drawings.Items, .. captions]);
+                if (legacy.Count > 0 || captions.Count > 0)
+                    drawings = new SheetDrawings([.. drawings.Items, .. legacy, .. captions]);
 
                 layouts.Add(new SheetLayout
                 {

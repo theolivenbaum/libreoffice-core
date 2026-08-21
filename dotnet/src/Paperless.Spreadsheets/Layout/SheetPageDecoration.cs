@@ -391,6 +391,30 @@ internal sealed class SheetPageDecoration(SheetLayout sheet, SheetPagePlacement 
         // environment: the mechanism the old note identified survived, the number attached to it
         // did not.
         //
+        // [24.2.7-audit: WRONG 2026-08-21, round 55 — reported, not fixed. The zero-band half is
+        // right and the "above zero" half is not.] Re-checked from scratch on 26.2.4.2 with
+        // authored fixtures rather than corpus variants, `probes/sheets-r55/audit_pagedecoration.py`.
+        // The control ran first and passed: at Excel's own 0.4 in band both sides draw both bands,
+        // agreeing to 1.2 pt. At a stated band of exactly zero, and at every negative band, the
+        // reference draws nothing — as this guard says.
+        //
+        // But the reference does not draw at "every stated band above zero". It draws nothing at
+        // **0.72 pt and 1.44 pt** either, and where it starts depends on the text: the threshold
+        // is between 1.44 and 2.16 pt for 8 pt header text and between 4.32 and 5.76 pt for 20 pt
+        // text — about 0.27x the point size, over two points, so it is a *text-fit* rule and not a
+        // constant and certainly not zero. Fourteen renderings, one variable each.
+        //
+        // Not implemented, and the reason is the reach rather than the difficulty:
+        // `probes/sheets-r55/census-bands.py` reads all 267 corpus worksheets that state header or
+        // footer content and finds **four** with a positive band under 6 pt —
+        // `085_Simple_Gantt_chart`, `020_Free_Blood_Pressure_Chart`, `fm-provider-service-measures`
+        // and `FAA-2019-0995-0002_attachment_2`, all at 3.6 to 5.67 pt and all on documents that
+        // match today. At 3.6 pt with ordinary 10 or 11 pt header text the bracket above puts the
+        // threshold at roughly 2.7 to 3.2 pt, so the reference draws them and so do we; guessing
+        // the exact law to move four passing worksheets is the trade this project's rules say not
+        // to make. What the probe *did* fix is beside it — see `XlsxPrintSetup`'s `Math.Min` on
+        // the two margins, a measured 18 pt body displacement at a negative band.
+        //
         // `differentFirst` swaps the pair on the sheet's first page, and swapping it to *nothing*
         // is the case the corpus holds: every workbook here that sets the flag supplies no
         // first-page content, so the first page prints bare. The band is unchanged either way —

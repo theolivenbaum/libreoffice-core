@@ -248,11 +248,12 @@ internal static class XlsxDrawings
         DrawingBlipFill? fill = DrawingFill.ReadBlip(blipFill);
         drawing = drawing with { Opacity = fill?.Opacity ?? 1 };
 
-        (RasterImage? raster, Lazy<VectorImage>? vector) = Load(package, images, choice.RelationshipId);
+        (RasterImage? raster, Lazy<VectorImage>? vector) =
+            LoadImage(package, images, choice.RelationshipId);
 
         if (choice.IsVector && choice.FallbackRelationshipId is { } fallback)
         {
-            (RasterImage? spare, Lazy<VectorImage>? _) = Load(package, images, fallback);
+            (RasterImage? spare, Lazy<VectorImage>? _) = LoadImage(package, images, fallback);
             if (vector is null) return drawing with { Image = KnockedOut(fill, spare) };
 
             raster = spare;
@@ -345,7 +346,12 @@ internal static class XlsxDrawings
             ? image with { Knockout = knockout }
             : raster;
 
-    private static (RasterImage? Raster, Lazy<VectorImage>? Vector) Load(
+    /// <summary>
+    /// Loads one picture part by relationship id. Shared with
+    /// <see cref="XlsxLegacyPictures"/>, whose VML shapes name their image the same way and must
+    /// not decide separately what an EMF is.
+    /// </summary>
+    internal static (RasterImage? Raster, Lazy<VectorImage>? Vector) LoadImage(
         OpcPackage package, Dictionary<string, OpcXml.Relationship> images, string? id)
     {
         if (id is null || !images.TryGetValue(id, out OpcXml.Relationship relationship)) return default;
