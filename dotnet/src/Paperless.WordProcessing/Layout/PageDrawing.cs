@@ -237,7 +237,19 @@ public static class PageDrawing
             DrawPicture(sink, frame, vector, null);
         else if (frame.Frame.Image is { } image) DrawPicture(sink, frame, null, image);
 
-        DrawFlow(frame.Content, sink, frame.Frame.Fill ?? default);
+        // The frame's own fill is deliberately *not* passed as the background for an automatic font
+        // colour, and this is a measurement rather than an omission. `SwFrame::GetBackgroundBrush`
+        // walks fly frames, so passing it is the reading the source invites — and it is wrong here
+        // twice over on the corpus. `docs-quality-MA.IMS.00001-…docx` page 9 has a shape filled
+        // `#0070C0`, whose WCAG luminance is 38 and so is dark by every rule this file knows, and the
+        // reference draws its text **black**; `069_Work_Breakdown_Structure_Template_Professional…`
+        // is the same shape at `#8496B0`. Passing the fill turned 383 glyphs white across those two
+        // that the reference draws black, against 34 in the whole corpus before. A `PageFrame` here
+        // is a Writer text frame *and* a DrawingML shape, and a shape's text belongs to the drawing
+        // layer where `COL_AUTO` is resolved by editeng and not by `SwDrawTextInfo::ApplyAutoColor`
+        // at all — which is the mechanism those two witnesses point at and which nothing here can
+        // yet tell apart. So the arm is left off until a probe separates the two kinds of frame.
+        DrawFlow(frame.Content, sink);
 
         if (frame.Frame.BorderColour is not { } colour) return;
         if (frame.Frame.BorderWidth <= Length.Zero) return;
