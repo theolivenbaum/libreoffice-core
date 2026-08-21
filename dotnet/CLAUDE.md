@@ -745,8 +745,28 @@ ls-files` lists only the lower-case name and `git status` reports **nothing untr
 resolves the second spelling to the tracked file. There is one file wearing two names in
 `readdir`, and the `nlink` of 1 is the filesystem telling you so.
 
-**Do not try to clean them up.** `rm <NAME>.XLS` on a case-insensitive mount is a request to
-delete that inode, and the inode is the corpus document. There are **45** such entries corpus-wide
+**Do not `rm` one. `rm <NAME>.XLS` deletes the document** — measured on a scratch file 2026-08-21:
+three names, one inode, link count 1, and `rm` on one name destroyed the file while leaving the
+others as stale entries pointing at nothing. The earlier form of this warning was inferred; it is now
+demonstrated.
+
+**They can be cleared safely, by renaming.** A rename round trip on the *tracked* name
+(`mv x .tmp && mv .tmp x`) invalidates every case-variant entry for that inode and leaves the file
+untouched. `.claude/skills/corpus-batches/scripts/dealias-corpus.py` does this; `--check` reports
+without changing anything.
+
+**Done 2026-08-21**: 77 aliased inodes carrying 87 extra names, all cleared, **zero hash changes**,
+`git status` clean, and the corpus now holds **946 files in 946 distinct inodes with no case-only
+collision anywhere**. A gate's `TOTAL` line therefore equals the manifest again, and the figures
+below (355 / 311 / 325, and 1033 corpus-wide) are the *historical* over-counts, not current ones.
+
+**git is the only authority for which spelling is real**, because no ordering rule works: some
+aliases upper-case the extension and some lower-case the whole filename. `core.quotePath=false` is
+required, since git escapes non-ASCII and the corpus holds a CJK filename.
+
+**The aliases can come back.** They are created by case-variant lookups — `look.py`'s upper-case
+`rglob` was one source and is fixed — so run `dealias-corpus.py --check` if a sweep `TOTAL` exceeds
+the manifest again. There are **45** such entries corpus-wide
 (words 18, sheets 18, slides 9), which is exactly the gap between `find` counts (words 355, slides
 311, sheets 325) and manifest rows (337, 302, 307).
 
