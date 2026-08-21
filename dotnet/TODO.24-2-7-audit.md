@@ -35,7 +35,8 @@ progress counts the marker:
 
 ```
 [24.2.7-audit: VERIFIED  <date>, <round> — …]     the claim still holds on 26.2.4.2
-[24.2.7-audit: WRONG     <date>, <round> — …]     it does not; say whether it was fixed
+[24.2.7-audit: FIXED     <date>, <round> — …]     it did not hold, and the code now matches
+[24.2.7-audit: WRONG     <date>, <round> — …]     it does not hold and the code still does not
 [24.2.7-audit: UNDECIDED <date>, <round> — …]     the probe could not separate it; say why
 ```
 
@@ -157,10 +158,16 @@ for p in dotnet/src/Paperless.*; do
 done | sort -rn
 
 # done, by outcome
-for k in VERIFIED WRONG UNDECIDED; do
+for k in VERIFIED FIXED WRONG UNDECIDED; do
   printf '%-10s %s\n' "$k" "$(git grep -c "audit: $k" -- 'dotnet/src/**/*.cs' | awk -F: '{s+=$2} END{print s+0}')"
 done
 ```
+
+**`WRONG` and `FIXED` are different states and the count must separate them.** A `WRONG` marker
+whose prose said "fixed" was indistinguishable from one whose prose said "reported, not fixed", so
+no command could answer the question that actually matters — *how many claims known to be false are
+still shipping in the code*. `FIXED` was added for that, 2026-08-21, and the two already-repaired
+sites were re-marked. **`WRONG` now means the defect is still live.**
 
 **A marker's prose must not name `24.2.7.2`.** Round 54 wrote a marker whose second line did, which
 pushed the open count *up* at the moment a site was cleared — the file's own trap, sprung by the

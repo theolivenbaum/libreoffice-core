@@ -16238,3 +16238,91 @@ The **18.46 pt body offset** (two witnesses, and `statedBand − nominal` is 18.
 test whether the header height is counted twice); then the **grey cell fills**; then
 `IntervalsThatFit` from authored charts rather than from `005`; then the four `_advanced_excel_pie`
 documents.
+
+### Parent verification — round 56 sheets
+
+**Sheets 276 → 276 of 307, verified over all 307 documents: zero in either direction, as predicted.
+Corpus 795 of 946.** Tests at the merged tree **4827, 0 failed** (Spreadsheets 940 → 956).
+
+The diff is entirely inside `Paperless.Spreadsheets` — **no cross-track sweep owed**, and
+`OdsPrintSetup` was deliberately left alone.
+
+### Two of round 55's own sentences refuted, and both were search artefacts of a kind worth naming
+
+- **"The `PAGE n OF 33` string is in no cell, no `oddHeader` and no `oddFooter`."** It is in an
+  `oddHeader`: `sheet10` states `&R\n\n\n\n\n\n\n&9PAGE \n&P OF &N`. **`PAGE.*OF` cannot match a
+  string split by a newline and a `&9`.** The claim was true of the regex and false of the document.
+- **"There is a text-fit threshold scaling at about 0.27× the point size."** There is **no
+  threshold**; there is a **clip rectangle**. `PrintHF` sets `Rectangle(aStart, nHeight − nDistance)`
+  and `DrawText_ToPosition` emits *nothing at all* for an area whose primitive range misses it,
+  while an area that meets it partly is masked and **keeps every line**. The 0.27 figure is
+  `ascent − inkAscent`; bisection at three sizes brackets the real quantity at **0.2056–0.2087 em**,
+  and round 55's 20 pt bracket is refuted outright — 4.32 pt draws.
+
+`FAA-2019-0995-0002_attachment_2` now reads **9995 words, the reference's figure exactly**, on both
+case aliases.
+
+### The larger defect the same probe found
+
+**The reference draws band text in the workbook's own default cell font** — family, size, weight and
+posture — plus the `&"Family,Style"`, `&B` and `&I` codes. We drew every band in hard-coded ten-point
+upright Liberation Sans, **while `SheetBandHeight`, which sizes the same band, had always used the
+workbook's font and read the `&"Family"` code.** Two halves of one band disagreeing, on all **81**
+banded workbooks.
+
+**And the instrument nearly hid it: key on the PDF's font list, not on advance widths.** The
+Liberation faces are metric-compatible, so a first pass measuring x positions concluded the style
+code was ignored. Font-count agreement moved on **46 rows, all towards the reference and none away**;
+band agreement moved on **41 of 81 documents, 39 improved and 2 worsened**; median per-document
+displacement **1.515 → 0.220 pt**.
+
+Four word counts moved and **none is content**: header tokens that used to be glued
+(`PageII:6Architecture`) now split where the face changes — *towards* the reference's tokenisation
+while the count moves away from it. Three of the four are `.xls`, exactly where the prediction's
+blind spot 1 pointed.
+
+### `IntervalsThatFit` is not a four-token fix, and the census is why it was not started
+
+**256 automatic value axes against 30 stated, in 129 documents — 79 sheets, 47 slides, 3 words —
+and `ChartLayout` lives in `Paperless.Core`.** Three briefs of mine described it as "four tokens on
+`005`". Censused and left, with the mm100 truncation bounded to 0.25% and the shape-inset hypothesis
+ruled out on sign. **This is the right call**: a `Paperless.Core` change reaching 129 documents is
+not something to start at the end of a round.
+
+### The audit gains a fourth outcome, because the count could not answer the question that matters
+
+A `WRONG` marker whose prose said *"fixed"* was indistinguishable from one whose prose said
+*"reported, not fixed"*, so **no command could report how many claims known to be false are still
+shipping**. `FIXED` added; the two repaired sites re-marked. **`WRONG` now means the defect is
+live.** At this commit: **40 open, 15 verified, 2 fixed, 1 wrong** — and the one live wrong claim is
+`OdpSlideLayout.cs`, unfixable here because the slides corpus holds no ODF presentation at all.
+
+The round also found **one of the three commands this file gives silently returned 0** under a
+tree-ish argument, and re-derived the counters the file had stored. Fixed. Per-project totals now
+cross-check against the global figure.
+
+Audit sites: `SheetShapeText.cs` **VERIFIED** (12 pt, two instruments, control first);
+`SheetNotes.cs` **VERIFIED**; `SheetPageDecoration.cs` **FIXED**. `Paperless.Spreadsheets` is 8 of 10
+re-checked, 7 correct, and the only wrong one was the only *furniture* claim.
+
+### Vision
+
+Confirmed by a second instrument: **three `#C0C0C0` cell fills on FAA p28 we do not draw at all**;
+and an **18.46 pt uniform downward translation of the body** on `fm-provider-service-measures` p36
+whose *band* agrees to 0.0005 pt — `FY2023-AIP-grants` p1 shows the same at 18.49 pt. Both
+pre-existing, both on passing documents.
+
+Refuted: *"we draw vertical rules the reference does not"* — we draw 22 and it draws 24, **the wrong
+direction**. And the `FILTER ASSY HYD291143 CMM` wrap is now the **second round running** that a
+reviewer has reported that exact phantom on that exact cell — worth treating as a property of the
+composite rather than of the document.
+
+### Sheets does next
+
+1. **The 18.46 pt body offset** — two witnesses agreeing to a twentieth of a point, both on passing
+   documents; on `fm-provider` sheet 7, `statedBand − nominal` is **18.4 pt exactly**, so test
+   whether the header height is being counted twice.
+2. **The grey cell fills** — census before writing.
+3. `IntervalsThatFit` **from authored charts, not from `005`** — and it is a `Paperless.Core` change
+   reaching 129 documents, so it owes a corpus gate.
+4. The four `_advanced_excel_pie` documents. 5. `XlsxNoteCaptions.cs`, then `SheetText.cs`.

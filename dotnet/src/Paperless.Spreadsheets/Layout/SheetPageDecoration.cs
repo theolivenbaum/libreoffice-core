@@ -404,7 +404,7 @@ internal sealed class SheetPageDecoration(SheetLayout sheet, SheetPagePlacement 
         // environment: the mechanism the old note identified survived, the number attached to it
         // did not.
         //
-        // [24.2.7-audit: WRONG 2026-08-21, round 55 — re-marked 2026-08-21, round 56: the
+        // [24.2.7-audit: FIXED 2026-08-21, round sheets-r56 — was WRONG (round 55): the
         // zero-band half was right, the "above zero" half was wrong, and the rule that replaces
         // it is implemented below rather than reported.] Round 55 re-checked this on 26.2.4.2
         // with `probes/sheets-r55/audit_pagedecoration.py`, found the reference drew nothing at
