@@ -84,6 +84,37 @@ public class AnchorRunHeightTests
     }
 
     /// <summary>
+    /// The text beside an anchor decides the line even when it is not the paragraph's own size.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The discriminating case between the two halves of the rule, and it is the one that caught the
+    /// first cut. Giving the anchor's run the paragraph's face and size is enough whenever the
+    /// paragraph's size is the text's; where they differ — a paragraph whose body style is 11 pt
+    /// Carlito, a picture run, and a 12 pt Cambria run of text beside it — the substituted size then
+    /// becomes a floor the reference does not have. Measured on the authored variants: with the
+    /// word-processing half alone, the two rows the reference puts at 0.00 and 9.70 came out 0.80 and
+    /// 9.90, and with <c>Fold</c> passing over the run as well they are 0.00 and 9.70 again.
+    /// </para>
+    /// <para>
+    /// Two directions, so it cannot be satisfied by a rule that always takes the smaller or always
+    /// takes the larger.
+    /// </para>
+    /// </remarks>
+    [Theory]
+    [InlineData(8)]
+    [InlineData(20)]
+    public void TheTextsOwnSizeDecidesEvenWhenItIsNotTheParagraphs(int points)
+    {
+        Length size = Length.FromPoints(points);
+
+        PageParagraph paragraph = Paragraph(
+            Anchor + "Y", [Run(0, 1, Large), Run(1, 1, size)]);
+
+        HeightOf(paragraph, 0, 2).ShouldBe(HeightOf(Paragraph("Y", [Run(0, 1, size)]), 0, 1));
+    }
+
+    /// <summary>
     /// A run holding an anchor <em>and</em> text keeps its own size, because then it is a text portion.
     /// </summary>
     /// <remarks>
