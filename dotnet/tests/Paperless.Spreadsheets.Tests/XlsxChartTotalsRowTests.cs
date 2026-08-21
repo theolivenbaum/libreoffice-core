@@ -129,6 +129,22 @@ public sealed class XlsxChartTotalsRowTests
     }
 
     /// <summary>
+    /// A table whose totals row is <em>below</em> the end of the range hides nothing.
+    /// </summary>
+    /// <remarks>
+    /// The mirror of <see cref="ATotalsRowAboveTheEndOfTheRangeIsReadLikeAnyOtherCell"/> and the
+    /// case that separates "the database range ends on this row" from "a database range with
+    /// totals covers this cell". A chart plotting the first five rows of a twenty-row table must
+    /// keep all five.
+    /// </remarks>
+    [Fact]
+    public void ATableWhoseTotalsRowIsBelowTheEndOfTheRangeHidesNothing()
+    {
+        Ranges(Table("B1:C8")).Resolve("'Data'!$B$2:$B$6").ShouldNotBeNull()
+            .Numbers.ShouldBe([10.0, 20.0, 30.0, 40.0, 50.0]);
+    }
+
+    /// <summary>
     /// The test is per column: a range wider than the table keeps the last cell of the columns
     /// the table does not cover.
     /// </summary>

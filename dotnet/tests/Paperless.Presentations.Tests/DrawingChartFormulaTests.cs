@@ -103,6 +103,29 @@ public class DrawingChartFormulaTests
         plot.Series[0].Values.Count.ShouldBe(2);
     }
 
+    /// <summary>
+    /// A resolver that answers an <em>empty</em> sequence leaves the series empty — the cache does
+    /// not stand in for it.
+    /// </summary>
+    /// <remarks>
+    /// <strong>Null and empty are different answers.</strong> Null is the C++ catching a throw and
+    /// falling through to the cache (the case above). Empty is a sequence that resolved and named
+    /// no readable cell, which Calc really produces: a range every cell of which is an Excel
+    /// table's totals row is skipped outright by <c>ScChart2DataSequence::BuildDataCache</c>
+    /// (<c>sc/source/ui/unoobj/chart2uno.cxx:2616-2632</c>), and the reference then draws an empty
+    /// plot at the value axis's default scale. That is `029_Annual_budget`'s left chart, where
+    /// falling back to the cache draws the whole thing — two series, twenty-two data labels and an
+    /// axis to $4,500 — over a reference that draws none of it.
+    /// </remarks>
+    [Fact]
+    public void AResolverThatAnswersAnEmptySequenceDoesNotFallBackToTheCache()
+    {
+        ChartPlot plot = Plot(Short, _ => new ChartRangeValues([], [])).ShouldNotBeNull();
+
+        plot.Series[0].Values.ShouldBeEmpty();
+        plot.Categories.ShouldBeEmpty();
+    }
+
     /// <summary>A literal sequence has no <c>c:f</c>, so the resolver is never asked.</summary>
     /// <remarks>
     /// <c>maFormula.isEmpty()</c> is the C++'s test and it is a test of the <em>formula</em>, not
