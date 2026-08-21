@@ -1460,7 +1460,7 @@ public static class PageDrawing
                         Start = face.Start,
                         Length = face.Length,
                         Face = face.Face,
-                        Font = fallback.ReferenceFor(face.Face),
+                        Font = fallback.ReferenceFor(face.Face, AsksForItalic(run)),
                     }
                     : run with { Start = face.Start, Length = face.Length });
             }
@@ -1468,6 +1468,21 @@ public static class PageDrawing
 
         return split;
     }
+
+    /// <summary>Whether a run asked for italic, however it was answered.</summary>
+    /// <remarks>
+    /// Two states, not one. A run whose family has an italic installed is answered with that face
+    /// and <see cref="OpenTypeFace.IsItalic"/> records it; a run whose family has none is answered
+    /// with the upright face and a <see cref="FontReference.SyntheticOblique"/> instead. Both asked
+    /// for italic, and 26.2.4.2 shears a fallback face for both — measured on
+    /// <c>probes/words-r58/fallback-oblique.py</c>'s <c>cjk-italic</c> and <c>cjk-italic-none</c>,
+    /// which differ by exactly that and agree at six sheared glyphs in every one of six formats.
+    /// Reading only the face would lose the second, which is the arm that reaches a document naming
+    /// a family nobody has installed — and those are the documents that fall back in the first
+    /// place.
+    /// </remarks>
+    private static bool AsksForItalic(PageRun run)
+        => run.Face.IsItalic || (run.Font?.SyntheticOblique ?? false);
 
     /// <summary>
     /// The runs cut at every as-character object's boundary, so the pen has somewhere to jump.

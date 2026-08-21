@@ -329,9 +329,16 @@ internal static class SheetText
             // resolver cannot reference falls back again to the primary face's missing-glyph box —
             // which is what happened before this existed — rather than to a font the PDF would
             // announce without carrying.
-            SheetFace drawn = run.IsFallback && SheetFonts.ForFallback(run.Face) is { } resolved
-                ? resolved
-                : face;
+            // The request travels with the substitution: a fallback face is not the face the cell
+            // asked for, so its own IsItalic says nothing about whether the cell wanted a lean.
+            // Both states count — a real italic face, and an upright one already carrying a
+            // synthetic oblique. See IGlyphFallbackResolver.ReferenceFor(OpenTypeFace, bool).
+            bool italic = face.Face.IsItalic || face.Reference.SyntheticOblique;
+
+            SheetFace drawn =
+                run.IsFallback && SheetFonts.ForFallback(run.Face, italic) is { } resolved
+                    ? resolved
+                    : face;
 
             segments.Add(Segment(
                 text.Substring(run.Start, run.Length), drawn, size, colour, offset,

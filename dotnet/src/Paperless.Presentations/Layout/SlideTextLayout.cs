@@ -1841,7 +1841,16 @@ public static partial class SlideTextLayout
         public FontReference? FontFor(int index, OpenTypeFace face)
         {
             RunStyle style = StyleAt(index);
-            return ReferenceEquals(style.Face, face) ? style.Font : Fallback?.ReferenceFor(face);
+            if (ReferenceEquals(style.Face, face)) return style.Font;
+
+            // A substituted face has no memory of what was asked for, so the lean has to be carried
+            // across with the request. Both states count as italic: a family whose italic is
+            // installed answers with an italic face, and one whose italic is not answers upright
+            // with a synthetic oblique instead — and 26.2.4.2 shears the fallback for both. See
+            // IGlyphFallbackResolver.ReferenceFor(OpenTypeFace, bool), which was measured through
+            // `.pptx` and `.fodp` among four other filters.
+            bool italic = (style.Face?.IsItalic ?? false) || (style.Font?.SyntheticOblique ?? false);
+            return Fallback?.ReferenceFor(face, italic);
         }
 
         private RunStyle StyleAt(int index)

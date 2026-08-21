@@ -312,8 +312,19 @@ internal static class SheetFonts
     private static readonly object Gate = new();
     private static SystemFontResolver? _shared;
 
-    private static readonly ConcurrentDictionary<OpenTypeFace, SheetFace?> FallbackFaces =
-        new(ReferenceEqualityComparer.Instance);
+    /// <summary>
+    /// Fallback faces already dressed, keyed by the face <em>and</em> by the request that reached
+    /// it.
+    /// </summary>
+    /// <remarks>
+    /// The slant is part of the key and not an afterthought: one substituted face answers both an
+    /// upright run and an italic one, and the two differ by
+    /// <see cref="FontReference.SyntheticOblique"/>. Keyed on the face alone, whichever run arrived
+    /// first would decide the lean for every other run in the workbook that fell back to the same
+    /// face.
+    /// </remarks>
+    private static readonly ConcurrentDictionary<(OpenTypeFace Face, bool Italic), SheetFace?>
+        FallbackFaces = new();
 
     /// <summary>
     /// The one resolver a workbook's faces are loaded through.
@@ -346,17 +357,23 @@ internal static class SheetFonts
     /// A fallback face dressed as a <see cref="SheetFace"/>, or null when it cannot be named.
     /// </summary>
     /// <param name="face">A face <see cref="Fallback"/> returned.</param>
-    public static SheetFace? ForFallback(OpenTypeFace face)
+    /// <param name="isItalicRequested">
+    /// Whether the cell's own run asked for italic. A substituted face has no memory of the
+    /// request, so without this a cell of italic text holding a character its face cannot draw
+    /// has that character drawn upright beside its leaning neighbours — measured on 26.2.4.2 in
+    /// <c>probes/words-r58/fallback-oblique-ooxml.py</c>, whose `.xlsx` arm shears six of six.
+    /// </param>
+    public static SheetFace? ForFallback(OpenTypeFace face, bool isItalicRequested = false)
     {
         ArgumentNullException.ThrowIfNull(face);
 
-        return FallbackFaces.GetOrAdd(face, static resolved =>
+        return FallbackFaces.GetOrAdd((face, isItalicRequested), static key =>
         {
-            FontReference? reference = Fallback.ReferenceFor(resolved);
+            FontReference? reference = Fallback.ReferenceFor(key.Face, key.Italic);
             return reference is null
                 ? null
                 : new SheetFace(
-                    resolved, reference, LineSpacing.Resolve(resolved, MetricGrid.Spreadsheet));
+                    key.Face, reference, LineSpacing.Resolve(key.Face, MetricGrid.Spreadsheet));
         });
     }
 
