@@ -165,7 +165,8 @@ internal static class PptTextBody
         string text = run.Text.Substring(start, length).Replace(
             PptTextReader.LineBreak, '\u2028');
 
-        List<SlideTextRun> runs = Runs(run, scheme, fonts, characters, start, length, text.Length);
+        List<SlideTextRun> runs = Runs(
+            run, scheme, fonts, characters, start, length, text.Length, out PptCharacterRun first);
 
         ushort alignment = properties.States(StatesAlignment) ? properties.Alignment : level.Alignment;
         short lineFeed = properties.States(StatesLineFeed) ? properties.LineFeed : level.LineFeed;
@@ -190,6 +191,8 @@ internal static class PptTextBody
             Language: null,
             Marker: Marker(properties, level, scheme, fonts, runs))
         {
+            LineSpacingStated = StatesLineSpacing(properties, first, run.Kind, depth),
+
             // The master's own value, which PowerPoint writes as 0x240 — one inch — and which the
             // record's default already is. Reading it matters for the deck that states something
             // else, and stating nothing must not fall back to a word processor's half inch.
@@ -289,7 +292,8 @@ internal static class PptTextBody
         PptCharacterLevel level,
         int start,
         int length,
-        int textLength)
+        int textLength,
+        out PptCharacterRun first)
     {
         List<SlideTextRun> runs = [];
         int end = start + length;
@@ -362,6 +366,7 @@ internal static class PptTextBody
             runs.Add(Run(atStart, scheme, fonts, level, 0, 0));
         }
 
+        first = atStart;
         return runs;
     }
 
@@ -422,6 +427,49 @@ internal static class PptTextBody
 
         return runs.Count > 0 ? runs[^1] : default;
     }
+
+    /// <summary>
+    /// Whether the paragraph <em>states</em> its line spacing, in the sense
+    /// <c>PPTParagraphObj::ApplyTo</c> uses to decide whether to put an
+    /// <c>SvxLineSpacingItem</c> at all.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>filter/source/msfilter/svdfppt.cxx:6266-6271</c>:
+    /// <code>
+    /// PPTPortionObj* pPortion = First();
+    /// bool bIsHardAttribute = GetAttrib( PPT_ParaAttr_LineFeed, nVal, nDestinationInstance );
+    /// sal_uInt32 nFont = sal_uInt32();
+    /// if ( pPortion &amp;&amp; pPortion-&gt;GetAttrib( PPT_CharAttr_Font, nFont, nDestinationInstance ) )
+    ///     bIsHardAttribute = true;
+    /// </code>
+    /// so a paragraph is "hard" when it states a line feed <em>or when the character run holding
+    /// its first character states a typeface index</em>. The second half is the surprising one and
+    /// it is the commoner of the two: 1947 of the corpus's 3736 <c>.ppt</c> paragraphs are hard by
+    /// the font index and only 436 by the line feed
+    /// (<c>probes/slides-r54/ppt-hardness-census.py</c>).
+    /// </para>
+    /// <para>
+    /// Both <c>GetAttrib</c> overloads also report hard when the text object's own instance is
+    /// <c>TextInShape</c> or <c>Subtitle</c> and the paragraph sits below the first outline level
+    /// (<c>:5953-5957</c> for the paragraph and <c>:5488-5492</c> for the portion), which is the
+    /// third term here.
+    /// </para>
+    /// <para>
+    /// <strong>Two further terms are deliberately not modelled, and both make more paragraphs hard
+    /// rather than fewer.</strong> A destination instance of <c>TSS_Type::Unknown</c> is hard
+    /// outright, and where the destination instance differs from the text object's own — which
+    /// <c>:1041-1047</c> arranges for any Body-kind text carrying no <c>OEPlaceholderAtom</c> — the
+    /// two master levels' values are compared and a difference is hard. Modelling those needs a
+    /// destination instance this reader does not carry. The omission therefore under-reaches,
+    /// which is the safe direction and is why it is written down rather than left implicit.
+    /// </para>
+    /// </remarks>
+    private static bool StatesLineSpacing(
+        PptParagraphRun properties, PptCharacterRun first, PptTextKind kind, int depth)
+        => properties.States(StatesLineFeed)
+           || first.States(StatesFontIndex)
+           || (depth > 0 && kind is PptTextKind.Other or PptTextKind.CentreBody);
 
     private static TextAlignment Alignment(ushort adjust) => adjust switch
     {

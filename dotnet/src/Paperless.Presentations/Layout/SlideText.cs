@@ -263,6 +263,45 @@ public sealed record SlideParagraph(
     /// a ten-inch slide is fifteen per cent of the page.
     /// </remarks>
     public Length DefaultTabInterval { get; init; } = DefaultTabDistance;
+
+    /// <summary>
+    /// Whether the paragraph <em>states</em> its line spacing, as opposed to leaving it at the
+    /// default — which is not the same question as whether <see cref="LineSpacing"/> resolves to
+    /// single spacing.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>It decides whether the shrink-to-fit's line-spacing reduction reaches the
+    /// paragraph at all, and only the binary PowerPoint reader ever sets it.</strong> EditEngine
+    /// tests four rules in order and stops at the first that applies
+    /// (<c>editeng/source/editeng/impedit3.cxx:1528-1602</c>):
+    /// <c>SvxLineSpaceRule::Min</c>, <c>::Fix</c>, <c>SvxInterLineSpaceRule::Prop</c>,
+    /// <c>::Off</c>. The <c>Prop</c> arm does <em>nothing at all</em> when the proportion is
+    /// exactly 100, and the <c>::Off</c> arm — the only place a paragraph picks up the fit's
+    /// <c>fSpacingY</c> — is then unreachable. So "states exactly 100%" and "states nothing" are
+    /// different answers, and <see cref="LineSpacingRule"/> spells them the same.
+    /// </para>
+    /// <para>
+    /// The two formats reach the item by different routes and that is what makes this
+    /// binary-only. Every OOXML and ODF line spacing goes through the UNO property, and
+    /// <c>SvxLineSpacingItem::PutValue</c> (<c>editeng/source/items/paraitem.cxx:194-202</c>)
+    /// reads <c>style::LineSpacingMode::PROP</c> and writes <c>eInterLineSpaceRule = Off</c>
+    /// <em>when the height is exactly 100</em>. The <c>.ppt</c> importer instead calls
+    /// <c>SvxLineSpacingItem::SetPropLineSpace(100)</c> directly
+    /// (<c>filter/source/msfilter/svdfppt.cxx:6285-6288</c>), and <c>lspcitem.hxx:86-91</c> shows
+    /// that setter writes <c>Prop</c> unconditionally.
+    /// </para>
+    /// <para>
+    /// Measured on an authored known-answer deck — <c>probes/slides-r54/make-ppt-fit-probe.py</c>
+    /// through <c>soffice --convert-to ppt</c> and <c>ppt-patch-kind.py</c>, fifteen fitted boxes
+    /// of one text — the <c>.pptx</c> half draws a baseline pitch of <c>1.2 × 0.8 × em</c> and the
+    /// <c>.ppt</c> half draws <c>1.2 × em</c>. Same box, same text, same fit table. And because
+    /// the binary side's lines are taller the fit <em>search</em> lands on a different row: at a
+    /// 150 pt box the reference draws 13.011 pt on the binary side against 15.987 on the OOXML
+    /// side.
+    /// </para>
+    /// </remarks>
+    public bool LineSpacingStated { get; init; }
 }
 
 /// <summary>

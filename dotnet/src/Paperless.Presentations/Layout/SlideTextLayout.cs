@@ -849,9 +849,17 @@ public static partial class SlideTextLayout
 
             // Nothing here states a proportion, so the ascent is one em: the ::Off branch is the
             // only one left to touch it, and Spaced is what transcribes that.
-            lines.Add(Spaced(
-                new PlacedLine(box, em, Spacing(paragraph.LineSpacing, natural), natural),
-                scaling));
+            //
+            // Unless the paragraph reaches this arm by STATING exactly one hundred per cent, which
+            // is a different answer from stating nothing and which only a .ppt can do. The Prop
+            // arm above is entered on `GetInterLineSpaceRule() == Prop` and does nothing at all at
+            // 100, so the ::Off arm below it -- the only place the fit's fSpacingY is applied --
+            // is unreachable for such a paragraph. See SlideParagraph.LineSpacingStated for the
+            // two import routes that make this binary-only and for the deck that measures it.
+            PlacedLine plain =
+                new PlacedLine(box, em, Spacing(paragraph.LineSpacing, natural), natural);
+
+            lines.Add(paragraph.LineSpacingStated ? plain : Spaced(plain, scaling));
         }
 
         Length total = Length.Zero;
