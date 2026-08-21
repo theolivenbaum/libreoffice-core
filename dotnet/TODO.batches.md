@@ -18515,3 +18515,94 @@ attributes in 3 slides documents and none in sheets**.
 column at 34), then `012`'s remaining 8 strokes, which are the *border* half of the very element
 whose shading half this round implemented plus seven shape `a:ln`s, then `069`'s displaced text,
 then the tall-table guard and `097`'s 1.65 pt.
+
+### Parent verification — round 63 words
+
+**803 of 946 unchanged: words 323, slides 200, sheets 280.** All 946 gated: **zero movement in
+either direction, as predicted.** Tests **5144, 0 failed** (WordProcessing 1231 → 1251).
+
+Both changes were predicted **per direction**, which the round's own previous cycle earned: change 1
+predicted 38–46 changed / 0 gained / **0 lost** and measured **42 / 0 / 0**, with the 42 being exactly
+the 42 the census named and **42 improved, 0 worsened** on fill agreement.
+
+### The counter-witness question is answered, and both earlier rounds were right
+
+Round 59 measured a frame-fill arm that turned 383 glyphs white the reference draws black and removed
+it. Round 62 measured the opposite on a different document. **The missing term is fill
+transparency.** Both witnesses state one (`a:alpha val="52941"`, `v:fill opacity="26214f"`), and
+`ApplyAutoColor` asks `getAverageColor(aGlobalRetoucheColor)` — **which blends toward white first**.
+Luminance **105** and **168**: both bright, both black. Ten arms across three documents, **each built
+so the rivals answer differently** — including `012`'s title given a black fill at `a:alpha 20000`,
+which turns its text **black on a black anchor** and refutes "the anchor decides" *in the same arm*.
+The blend then pinned with **no free parameter**: three colours, three different predicted flips
+(9.571 / 37.454 / 62.222 %), **11 of 11**.
+
+`v:fill/@opacity`, read by nothing before, now also makes the box translucent — **all three of
+`069`'s fill colours match the reference's pixels exactly where none did.**
+
+**The anchor limb is deliberately not shipped**: it needs the anchor to reach `PageDrawing.DrawFrame`,
+which draws from a per-page list.
+
+### `w:tblStylePr`'s `w:tcPr` half — two omissions in one element
+
+`WordStyle` **discarded any layer carrying no `w:rPr`** (every band and column layer of
+`PlainTable5`), and `Names` **never offered the bands**. `012` page 1 goes **19 fills → 75**, colour
+for colour against the reference and rectangle for rectangle to **0.10 pt**. Reach **resolved, not
+declared**: 749 cells in 42 documents against **34 977 declared layers**.
+
+**The line-moving risk was closed before the change**: 0 of 271 documents name a style whose
+`w:basedOn` chain reaches a band layer with a `w:rPr`.
+
+### Two regressions that never existed, and a fix whose own first cut was worse
+
+`page_streams` **ate a whitespace byte off compressed data**, so two of 337 reference PDFs read as
+zero fills on pages they plainly paint. A 100 dpi raster refuted it in one step.
+
+**And the repair's first cut was worse than the bug**: `/Length` is an **indirect reference in every
+LibreOffice PDF**, and reading it literally emptied every stream in the corpus. All earlier probe
+PDFs were then re-read with the corrected reader and **not one number moved** — which is the check
+that makes the correction safe to trust rather than merely plausible.
+
+### A test named after a rule passed under that rule's own mutation
+
+`verify-test.sh` caught `TheHeadingRowIsNotCountedAsABand` detecting nothing: **at band size two,
+counting the heading leaves body row 1 in band 0 either way.** It asks rows 2 and 4 now. That is the
+fourth distinct shape of "a test that passes without reaching the defect" this session — after the
+unbound namespace, the single-run fixture, and the unit test that never touched its call site.
+
+### `Color::IsDark`'s threshold is not continuous, and the round's own probe had it wrong first
+
+`GetWCAGLuminance` returns a `sal_uInt8`. **One arm of eleven separates the two readings**, and it
+went the truncating way. The round's first cut was 5 of 6; corrected, 11 of 11.
+
+### The audit's open count over-states four-fold, and the parent confirmed it
+
+The round noticed `Paperless.WordProcessing` shows **11 open hits and has one reachable open site**.
+Measured corpus-wide by the parent: **37 raw, 9 in files carrying no marker at all** — and of those,
+two sit in the ODT and RTF readers, and **the words corpus holds no `.rtf` at all**.
+
+Most of the 37 are prose *inside or beside* an already-marked site, or historical narrative about a
+superseded port. **This is the fourth correction to that file's metric** — it conflated hits with
+files, it grew while being worked, a marker's own prose put a cleared site back into the count, and
+now it over-states the backlog four-fold. **Every one was found by a round, not by the file.** The
+honest command is now in `TODO.24-2-7-audit.md`.
+
+### Vision — including a sentence that changed side
+
+**`012` p1**: a sentence three readers gave over three rounds — *"the reference draws alternating grey
+row bands; ours draws none"* — **now lists the banding among the things that are identical**. Second
+instrument: 48 fills to 48, rectangles to 0.10 pt. The same reader still reports, correctly, the two
+things not fixed.
+
+**`069` p1** was change 2's control, and the reader answered *"looks identical, not different"* **at
+her own stated low confidence** — confirmed far more sharply at pixel level. She then volunteered a
+new high-confidence lead: `PROJECT NAME` drawn below and right of its box, overlapping the row
+beneath. **Unchecked by a second instrument and flagged as such.**
+
+### Words does next
+
+1. **The anchor limb** — the control already exists (LONG at 34); plumbing, not measurement.
+2. **`012`'s remaining 8 strokes** — the **border half of the very element whose shading half just
+   shipped**; `ConditionalCellProperties` already holds it, plus seven shape `a:ln`.
+3. `069`'s displaced text (new lead, needs a second instrument), then the tall-table guard, `097`'s
+   1.65 pt, the `.doc` label slant and the Carlito class.
