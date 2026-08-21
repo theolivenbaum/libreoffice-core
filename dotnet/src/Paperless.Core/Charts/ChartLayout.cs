@@ -2534,8 +2534,34 @@ public static partial class ChartLayout
 
         for (int at = 0; at < categories; at++) previous[at] = baseline;
 
+        // Series 1 is painted LAST, over the others.
+        //
+        // `AreaChart::createShapes` reverses its own slot list before it draws anything —
+        // `lcl_reorderSeries(m_aZSlots)` when `m_nDimension == 2 && (m_bArea || !m_bCategoryXAxis)`
+        // (`chart2/source/view/charttypes/AreaChart.cxx:565-568`) — so the first series ends up on
+        // top of the pile rather than under it. It is measured rather than only cited: on
+        // `006_advanced_powerpoint_area.pptx` the reference's page is dominated by the *first*
+        // series' brick red with a thin slate-blue rind on the left, and this reader drew the
+        // second series' blue over it with a thin red rind on the right. A reader given the two
+        // halves and nothing else ranked "the dominant colour of the area chart flips" as the
+        // loudest difference on the page and said the two silhouettes and the crossing point are
+        // identical, which is what says it is a paint order and not a value.
+        //
+        // Only the *emission* is reversed, not the accumulation: a stacked area's running total
+        // has to be built in file order or the bands come out in the wrong sequence.
+        //
+        // And a stacked area is exempt, which the reference's own condition does not say and a
+        // measurement does. `stacked_area_chart.pptx` is `diff% 1.82, |ink|% 0.16` in file order
+        // and `1.87 / 0.22` reversed, so the reference paints its stacked bands in file order
+        // after all — the bands abut rather than nest, so their shared edges are drawn by
+        // whichever polygon comes last and the order is visible there. Reversing it is a small,
+        // reproducible regression on the one corpus deck that can see it, and the binary wins
+        // over the source's unconditional `m_bArea`.
+        List<List<ChartShape>> painted = [];
+
         foreach (ChartSeries series in plot.Series)
         {
+            List<ChartShape> own = [];
             List<DocPoint> upper = [];
             List<DocPoint> lower = [];
             List<(DocPoint At, int Index, double Value)> points = [];
@@ -2550,7 +2576,7 @@ public static partial class ChartLayout
                     || !double.IsFinite(value)
                     || CategoryFraction(plot, at, categories) is not { } across)
                 {
-                    Emit(series, upper, lower, shapes);
+                    Emit(series, upper, lower, own);
                     continue;
                 }
 
@@ -2574,13 +2600,23 @@ public static partial class ChartLayout
                 points.Add((vertex, at, value));
             }
 
-            Emit(series, upper, lower, shapes);
+            Emit(series, upper, lower, own);
             AddPointLabels(plot, series, points, ChartLabelPlacement.Centre, area, labels);
+            painted.Add(own);
 
             if (plot.IsStacked)
             {
                 for (int at = 0; at < categories; at++) previous[at] = scale.Fraction(running[at]);
             }
+        }
+
+        if (plot.IsStacked)
+        {
+            foreach (List<ChartShape> own in painted) shapes.AddRange(own);
+        }
+        else
+        {
+            for (int at = painted.Count - 1; at >= 0; at--) shapes.AddRange(painted[at]);
         }
     }
 

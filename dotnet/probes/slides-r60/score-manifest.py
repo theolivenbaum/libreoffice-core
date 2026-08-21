@@ -49,7 +49,7 @@ if __name__ == "__main__":
 
     rows = manifest(family)
     ink, verdict = load(out)
-    passing = missing = 0
+    passing = missing = unknown = 0
     abs_ink = signed = 0.0
     major = 0
     disagree = []
@@ -67,13 +67,22 @@ if __name__ == "__main__":
         if f and f[2] not in ("-", "?"):
             abs_ink += float(f[2])
             signed += float(f[3])
-            major += int(f[4])
+            # The ink columns and the major-page column can be absent independently: two sheets
+            # rows carry real ink and a "?" major count, because pdf-image-diff.py reports the
+            # major total only when it finishes the document and a 4372-page workbook does not.
+            # Counting them as zero understates the major total by at most those rows, and the
+            # count of them is printed rather than swallowed.
+            if f[4] in ("-", "?"):
+                unknown += 1
+            else:
+                major += int(f[4])
     if missing:
         raise SystemExit(
             f"REFUSING TO PRINT: {missing} of {len(rows)} manifest paths found no row in {out}. "
             "A sweep that did not visit every manifest path cannot be scored against it.")
     print(f"{family}: {passing} of {len(rows)}   (missing {missing})")
-    print(f"abs_ink {abs_ink:.2f}  signed {signed:.2f}  major {major}")
+    print(f"abs_ink {abs_ink:.2f}  signed {signed:.2f}  major {major}"
+          + (f"  (+{unknown} rows with no major count)" if unknown else ""))
     print(f"manifest disagreements: {len(disagree)}")
     for p, s, v in disagree:
         print(f"   {p}: manifest={s} sweep={v}")
