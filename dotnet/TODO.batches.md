@@ -17126,3 +17126,75 @@ round stating that plainly is the behaviour wanted**; three earlier rounds commi
 section and did not say why. `briefs-r50/COMMON.md` now requires the vision section in `results.md`,
 with the page, the reason it was chosen, the direction reported, and what a second instrument said —
 or the sentence saying none was run and why.
+
+## Round 59 — sheets (2026-08-21, unmerged)
+
+**Sheets 277 → 278 of 307.** Branch `wt-sheets-r59`, base `dc9ca5900c2`. Full record in
+`dotnet/probes/sheets-r59/results.md`.
+
+**The baseline was 277, not the briefed 276, and only the reference side moved**:
+`fse_identification_form.xlsx` `REF words 427 → 440` with ours pinned — the calendar volatility
+round 57 separated. It moved back to 427 during the round and took the verdict with it, which is
+why the net is +1 where our own side gained two.
+
+**Round 58's "our pie is 18% larger than the reference's" is refuted and the cause is the
+instrument.** `pdf-ops.py`'s path bounding box includes a bezier's control points; we emit cubics
+where LibreOffice emits polygonised arcs, so our wedge boxes bulge up to 8.11 pt outside the circle
+and the reference's 0.11. Read off the wedge corner instead — the first wedge's box's lower-left
+corner *is* the pie centre — the figures are 221.24 against 199.56, **10.9%**. The centre offset
+reproduces exactly.
+
+**A pie's `bestFit` data labels, their legend keys and the diagram shrink now ship.**
+`c:showLegendKey` was parsed and never drawn; its only call site was inside an existence test.
+`bestFit` is `AVOID_OVERLAP`: drawn as `CENTER`, run through `performLabelBestFitInnerPlacement`,
+and a label that will not fit inside its slice is **rebuilt at the `OUTSIDE` anchor** — the rim
+point on the bisector plus a flat 150 mm100. The pie branch of `impl_createDiagramAndContent` then
+recreates the whole diagram at `adjustInnerSize(consumedOuterRect)`, which is why a pie with
+best-fit labels is smaller than the same pie without them: **99.78 against 110.44**, measured over
+sixteen one-variable rewrites of the corpus witness's own chart part.
+
+**The port is verified against the reference's own answers**: given the reference's block width its
+four inner placements reproduce to **0.12 pt** and its one failure reproduces as a failure. And the
+reference draws **six label keys for five labels** — the outside fallback removes the text shape and
+leaves the discarded attempt's key behind — which is reproduced and pinned.
+
+**Predicted +4 verdicts and measured +2**, and both misses are the same axis. Chasing them found a
+defect nothing on this project had measured: **our chart label line height for Carlito is 1.2207 em
+where the reference's is 1.1219 at 10 pt and 1.2241 at 15.89** — sub-linear, so no scaled sum of the
+face's metrics is right at both — and **our single-line labels agree only because the ascent error
+cancels the height error**. Recorded at `SheetBandText.ChartLineHeightAt`, unfixed.
+
+**A one-bit alternative was tested and rejected on the measurement**: putting
+`ShapeFactory::createText`'s 0.18/0.30 em insets into the label's box halves the radius error on two
+authored probes and *breaks the page* — the label structure goes from the reference's one-outside
+four-wrapped to three-outside, the centre error triples and the word count overshoots to the `outEnd`
+figure. Both cuts are in the results file.
+
+**Shared layer, and the round's own reach census was refuted by its own sweep.** The first census
+matched `<c:pieChart>` and answered 5/3/2. A chart part may bind the chart namespace **as the
+default**, with no prefix — `microsoft_learn_multi_chart_examples.xlsx` does, and its word count
+moved from a document the census said could not be touched — and `c:dLblPos` is optional with a
+pie's default being `bestFit`. Corrected: **7 sheets, 5 slides, 4 words documents**, all named in
+`results.md` § 7. Both affected `done` sheets documents were **measured** and neither moved.
+
+**Two censuses that had never been run, both negative.** `.xls` colour scales live in `CF12`
+(0x087A): **42 records in 2 documents and every one is `ct=1`, `cellIs`** — there is no `.xls`
+colour scale, data bar or icon set in this corpus. The `x14` extension arm: **27 rules in 11 sheets
+documents, all `dataBar` and `iconSet`, zero `colorScale`** — so round 58's colour-scale reach is
+the whole-corpus figure.
+
+**`cellIs` was censused and not implemented, and the census changes the plan**: 123 rules in 18
+documents, every one carrying a `dxfId`, 118 of 125 operands literal — but **87 of the 123 `dxf`s
+state a font and no fill at all**. It is two arms, not one.
+
+**Vision.** Two independent readers on two unrelated pages named the shipped change from outside
+(the outside label, its key, the identical wrap) and independently measured the residual on `011`
+at "+50 px right" and "4–5% smaller", which `pdf-ops.py` confirms at 28.1 pt and 4.5%. **And the
+same page produced its page-split misreading for the fourth and fifth reader** — this time as "the
+reference's chart frame is narrower on the right" — where the two frames agree to 0.4 pt and the
+frame simply runs off an A4 MediaBox on page 1 in both.
+
+**Next**: the chart label's vertical metrics (it is what the two unflipped pies need, one word
+each); `cellIs` in two arms; `c:dPt` on bars; `showLegendKey` on a bar chart (38 undrawn keys in
+`Keywords_Mapping_Graphs_and_Charts` alone); and `c:dLblPos="outEnd"`, which still takes the old
+1.1-radius rule this round measured to be wrong.

@@ -586,6 +586,8 @@ public static partial class ChartLayout
     private static void AddOfPie(
         ChartPlot plot,
         DocRect area,
+        DocRect available,
+        ChartText measurer,
         List<ChartShape> shapes,
         List<ChartLine> lines,
         List<ChartLabel> labels)
@@ -601,7 +603,7 @@ public static partial class ChartLayout
         int split = Math.Clamp(plot.SplitPosition, 1, Math.Max(1, points - 1));
         if (points < OfPieMinimumPoints)
         {
-            AddWedges(plot, area, shapes, labels);
+            AddWedges(plot, area, available, measurer, shapes, labels);
             return;
         }
 

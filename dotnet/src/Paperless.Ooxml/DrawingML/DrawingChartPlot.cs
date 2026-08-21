@@ -1246,6 +1246,12 @@ public static class DrawingChartPlot
         bool category = Flag(labels, "showCatName") ?? inherited?.ShowCategory ?? shown;
         bool name = Flag(labels, "showSerName") ?? inherited?.ShowSeries ?? shown;
 
+        // c:showLegendKey. Unlike the other four this one defaults *off* even outside the Office
+        // 2007 arm: `lclConvertLabelFormatting` initialises `ShowLegendSymbol` from
+        // `rDataLabel.mobShowLegendKey.get(false)` and never from `bDefaultShown`
+        // (seriesconverter.cxx:139). Sixty-two of them in five sheets documents.
+        bool key = Flag(labels, "showLegendKey") ?? inherited?.ShowLegendKey ?? false;
+
         // The stated format goes to whichever of the two properties the label will use, which is
         // the percentage one whenever a percentage is shown and the format is not source-linked.
         XElement? numFmt = Child(labels, "numFmt");
@@ -1267,6 +1273,7 @@ public static class DrawingChartPlot
             ShowPercent = percent,
             ShowCategory = category,
             ShowSeries = name,
+            ShowLegendKey = key,
             ValueFormat = asPercent || general
                 ? inherited?.ValueFormat
                 : Parsed(code),

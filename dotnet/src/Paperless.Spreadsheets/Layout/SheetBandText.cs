@@ -101,6 +101,24 @@ internal static class SheetBandText
     /// 1.1494 there, and the difference compounds through the insets that place the plot area
     /// rather than showing up in any one label.
     /// </remarks>
+    /// <para>
+    /// <strong>Measured divergence, round 59, unfixed.</strong> This is right for Liberation Sans
+    /// and wrong for Carlito, and the error is not a constant factor. Read off
+    /// <c>003_advanced_excel_pie</c>'s reference rendering, where a wrapped pie data label gives
+    /// the line height directly: 26.2.4.2 stacks Carlito's lines <strong>11.23 pt apart at
+    /// 10.01 pt</strong> — 1.1219 em — and <strong>19.45 pt apart at 15.89 pt</strong> — 1.2241 em.
+    /// This function answers 1.2207 at both, which is what Carlito's hhea, OS/2 typo and OS/2 win
+    /// metrics all give, so the reference is not reading a different table; its line height is
+    /// <em>sub-linear</em> below about sixteen point and no scaled sum of the face's own metrics
+    /// can be right at both sizes.
+    /// </para>
+    /// <para>
+    /// It went unnoticed for as long as it did because it cancels: a chart label is drawn at
+    /// <c>blockCentre − blockHeight/2 + ascent</c>, and <see cref="AscentAt(Length)"/> is 9.51 at
+    /// 10 pt where the reference's is 9.00, so a <em>single-line</em> label lands within 0.01 pt of
+    /// the reference's. The error is only visible once a label wraps or its box is measured for a
+    /// fit test — which is what a pie's best-fit placement does to every one of them.
+    /// </para>
     /// <param name="size">The em size.</param>
     public static Length ChartLineHeightAt(Length size)
         => Metrics.Value is { } metrics ? Ungridded(metrics).ScaledLineHeight(size) : size * 1.15;

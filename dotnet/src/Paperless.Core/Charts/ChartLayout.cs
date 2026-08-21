@@ -819,6 +819,23 @@ public static partial class ChartLayout
             }
         }
 
+        // The pie's own second pass, and the only chart type that has one:
+        // impl_createDiagramAndContent draws the series once, takes the bounding box of everything
+        // the diagram group produced — the labels included — and recreates the whole thing at
+        // adjustInnerSize(consumedOuterRect). It is what makes a pie with best-fit labels smaller
+        // than a pie without them, measured at radius 99.78 against 110.44 on the corpus witness,
+        // and it is gated on there being a best-fit label because that is the only placement whose
+        // labels can leave the diagram rectangle at all.
+        if (HasBestFitLabels(plot))
+        {
+            DocRect outer = DiagramAreaOf(plot, frame, measurer);
+            area = AdjustInnerSize(
+                plot, outer, area, PieConsumedRect(plot, area, outer, measurer));
+
+            if (area.Width <= Length.Zero || area.Height <= Length.Zero)
+                return new ChartDrawing(DocRect.Empty, boxes, lines, labels, shapes);
+        }
+
         if (plot.PlotBackground is { } wall) boxes.Add(new ChartBox(area, wall));
 
         if (plot.HasAxes)
@@ -867,7 +884,8 @@ public static partial class ChartLayout
                 switch (kind)
                 {
                     case ChartPlotKind.Pie:
-                        AddWedges(part, area, shapes, labels);
+                        AddWedges(part, area, DiagramAreaOf(plot, frame, measurer),
+                                  measurer, shapes, labels);
                         break;
                     case ChartPlotKind.Area:
                         AddAreas(part, area, against, categories, columns, shapes, labels);
@@ -886,7 +904,8 @@ public static partial class ChartLayout
                         AddCandles(part, area, against, categories, boxes, lines, labels);
                         break;
                     case ChartPlotKind.OfPie:
-                        AddOfPie(part, area, shapes, lines, labels);
+                        AddOfPie(part, area, DiagramAreaOf(plot, frame, measurer),
+                                 measurer, shapes, lines, labels);
                         break;
                     default:
                         AddBars(part, area, against, categories, columns, boxes, labels);
@@ -2550,7 +2569,12 @@ public static partial class ChartLayout
     /// </para>
     /// </remarks>
     private static void AddWedges(
-        ChartPlot plot, DocRect area, List<ChartShape> shapes, List<ChartLabel> labels)
+        ChartPlot plot,
+        DocRect area,
+        DocRect available,
+        ChartText measurer,
+        List<ChartShape> shapes,
+        List<ChartLabel> labels)
     {
         if (plot.Series.Count == 0) return;
 
@@ -2572,6 +2596,8 @@ public static partial class ChartLayout
                 pieCentre,
                 plot.Rings ? outer * ((ring + 1) / (double)(rings + 1)) : Length.Zero,
                 plot.Rings ? outer * ((ring + 2) / (double)(rings + 1)) : outer,
+                available,
+                measurer,
                 shapes,
                 labels);
         }
@@ -2584,6 +2610,8 @@ public static partial class ChartLayout
         DocPoint centre,
         Length hole,
         Length radius,
+        DocRect available,
+        ChartText measurer,
         List<ChartShape> shapes,
         List<ChartLabel> labels)
     {
@@ -2614,7 +2642,10 @@ public static partial class ChartLayout
             // fLogicZ / bCenter branch), and OUTSIDE puts it just beyond the rim at 1.1. Putting
             // every pie label at the centre of the circle instead stacks them all on one another,
             // which reads as one label rather than as eight.
-            if (series.LabelAt(at) is { Draws: true } label)
+            // A whole pie's labels are laid out by ChartLayout.PieLabels below, which is where
+            // the best-fit placement, the legend key and the outside fallback live; this arm is
+            // now a *ring's* labels only, and for those AVOID_OVERLAP really is CENTER.
+            if (hole > Length.Zero && series.LabelAt(at) is { Draws: true } label)
             {
                 double middle = start - sweep / 2;
                 double reach = label.Placement is ChartLabelPlacement.Outside ? 1.1 : 0.5;
@@ -2645,6 +2676,46 @@ public static partial class ChartLayout
 
             start -= sweep;
         }
+
+        if (hole > Length.Zero) return;
+
+        // The pie's own labels, block by block: the legend key is a shape of its own and the text
+        // is placed from the block rather than from the anchor, because the key is inside the box
+        // the best-fit test measures.
+        foreach (PiePlacedLabel placed in PieLabels(
+                     plot, series, centre, radius, available, measurer))
+        {
+            if (placed.GhostKey is { } ghost && placed.KeyFill is { } ghostFill)
+                shapes.Add(new ChartShape(GraphicsPath.Rectangle(ghost), ghostFill));
+
+            if (placed.Key is { } key && placed.KeyFill is { } fill)
+                shapes.Add(new ChartShape(GraphicsPath.Rectangle(key), fill));
+
+            Length gap = placed.Block.Width - TextWidthOf(placed, plot, measurer);
+
+            labels.Add(new ChartLabel(
+                string.Join('\n', placed.Lines),
+                new DocPoint(
+                    placed.Block.X + gap + ((placed.Block.Width - gap) / 2),
+                    placed.Block.Y + (placed.Block.Height / 2)),
+                ChartLabelAnchor.Centre,
+                plot.DataLabelFont,
+                AxisColour,
+                IsBold: plot.IsDataLabelBold));
+        }
+    }
+
+    /// <summary>The measured width of a placed label's text, key and gap excluded.</summary>
+    private static Length TextWidthOf(PiePlacedLabel placed, ChartPlot plot, ChartText measurer)
+    {
+        Length width = Length.Zero;
+        foreach (string line in placed.Lines)
+        {
+            width = Length.Max(
+                width, measurer.Measure(line, plot.DataLabelFont, plot.DataLabelBold).Width);
+        }
+
+        return width;
     }
 
     /// <summary>
