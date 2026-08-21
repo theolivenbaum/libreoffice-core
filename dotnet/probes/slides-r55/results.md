@@ -322,11 +322,18 @@ this project's own rule.
 The diff touches `Paperless.Core` (`FontReference`), `Paperless.Text` (`SystemFontResolver`) and
 `Paperless.Rendering` (both sinks). All three tracks were swept.
 
-| track | passing | manifest disagreements | sheared glyphs before → after (reference) |
+| track | passing | sheared glyphs before → after (reference) | pages we drew none, before → after |
 |---|---|---|---|
-| slides | 199 of 302 | 0 | 0 → 16 740 (16 008) |
-| **words** | **319 of 337** | **0** | 0 → **158 673** (154 501) |
-| sheets | *see the merge note* | | 0 → *(15 497)* |
+| slides | **199 of 302**, 0 manifest disagreements | 0 → **16 740** (16 008) | 157 → **3** |
+| **words** | **319 of 337**, 0 manifest disagreements | 0 → **158 673** (154 501) | 759 → **162** |
+| sheets | 272 `match` of 307 | 0 → **15 509** (15 497) | 106 → **11** |
+
+**Sheets is the cleanest of the three** — 15 509 sheared glyphs against 15 497, only 11 pages of
+106 still disagreeing, and **all ten affected documents verdict `match`**. Its sweep is reported
+with two caveats that are the harness and not the change: two `.xlsm` were dropped under load
+(both render fine on their own, checked) and `STC_WebList.xlsx` — 4372 pages — timed out in the
+image diff. Sheets has no baseline at *this* commit to difference against, so the passing figure
+is offered as a level, not a delta; the shear agreement and the ten verdicts are the evidence.
 
 **Words moves no verdict.** Of the 845 words pages with a shear on either side, we drew none on
 759 before and on **162** after; 323 are now within 2% of the reference's glyph count and 360 are

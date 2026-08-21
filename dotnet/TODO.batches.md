@@ -15864,9 +15864,11 @@ file's trap, sprung inside the file that documents it, one round after it was wr
 
 ### Cross-track, measured rather than argued
 
-The diff touches `Paperless.Core`, `Paperless.Text` and `Paperless.Rendering`. Words swept:
-**319 of 337, 0 manifest disagreements — no verdict moves**, and sheared glyphs 0 → 158 673
-against the reference's 154 501. Of the 845 words pages with a shear on either side, we drew none
+The diff touches `Paperless.Core`, `Paperless.Text` and `Paperless.Rendering`. **Both other
+tracks were swept.** Words: **319 of 337, 0 manifest disagreements — no verdict moves**, sheared
+glyphs 0 → **158 673** against the reference's 154 501. Sheets: **272 `match` of 307**, sheared
+glyphs 0 → **15 509** against 15 497 with only **11 of 106** pages still disagreeing, and all ten
+affected documents `match` — the cleanest of the three. Of the 845 words pages with a shear on either side, we drew none
 on 759 before and **162** after. The 162 and a further 360 pages that differ by more than 2% are
 the **words track's own font-resolution divergence**, now visible for the first time because a
 wrong face and a right face both used to draw upright.
