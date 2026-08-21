@@ -18407,3 +18407,92 @@ against fresh renders — **including after a build that overlapped the sheets s
 states plainly rather than omitting.** A census bug was caught on the way: the theme lookup was
 hardcoded to `theme1.xml` and two workbooks call theirs `theme11.xml`, so it was reporting the wrong
 answer **for the very document that produced the verdict**.
+
+## Round 63 — sheets: the axis wrap limit is 0.95, `AdvanceScale` is gone, and the chart-area border is in
+
+**803 of 946 unchanged — sheets 280, slides 200, words 323, zero verdict movement in either
+direction on any of the three tracks**, all three swept in this worktree because the diff touches
+`Paperless.Core` and `Paperless.Ooxml`. Tests **5133, 0 failed, 1 skipped**; build 0/0.
+
+### Round 30's fitted 1.000 is refuted, and it had located a different boundary
+
+`lcl_hasWordBreak` does not turn the axis — it turns line breaking **off** and restarts, and the
+45° follows only if the labels then collide as single lines. **Every deck round 30 used carried a
+one-word label**, for which the wrap limit and the collision boundary are 0.95 and 1.00 of the
+tick spacing and only the outer one leaves a trace: a word wider than 0.95 of a tick and narrower
+than a whole one breaks, unbreaks and comes out upright. So the deck turns at 1.000 whatever the
+wrap limit is, and 0.95 was rejected for being invisible.
+
+Give one label a **space** and the two separate. 328 decks, the tick spacing swept continuously by
+the chart frame's own width rather than by an integer category count, LibreOffice's decision read
+twice — from its own `chart:coordinate-region` and from whether the labels survive in the exported
+PDF's text layer, which they do not at 45° — and the two readings agree on all 328:
+
+| decks | quantised ruler | unquantised |
+|---|---|---|
+| one word, six sizes | [0.9805, 1.0102) | **EMPTY** |
+| one word, frame width, 10 and 11 pt | [0.9974, 0.9988) | **EMPTY** |
+| **two words**, 10 pt | **[0.9470, 0.9505)** | [0.9713, 0.9748) |
+| **two words**, 11 pt | **[0.9486, 0.9524)** | [0.9276, 0.9312) |
+
+0.95 is in both two-word brackets and 1.000 is in neither, and **0.95 is `createTextShapes`'s own
+5% reduction with nothing fitted**. The empty unquantised intersections are round 62's pixel-em
+law confirmed from a second, independent observable. A four-arm control (vary the first word, the
+second word, both) shows the trigger is any word over the limit; a fifth deck shows the **first**
+label is never tested (`nTick > 0`); a sixth shows a **trailing blank hangs** and is not part of
+the word's width.
+
+`IChartTextMeasurer.AdvanceScale`, `ChartText.AdvanceScale` and the `SheetChart` override are
+**deleted**. Round 62's account of the method — a units patch on a fitted constant — is superseded:
+it was a fitted constant that had measured the wrong thing.
+
+**And it moves nothing.** 0 of 307 sheets renderings differ byte for byte, and 0 of the 34 slides
+and words documents that hold a labelled category axis, measured by reverting the rule in this
+tree and rendering both ways. The live control that the constant is in the rendering path: our own
+boundary on the two-word deck moves from 34.46 to **36.30**, which is `33.597 / 0.95` on the
+slides measurer's still-unquantised ruler, against the reference's 35.41.
+
+### The `D9D9D9` chart-area border: the code's own citation was an exception read as a rule
+
+`objectformatter.cxx:838-848` applies the grey 0.75 pt chart-space line **for every host but
+Impress** (tdf#150176). `ChartPlot.Border` cited that line for "a chart with no `a:ln` has no
+frame", which is why four blind readers across two rounds, all on **spreadsheets**, kept reporting
+a border the code was sure did not exist.
+
+Implemented; **10 sheets renderings change and every one lands on the reference's own stroke count
+exactly** — 12/12 on `microsoft_learn_multi_chart_examples`, 8/8 on `005_Contextures`, 2/2 on
+`023_Waterfall`, whose page-1 rectangle comes out at (67.78, 425.91)-(530.84, 756.17) against
+(68.17, 425.79)-(530.67, 755.77). No word count moves anywhere, which is what a stroke must do.
+A blind reader on `023` page 2, told nothing, listed the outline among what is **identical**.
+
+**The shape census over-reaches by nine times and the ink says so**: 90 sheets documents state a
+border-less non-Impress chart space; the reference actually draws more grey strokes than we did on
+21 documents, 12 of them a clean 0-against-N, and **10** of those changed. A chart part on a sheet
+that is never printed states everything and draws nothing.
+
+### `058_Social_media_engagement_data` is a `TODAY()` workbook, not an axis-fitting case
+
+A blind reader ranked first, at high confidence, that the two halves' date columns differ
+wholesale — 2/20/2023 on ours against 8/21/2026 on the reference's, twenty-four rows deep, with
+the impressions column unchanged. **24 `TODAY` formulas in `sheet11.xml`**: the reference
+recomputes them at render time and we draw the cached value. She also refuted the brief's other
+claim about the document — *"both halves draw 24 category labels … both rotated … neither
+truncated"* — where the brief has "the reference draws about 24 where we draw ten".
+**Proposed `kind` `text` → `unstable`.**
+
+### `046`'s ellipsis, confirmed to the character
+
+The parent's correction to round 62 holds exactly: ours 754 characters to the reference's 753,
+`only ours {t,n,e,m}` against `only ref {'.','.','.'}`. **The reference truncates a rotated
+category label with an ellipsis where we draw the word in full.** A blind reader who was not told
+the claim reported our labels colliding into "an unreadable clot" where the reference's are
+separated — and flagged at **low** confidence that she could not tell whether an ellipsis was
+hiding in it. She named the limit of her own instrument and was right about it.
+
+### Next
+
+**Sheets** — `023_Waterfall`'s page-2 chart, which a blind reader shows is not the same chart as
+the reference's at all (three horizontal bars against a stacked column, a value axis to 7000
+against none, no connector). Then the rotated-label ellipsis, which `046` settles to the
+character. Then a chart **title**'s stated colour: two readers, two unrelated documents, same
+direction, no instrument yet — the shape the `D9D9D9` border had before it turned out to be exact.
