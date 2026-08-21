@@ -738,7 +738,14 @@ public sealed class MeasuredParagraph
         // font's own line height, which is why the run's *height* above is still wanted and only its
         // descent is dropped.
         //
-        // Measured against the installed 24.2.7.2 by `dotnet/probes/words-r46/picture-alone-descent.py`:
+        // Measured against the installed 26.2.4.2 by `dotnet/probes/words-r46/picture-alone-descent.py`
+        // — **re-checked 2026-08-21 under `TODO.24-2-7-audit.md` and found unchanged**. All eight
+        // DOCX rows and all four `fodt alone` rows come back exact, and the reference's own figures
+        // are identical to the ones round 46 read off 24.2.7.2, to the tenth of a point, at 20, 50
+        // and 150 pt. The four `fodt with-text` rows still come back 27.60 at every picture height:
+        // that is round 46's own measured-and-deliberately-unfixed ODF defect (an as-character
+        // object at the very end of a flat-ODF paragraph contributes no height), not a movement in
+        // the reference. As round 46 originally read it off 24.2.7.2:
         // sixteen rows over two formats, two shapes and four picture heights. A DOCX picture alone on
         // its line at 20, 50 and 150 pt gives a baseline-to-baseline gap of h + 13.8 with a 12 pt
         // Liberation Serif paragraph, and h + 13.8 + 2.6 with any text beside the picture — 2.6 pt
