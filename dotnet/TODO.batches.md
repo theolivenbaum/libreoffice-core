@@ -15190,3 +15190,112 @@ not acted on: in that shape **we honour the font where LibreOffice does not**, a
 4. **`SheetOptimalRowHeights.cs`'s 24.2.7.2 site** — row heights are the axis this track already
    established for a 14-document cluster, and that site claims thirty exact reproductions against a
    *superseded* binary.
+
+## Round 54 — slides — the brief's mechanism was right and its condition was wrong
+
+`dotnet/probes/slides-r54/` — `prediction.md` (`e7a62caeeb8`) committed before anything was built or
+rendered post-change. **199 of 302 unchanged, `abs_ink` 1233.54 → 1147.17, major pages 432 → 403,
+`tf-agreement` 0.75210 → 0.77053, exact `/Tf` pages 1558 → 1709.** 42 documents moved, 38 improved,
+4 worsened; **0 of 302 page counts changed**. Four source files, all in `Paperless.Presentations`;
+no cross-track sweep owed. Tests 4695 → **4703**, 0 failed, 1 skipped.
+
+### The `.ppt` autofit's spacing reduction: measured, then its condition refuted by A/B
+
+Round 53 nailed the chain to three lines and did not measure it. It is now measured on an **authored
+known-answer `.ppt`**, and authoring it needed a fact round 53's plan did not have: **`soffice
+--convert-to ppt` cannot preserve `a:normAutofit`, because autofit is not spelled anywhere in the
+binary format.** `svdfppt.cxx:1030-1039` infers it from the TextHeaderAtom's *instance*, and a
+round-tripped text box comes out TextInShape — the first cut of the probe drew all fifteen slides at
+40 pt over 21 overflowing lines. `ppt-patch-kind.py` flips the atom to Body; the body is one
+`uint32`, so the edit is length-preserving. **The `.pptx` half of the same deck draws
+`1.2 × 0.8 × em` and the `.ppt` half draws `1.2 × em`**, and because the binary side's lines are
+taller the fit *search* lands on a different row.
+
+A second confirmation the source gives and round 53 did not have: `SvxLineSpacingItem::PutValue`
+(`paraitem.cxx:194-202`) — the path every OOXML and ODF line spacing takes — writes
+`eInterLineSpaceRule = Off` **when the height is exactly 100**, where the `.ppt` importer's
+`SetPropLineSpace(100)` writes `Prop`. The defect is binary-only by construction and
+`Paperless.Text` was not touched.
+
+**But the brief's condition is wrong.** Implementing the record's own hardness disjunction — the
+paragraph states a line feed, or its first portion states a typeface index — is worth **−13.06
+`abs_ink` over 13 documents**. Treating **every** `.ppt` paragraph as stating its spacing is worth
+**−85.96 over 34, 30 of them improvements**, and moves major pages 432 → 403. `Lepore.ppt`
+identifies it decisively rather than statistically: its body paragraph's mask is **0** and its
+character run states only a font *height*, so the record makes it soft by every term this reader can
+evaluate, and the reference still draws it at `1.2 × em` under a 0.850 font scale. **The authored
+deck could not have chosen between the two rules** — LibreOffice's PPT export writes `lf=100` *and*
+`font=1` on every paragraph, so both rules pass it 15 of 15. A known-answer deck built by round trip
+inherits the exporter's habits; the corpus A/B is what discriminated.
+
+### `Lepore.ppt` closed: a fitted bullet takes the font scale without the round-to-whole-point
+
+Page 2 draws 20.0 × 11 and 20.4 × 6 and the pair is the answer — **the 20.4s are the six bullets**.
+`Outliner::setRoundFontSizeToPt` rounds a run's scaled height to a whole point;
+`Outliner::ImpCalcBulletFont` (`outliner.cxx:851-855`) never reaches it and is one multiplication
+and one `fround` in hundredths of a millimetre. 24 pt is 847 units, `fround(847 × 0.85) = 720` =
+20.409 pt, against `round(24 × 0.85) = 20` for the text. We drew both at 20.013; we now draw both.
+`Lepore.ppt` **9.76 → 0.53**.
+
+**Worth −0.41 `abs_ink` and +0.0119 `tf-agreement` with 144 more exact-`/Tf` pages** — a bullet is
+almost no ink and is a whole entry in the size multiset. Measure the quantity the change controls.
+
+### `NAS` is rotated text, not surplus shapes — and the vision round refuted its own reviewers
+
+Three fresh blind reviewers. **Both page-8 reviewers ranked the same finding first, in the same
+terms, both marked confident, and both were wrong**: they reported the page's largest coloured area
+as pale on our side and saturated on the reference's, and a colour histogram of the region says both
+sides draw the same two colours in the same proportions, in the rasters *and* in the composed image
+they saw. Third instance of `HANDOVER.md` § 7. The two discriminators § 7 offers — same object, page
+chosen for a stated reason — both held here. **Only the third, a different instrument, caught it.**
+
+Reviewer B, asked to count, reported the object inventories match item for item, and our page 8
+writes 102 `BT` blocks to the reference's 99 — so **round 53's "66 text blocks to the reference's 61,
+a visibility question" is not what the page shows.** Reviewer C on page 99 found the real defect and
+a second instrument confirmed it: the reference's page 99 carries **101 rotated `Tm`** and ours
+carries none.
+
+`rotated-text-census.py`, **whose first cut was wrong in an instructive way and says so** — the two
+stacks rotate through different operators, LibreOffice with a rotated `Tm` and Paperless with a
+rotated `cm`, so a `Tm`-only count reports 18832 rotated operators to nought — gives:
+**73 of 302 documents draw rotated text on either side; 1097 blocks ours to 1905 the reference's;
+and 197 pages where the reference rotates text and we rotate none.** NAS alone is 307 of the
+shortfall over 33 pages, which is what its 159.88 `abs_ink` actually is. It runs both ways:
+`Demick_JetBlue.pptx` rotates **76** blocks where the reference rotates **8**.
+
+**NAS is not a "we render better" false positive.** Page 8 is 3.18% differing pixels, page 99 4.43%,
+55 of its 137 pages are major, and the reference draws rotated labels we draw flat on 33 pages.
+
+### The prediction, and the `abs_ink` estimate failing the other way round
+
+Verdicts 0 predicted, 0 measured. Page counts 0 predicted, 0 measured. The known-answer deck 15 of
+15. `gfopportunities` p6 predicted to draw 26/22/17 — every baseline on that page now matches.
+**`abs_ink` was predicted −5 to −25 and measured −86.37.** Round 53 over-shot by three by
+extrapolating a census of *candidates*; round 54 under-shot by three by censusing *symptoms already
+visible*, because a rule that changes the fit **search** changes pages a symptom census cannot see —
+which the prediction's own blind-spot list named before the sweep. **Predict a sign and a rank, not
+a range, until someone has a model of how much of a page moves.** My control — that documents
+outside the change list would not move — was also refuted.
+
+### The audit: one site verified, and the marker itself sprang the file's own trap
+
+`PptxSlideLayout.cs:763` **VERIFIED on 26.2.4.2** — six stated sizes 10–40 pt put a table cell's
+first baseline 1.0007 … 1.0002 ems below the cell's top, one em on all six, not the 0.907 em of
+24.2.7.2, and our six land on the reference's to 0.000 pt. **The `[24.2.7-audit: …]` marker ran to a
+second line and that line named `24.2.7.2` in prose, so the open count went UP by one while a site
+was being cleared.** No line of a multi-line marker may contain the bare string. 44 open hits in 29
+files, 12 marked.
+
+### Slides does next
+
+1. **Rotated text — 197 pages.** The track's largest unworked front, both directions, and it is what
+   NAS's ink is. `a:bodyPr/@vert` and `@rot` on the OOXML side, Escher `txflTextFlow` on the binary
+   side. Use `rotated-text-census.py` and read its remarks first.
+2. **The fitted bullet's vertical placement** — `Lepore.ppt` p2 now has both sizes exact and puts the
+   bullet 1.9 pt too high. `Outliner::StripBullet` draws a symbol from `aBulletArea.Bottom()` with
+   `ALIGN_BOTTOM` and a number at `nFirstLineMaxAscent` (`outliner.cxx:909-919`); `SlideMarker`
+   already carries the discriminator.
+3. **`2015-Civil-Rights-Website-training.ppt`**, now the track's second-largest at 30.32, with a
+   `baseline-agreement` mean of 1.4915 over 1228 pairs — the largest single-document text residue.
+4. The audit: `PptxSlideLayout.cs` 2 left, `SlideDrawing.cs` 2, `PptxTextStyles.cs` 1,
+   `OdpSlideLayout.cs` 1 — the last being the ODF half of the claim round 54 verified for OOXML.
