@@ -164,6 +164,40 @@ public static class EscherPropertyIds
     /// </remarks>
     public const ushort WrapText = 133;
 
+    /// <summary>
+    /// Which way the shape's own text flows, an <c>MSO_TXFL</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Six values (<c>include/svx/msdffdef.hxx:550-557</c>), of which three are one answer:
+    /// <c>mso_txflTtoBA</c> (1), <c>mso_txflTtoBN</c> (3) and <c>mso_txflVertN</c> (5) all set
+    /// the text object <em>vertical</em>, <c>mso_txflBtoT</c> (2) rotates it a quarter the other
+    /// way, and <c>mso_txflHorzN</c> (0) and <c>mso_txflHorzA</c> (4) leave it alone
+    /// (<c>filter/source/msfilter/svdfppt.cxx:815-832</c>).
+    /// </para>
+    /// <para>
+    /// An explicit zero is common and means nothing beyond the default: of the 106 shapes in
+    /// <c>concepts-surrounding-cloud-computing…ppt</c> that state this property, 104 state
+    /// <c>mso_txflHorzN</c>. Counting "states the property" rather than "states a turn"
+    /// overstates the reach of any change here by fifty to one.
+    /// </para>
+    /// </remarks>
+    public const ushort TextFlow = 136;
+
+    /// <summary>
+    /// The shape's font rotation, an <c>MSO_CDIR</c> — <b>read by nothing here yet</b>.
+    /// </summary>
+    /// <remarks>
+    /// Quarter turns of the glyphs within the flow, and it interacts with
+    /// <see cref="TextFlow"/> rather than composing with it: 1 and 3 <em>toggle</em> the vertical
+    /// flag as well as turning, and every value subtracts <c>cdir × 90°</c> from the text
+    /// object's angle (<c>svdfppt.cxx:833-841</c>). Named here because a reader of
+    /// <see cref="TextFlow"/> that ignores it will be wrong on a shape that states both; over
+    /// the corpus's 51 <c>.ppt</c> that is two documents and six shapes, none of which also
+    /// states a non-zero <see cref="TextFlow"/>.
+    /// </remarks>
+    public const ushort FontDirection = 137;
+
     /// <summary>Where the shape's text sits inside it, an <c>MSO_ANCHOR</c>.</summary>
     /// <remarks>
     /// Ten values (<c>include/svx/msdffdef.hxx:522</c>), of which the "centered" and "baseline"

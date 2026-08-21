@@ -105,6 +105,24 @@ public readonly record struct ChartBox(
     Colour? Line = null,
     Length LineWidth = default);
 
+/// <summary>
+/// How one axis' gridlines are painted.
+/// </summary>
+/// <remarks>
+/// A minor gridline states its own <c>a:ln</c> far more often than a major one does, and the two
+/// things it states — a width and a dash — are exactly what an ink measurement notices. On
+/// <c>N2_E_Maestroni_Swarm_COP.pptx</c> the minor grid is <c>&lt;a:ln w="6350"&gt;
+/// &lt;a:prstDash val="sysDash"/&gt;</c>, and drawing its 110 lines solid and hairline instead of
+/// dashed at half a point is worth 2.8 points of that document's unsigned ink on its own.
+/// </remarks>
+/// <param name="Colour">The colour to stroke in.</param>
+/// <param name="Width">The stroke width; zero is a hairline.</param>
+/// <param name="Dash">Alternating ink and gap lengths, or null for a solid line.</param>
+public readonly record struct ChartGrid(
+    Colour Colour,
+    Length Width = default,
+    IReadOnlyList<Length>? Dash = null);
+
 /// <summary>One straight line — an axis, a tick, a gridline.</summary>
 /// <param name="From">Its start.</param>
 /// <param name="To">Its end.</param>
@@ -1531,7 +1549,34 @@ public static partial class ChartLayout
                     new DocPoint(area.Left, axisY), new DocPoint(area.Right, axisY), AxisColour));
         }
 
-        foreach (double tick in scale.MajorTicks())
+        // The minor grid needs the *next* tick, so the ticks are taken as a list rather than
+        // walked lazily. Only the primary axis draws a grid, exactly as for the major one.
+        List<double> ticks = [.. scale.MajorTicks()];
+
+        if (!secondary && plot.ValueMinorGrid is { } minor && plot.ValueMinorIntervals > 1)
+        {
+            for (int at = 0; at + 1 < ticks.Count; at++)
+            {
+                for (int step = 1; step < plot.ValueMinorIntervals; step++)
+                {
+                    double between = scale.Fraction(ticks[at])
+                        + ((scale.Fraction(ticks[at + 1]) - scale.Fraction(ticks[at]))
+                           * step / plot.ValueMinorIntervals);
+
+                    lines.Add(columns
+                        ? new ChartLine(
+                            new DocPoint(area.Left, area.Bottom - (area.Height * between)),
+                            new DocPoint(area.Right, area.Bottom - (area.Height * between)),
+                            minor.Colour, minor.Width, minor.Dash)
+                        : new ChartLine(
+                            new DocPoint(area.Left + (area.Width * between), area.Top),
+                            new DocPoint(area.Left + (area.Width * between), area.Bottom),
+                            minor.Colour, minor.Width, minor.Dash));
+                }
+            }
+        }
+
+        foreach (double tick in ticks)
         {
             double along = scale.Fraction(tick);
 
@@ -1716,11 +1761,35 @@ public static partial class ChartLayout
             ? dates.Ticks.Count - 1
             : plot.ShiftedCategories ? categories : categories - 1;
 
+        double Along(int at) => plot.DateAxis is { } dateScale
+            ? dateScale.Fraction(dateScale.Ticks[at])
+            : ticks == 0 ? 0.0 : (double)at / ticks;
+
+        if (plot.CategoryMinorGrid is { } categoryMinor && plot.CategoryMinorIntervals > 1)
+        {
+            for (int at = 0; at + 1 <= ticks; at++)
+            {
+                for (int step = 1; step < plot.CategoryMinorIntervals; step++)
+                {
+                    double between = Along(at)
+                        + ((Along(at + 1) - Along(at)) * step / plot.CategoryMinorIntervals);
+
+                    lines.Add(columns
+                        ? new ChartLine(
+                            new DocPoint(area.Left + (area.Width * between), area.Top),
+                            new DocPoint(area.Left + (area.Width * between), area.Bottom),
+                            categoryMinor.Colour, categoryMinor.Width, categoryMinor.Dash)
+                        : new ChartLine(
+                            new DocPoint(area.Left, area.Bottom - (area.Height * between)),
+                            new DocPoint(area.Right, area.Bottom - (area.Height * between)),
+                            categoryMinor.Colour, categoryMinor.Width, categoryMinor.Dash));
+                }
+            }
+        }
+
         for (int at = 0; at <= ticks; at++)
         {
-            double along = plot.DateAxis is { } scale
-                ? scale.Fraction(scale.Ticks[at])
-                : ticks == 0 ? 0.0 : (double)at / ticks;
+            double along = Along(at);
 
             if (columns)
             {

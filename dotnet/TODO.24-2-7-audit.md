@@ -64,6 +64,7 @@ broken one, because it is the only thing that stops the next round paying for th
 | `Paperless.Spreadsheets` | `Ooxml/XlsxNoteCaptions.cs` (a VML anchor's offsets as 96-dpi screen pixels) | 57 | **verified 26.2.4.2, 2026-08-21** — control first (offset 0 lands on the row grid to 0.012 pt), then three steps of 14.998 pt for 20 px, i.e. 96.0 dpi. **And the probe exposed a rule the site does not state**: the offset is *clamped* to the anchored cell's own extent, which we do not do — 5 anchors of 365 in one document of fifteen |
 
 | `Paperless.Presentations` | `Ooxml/PptxSlideLayout.cs` :763 (table cell line spacing) | 54 | **verified 26.2.4.2, 2026-08-21** — 6 of 6 stated sizes put the reference's first baseline one em below the cell's top |
+| `Paperless.Presentations` | `Layout/SlideDrawing.cs` :341, :360 (a picture frame's own fill) | 56 | **verified 26.2.4.2, 2026-08-21** — three byte-identical renderings for the package-entry arm, and a discriminating pair (108 304 red pixels inline, 0 zipped) for the inline arm |
 | `Paperless.Presentations` | `OpenDocument/OdpSlideLayout.cs` :302 (the ODF half of the same claim) | 55 | **WRONG — reported, not fixed.** The rule is no longer fixed at all: 26.2.4.2 obeys `style:font-independent-line-spacing` as stated, one em when true and the face's own 0.903 em when absent. **Not fixed because the slides corpus holds no ODF presentation** — 251 `.pptx` and 51 `.ppt` — so the change would ship unmeasured |
 
 **A trap the probe harness cost half an hour to find, before anyone else pays for it again.** A
@@ -82,6 +83,8 @@ generator that is known to be read correctly by 26.2.4.2; start from it. Confirm
 | 54 (sheets) | `SheetOptimalRowHeights.cs`, the `WrappedHeight` fit | **still correct** — 30 of 30 authored wrapped rows within half a twip on 26.2.4.2, read twice over (marker deltas in both PDFs, and the reference's own `fods` `style:row-height`) with the site's own 300-twip figure as the control. `probes/sheets-r54/audit_rowheight.py` |
 | 57 (sheets) | `Ooxml/XlsxNoteCaptions.cs`, the VML anchor's units | **verified** — 96 dpi exactly on 26.2.4.2, the control first: an anchor with a zero row offset lands on the row grid to 0.012 pt, and offsets of 20, 40 and 60 px step the exported annotation by 14.998, 14.998 and 14.990 pt. Seventy-two dpi would have stepped it by 20 and EMUs by nothing. **The probe's first cut read "neither" at every step and was measuring a clamp, not a law**: its rows were 20 pt (26.7 px) and its offsets 48, 96 and 144, so all three saturated at exactly one row. Sixty-point rows separate the rule from the clamp. `probes/sheets-r57/audit_vmlanchor.py`. The clamp itself is a real divergence — we do not clamp — with 5 anchors of 365 to its name (`census-vmlclamp.py`), recorded at the site and not implemented |
 | 56 (sheets) | `SheetShapeText.cs` `DefaultSize`; `SheetNotes.cs`'s note order; and `SheetPageDecoration.cs` a second time | **two verified, one WRONG and now fixed.** The shape-text default is 12 pt on 26.2.4.2 by two instruments (`probes/sheets-r56/audit_shapetext.py`), the note order is unchanged, and round 55's "text-fit threshold" at `SheetPageDecoration.cs` turns out to be a **clip rectangle** — `PrintHF` sets one of `Rectangle(aStart, nHeight - nDistance)` and `DrawText_ToPosition` emits nothing for an area whose ink misses it. Round 55's 8 pt bracket falls out of `ascent - capHeight` with no free parameter; its 20 pt bracket does not reproduce. **A site re-checked twice in consecutive rounds, and the second pass replaced a fitted law with a mechanism** — the same argument as re-marking an already-`VERIFIED` site |
+
+| 56 (slides) | `SlideDrawing.cs`, the picture-frame fill, **2 sites** | **still correct, both halves.** The package-entry arm is three byte-identical page images of one corpus deck under three different stated fills; the inline arm needed a **discriminating pair** — the same 306 kB EMF inline and then moved to `Pictures/` by the reference's own exporter — and the two differ by 108 304 red pixels against 0. `probes/slides-r56/audit_picturefill.py` |
 | 55 (sheets) | `SheetPageDecoration.cs`, the header/footer band guard | **WRONG in half.** The zero-band claim holds and every negative band too; "the reference draws the footer at every stated band above zero" is false — nothing is drawn at 0.72 or 1.44 pt of 8 pt text, and the threshold *scales with the point size* (1.44–2.16 pt at 8 pt, 4.32–5.76 pt at 20 pt). A text-fit rule, not a constant. Reported and not implemented: four corpus worksheets have a positive band under 6 pt and all four pass today. The probe also found a **real 18 pt body displacement** at a *negative* band, which is fixed. `probes/sheets-r55/audit_pagedecoration.py`, `census-bands.py` |
 
 | 54 (slides) | `PptxSlideLayout.cs` :763, 1 site | **still correct** — and the version bump is *why* it is correct: the site records that 24.2.7.2 drew a cell's first baseline at the face's own 0.907 em, `a47776a938c` (tdf#165521) removed the leading for cells, and 26.2.4.2 draws it at one em on 6 of 6 stated sizes from 10 to 40 pt. A site whose comment says "the running binary disagrees with its own C++" is the highest-prior kind on this list |
@@ -188,6 +191,34 @@ and the whole point of the marker convention is that the command is cheap. **Run
 
 If you want a figure for a report, run the command and date it in the report, not here.
 
+| project | open hits |
+|---|---:|
+| `Paperless.WordProcessing` | 11 |
+| `Paperless.Spreadsheets` | 10 |
+| `Paperless.Presentations` | 9 |
+| `Paperless.Text` | 6 |
+| `Paperless.Core` | 2 |
+| `Paperless.Rendering` | 1 |
+| `Paperless.Ooxml` | 1 |
+
+Total open **40**, marked **17** (14 verified, 3 wrong) — computed with the commands above on
+2026-08-21 at the end of round 56, and **not maintained**: run them. Round 56 marked
+`SlideDrawing.cs` and the open count held at 40, as it is meant to.
+
+**Round 56's marker is a second data point for the discriminating-pair method**, which round 55
+introduced here. `SlideDrawing.cs`'s claim has an inline arm and a package-entry arm, and either
+arm rendered on its own is consistent with "the fill is never drawn" *and* with "the fill is
+always drawn" — only the two together, over bytes the reference itself moved from one storage to
+the other, separate them. Two of the last three re-checks on this list turned on that, and in both
+cases the naive single-fixture reading was available and wrong.
+
+Two of the two the round removed are worth naming, because only one of them was a re-check.
+`OdpSlideLayout.cs:302` was re-checked and marked. The other was **round 54's own marker at
+`PptxSlideLayout.cs:763`, whose prose named the superseded version** and so kept a cleared site
+in the open count — the trap this file describes, still live in the file it was described in.
+Rewriting one clause to say "the superseded binary" cleared it. **A rule written down is not a
+rule applied**; the count is the only thing that notices.
+
 ## Outcomes so far — **one** site wrong, of every one re-checked
 
 | site | outcome |
@@ -273,6 +304,7 @@ the site itself names **26.2.4.2** and the date — this table is the index, not
 
 | date | site | outcome | how |
 |---|---|---|---|
+| 2026-08-21 | `Paperless.Presentations/Layout/SlideDrawing.cs` :341, :360 (a picture frame's own fill) | **VERIFIED, both halves** | round 56, `probes/slides-r56/audit_picturefill.py`. The site makes two claims and they need different fixtures. *A package entry loses the fill*: `2014BSA_Sunday_Killion.pptx` rendered as found, with the frame's `a:solidFill` changed to red, and with it replaced by `a:noFill` gives three **byte-identical** page-5 images on 26.2.4.2 — no fill reaches the page whatever the frame states. *An inline metafile keeps it*: this is the half a single rendering cannot settle, so it was checked as a **discriminating pair** — one authored flat ODP holding a 306 kB EMF as `office:binary-data` under a red frame draws **108 304 red pixels**, and the reference's own `--convert-to odp` of that same file, which moves the identical bytes to `Pictures/` and changes nothing else, draws **none**. The storage is the only variable and it decides the answer, which is exactly what `FillReachesThePage`'s `IsInline` term encodes |
 | 2026-08-21 | `Paperless.Presentations/OpenDocument/OdpSlideLayout.cs` :302 (ODF drawing-cell first baseline) | **WRONG — reported, not fixed** | round 55, `probes/slides-r55/odp-cell-baseline.py`. **A discriminating pair, and the pair is the whole method here**: `soffice --convert-to odp` writes `style:font-independent-line-spacing="true"` onto every drawing cell it emits, so the round-tripped fixture states the very attribute under test and one rendering of it measures the exporter's habit rather than the rule. Rendering it beside a byte-identical copy with that one attribute deleted separates them on four of six sizes — 1.0013 / 0.9998 / 1.0003 / 1.0001 em with it, 0.9020 / 0.9100 / 0.9074 / 0.9030 em without. The site's claim was a *fixed* 0.907 em "whatever `tablecellcontext.cxx:61` sets"; the behaviour is now attribute-driven, and LibreOffice's own ODP export always writes `true`, so an Impress deck takes the one-em arm and this reader draws it 1.7 pt high in an 18 pt face |
 | 2026-08-21 | `Paperless.Text/Fonts/SystemFontResolver.cs` `GenericFallbacks` (unrecognised → DejaVu Sans) | **VERIFIED again, from a fifth caller** | round 55. Round 54 verified it from four filters that reach it undeclared and stated that the word-processing filters never do. **The DOC filter does**: `GetFontParams` maps `ff` 0, 6 and 7 onto `FAMILY_DONTKNOW` and `SetNewFontAttr` sets it on the item, so those runs arrive here with no class and this switch answers them — DejaVu Sans, and DejaVu Sans *Mono* for `Consolas`, which is this switch's own column. Nine flat-ODF fixtures exported to Word 97 and back, `probes/words-r55/doc-family-code.py`; `Garamond` is the control, forced `FAMILY_ROMAN` by `GetFontParams`'s name-override list and drawn Serif where the otherwise identical `Aptos` is drawn Sans |
 | 2026-08-21 | `Paperless.Text/Fonts/SystemFontResolver.cs` `GenericFallbacks` (unrecognised → DejaVu Sans) | **VERIFIED, and round 53's WRONG reversed** | `probes/words-r54/font-fallback-rule.py` (98 authored files, 5 controls) + `cross-format-fallback.py` (28): the branch is right for every filter that reaches it undeclared — ODF text, XLSX, PPTX, flat ODS, all tracking fontconfig, `Consolas` → DejaVu Sans **Mono**. The DOCX/DOC/RTF answer is a **roman default applied by the reader**, now in `WordFallbackClass`. Cross-track evidence: 0 of 302 slides and 0 of 307 sheets renderings show the Sans-for-Serif pair |
