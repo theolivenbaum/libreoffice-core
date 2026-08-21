@@ -447,6 +447,81 @@ internal static class SheetBandText
     }
 
     /// <summary>
+    /// Shapes one line of a <em>chart's</em> text, or null when there is no face to shape it with.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The horizontal counterpart of <see cref="ChartLineHeightAt(Length, string?, bool)"/>, and it
+    /// exists for exactly the same reason. A chart's text is not laid out by Calc: <c>chart2</c>'s
+    /// view builds it as plain text shapes on a <c>VirtualDevice</c> of its own, and
+    /// <b>that device is 96 dpi</b> (<see cref="MetricGrid.Chart"/>). A font is instantiated at a
+    /// whole number of device pixels, so at 10 pt the device sets <b>13</b> for 13.333 and every
+    /// advance comes back <b>2.5% narrower</b> than the size the file states — and at 11 pt it sets
+    /// 15 for 14.667 and they come back 2.3% <em>wider</em>.
+    /// </para>
+    /// <para>
+    /// <b>Round 60 moved the vertical metrics onto that device and left the width behind.</b> That
+    /// is what made <c>003_advanced_excel_pie</c>'s <c>M3</c> label 1.7 pt too wide and so miss the
+    /// best-fit inner placement by <b>0.33 of a degree</b>, which pushed it outside the slice the
+    /// reference keeps it in and put two surplus words on the page-2 remainder of all four corpus
+    /// pies. The predicate was never wrong; its input was.
+    /// </para>
+    /// <para>
+    /// <b>Measured off 26.2.4.2 before the C++ was opened.</b>
+    /// <c>probes/sheets-r62/probe-chartwidth.py</c> renders fourteen one-variable rewrites of that
+    /// document's own chart part and reads the drawn advance out of the reference's own <c>TJ</c>
+    /// arrays — whose per-glyph adjustments are in thousandths of the text em and are therefore
+    /// independent of the chart's scale, of the page and of the size the PDF writer chose. The
+    /// measured drawn/natural ratio follows <c>round(size × 96/72) / (size × 96/72)</c> at every
+    /// one of the fourteen: above one at 8, 11, 14 and 20 pt and below it at 10, 13, 16, 22 and 28,
+    /// residual at most 0.005 with no free parameter. <b>A sawtooth in the size is a signature
+    /// nothing but a pixel em produces.</b>
+    /// </para>
+    /// <para>
+    /// <b>The glyphs keep the size the file states; only the pen moves.</b> The reference draws
+    /// those labels at 10.008 pt with the narrower advances, not at 9.75 pt, so the em is quantised
+    /// for the <em>advance</em> and not for the glyph. The drawing path takes this for the same
+    /// reason the measuring path does: a label measured narrow and drawn wide is centred on the
+    /// wrong width. The reference's further per-glyph rounding to a whole hundredth of a
+    /// millimetre is measured and deliberately <b>not</b> applied — see
+    /// <see cref="MetricGrid.PixelEmScale"/> for the reasoning and what it costs.
+    /// </para>
+    /// </remarks>
+    /// <param name="text">The text.</param>
+    /// <param name="size">The em size.</param>
+    /// <param name="family">The family name, or null for the furniture's own face.</param>
+    /// <param name="bold">Whether to shape in the family's bold face.</param>
+    public static BandRun? ChartShape(string text, Length size, string? family, bool bold)
+    {
+        if (text.Length == 0) return null;
+
+        (OpenTypeFace? resolved, FontReference reference, _) = FaceFor(family, bold);
+        if (resolved is not { } face) return null;
+
+        ShapedText shaped = TextShaper.Default.Shape(face, text);
+        double scale = MetricGrid.Chart.PixelEmScale(size);
+
+        List<PositionedGlyph> glyphs = new(shaped.Glyphs.Count);
+        List<int> clusters = new(shaped.Glyphs.Count);
+        Length pen = Length.Zero;
+
+        foreach (ShapedGlyph glyph in shaped.Glyphs)
+        {
+            Length advance = shaped.Scale(glyph.Advance, size) * scale;
+            glyphs.Add(new PositionedGlyph(
+                glyph.GlyphId,
+                new DocPoint(
+                    pen + shaped.Scale(glyph.OffsetX, size),
+                    -shaped.Scale(glyph.OffsetY, size)),
+                advance));
+            clusters.Add(glyph.Cluster);
+            pen += advance;
+        }
+
+        return new BandRun(glyphs, clusters, reference, size, text, pen);
+    }
+
+    /// <summary>
     /// How a backend names the furniture's face: the resolver's own key, which is a file path.
     /// </summary>
     /// <remarks>

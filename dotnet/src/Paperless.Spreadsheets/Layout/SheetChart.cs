@@ -147,7 +147,8 @@ internal static class SheetChart
             return;
         }
 
-        if (SheetBandText.Shape(label.Text, label.Size, label.Family, bold) is not { } run) return;
+        if (SheetBandText.ChartShape(label.Text, label.Size, label.Family, bold) is not { } run)
+            return;
 
         Length line = SheetBandText.ChartLineHeightAt(label.Size, label.Family, bold);
         Length ascent = SheetBandText.ChartAscentAt(label.Size, label.Family, bold);
@@ -237,7 +238,7 @@ internal static class SheetChart
         List<BandRun> runs = [];
         foreach (string part in parts)
         {
-            if (SheetBandText.Shape(part, label.Size, label.Family, bold) is { } shaped)
+            if (SheetBandText.ChartShape(part, label.Size, label.Family, bold) is { } shaped)
                 runs.Add(shaped);
         }
 
@@ -336,7 +337,8 @@ internal static class SheetChart
             return text.Length == 0
                 ? new DocSize(Length.Zero, height)
                 : new DocSize(
-                    SheetBandText.Shape(text, size, family, bold)?.Width ?? Length.Zero, height);
+                    SheetBandText.ChartShape(text, size, family, bold)?.Width ?? Length.Zero,
+                    height);
         }
     }
 }
