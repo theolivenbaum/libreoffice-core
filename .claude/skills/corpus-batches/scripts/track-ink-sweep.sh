@@ -76,6 +76,40 @@ print(sum(1 for w in t if any(c.isalnum() for c in w)), len(t))'
 mapfile -t DIRS < <(cd "$ROOT_DIR" && ls -d $GLOB 2>/dev/null)
 [ "${#DIRS[@]}" -gt 0 ] || { echo "no batches matched $GLOB under $ROOT_DIR" >&2; exit 1; }
 
+# One inode, one render. This mount is case-insensitive and carries alias directory entries:
+# `Foo.ppt` and `Foo.PPT` are the same file under two names, and how many of them a glob
+# enumerates is not stable between runs. Two consequences, and the second is the dangerous one:
+#
+#   * the TOTAL line over-counts, which is merely misleading; and
+#   * the per-format identity lower-cases the extension, so BOTH spellings map to the same id
+#     and therefore the same output path. Two workers then render one document to one file
+#     while a third step reads it. Slides round 63 caught this as a single document worth
+#     94.14 of a 989 abs_ink total, appearing and disappearing between sweeps of an unchanged
+#     tree.
+#
+# `find -printf '%D:%i\t%p'` keys on device and inode with no shell round trip, so it is safe
+# for the filenames with spaces, brackets and per-cent signs this corpus contains. It cannot
+# drop a genuine document: two genuine documents are never one inode.
+#
+# WHICH spelling survives matters, and no ordering rule gets it right. Some aliases
+# are an upper-cased extension (`Foo.PPT` beside `Foo.ppt`) and some are a wholly
+# lower-cased name (`template pilot logbook.xls` beside `Template Pilot Logbook.xls`),
+# so "prefer lower case" and "prefer upper case" are each correct for one family and
+# wrong for the other. Keeping the wrong one makes every manifest-keyed scorer report
+# the document as unswept.
+#
+# git is the authority: it tracks exactly one spelling per inode, the real one. So the
+# dedup prefers a tracked path and falls back to first-seen when the corpus is not a
+# checkout. Verified: the deduped enumeration equals MANIFEST.tsv's 946 paths exactly,
+# set for set, with nothing on either side.
+TRACKED="$(mktemp)"
+trap 'rm -f "$TRACKED"' EXIT
+# core.quotePath=false is required, not cosmetic: git escapes non-ASCII paths by
+# default, so the corpus's CJK filename would not match what find emits and the
+# alias would win for that one document.
+git -C "$ROOT_DIR" -c core.quotePath=false ls-files 2>/dev/null \
+  | sed "s|^|$ROOT_DIR/|" > "$TRACKED" || :
+
 mapfile -t FILES < <(
   for d in "${DIRS[@]}"; do
     # The in-scope extension list, kept identical to batch-check.sh's. It was NOT identical
@@ -94,8 +128,12 @@ mapfile -t FILES < <(
       -o -iname '*.ppt'  -o -iname '*.pptx' -o -iname '*.pptm' -o -iname '*.pot' \
       -o -iname '*.potx' -o -iname '*.potm' -o -iname '*.ppsx' -o -iname '*.ppsm' \
       -o -iname '*.pps'  -o -iname '*.odp'  -o -iname '*.otp'  -o -iname '*.fodp' \
-      -o -iname '*.sxi' \) 2>/dev/null
-  done | sort
+      -o -iname '*.sxi' \) -printf '%D:%i\t%p\n' 2>/dev/null
+  done | awk -F'\t' -v T="$TRACKED" '
+      BEGIN { while ((getline l < T) > 0) tracked[l] = 1 }
+      { if (!($1 in best) || (tracked[$2] && !tracked[best[$1]])) best[$1] = $2 }
+      END { for (k in best) print best[k] }
+    ' | sort
 )
 echo "documents: ${#FILES[@]}" >&2
 
