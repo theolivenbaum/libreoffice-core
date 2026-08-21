@@ -18407,3 +18407,111 @@ against fresh renders — **including after a build that overlapped the sheets s
 states plainly rather than omitting.** A census bug was caught on the way: the theme lookup was
 hardcoded to `theme1.xml` and two workbooks call theirs `theme11.xml`, so it was reporting the wrong
 answer **for the very document that produced the verdict**.
+
+## Round 63 — words
+
+**323 of 337, unchanged, and that was the prediction.** Two draw-only changes, 51 renderings moved,
+**0 verdicts gained and 0 lost**, and 0 page counts, 0 word counts and 0 font lists moved anywhere in
+the 337. `probes/words-r63/results.md`.
+
+### `012`'s 56 missing fills are closed, and the seat was two omissions in one element
+
+`WordStyle` **discarded any `w:tblStylePr` carrying no `w:rPr`** — which is every band and column
+layer of `PlainTable5` — and `WordTableStyleConditions.Names` never offered the four band layers at
+all. `012` page 1 goes **19 fills → 75**, colour for colour against the reference (`#F2F2F2` 0→48,
+`#FFFFFF` 0→8) and rectangle for rectangle to **0.10 pt**; page 2 goes 0 → 1. Reach resolved rather
+than declared: **749 cells in 42 documents**, against 34 977 declared layers — thirty-three documents
+carry Word's whole built-in style set as latent styles and name three of them. **42 renderings
+changed and all 42 are the census's own 42; 42 improved, 0 worsened.**
+
+The one route by which it could have moved a line was closed before the change rather than after:
+adding bands to `Names` feeds them to the run resolver too, and **0 of 271 documents name a style
+whose `w:basedOn` chain reaches a band layer carrying a `w:rPr`.**
+
+### Round 59's counter-witnesses are Writer text boxes, and the missing term is alpha
+
+The brief asked whether those shapes are text boxes at all. **They are, their fills are consulted,
+and round 59 and round 62 were both right.** `docs-quality-MA.IMS.00001-…` states
+`<a:alpha val="52941"/>` and `069_Work_Breakdown_Structure…` — which holds **no DrawingML shape at
+all**, it is entirely VML — states `<v:fill opacity="26214f"/>`. `ApplyAutoColor` asks
+`getAverageColor(aGlobalRetoucheColor)`, which blends the fill toward white by its transparency
+before `IsDark` sees it: those two are luminance **105** and **168**, both bright, both black.
+
+Ten arms across three corpus documents, each chosen so the two hypotheses answer *differently* —
+including `012`'s title box given a black fill at `a:alpha val="20000"`, which turns its text
+**black on a black anchor** and so refutes "the anchor decides" in the same arm. Then the blend
+itself pinned with no free parameter: it predicts a **different** flip transparency for every fill
+colour, and **11 of 11** arms straddling 9.571 % / 37.454 % / 62.222 % land where it says.
+
+`v:fill/@opacity` was read by nothing; it is read now, which also makes the box translucent — all
+three of `069`'s fill colours now match the reference's rendered pixels **exactly** where none did.
+**Round 59's LONG column is the gate this was staked on and it did not move: 34 glyphs in 2
+documents.** SHORT went 2728 in 38 → **2571 in 37**. Nine renderings, 8 improved, 1 unchanged
+(the counter-witness itself), 0 worsened.
+
+**Not shipped: the other limb** — a `noFill` box continuing to its *anchor's* background. It needs
+the anchor to reach `PageDrawing.DrawFrame`, which draws from a per-page list. `012`'s white title
+waits on it.
+
+### An instrument reported two regressions that do not exist, and the fix's first cut was worse
+
+`textcolour.py`'s `page_streams` ate a whitespace byte off the **compressed** data — `0x0A` is an
+ordinary deflate byte — so two of the 337 reference PDFs came back with no operators at all and read
+as *zero fills on a page the reference plainly paints*. A 100 dpi raster refuted it in one step.
+And the fix's first cut read `/Length` as a literal where it is an **indirect reference** in every
+PDF LibreOffice writes, which emptied every stream in the corpus. Both are in the docstring.
+
+**Every earlier probe PDF of the round was re-read with the corrected reader and not one number
+moved**, so the brackets stand as first measured.
+
+### Vision: a sentence three readers gave over three rounds has changed side
+
+On `012` page 1, round 61's and round 62's readers each reported *"the reference draws alternating
+grey row bands; ours draws none."* This round's reader, who had seen neither, lists the row banding
+among the things that are **identical**. Confirmed at 48 fills to 48, rectangles to 0.10 pt. The same
+reader still reports the two things this round did not fix — the title, and the seven bar outlines —
+in the right direction both times.
+
+On `airbus…v1-4` page 5, the highest-reach document of change 1 and one that already passes, a reader
+asked directly about row shading: *"I do not see a case where the top shades a row grey that the
+bottom leaves white, or vice versa."*
+
+And a **new lead** neither change touches, unprompted and at high confidence: `069` draws
+`PROJECT NAME` below and right of the box that should hold it, overlapping the row beneath. Not yet
+checked by a second instrument; the document fails on words, 108 against 117.
+
+### The 24.2.7.2 audit — one site VERIFIED, and the list's over-read counted for the first time
+
+`DocxLayoutSource.cs`:777, all three claims about `w:pPr/w:rPr` being the paragraph *mark's*
+formatting, re-measured on the reference alone with a mark/run control for each. The empty
+paragraph's height lands on 36 × 1.15 = **41.40 pt exactly**.
+
+More useful than the verdict: **`Paperless.WordProcessing` shows 11 open hits and has 1 reachable
+open site.** Five sit inside an existing marker; five state a 26.2.4.2 measurement in the same
+comment as the older one they replaced, two of those in the ODT and RTF readers, whose formats have
+**no witness in this corpus** (271 `.docx`, 66 `.doc`, 0 `.rtf`, 0 `.odt`). The header has warned
+three times that the string over-reads; this is the first count of by how much.
+
+### Tests, and one that did not detect its own rule
+
+5144, 0 failed, 1 skipped; words 1231 → **1251**. Eight mutations through `verify-test.sh`, all
+eight detected — but `TheHeadingRowIsNotCountedAsABand` **did not fire at first**: at the fixture's
+band size of two, counting the heading row leaves the first body row in band 0 under both readings,
+so the test named after the rule passed under the rule's own mutation. It asks rows 2 and 4 now.
+That is `COMMON.md`'s "assert the baseline, not only the consequence" arriving from a third
+direction — assert the case that *discriminates*, not the case the sentence mentions.
+
+### Shared layers: none
+
+Seven files, all under `Paperless.WordProcessing`. The blend was deliberately kept out of
+`Paperless.Core`'s `Colour`, where it would have been a natural home and a shared-layer diff.
+For whoever extends it: `v:fill/@opacity` is read in one other place in the tree,
+`Paperless.Spreadsheets/Ooxml/XlsxNoteCaptions.cs`, and the other two corpora hold **5 such
+attributes in 3 slides documents and none in sheets**.
+
+### Next
+
+**Words** — the anchor limb of the auto-colour rule (the control already exists: round 59's LONG
+column at 34), then `012`'s remaining 8 strokes, which are the *border* half of the very element
+whose shading half this round implemented plus seven shape `a:ln`s, then `069`'s displaced text,
+then the tall-table guard and `097`'s 1.65 pt.
