@@ -17198,3 +17198,87 @@ frame simply runs off an A4 MediaBox on page 1 in both.
 each); `cellIs` in two arms; `c:dPt` on bars; `showLegendKey` on a bar chart (38 undrawn keys in
 `Keywords_Mapping_Graphs_and_Charts` alone); and `c:dLblPos="outEnd"`, which still takes the old
 1.1-radius rule this round measured to be wrong.
+
+### Parent verification — round 59 sheets
+
+**Sheets 276 → 278, corpus 796 of 946.** All 946 documents gated: **two gains, zero regressions.**
+
+```
+Core 345   Containers 109   Text 624   Vector 298   Rendering 153(1 skipped)   Markup 259
+OpenDocument 125   WordProcessing 1188   Spreadsheets 980   Presentations 836     = 4917
+0 failed
+```
+
+`Vector` reported **27 failures** in the ten-project run on a binary this round does not touch;
+alone, **298 of 298**. Sixth sighting of the load artefact, and the largest false count yet — worth
+noting because 27 is big enough to look like a real breakage rather than noise.
+
+### The parent's own census was wrong, and the round caught it
+
+I looked at `003_advanced_excel_pie` directly, found the undrawn data-label legend keys, censused
+them at **68 elements in 5 documents**, and handed that to the round mid-flight. **The figure is 62.**
+The walk counted `003_advanced_excel_pie.XLSX` and `.xlsx` — one inode, two names — as two documents;
+the per-document listing beside it *had* case-folded and read 5 documents correctly, so only the
+accumulation was wrong. **Case-fold where you accumulate, not only where you print.**
+
+That is the alias trap, which I have put into every brief for a dozen rounds, in my own census, on
+the document I was looking at. The round had reproduced the finding independently before my message
+arrived and corrected the number within the hour.
+
+**Its second correction matters more.** I reported that the reference's page 1 carries `M1; Actual;`
+and page 2 carries `93; 17%`. **That is the raster.** `pdftotext` gives the whole nineteen-glyph run
+on **both** pages — and that is precisely where the extra words come from. Reading a split off the
+image and describing it as a property of the text layer is the same class of error as the reviewer
+readings the project keeps refuting.
+
+### The framing measurement was itself an instrument artefact
+
+**"Our pie is 18% larger" is refuted.** `pdf-ops.py`'s path bounding box includes bezier **control
+points**, and we emit cubics where LibreOffice emits polygonised arcs — so our wedge boxes bulge
+**8.11 pt** outside the circle and the reference's **0.11**. Measured at the wedge corner instead:
+**221.24 against 199.56, 10.9%.** The centre offset reproduces exactly (6.36 left, 3.18 low).
+
+A one-bit alternative was tested and **rejected on evidence rather than taste**: putting the
+text-shape insets in the label's box halves the radius error on two probes (4.36% → 1.47%,
+7.38% → 0.72%) and **breaks the page** — label structure goes 1-outside-4-wrapped to 3-outside, the
+centre error triples, and words overshoot to 146. **Both cuts committed.**
+
+### And the round refuted its own reach census, from its own sweep
+
+5/3/2 → **7 sheets, 5 slides, 4 words**, because a chart part may bind the chart namespace **as the
+default** (no `c:` prefix) — `microsoft_learn_multi_chart_examples` does, and it moved — and
+`c:dLblPos` is optional with a pie defaulting to `bestFit`. Both `done` sheets documents in the
+affected set were measured and neither moved. `outEnd` was deliberately not changed, which made "the
+four `outEnd`-only documents will not move" a falsifiable prediction; the gate confirms it.
+
+### The residual is a text metric, measured and recorded at its site
+
+**Our chart label line height for Carlito is 1.2207 em; the reference's is 1.1219 at 10.01 pt and
+1.2241 at 15.89 pt.** Sub-linear — so **no scaled sum of the face's metrics is right at both**, and
+Carlito's `hhea`, `typo` and `win` tables all give 1.2207. **Our single-line labels agree today only
+because the ascent error (9.51 against 9.00) cancels the height error.** This is what `011` and
+`027` need — one word each — and it moves the radius and centre on all seven affected documents.
+
+### Three censuses that had never been run
+
+- **`.xls` `CF12` (0x087A): 42 records in 2 documents, all `ct=1` (`cellIs`).** There is **no `.xls`
+  colour scale in this corpus** — so round 58's `colorScale` reach was already the whole-corpus
+  figure.
+- **The `x14` arm: 27 rules in 11 documents, all `dataBar`/`iconSet`, zero `colorScale`.** Same
+  conclusion from the other side.
+- **`cellIs`: 123 rules in 18 documents**, every one with a `dxfId`, 118/125 operands literal — but
+  **87 of 123 `dxf`s state a font and no fill. It is two arms, not one.** Not implemented; the
+  census is the deliverable.
+
+### Audit
+
+**No site re-checked this round, stated deliberately** rather than left silent, with
+`Paperless.Core/Graphics/GlyphRun.cs` named next because the line-height work just measured a live
+vertical-metric divergence there. Re-derived: **39 open in 27 files, 22 markers (19 VERIFIED,
+2 FIXED, 1 WRONG).**
+
+### Sheets does next
+
+The chart label's vertical metrics — one word each on `011` and `027`, and it moves the radius and
+centre on all seven affected documents. Then `cellIs`, now known to be **two arms** (fill and font)
+rather than one.
