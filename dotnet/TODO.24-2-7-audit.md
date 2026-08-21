@@ -77,6 +77,28 @@ and reports 46 of 48 cases wrong. `dotnet/probes/sheets-r53-totalsrow/audit_mkwb
 generator that is known to be read correctly by 26.2.4.2; start from it. Confirm any new fixture by
 `soffice --convert-to fods` and reading `fo:font-size` back before trusting a single measurement.
 
+## A named next site that was not one — round 60 (sheets)
+
+Round 59 named **`Paperless.Core/Graphics/GlyphRun.cs`** as the next site to re-check, "precisely
+because [a] vertical-metric divergence is live there". **It is not, and one `git grep` separates
+them.** That file's two open hits are at lines 347 and 369 and both belong to `LuminanceRecolour`:
+`a:blip/a:lum` brightness and contrast, PowerPoint's washout mapping to `ColorMode_WATERMARK`, and
+`Bitmap::Adjust`'s `msoBrightness` branch. There is **no vertical-metric claim in the file at all**.
+
+The seat of the divergence was `SheetBandText.Ungridded` in `Paperless.Spreadsheets`, which carries
+no marker because it was never a 24.2.7.2 claim — it was a claim about `chart2` made on this
+project, and round 60 measured it wrong (a chart's text is quantised onto a **96 dpi** device;
+`probes/sheets-r60/`).
+
+**The lesson for this list**: a site named from the *prose* of a round's own write-up is not a site
+named from the file. Name it with the command at the top of this file, or the next round pays for
+the mismatch. Two rounds carried this one.
+
+It is also worth recording that four of `Paperless.Text`'s open hits are prose inside
+**already-marked** sites — `MeasuredParagraph.cs` and `SystemFontResolver.cs`, both `VERIFIED` by
+the words track — so the open count still over-reads for exactly the reason this file's header
+gives.
+
 ## Progress
 
 | round | sites re-checked | outcome |

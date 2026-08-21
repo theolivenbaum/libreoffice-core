@@ -17282,3 +17282,85 @@ vertical-metric divergence there. Re-derived: **39 open in 27 files, 22 markers 
 The chart label's vertical metrics — one word each on `011` and `027`, and it moves the radius and
 centre on all seven affected documents. Then `cellIs`, now known to be **two arms** (fill and font)
 rather than one.
+
+## Round 60 — sheets (2026-08-21, unmerged)
+
+**Sheets 278 → 277 of 307.** Branch `wt-sheets-r60`, base `c17996f89cb`. Full record in
+`dotnet/probes/sheets-r60/results.md`.
+
+**Baseline reproduced at 278**, the briefed figure, with `fse_identification_form.xlsx` already
+inside the mismatches at 440/427 — so the brief's carry-on clause was not needed.
+
+**The chart label's vertical metric is measured and closed: a chart's text is laid out on a
+96 dpi device.** `probe-chartvmetrics2.py` renders 117 one-variable rewrites of the corpus witness's
+own chart part — thirteen sizes from 6 to 40 pt on Carlito, Liberation Sans and Liberation Serif,
+each as a one-line and a three-line chart title, plus a `ctr` data-label series — and **every one of
+the 39 measured baseline pitches is an integer multiple of 0.75 pt**, one pixel at 96 dpi, with
+
+```
+hpx   = round(size_pt * 96 / 72)
+pitch = ( round(asc/upem * hpx) + round(-desc/upem * hpx) ) * 72/96
+```
+
+and the `hhea` line gap **excluded**. Max error 0.089 pt against 2.476 for the continuous
+`ascent + descent + lineGap` the tree shipped. Carlito's gap is zero and both Liberation faces' is
+not, so the three faces separate the gap term outright. The ascent is the same rounding, checked
+independently by requiring a CENTER label's block centre to come out size-independent: 0.042–0.069 pt
+under the pixel law against 0.58–0.70 under ours. **`chart2` does not use *no* device, it uses a
+different one** — `MetricGrid` already carried this arithmetic for Impress at 600 dpi and Calc at
+720, and `SheetBandText.Ungridded` dropped the grid entirely.
+
+**278 → 277, and the three moves are three different things.** `011_advanced_excel_pie`
+`words` → `match` (136 → 137 of 140) — **ours, a gain**. `003_advanced_excel_pie` `match` → `words`
+(143 → 139 of 143) — **ours, a regression**. `ans_mappings_of_eccairs_terms.xlsx` `match` → `pages`
+— **the reference's**. Our own side is net nought, and the corrected quantities are right where the
+gate cannot see them: the legend entry pitch goes 15.04 → 14.09 against the reference's 14.08 and
+the wrapped-label pitch 12.21 → 11.25 against 11.23, on **97 chart-bearing sheets documents**.
+
+**`ans_mappings_of_eccairs_terms.xlsx`'s reference rendering is non-deterministic**, and this is the
+round's second result. The mount gives it two directory entries for one inode, so a sweep renders it
+twice — the usual trap becomes an instrument — and within the *same* sweep one alias read 191 pages
+and the other 190. Nine further renderings, three serial and six under load: **one in nine loses a
+page**, and the word count wanders over 28081–28084 while our side is pinned at 191/27894. The file
+holds no `TODAY`, `NOW` or `RAND`, so this is not calendar volatility: it is instability in the
+reference's own layout of a 191-page workbook, and **any sweep can lose that verdict at random**.
+
+**The regression is understood rather than merely reported.** A temporary trace at the call site
+gives the real rectangles; `VDiagram::adjustInnerSize` is transcribed correctly line for line; and
+solving the reference's own arithmetic backwards from its answer proves its **pass-1 consumed
+rectangle reaches left of the pie** (`consumed.Left ≤ 279.04`, ours 291.76) and is 10 pt taller. Our
+base rendering matched by cancellation — its consumed rect reached *too* far left, to 232.12 — so
+the right answer lies between the two. `003`'s four lost words are the tokens `M1;` and `19%`, which
+the A4 MediaBox makes the reference draw twice.
+
+**The shape-factory insets are refuted a second time, and this time in a different place.**
+`ShapeFactory::createText` really does set 0.18 em horizontal and 0.30 em vertical text distances,
+so a label shape's box is bigger than its text; round 59 rejected putting them in the label box, and
+round 60 put them **in the fit test only**, with the corrected metric. Every pie jumps to the
+`outEnd` word count (146/143/143/143 against 143/140/140/140) and it **breaks `019`, which passes**.
+Both cuts committed.
+
+**Vision found what no metric had: our chart title is 9.57 pt too high.** Two blind reviewers on two
+unrelated documents both reported the reference's title sitting lower; `pdf-ops.py` puts ours at
+601.44 and the reference's at 591.87 on *both*, with the x agreeing to 0.10 pt and the size to 0.01.
+It is **pre-existing** — the same title was at 601.61 before this round — and it reaches every chart
+title in the corpus. Recorded at `ChartLayout.AddTitles`. The same pages produced the sixth and
+seventh readers of the `011` right-edge illusion, one of whom flagged her own confidence on it.
+
+**The brief's named audit site is refuted.** `Paperless.Core/Graphics/GlyphRun.cs`'s two open hits
+are `a:blip/a:lum` brightness and contrast — PowerPoint's washout and `Bitmap::Adjust` — and carry
+no vertical-metric claim at all. The site was named from the text of a round's own write-up rather
+than from the file; one `git grep` separates them, and `TODO.24-2-7-audit.md` now says so.
+Counters re-derived: **38 open hits in 26 files, 23 markers (19 VERIFIED, 3 FIXED, 1 WRONG)**.
+
+**Tests +40** (`Paperless.Spreadsheets` 980 → 1020), 35 of them the reference's own measured
+pitches. **4957 passed, 0 failed, 1 skipped.** Four mutations through `verify-test.sh`, **all four
+detected**, none a drift guard.
+
+**Shared layer**: the `Paperless.Text` edit is a single new `MetricGrid` constant and changes no
+existing caller, so words and slides cannot move **by construction**. That is a falsifiable
+prediction for the parent's sweep.
+
+**Next**: the pass-1 consumed rectangle, whose arithmetic is now solved and which should take `003`
+back and `027` with it; the 9.57 pt chart title; `cellIs` in two arms; `c:dPt`; and the same 96 dpi
+law for `SlideChart` and `FrameChart`, which were deliberately not touched.

@@ -3067,6 +3067,22 @@ public static partial class ChartLayout
 
             // Line by line, top down, from the same origin the reservation above measured from,
             // so a two-line title fills exactly the band that was kept for it.
+            //
+            // MEASURED DIVERGENCE, round 60, unfixed and pre-existing. Our title's first baseline
+            // is 9.57 pt HIGHER than 26.2.4.2's, identically on two unrelated documents:
+            // `003_advanced_excel_pie` and `011_advanced_excel_pie` both draw it at 601.44 where
+            // the reference draws 591.87, while the title's x agrees to 0.10 pt and its size to
+            // 0.01 (`pdf-ops.py` on both halves). The reference puts the baseline 32.06 pt below
+            // the chart frame's own top edge and we put it 22.93 below; at 18 pt the chart-device
+            // ascent is 17.25, so the gap above the ascent is 14.81 there against our 5.68.
+            //
+            // `PageMargin` is what decides ours and it is not what decides the reference's. This
+            // is *not* round 60's line-height change — the same title was at 601.61 before it, so
+            // that moved it 0.17 pt. It reaches every chart title in the corpus (97 sheets
+            // documents, 67 slides, 10 words: `probes/sheets-r60/census-charttext.py`) and it was
+            // found by two blind page reviewers on two unrelated pages before any metric noticed
+            // it. Left unfixed because the rule behind 14.81 pt has not been measured, and a
+            // constant fitted to one size would be a fit rather than a law.
             Length pen = frame.Y + (frame.Height * PageMargin);
             foreach (string line in LinesOf(
                          titles, title, plot.TitleSize, plot.IsTitleBold,
