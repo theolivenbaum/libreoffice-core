@@ -174,6 +174,17 @@ public sealed record WordCompatibility(
     /// <c>paragraph-spacing-settings.docx</c> and <c>paragraph-spacing-no-settings.docx</c>.
     /// </para>
     /// <para>
+    /// [24.2.7-audit: VERIFIED 2026-08-21, round words-r59 — unchanged on 26.2.4.2, on all four
+    /// arms. <c>probes/words-r59/audit_paraspacing.py</c> re-authors the fixture and measures the
+    /// <em>baseline pitch</em> in the reference's own PDF rather than a stated spacing, because a
+    /// boundary is exactly what a pitch is: 24.00 pt collapsed, 32.00 pt added. No settings part
+    /// 32.00; part present but empty 24.00; part naming only <c>compatibilityMode</c> 24.00; flag
+    /// set 32.00. The second of those is the discriminator and it is the whole of this property —
+    /// <em>absent</em> and <em>empty</em> are different inputs, because the write lives in
+    /// <c>DomainMapper_Impl::ApplySettingsTable</c> which returns at its first line when there is no
+    /// table at all. All four agree with us to 0.00 pt.]
+    /// </para>
+    /// <para>
     /// Narrow, and worth saying so: <b>no document on the 200-file words corpus lacks a settings
     /// part</b>, so this changes nothing there. It is here because the case is cheap to get right
     /// and expensive to rediscover — a synthetic fixture written without the part is the standard
