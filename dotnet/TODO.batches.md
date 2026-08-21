@@ -18078,3 +18078,58 @@ the default `#D9D9D9` chart border.
 **Words** — `012` and `015`: **split a fly-held table across a page**. Two verdicts, fully
 characterised, and the overflowing row is **empty**, so word counts already match and only the page
 count is at stake.
+
+### Words r62 — a fly-held table splits, and where it stops is a compatibility flag
+
+**321 → 323**, `012` and `015` close, **zero regressions**, exactly **2** of 337 renderings changed
+and **no word count anywhere moved**. 26.2.4.2 marks every DOCX floating table's frame splittable
+without exception (`DomainMapperTableHandler.cxx`:1765), and the continuation starts at the top
+margin — `012`'s ninth row is `12.40 489.65 99.95 50.35 re f*`, a top edge at 72.00 exactly.
+
+**The first cut gained 2 and lost 2, and the intermediate sweep is what said so.** Splitting at the
+body's bottom broke the two graph-paper templates. The seat is `GetFlyAnchorBottom`
+(`sw/source/core/layout/fly.cxx`:114) and `isLegacyBehavior` above it: a Word ≤ 2010 file
+(`compatibilityMode` ≤ 14, `TAB_OVER_MARGIN`) whose fly is anchored to the **page frame** may hang
+into the bottom margin and the footer instead of splitting. **Both conditions are needed and each
+alone is insufficient**, measured in both directions on both documents — raise `080` to mode 15
+alone: two pages; move its anchor to `text` alone: two; give `012` *both* mode 14 and a page anchor:
+one. Nine renderings at rising `w:tblpY` put `080` at y = 835 on an 841.9 pt sheet, still one page.
+
+**Three refutations before a line was written**: `w:vertAnchor` alone is not the discriminator (four
+one-variable renderings of `012`, geometrically identical), nor is `w:hRule="exact"`, nor is the flow
+after the table.
+
+**The prediction said "0 regressions" and that is falsified** — and it had named the cause in advance
+as the census's largest blind spot, content-sized rows. A changed-rendering band should be stated
+**per direction**, not as a magnitude.
+
+**The COL_AUTO question is settled and deliberately not implemented.** Four arms, both variables
+inverted: `012`'s title box is `noFill` and anchored inside a **black table cell**, and turning the
+cells white turns the title black while filling the box white turns it black under black cells. So
+the shape's own fill wins when it has one and the **anchor's** background decides when it has none.
+That rule predicts *white* where round 59 measured *black* on `#0070C0`, so neither direction ships
+until that document is re-measured. A first cut of the probe used `#00B050`, which `Color::IsDark`
+calls dark, so both hypotheses predicted the same answer — **a non-discriminating arm reads exactly
+like a confirmation**.
+
+**Three vision readings, and the control paid twice again.** `080` p1 after both changes — chosen
+because it was predicted to be *restored* — came back "no content, layout, or geometry difference",
+confirmed at 86 strokes against 86 and under a pixel of offset. `015` p2, the page the change
+creates, came back **blank and identical on both sides and the reader refused to invent a
+difference** — correctly: the row is five **white** rules on white paper, invisible to the composite
+and to `pdftotext` alike, and exact to 0.00 pt in the operator dump. A fresh reader on `012` p1
+reproduced round 61's white-title finding independently *and* supplied second-instrument
+confirmation for the two of round 61's findings that had none: the reference draws 48 `#F2F2F2`
+band fills we draw none of, and strokes seven bar outlines we stroke none of.
+
+**`012`'s 56 missing fills are not `w:shd`.** The document holds twelve `w:shd` elements and we draw
+twelve fills from them; the rest is `w:tblStylePr`'s `firstCol` and `band1Horz` layers, whose
+`w:tcPr` half this reader does not read. `WordTableStyleConditions`'s own remark asked for a document
+to measure the bands on and `012` is it.
+
+Audit: `WordStyles.HasDefaultParagraphPropertiesElement` **VERIFIED** on 26.2.4.2 — a bare
+`<w:pPrDefault/>` turns widow/orphan control on, 45 renderings, and the document-level
+`w:settings/w:widowControl` is inert at every filler count.
+
+**Next on words**: the `w:tblStylePr` `w:tcPr` half; then round 59's counter-witness re-measured;
+then the tall-table guard, whose two protected documents are named and passing.
