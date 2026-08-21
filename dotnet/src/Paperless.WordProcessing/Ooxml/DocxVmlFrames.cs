@@ -467,6 +467,51 @@ internal static class DocxVmlFrames
     /// <c>strokeweight="1pt"</c> comes out 4 px at 300 dpi, which is 0.96 pt.
     /// </para>
     /// </remarks>
+    /// <summary>
+    /// A <c>v:fill/@opacity</c> as a fraction of one, or null when the element states none.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Three spellings and all three are in the wild: <c>26214f</c> is VML's 16.16 fixed point, so
+    /// 26214/65536 = 0.4; <c>40%</c> is a percentage; <c>.4</c> is a plain fraction.
+    /// <c>ConversionHelper::decodePercent</c> reads all three, and the <c>f</c> suffix is the one a
+    /// reader misses — the corpus's 48 opacity attributes are every one of them in that form, so
+    /// reading it as a plain number gives 26214 rather than 0.4.
+    /// </para>
+    /// <para>
+    /// <strong>This was read by nothing at all, and it is not only a matter of how the box is
+    /// painted.</strong> It is the term that decides whether the text inside the box comes out
+    /// black or white — see <see cref="Layout.AutomaticColour"/>, and
+    /// <c>069_Work_Breakdown_Structure_Template_Professional_Format</c>, whose
+    /// <c>fillcolor="#8496b0"</c> is dark and whose <c>opacity="26214f"</c> makes it bright.
+    /// </para>
+    /// </remarks>
+    /// <param name="value">The attribute's text, or null.</param>
+    private static double? Opacity(string? value)
+    {
+        if (value is not { Length: > 0 }) return null;
+
+        string text = value.Trim();
+        double scale = 1.0;
+
+        if (text.EndsWith('f'))
+        {
+            text = text[..^1];
+            scale = 1.0 / 65536.0;
+        }
+        else if (text.EndsWith('%'))
+        {
+            text = text[..^1];
+            scale = 1.0 / 100.0;
+        }
+
+        if (!double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out double raw))
+            return null;
+
+        double fraction = raw * scale;
+        return double.IsFinite(fraction) ? Math.Clamp(fraction, 0.0, 1.0) : null;
+    }
+
     private static VmlPaint PaintOf(XElement shape, Dictionary<string, string> style)
     {
         bool box = shape.Name.LocalName is "rect" or "roundrect";
@@ -480,6 +525,11 @@ internal static class DocxVmlFrames
                        && On(fillElement?.Attribute("on")?.Value)
             ? VmlColour(shape.Attribute("fillcolor")?.Value ?? fillElement?.Attribute("color")?.Value)
             : null;
+
+        if (fill is { } opaque && Opacity(fillElement?.Attribute("opacity")?.Value) is { } opacity)
+        {
+            fill = opaque.WithAlpha((byte)Math.Clamp(Math.Floor((opacity * 255.0) + 0.5), 0.0, 255.0));
+        }
 
         Colour? line = On(shape.Attribute("stroked")?.Value)
                        && On(strokeElement?.Attribute("on")?.Value)

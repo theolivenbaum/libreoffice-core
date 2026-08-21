@@ -925,10 +925,7 @@ public readonly record struct PageRun(
     /// </remarks>
     /// <param name="background">The brush behind the run, or transparent for none.</param>
     public Colour ColourOn(Colour background)
-        => Colour.A != 0 ? Colour
-            : background.A != 0 && background.IsDark
-                ? Core.Graphics.Colour.White
-                : Core.Graphics.Colour.Black;
+        => Colour.A != 0 ? Colour : AutomaticColour.Over(background);
 
     /// <summary>True when the run is drawn on a coloured band rather than on the page.</summary>
     /// <remarks>

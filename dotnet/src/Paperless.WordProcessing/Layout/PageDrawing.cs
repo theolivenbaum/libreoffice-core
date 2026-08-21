@@ -237,19 +237,24 @@ public static class PageDrawing
             DrawPicture(sink, frame, vector, null);
         else if (frame.Frame.Image is { } image) DrawPicture(sink, frame, null, image);
 
-        // The frame's own fill is deliberately *not* passed as the background for an automatic font
-        // colour, and this is a measurement rather than an omission. `SwFrame::GetBackgroundBrush`
-        // walks fly frames, so passing it is the reading the source invites — and it is wrong here
-        // twice over on the corpus. `docs-quality-MA.IMS.00001-…docx` page 9 has a shape filled
-        // `#0070C0`, whose WCAG luminance is 38 and so is dark by every rule this file knows, and the
-        // reference draws its text **black**; `069_Work_Breakdown_Structure_Template_Professional…`
-        // is the same shape at `#8496B0`. Passing the fill turned 383 glyphs white across those two
-        // that the reference draws black, against 34 in the whole corpus before. A `PageFrame` here
-        // is a Writer text frame *and* a DrawingML shape, and a shape's text belongs to the drawing
-        // layer where `COL_AUTO` is resolved by editeng and not by `SwDrawTextInfo::ApplyAutoColor`
-        // at all — which is the mechanism those two witnesses point at and which nothing here can
-        // yet tell apart. So the arm is left off until a probe separates the two kinds of frame.
-        DrawFlow(frame.Content, sink);
+        // The frame's own fill *is* the background an automatic font colour resolves against, and the
+        // reason it was not, for four rounds, is that the two witnesses against it were misread.
+        //
+        // Round 59 passed the fill, measured 383 glyphs turning white that the reference draws black
+        // across `docs-quality-MA.IMS.00001-…docx` page 9 (`#0070C0`, WCAG 39) and
+        // `069_Work_Breakdown_Structure_Template_Professional…` (`#8496B0`, WCAG 76), and removed the
+        // arm — concluding that such a shape's text must belong to the drawing layer and never reach
+        // `ApplyAutoColor`. Round 62 then established the opposite on four inverted arms of `012`.
+        // **Both measurements are right and neither hypothesis is**: both witnesses state a
+        // transparency, `ApplyAutoColor` asks `getAverageColor` and not the fill, and blended toward
+        // white those two fills are luminance 106 and 172. See `AutomaticColour`, which carries the
+        // three-colour bracket that pins the blend.
+        //
+        // A frame stating no fill still resolves to black here rather than continuing to its
+        // *anchor's* background, which is the other limb of round 62's rule and the one `012`'s white
+        // title needs. The anchor is not reachable from here — frames are drawn from a per-page list —
+        // so that limb is still open.
+        DrawFlow(frame.Content, sink, frame.Frame.Fill ?? default);
 
         if (frame.Frame.BorderColour is not { } colour) return;
         if (frame.Frame.BorderWidth <= Length.Zero) return;
@@ -1336,8 +1341,7 @@ public static class PageDrawing
     /// </para>
     /// </remarks>
     /// <param name="background">The brush behind the run, or transparent for none.</param>
-    private static Colour Automatic(Colour background)
-        => background.A != 0 && background.IsDark ? Colour.White : Colour.Black;
+    private static Colour Automatic(Colour background) => AutomaticColour.Over(background);
 
     /// <summary>
     /// The formatting run covering a character, or the paragraph's own formatting where none does.

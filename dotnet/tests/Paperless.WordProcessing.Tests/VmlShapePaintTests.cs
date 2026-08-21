@@ -61,6 +61,57 @@ public sealed class VmlShapePaintTests
     }
 
     /// <summary>
+    /// <c>v:fill/@opacity</c> is read, in all three of its spellings, and lands in the fill's alpha.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// This was read by nothing at all until round 63, and it is not only about how the box is
+    /// painted. It is the term that decides whether the text <em>inside</em> the box is drawn black
+    /// or white: <c>069_Work_Breakdown_Structure_Template_Professional_Format</c>'s title box is
+    /// <c>fillcolor="#8496b0"</c>, which is dark by <c>Color::IsDark</c> at WCAG 76, with
+    /// <c>opacity="26214f"</c>, which blends it to WCAG 168 — and the reference draws its text
+    /// black. Passing the unblended fill turned 12 of that document's glyphs white in round 59.
+    /// </para>
+    /// <para>
+    /// <c>26214f</c> is VML's 16.16 fixed point and 26214/65536 is 0.4, so the alpha is 102. The
+    /// suffix is the trap: every one of the 48 opacity attributes in the words corpus is written
+    /// that way, and reading it as a plain number gives 26214.
+    /// </para>
+    /// </remarks>
+    [Theory]
+    [InlineData("26214f", 102)]
+    [InlineData("40%", 102)]
+    [InlineData(".4", 102)]
+    [InlineData("32768f", 128)]
+    public void AFillOpacityBecomesTheFillsAlpha(string opacity, int alpha)
+    {
+        PageFrame frame = One(
+            "<v:rect style=\"position:absolute;margin-left:0;margin-top:0;width:100pt;height:20pt\""
+            + " fillcolor=\"#8496b0 [1951]\">"
+            + $"<v:fill opacity=\"{opacity}\"/></v:rect>");
+
+        frame.Fill.ShouldNotBeNull();
+        frame.Fill!.Value.ToArgb().ShouldBe(((uint)alpha << 24) | 0x8496B0u);
+    }
+
+    /// <summary>A shape stating no opacity keeps an opaque fill.</summary>
+    /// <remarks>
+    /// The control, and it is the majority: 48 VML shapes in the corpus state an opacity and every
+    /// other one must be unaffected, or reading the attribute would change the drawn colour of every
+    /// filled VML rectangle in the track.
+    /// </remarks>
+    [Fact]
+    public void AFillStatingNoOpacityIsOpaque()
+    {
+        PageFrame frame = One(
+            "<v:rect style=\"position:absolute;margin-left:0;margin-top:0;width:100pt;height:20pt\""
+            + " fillcolor=\"#8496b0 [1951]\"/>");
+
+        frame.Fill.ShouldBe(Colour.FromRgb(0x8496B0));
+        frame.Fill!.Value.IsOpaque.ShouldBeTrue();
+    }
+
+    /// <summary>
     /// A stated <c>strokeweight</c> is honoured and its absence is a hairline.
     /// </summary>
     /// <remarks>
