@@ -42,9 +42,30 @@ namespace Paperless.Spreadsheets.Ooxml;
 /// <strong>The anchor's offsets are screen pixels, not EMUs.</strong>
 /// <c>ShapeAnchor::importVmlAnchor</c> sets <c>CellAnchorType::Pixel</c>
 /// (<c>sc/source/filter/oox/drawingbase.cxx:152-155</c>) and <c>calcCellAnchorEmu</c> scales them
-/// through <c>Unit::ScreenX</c>, which is 96 per inch. Checked against LibreOffice 24.2.7.2's own
-/// export of the workbook above: all four of its shown captions come back within two hundredths of
-/// a millimetre of the rectangle this arithmetic produces, and the CSS rectangle is out by inches.
+/// through <c>Unit::ScreenX</c>, which is 96 per inch.
+/// </para>
+/// <para>
+/// [24.2.7-audit: VERIFIED 2026-08-21, round sheets-r57 — 96 dpi exactly on 26.2.4.2, with the
+/// control first and a slope over three steps.] <c>probes/sheets-r57/audit_vmlanchor.py</c>:
+/// eight 60 pt rows and one shown comment whose anchor's row offset is the only thing that
+/// varies. The control — offset 0 against a row-2 anchor — puts the exported annotation at
+/// <strong>119.988 pt</strong> against the 120.0 the row grid alone predicts, so the fixture is
+/// read correctly before any law is fitted; the offsets 20, 40 and 60 px then step the annotation
+/// by <strong>14.998, 14.998 and 14.990 pt</strong>, which is 96.0, 96.0 and 96.1 implied dots
+/// per inch. Seventy-two would have given 20 pt a step and EMUs nothing.
+/// </para>
+/// <para>
+/// <strong>And a rule the site did not state, which authoring the probe exposed: 26.2.4.2 clamps
+/// the offset to the anchored cell's own extent.</strong> A row offset of 200 or 400 px into a
+/// 60 pt (80 px) row both land on exactly the next row's top — 179.885 pt against a row-3 top of
+/// 180.0 — and <c>XlsxVml.ParseAnchor</c> converts the offset without clamping it. <strong>Recorded
+/// and not implemented</strong>, because the clamp needs the sheet's grid at anchor-resolution
+/// time and because the corpus barely exercises it:
+/// <c>probes/sheets-r57/census-vmlclamp.py</c> resolves each VML part to its own worksheet and
+/// finds <strong>5 anchors of 365, in one document of fifteen</strong>
+/// (<c>023_Waterfall_Chart_Template_for_Excel</c>), overshooting their own cell, the worst by 20 %.
+/// The first cut of that census answered <em>zero</em> because it compared every anchor against
+/// the tallest row anywhere in the workbook — a bound generous enough that nothing can exceed it.
 /// </para>
 /// <para>
 /// <strong>One known difference, and it is in the height.</strong> Calc freezes the caption's size

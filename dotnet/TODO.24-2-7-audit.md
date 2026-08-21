@@ -61,6 +61,7 @@ broken one, because it is the only thing that stops the next round paying for th
 | `Paperless.Spreadsheets` | `Layout/SheetPageDecoration.cs` | 56 | **the same site again, and now implemented.** There is no threshold: the band is a *clip rectangle* and the apparent threshold is `ascent - inkAscent`. Round 55's own 8 pt bracket falls out of it with nothing fitted; its 20 pt bracket is **refuted** (4.32 pt draws) |
 | `Paperless.Spreadsheets` | `Layout/SheetShapeText.cs` (`DefaultSize`) | 56 | **verified 26.2.4.2, 2026-08-21** — 12 pt by two instruments, the flat-ODS export and the rendering, with the 1100 control first and an 1800 box to separate 12 from 18 |
 | `Paperless.Spreadsheets` | `Layout/SheetNotes.cs` (column-major note order) | 56 | **verified 26.2.4.2, 2026-08-21** — `Hazard Analysis Template.xls` still lists D1 F2 H2 J2 L1 N2 P2 R2, and reading order would put L1 second |
+| `Paperless.Spreadsheets` | `Ooxml/XlsxNoteCaptions.cs` (a VML anchor's offsets as 96-dpi screen pixels) | 57 | **verified 26.2.4.2, 2026-08-21** — control first (offset 0 lands on the row grid to 0.012 pt), then three steps of 14.998 pt for 20 px, i.e. 96.0 dpi. **And the probe exposed a rule the site does not state**: the offset is *clamped* to the anchored cell's own extent, which we do not do — 5 anchors of 365 in one document of fifteen |
 
 | `Paperless.Presentations` | `Ooxml/PptxSlideLayout.cs` :763 (table cell line spacing) | 54 | **verified 26.2.4.2, 2026-08-21** — 6 of 6 stated sizes put the reference's first baseline one em below the cell's top |
 | `Paperless.Presentations` | `OpenDocument/OdpSlideLayout.cs` :302 (the ODF half of the same claim) | 55 | **WRONG — reported, not fixed.** The rule is no longer fixed at all: 26.2.4.2 obeys `style:font-independent-line-spacing` as stated, one em when true and the face's own 0.903 em when absent. **Not fixed because the slides corpus holds no ODF presentation** — 251 `.pptx` and 51 `.ppt` — so the change would ship unmeasured |
@@ -79,6 +80,7 @@ generator that is known to be read correctly by 26.2.4.2; start from it. Confirm
 | 52 (slides) | `SlideAutofit.cs`, 4 sites | **WRONG.** −155.40 `abs_ink`, −11.1% of the track |
 | 53 (slides) | `SlideTextLayout.cs`, **6 sites** | **all six still correct** — and the probes written to check them found a *fifth* branch none of the six described, worth another two fixes' worth of baseline accuracy. See `probes/slides-r53/results.md` § "The 24.2.7.2 audit" |
 | 54 (sheets) | `SheetOptimalRowHeights.cs`, the `WrappedHeight` fit | **still correct** — 30 of 30 authored wrapped rows within half a twip on 26.2.4.2, read twice over (marker deltas in both PDFs, and the reference's own `fods` `style:row-height`) with the site's own 300-twip figure as the control. `probes/sheets-r54/audit_rowheight.py` |
+| 57 (sheets) | `Ooxml/XlsxNoteCaptions.cs`, the VML anchor's units | **verified** — 96 dpi exactly on 26.2.4.2, the control first: an anchor with a zero row offset lands on the row grid to 0.012 pt, and offsets of 20, 40 and 60 px step the exported annotation by 14.998, 14.998 and 14.990 pt. Seventy-two dpi would have stepped it by 20 and EMUs by nothing. **The probe's first cut read "neither" at every step and was measuring a clamp, not a law**: its rows were 20 pt (26.7 px) and its offsets 48, 96 and 144, so all three saturated at exactly one row. Sixty-point rows separate the rule from the clamp. `probes/sheets-r57/audit_vmlanchor.py`. The clamp itself is a real divergence — we do not clamp — with 5 anchors of 365 to its name (`census-vmlclamp.py`), recorded at the site and not implemented |
 | 56 (sheets) | `SheetShapeText.cs` `DefaultSize`; `SheetNotes.cs`'s note order; and `SheetPageDecoration.cs` a second time | **two verified, one WRONG and now fixed.** The shape-text default is 12 pt on 26.2.4.2 by two instruments (`probes/sheets-r56/audit_shapetext.py`), the note order is unchanged, and round 55's "text-fit threshold" at `SheetPageDecoration.cs` turns out to be a **clip rectangle** — `PrintHF` sets one of `Rectangle(aStart, nHeight - nDistance)` and `DrawText_ToPosition` emits nothing for an area whose ink misses it. Round 55's 8 pt bracket falls out of `ascent - capHeight` with no free parameter; its 20 pt bracket does not reproduce. **A site re-checked twice in consecutive rounds, and the second pass replaced a fitted law with a mechanism** — the same argument as re-marking an already-`VERIFIED` site |
 | 55 (sheets) | `SheetPageDecoration.cs`, the header/footer band guard | **WRONG in half.** The zero-band claim holds and every negative band too; "the reference draws the footer at every stated band above zero" is false — nothing is drawn at 0.72 or 1.44 pt of 8 pt text, and the threshold *scales with the point size* (1.44–2.16 pt at 8 pt, 4.32–5.76 pt at 20 pt). A text-fit rule, not a constant. Reported and not implemented: four corpus worksheets have a positive band under 6 pt and all four pass today. The probe also found a **real 18 pt body displacement** at a *negative* band, which is fixed. `probes/sheets-r55/audit_pagedecoration.py`, `census-bands.py` |
 
@@ -108,15 +110,19 @@ a round caught.
 | project | open hits | reaches |
 |---|---:|---|
 | `Paperless.WordProcessing` | 11 | words |
-| `Paperless.Presentations` | 11 | slides |
-| `Paperless.Spreadsheets` | 10 | sheets |
+| `Paperless.Spreadsheets` | 9 | sheets |
+| `Paperless.Presentations` | 9 | slides |
 | `Paperless.Text` | 6 | **all three tracks** |
 | `Paperless.Core` | 2 | **all three tracks** |
 | `Paperless.Rendering` | 1 | **all three tracks** |
 | `Paperless.Ooxml` | 1 | **all three tracks** |
-| **total** | **42** | |
+| **total** | **39** | |
 
-Re-derived at round 56's tree. **The per-file column is gone**: it said `Paperless.Text` 8 where
+Re-derived at round 57's tree, with the commands below. **The `42` and the `Presentations 11` this
+table carried did not reproduce and are corrected — for the fifth time in this file's history.**
+At round 57's base commit the same commands give **40** (WordProcessing 11, Spreadsheets 10,
+Presentations 9, Text 6, Core 2, Rendering 1, Ooxml 1), so two of the three figures were already
+wrong when they were written and only the sheets column moved this round. Run the commands. **The per-file column is gone**: it said `Paperless.Text` 8 where
 the command gives 6 and the "orientation only" table below already said 6, and a file count that
 disagrees with itself two tables apart is worth less than the command. `git grep -l` over the open
 sites gives **23** files, not 26.
@@ -126,8 +132,9 @@ paragraph below said `12` markers. Re-derived at commit `e11ee5ac386` with the c
 itself gives: **42 open, 13 marked**. A figure quoted rather than re-derived decays — the same
 lesson this file records about round 53's "73 of 337", arriving again in the file that records it.
 
-Marked so far, re-derived at round 56's tree with the commands below: **17** marker lines —
-**15 `VERIFIED`, 2 `WRONG`, 0 `UNDECIDED`**. (This paragraph said `14 — 9 verified, 3 wrong, 1
+Marked so far, re-derived at round 57's tree with the commands below: **19** marker lines —
+**16 `VERIFIED`, 2 `FIXED`, 1 `WRONG`, 0 `UNDECIDED`**. At round 57's base the same commands give
+**18** — 15 / 2 / 1 / 0. (This paragraph said `14 — 9 verified, 3 wrong, 1
 undecided, 1 half-wrong`, and none of those four figures reproduces; at round 56's base it was
 **15 lines, 13 verified, 2 wrong, 0 undecided**. The same failure the file records twice already:
 a hand-maintained count decays. Marker *lines* are what the command counts, and a site re-marked
@@ -299,20 +306,24 @@ the site itself names **26.2.4.2** and the date — this table is the index, not
 
 ## Still unverified in `Paperless.Spreadsheets`
 
-`Layout/SheetText.cs` (the turned-cell row-height fit) and `Ooxml/XlsxNoteCaptions.cs` (a VML
-anchor's offsets as 96-dpi screen pixels). Round 56 took `SheetShapeText.cs` and `SheetNotes.cs`
-and both came back **VERIFIED**; that heading used to name four files and two of them are done.
+**`Layout/SheetText.cs` (the turned-cell row-height fit), and it is the last one.** Round 57 took
+`Ooxml/XlsxNoteCaptions.cs` and it came back **VERIFIED**; round 56 took `SheetShapeText.cs` and
+`SheetNotes.cs` and both came back VERIFIED. This heading used to name four files and three of
+them are done.
+
+**The "furniture claims are the ones that break" pattern did not hold a third time.**
+`XlsxNoteCaptions.cs` is a furniture claim and it is correct, which is why it was taken first —
+and the prior it was taken on is now one furniture claim wrong of two rather than one of one.
 
 **`SheetPageDecoration.cs` was round 55's and came back half wrong** — see the log above. The next
-sheets round should take `SheetNotes.cs` or `SheetShapeText.cs`; `XlsxNoteCaptions.cs`'s claim (a
-VML anchor's offsets are 96-dpi screen pixels) was exercised in passing by round 55's legacy-picture
-reader, which shares that arithmetic and reproduces the reference to 0.12 pt on two documents, but it
-has not been probed in its own right and is **not** marked.
+sheets round has exactly one site left, `Layout/SheetText.cs`'s turned-cell row-height fit, which
+is a metric claim.
 
-The running score across all rounds is now **three wrong in thirteen**. Two of the three were
-shared-layer sites; the third is `SheetPageDecoration.cs`. **Eight** `Paperless.Spreadsheets`
-sites have been re-checked and seven were correct, so the sheets metric work has mostly held
-across the binary change — and the one site found wrong is still the only one that was about page
-furniture rather than text metrics, which is now a pattern worth acting on rather than a
-coincidence: the two remaining sheets sites are one metric claim and one furniture claim, and the
-furniture one (`XlsxNoteCaptions.cs`) is the one to take first.
+The running score across all rounds is now **three wrong in fourteen**. Two of the three were
+shared-layer sites; the third is `SheetPageDecoration.cs`. **Nine** `Paperless.Spreadsheets`
+sites have been re-checked and eight were correct, so the sheets metric work has mostly held
+across the binary change. Round 56 recorded "the only site found wrong is the only furniture
+claim, which is a pattern rather than a coincidence" and sent round 57 at the other furniture
+claim on the strength of it. `XlsxNoteCaptions.cs` came back correct, so **the pattern was two
+observations of one event and it did not repeat** — which is worth as much as the prior was, and
+is the reason the re-check was run rather than the claim being assumed either way.
