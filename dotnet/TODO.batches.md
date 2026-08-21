@@ -18122,6 +18122,14 @@ the A4 MediaBox is **refuted by a column profile**: the reference's ink stops at
 **The `#D9D9D9` chart-area border is now four readers, two rounds, three documents**, with
 `pdf-ops.py` at 3-against-0 and 1-against-0.
 
-**Next**: the axis-label arrangement — rotation before thinning — which is what cost the two
-verdicts and which a reader gave the direction on at high confidence (twelve rotated against our
-six horizontal); then `023`'s nine undrawn bars; then the chart border; then the data-label colour.
+**And the mechanism behind both losses is traced to the line, and it is a calibration and not a
+bug.** `ChartAxisLabels.Resolve`'s only route to auto-rotation runs through `Wraps`
+(`VCartesianAxis.cxx`:889-903); narrower labels stop wrapping, so the loop thins instead of
+rotating. The limit `Wraps` uses is a fitted **1.000 × tick spacing**, bracketed at [0.990, 1.056]
+on round 30's decks — **and every one of those boundaries was found with the ruler this round just
+corrected**, so the fit is a measurement of `true ÷ 0.975` and the true limit is near 0.975, which
+is where the C++'s own `0.95 × spacing` plus two text insets already sat. The decks and the
+generator still exist, so re-deriving it is a re-run rather than a new probe.
+
+**Next**: re-derive that bracket; then `023`'s nine undrawn bars; then the chart border (four
+readers, two rounds, three documents, `pdf-ops.py` at 3-0 and 1-0); then the data-label colour.

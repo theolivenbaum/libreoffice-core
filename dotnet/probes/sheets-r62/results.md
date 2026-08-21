@@ -368,13 +368,51 @@ Reach of the *sheets* change, `census-chartreach.py`, all 946 manifest paths, ca
 accumulates: **90 sheets documents hold a text-bearing chart part** (76 `done`, 14 `open`) plus 7
 BIFF chart documents; the untouched cross-track reach is **67 slides** and **10 words**.
 
+## 11a. The mechanism behind both regressions, traced to the line — and it invalidates a
+calibration rather than exposing a bug
+
+`ChartAxisLabels.Resolve`'s only route from "the labels collide" to "turn them 45°" is through
+`Wraps`: `canAutoAdjustLabelPlacement` refuses while line breaking is on, and an OOXML axis has it
+on, so the axis is rotated **only** if some label first *breaks inside a word* in the room one tick
+gives it (`VCartesianAxis.cxx`:889-903, `lcl_hasWordBreak`). If no label wraps, the loop falls
+through to `rhythm++` and **thins instead of rotating**. Making the labels 2.5% narrower is exactly
+the way to flip `Wraps` from true to false — and that is what happened on `023` (twelve rotated
+labels became six horizontal ones) and on `058` (twenty-four consecutive dates became ten).
+
+**The limit `Wraps` compares against is a fitted constant, and it was fitted with the ruler this
+round corrected.** Its remarks record the fit: three boundary series on
+`research/probes/slides-r30/make-rot-probe.py`'s decks bracket the limit at **[0.990, 1.056] of the
+tick spacing**, one is "the only round number in the intersection", and the C++'s own
+`0.95 × spacing` (`VCartesianAxis.cxx`:753-759, "to have a visible distance between the labels")
+is explicitly rejected as "0.88 of it on those decks". **Every one of those boundaries was found by
+comparing LibreOffice's rotation against *our* word widths, which were 2.5% too wide at 10 pt.** So
+the fitted 1.000 is a measurement of `true limit ÷ 0.975`, and the true limit is near **0.975**,
+which is within a hair of the C++'s 0.95 plus the two horizontal text insets the same remarks say
+they could not separate it from.
+
+**This round therefore did not break the rotation rule; it invalidated the rule's calibration**,
+and the calibration cannot be repaired by picking a new constant here because the correction is a
+sawtooth in the size and the decks were at one size. Two repairs, both stated so the next round
+does not have to find them:
+
+1. **Re-derive the bracket against the reference with the corrected ruler.** The decks and the
+   generator already exist and the boundaries are read off LibreOffice's own
+   `chart:coordinate-region`, so this is a re-run and not a new probe — the shape round 59's
+   `a:fillToRect` re-check had, which was the cheapest re-check on the audit list.
+2. **Or keep `Wraps` on the unquantised measurement until it is re-derived**, which is what makes
+   this round change only what it measured. It was *not* done here because `Wraps` lives in
+   `Paperless.Core` and reaches its ruler through `IChartTextMeasurer`, so it would mean adding a
+   second method to a shared interface in order to preserve a measurement now known to be wrong.
+   That is a worse thing to ship than a stated regression.
+
 ## 12. What the next round should do first
 
-1. **The axis-label arrangement — rotation before thinning.** It is what this round cost two
-   verdicts on and a blind reader gave the direction at high confidence: on `023` the reference
-   draws **twelve rotated** category labels where we draw **six horizontal**. `046` and `058` are
-   the same class (`058`: the reference draws ~24 consecutive horizontal dates, we draw ten). Three
-   documents, one rule, and the two lost verdicts come back with it.
+1. **The axis-label wrap limit, re-derived with the corrected ruler** — § 11a. It is what this
+   round cost two verdicts on, the mechanism is traced to `VCartesianAxis.cxx`:889-903 and
+   :753-759, and a blind reader gave the direction at high confidence: on `023` the reference draws
+   **twelve rotated** category labels where we draw **six horizontal**. `046` and `058` are the same
+   class (`058`: the reference draws ~24 consecutive horizontal dates, we draw ten). Three
+   documents, one constant, and the two lost verdicts come back with it.
 2. **`023_Waterfall`'s chart itself**, which is worse than its verdict ever suggested: **nine of
    twelve bars are not drawn at all**, there are no waterfall connector lines, and the value axis
    runs to 25000 against the reference's 8000.
