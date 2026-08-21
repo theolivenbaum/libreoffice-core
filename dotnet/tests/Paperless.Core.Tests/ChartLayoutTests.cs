@@ -47,7 +47,7 @@ public class ChartLayoutTests
     public void AGridlineIsDrawnAcrossThePlotAreaAtEveryMajorTick()
     {
         ChartDrawing without = Place(Bars());
-        ChartDrawing with = Place(Bars() with { ValueGrid = Colour.FromRgb(0xB3B3B3) });
+        ChartDrawing with = Place(Bars() with { ValueGrid = new ChartGrid(Colour.FromRgb(0xB3B3B3)) });
 
         // Ten ticks on the corpus scale, so ten more lines and no other change.
         with.Lines.Count.ShouldBe(without.Lines.Count + 10);

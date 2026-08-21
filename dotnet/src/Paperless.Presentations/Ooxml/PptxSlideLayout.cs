@@ -1523,6 +1523,19 @@ internal sealed partial class PptxSlideLayout
     /// rectangular one, which is what LibreOffice does with it too: its comment says
     /// "XML_rect or XML_shape, but the latter is not implemented".
     /// </para>
+    /// <para>
+    /// <strong>A <c>path="circle"</c> whose focus lands on a corner is a radial gradient and not
+    /// a diagonal linear one.</strong>
+    /// [24.2.7-audit: FIXED 2026-08-21, slides-r59 — round 39 measured the corner case as
+    /// <c>draw:style="linear"</c> with a 45° angle on the superseded binary and this reader was
+    /// built on that. Re-running that round's own four-arm fixture through 26.2.4.2's flat-ODF
+    /// export gives <c>radial</c> on all four, the two corner arms included:
+    /// <c>l="100000" t="100000"</c> exports <c>draw:style="radial" draw:cx="100%"
+    /// draw:cy="100%"</c> and <c>r="99000" b="99000"</c> exports <c>radial</c> at
+    /// <c>0%/0%</c>. The corner branch is removed. Corpus reach, counted on what the parts
+    /// state: 67 corner-focus circle paths in 7 documents — 6 slides decks and one words
+    /// document, with 42 of the 67 in two infographic funnel decks.]
+    /// </para>
     /// </remarks>
     private static Paint? Gradient(XElement? element, in FillContext context)
     {
@@ -1552,15 +1565,6 @@ internal sealed partial class PptxSlideLayout
         int cx = FocusPerCent(gradient.FillToRect.Left, gradient.FillToRect.Right);
         int cy = FocusPerCent(gradient.FillToRect.Top, gradient.FillToRect.Bottom);
 
-        if (gradient.Path == "circle" && (cx is 0 or 100) && (cy is 0 or 100))
-        {
-            // The focus is a corner: the reference draws the diagonal linear ramp instead,
-            // stop 0 at that corner. Direction runs corner-to-opposite-corner, and Linear
-            // spans the box's rotated extent, so the two corners land on the ramp's ends.
-            return SlideGradients.Linear(box, cx == 0 ? 1 : -1, cy == 0 ? 1 : -1, stops)
-                with { Transform = space };
-        }
-
         DocPoint centre = new(
             box.Left + (box.Width * (cx / 100.0)),
             box.Top + (box.Height * (cy / 100.0)));
@@ -1587,9 +1591,17 @@ internal sealed partial class PptxSlideLayout
     /// <c>a:fillStyleLst</c>, and not one of them changed a pixel when this landed — a theme's
     /// third fill style is almost never what a drawn shape resolves to. Correct, tested, and
     /// waiting for a document. The <b>truncation</b> to whole per cent decides the corner test in
-    /// <see cref="Gradient"/>, which is where the corpus movement was: measured against
-    /// LibreOffice 24.2.7.2, a stated centre of 0.5% is treated as 0 and takes the linear
-    /// branch, and 1% does not (<c>probes/slides-r39/gradient-path.md</c>).
+    /// <see cref="Gradient"/>. Measured against the superseded binary, a stated centre of 0.5%
+    /// was treated as 0 and took a *linear* branch there, and 1% did not
+    /// (<c>probes/slides-r39/gradient-path.md</c>).
+    ///
+    /// [24.2.7-audit: VERIFIED 2026-08-21, slides-r59 — the truncation and the clamp both still
+    /// hold on 26.2.4.2, and the branch they fed does not. Re-run of round 39's own four-arm
+    /// fixture through the reference's flat-ODF export: <c>l="0" r="99000"</c> (0.5%) exports
+    /// <c>draw:cx="0%"</c> and <c>l="0" r="98000"</c> (1%) exports <c>draw:cx="1%"</c>, so the
+    /// truncation is intact; <c>t="-80000" b="180000"</c> exports <c>draw:cy="0%"</c>, so the
+    /// clamp is intact. What changed is <see cref="Gradient"/>'s corner test — see the marker
+    /// there.]
     /// </remarks>
     private static int FocusPerCent(double nearInset, double farInset)
     {

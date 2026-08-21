@@ -403,6 +403,75 @@ public sealed partial record ChartPlot
     /// <remarks><c>c:valAx/c:tickLblPos</c>; see <see cref="ValueLabelsVisible"/>.</remarks>
     public bool SecondaryLabelsVisible { get; init; } = true;
 
+    /// <summary>How the value axis' own line and tick marks are painted.</summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>An axis line is not black, and this reader drew every one of them black.</strong>
+    /// <c>spAxisLines</c> (<c>oox/source/drawingml/chart/objectformatter.cxx:215-220</c>) gives it
+    /// the theme's <c>tx1</c> at <c>tint 75000</c> — the same entry as a major gridline — and the
+    /// theme's subtle line style supplies its width. On <c>Demick_JetBlue.pptx</c> page 4 the
+    /// reference draws its two axis lines <c>#666666</c> at 0.73 pt where we drew <c>#000000</c>
+    /// hairlines.
+    /// </para>
+    /// <para>
+    /// The <em>tick labels</em> are a separate statement and do not move with it: both stacks
+    /// draw that page's labels <c>#000000</c>, which is <c>c:txPr</c>'s answer and not this one.
+    /// </para>
+    /// <para>
+    /// Not nullable — an axis that is drawn at all has a stroke — and the default is the black
+    /// hairline every non-OOXML reader has always produced, so ODF and BIFF are unchanged.
+    /// </para>
+    /// </remarks>
+    public ChartGrid ValueAxisLine { get; init; } = new(Colour.Black);
+
+    /// <summary>How the category axis' own line and tick marks are painted.</summary>
+    /// <remarks><c>c:catAx/c:spPr/a:ln</c>; see <see cref="ValueAxisLine"/>.</remarks>
+    public ChartGrid CategoryAxisLine { get; init; } = new(Colour.Black);
+
+    /// <summary>How the secondary value axis' own line and tick marks are painted.</summary>
+    /// <remarks>See <see cref="ValueAxisLine"/>.</remarks>
+    public ChartGrid SecondaryAxisLine { get; init; } = new(Colour.Black);
+
+    /// <summary>Where the value axis puts its major tick marks.</summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>An axis reserves its tick length only when it actually draws a tick outside the
+    /// plot area.</strong> <c>c:majorTickMark</c> takes <c>out</c>, <c>cross</c>, <c>in</c> and
+    /// <c>none</c>; <c>lclGetTickMark</c>
+    /// (<c>oox/source/drawingml/chart/axisconverter.cxx:104-115</c>) maps the first two to a
+    /// style carrying <c>OUTER</c> and the last two to one that does not, and only an outward
+    /// tick extends past the plot area and is therefore charged to it by
+    /// <c>VDiagram::adjustInnerSize</c>.
+    /// </para>
+    /// <para>
+    /// Measured one property and one axis at a time on a corpus chart already stating
+    /// <c>none</c> on both axes — six arms, and the plot edge moves by <c>AXIS2D_TICKLENGTH</c>
+    /// exactly, on that axis' own edge and on no other:
+    /// <c>none 0.00 / in 0.00 / out +4.25 / cross +4.25</c>. The labels do not move with it: the
+    /// leftmost value label's pen sits at the same <c>x</c> in all four arms, so what the tick
+    /// buys is the gap between the label and the axis and not the label's own place.
+    /// </para>
+    /// <para>
+    /// The default is <see cref="ChartTickMark.Outer"/> because an <em>absent</em>
+    /// <c>c:majorTickMark</c> is not <c>none</c>: <c>AxisModel</c>'s constructor defaults it to
+    /// <c>out</c> for a 2007 chart and to <c>cross</c> for a later one
+    /// (<c>oox/source/drawingml/chart/axismodel.cxx:42-48</c>), and both of those reserve. Only a
+    /// stated <c>none</c> or <c>in</c> changes anything, and ODF — which has no census behind it
+    /// here — is left on the default.
+    /// </para>
+    /// </remarks>
+    public ChartTickMark ValueTicks { get; init; } = ChartTickMark.Outer;
+
+    /// <summary>Where the category axis puts its major tick marks.</summary>
+    /// <remarks><c>c:catAx/c:majorTickMark</c>; see <see cref="ValueTicks"/>.</remarks>
+    public ChartTickMark CategoryTicks { get; init; } = ChartTickMark.Outer;
+
+    /// <summary>Where the secondary value axis puts its major tick marks.</summary>
+    /// <remarks>
+    /// <c>c:majorTickMark</c> on the secondary <c>c:valAx</c>; see <see cref="ValueTicks"/>.
+    /// </remarks>
+    public ChartTickMark SecondaryTicks { get; init; } = ChartTickMark.Outer;
+
     /// <summary>Whether the chart has a pair of axes at all.</summary>
     /// <remarks>
     /// A pie has neither, so it gets no axis lines, no ticks, no gridlines and — the part that
@@ -856,21 +925,36 @@ public sealed partial record ChartPlot
     public Colour? PlotBackground { get; init; }
 
     /// <summary>
-    /// The colour the value axis' major gridlines are drawn in, or null when it has none.
+    /// How the value axis' major gridlines are painted, or null when it has none.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// Present rather than absent is the question the file answers — <c>c:majorGridlines</c>,
-    /// <c>chart:grid class="major"</c> — and both default the colour rather than stating it.
-    /// <c>0xB3B3B3</c> is chart2's own default, set on <c>GridProperties</c> as
+    /// <c>chart:grid class="major"</c> — and both usually leave the paint to a default.
+    /// <c>0xB3B3B3</c> is chart2's own, set on <c>GridProperties</c> as
     /// <c>LINE_COLOR = 0xb3b3b3 // gray30</c>
-    /// (<c>chart2/source/model/main/GridProperties.cxx:64-66</c>), and it is what a reader must
-    /// supply for a gridline that states nothing about itself.
+    /// (<c>chart2/source/model/main/GridProperties.cxx:64-66</c>), and it is what the ODF and
+    /// BIFF readers supply.
+    /// </para>
+    /// <para>
+    /// <strong>It is not what an OOXML chart draws.</strong> <c>ObjectFormatter</c>'s automatic
+    /// table gives a major gridline the theme's <c>tx1</c> at <c>tint 75000</c> put through the
+    /// theme's subtle line style, which on a black <c>tx1</c> is <c>0x666666</c> and not
+    /// <c>0xB3B3B3</c> — and the same line style states the width, which is 0.75 pt on every
+    /// theme Office ships and not a hairline. See
+    /// <c>DrawingChartAutoFormat.LineColourOf</c>.
+    /// </para>
+    /// <para>
+    /// A <see cref="ChartGrid"/> rather than a bare colour for the same reason the minor grid is
+    /// one: the width is as visible as the colour and there is no reason for the two grids to
+    /// carry different amounts of information about themselves.
+    /// </para>
     /// </remarks>
-    public Colour? ValueGrid { get; init; }
+    public ChartGrid? ValueGrid { get; init; }
 
-    /// <summary>The colour the category axis' major gridlines are drawn in, or null.</summary>
-    /// <remarks>Far rarer than <see cref="ValueGrid"/>; see it for the default.</remarks>
-    public Colour? CategoryGrid { get; init; }
+    /// <summary>How the category axis' major gridlines are painted, or null.</summary>
+    /// <remarks>Far rarer than <see cref="ValueGrid"/>; see it for the defaults.</remarks>
+    public ChartGrid? CategoryGrid { get; init; }
 
     /// <summary>
     /// The colour the value axis' <em>minor</em> gridlines are drawn in, or null when it has none.
@@ -1100,4 +1184,27 @@ public sealed partial record ChartPlot
         foreach (ChartSeries series in Series) count = Math.Max(count, series.Values.Count);
         return count;
     }
+}
+
+/// <summary>Where an axis draws its major tick marks.</summary>
+/// <remarks>
+/// <c>chart2::TickmarkStyle</c>, which is a flag pair — <c>INNER = 1</c>, <c>OUTER = 2</c> — and
+/// <c>c:majorTickMark</c>'s four tokens map onto it exactly
+/// (<c>oox/source/drawingml/chart/axisconverter.cxx:104-115</c>). Kept as four named states
+/// rather than as two booleans because the reservation asks only about <c>OUTER</c> and the
+/// drawing asks about both, and a pair of booleans lets the two questions drift apart.
+/// </remarks>
+public enum ChartTickMark
+{
+    /// <summary><c>none</c> — no tick drawn, and nothing reserved.</summary>
+    None,
+
+    /// <summary><c>in</c> — a tick inside the plot area. Reserves nothing.</summary>
+    Inner,
+
+    /// <summary><c>out</c> — a tick outside the plot area. Reserves its length.</summary>
+    Outer,
+
+    /// <summary><c>cross</c> — a tick on both sides. Reserves its outward half's length.</summary>
+    Cross,
 }

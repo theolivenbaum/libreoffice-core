@@ -339,7 +339,7 @@ public static class OdfChartPlot
     /// (<c>chart2/source/model/main/GridProperties.cxx:64-66</c>), and one whose style states
     /// <c>draw:stroke="none"</c> is not drawn.
     /// </remarks>
-    private static Colour? GridOf(XElement? axis, OdfChartStyles styles)
+    private static ChartGrid? GridOf(XElement? axis, OdfChartStyles styles)
     {
         foreach (XElement grid in Children(axis, OdfNamespaces.Chart, "grid"))
         {
@@ -347,7 +347,9 @@ public static class OdfChartPlot
                 continue;
 
             string? style = Attribute(grid, OdfNamespaces.Chart, "style-name");
-            return styles.HasStroke(style) ? styles.Line(style) ?? DefaultGrid : null;
+            if (!styles.HasStroke(style)) return null;
+
+            return new ChartGrid(styles.Line(style) ?? DefaultGrid);
         }
 
         return null;

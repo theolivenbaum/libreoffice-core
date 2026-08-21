@@ -69,7 +69,7 @@ public class ChartLayoutAxisTests
         Colour grey = Colour.FromRgb(0xB3B3B3);
 
         ChartDrawing hidden = Place(
-            Bars() with { ValueAxisVisible = false, ValueGrid = grey });
+            Bars() with { ValueAxisVisible = false, ValueGrid = new ChartGrid(grey) });
 
         hidden.Lines.Count(line => line.Colour == grey).ShouldBe(10);
         hidden.Labels.ShouldNotContain(label => label.Text == "180");

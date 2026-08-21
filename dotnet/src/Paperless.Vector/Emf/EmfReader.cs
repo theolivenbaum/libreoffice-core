@@ -2296,7 +2296,11 @@ internal sealed class EmfReader
         int length = characters.Length;
         while (length > 0 && characters[length - 1] == '\0') length--;
 
-        return new string(characters[..length]);
+        // A 16-bit EMF text record in a symbol-charset font still stores the *slot* in each code
+        // unit -- widened, not translated -- so it takes the same Private Use Area move as the
+        // eight-bit path. `010605Vul.ppt`'s page 9 writes its Monotype Sorts arrows through
+        // EMR_EXTTEXTOUTW and every one of them arrives here.
+        return MetafileTextEngine.Symbolise(new string(characters[..length]), _context.Font);
     }
 
     private static ushort[] Glyphs(ReadOnlySpan<byte> data)
