@@ -239,10 +239,9 @@ public static class DrawingChartPlot
             PlotBackground = FillOf(Child(plotArea, "spPr"), theme),
             ValueGrid = GridOf(axes.Value, theme),
             CategoryGrid = GridOf(axes.Category, theme) ?? GridOf(axes.Domain, theme),
-            ValueMinorGrid = GridOf(axes.Value, theme, "minorGridlines", DefaultMinorGrid),
+            ValueMinorGrid = MinorGridOf(axes.Value, theme),
             CategoryMinorGrid =
-                GridOf(axes.Category, theme, "minorGridlines", DefaultMinorGrid)
-                ?? GridOf(axes.Domain, theme, "minorGridlines", DefaultMinorGrid),
+                MinorGridOf(axes.Category, theme) ?? MinorGridOf(axes.Domain, theme),
             ValueMinorIntervals = MinorIntervals(axes.Value),
             // The three automatic-text sizes and weights, which are *not* chart2's model
             // defaults — see AutoText below for why an OOXML chart never reaches those.
@@ -407,18 +406,36 @@ public static class DrawingChartPlot
     /// <c>a:ln/a:noFill</c> means no gridline at all, which is how a chart turns one off without
     /// removing the element.
     /// </remarks>
-    private static Colour? GridOf(
-        XElement? axis,
-        DrawingTheme? theme,
-        string element = "majorGridlines",
-        Colour? fallback = null)
+    private static Colour? GridOf(XElement? axis, DrawingTheme? theme)
     {
-        if (Child(axis, element) is not { } grid) return null;
+        if (Child(axis, "majorGridlines") is not { } grid) return null;
 
         XElement? properties = Child(grid, "spPr");
         if (Drawing.Child(Drawing.Child(properties, "ln"), "noFill") is not null) return null;
 
-        return LineOf(properties, theme) ?? fallback ?? DefaultGrid;
+        return LineOf(properties, theme) ?? DefaultGrid;
+    }
+
+    /// <summary>
+    /// An axis' minor gridlines, with the width and dash they state, or null when it has none.
+    /// </summary>
+    /// <remarks>
+    /// Unlike <c>c:majorGridlines</c>, a <c>c:minorGridlines</c> in the corpus usually carries an
+    /// <c>a:ln</c>, and both of the things it puts there are visible: a stated width and a stated
+    /// <c>a:prstDash</c>. Reading only the colour draws 110 solid hairlines where the reference
+    /// draws 110 dashed half-point ones — see <see cref="ChartGrid"/>.
+    /// </remarks>
+    private static ChartGrid? MinorGridOf(XElement? axis, DrawingTheme? theme)
+    {
+        if (Child(axis, "minorGridlines") is not { } grid) return null;
+
+        XElement? properties = Child(grid, "spPr");
+        if (Drawing.Child(Drawing.Child(properties, "ln"), "noFill") is not null) return null;
+
+        return new ChartGrid(
+            LineOf(properties, theme) ?? DefaultMinorGrid,
+            StatedLineWidth(properties) ?? Length.Zero,
+            DashOf(properties));
     }
 
     /// <summary>

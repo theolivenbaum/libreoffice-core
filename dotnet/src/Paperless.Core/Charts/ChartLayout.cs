@@ -105,6 +105,24 @@ public readonly record struct ChartBox(
     Colour? Line = null,
     Length LineWidth = default);
 
+/// <summary>
+/// How one axis' gridlines are painted.
+/// </summary>
+/// <remarks>
+/// A minor gridline states its own <c>a:ln</c> far more often than a major one does, and the two
+/// things it states — a width and a dash — are exactly what an ink measurement notices. On
+/// <c>N2_E_Maestroni_Swarm_COP.pptx</c> the minor grid is <c>&lt;a:ln w="6350"&gt;
+/// &lt;a:prstDash val="sysDash"/&gt;</c>, and drawing its 110 lines solid and hairline instead of
+/// dashed at half a point is worth 2.8 points of that document's unsigned ink on its own.
+/// </remarks>
+/// <param name="Colour">The colour to stroke in.</param>
+/// <param name="Width">The stroke width; zero is a hairline.</param>
+/// <param name="Dash">Alternating ink and gap lengths, or null for a solid line.</param>
+public readonly record struct ChartGrid(
+    Colour Colour,
+    Length Width = default,
+    IReadOnlyList<Length>? Dash = null);
+
 /// <summary>One straight line — an axis, a tick, a gridline.</summary>
 /// <param name="From">Its start.</param>
 /// <param name="To">Its end.</param>
@@ -1549,11 +1567,11 @@ public static partial class ChartLayout
                         ? new ChartLine(
                             new DocPoint(area.Left, area.Bottom - (area.Height * between)),
                             new DocPoint(area.Right, area.Bottom - (area.Height * between)),
-                            minor)
+                            minor.Colour, minor.Width, minor.Dash)
                         : new ChartLine(
                             new DocPoint(area.Left + (area.Width * between), area.Top),
                             new DocPoint(area.Left + (area.Width * between), area.Bottom),
-                            minor));
+                            minor.Colour, minor.Width, minor.Dash));
                 }
             }
         }
@@ -1760,11 +1778,11 @@ public static partial class ChartLayout
                         ? new ChartLine(
                             new DocPoint(area.Left + (area.Width * between), area.Top),
                             new DocPoint(area.Left + (area.Width * between), area.Bottom),
-                            categoryMinor)
+                            categoryMinor.Colour, categoryMinor.Width, categoryMinor.Dash)
                         : new ChartLine(
                             new DocPoint(area.Left, area.Bottom - (area.Height * between)),
                             new DocPoint(area.Right, area.Bottom - (area.Height * between)),
-                            categoryMinor));
+                            categoryMinor.Colour, categoryMinor.Width, categoryMinor.Dash));
                 }
             }
         }

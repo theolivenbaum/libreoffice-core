@@ -890,11 +890,11 @@ public sealed partial record ChartPlot
     /// category axis; the axis is drawn identically on both sides.
     /// </para>
     /// </remarks>
-    public Colour? ValueMinorGrid { get; init; }
+    public ChartGrid? ValueMinorGrid { get; init; }
 
     /// <summary>The colour the category axis' minor gridlines are drawn in, or null.</summary>
     /// <inheritdoc cref="ValueMinorGrid"/>
-    public Colour? CategoryMinorGrid { get; init; }
+    public ChartGrid? CategoryMinorGrid { get; init; }
 
     /// <summary>
     /// How many sub-intervals a minor gridline divides one major interval into.
