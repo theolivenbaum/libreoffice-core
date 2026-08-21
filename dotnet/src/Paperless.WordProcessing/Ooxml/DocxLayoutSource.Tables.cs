@@ -98,10 +98,14 @@ public sealed partial class DocxLayoutSource
         WordTableLook look = WordTableLook.Read(properties);
         int rowCount = CountRows(element, depth: 0);
 
+        // How wide a band is belongs to the *style*, not to the table: there is no table-level element
+        // for it at all. Resolved once here so that every row of the table counts in the same units.
+        (int Rows, int Columns) bands = _styles.TableStyleBandSizes(styleId);
+
         _tableDepth++;
         try
         {
-            ReadRows(element, rows, tablePadding, properties, depth: 0, styleId, look, rowCount);
+            ReadRows(element, rows, tablePadding, properties, depth: 0, styleId, look, rowCount, bands);
         }
         finally
         {
@@ -369,7 +373,8 @@ public sealed partial class DocxLayoutSource
         int depth,
         string? styleId,
         WordTableLook look,
-        int rowCount)
+        int rowCount,
+        (int Rows, int Columns) bands)
     {
         if (depth > 8) return;
 
@@ -379,7 +384,8 @@ public sealed partial class DocxLayoutSource
 
             if (Word.Is(child, "tr"))
             {
-                rows.Add(Row(child, tablePadding, tableProperties, styleId, look, rows.Count, rowCount));
+                rows.Add(Row(
+                    child, tablePadding, tableProperties, styleId, look, rows.Count, rowCount, bands));
                 continue;
             }
 
@@ -388,7 +394,8 @@ public sealed partial class DocxLayoutSource
             if (Word.Is(child, "sdt") || Word.Is(child, "sdtContent")
                 || Word.Is(child, "customXml") || Word.Is(child, "ins"))
             {
-                ReadRows(child, rows, tablePadding, tableProperties, depth + 1, styleId, look, rowCount);
+                ReadRows(
+                    child, rows, tablePadding, tableProperties, depth + 1, styleId, look, rowCount, bands);
             }
         }
     }
@@ -427,7 +434,8 @@ public sealed partial class DocxLayoutSource
         string? styleId,
         WordTableLook look,
         int rowIndex,
-        int rowCount)
+        int rowCount,
+        (int Rows, int Columns) bands)
     {
         XElement? properties = Word.Child(element, "trPr");
         List<PendingCell> cells = [];
@@ -449,14 +457,25 @@ public sealed partial class DocxLayoutSource
 
             // Set around `ReadCell` alone: the cell's paragraphs are read inside it, and a nested table
             // there restores its own on the way out.
-            _tableStyleRun = _styles.TableStyleRunProperties(
-                styleId,
-                new WordTableStyleConditions(
-                    look,
-                    IsFirstRow: rowIndex == 0,
-                    IsLastRow: rowCount > 0 && rowIndex == rowCount - 1,
-                    IsFirstColumn: index == 0,
-                    IsLastColumn: index == lastIndex));
+            bool isFirstRow = rowIndex == 0;
+            bool isLastRow = rowCount > 0 && rowIndex == rowCount - 1;
+            bool isFirstColumn = index == 0;
+            bool isLastColumn = index == lastIndex;
+
+            WordTableStyleConditions conditions = new(
+                look,
+                isFirstRow,
+                isLastRow,
+                isFirstColumn,
+                isLastColumn,
+                // The band is counted over the rows and columns the edge layers do not claim, and
+                // `012_Project_Timeline_Template_Black_and_Brown_Theme` is what fixes that: its bands
+                // land on table rows 2, 4, 6 and 8, which is the heading row excluded. A row inside an
+                // edge region has no band at all rather than band nought.
+                Band(rowIndex, isFirstRow, isLastRow, look.FirstRow, look.LastRow, bands.Rows),
+                Band(index, isFirstColumn, isLastColumn, look.FirstColumn, look.LastColumn, bands.Columns));
+
+            _tableStyleRun = _styles.TableStyleRunProperties(styleId, conditions);
 
             cells.Add(new PendingCell(
                 new PageTableCell
@@ -467,7 +486,8 @@ public sealed partial class DocxLayoutSource
                     Padding = Padding(Word.Child(cellProperties, "tcMar"), tablePadding),
                     VerticalAlignment = VerticalAlignment(cellProperties),
                     TextDirection = TextDirection(cellProperties),
-                    Shading = Shading(cellProperties),
+                    Shading = Shading(cellProperties)
+                              ?? ConditionalShading(styleId, conditions),
                 },
                 Merge(cellProperties),
                 OwnBorders(cellProperties)));
@@ -485,6 +505,50 @@ public sealed partial class DocxLayoutSource
             // LibreOffice reads the same element the same way — "row can't break across pages if
             // nIntValue == 1" (`dmapper/TablePropertiesHandler.cxx`).
             CanSplit: !Word.IsOn(Word.Child(properties, "cantSplit")));
+    }
+
+    /// <summary>
+    /// Which band a row or column falls in, or null when an edge layer claims it.
+    /// </summary>
+    /// <remarks>
+    /// The index counts only the rows (or columns) outside the <c>firstRow</c>/<c>lastRow</c> regions
+    /// <em>the table asked for</em>: a style declaring a <c>firstRow</c> layer that the table's
+    /// <c>w:tblLook</c> switches off leaves its heading row in the banding, which is what Word does.
+    /// Only the first row and the last can be in a region, so subtracting one for a claimed leading
+    /// edge is the whole of the arithmetic.
+    /// </remarks>
+    /// <param name="index">The row's or cell's own index.</param>
+    /// <param name="isFirst">Whether it is the leading one.</param>
+    /// <param name="isLast">Whether it is the trailing one.</param>
+    /// <param name="claimsFirst">Whether the table asked for the leading edge's layer.</param>
+    /// <param name="claimsLast">Whether the table asked for the trailing edge's layer.</param>
+    /// <param name="size">The band size, at least one.</param>
+    private static int? Band(
+        int index, bool isFirst, bool isLast, bool claimsFirst, bool claimsLast, int size)
+    {
+        if ((claimsFirst && isFirst) || (claimsLast && isLast)) return null;
+
+        int within = index - (claimsFirst ? 1 : 0);
+        return within < 0 ? null : within / Math.Max(1, size);
+    }
+
+    /// <summary>
+    /// The fill a table style's conditional <c>w:tcPr</c> layers give a cell, or null for none.
+    /// </summary>
+    /// <remarks>
+    /// Asked only after the cell's own <c>w:shd</c>, which is direct formatting and absolute. The
+    /// layers arrive most specific first and the first one stating a <c>w:shd</c> wins outright —
+    /// there is no blending between layers, only between a <c>w:shd</c>'s own foreground and
+    /// background, which <see cref="ShadeColour"/> does.
+    /// </remarks>
+    private Colour? ConditionalShading(string? styleId, WordTableStyleConditions conditions)
+    {
+        foreach (XElement layer in _styles.TableStyleCellProperties(styleId, conditions))
+        {
+            if (Word.Child(layer, "shd") is { } shade) return ShadeColour(shade);
+        }
+
+        return null;
     }
 
     /// <summary>

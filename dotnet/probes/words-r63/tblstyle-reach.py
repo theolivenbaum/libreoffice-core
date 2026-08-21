@@ -134,11 +134,10 @@ class Styles:
                 shd = None if tcpr is None else tcpr.find(W + 'shd')
                 if shd is not None:
                     return name, shd.get(W + 'fill'), shd.get(W + 'val')
-            tp = st.find(W + 'tblPr')                    # the style's unconditional tcPr half
-            if tp is not None:
-                shd = tp.find(W + 'shd')
-                if shd is not None:
-                    return 'tblPr', shd.get(W + 'fill'), shd.get(W + 'val')
+            tcpr = st.find(W + 'tcPr')                   # the style's unconditional cell half
+            shd = None if tcpr is None else tcpr.find(W + 'shd')
+            if shd is not None:
+                return 'style/tcPr', shd.get(W + 'fill'), shd.get(W + 'val')
         return None, None, None
 
 

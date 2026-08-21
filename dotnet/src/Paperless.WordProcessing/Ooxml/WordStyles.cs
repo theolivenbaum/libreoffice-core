@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Xml.Linq;
 using Paperless.Core.Diagnostics;
 using Paperless.Ooxml;
@@ -123,19 +124,25 @@ public sealed class WordStyle
         ParagraphProperties = Word.Child(element, "pPr");
         RunProperties = Word.Child(element, "rPr");
         TableProperties = Word.Child(element, "tblPr");
+        CellProperties = Word.Child(element, "tcPr");
 
         Dictionary<string, XElement> conditional = new(StringComparer.Ordinal);
+        Dictionary<string, XElement> conditionalCells = new(StringComparer.Ordinal);
         foreach (XElement layer in Word.Children(element, "tblStylePr"))
         {
             if (Word.Attribute(layer, "type") is not { Length: > 0 } type) continue;
-            if (Word.Child(layer, "rPr") is not { } runProperties) continue;
 
             // First wins, because a style stating the same layer twice is stating it once and then
-            // contradicting itself, and Word keeps the first.
-            conditional.TryAdd(type, runProperties);
+            // contradicting itself, and Word keeps the first. Each half is indexed on its own: a layer
+            // carrying only a `w:tcPr` is a real layer, and skipping the whole element when it has no
+            // `w:rPr` — which is what stood here — is why a conditional cell shade was read by nothing.
+            if (Word.Child(layer, "rPr") is { } runProperties) conditional.TryAdd(type, runProperties);
+            if (Word.Child(layer, "tcPr") is { } cellProperties)
+                conditionalCells.TryAdd(type, cellProperties);
         }
 
         ConditionalRunProperties = conditional;
+        ConditionalCellProperties = conditionalCells;
     }
 
     /// <summary>The identifier content refers to. Not the user-visible name.</summary>
@@ -175,9 +182,22 @@ public sealed class WordStyle
     /// <remarks>
     /// Indexed rather than kept as a list because a cell asks for named regions in a fixed order of
     /// specificity — see <see cref="WordTableStyleConditions.Names"/> — and never enumerates them.
-    /// Layers carrying no <c>w:rPr</c> are absent: this round applies the run half only.
+    /// Layers carrying no <c>w:rPr</c> are absent from this dictionary and may still be present in
+    /// <see cref="ConditionalCellProperties"/>.
     /// </remarks>
     public IReadOnlyDictionary<string, XElement> ConditionalRunProperties { get; }
+
+    /// <summary>
+    /// A table style's conditional <c>w:tcPr</c> layers, by the <c>w:tblStylePr w:type</c> that names
+    /// each region. Empty on every other kind of style.
+    /// </summary>
+    /// <remarks>
+    /// The other half of the same twelve layers, and the one a table's *shading* comes out of. Kept
+    /// separately rather than storing the <c>w:tblStylePr</c> itself so that the two resolvers cannot
+    /// accidentally read each other's element: a <c>w:shd</c> exists under both <c>w:rPr</c> and
+    /// <c>w:tcPr</c> and means different things there — character shading against cell shading.
+    /// </remarks>
+    public IReadOnlyDictionary<string, XElement> ConditionalCellProperties { get; }
 
     /// <summary>
     /// A table style's <c>w:tblPr</c>, or null. Meaningless on any other kind of style.
@@ -189,6 +209,16 @@ public sealed class WordStyle
     /// rather than a resolved value.
     /// </remarks>
     public XElement? TableProperties { get; }
+
+    /// <summary>
+    /// A table style's unconditional <c>w:tcPr</c>, or null. Meaningless on any other kind of style.
+    /// </summary>
+    /// <remarks>
+    /// <c>w:style/w:tcPr</c> — a sibling of <c>w:tblPr</c> and not a child of it, which is the reading
+    /// a census of this got wrong first. It is the <c>wholeTable</c> layer's cell half by another
+    /// spelling, and sixteen corpus cells take their fill from it.
+    /// </remarks>
+    public XElement? CellProperties { get; }
 
     /// <summary>
     /// Replaces the style's <c>w:pPr</c> with an equivalent that states one more attribute, for
@@ -822,6 +852,89 @@ public sealed class WordStyles
         }
 
         return layers;
+    }
+
+    /// <summary>
+    /// The <c>w:tcPr</c> layers a table style applies to one cell, most specific first.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The cell half of <see cref="TableStyleRunProperties"/>, resolved the same way and in the same
+    /// order: a style's own layers before its parent's, and within a style the order of
+    /// <see cref="WordTableStyleConditions.Names"/>. The unconditional <c>w:style/w:tcPr</c> goes last
+    /// within each style, since every conditional layer refines it.
+    /// </para>
+    /// <para>
+    /// This is what draws. Round 62 measured <c>012_Project_Timeline_Template_Black_and_Brown_Theme</c>
+    /// page 1 at <b>75 fills on the reference against 19 of ours</b>, established that the missing 56
+    /// are <em>not</em> <c>w:shd</c> — the document holds twelve and we draw twelve — and named this as
+    /// the seat. The resolved reach over the corpus is 749 cells in 42 documents.
+    /// </para>
+    /// </remarks>
+    /// <param name="tableStyleId">The <c>w:tblStyle</c> the table names, or null.</param>
+    /// <param name="conditions">Which regions the cell is in, and which the table asked for.</param>
+    public List<XElement> TableStyleCellProperties(
+        string? tableStyleId, WordTableStyleConditions conditions)
+    {
+        List<XElement> layers = [];
+
+        WordStyle? current = Find(tableStyleId, WordStyleType.Table);
+        if (current is null) return layers;
+
+        IReadOnlyList<string> names = conditions.Names;
+        HashSet<string> visited = new(StringComparer.Ordinal);
+
+        for (int depth = 0; current is not null && depth < MaxBasedOnDepth; depth++)
+        {
+            foreach (string name in names)
+            {
+                if (current.ConditionalCellProperties.TryGetValue(name, out XElement? found))
+                    layers.Add(found);
+            }
+
+            if (current.CellProperties is { } own) layers.Add(own);
+
+            if (!visited.Add(current.StyleId)) break;
+            current = Find(current.BasedOn, WordStyleType.Table);
+        }
+
+        return layers;
+    }
+
+    /// <summary>
+    /// The band sizes a table style declares — <c>w:tblStyleRowBandSize</c> and
+    /// <c>w:tblStyleColBandSize</c>, one each, defaulting to one.
+    /// </summary>
+    /// <remarks>
+    /// Read off the <c>w:tblPr</c> chain rather than off the table, because they belong to the style:
+    /// a table has no way to say how wide its own bands are. The first stated value in the chain wins,
+    /// the style's own before its parent's, and a value below one is clamped away — a band size of
+    /// nought would divide by zero and a negative one is not a thing the format can mean.
+    /// </remarks>
+    /// <param name="tableStyleId">The <c>w:tblStyle</c> the table names, or null.</param>
+    public (int Rows, int Columns) TableStyleBandSizes(string? tableStyleId)
+    {
+        int rows = 0;
+        int columns = 0;
+
+        foreach (XElement properties in TableStyleTableProperties(tableStyleId))
+        {
+            if (rows == 0 && Size(properties, "tblStyleRowBandSize") is { } row) rows = row;
+            if (columns == 0 && Size(properties, "tblStyleColBandSize") is { } column) columns = column;
+        }
+
+        return (rows > 0 ? rows : 1, columns > 0 ? columns : 1);
+
+        static int? Size(XElement properties, string localName)
+            => Word.Child(properties, localName) is { } element
+               && int.TryParse(
+                   Word.Attribute(element, "val"),
+                   NumberStyles.Integer,
+                   CultureInfo.InvariantCulture,
+                   out int value)
+               && value > 0
+                ? value
+                : null;
     }
 
     /// <summary>
