@@ -656,6 +656,15 @@ the second one permanently: `look.py` resolves a document by `CORPUS.rglob(stem.
 because of it. Reconcile every `find`-based total case-folded, and treat a total that grew without
 a corpus commit as this until proven otherwise.
 
+**And the alias count is not static — it grows when you look at a page.** Measured across one
+session: the corpus held 45 alias entries, then 38 more materialised on the sheets track alone, and
+a whole-corpus sweep's `TOTAL` went **991 → 1033 with the corpus unchanged and not one commit to
+it**. `look.py` and `pair.sh` create them by resolving a document. So a sweep `TOTAL` is not
+comparable with the same sweep's `TOTAL` an hour earlier, let alone with a stored one. **Score every
+sweep against `MANIFEST.tsv`'s path list, and have the scorer refuse to print unless every manifest
+path found a row** — that check is what keeps the figure meaningful while the denominator drifts
+underneath it.
+
 Measured 2026-08-20, so the shape of it is not in doubt: `grants-2005.xls` and `grants-2005.XLS`
 report the **same inode** (`35184372089472271`), the same size, and a **link count of 1**. `git
 ls-files` lists only the lower-case name and `git status` reports **nothing untracked**, so git
