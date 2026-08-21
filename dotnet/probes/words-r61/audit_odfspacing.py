@@ -26,8 +26,19 @@ Measured by the reference's own PDF geometry: the boundary is the difference bet
 first-baselines, and the top is the first baseline against the page's top edge. Both are read off
 text origins, so nothing here depends on reading a border or a fill.
 
-Flat ODF rather than a zipped `.odt`, because the whole document is one file and the arms differ by
-one element — there is no chance of an arm silently carrying the wrong settings part.
+**The arms are derived from round 53's own fixture rather than authored, and that was not the first
+attempt.** A minimal flat ODF written here — correct namespaces, `ooo:configuration-settings`, the
+item spelled exactly as the fixture spells it — was read correctly by *our* reader (24.00 pt with
+the flag false) and **ignored outright by 26.2.4.2**, which gave 32.00 pt in all six arms including
+the two that state `false`. A probe that reports "the reference ignores this setting" because its
+own file was not read is the shape this project has paid for twice, so the arms are now one string
+substitution each into `paragraph-spacing-collapsed.fodt`, a file 26.2.4.2 demonstrably reads: it
+answers 24.00 with the flag as shipped. What the authored file lacked was not chased; the point of
+the round-53 rule is that it does not have to be.
+
+Each variant is rendered into the shared `ref` directory under its own numbered stem, per the test
+corpus README: two `--convert-to` calls that would write the same output name silently produce one
+file and exit 0 for both.
 """
 import os
 import re
@@ -39,67 +50,45 @@ from concurrent.futures import ThreadPoolExecutor
 PAGE_H = 841.89
 PARAGRAPHS = 8
 
-NS = ' '.join([
-    'xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0"',
-    'xmlns:style="urn:oasis:names:tc:opendocument:xmlns:style:1.0"',
-    'xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0"',
-    'xmlns:fo="urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0"',
-    'xmlns:config="urn:oasis:names:tc:opendocument:xmlns:config:1.0"',
-])
+FIXTURE = ('/c/sandbox/workdir/wt-words-r50/dotnet/tests/corpus/features/'
+           'paragraph-spacing-collapsed.fodt')
+
+ITEM = ('<config:config-item config:name="%s" config:type="boolean">%s'
+        '</config:config-item>')
 
 
-def document(setting):
-    """`setting` is None for no `office:settings` at all, else (name, 'true'|'false')."""
-    if setting is None:
-        settings = ''
-    else:
-        name, value = setting
-        settings = (
-            '<office:settings><config:config-item-set '
-            'config:name="ooo:configuration-settings">'
-            f'<config:config-item config:name="{name}" config:type="boolean">{value}'
-            '</config:config-item></config:config-item-set></office:settings>')
+def variant(source, changes):
+    """`changes` maps a setting name to 'true', 'false' or None (remove the item)."""
+    out = source
+    for name, value in changes.items():
+        pattern = re.compile(
+            r'<config:config-item config:name="%s" config:type="boolean">'
+            r'(?:true|false)</config:config-item>' % re.escape(name))
+        if not pattern.search(out):
+            raise SystemExit('the fixture does not state %s — refusing to guess' % name)
+        out = pattern.sub('' if value is None else ITEM % (name, value), out, count=1)
+    return out
 
-    body = ''.join(f'<text:p text:style-name="P1">Line {i}</text:p>'
-                   for i in range(PARAGRAPHS))
 
-    return (
-        '<?xml version="1.0" encoding="UTF-8"?>'
-        f'<office:document {NS} office:version="1.3" '
-        'office:mimetype="application/vnd.oasis.opendocument.text">'
-        + settings +
-        '<office:automatic-styles>'
-        '<style:style style:name="P1" style:family="paragraph">'
-        '<style:paragraph-properties fo:margin-top="12pt" fo:margin-bottom="8pt" '
-        'fo:line-height="12pt"/>'
-        '<style:text-properties style:font-name="Liberation Serif" fo:font-size="12pt"/>'
-        '</style:style>'
-        '<style:page-layout style:name="PL1"><style:page-layout-properties '
-        'fo:page-width="21cm" fo:page-height="29.7cm" fo:margin-top="2.54cm" '
-        'fo:margin-bottom="2.54cm" fo:margin-left="2.54cm" fo:margin-right="2.54cm"/>'
-        '</style:page-layout>'
-        '</office:automatic-styles>'
-        '<office:master-styles><style:master-page style:name="Standard" '
-        'style:page-layout-name="PL1"/></office:master-styles>'
-        f'<office:body><office:text>{body}</office:text></office:body>'
-        '</office:document>')
-
+ADD = 'AddParaTableSpacing'
+AT_START = 'AddParaTableSpacingAtStart'
 
 CASES = [
-    ('add-absent', None,
-     'no office:settings at all — expect ADDED, 32.00 pt boundaries and a 93.60 pt first baseline'),
-    ('add-false', ('AddParaTableSpacing', 'false'),
-     'expect COLLAPSED, 24.00 pt boundaries'),
-    ('add-true', ('AddParaTableSpacing', 'true'),
-     'expect ADDED, 32.00 pt boundaries'),
-    ('atstart-absent', None,
-     'the same document again, read for its first baseline — expect 93.60'),
-    ('atstart-false', ('AddParaTableSpacingAtStart', 'false'),
-     'expect the first baseline at 81.60, the space dropped'),
-    ('atstart-true', ('AddParaTableSpacingAtStart', 'true'),
-     'expect the first baseline at 93.60'),
+    ('as-shipped', {},
+     'the fixture unchanged: add=false, atStart=true. Expect first 93.60, boundaries 24.00'),
+    ('add-true', {ADD: 'true'}, 'expect boundaries 32.00 — the two spacings sum'),
+    ('add-removed', {ADD: None},
+     'the discriminator: absent must behave as TRUE, so 32.00'),
+    ('atstart-false', {AT_START: 'false'},
+     'expect the first baseline at 81.60, the space-before dropped'),
+    ('atstart-removed', {AT_START: None},
+     'the second discriminator: absent must behave as TRUE, so 93.60'),
+    ('both-off', {ADD: 'false', AT_START: 'false'},
+     'the corner: 81.60 and 24.00 together'),
 ]
 
+PARAGRAPHS = 8
+PAGE_H = 841.89
 
 def render_ref(src, outdir, slot):
     subprocess.run(
@@ -145,12 +134,14 @@ if __name__ == '__main__':
     for d in ('in', 'ref', 'ours'):
         os.makedirs(os.path.join(out, d), exist_ok=True)
 
+    source = open(FIXTURE, encoding='utf-8').read()
+
     built = []
-    for i, (name, setting, why) in enumerate(CASES):
+    for i, (name, changes, why) in enumerate(CASES):
         stem = '%02d-%s' % (i, name)
         path = os.path.join(out, 'in', stem + '.fodt')
         with open(path, 'w', encoding='utf-8') as f:
-            f.write(document(setting))
+            f.write(variant(source, changes))
         built.append((name, stem, path, why))
 
     with ThreadPoolExecutor(workers) as pool:
@@ -174,7 +165,7 @@ if __name__ == '__main__':
                 sys.exit(2)
             read[(stem, side)] = ys
 
-    print('%d flat-ODF packages, %d halves, every half drew all %d baselines\n'
+    print('%d flat-ODF variants of the round-53 fixture, %d halves, all %d baselines each\n'
           % (len(built), 2 * len(built), PARAGRAPHS))
     print('%-16s %-22s %-22s %s' % ('case', 'reference top / pitch', 'ours', 'what it tests'))
     for name, stem, path, why in built:
@@ -182,6 +173,11 @@ if __name__ == '__main__':
         o = read[(stem, 'ours')]
         rp = sorted({round(b - a, 2) for a, b in zip(r, r[1:])})
         op = sorted({round(b - a, 2) for a, b in zip(o, o[1:])})
-        agree = 'AGREE' if (r[0], rp) == (o[0], op) else 'DIFFER'
+        # Half a twip and a little: both sides quantise onto the twip grid and the reference
+        # rounds its PDF coordinates to two places, so 93.60 against 93.59 is agreement.
+        agree = ('AGREE'
+                 if abs(r[0] - o[0]) <= 0.06 and len(rp) == len(op)
+                 and all(abs(a - b) <= 0.06 for a, b in zip(rp, op))
+                 else 'DIFFER')
         print('%-16s %7.2f / %-12s %7.2f / %-12s %-7s %s'
               % (name, r[0], rp, o[0], op, agree, why))
