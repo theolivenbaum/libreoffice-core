@@ -17880,3 +17880,91 @@ style 32, and what is left of that document. Then the **rotated category label's
 instrument built before the hypothesis is believed. **The fitted bullet's 1.9 pt is now untouched
 for six rounds**; this round deferred it as a decision — three chart items with direct measurements
 outranked it — and the next round should either take it or say why in the same words.
+
+---
+
+## Round 61 — sheets (2026-08-21), branch `wt-sheets-r61`, base `3f079cea621`
+
+**Sheets 279 → 281 of 307. Zero regressions. `003` and `027` both close.**
+`dotnet/probes/sheets-r61/` — `prediction.md` committed before any code, `results.md` beside it.
+
+**The pie's first pass is `reduceToMinimumSize`, not the diagram.** Round 60 solved the arithmetic
+backwards from the reference's answer and named the unknown right; what it assumed wrong is that
+pass 1 runs at the full diagram rectangle. `ChartView.cxx:557-560` reduces the diagram to
+`round(side/2.2)` before any series exists, and the axis-label pass that would grow it straight back
+is guarded by `!bIsPieOrDonut` — so a **pie**, and only a pie, lays its first-pass labels out around
+a radius of 50.33 pt instead of 110.72. `git blame` dates that line 2019-05-28, so it is in
+26.2.4.2. The best-fit allowance falls from 88.6 pt to 40.3, every label fails the inner fit instead
+of one, and the consumed rectangle overruns on all four sides. `adjustInnerSize` needed no change.
+
+| | before | after | reference |
+|---|---:|---:|---:|
+| `003` pie centre | (382.80, 467.68) | **(408.81, 464.81)** | (408.84, 464.74) |
+| `019` pie centre | (412.44, 467.77) | **(408.90, 464.88)** | (408.95, 464.82) |
+| `003` radius | 104.70 | **100.01** | 99.78 |
+
+**26.04 pt of centre error to 0.03, on all four corpus pies at once**, with nothing fitted.
+
+**The 9.57 pt chart title is two terms that were already in the tree — in the reservation, not in
+the pen.** `lcl_createTitle`'s flat **135** for a `MAIN_TITLE` and `ShapeFactory::createText`'s
+`round(fontHeight × 0.30)` upper inset. `DiagramAreaOf` has carried both since the layout was
+written and `AddTitles` carried neither. Measured over **eighteen** one-variable rewrites, nine
+sizes 6-36 pt × bold and regular, both sides rendered: `y_ours − y_ref` tracks
+`(135 + round(0.30·size))/100 mm` across the whole range with **no free parameter**.
+601.44 → **592.20** against 591.87; **the 0.33 pt residual is left unfitted** and looks like an
+absolute chart-device ascent offset that round 60's slope-based control could not have seen.
+
+**Prediction 12 of 13.** The miss is that all four pies come out **two words over** the reference —
+inside the 2% band on all four, which is why four verdicts came out right off a number that was
+wrong four times.
+
+**Vision: two new findings, each confirmed by a second instrument, each with a census.**
+- **The chart area's default `#D9D9D9` border.** Two blind readers on two unrelated documents; the
+  reference draws exactly one per chart where `c:chartSpace` states no `c:spPr` (3 against our 0 on
+  each of `005_Contextures` and `microsoft_learn_multi_chart_examples`), and **both sides draw one**
+  on the four `advanced_excel_pie` documents, which do state one — the control that separates the
+  rule from the observation. Round 60 read 63 strokes against 66 and said "none" was wrong as
+  stated; **the three it could not account for are the three chart frames.** 10 sheets documents /
+  23 parts, 2 slides, 1 words.
+- **A data label's stated text colour.** `005`'s pie states
+  `<a:defRPr b="1"><a:solidFill><a:schemeClr val="bg1"/>` — white. Ours draws 4203 dark pixels over
+  the pie to the reference's 720, and 410 light to its 3053. `ChartDataLabel` carries **no colour
+  field** and every label is drawn in a hardcoded black. **22 sheets documents / 40 parts, 49 slides
+  / 93, 7 words / 7** — mostly a slides item.
+- And on `003` the reader called the pie geometry **identical**, where round 60's reader on the same
+  page measured 45 px of centre offset. Her first-ranked difference — M3 inside the slice on the
+  reference and outside on ours — is confirmed by the ghost-key count, **2 against 1**, and is
+  where the two surplus words come from.
+
+**24.2.7.2 audit**: counters re-derived — **37 open in 26 files, 26 marker lines (21 VERIFIED, 4
+FIXED, 1 WRONG)**. `Paperless.Ooxml/DrawingML/DrawingFill.cs`:115 (`a:lum` as a whole per cent)
+**VERIFIED on 26.2.4.2**, by a probe that never runs our renderer: `70999/-70999` renders
+byte-identically to `70000/-70000` (truncation) and `69500/-69500` does not (not rounding) — **the
+two cases fail under the two readings in opposite directions** — with two controls first.
+`Paperless.Ooxml` is one of one.
+
+**Tests +11** (`Paperless.Core` 376 → 387). **5045 passed, 0 failed, 1 skipped.** Build 0/0.
+Five mutations: four detected; the fifth (squaring before intersecting) is an **equivalent
+formulation, not a drift guard** — the reduced rectangle is always strictly inside the available
+one, which also refutes one of the round's own stated blind spots.
+
+**Shared layer**: the diff is `Paperless.Core/Charts/ChartLayout*.cs`. Census over all 946: **62
+sheets / 14 slides / 3 words** documents have a titled chart; **7 / 5 / 2** have a best-fit pie
+(slides `bitesize-writing-a-report.pptx`, `3495.pptx`; words `pie-chart-result.docx`,
+`pie-chart-template.docx` are the `done` ones at risk). **Falsifiable: 0 verdicts move on words and
+0 on slides.**
+
+**`MANIFEST.tsv`** (not touched; proposed): `003_advanced_excel_pie.xlsx` and
+`027_advanced_excel_pie.xlsx` `open` → `done`.
+
+**A refutation the round paid for rather than reasoned about.** `005_Contextures`'s page-1 pie is
+`dLblPos="inEnd"`, so our gate skips the second pass entirely and its radius is **131.82 against the
+reference's 125.21** — 5.3%, the same class, unchanged by this round. Widening the gate to *any*
+drawn pie label was implemented and rendered: the pie moved **0.81 pt and did not shrink at all**,
+because we place an `inEnd` label at half the radius (the `CENTER` arm) so the consumed rectangle
+never leaves the reduced wall. **The missing piece is the `INSIDE`/`OUTSIDE` placement geometry, not
+the gate.** Reverted, restored by `cp` + `touch`, rebuilt, and the shipped state re-rendered to
+prove it.
+
+**Next**: the inner-fit test that rejects one label of five (`003`'s M3, ghost keys 2 against 1);
+the data-label text colour; the default chart border; then `cellIs`.

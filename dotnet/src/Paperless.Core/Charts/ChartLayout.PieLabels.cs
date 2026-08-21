@@ -551,6 +551,65 @@ public static partial class ChartLayout
     }
 
     /// <summary>
+    /// The rectangle a diagram's <em>first</em> pass is drawn at.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>VDiagram::reduceToMinimumSize</c> (<c>VDiagram.cxx:635-651</c>), called from
+    /// <c>impl_createDiagramAndContent</c> at <c>ChartView.cxx:557-560</c> before a single series
+    /// shape exists:
+    /// </para>
+    /// <code>
+    /// // It is preferable to use full size than minimum for pie charts
+    /// if (!rParam.mbUseFixedInnerSize)
+    ///     aVDiagram.reduceToMinimumSize();
+    /// </code>
+    /// <para>
+    /// <strong>The comment is a complaint, not a description.</strong> The guard is on
+    /// <c>mbUseFixedInnerSize</c> — a manual <c>c:layout</c> on the plot area — and not on the
+    /// chart type, so a pie is reduced too; <c>git blame</c> puts that line at 2019-05-28, well
+    /// before 26.2.4.2. What normally undoes it is the axis-label pass at <c>:588</c>, whose
+    /// <c>adjustInnerSize</c> grows the diagram straight back out — and that pass is guarded by
+    /// <c>!bIsPieOrDonut</c>. So on a pie, and on a pie alone, the labels of pass 1 are laid out
+    /// around a diagram <em>one 2.2th</em> of the available rectangle, and the pie's own second
+    /// pass at <see cref="AdjustInnerSize"/> is the only thing that grows it back.
+    /// </para>
+    /// <para>
+    /// That is what decides which labels pass 1 rebuilds outside, and it is the whole of the
+    /// difference round 60 measured and could not close: at radius 110.72 the best-fit wrapping
+    /// allowance is 88.6 pt and four of <c>003_advanced_excel_pie</c>'s five labels fit inside
+    /// their slices, so nothing reaches left of the pie and <c>consumed.Left</c> came out at the
+    /// diagram's own left edge. At radius 50.33 the allowance is 40.3 pt, every label fails the
+    /// inner fit, and the consumed rectangle overruns on all four sides — which is the shape the
+    /// reference's answer has to be solved back to.
+    /// </para>
+    /// <para>
+    /// The rounding is <c>std::round</c>, away from zero, on hundredths of a millimetre; the
+    /// intersection with the available rectangle and then the aspect ratio are
+    /// <c>adjustPosAndSize</c>'s own order (<c>VDiagram.cxx:89-127</c>) and swapping them moves
+    /// the pass-1 centre by tens of points.
+    /// </para>
+    /// </remarks>
+    private static DocRect ReducedToMinimum(ChartPlot plot, DocRect available)
+    {
+        if (available.Width <= Length.Zero || available.Height <= Length.Zero) return available;
+
+        Length width = Length.FromMm100(
+            (long)Math.Round(available.Width.Mm100 / 2.2, MidpointRounding.AwayFromZero));
+        Length height = Length.FromMm100(
+            (long)Math.Round(available.Height.Mm100 / 2.2, MidpointRounding.AwayFromZero));
+
+        Length left = Length.Max(available.X + width, available.Left);
+        Length top = Length.Max(available.Y + height, available.Top);
+        Length right = Length.Min(available.X + width + width, available.Right);
+        Length bottom = Length.Min(available.Y + height + height, available.Bottom);
+
+        return right <= left || bottom <= top
+            ? available
+            : Squared(plot, new DocRect(left, top, right - left, bottom - top));
+    }
+
+    /// <summary>
     /// The diagram rectangle a pie is redrawn at once its labels have been measured.
     /// </summary>
     /// <remarks>
