@@ -112,6 +112,34 @@ public sealed class TableParagraphLeadingTests
         Tables()[2].Points.ShouldBe(78.90, tolerance: Tolerance);
     }
 
+    /// <summary>The <c>atLeast</c> raise sits above the text, so the baseline moves with it.</summary>
+    /// <remarks>
+    /// <para>
+    /// <b>The table position alone cannot see this, and finding that out is what the test is for.</b>
+    /// Stripping the raise from the paragraph's first line shortens the paragraph by 7.35 pt, and
+    /// handing that same raise on as leading lengthens the gap below it by 7.35 — so the table lands in
+    /// exactly the same place either way and all three assertions above pass over a paragraph drawn
+    /// 7.35 pt too high. Running the mutation through <c>verify-test.sh</c> is what exposed the
+    /// cancellation; the baseline is the quantity that separates them.
+    /// </para>
+    /// <para>
+    /// The reference draws it 76.15 pt below the body's top edge: table 2's bottom edge at 58.90, the
+    /// 7.35 pt raise, and Caladea's 9.90 pt ascent at 11 pt.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void TheAtLeastRaiseSitsAboveTheTextAndNotBelowIt()
+    {
+        using IDocument document =
+            new WordProcessingReader().Read(DocumentSource.FromFile(Corpus.Require(Fixture)));
+
+        WordProcessingPages pages = (WordProcessingPages)((IPaginatedDocument)document).Layout();
+        IReadOnlyList<PlacedLine> lines = pages.Pages[0].Lines;
+
+        lines.Count.ShouldBe(3, $"{Fixture}'s three body paragraphs are one line each");
+        lines[2].Baseline.Points.ShouldBe(76.15, tolerance: Tolerance);
+    }
+
     /// <summary>Where each table's top edge sits, relative to the body's top edge.</summary>
     private static List<Length> Tables()
     {
