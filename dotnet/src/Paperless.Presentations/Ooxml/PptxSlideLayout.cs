@@ -780,7 +780,8 @@ internal sealed partial class PptxSlideLayout
         // table, one cell, zero margins, top-anchored, six stated sizes from 10 to 40 pt. The
         // reference draws its first baseline at 1.0007, 1.0005, 1.0003, 1.0003, 1.0002 and 1.0002
         // ems below the cell's top edge -- one em, quantised, on all six, and NOT the 0.907 em the
-        // 24.2.7.2 note above records. Our own six land on the reference's to 0.000 pt.]
+        // superseded note above records. Our own six land on the reference's to 0.000 pt.
+        // The ODF side of the same claim, OdpSlideLayout.cs:302, was NOT covered by this probe.]
         return PptxTextBody.Read(
             body, theme.Colours, theme.MinorLatin,
             themed.Count == 0 ? null : _ => themed) with
