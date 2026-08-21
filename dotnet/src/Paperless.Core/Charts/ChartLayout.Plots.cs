@@ -197,7 +197,7 @@ public static partial class ChartLayout
             // placed by the ray and not by a side of the plot area.
             DocPoint beyond = RadarPoint(web, at, categories, 1.0 + RadarLabelReach);
             labels.Add(new ChartLabel(
-                text, beyond, ChartLabelAnchor.Centre, plot.LabelSize, AxisColour));
+                text, beyond, ChartLabelAnchor.Centre, plot.LabelSize, plot.LabelColour));
         }
 
         if (!plot.ValueAxisVisible) return;
@@ -210,7 +210,7 @@ public static partial class ChartLayout
                 new DocPoint(at.X - LabelSpacing, at.Y),
                 ChartLabelAnchor.RightMiddle,
                 plot.LabelSize,
-                AxisColour));
+                plot.LabelColour));
         }
     }
 
@@ -742,7 +742,7 @@ public static partial class ChartLayout
                         new DocPoint(left + (right - left) / 2, top + height / 2),
                         ChartLabelAnchor.Centre,
                         plot.DataLabelFont,
-                        AxisColour,
+                        plot.DataLabelColour,
                         IsBold: plot.IsDataLabelBold));
                 }
 
@@ -800,7 +800,7 @@ public static partial class ChartLayout
                 centre.Y - radius * (reach * Math.Sin(middle))),
             ChartLabelAnchor.Centre,
             plot.DataLabelFont,
-            AxisColour,
+            plot.DataLabelColour,
             IsBold: plot.IsDataLabelBold));
     }
 }

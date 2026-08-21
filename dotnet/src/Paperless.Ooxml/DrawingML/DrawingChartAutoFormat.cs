@@ -41,6 +41,18 @@ public enum ChartAutoObject
 }
 
 /// <summary>
+/// Which of a chart's two framed backgrounds an automatic fill is being asked about.
+/// </summary>
+public enum ChartAutoFrame
+{
+    /// <summary>The whole chart object's background — <c>spChartSpaceFill</c>.</summary>
+    ChartSpace,
+
+    /// <summary>The two-dimensional plot area's wall — <c>spPlotArea2dFills</c>.</summary>
+    PlotArea,
+}
+
+/// <summary>
 /// The colours a chart gives a series that states none — <c>ObjectFormatter</c>'s automatic
 /// formatting, ported.
 /// </summary>
@@ -216,6 +228,71 @@ public static class DrawingChartAutoFormat
         .. AccentsModified(35, "shade", 50000),
         Invisible(41, 48),
     ];
+
+    /// <summary><c>spChartSpaceFill</c>: the chart object's own background, by chart style.</summary>
+    /// <remarks><c>objectformatter.cxx:174-180</c>.</remarks>
+    private static readonly AutoFormatEntry[] ChartSpaceFills =
+    [
+        Single(1, 32, "bg1", null, 0),
+        Single(33, 40, "lt1", null, 0),
+        Single(41, 48, "dk1", null, 0),
+    ];
+
+    /// <summary><c>spPlotArea2dFills</c>: the plot area's wall, by chart style.</summary>
+    /// <remarks>
+    /// <c>objectformatter.cxx:190-197</c>. The <c>tint</c> on the two dark rows carries the
+    /// source's own comment, "tint not documented!?" — it is what LibreOffice does.
+    /// </remarks>
+    private static readonly AutoFormatEntry[] PlotAreaFills =
+    [
+        Single(1, 32, "bg1", null, 0),
+        Single(33, 34, "dk1", "tint", 20000),
+        .. AccentsModified(35, "tint", 20000),
+        Single(41, 48, "dk1", "tint", 95000),
+    ];
+
+    /// <summary>
+    /// The background a chart space or a plot area takes when it states no <c>c:spPr</c>, or null
+    /// when it takes none.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>Below style 33 a pptx chart has no automatic background at all, and that is a
+    /// quirk rather than a table row.</strong> <c>ObjectTypeFormatter</c>'s constructor overrides
+    /// the fill *style* for exactly these two object types when the chart style is 32 or less —
+    /// <c>maFillFormatter.setAutoFill(rData.mrFilter.getGraphicHelper().getDefaultChartAreaFillStyle())</c>,
+    /// <c>objectformatter.cxx:956-959</c> — and <c>PptGraphicHelper</c> answers <c>XML_noFill</c>
+    /// (<c>oox/source/ppt/pptimport.cxx:309-312</c>) where the base helper answers
+    /// <c>XML_solidFill</c> (<c>oox/source/helper/graphichelper.cxx:139-142</c>). The source's own
+    /// comment on it is "this seems to be an undocumented quirk in the OOXML spec".
+    /// </para>
+    /// <para>
+    /// So the <c>bg1</c> row is reachable only from a workbook or a document, where it paints the
+    /// page's own white over a white page. This returns null for it rather than a colour: it is
+    /// today's behaviour on all three tracks, it is right for the format that holds 160 of the
+    /// corpus' 163 slides charts, and the two rows that <em>are</em> implemented — 33 and up —
+    /// are the ones that put ink on a page which has none today. The corpus states a style above
+    /// 32 on exactly three chart parts, all of them 42:
+    /// <c>8_P-Pavese_AIRBUS-ATB-journee-CRATB.pptx</c> and <c>DynamicBubbleChart.xlsx</c>.
+    /// </para>
+    /// <para>
+    /// Measured on Pavese's page 8: the reference paints <c>#000000</c> over the whole chart
+    /// object, 720 x 391 pt, and <c>#454545</c> over the plot wall, 640 x 292 pt, and this reader
+    /// painted neither — 72% of the page.
+    /// </para>
+    /// </remarks>
+    /// <param name="style">The chart's <c>c:style/@val</c>.</param>
+    /// <param name="what">Which of the two backgrounds.</param>
+    /// <param name="theme">The theme the scheme names resolve against.</param>
+    public static Colour? FrameFillOf(int style, ChartAutoFrame what, DrawingTheme? theme)
+    {
+        if (style <= 32) return null;
+
+        AutoFormatEntry[] table =
+            what == ChartAutoFrame.ChartSpace ? ChartSpaceFills : PlotAreaFills;
+
+        return Entry(table, style) is { } entry ? Resolve(entry, 0, 0, theme) : null;
+    }
 
     /// <summary>
     /// The colour a series takes when it states none, as a <c>a:solidFill</c>, or null for none.

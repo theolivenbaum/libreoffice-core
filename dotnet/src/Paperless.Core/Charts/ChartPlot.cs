@@ -733,6 +733,49 @@ public sealed partial record ChartPlot
     public ChartLegendPosition Legend { get; init; } = ChartLegendPosition.None;
 
     /// <summary>The chart area's own fill, or null when it states none.</summary>
+    /// <summary>The colour an axis' tick labels are drawn in — the axes' own <c>c:txPr</c>.</summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>A chart's text is not black because LibreOffice draws chart text black.</strong>
+    /// It is black because <c>tx1</c> usually resolves to black, and a chart that names anything
+    /// else gets it. This reader drew every piece of chart text in one hardcoded
+    /// <c>Colour.Black</c> until round 60, which is right for the majority and wrong for every
+    /// chart on a dark master: <c>8_P-Pavese_AIRBUS-ATB-journee-CRATB.pptx</c> names
+    /// <c>a:schemeClr val="bg1"</c> on its title, on both axes and on its data labels, and the
+    /// reference draws all fourteen of page 8's text runs white where this reader drew
+    /// twenty-two black ones.
+    /// </para>
+    /// <para>
+    /// Five separate properties rather than one, because the five objects state the colour in
+    /// five different places and a chart routinely states it in only some of them — a corpus
+    /// census over every OOXML chart part counts <c>c:valAx</c>, <c>c:catAx</c>, <c>c:title</c>,
+    /// <c>c:dLbls</c> and <c>c:legend</c> separately, and the commonest single statement
+    /// (<c>tx1</c>, 385 times) sits on an axis while the second (<c>bg1</c>, 45) is spread over
+    /// data labels and titles.
+    /// </para>
+    /// <para>
+    /// The default is black on all five, so a format that states nothing — every ODF chart, every
+    /// binary workbook chart — keeps exactly the answer it had.
+    /// </para>
+    /// </remarks>
+    public Colour LabelColour { get; init; } = Colour.Black;
+
+    /// <summary>The colour the chart's main title is drawn in.</summary>
+    /// <remarks>See <see cref="LabelColour"/>.</remarks>
+    public Colour TitleColour { get; init; } = Colour.Black;
+
+    /// <summary>The colour an axis title is drawn in.</summary>
+    /// <remarks>See <see cref="LabelColour"/>.</remarks>
+    public Colour AxisTitleColour { get; init; } = Colour.Black;
+
+    /// <summary>The colour a series' data labels are drawn in.</summary>
+    /// <remarks>See <see cref="LabelColour"/>.</remarks>
+    public Colour DataLabelColour { get; init; } = Colour.Black;
+
+    /// <summary>The colour a legend entry's name is drawn in.</summary>
+    /// <remarks>See <see cref="LabelColour"/>.</remarks>
+    public Colour LegendColour { get; init; } = Colour.Black;
+
     public Colour? Background { get; init; }
 
     /// <summary>
