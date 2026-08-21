@@ -662,6 +662,23 @@ find /tmp -maxdepth 1 -name 'clr-debug-pipe-*' -mmin +120 -print0 | xargs -0 -r 
 hours old. Better still, point a sweep's `TMPDIR` at the host mount (`/c/sandbox/workdir/...`),
 which has 150 GB free where `/` has five.
 
+**A reference PDF differs byte for byte between two sweeps and it means nothing — but one document's
+reference genuinely is non-deterministic, and the two must not be confused.**
+
+The spurious case: **98 bytes of XMP `dc:date`**, length unchanged, with page, word and font counts
+**identical across three sweeps of all 337 words paths**. `soffice` stamps the conversion time into
+the metadata. So a byte diff of two reference renderings is not evidence of anything until the date
+is masked out, and a round that byte-compares reference PDFs will otherwise find "changes"
+everywhere.
+
+The real case: **`ans_mappings_of_eccairs_terms.xlsx`** renders **191 pages eight times and 190
+once** over nine renderings, with words wandering across four values and our side pinned throughout.
+No `TODAY`/`NOW`/`RAND` — layout instability. It is filed `unstable`.
+
+**The discriminator is the gate columns, not the bytes.** Identical page/word/font counts with
+differing bytes is the date. Differing counts across renderings of one unchanged input is the real
+thing, and there is exactly one such document known.
+
 **`verify-test.sh` rebuilds twice, so running it during a sweep replaces the binary under that
 sweep.** The rule "a sweep and a rebuild must never overlap" has always been written as though the
 rebuild would be an explicit `dotnet build`. It need not be: the mutation harness builds on both
