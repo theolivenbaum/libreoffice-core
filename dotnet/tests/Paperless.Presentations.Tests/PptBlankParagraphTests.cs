@@ -94,6 +94,64 @@ public class PptBlankParagraphTests
     }
 
     /// <summary>
+    /// The blank line's own run is found even when it BEGINS at the blank paragraph — which is
+    /// where every real deck puts it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The fixture above states one character run over the whole text, so the empty paragraph sits
+    /// strictly inside it and the run walk finds it on the first iteration. Real binary decks do
+    /// not look like that: PowerPoint writes the blank paragraph's own carriage return as its own
+    /// one-character run, so the run that <em>contains</em> the blank paragraph <em>begins</em>
+    /// exactly where the run that precedes it ends.
+    /// </para>
+    /// <para>
+    /// The walk used to stop as soon as its running position reached the paragraph's end, which
+    /// for a zero-length paragraph is the boundary between those two runs — so it stopped one run
+    /// short every time and every blank line in the corpus fell back to the outline level's size.
+    /// This is the case the theory above cannot see.
+    /// </para>
+    /// <para>
+    /// The layout of the text is <c>first</c>, CR, CR, <c>last</c>: the blank paragraph is the
+    /// zero-length span at index 6, and the run boundaries are 0–6, 6–7, 7–11 — the shape
+    /// <c>slides/done-005/ppt/ITE106-Chapter 4.ppt</c> writes on every one of its bullet slides.
+    /// The reference draws that deck's blank lines at the middle run's 12 pt against a level
+    /// default of 32.
+    /// </para>
+    /// </remarks>
+    [Theory]
+    [InlineData(12)]
+    [InlineData(27)]
+    public void TheRunThatBeginsAtABlankParagraphIsStillItsRun(int blankHeight)
+    {
+        const uint statesHeight = 0x0002_0000;
+
+        PptTextRun run = new(
+            PptTextKind.Other,
+            $"first{PptTextReader.ParagraphSeparator}{PptTextReader.ParagraphSeparator}last",
+            [],
+            [
+                new PptCharacterRun(6, RunEmphasis.None, RunEmphasis.None, statesHeight, FontHeight: 24),
+                new PptCharacterRun(1, RunEmphasis.None, RunEmphasis.None, statesHeight,
+                                    FontHeight: (ushort)blankHeight),
+                new PptCharacterRun(4, RunEmphasis.None, RunEmphasis.None, statesHeight, FontHeight: 24),
+            ]);
+
+        SlideTextBody body = PptTextBody.Build(
+            run, styles: null, Scheme, Fonts, SlideTextBody.DefaultInsets,
+            TextAnchor.Top, wraps: true).ShouldNotBeNull();
+
+        body.Paragraphs.Count.ShouldBe(3);
+        body.Paragraphs[1].Text.ShouldBe(string.Empty);
+        body.Paragraphs[1].Runs.Count.ShouldBe(1);
+        body.Paragraphs[1].Runs[0].Size.Points.ShouldBe(blankHeight, 0.01);
+
+        // …and the two paragraphs that do carry text are unaffected by the wider walk.
+        body.Paragraphs[0].Runs[0].Size.Points.ShouldBe(24, 0.01);
+        body.Paragraphs[2].Runs[0].Size.Points.ShouldBe(24, 0.01);
+    }
+
+    /// <summary>
     /// A trailing empty paragraph is still dropped, because it is the terminator's artefact rather
     /// than a line the author wrote.
     /// </summary>

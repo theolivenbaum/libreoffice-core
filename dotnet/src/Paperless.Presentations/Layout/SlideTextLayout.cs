@@ -142,7 +142,7 @@ public static partial class SlideTextLayout
     /// other half of the same defect: <strong>a shape's rectangle is an integer number of
     /// hundredths of a millimetre in the reference and carried the file's full EMU precision
     /// here.</strong> oox builds a shape's matrix in EMUs and scales it into hundredths of a
-    /// millimetre at the end (<c>oox/source/drawingml/shape.cxx</c>:1226-1230, 24.2.7.2), and
+    /// millimetre at the end (<c>oox/source/drawingml/shape.cxx</c>:1226-1230), and
     /// <c>SvxShape</c> then hands the result to <c>SdrObject::SetSnapRect</c>, whose
     /// <c>tools::Rectangle</c> holds four <c>sal_Int32</c> in the model's map unit. A
     /// <c>SdrTextObj</c>'s text rectangle is that rectangle less four
@@ -168,6 +168,16 @@ public static partial class SlideTextLayout
     /// is a table's row sizing and hands over a width it has already computed from column edges
     /// rather than a rectangle. Quantising a width on its own is not this rule — the rule is
     /// about two edges — and a table's own grid is a separate measurement.
+    /// </para>
+    /// <para>
+    /// <strong>Re-checked against 26.2.4.2 on 2026-08-21</strong> (`TODO.24-2-7-audit.md`), by
+    /// probe rather than by reading: twelve boxes whose top edge steps by 40 EMU — one ninth of a
+    /// unit — from 1944.000 to 1945.222 hundredths of a millimetre. The reference draws its first
+    /// baseline at exactly <em>two</em> values across all twelve, 444.9260 pt for the five tops at
+    /// or below 1944.444 and 444.8980 pt for the seven at or above 1944.556. The step is 0.0280 pt,
+    /// which is one unit, and the transition sits on the half — so the edge is quantised, and by
+    /// <c>round</c> rather than by truncation. The claim holds unchanged
+    /// (<c>probes/slides-r53/results.md</c>).
     /// </para>
     /// </remarks>
     private static DocRect OnGrid(DocRect rectangle)
@@ -294,12 +304,22 @@ public static partial class SlideTextLayout
     /// <em>NTP</em> is "no trailing paragraphs", and the asymmetry is the whole point: an empty
     /// paragraph in the <em>middle</em> still counts, because a later paragraph with text sets the
     /// bottom to an offset that already includes it. Only a run of empty paragraphs at the end is
-    /// dropped. Measured against LibreOffice 24.2.7.2 on
+    /// dropped. Measured against LibreOffice 26.2.4.2 on
     /// <c>slides/batch-002/ppt/gfopportunitiesforlinkagespres_2010_en.ppt</c>, whose eighth slide
     /// carries four empty paragraphs after its three bullets: the reference fits that text at
     /// 25 pt, and moving three of those empty paragraphs into the middle of the body makes the
     /// same LibreOffice fit it at 21 pt with nine-tenths line spacing — which is exactly what
     /// Paperless produced for the untouched deck while it measured every paragraph.
+    /// </para>
+    /// <para>
+    /// <strong>Re-checked against 26.2.4.2 on 2026-08-21</strong> (`TODO.24-2-7-audit.md`), on an
+    /// authored deck rather than on the corpus document the original figure came from: one 40 pt
+    /// three-paragraph body in one 240 pt autofit box, four slides differing only in where its four
+    /// empty paragraphs sit. Four at the end and none at all both fit at <strong>18.992 pt</strong>
+    /// over twelve lines; three of them moved into the middle, and all four in the middle, both fit
+    /// at <strong>15.987 pt</strong> over nine. Trailing empty paragraphs are still dropped from
+    /// the measured height and interior ones are still counted, and the two arrangements are still
+    /// a whole table row apart.
     /// </para>
     /// </remarks>
     private static Length HeightToLastNonEmpty(List<Block> blocks)
@@ -789,9 +809,16 @@ public static partial class SlideTextLayout
             // SvxInterLineSpaceRule::Prop, which multiplies the stated proportion and the fit
             // search's spacing scale together and rounds the *product* once; a paragraph that
             // states none takes the ::Off branch, which has only the fit's scale to apply and
-            // no four-fifths on the ascent (impedit3.cxx:1553-1602, 24.2.7). Applying the two
+            // no four-fifths on the ascent (impedit3.cxx:1553-1602). Applying the two
             // factors in sequence rounds twice and lands a hundredth of a millimetre out — see
             // Spacing and Proportioned.
+            //
+            // Re-checked against 26.2.4.2 on 2026-08-21 (TODO.24-2-7-audit.md) together with
+            // Proportioned and ProportionedAscent, on make-linespace-probe.py: 44 authored boxes,
+            // four em sizes x (no a:lnSpc, ten a:lnSpc percentages from 40 to 200). The reference's
+            // baseline pitch is reproduced EXACTLY on all 44 and its first baseline to a uniform
+            // 0.028 pt. The two-branch split survives: 40% draws a pitch of 19.191 pt where the
+            // Off branch would draw 47.991.
             if (Proportion(paragraph.LineSpacing) is { } proportion)
             {
                 Length height = Proportioned(natural, proportion * scaling.Spacing);
@@ -1014,9 +1041,11 @@ public static partial class SlideTextLayout
     /// proportional height in hundredths of a millimetre with one rounding —
     /// <c>nHeight = fround(pLine-&gt;GetHeight() * fProportionalScale * fSpacingFactor)</c> below
     /// a hundred per cent, and a truncating <c>sal_Int32</c> conversion of the same product above it
-    /// (<c>editeng/source/editeng/impedit3.cxx:1553-1580</c>, 24.2.7). <c>basegfx::fround</c> is
+    /// (<c>editeng/source/editeng/impedit3.cxx:1553-1580</c>). <c>basegfx::fround</c> is
     /// <c>(Int)(x + 0.5)</c> for a positive value (<c>include/basegfx/numeric/ftools.hxx:39-50</c>),
     /// so the two branches round in opposite directions and both are reproduced here.
+    /// <strong>Re-checked against 26.2.4.2 on 2026-08-21</strong> — see the note in
+    /// <see cref="Proportioned"/>.
     /// </para>
     /// <para>
     /// Worth a line height rather than a rounding curiosity, because the fit search reads it. On the
@@ -1094,8 +1123,8 @@ public static partial class SlideTextLayout
     /// twelve now lands on the reference's pitch to a thousandth of a point and on its first
     /// baseline to the same <strong>0.028 pt</strong> — one hundredth of a millimetre — that
     /// every other case on that probe carries, stated-height or not, so nothing about the stated
-    /// height contributes to it. That residual is recorded in <c>probes/slides-r53/results.md</c>
-    /// as observed and unexplained; it does not appear on the corpus documents measured there.
+    /// height contributes to it. That is the constant <c>SlideTextPlacementTests</c> already
+    /// records as the shift LibreOffice's PDF export puts on every pen.
     /// </para>
     /// <para>
     /// The arithmetic can go negative — 40 pt text in a stated 10 pt line puts the ascent at
@@ -1170,10 +1199,21 @@ public static partial class SlideTextLayout
     /// EditEngine multiplies them together and rounds the result once:
     /// <c>nHeight = fround(pLine-&gt;GetHeight() * fProportionalScale * fSpacingFactor)</c> below a
     /// hundred per cent, and a truncating <c>sal_Int32</c> conversion of the same product above it
-    /// (<c>editeng/source/editeng/impedit3.cxx:1568,1575</c>, 24.2.7). <c>basegfx::fround</c> is
+    /// (<c>editeng/source/editeng/impedit3.cxx:1568,1575</c>). <c>basegfx::fround</c> is
     /// <c>(Int)(x + 0.5)</c> for a positive value
     /// (<c>include/basegfx/numeric/ftools.hxx:39-50</c>), so the two branches round in opposite
     /// directions and both are reproduced here.
+    /// </para>
+    /// <para>
+    /// <strong>Re-checked against 26.2.4.2 on 2026-08-21</strong> (<c>TODO.24-2-7-audit.md</c>) on
+    /// <c>probes/slides-r53/make-linespace-probe.py</c>: forty <c>a:lnSpc/a:spcPct</c> boxes —
+    /// 40, 50, 60, 80, 90, 93, 100, 110, 150 and 200 per cent at 11, 12, 24 and 40 pt, four lines
+    /// each, <c>a:noAutofit</c>. Our pitch equals the reference's on <strong>40 of 40</strong> to a
+    /// thousandth of a point, so both roundings survive the version move. The measurement also
+    /// settles the deliberate divergence recorded above: at 40 per cent the reference draws a
+    /// 19.191 pt pitch on a 47.991 pt natural line, which is <c>fround(0.40 x natural)</c> and not
+    /// the 50 per cent <c>Apply</c> would have clamped it to. <strong>EditEngine has no such
+    /// clamp in 26.2.4.2 either.</strong>
     /// </para>
     /// <para>
     /// <strong>Rounding the two factors separately is not a smaller version of this; it is a
@@ -1208,7 +1248,16 @@ public static partial class SlideTextLayout
     /// <c>fround(GetTxtHeight() × fSpacingFactor × fProportionalScale × 0.8)</c> and never raises
     /// it, which is what keeps a line whose ascent was already short where it was; above a hundred
     /// the ascent moves by the whole of the height's change
-    /// (<c>editeng/source/editeng/impedit3.cxx:1564-1578</c>, 24.2.7).
+    /// (<c>editeng/source/editeng/impedit3.cxx:1564-1578</c>).
+    /// </para>
+    /// <para>
+    /// <strong>Re-checked against 26.2.4.2 on 2026-08-21</strong> (<c>TODO.24-2-7-audit.md</c>) on
+    /// the same forty boxes <see cref="Proportioned"/> names, whose first baseline is what this
+    /// method decides. Below a hundred per cent the reference's ascent is
+    /// <c>fround(1.2 x em x proportion x 0.8)</c> — 35.676 pt at 93 per cent of 40 pt, where the
+    /// arithmetic gives 35.712 and the uniform 0.028 pt residual accounts for the rest — and above
+    /// it the ascent moves by the whole of the height's change: 63.937 at 150 per cent, where
+    /// <c>em + (height − natural)</c> is 63.981. Both arms hold.
     /// </para>
     /// <para>
     /// The four-fifths is not derivable from anything; it is a constant EditEngine took from
