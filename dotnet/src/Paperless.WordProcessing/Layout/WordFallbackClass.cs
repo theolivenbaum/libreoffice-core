@@ -99,4 +99,36 @@ internal static class WordFallbackClass
         => string.IsNullOrWhiteSpace(familyName) ? FontFamilyClass.Unknown
             : declared == FontFamilyClass.SansSerif ? FontFamilyClass.SansSerif
             : FontFamilyClass.Serif;
+
+    /// <summary>
+    /// The class to hand <see cref="FontRequest"/> for a <c>.doc</c> run, whose <c>FFN</c> states one
+    /// per font.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>The WW8 filter is the one of the three that can reach
+    /// <see cref="FontFamilyClass.Unknown"/>, so it does not take the roman default.</strong>
+    /// <c>SwWW8ImplReader::SetNewFontAttr</c> builds an <c>SvxFontItem</c> per font from the
+    /// <c>FFN</c>'s <c>ff</c> nibble, and <c>GetFontParams</c>'s table maps 0, 6 and 7 onto
+    /// <c>FAMILY_DONTKNOW</c> — which is *set on the item*, where the DOCX filter would have left an
+    /// inherited value and the RTF filter never sets one at all. A <c>DONTKNOW</c> family appends no
+    /// generic to the fontconfig pre-match, so the answer is fontconfig's own.
+    /// </para>
+    /// <para>
+    /// Measured on 26.2.4.2 with nine flat-ODF fixtures exported to Word 97 and back
+    /// (<c>probes/words-r55/doc-family-code.py</c>) — a route that reaches the WW8 import with a
+    /// genuinely undeclared <c>FFN</c>, which round 54's DOCX round trip could not:
+    /// <b>only <c>roman</c> draws DejaVu Serif</b>; no code at all, <c>modern</c> and
+    /// <c>decorative</c> all draw DejaVu Sans, and so does <c>swiss</c>.
+    /// </para>
+    /// <para>
+    /// So this hands the <c>FFN</c>'s own answer through untouched, and the one thing it does is the
+    /// guard <see cref="ForDeclared"/> carries for the same reason: a run naming <em>no</em> family
+    /// is answered by <c>DefaultFonts</c> — Liberation Serif — and must not be given a class at all.
+    /// </para>
+    /// </remarks>
+    /// <param name="familyName">The family the run asks for, or null when it names none.</param>
+    /// <param name="declared">The class the <c>FFN</c> states, including its overrides by name.</param>
+    public static FontFamilyClass ForWw8Font(string? familyName, FontFamilyClass declared)
+        => string.IsNullOrWhiteSpace(familyName) ? FontFamilyClass.Unknown : declared;
 }
