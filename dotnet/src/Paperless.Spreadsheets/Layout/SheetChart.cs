@@ -2,6 +2,7 @@ using Paperless.Core.Charts;
 using Paperless.Core.Geometry;
 using Paperless.Core.Graphics;
 using Paperless.Core.Units;
+using Paperless.Text.Fonts;
 
 namespace Paperless.Spreadsheets.Layout;
 
@@ -340,5 +341,14 @@ internal static class SheetChart
                     SheetBandText.ChartShape(text, size, family, bold)?.Width ?? Length.Zero,
                     height);
         }
+
+        /// <inheritdoc cref="IChartTextMeasurer.AdvanceScale"/>
+        /// <remarks>
+        /// This is the one consumer whose ruler moved: <see cref="SheetBandText.ChartShape"/>
+        /// measures on <c>chart2</c>'s 96 dpi device, where the em is a whole number of pixels.
+        /// See the interface's remarks for why a fitted limit has to be told about it.
+        /// </remarks>
+        /// <param name="size">The em size the limit is being applied at.</param>
+        public double AdvanceScale(Length size) => MetricGrid.Chart.PixelEmScale(size);
     }
 }
