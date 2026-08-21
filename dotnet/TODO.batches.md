@@ -16326,3 +16326,109 @@ composite rather than of the document.
 3. `IntervalsThatFit` **from authored charts, not from `005`** — and it is a `Paperless.Core` change
    reaching 129 documents, so it owes a corpus gate.
 4. The four `_advanced_excel_pie` documents. 5. `XlsxNoteCaptions.cs`, then `SheetText.cs`.
+
+---
+
+## Round 57 — sheets
+
+**276 → 276 of 307, zero verdict movement, as predicted. Corpus 795 of 946.** The baseline came
+back **277** and the extra one was the calendar, not the code: the corpus mount gives
+`fse_identification_form` two names, `batch-check.sh` rendered it twice minutes apart, and the
+*reference's* word count moved 427 → 440 between them while ours stayed pinned at 440. **The case
+alias, normally a counting nuisance, is the cheapest available control on the reference's own
+reproducibility.**
+
+### The 18.46 pt body offset is a band that is not scaled, not a header height counted twice
+
+Both of round 56's witnesses are **scaled** worksheets — `fitToHeight="17"` and `scale="43"` —
+and `ScPrintFunc::GetDocPageSize` (`printfun.cxx:3002`) builds the page rectangle in *document
+twips*: `(top + nTopMargin) * 100 / nZoom + aHdr.nHeight`, each margin divided by the zoom and
+each band added whole. A document twip reaches the paper at `zoom/100` of a physical twip, so the
+margin comes back out at full size and **the band arrives at `nHeight × zoom/100`**.
+
+`SheetPagination.DocPageSize` had ported that arithmetic since it was written — which is why no
+page count was ever wrong — but its *comment* said the bands "are printed at full size whatever
+the sheet's scale", and `SheetPrintSetup.PrintableArea`, which places what a page holds,
+implemented the comment. **Two ports of one formula, one written from the prose of the other.**
+
+Five authored scales with the 100 % control first: `ours − ref` on the first body token was
+0.03 / 6.86 / 13.65 / 20.44 / 25.57 and is now **0.03 / 0.08 / 0.02 / 0.00 / 0.03**. Median
+displacement over the witnesses' paired tokens: `fm-provider` p36 **18.460 → 0.006** (550 tokens),
+`FY2023-AIP-grants` p1 **18.489 → 0.035** (2242). `FY2023-AIP-grants` now reads **51045 words, the
+reference's figure exactly**, and `fm-provider` p15 went 599/610 to **610/610 with an empty
+`ours − ref` difference**.
+
+**The band's own text was already right and agrees at all five scales** — `DrawBand` has taken the
+zoom since it was written. That is why a scaled sheet's header was the correct size over a body in
+the wrong place, and it is what made the defect look like a mystery rather than a scale.
+
+**Six word counts moved and every one is an increase**, which is what the prediction said the
+mechanism could only produce — the body moves *up*, so a row that ran off the bottom comes back.
+**Three of the six are `.xls`**, the third round running that blind spot has fired where it was
+pointed. `fm-provider`'s total moved *away* from the reference and the change is still right: the
+whole movement is on one page, where it closed exactly.
+
+### The grey fills are conditional formatting, and the census says do not start there
+
+The three `#C0C0C0` fills on `FAA…attachment_2` p28 are a `cfRule type="expression"` with the
+formula `MID($C5,1,7)="MISSING"` and a `dxf` of `bgColor indexed="22"`. Not style inheritance —
+both the `cellXf` and its `xfId="6"` cell style state `fillId="0"`. **89 of 243 xlsx-family
+documents carry a `cfRule` and we draw none of them**: `colorScale` 38, `expression` 34, `cellIs`
+18, `dataBar` 6, `containsText` 5. So "three grey fills" is the *hardest* arm of a subsystem
+reaching 89 documents, and the order to take it in is `colorScale` (no formula at all), then
+`cellIs` (a comparison), then `expression` last.
+
+### The `_advanced_excel_pie` cluster is not clipping — refuted
+
+Both renderers emit **every** glyph of every label; `17%`/`7%` and `trend`/`rend` are `pdftotext`
+decoding a run whose origin is off the left edge of the MediaBox. The labels are in different
+*places*, for two measured reasons: **the reference wraps each pie data label onto two lines**
+(`M2; Actual; 100;` then `19%` 11.2 pt below, against our single 20-glyph run) which moves a
+centred label 27 pt sideways; and **every chart run is in the wrong face** — the reference's title
+is **18.01 pt Carlito Bold** against our **13.00 pt Liberation Sans**. Both reported independently
+by a blind reviewer on a page chosen for a stated reason.
+
+### Vision: one confirmation, one extension, two refutations — and a class
+
+The reviewer on the page the change targets declined to call a vertical difference at all, which
+is the fix seen from outside. The FAA grey shading was **confirmed** and its *extent* misread —
+three rectangles spanning whole rows, read as stripes down seven columns.
+
+**Refuted:** *"ours reads `Page 24 of 18` where the reference reads `Page 18 of 18`"* — neither
+string is in either document; both read `Page 34 of 38` … `Page 37 of 38` identically. A 3.79 pt
+footer at 150 dpi is below what a reader can resolve, and this is the first invented *token* on
+this track rather than a misjudged position. And *"ours draws a black outer border the reference
+does not"* — the reference draws **90 horizontal and 5 vertical** strokes on that page against our
+**44 and 4**. **Second consecutive round a reviewer has reported a rule the reference supposedly
+omits, and the second in which the reference draws more of them than we do.** Treat over-reported
+borders on our side as a class.
+
+### Audit: `XlsxNoteCaptions.cs` **VERIFIED**, and the pattern that sent us there did not repeat
+
+96 dpi exactly on 26.2.4.2 — control first (offset 0 lands on the row grid to 0.012 pt), then
+three steps of 14.998 pt for 20 px. **The probe's first cut read "neither" at every step and was
+measuring a clamp**: 20 pt rows are 26.7 px, so offsets of 48, 96 and 144 all saturated at one
+row. That clamp is a rule the site never stated and we do not implement — recorded, not fixed, at
+**5 anchors of 365 in one document of fifteen**. *And that census also had to be written twice*:
+its first cut compared every anchor against the tallest row anywhere in the workbook and answered
+zero. Counters re-derived: **39 open, 19 marker lines (16/2/1/0)**; at the base **40 and 18**,
+against a stored **42** with `Presentations 11`. Round 56's "the only wrong sheets site is the
+only furniture claim" was two observations of one event and did not repeat.
+`Paperless.Spreadsheets` is **nine of ten**, eight correct; `Layout/SheetText.cs` is the last.
+
+### Tests and shared layer
+
+**4825 → 4830, 0 failed, 1 skipped**, all +5 in `Paperless.Spreadsheets` (956 → 961). Three
+mutations through `verify-test.sh`, all three detected, including **the wiring** — the unit test
+alone passes under `PrintableAreaAt(1.0)` at the call site, because the unit is still correct and
+simply never asked for the page's scale. **No shared layer touched**; no cross-track sweep owed.
+`MANIFEST.tsv` unchanged.
+
+### Next
+
+1. **Conditional formatting, `colorScale` first** (38 documents, no formula needed). 2. **The
+chart face** — Carlito against our Liberation Sans, a font-resolution question before it is a
+layout one. 3. The **pie data-label wrap** (`Paperless.Core`, owes a corpus gate). 4.
+`Layout/SheetText.cs`, the last audit site. 5. `IntervalsThatFit`, still untouched. 6. The **note
+page's own scale**, left at 1.0 on purpose and written down at the call site, together with the
+note page's `Placement = default` that draws its band at a **one per cent** zoom.
