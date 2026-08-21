@@ -18309,3 +18309,101 @@ and a value axis to 25000 against 8000 — **on a document that passes**.
 **Words** — `012`'s 56 missing fills and 8 missing strokes (`w:tblStylePr`'s `w:tcPr` half, which
 this reader never reads), then round 59's counter-witness re-measured, then the tall-table guard
 whose two protected documents are named and passing.
+
+### Parent verification — round 62 slides
+
+**803 of 946 unchanged: words 323, slides 200, sheets 280.** All 946 gated: **zero movement in
+either direction.** Tests **5124, 0 failed**.
+
+```
+Core 407   Containers 109   Text 625   Vector 302   Rendering 153(1 skipped)   Markup 259
+OpenDocument 125   WordProcessing 1231   Spreadsheets 1035   Presentations 878     = 5124
+```
+
+The round moved `dRight` over 1 pt from **27 to 10 of 57 chart pages**, and **28 documents moved on
+differing pixels, 28 improved and 0 worsened**.
+
+### The brief's 2.70 pt was a typeface, not legend arithmetic
+
+The key size, gap, padding and margin were **already exact**. The reference sets its two 10 pt legend
+runs in **Carlito** and its seventeen 10 pt axis runs in **LiberationSans**; we set all nineteen in
+LiberationSans. The seat is `FamilyOf`'s *"first literal `a:latin` anywhere in the part"*, handing the
+axes' Arial to a legend that states none. The widest entry's **right edges agree to 0.005 pt while
+its width differs by 2.692** — structural, because that edge is `frame.Right − margin − paddingX`
+whatever the text measures. The 17 pages went `−2.71/−2.73/−2.88` → `−0.62/−0.63/−0.79`, and the
+residue is the reference's own `TJ` tracking at 56/1000 em.
+
+### Its cross-track gain did not survive at HEAD, and that is the two rounds interacting
+
+The round measured `064_Small_business_cash_flow` `open` → `match` at 510 words, **and confirmed it
+was its own with a base-source control** (three files checked out at the base, CLI rebuilt, renders
+508; restored, rebuilt, three documents byte-identical to their sweeps). At HEAD it reads **509 of
+520 on a band of 10.4** — one word the wrong side. Sheets r62's advance-width quantisation, merged in
+between, took it back.
+
+Neither round is wrong. **This is why the parent's gate at HEAD is the authority and a round's
+cross-track sweep is evidence about its own worktree** — now demonstrated by interaction rather than
+by base-commit lag.
+
+### Three inherited claims refuted, one of them an instrument the round had just built
+
+- **Round 60's "a line series' legend key is 7.00 pt against the reference's 6.01" does not exist.**
+  `legend-census.py`'s floor admitted the **plot's own data markers**. The reference's real legend key
+  there is a **5.98 pt round marker at x 589.24**, centred in a 22.68 pt slot exactly as
+  `getPreferredLegendKeyAspectRatio` predicts. **Two real defects had been fused into one wrong one.**
+- **Round 60's rotated-anchor hypothesis is dead.** The round built the instrument that brief asked
+  for and the reference draws **no 45° runs at all** on that page.
+- **And that instrument was then refuted by a blind reader** — the reverse of the usual direction. A
+  reviewer reported the same 24 rotated labels on *both* halves; a fill census found **126 glyph-sized
+  filled paths** in the reference's label band.
+
+### A third ceiling class, verified by the parent
+
+**26.2.4.2 emits a 45°-rotated chart label as outlines, not text** (its 90° and 0° labels stay text),
+so **its own PDF loses those words**. Checked independently rather than taken from the round:
+
+- `Demick_JetBlue` extracts **812 words to the reference's 608**, and the whole **204-word deficit
+  falls on pages 4, 5 and 7 — 63, 78, 63**.
+- On page 4 the reference draws **192 glyph-sized filled paths against our 63** with the same number
+  of text shows, and the tokens in our text layer and absent from the reference's are exactly the
+  rotated category labels: `06 07 08 09 10 11 12 20 -7 -8 -9`.
+- `N2_E_Maestroni_Swarm_COP` is **5296 against 5126**, a 170-word deficit on a band of 102.5.
+
+**Both stacks draw the same glyphs; only the reference's PDF loses them. Our output is the searchable
+one and the gate scores it as failure** — the raster ceiling's shape by a different mechanism. Both
+re-filed `kind=ceiling`.
+
+**And both had been filed `ceiling` once before.** Round 50 re-filed them `text` on the charstream
+test, which **correctly** reported that the characters differ — they do, because the reference is
+missing 204 of them. **The measurement was right and the interpretation was wrong.** The charstream
+test cannot separate *"we drew different text"* from *"the reference drew this text as outlines"*,
+and that is the third class it does not name.
+
+### The fitted bullet: the decision, taken in the same words, with the reach finally measured
+
+**Not taken, and not by default.** Confirmed still live and unchanged at **1.91 pt**, identical to
+round 54's figure. Deferred because its demonstration page is `diff% 0.82, |ink|% 0.00` and the
+document is 0.53 of 989.29.
+
+**What seven rounds never produced is the reach, and it is now committed: 251 pages over 0.25 pt out,
+in 58 documents**, median 0.056 pt, max 5.003 (`wells08_basic.ppt` 25 pages, `berlin.ppt` 19,
+`RESPA` 18). **The item is 251 pages, not one**, and the next round can rank it against that.
+
+### Documents-moved missed a seventh round — downward this time, which is new
+
+Predicted 33–39, measured **28**. The eight over-counted are named exactly: four scatter and four
+bubble template decks whose parts carry a `c:legend` — which is what the census reads — while **none
+of their series carries a `c:tx`**, so neither stack has a name to put in a legend and **neither
+draws one**. That is `COMMON.md`'s "estimate reach from what a shape resolves to, not what a part
+declares" arriving from the other side, and it was not among the four blind spots listed.
+
+The round also noted its own band was stated as a magnitude rather than per direction, which the
+updated `COMMON.md` now forbids; stated properly it was **28 improved / 0 worsened**.
+
+### Hygiene stated rather than hidden
+
+`verify-test.sh` was run only with no sweep in flight, and finished sweeps were checked byte for byte
+against fresh renders — **including after a build that overlapped the sheets sweep, which the round
+states plainly rather than omitting.** A census bug was caught on the way: the theme lookup was
+hardcoded to `theme1.xml` and two workbooks call theirs `theme11.xml`, so it was reporting the wrong
+answer **for the very document that produced the verdict**.
