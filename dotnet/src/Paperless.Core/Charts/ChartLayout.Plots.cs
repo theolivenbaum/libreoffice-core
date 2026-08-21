@@ -159,7 +159,7 @@ public static partial class ChartLayout
         if (categories <= 0) return;
         if (RadiusOf(area) is not { } web) return;
 
-        Colour grid = plot.ValueGrid ?? plot.CategoryGrid ?? AxisColour;
+        Colour grid = plot.ValueGrid?.Colour ?? plot.CategoryGrid?.Colour ?? AxisColour;
 
         foreach (double tick in scale.MajorTicks())
         {

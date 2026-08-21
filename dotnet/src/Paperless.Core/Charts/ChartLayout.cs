@@ -1562,14 +1562,17 @@ public static partial class ChartLayout
         ChartTickMark mark = secondary ? plot.SecondaryTicks : plot.ValueTicks;
         Length outer = OuterTick(mark);
         Length inner = InnerTick(mark);
+        ChartGrid stroke = secondary ? plot.SecondaryAxisLine : plot.ValueAxisLine;
 
         if (visible)
         {
             lines.Add(columns
                 ? new ChartLine(
-                    new DocPoint(axisX, area.Top), new DocPoint(axisX, area.Bottom), AxisColour)
+                    new DocPoint(axisX, area.Top), new DocPoint(axisX, area.Bottom),
+                    stroke.Colour, stroke.Width, stroke.Dash)
                 : new ChartLine(
-                    new DocPoint(area.Left, axisY), new DocPoint(area.Right, axisY), AxisColour));
+                    new DocPoint(area.Left, axisY), new DocPoint(area.Right, axisY),
+                    stroke.Colour, stroke.Width, stroke.Dash));
         }
 
         // The minor grid needs the *next* tick, so the ticks are taken as a list rather than
@@ -1612,7 +1615,8 @@ public static partial class ChartLayout
                 if (!secondary && plot.ValueGrid is { } grid)
                 {
                     lines.Add(new ChartLine(
-                        new DocPoint(area.Left, y), new DocPoint(area.Right, y), grid));
+                        new DocPoint(area.Left, y), new DocPoint(area.Right, y),
+                        grid.Colour, grid.Width, grid.Dash));
                 }
 
                 if (!visible) continue;
@@ -1622,7 +1626,7 @@ public static partial class ChartLayout
                     lines.Add(new ChartLine(
                         new DocPoint(axisX + (outer * outward), y),
                         new DocPoint(axisX - (inner * outward), y),
-                        AxisColour));
+                        stroke.Colour, stroke.Width, stroke.Dash));
                 }
 
                 if (!labelled) continue;
@@ -1641,7 +1645,8 @@ public static partial class ChartLayout
                 if (!secondary && plot.ValueGrid is { } grid)
                 {
                     lines.Add(new ChartLine(
-                        new DocPoint(x, area.Top), new DocPoint(x, area.Bottom), grid));
+                        new DocPoint(x, area.Top), new DocPoint(x, area.Bottom),
+                        grid.Colour, grid.Width, grid.Dash));
                 }
 
                 if (!visible) continue;
@@ -1651,7 +1656,7 @@ public static partial class ChartLayout
                     lines.Add(new ChartLine(
                         new DocPoint(x, axisY + (inner * outward)),
                         new DocPoint(x, axisY - (outer * outward)),
-                        AxisColour));
+                        stroke.Colour, stroke.Width, stroke.Dash));
                 }
 
                 if (!labelled) continue;
@@ -1686,6 +1691,7 @@ public static partial class ChartLayout
     {
         Length outer = OuterTick(plot.CategoryTicks);
         Length inner = InnerTick(plot.CategoryTicks);
+        ChartGrid stroke = plot.CategoryAxisLine;
 
         if (plot.CategoryAxisVisible)
         {
@@ -1693,11 +1699,11 @@ public static partial class ChartLayout
                 ? new ChartLine(
                     new DocPoint(area.Left, area.Bottom),
                     new DocPoint(area.Right, area.Bottom),
-                    AxisColour)
+                    stroke.Colour, stroke.Width, stroke.Dash)
                 : new ChartLine(
                     new DocPoint(area.Left, area.Top),
                     new DocPoint(area.Left, area.Bottom),
-                    AxisColour));
+                    stroke.Colour, stroke.Width, stroke.Dash));
         }
 
         foreach (double tick in domain.MajorTicks())
@@ -1712,7 +1718,8 @@ public static partial class ChartLayout
                 if (plot.CategoryGrid is { } grid)
                 {
                     lines.Add(new ChartLine(
-                        new DocPoint(x, area.Top), new DocPoint(x, area.Bottom), grid));
+                        new DocPoint(x, area.Top), new DocPoint(x, area.Bottom),
+                        grid.Colour, grid.Width, grid.Dash));
                 }
 
                 if (!plot.CategoryAxisVisible) continue;
@@ -1722,7 +1729,7 @@ public static partial class ChartLayout
                     lines.Add(new ChartLine(
                         new DocPoint(x, area.Bottom - inner),
                         new DocPoint(x, area.Bottom + outer),
-                        AxisColour));
+                        stroke.Colour, stroke.Width, stroke.Dash));
                 }
 
                 if (!plot.CategoryLabelsVisible) continue;
@@ -1744,7 +1751,7 @@ public static partial class ChartLayout
                     lines.Add(new ChartLine(
                         new DocPoint(area.Left - outer, y),
                         new DocPoint(area.Left + inner, y),
-                        AxisColour));
+                        stroke.Colour, stroke.Width, stroke.Dash));
                 }
 
                 if (!plot.CategoryLabelsVisible) continue;
@@ -1782,6 +1789,7 @@ public static partial class ChartLayout
     {
         Length outer = OuterTick(plot.CategoryTicks);
         Length inner = InnerTick(plot.CategoryTicks);
+        ChartGrid stroke = plot.CategoryAxisLine;
 
         if (plot.CategoryAxisVisible)
         {
@@ -1789,11 +1797,11 @@ public static partial class ChartLayout
                 ? new ChartLine(
                     new DocPoint(area.Left, area.Bottom),
                     new DocPoint(area.Right, area.Bottom),
-                    AxisColour)
+                    stroke.Colour, stroke.Width, stroke.Dash)
                 : new ChartLine(
                     new DocPoint(area.Left, area.Top),
                     new DocPoint(area.Left, area.Bottom),
-                    AxisColour));
+                    stroke.Colour, stroke.Width, stroke.Dash));
         }
 
         if (categories <= 0 && plot.DateAxis is null) return;
@@ -1843,7 +1851,8 @@ public static partial class ChartLayout
                 if (plot.CategoryGrid is { } grid)
                 {
                     lines.Add(new ChartLine(
-                        new DocPoint(x, area.Top), new DocPoint(x, area.Bottom), grid));
+                        new DocPoint(x, area.Top), new DocPoint(x, area.Bottom),
+                        grid.Colour, grid.Width, grid.Dash));
                 }
 
                 if (plot.CategoryAxisVisible && outer + inner > Length.Zero)
@@ -1851,7 +1860,7 @@ public static partial class ChartLayout
                     lines.Add(new ChartLine(
                         new DocPoint(x, area.Bottom - inner),
                         new DocPoint(x, area.Bottom + outer),
-                        AxisColour));
+                        stroke.Colour, stroke.Width, stroke.Dash));
                 }
             }
             else
@@ -1861,7 +1870,8 @@ public static partial class ChartLayout
                 if (plot.CategoryGrid is { } grid)
                 {
                     lines.Add(new ChartLine(
-                        new DocPoint(area.Left, y), new DocPoint(area.Right, y), grid));
+                        new DocPoint(area.Left, y), new DocPoint(area.Right, y),
+                        grid.Colour, grid.Width, grid.Dash));
                 }
 
                 if (plot.CategoryAxisVisible && outer + inner > Length.Zero)
@@ -1869,7 +1879,7 @@ public static partial class ChartLayout
                     lines.Add(new ChartLine(
                         new DocPoint(area.Left - outer, y),
                         new DocPoint(area.Left + inner, y),
-                        AxisColour));
+                        stroke.Colour, stroke.Width, stroke.Dash));
                 }
             }
         }

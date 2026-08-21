@@ -240,11 +240,15 @@ public static class DrawingChartPlot
             Border = LineOf(Child(chartSpace, "spPr"), theme),
             BorderWidth = LineWidthOf(Child(chartSpace, "spPr")),
             PlotBackground = FillOf(Child(plotArea, "spPr"), theme),
-            ValueGrid = GridOf(axes.Value, theme),
-            CategoryGrid = GridOf(axes.Category, theme) ?? GridOf(axes.Domain, theme),
-            ValueMinorGrid = MinorGridOf(axes.Value, theme),
-            CategoryMinorGrid =
-                MinorGridOf(axes.Category, theme) ?? MinorGridOf(axes.Domain, theme),
+            ValueGrid = GridOf(axes.Value, theme, automatic),
+            CategoryGrid = GridOf(axes.Category, theme, automatic)
+                           ?? GridOf(axes.Domain, theme, automatic),
+            ValueMinorGrid = MinorGridOf(axes.Value, theme, automatic),
+            CategoryMinorGrid = MinorGridOf(axes.Category, theme, automatic)
+                                ?? MinorGridOf(axes.Domain, theme, automatic),
+            ValueAxisLine = AxisLineOf(axes.Value, theme, automatic),
+            SecondaryAxisLine = AxisLineOf(axes.Secondary, theme, automatic),
+            CategoryAxisLine = AxisLineOf(axes.Domain ?? axes.Category, theme, automatic),
             ValueMinorIntervals = MinorIntervals(axes.Value),
             // The three automatic-text sizes and weights, which are *not* chart2's model
             // defaults — see AutoText below for why an OOXML chart never reaches those.
@@ -409,15 +413,57 @@ public static class DrawingChartPlot
     /// <c>a:ln/a:noFill</c> means no gridline at all, which is how a chart turns one off without
     /// removing the element.
     /// </remarks>
-    private static Colour? GridOf(XElement? axis, DrawingTheme? theme)
+    private static ChartGrid? GridOf(
+        XElement? axis, DrawingTheme? theme, ChartAutoContext automatic)
     {
         if (Child(axis, "majorGridlines") is not { } grid) return null;
 
         XElement? properties = Child(grid, "spPr");
         if (Drawing.Child(Drawing.Child(properties, "ln"), "noFill") is not null) return null;
 
-        return LineOf(properties, theme) ?? DefaultGrid;
+        return AutomaticLine(ChartAutoLine.MajorGrid, properties, theme, automatic);
     }
+
+    /// <summary>
+    /// One piece of a chart's furniture: what it states, and the automatic format under it.
+    /// </summary>
+    /// <remarks>
+    /// <c>LineFormatter::convertFormatting</c> is two lines —
+    /// <c>aLineProps.assignUsed(*mxAutoLine)</c> then <c>assignUsed(shape's own)</c> — so the
+    /// automatic entry is the base and each thing the shape states wins over it *separately*.
+    /// That is why an <c>a:ln</c> carrying only a <c>w</c> keeps the automatic colour, which is
+    /// exactly what <c>Demick_JetBlue.pptx</c>'s value axis does, and why reading "states an
+    /// <c>a:ln</c>" as "states everything" draws it black.
+    /// </remarks>
+    private static ChartGrid AutomaticLine(
+        ChartAutoLine what,
+        XElement? properties,
+        DrawingTheme? theme,
+        ChartAutoContext automatic)
+    {
+        Colour? colour = LineOf(properties, theme)
+                         ?? DrawingChartAutoFormat.LineColourOf(
+                             what, automatic.Style, theme, automatic.Styles);
+
+        Length width = StatedLineWidth(properties)
+                       ?? DrawingChartAutoFormat.AutomaticLineWidth(automatic.Styles);
+
+        return new ChartGrid(colour ?? DefaultGrid, width, DashOf(properties));
+    }
+
+    /// <summary>
+    /// How an axis draws its own line and tick marks — <c>c:spPr/a:ln</c> over the automatic
+    /// entry.
+    /// </summary>
+    /// <remarks>
+    /// A deleted axis is not drawn at all, so this is never asked about one; an
+    /// <c>a:ln/a:noFill</c> is a line the file turns off, and there is nowhere in
+    /// <see cref="ChartGrid"/> to say so, so it is drawn as the automatic colour rather than
+    /// invented away. Two corpus axes state it and both are also <c>c:delete val="1"</c>.
+    /// </remarks>
+    private static ChartGrid AxisLineOf(
+        XElement? axis, DrawingTheme? theme, ChartAutoContext automatic)
+        => AutomaticLine(ChartAutoLine.Axis, Child(axis, "spPr"), theme, automatic);
 
     /// <summary>
     /// An axis' minor gridlines, with the width and dash they state, or null when it has none.
@@ -428,17 +474,15 @@ public static class DrawingChartPlot
     /// <c>a:prstDash</c>. Reading only the colour draws 110 solid hairlines where the reference
     /// draws 110 dashed half-point ones — see <see cref="ChartGrid"/>.
     /// </remarks>
-    private static ChartGrid? MinorGridOf(XElement? axis, DrawingTheme? theme)
+    private static ChartGrid? MinorGridOf(
+        XElement? axis, DrawingTheme? theme, ChartAutoContext automatic)
     {
         if (Child(axis, "minorGridlines") is not { } grid) return null;
 
         XElement? properties = Child(grid, "spPr");
         if (Drawing.Child(Drawing.Child(properties, "ln"), "noFill") is not null) return null;
 
-        return new ChartGrid(
-            LineOf(properties, theme) ?? DefaultMinorGrid,
-            StatedLineWidth(properties) ?? Length.Zero,
-            DashOf(properties));
+        return AutomaticLine(ChartAutoLine.MinorGrid, properties, theme, automatic);
     }
 
     /// <summary>
@@ -695,32 +739,17 @@ public static class DrawingChartPlot
                 Flag(table, "showKeys") ?? false,
                 LineOf(Child(table, "spPr"), theme) ?? DefaultGrid);
 
-    /// <summary>chart2's own gridline colour, gray30.</summary>
-    private static readonly Colour DefaultGrid = Colour.FromRgb(0xB3B3B3);
-
     /// <summary>
-    /// The colour a minor gridline that states none is drawn in.
+    /// chart2's own gridline colour, gray30 — the last resort when there is no theme to ask.
     /// </summary>
     /// <remarks>
-    /// <para>
-    /// <c>chart2</c>'s <c>GridProperties</c> has one default for both grids
-    /// (<c>chart2/source/model/main/GridProperties.cxx:64-66</c>), so this is deliberately the
-    /// same value as <see cref="DefaultGrid"/> rather than a guessed lighter one.
-    /// </para>
-    /// <para>
-    /// <strong>And it is measurably not what 26.2.4.2 draws for an OOXML chart, which is a
-    /// divergence this reader already had for the MAJOR grid and which is recorded here rather
-    /// than guessed at.</strong> <c>ObjectFormatter</c>'s automatic table
-    /// (<c>oox/source/drawingml/chart/objectformatter.cxx:223-235</c>) formats a major gridline
-    /// as the theme's <c>tx1</c> at <c>tint 75000</c> and a minor one at <c>tint 50000</c>, and on
-    /// <c>Demick_JetBlue.pptx</c> page 4 the reference draws <c>0x666666</c> and <c>0x8B8B8B</c>
-    /// against this file's <c>0xB3B3B3</c> for both. Closing that gap is the whole automatic-format
-    /// layer for gridlines and not a constant, so it stays open: a mesh in the wrong grey is much
-    /// nearer the reference than no mesh at all, and it is the same grey this reader has been
-    /// drawing major gridlines in all along.
-    /// </para>
+    /// <strong>It is not what an OOXML chart draws</strong>, and reaching it means
+    /// <see cref="DrawingChartAutoFormat.LineColourOf"/> found neither a theme nor a format
+    /// matrix. Kept because inventing black there would be worse than the value chart2's own
+    /// model carries (<c>chart2/source/model/main/GridProperties.cxx:64-66</c>).
     /// </remarks>
-    private static readonly Colour DefaultMinorGrid = Colour.FromRgb(0xB3B3B3);
+    private static readonly Colour DefaultGrid = Colour.FromRgb(0xB3B3B3);
+
 
     /// <summary>What one axis states about its scale.</summary>
     private static ChartScaleRequest ScaleOf(XElement? axis)

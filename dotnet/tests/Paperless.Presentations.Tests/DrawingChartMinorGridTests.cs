@@ -122,9 +122,10 @@ public class DrawingChartMinorGridTests
     public void TheLayoutDrawsFourLinesBetweenEveryPairOfMajorTicksAndNoneOutsideThem()
     {
         // The minor grid is given a colour of its own purely so the two sets can be told apart
-        // here: this reader defaults both to the same grey, which is chart2's own single
-        // GridProperties default — see DrawingChartPlot.DefaultMinorGrid for what 26.2.4.2
-        // actually paints them and why that gap is recorded rather than guessed at.
+        // here: the two take different automatic entries -- tx1 at tint 75000 and at tint
+        // 50000 through the theme's subtle line style -- and this fixture states neither a theme
+        // nor a chart style, so both fall to the same last-resort grey and the test asks only
+        // about the geometry.  DrawingChartAutoFormat.LineColourOf carries the colours.
         ChartPlot plot = Read(Bars(
             "<c:majorGridlines/><c:minorGridlines><c:spPr><a:ln><a:solidFill>"
             + "<a:srgbClr val=\"FF0000\"/></a:solidFill></a:ln></c:spPr></c:minorGridlines>"));
@@ -135,7 +136,7 @@ public class DrawingChartMinorGridTests
             new Ruler());
 
         Colour minor = plot.ValueMinorGrid!.Value.Colour;
-        Colour major = plot.ValueGrid!.Value;
+        Colour major = plot.ValueGrid!.Value.Colour;
 
         List<double> majorYs = [.. drawing.Lines
             .Where(line => line.Colour == major && line.From.Y == line.To.Y

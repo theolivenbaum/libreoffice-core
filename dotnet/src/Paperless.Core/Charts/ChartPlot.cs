@@ -403,6 +403,35 @@ public sealed partial record ChartPlot
     /// <remarks><c>c:valAx/c:tickLblPos</c>; see <see cref="ValueLabelsVisible"/>.</remarks>
     public bool SecondaryLabelsVisible { get; init; } = true;
 
+    /// <summary>How the value axis' own line and tick marks are painted.</summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>An axis line is not black, and this reader drew every one of them black.</strong>
+    /// <c>spAxisLines</c> (<c>oox/source/drawingml/chart/objectformatter.cxx:215-220</c>) gives it
+    /// the theme's <c>tx1</c> at <c>tint 75000</c> — the same entry as a major gridline — and the
+    /// theme's subtle line style supplies its width. On <c>Demick_JetBlue.pptx</c> page 4 the
+    /// reference draws its two axis lines <c>#666666</c> at 0.73 pt where we drew <c>#000000</c>
+    /// hairlines.
+    /// </para>
+    /// <para>
+    /// The <em>tick labels</em> are a separate statement and do not move with it: both stacks
+    /// draw that page's labels <c>#000000</c>, which is <c>c:txPr</c>'s answer and not this one.
+    /// </para>
+    /// <para>
+    /// Not nullable — an axis that is drawn at all has a stroke — and the default is the black
+    /// hairline every non-OOXML reader has always produced, so ODF and BIFF are unchanged.
+    /// </para>
+    /// </remarks>
+    public ChartGrid ValueAxisLine { get; init; } = new(Colour.Black);
+
+    /// <summary>How the category axis' own line and tick marks are painted.</summary>
+    /// <remarks><c>c:catAx/c:spPr/a:ln</c>; see <see cref="ValueAxisLine"/>.</remarks>
+    public ChartGrid CategoryAxisLine { get; init; } = new(Colour.Black);
+
+    /// <summary>How the secondary value axis' own line and tick marks are painted.</summary>
+    /// <remarks>See <see cref="ValueAxisLine"/>.</remarks>
+    public ChartGrid SecondaryAxisLine { get; init; } = new(Colour.Black);
+
     /// <summary>Where the value axis puts its major tick marks.</summary>
     /// <remarks>
     /// <para>
@@ -896,21 +925,36 @@ public sealed partial record ChartPlot
     public Colour? PlotBackground { get; init; }
 
     /// <summary>
-    /// The colour the value axis' major gridlines are drawn in, or null when it has none.
+    /// How the value axis' major gridlines are painted, or null when it has none.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// Present rather than absent is the question the file answers — <c>c:majorGridlines</c>,
-    /// <c>chart:grid class="major"</c> — and both default the colour rather than stating it.
-    /// <c>0xB3B3B3</c> is chart2's own default, set on <c>GridProperties</c> as
+    /// <c>chart:grid class="major"</c> — and both usually leave the paint to a default.
+    /// <c>0xB3B3B3</c> is chart2's own, set on <c>GridProperties</c> as
     /// <c>LINE_COLOR = 0xb3b3b3 // gray30</c>
-    /// (<c>chart2/source/model/main/GridProperties.cxx:64-66</c>), and it is what a reader must
-    /// supply for a gridline that states nothing about itself.
+    /// (<c>chart2/source/model/main/GridProperties.cxx:64-66</c>), and it is what the ODF and
+    /// BIFF readers supply.
+    /// </para>
+    /// <para>
+    /// <strong>It is not what an OOXML chart draws.</strong> <c>ObjectFormatter</c>'s automatic
+    /// table gives a major gridline the theme's <c>tx1</c> at <c>tint 75000</c> put through the
+    /// theme's subtle line style, which on a black <c>tx1</c> is <c>0x666666</c> and not
+    /// <c>0xB3B3B3</c> — and the same line style states the width, which is 0.75 pt on every
+    /// theme Office ships and not a hairline. See
+    /// <c>DrawingChartAutoFormat.LineColourOf</c>.
+    /// </para>
+    /// <para>
+    /// A <see cref="ChartGrid"/> rather than a bare colour for the same reason the minor grid is
+    /// one: the width is as visible as the colour and there is no reason for the two grids to
+    /// carry different amounts of information about themselves.
+    /// </para>
     /// </remarks>
-    public Colour? ValueGrid { get; init; }
+    public ChartGrid? ValueGrid { get; init; }
 
-    /// <summary>The colour the category axis' major gridlines are drawn in, or null.</summary>
-    /// <remarks>Far rarer than <see cref="ValueGrid"/>; see it for the default.</remarks>
-    public Colour? CategoryGrid { get; init; }
+    /// <summary>How the category axis' major gridlines are painted, or null.</summary>
+    /// <remarks>Far rarer than <see cref="ValueGrid"/>; see it for the defaults.</remarks>
+    public ChartGrid? CategoryGrid { get; init; }
 
     /// <summary>
     /// The colour the value axis' <em>minor</em> gridlines are drawn in, or null when it has none.
