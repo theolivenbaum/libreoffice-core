@@ -424,6 +424,31 @@ internal static class OdfParagraphFormats
             : null;
     }
 
+    /// <summary>
+    /// The posture a named character style states, or null when it states none.
+    /// </summary>
+    /// <remarks>
+    /// The silence is the answer here for the same reason it is in <see cref="StatedTextSize"/>, and
+    /// for one more: a list level's character style stating <c>fo:font-style="normal"</c> draws an
+    /// upright label over an italic paragraph, so <em>stated upright</em> and <em>unstated</em> lead
+    /// to different pictures. Measured on <c>probes/words-r59/label-slant.py</c>'s
+    /// <c>leveloff-markon</c>, whose <c>.odt</c> arm draws the bullet upright over an italic item.
+    /// </remarks>
+    /// <param name="styles">The document's styles.</param>
+    /// <param name="styleName">The character style's name.</param>
+    internal static bool? StatedTextItalic(OdfStyles styles, string? styleName)
+    {
+        ArgumentNullException.ThrowIfNull(styles);
+
+        OdfProperty stated = styles.ResolveWithoutDefaults(
+            styleName, OdfStyleFamily.Text, OdfPropertyKind.Text,
+            OdfNamespaces.FoCompatible, "font-style");
+
+        return stated.HasValue && stated.Value is { Length: > 0 } value
+            ? value is "italic" or "oblique"
+            : null;
+    }
+
     private static OdfProperty Paragraph(
         OdfStyles styles, string? styleName, string ns, string name)
         => styles.ResolveProperty(

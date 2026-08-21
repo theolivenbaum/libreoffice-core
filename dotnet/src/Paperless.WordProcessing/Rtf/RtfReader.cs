@@ -352,7 +352,7 @@ public sealed class RtfDocument : IWordProcessingDocument, IPaginatedDocument
                 Text = CaseMapping.Apply(paragraph.Text, runs),
                 Face = face,
                 Font = font,
-                Colour = paragraph.Colour ?? Colour.Black,
+                Colour = paragraph.Colour ?? Colour.Transparent,
                 Format = paragraph.Format,
                 Label = Label(paragraph, face, font),
                 EmSize = paragraph.Size,
@@ -400,7 +400,7 @@ public sealed class RtfDocument : IWordProcessingDocument, IPaginatedDocument
                     Language: paragraph.Language, DisableKerning: !paragraph.AutoKerning)) with
             {
                 Font = font,
-                Colour = paragraph.Colour ?? Colour.Black,
+                Colour = paragraph.Colour ?? Colour.Transparent,
                 Follow = LabelFollow.Nothing,
             }
             : null;
@@ -638,7 +638,7 @@ public sealed class RtfDocument : IWordProcessingDocument, IPaginatedDocument
                 face,
                 size,
                 font,
-                run.Colour ?? paragraph.Colour ?? Colour.Black,
+                run.Colour ?? paragraph.Colour ?? Colour.Transparent,
                 new Text.Shaping.ShapingOptions(
                     Language: run.Language, DisableKerning: !run.AutoKerning),
                 rise,

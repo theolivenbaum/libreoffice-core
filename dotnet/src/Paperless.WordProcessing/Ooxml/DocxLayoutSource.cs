@@ -845,7 +845,7 @@ public sealed partial class DocxLayoutSource
             Text = mapped,
             Face = face,
             Font = _references.GetValueOrDefault(text.FaceKey),
-            Colour = text.Colour ?? Colour.Black,
+            Colour = text.Colour ?? Colour.Transparent,
             Shading = ShadeColour(WordParagraphFormats.ShadingOf(_styles, properties)),
             Borders = ParagraphBorders(properties),
             Format = breaksPage || walker.BreaksPageHere
@@ -1144,7 +1144,7 @@ public sealed partial class DocxLayoutSource
                 face,
                 size,
                 font,
-                style.Colour ?? paragraph.Colour ?? Colour.Black,
+                style.Colour ?? paragraph.Colour ?? Colour.Transparent,
                 new ShapingOptions(Language: style.Language, DisableKerning: !style.AutoKerning),
                 rise,
                 style.CaseMap,

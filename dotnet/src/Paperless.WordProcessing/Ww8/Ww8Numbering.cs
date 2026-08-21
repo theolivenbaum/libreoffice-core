@@ -46,6 +46,18 @@ namespace Paperless.WordProcessing.Ww8;
 /// The font-table index the label is set in, from <c>sprmCRgFtc0</c> in the level's
 /// <c>grpprlChpx</c>, or −1 when the level states none.
 /// </param>
+/// <param name="IsItalic">
+/// Whether the level leans its label, from <c>sprmCFItalic</c> in the level's <c>grpprlChpx</c>,
+/// or null when the level states nothing about it.
+/// <para>
+/// <strong>Three states rather than two, and the third one is the point.</strong> A level that
+/// states the posture wins outright over the paragraph, in either direction: measured on
+/// <c>probes/words-r59/label-slant.py</c>, whose <c>levelon-markoff</c> draws a leaning label over
+/// an upright paragraph and whose <c>leveloff-markon</c> draws an upright one over a leaning
+/// paragraph. Folding "stated off" into "unstated" would get the second of those wrong, and 13 of
+/// the corpus's <c>.docx</c> — plus whatever share of its <c>.doc</c> — write exactly that shape.
+/// </para>
+/// </param>
 public readonly record struct Ww8ListLevel(
     int StartAt,
     byte NumberFormat,
@@ -59,7 +71,8 @@ public readonly record struct Ww8ListLevel(
     int TabPosition = 0,
     byte Follow = 0,
     int HalfPointSize = 0,
-    int FontIndex = -1)
+    int FontIndex = -1,
+    bool? IsItalic = null)
 {
     /// <summary>The <c>nfc</c> meaning "this level draws a bullet, not a number".</summary>
     public const byte BulletFormat = 23;
@@ -420,6 +433,7 @@ public sealed class Ww8Numbering
         if (position < 0 || position + characterPropertiesLength > stream.Length) return false;
         int halfPointSize = LevelSize(stream.Slice(position, characterPropertiesLength));
         int fontIndex = LevelFont(stream.Slice(position, characterPropertiesLength));
+        bool? italic = LevelItalic(stream.Slice(position, characterPropertiesLength));
 
         position += characterPropertiesLength;
         if (position < 0 || position + 2 > stream.Length) return false;
@@ -435,8 +449,50 @@ public sealed class Ww8Numbering
 
         level = new Ww8ListLevel(
             startAt, numberFormat, numberText, placeholders, isLegal, neverRestarts, restartLimit,
-            indentAt, firstLine, tabPosition, follow, halfPointSize, fontIndex);
+            indentAt, firstLine, tabPosition, follow, halfPointSize, fontIndex, italic);
         return true;
+    }
+
+    /// <summary>
+    /// Whether the level leans its label, or null when its <c>grpprlChpx</c> says nothing about it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The third thing worth having out of the group, and the one that decides the label's
+    /// <em>posture</em> where <see cref="LevelFont"/> decides its picture. LibreOffice reads it
+    /// through the same item set as the size and the face — <c>WW8ListManager::ReadLVL</c> runs the
+    /// whole <c>grpprlChpx</c> into <c>pLevel-&gt;maCharSet</c> — and
+    /// <c>SwTextFormatter::NewNumberPortion</c> then applies that set over a base font whose posture
+    /// it has already reset for a bullet (<c>#i53199</c>,
+    /// <c>sw/source/core/text/txtfld.cxx</c>:578-590). So for a bullet the level is very nearly the
+    /// only thing that can lean the label at all.
+    /// </para>
+    /// <para>
+    /// <c>sprmCFItalic</c>'s operand is a toggle byte: 0 off, 1 on, 128 "take the style's" and 129
+    /// "invert the style's". A list level has no style underneath it to take or invert, so 128 and
+    /// 129 are answered <em>unstated</em> rather than guessed at — which is the same judgement
+    /// <see cref="LevelIndents"/> makes about a tab group it cannot read.
+    /// </para>
+    /// </remarks>
+    private static bool? LevelItalic(ReadOnlySpan<byte> grpprl)
+    {
+        byte[] copy = grpprl.ToArray();
+        bool? stated = null;
+
+        foreach (Ww8Sprm sprm in Ww8SprmReader.Read(copy))
+        {
+            if (sprm.Identifier is not (ItalicSprm or ItalicSprm97)) continue;
+            if (sprm.Operand.Length < 1) continue;
+
+            stated = sprm.Operand.Span[0] switch
+            {
+                0 => false,
+                1 => true,
+                _ => stated,
+            };
+        }
+
+        return stated;
     }
 
     /// <summary>
@@ -576,6 +632,15 @@ public sealed class Ww8Numbering
 
         return (indentAt, firstLine, tabPosition);
     }
+
+    /// <summary><c>sprmCFItalic</c> as Word 97 wrote it: <c>sprmids.hxx</c>'s <c>CFItalic</c>.</summary>
+    private const ushort ItalicSprm97 = 0x0836;
+
+    /// <summary>
+    /// <c>sprmCFItalic</c> in the spelling a Word 6/95 level may carry — <c>sprmids.hxx</c>:148,
+    /// eighty-six, one past <c>sprmCFBold</c>'s eighty-five.
+    /// </summary>
+    private const ushort ItalicSprm = 0x0056;
 
     /// <summary><c>sprmCHps</c>, a font size in half-points, as Word 97 wrote it.</summary>
     private const ushort FontSizeSprm97 = 0x4A43;

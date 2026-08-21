@@ -695,19 +695,87 @@ public sealed partial class DocxLayoutSource
 
     /// <summary>The colour a <c>w:shd</c> fills with, or null when it fills with nothing.</summary>
     /// <remarks>
+    /// <para>
     /// Separate from <see cref="Shading"/> because a paragraph's shading is not simply the child of its own
     /// <c>w:pPr</c>: it can come from any layer of the style chain, and only the resolver knows which layer
     /// won. Both reach the same reading of the element once it has been found.
+    /// </para>
+    /// <para>
+    /// <strong><c>w:shd</c> is a pattern and not a fill, and reading only its <c>w:fill</c> is why three
+    /// black rectangles were missing from <c>AFS-050-004-F2_0i</c> page 2.</strong>
+    /// <c>CellColorHandler::getProperties</c> (<c>sw/source/writerfilter/dmapper</c>) turns <c>w:val</c>
+    /// into a weight out of a thousand and blends <c>w:color</c> over <c>w:fill</c> at it; only the
+    /// zero-weight case — <c>clear</c>, and anything the table does not name — is the fill on its own.
+    /// So <c>&lt;w:shd w:val="solid" w:color="auto" w:fill="auto"/&gt;</c> is a <em>black</em> cell, and
+    /// that is the ordinary way a Word document writes a reversed-out header row.
+    /// </para>
+    /// <para>
+    /// The two <c>auto</c>s are not the same value and that asymmetry is the file format's:
+    /// <c>w:color="auto"</c> is black and <c>w:fill="auto"</c> is white
+    /// (<c>CellColorHandler::lcl_attribute</c>). Measured on 26.2.4.2 over eight patterns —
+    /// <c>probes/words-r59/autocolour.py</c> — which reproduce exactly: <c>pct50</c> auto over auto is
+    /// <c>#7F7F7F</c>, <c>pct25</c> is <c>#BFBFBF</c>, <c>pct75</c> is <c>#3F3F3F</c>, every striped and
+    /// crossed value is 333 and comes out <c>#AAAAAA</c>, and <c>pct50</c> red over blue is
+    /// <c>#7F007F</c>. The division is integer and truncating, which is where those exact bytes come
+    /// from.
+    /// </para>
+    /// <para>
+    /// <strong><c>w:val="nil"</c> is not "no fill".</strong> It is absent from that table, so it takes
+    /// the zero-weight branch and paints its <c>w:fill</c> like <c>clear</c>: the reference fills
+    /// <c>nil</c> with <c>w:fill="000000"</c> black and reverses its text out. Returning null for it —
+    /// which is what stood here — is the one reading the probe refutes outright rather than refines.
+    /// </para>
     /// </remarks>
     private Colour? ShadeColour(XElement? shade)
     {
         if (shade is null) return null;
 
-        if (Word.Attribute(shade, "val") is "nil") return null;
-
-        return WordThemeColour.Read(
+        Colour? fill = WordThemeColour.Read(
             shade, _theme, "fill", "themeFill", "themeFillTint", "themeFillShade");
+
+        int weight = ShadingWeight(Word.Attribute(shade, "val"));
+        if (weight <= 0) return fill;
+
+        Colour foreground = WordThemeColour.Read(
+            shade, _theme, "color", "themeColor", "themeTint", "themeShade") ?? Colour.Black;
+        Colour background = fill ?? Colour.White;
+
+        return new Colour(
+            Mix(foreground.R, background.R, weight),
+            Mix(foreground.G, background.G, weight),
+            Mix(foreground.B, background.B, weight));
+
+        static byte Mix(byte foreground, byte background, int weight)
+            => (byte)(((foreground * weight) + (background * (1000 - weight))) / 1000);
     }
+
+    /// <summary>
+    /// How much of a <c>w:shd</c>'s foreground shows through, out of a thousand.
+    /// </summary>
+    /// <remarks>
+    /// <c>CellColorHandler::getProperties</c>'s own table, value for value. The percentages are not
+    /// uniformly ten times their name — <c>pct12</c> is 125, <c>pct15</c> 150, <c>pct37</c> 375,
+    /// <c>pct62</c> 625 and <c>pct87</c> 875, because those five are Word's names for eighths — and
+    /// every striped or crossed pattern, thin or not, is a flat 333 whatever its geometry, since
+    /// Writer has no pattern brush to draw it with. Anything the table does not name is zero, which is
+    /// the fill on its own.
+    /// </remarks>
+    private static int ShadingWeight(string? pattern) => pattern switch
+    {
+        null or "clear" or "nil" => 0,
+        "solid" => 1000,
+        "pct12" => 125,
+        "pct15" => 150,
+        "pct37" => 375,
+        "pct62" => 625,
+        "pct87" => 875,
+        ['p', 'c', 't', .. var digits] when int.TryParse(digits, out int percent)
+            && percent is > 0 and <= 100 => percent * 10,
+        "horzStripe" or "vertStripe" or "reverseDiagStripe" or "diagStripe" or "horzCross"
+            or "diagCross" or "thinHorzStripe" or "thinVertStripe" or "thinReverseDiagStripe"
+            or "thinDiagStripe" or "thinHorzCross" or "thinDiagCross" => 333,
+        _ => 0,
+    };
 
     /// <summary>
     /// A cell's own four borders — <c>w:tcBorders</c> and nothing else — with null for a side it

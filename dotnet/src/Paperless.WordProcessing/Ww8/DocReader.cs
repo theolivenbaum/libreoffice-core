@@ -676,7 +676,7 @@ public sealed class Ww8Document : IWordProcessingDocument, IPaginatedDocument
                 Text = CaseMapping.Apply(WithSymbols(fonts, paragraph), runs),
                 Face = face,
                 Font = font,
-                Colour = paragraph.Colour ?? Colour.Black,
+                Colour = paragraph.Colour ?? Colour.Transparent,
                 Format = paragraph.Format,
                 Label = Label(fonts, paragraph, face, font),
                 Borders = paragraph.Borders,
@@ -744,10 +744,18 @@ public sealed class Ww8Document : IWordProcessingDocument, IPaginatedDocument
     {
         if (paragraph.ListMarker is not { Length: > 0 } marker) return null;
 
+        // A bullet's base font is the paragraph's with its posture reset — `#i53199` in
+        // `SwTextFormatter::NewNumberPortion` — so only the level can lean it; a number's base keeps
+        // the paragraph's, and the level overrides it only where it states one. Measured over the
+        // `.doc` column of `probes/words-r59/label-slant.py`, where the level's `sprmCFItalic`
+        // survives a round trip through 26.2.4.2 and the paragraph mark's own formatting does not.
+        bool isBullet = paragraph.ListLabelSlot != '\0';
+        bool italic = paragraph.ListLabelItalic ?? (!isBullet && paragraph.IsItalic);
+
         (string text, OpenTypeFace labelFace, FontReference? labelFont) =
-            SymbolLabel(fonts, paragraph.ListLabelFamily, paragraph.ListLabelSlot)
-            ?? LevelLabel(fonts, paragraph.ListLabelFamily, marker)
-            ?? (marker, face, font);
+            SymbolLabel(fonts, paragraph.ListLabelFamily, paragraph.ListLabelSlot, italic)
+            ?? LevelLabel(fonts, paragraph.ListLabelFamily, marker, italic)
+            ?? Paragraphs(fonts, paragraph, marker, face, font, italic);
 
         return PageLabel.Measured(
             text, labelFace,
@@ -758,7 +766,7 @@ public sealed class Ww8Document : IWordProcessingDocument, IPaginatedDocument
                 Language: paragraph.Language, DisableKerning: !paragraph.AutoKerning)) with
         {
             Font = labelFont,
-            Colour = paragraph.Colour ?? Colour.Black,
+            Colour = paragraph.Colour ?? Colour.Transparent,
             Follow = paragraph.ListFollow switch
             {
                 1 => LabelFollow.Space,
@@ -860,29 +868,65 @@ public sealed class Ww8Document : IWordProcessingDocument, IPaginatedDocument
     /// </para>
     /// </remarks>
     private static (string Text, OpenTypeFace Face, FontReference? Font)? LevelLabel(
-        LayoutFonts fonts, string? family, string marker)
+        LayoutFonts fonts, string? family, string marker, bool italic)
     {
         if (family is not { Length: > 0 } || marker.Length == 0) return null;
         if (SymbolFontRecode.IsRecodeable(family)) return null;
-        if (fonts.Face(family, 400, false) is not { } levelFace) return null;
+        if (fonts.Face(family, 400, italic) is not { } levelFace) return null;
 
         foreach (char character in marker)
         {
             if (!levelFace.HasGlyphFor(character)) return null;
         }
 
-        return (marker, levelFace, fonts.Reference(family, 400, false));
+        return (marker, levelFace, fonts.Reference(family, 400, italic));
     }
 
+    /// <summary>
+    /// The label in the paragraph's own face, at the label's own posture.
+    /// </summary>
+    /// <remarks>
+    /// What is left when the level names no face of its own, and it is the paragraph's face unless
+    /// the label leans where the paragraph does not or the other way about — a level's
+    /// <c>sprmCFItalic</c> is stated in either direction and beats the paragraph in both. Resolved
+    /// only in that case, so a list paragraph whose label agrees with its text puts no second
+    /// request through the font cache.
+    /// </remarks>
+    private static (string Text, OpenTypeFace Face, FontReference? Font) Paragraphs(
+        LayoutFonts fonts,
+        Ww8DocumentReader.Ww8LayoutParagraph paragraph,
+        string marker,
+        OpenTypeFace face,
+        FontReference? font,
+        bool italic)
+    {
+        if (italic == paragraph.IsItalic) return (marker, face, font);
+
+        return fonts.Face(paragraph.FamilyName, paragraph.Weight, italic) is { } leaned
+            ? (marker, leaned, fonts.Reference(paragraph.FamilyName, paragraph.Weight, italic))
+            : (marker, face, font);
+    }
+
+    /// <param name="fonts">The shared font cache.</param>
+    /// <param name="family">The family the level names, or null when it names none.</param>
+    /// <param name="slot">The raw code point the level states, or <c>\0</c> for a counter.</param>
+    /// <param name="italic">
+    /// Whether the slot is drawn leaning. Defaulted <c>false</c> for the two callers that resolve a
+    /// <c>sprmCSymbol</c> inside ordinary text rather than a list level, because those are given a
+    /// family and a slot and not the run's own CHPX. Whether 26.2.4.2 leans a recoded symbol in an
+    /// italic run is <strong>not measured</strong> — round 58's residual is a column of list bullets
+    /// at one x position and holds no run symbol — so the default preserves what was drawn before
+    /// rather than guessing.
+    /// </param>
     private static (string Text, OpenTypeFace Face, FontReference? Font)? SymbolLabel(
-        LayoutFonts fonts, string? family, char slot)
+        LayoutFonts fonts, string? family, char slot, bool italic = false)
     {
         if (family is not { Length: > 0 }) return null;
         if (slot == '\0') return null;
         if (!SymbolFontRecode.IsRecodeable(family)) return null;
 
-        if (fonts.Face(family, 400, false) is not { } statedFace) return null;
-        FontReference? reference = fonts.Reference(family, 400, false);
+        if (fonts.Face(family, 400, italic) is not { } statedFace) return null;
+        FontReference? reference = fonts.Reference(family, 400, italic);
 
         // The face's own file is present, so its slots are drawable as they stand.
         if (reference is not null
@@ -896,13 +940,13 @@ public sealed class Ww8Document : IWordProcessingDocument, IPaginatedDocument
 
         // The recode and the face go together: the code point means nothing anywhere but OpenSymbol,
         // so a resolution that landed elsewhere leaves the caller's fallback in place.
-        if (fonts.Face(SymbolFontRecode.SubstituteFamily, 400, false) is not { } symbolFace)
+        if (fonts.Face(SymbolFontRecode.SubstituteFamily, 400, italic) is not { } symbolFace)
         {
             return null;
         }
 
         FontReference? symbolReference =
-            fonts.Reference(SymbolFontRecode.SubstituteFamily, 400, false);
+            fonts.Reference(SymbolFontRecode.SubstituteFamily, 400, italic);
 
         return symbolReference is not null
                && SymbolFontRecode.IsSubstituteFamily(symbolReference.FamilyName)
@@ -1133,7 +1177,7 @@ public sealed class Ww8Document : IWordProcessingDocument, IPaginatedDocument
                 face,
                 size,
                 font,
-                run.Colour ?? paragraph.Colour ?? Colour.Black,
+                run.Colour ?? paragraph.Colour ?? Colour.Transparent,
                 new Text.Shaping.ShapingOptions(
                     Language: run.Language, DisableKerning: !run.AutoKerning),
                 rise,

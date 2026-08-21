@@ -912,6 +912,24 @@ public readonly record struct PageRun(
     /// </remarks>
     public Colour EffectiveColour => Colour.A == 0 ? Core.Graphics.Colour.Black : Colour;
 
+    /// <summary>
+    /// The colour this run is drawn in over a given background.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="EffectiveColour"/> answers the same question with no background to answer it
+    /// against, which is the same answer wherever the background is not dark. Transparent
+    /// <see cref="Colour"/> is OOXML's <c>auto</c> and ODF's absent colour alike — the state
+    /// LibreOffice calls <c>COL_AUTO</c> — and it is resolved against the frame's brush at the
+    /// drawing pass rather than at the reader, because the reader does not know which cell the
+    /// paragraph will land in.
+    /// </remarks>
+    /// <param name="background">The brush behind the run, or transparent for none.</param>
+    public Colour ColourOn(Colour background)
+        => Colour.A != 0 ? Colour
+            : background.A != 0 && background.IsDark
+                ? Core.Graphics.Colour.White
+                : Core.Graphics.Colour.Black;
+
     /// <summary>True when the run is drawn on a coloured band rather than on the page.</summary>
     /// <remarks>
     /// Transparent means no band, as it does for <see cref="Colour"/>: a highlight is an addition to the

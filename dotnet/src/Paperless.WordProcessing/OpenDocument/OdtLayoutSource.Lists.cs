@@ -227,11 +227,20 @@ public sealed partial class OdtLayoutSource
 
         Length size = LabelSize(definition, text);
 
+        // The level's own character style beats the item's posture in *either* direction: a style
+        // stating `fo:font-style="normal"` draws an upright label over an italic paragraph, and one
+        // stating `italic` draws a leaning label over an upright one. A bullet whose level states
+        // nothing is upright whatever the paragraph is, because `SwTextFormatter::NewNumberPortion`
+        // resets the base font's posture for a bullet and not for a number (`#i53199`,
+        // `sw/source/core/text/txtfld.cxx`:578-590). Measured over the `.odt` column of
+        // `probes/words-r59/label-slant.py`.
+        bool italic = OdfParagraphFormats.StatedTextItalic(_styles, definition.TextStyleName)
+                      ?? (definition.Kind != OdfListLabelKind.Bullet && text.IsItalic);
+
         // A bullet level names a symbol font and a numbered one usually names nothing, in which case the
         // label is set in the item's own face — which is what makes "1." match the text beside it.
-        OpenTypeFace labelFace = definition.Typeface is { Length: > 0 } family
-            ? Face(family, text.Weight, text.IsItalic) ?? face
-            : face;
+        string? requested = definition.Typeface is { Length: > 0 } family ? family : text.FamilyName;
+        OpenTypeFace labelFace = Face(requested, text.Weight, italic) ?? face;
 
         PageLabel label = PageLabel.Measured(
             drawn, labelFace, size,
@@ -240,8 +249,15 @@ public sealed partial class OdtLayoutSource
         return (
             label with
             {
-                Font = _references.GetValueOrDefault((labelFace.FamilyName, text.Weight, text.IsItalic)),
-                Colour = text.Colour ?? Core.Graphics.Colour.Black,
+                // Keyed on the family that was *requested*, not on the family that came back. A bullet
+                // level names `Symbol`, which nothing here has, and the resolver answers `OpenSymbol` —
+                // so a lookup by the resolved name missed the cache outright and the label was left with
+                // no reference at all. That is the `emb no` failure the DOCX and WW8 readers each carry a
+                // paragraph about, arriving a third time: with no reference the drawing pass falls back
+                // to a name-only one, which can be drawn with and not embedded, and which also carries no
+                // synthetic lean — so the level's own slant was lost with it.
+                Font = _references.GetValueOrDefault((requested, text.Weight, italic)),
+                Colour = text.Colour ?? Core.Graphics.Colour.Transparent,
                 Follow = follow,
                 TabStop = tabStop,
                 MinimumGap = minimumGap,
