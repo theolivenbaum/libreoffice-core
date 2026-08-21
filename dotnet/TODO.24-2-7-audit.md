@@ -38,6 +38,24 @@ while it was being worked. That is why a re-checked site now carries an explicit
 
 Progress is `git grep -c '24\.2\.7-audit'`, never a count of `24.2.7`.
 
+## Progress
+
+| round | sites re-checked | outcome |
+|---|---|---|
+| 52 (slides) | `SlideAutofit.cs`, 4 sites | **WRONG.** −155.40 `abs_ink`, −11.1% of the track |
+| 53 (slides) | `SlideTextLayout.cs`, **6 sites** | **all six still correct** — and the probes written to check them found a *fifth* branch none of the six described, worth another two fixes' worth of baseline accuracy. See `probes/slides-r53/results.md` § "The 24.2.7.2 audit" |
+
+**48 → 42 sites, 30 → 29 files.** Two in one: a re-check is worth running even when it comes back
+clean, because authoring the probe is what exposes what the site does *not* say. Round 53's
+`make-linespace-probe.py` confirmed all four of `SlideTextLayout.cs`'s EditEngine sites and, in the
+same rendering, showed that `SvxLineSpaceRule::Fix` and `::Min` — the two arms *before* the ones
+those sites describe — were not transcribed at all. That was a 9.58 pt vertical displacement on
+every paragraph stating an exact line height, 769 of them in 23 documents.
+
+It also promoted one recorded *divergence* from a judgement to a measurement: `LineSpacingRule`'s
+50% clamp is Writer's and not EditEngine's, and at 40% the reference draws `fround(0.40 × natural)`
+rather than clamping. 26.2.4.2 has no such clamp either.
+
 ## The measured size of the list
 
 Taken with `git grep` at the time of writing — **hits and files are different numbers and an
