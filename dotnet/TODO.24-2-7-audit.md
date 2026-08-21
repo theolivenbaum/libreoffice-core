@@ -177,6 +177,46 @@ It also promoted one recorded *divergence* from a judgement to a measurement: `L
 50% clamp is Writer's and not EditEngine's, and at 40% the reference draws `fround(0.40 × natural)`
 rather than clamping. 26.2.4.2 has no such clamp either.
 
+## The open count over-states by about four times, and here is the honest one
+
+Found by round 63 (words), which noticed that `Paperless.WordProcessing` shows **11 open hits** and
+has **one reachable open site**. Measured corpus-wide:
+
+| project | raw open hits | hits in files carrying **no** marker |
+|---|---:|---:|
+| `Paperless.WordProcessing` | 11 | **3** |
+| `Paperless.Spreadsheets` | 9 | **4** |
+| `Paperless.Presentations` | 8 | **0** |
+| `Paperless.Text` | 5 | **1** |
+| `Paperless.Core` | 2 | **0** |
+| `Paperless.Rendering` | 1 | **1** |
+| `Paperless.Ooxml` | 1 | **0** |
+| **total** | **37** | **9** |
+
+**A raw hit is not an unverified claim.** Most of the 37 are one of:
+
+- **prose inside or beside a site that has already been marked** — the marker records the outcome and
+  the surrounding comment still names the old binary because that is the history being described;
+- **historical narrative** about a superseded port, which is not a claim about behaviour at all;
+- **a site in a reader with no witness in this corpus** — two of `Paperless.WordProcessing`'s sit in
+  the ODT and RTF readers, and the words corpus holds **no `.rtf` at all**.
+
+```sh
+# hits in files that carry no marker — the honest backlog
+for p in dotnet/src/Paperless.*; do
+  for f in $(comm -23 <(git grep -ln '24\.2\.7' -- "$p/**/*.cs" | sort) \
+                      <(git grep -ln '24\.2\.7-audit' -- "$p/**/*.cs" | sort)); do
+    git grep -c '24\.2\.7' -- "$f"
+  done
+done | awk -F: '{s+=$2} END{print s+0}'
+```
+
+**This is the fourth time this file's metric has needed correcting** — it conflated hits with files,
+it grew while being worked, a marker's own prose put a cleared site back into the count, and now it
+turns out to over-state the backlog four-fold. **Every one of those was found by a round, not by the
+file.** The lesson has stopped being about this metric: **a count of mentions is never a count of
+claims, and the gap grows every time the thing is worked on.**
+
 ## The size of the list — **run the command, do not read a number**
 
 This file has carried a hand-maintained count three times and it has been wrong three times: it
