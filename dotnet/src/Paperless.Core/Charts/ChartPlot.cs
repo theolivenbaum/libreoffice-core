@@ -873,6 +873,58 @@ public sealed partial record ChartPlot
     public Colour? CategoryGrid { get; init; }
 
     /// <summary>
+    /// The colour the value axis' <em>minor</em> gridlines are drawn in, or null when it has none.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>c:minorGridlines</c>, <c>chart:grid class="minor"</c>. A separate element from
+    /// <see cref="ValueGrid"/> and a separate answer: an axis may state either, both or neither.
+    /// </para>
+    /// <para>
+    /// <strong>What this is worth is a whole page, and no gate column can see it.</strong> On
+    /// <c>Demick_JetBlue.pptx</c> page 4 the reference draws 28 horizontal and 21 vertical minor
+    /// lines over the plot area and we drew none, which is the <c>pdf-image-diff</c> report's
+    /// <em>"a solid area drawn differently, 31.18% of page"</em> — 31% of a page of pure ink
+    /// difference, on a document whose only gate failure is a word count that a gridline cannot
+    /// move. The brief that sent this round looking at that page had it diagnosed as a rotated
+    /// category axis; the axis is drawn identically on both sides.
+    /// </para>
+    /// </remarks>
+    public Colour? ValueMinorGrid { get; init; }
+
+    /// <summary>The colour the category axis' minor gridlines are drawn in, or null.</summary>
+    /// <inheritdoc cref="ValueMinorGrid"/>
+    public Colour? CategoryMinorGrid { get; init; }
+
+    /// <summary>
+    /// How many sub-intervals a minor gridline divides one major interval into.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>chart2</c> models the minor grid as a <em>count of sub-intervals</em> rather than as a
+    /// step, so <c>n</c> here draws <c>n − 1</c> lines strictly between each pair of major ticks
+    /// and none outside them. Its own default is 2 (<c>ScaleAutomatism.cxx:75</c>) and that is
+    /// what a category axis gets, because <c>AxisConverter</c>'s <c>CATEGORY</c> branch never sets
+    /// a sub-increment.
+    /// </para>
+    /// <para>
+    /// <strong>A value axis is 5, not 2, and the reason is in the reference's source.</strong>
+    /// <c>AxisConverter::convertFromModel</c> (<c>oox/source/drawingml/chart/axisconverter.cxx:405-409</c>)
+    /// ends its <c>REALNUMBER</c> branch with <c>// tdf#114168 If minor unit is not set then set
+    /// interval to 5, as MS Excel do</c>. With both units stated it is
+    /// <c>round(majorUnit / minorUnit)</c>, and a logarithmic axis stating a minor unit is 9.
+    /// Measured on 26.2.4.2: <c>Demick_JetBlue.pptx</c> page 4's left axis has 8 major ticks
+    /// 25.97 pt apart and 28 minor lines 5.19 pt apart — 25.97 / 5.19 = 5.00 exactly — while its
+    /// category axis draws one minor line per interval, at the midpoint.
+    /// </para>
+    /// </remarks>
+    public int ValueMinorIntervals { get; init; } = 5;
+
+    /// <summary>How many sub-intervals the category axis' minor grid divides an interval into.</summary>
+    /// <inheritdoc cref="ValueMinorIntervals"/>
+    public int CategoryMinorIntervals { get; init; } = 2;
+
+    /// <summary>
     /// The inner plot rectangle the file states, relative to the chart frame, or null.
     /// </summary>
     /// <remarks>

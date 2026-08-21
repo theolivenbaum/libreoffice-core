@@ -1531,7 +1531,34 @@ public static partial class ChartLayout
                     new DocPoint(area.Left, axisY), new DocPoint(area.Right, axisY), AxisColour));
         }
 
-        foreach (double tick in scale.MajorTicks())
+        // The minor grid needs the *next* tick, so the ticks are taken as a list rather than
+        // walked lazily. Only the primary axis draws a grid, exactly as for the major one.
+        List<double> ticks = [.. scale.MajorTicks()];
+
+        if (!secondary && plot.ValueMinorGrid is { } minor && plot.ValueMinorIntervals > 1)
+        {
+            for (int at = 0; at + 1 < ticks.Count; at++)
+            {
+                for (int step = 1; step < plot.ValueMinorIntervals; step++)
+                {
+                    double between = scale.Fraction(ticks[at])
+                        + ((scale.Fraction(ticks[at + 1]) - scale.Fraction(ticks[at]))
+                           * step / plot.ValueMinorIntervals);
+
+                    lines.Add(columns
+                        ? new ChartLine(
+                            new DocPoint(area.Left, area.Bottom - (area.Height * between)),
+                            new DocPoint(area.Right, area.Bottom - (area.Height * between)),
+                            minor)
+                        : new ChartLine(
+                            new DocPoint(area.Left + (area.Width * between), area.Top),
+                            new DocPoint(area.Left + (area.Width * between), area.Bottom),
+                            minor));
+                }
+            }
+        }
+
+        foreach (double tick in ticks)
         {
             double along = scale.Fraction(tick);
 
@@ -1716,11 +1743,35 @@ public static partial class ChartLayout
             ? dates.Ticks.Count - 1
             : plot.ShiftedCategories ? categories : categories - 1;
 
+        double Along(int at) => plot.DateAxis is { } dateScale
+            ? dateScale.Fraction(dateScale.Ticks[at])
+            : ticks == 0 ? 0.0 : (double)at / ticks;
+
+        if (plot.CategoryMinorGrid is { } categoryMinor && plot.CategoryMinorIntervals > 1)
+        {
+            for (int at = 0; at + 1 <= ticks; at++)
+            {
+                for (int step = 1; step < plot.CategoryMinorIntervals; step++)
+                {
+                    double between = Along(at)
+                        + ((Along(at + 1) - Along(at)) * step / plot.CategoryMinorIntervals);
+
+                    lines.Add(columns
+                        ? new ChartLine(
+                            new DocPoint(area.Left + (area.Width * between), area.Top),
+                            new DocPoint(area.Left + (area.Width * between), area.Bottom),
+                            categoryMinor)
+                        : new ChartLine(
+                            new DocPoint(area.Left, area.Bottom - (area.Height * between)),
+                            new DocPoint(area.Right, area.Bottom - (area.Height * between)),
+                            categoryMinor));
+                }
+            }
+        }
+
         for (int at = 0; at <= ticks; at++)
         {
-            double along = plot.DateAxis is { } scale
-                ? scale.Fraction(scale.Ticks[at])
-                : ticks == 0 ? 0.0 : (double)at / ticks;
+            double along = Along(at);
 
             if (columns)
             {

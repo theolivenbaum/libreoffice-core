@@ -239,6 +239,11 @@ public static class DrawingChartPlot
             PlotBackground = FillOf(Child(plotArea, "spPr"), theme),
             ValueGrid = GridOf(axes.Value, theme),
             CategoryGrid = GridOf(axes.Category, theme) ?? GridOf(axes.Domain, theme),
+            ValueMinorGrid = GridOf(axes.Value, theme, "minorGridlines", DefaultMinorGrid),
+            CategoryMinorGrid =
+                GridOf(axes.Category, theme, "minorGridlines", DefaultMinorGrid)
+                ?? GridOf(axes.Domain, theme, "minorGridlines", DefaultMinorGrid),
+            ValueMinorIntervals = MinorIntervals(axes.Value),
             // The three automatic-text sizes and weights, which are *not* chart2's model
             // defaults — see AutoText below for why an OOXML chart never reaches those.
             TitleSize = SizeOf(Child(chart, "title"))
@@ -402,14 +407,46 @@ public static class DrawingChartPlot
     /// <c>a:ln/a:noFill</c> means no gridline at all, which is how a chart turns one off without
     /// removing the element.
     /// </remarks>
-    private static Colour? GridOf(XElement? axis, DrawingTheme? theme)
+    private static Colour? GridOf(
+        XElement? axis,
+        DrawingTheme? theme,
+        string element = "majorGridlines",
+        Colour? fallback = null)
     {
-        if (Child(axis, "majorGridlines") is not { } grid) return null;
+        if (Child(axis, element) is not { } grid) return null;
 
         XElement? properties = Child(grid, "spPr");
         if (Drawing.Child(Drawing.Child(properties, "ln"), "noFill") is not null) return null;
 
-        return LineOf(properties, theme) ?? DefaultGrid;
+        return LineOf(properties, theme) ?? fallback ?? DefaultGrid;
+    }
+
+    /// <summary>
+    /// How many sub-intervals this axis' minor grid divides one major interval into.
+    /// </summary>
+    /// <remarks>
+    /// <c>AxisConverter::convertFromModel</c>'s <c>REALNUMBER</c>/<c>PERCENT</c> branch
+    /// (<c>oox/source/drawingml/chart/axisconverter.cxx:389-409</c>), which is the only place the
+    /// count is decided for an OOXML axis: <c>round(majorUnit / minorUnit)</c> when both are
+    /// stated and the quotient is sane, <b>5</b> when <c>c:minorUnit</c> is absent — its own
+    /// comment is <c>tdf#114168 … as MS Excel do</c> — and 9 for a logarithmic axis that states
+    /// one. A stated minor unit alone, with no major, leaves the count <em>unset</em> and
+    /// <c>ScaleAutomatism</c>'s default of 2 stands.
+    /// </remarks>
+    private static int MinorIntervals(XElement? axis)
+    {
+        bool logarithmic = Value(Child(Child(axis, "scaling"), "logBase")) is not null;
+        double? major = Number(Child(axis, "majorUnit"));
+        double? minor = Number(Child(axis, "minorUnit"));
+
+        if (logarithmic) return minor is null ? 2 : 9;
+        if (major is { } step && minor is { } sub && sub > 0 && sub <= step)
+        {
+            double count = (step / sub) + 0.5;
+            return count is >= 1.0 and < 1001.0 ? (int)count : 2;
+        }
+
+        return minor is null ? 5 : 2;
     }
 
     /// <summary>
@@ -615,6 +652,30 @@ public static class DrawingChartPlot
 
     /// <summary>chart2's own gridline colour, gray30.</summary>
     private static readonly Colour DefaultGrid = Colour.FromRgb(0xB3B3B3);
+
+    /// <summary>
+    /// The colour a minor gridline that states none is drawn in.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>chart2</c>'s <c>GridProperties</c> has one default for both grids
+    /// (<c>chart2/source/model/main/GridProperties.cxx:64-66</c>), so this is deliberately the
+    /// same value as <see cref="DefaultGrid"/> rather than a guessed lighter one.
+    /// </para>
+    /// <para>
+    /// <strong>And it is measurably not what 26.2.4.2 draws for an OOXML chart, which is a
+    /// divergence this reader already had for the MAJOR grid and which is recorded here rather
+    /// than guessed at.</strong> <c>ObjectFormatter</c>'s automatic table
+    /// (<c>oox/source/drawingml/chart/objectformatter.cxx:223-235</c>) formats a major gridline
+    /// as the theme's <c>tx1</c> at <c>tint 75000</c> and a minor one at <c>tint 50000</c>, and on
+    /// <c>Demick_JetBlue.pptx</c> page 4 the reference draws <c>0x666666</c> and <c>0x8B8B8B</c>
+    /// against this file's <c>0xB3B3B3</c> for both. Closing that gap is the whole automatic-format
+    /// layer for gridlines and not a constant, so it stays open: a mesh in the wrong grey is much
+    /// nearer the reference than no mesh at all, and it is the same grey this reader has been
+    /// drawing major gridlines in all along.
+    /// </para>
+    /// </remarks>
+    private static readonly Colour DefaultMinorGrid = Colour.FromRgb(0xB3B3B3);
 
     /// <summary>What one axis states about its scale.</summary>
     private static ChartScaleRequest ScaleOf(XElement? axis)
