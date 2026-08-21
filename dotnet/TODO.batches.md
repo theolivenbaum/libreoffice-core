@@ -15765,6 +15765,12 @@ superseded version.** Live at this commit: **42 open, 14 marked — 13 verified,
 **199 → 199 of 302, 0 page counts moved, 0 manifest disagreements.** `abs_ink` 1147.14 →
 **1136.53**, major pages 402 → **395**, `tf-agreement` 0.77054 → 0.77061.
 
+The largest of the eight ink regressions is **not one**: `Sylva introduction session.pptx` goes
+2.99 → 3.26 on unsigned ink while its **differing pixels fall 50.97 → 48.81** and its turn count
+goes from *34 blocks the reference does not turn* to **0, the reference's own figure**. By
+differing pixels only one document worsens by more than a quarter point:
+`ws_prod…M.017-(French)-France.ppt`, +1.04 on a deck already at 738.13.
+
 **And the headline number of this round is not in that table.** Summed differing-pixel percentage
 over the track's 4530 pages: **19823.86 → 19731.15, −92.71**, 46 documents moved, 38 better,
 8 worse. The synthetic-oblique fix alone is worth **−1.92 `abs_ink`** and **−76.89 differing
@@ -15875,8 +15881,9 @@ it rather than quote it.
    unread. `PptSlideLayout` has no `Turned` equivalent; the OOXML half of this round built
    everything else it needs.
 2. **Over-rotation is now the whole of the turn gap.** `Demick_JetBlue` 76 blocks to 8,
-   `8_P-Pavese_AIRBUS` 21 to 1, `Sylva` 34 to 0 — and `Sylva` is this round's largest ink
-   regression. Not `@vert`: shape rotation reaching text that should stay upright.
+   `8_P-Pavese_AIRBUS` 21 to 1, `171128IPAP` 45 to 70 the other way. Not `@vert`: shape rotation
+   reaching text that should stay upright. `Sylva` went **34-to-0 → 0-to-0** as a side effect of
+   `@vert` and `@rot` cancelling on one body — the shape of the fix the rest of them want.
 3. **The font-resolution divergence the shear exposed** — `2014BSA_Sunday_Killion` shears 948
    glyphs where the reference shears none, and 360 words pages disagree by more than 2%. Same face
    *lists* on both sides; the divergence is per-run.

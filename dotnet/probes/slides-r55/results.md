@@ -50,6 +50,23 @@ major threshold, not a different tree.
 | +0.01 | `nabiyeleul_1_aviation_service…pptx` | 3.43 → 3.44 |
 | +0.01 | `16 - UTM - (NASA).pptx` | 15.10 → 15.11 |
 
+**Two of the eight are the round-53 shape rather than real, and one of them is the largest.**
+`Sylva introduction session.pptx` is the clearest case this project has produced: its unsigned ink
+rose 2.99 → 3.26 while its **differing pixels fell 50.97 → 48.81** *and* its turn count went from
+**34 blocks the reference does not turn to 0, which is the reference's own figure exactly*. It has
+a body stating `@rot` and `@vert` that cancel; before this round we turned that text and the
+reference did not. Three instruments, two of which are not the ink column, say the page improved.
+`Employment-Based_I-485` is the same shape at a smaller scale (215.52 → 212.77 differing pixels
+against +0.05 ink).
+
+**By differing pixels — the instrument that can see this change — 8 documents worsen and only one
+by more than a quarter of a point**: `ws_prod…M.017-(French)-France.ppt` **+1.04** over 55 pages,
+on a document already at 738.13 (13.4% of every page). Its shear placement is right to within a
+few glyphs a page (3778 to the reference's 3830, no page off by more than 12), so the residue is
+ink moving inside a page that is wrong for other reasons. The rest: `2014BSA_Sunday_Killion` +0.21
+and `16 - UTM - (NASA)` +0.11 (both the font-resolution case in §1), `NAS-…-Weather` +0.07,
+`ws_prod…Part-M` +0.06, `joint_user_outcomes` +0.02, `nabiyeleul` +0.01, `_1___Opatrny_Ales` +0.01.
+
 Largest improvements: `NAS-Infrastructure-Roadmaps-v16.0.pptx` **159.88 → 151.76** with major
 pages **55 → 49**, `2015-Civil-Rights-Website-training.ppt` 30.32 → 29.64,
 `NAS-…-Weather` 11.93 → 11.42, `attendance-updates-for-governors` 3.80 → 3.29, `undp` 20.57 →
@@ -324,10 +341,11 @@ track's to work, and this is the census that names it.
    4, `Thailand17` 4, `hofman` 1 — and the turn census still shows those documents short.
    `PptSlideLayout` has no `Turned` equivalent; giving `SlideTextBody.Rotation` the same quarter
    turn from Escher would reuse everything this round built.
-2. **Over-rotation, which is now the whole of the turn gap.** `Demick_JetBlue.pptx` turns 76 blocks
-   where the reference turns 8, `8_P-Pavese_AIRBUS` 21 to 1, `Sylva` 34 to 0 — and `Sylva` is this
-   round's largest ink regression. `171128IPAP` is the mirror at 45 to 70. None of these is
-   `@vert`; they are shape rotation reaching text that should stay upright.
+2. **Over-rotation, which is now the whole of the turn gap.** `Demick_JetBlue.pptx` turns 76
+   blocks where the reference turns 8, `8_P-Pavese_AIRBUS` 21 to 1, `171128IPAP` is the mirror at
+   45 to 70. None of these is `@vert`; they are shape rotation reaching text that should stay
+   upright. `Sylva`'s 34-to-0 went to **0 to 0** this round, as a side effect of `@vert` and
+   `@rot` cancelling on the same body — which is the shape of the fix the rest of them want.
 3. **The font-resolution divergence the shear exposed.** `2014BSA_Sunday_Killion.pptx` (948
    sheared glyphs to the reference's 0), `16 - UTM - (NASA)`, `Sean Monogue` on slides, and 360
    words pages. Both sides embed the same face *lists*; the divergence is per-run. It has been
