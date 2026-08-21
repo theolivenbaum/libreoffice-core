@@ -18084,8 +18084,8 @@ count is at stake.
 
 ## Round 62 — sheets — a chart's advance width goes through the same 96 dpi device its line height already did (2026-08-21)
 
-**282 → 279.** The round's named item closed exactly and the round cost two verdicts, and both
-facts are load-bearing.
+**282 → 280.** The round's named item closed exactly and the round cost one verdict on our side,
+and both facts are load-bearing. (It read 279 before the wrap-limit units were restored — below.)
 
 **The brief's item 1 had the wrong seat.** `BestFitInner` is a faithful port; it missed `003`'s
 `M3` by **0.33 of a degree** because its *input* was 1.7 pt too wide. Round 60 put a chart's
@@ -18099,13 +18099,13 @@ every one, residual ≤0.005, no free parameter. All five of `003`'s label boxes
 reference's drawn width to **0.03 pt** and their centres to **0.16**, and the four corpus pies are
 **word-exact** where they were two over — round 61's one miss, closed.
 
-**The cost, stated and not netted.** `023_Waterfall` `match` → `words` (881 → 843, ref 868) and
-`046_Cost_analysis` `match` → `words` (159 → 161, ref 157). A third, `fse_identification_form`,
-moved on the **reference's** side. `046`'s character stream is **754 characters before and after** —
-pure re-ordering, a tokenisation ceiling. `023`'s pass was never agreement: the reference draws its
-nine `Delta` category labels **rotated** (three tokens each) and we draw them horizontally, and our
-881 was our own fragmentation making up the difference. Ink improved on 5 of the 6 documents
-measured, `023` among them.
+**The cost, stated and not netted.** `046_Cost_analysis` `match` → `words` (159 → 161, ref 157),
+and its character stream is **754 characters before and after** — pure re-ordering, a tokenisation
+ceiling. A second, `fse_identification_form`, moved on the **reference's** side. `023_Waterfall`
+went `match` → `words` (881 → 843) and then **back to `match` at 872/868** once the cause was
+found; its pass at 881 was never agreement, because the reference draws its nine `Delta` category
+labels **rotated** into three tokens each and we drew them horizontally. Ink improved on 5 of the 6
+documents measured, `023` among them.
 
 **The prediction named its own failure.** `prediction.md`: *"the thing most likely to be wrong is a
 regression among the other 93 chart-bearing documents … I predict 0 and I expect that to be the
@@ -18131,5 +18131,12 @@ corrected**, so the fit is a measurement of `true ÷ 0.975` and the true limit i
 is where the C++'s own `0.95 × spacing` plus two text insets already sat. The decks and the
 generator still exist, so re-deriving it is a re-run rather than a new probe.
 
-**Next**: re-derive that bracket; then `023`'s nine undrawn bars; then the chart border (four
-readers, two rounds, three documents, `pdf-ops.py` at 3-0 and 1-0); then the data-label colour.
+**The shipped repair restores the calibration's units and is not a constant**: the same test in
+the new ruler is `w_new ≤ spacing × scale(size)`, an identity at every size.
+`IChartTextMeasurer` gains a **defaulted** `AdvanceScale => 1.0` overridden only by the sheets
+measurer, so slides and words are provably untouched. `023` comes back at 872/868 and `058` goes
+from 6.2% off the reference to 3.1%.
+
+**Next**: re-derive that bracket against the reference (round 30's decks and generator both still
+exist); then `023`'s nine undrawn bars; then the chart border (four readers, two rounds, three
+documents, `pdf-ops.py` at 3-0 and 1-0); then the data-label colour.

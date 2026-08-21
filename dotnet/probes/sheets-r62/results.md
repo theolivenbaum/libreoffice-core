@@ -20,8 +20,14 @@ did not move**: 440 words in round 61's sweep, in this baseline, and in this rou
 The reference went 427 → 440 → 427 across the three. Four other rows moved on the reference's side
 only and changed no verdict. `ans_mappings_of_eccairs_terms.xlsx` matched in every sweep.
 
-## 2. Result: **282 → 279**. The named item closed exactly; three verdicts lost, one of them the
-reference's
+## 2. Result: **282 → 280**. The named item closed exactly; one verdict lost on our side, one on
+the reference's
+
+> **This section was written at 279 and re-measured at 280.** § 11a traced both regressions to a
+> *calibration* this round invalidated rather than to a defect, and § 11b acts on that: restoring
+> the wrap limit's units brings `023_Waterfall` back to `match` and takes `058` from 100 to 200
+> against a reference of 194. The tables below are the final sweep, `final2/parity.tsv`. Where a
+> number appears as "279" it is the intermediate state and is labelled.
 
 | document | before | after | which side |
 |---|---|---|---|
@@ -29,12 +35,13 @@ reference's
 | `chartset-002/xlsx/011_advanced_excel_pie.xlsx` | `match` **142**/140 | `match` **140/140** | ours, exact |
 | `chartset-002/xlsx/027_advanced_excel_pie.xlsx` | `match` **142**/140 | `match` **140/140** | ours, exact |
 | `chartset-004/xlsx/019_advanced_excel_pie.xlsx` | `match` **142**/140 | `match` **140/140** | ours, exact |
-| `chartset-008/xlsx/023_Waterfall_Chart_Template_for_Excel` | `match` 881/868 | **`words` 843/868** | **ours — a regression** |
+| `chartset-008/xlsx/023_Waterfall_Chart_Template_for_Excel` | `match` 881/868 | `match` **872**/868 | ours, and it went through `words` 843 first — § 11a/b |
 | `chartset-008/xlsx/046_Cost_analysis_with_Pareto_chart` | `match` 159/157 | **`words` 161/157** | **ours — a regression** |
 | `unstable-001/xlsx/fse_identification_form.xlsx` | `match` 440/440 | `words` 440/**427** | **the reference** |
 
 Other rows that moved without changing a verdict, ours: `058_Social_media_engagement_data`
-206 → 100 (`words` either way, and the fall is a **tokenisation** effect — § 5),
+206 → **200** against a reference of 194 (`words` either way, and closer than it started; it read
+100 in the intermediate state — § 5),
 `055_Project_timeline` 269 → 262, `029_Annual_budget` 315 → 310, `001_Contextures` 883 → 881,
 `008_Contextures` 176 → **175/175 exact**, `033_Event_planning` 496 → 497, `064_Small_business`
 508 → 507, `TOGAF9-Tool-ConfReqts-CSQ` 23620 → 23617, `Template Pilot Logbook` 1587 → 1588. **No
@@ -133,7 +140,7 @@ for character.
 
 | | predicted | measured |
 |---|---|---|
-| sheets verdicts | **282 → 282**, 0 regressions | **279 — WRONG, −3** |
+| sheets verdicts | **282 → 282**, 0 regressions | **280 — WRONG, −2** (one of them the reference's) |
 | `003` | 145 → **143**/143 | **143/143 — right** |
 | `011` | 142 → **140**/140 | **140/140 — right** |
 | `019` | 142 → **140**/140 | **140/140 — right** |
@@ -145,8 +152,8 @@ for character.
 | documents whose chart text moves | 97 sheets | **not directly measurable; 20 moved a word count** |
 | tests | +6 to +15 | **+16 — just outside, and stated as a range** |
 | `MANIFEST.tsv` rows | 0 | **2 — wrong, and both are losses (§ 9)** |
-| "most likely to be wrong: a regression among the other 93 chart-bearing documents. I predict 0 and I expect that to be the prediction that fails" | 0 | **2 — the prediction failed exactly where it said it would** |
-| stated acceptable band | −2 to +1 | **−2 on our side** (the third is the reference's) |
+| "most likely to be wrong: a regression among the other 93 chart-bearing documents. I predict 0 and I expect that to be the prediction that fails" | 0 | **2 at first, 1 after § 11b — the prediction failed exactly where it said it would** |
+| stated acceptable band | −2 to +1 | **−1 on our side** (the other is the reference's) |
 
 **The round called its own failure and the failure arrived.** That is the only part of this write-up
 that is unambiguously good news about the method rather than about the code.
@@ -173,9 +180,11 @@ was gained or lost.** The token count went 159 → 161 against a reference of 15
 **This verdict was a coin flip on a document whose text is scrambled on both sides**, and the round
 lost the toss. It is a tokenisation ceiling, not a content change.
 
-### `023_Waterfall_Chart_Template_for_Excel`: real, and the page says the gate was wrong before
+### `023_Waterfall_Chart_Template_for_Excel`: real, understood, and **recovered** — 872/868
 
-Ours 881 → 843, reference 868. Ink *improved*: `diff%` 2.766 → 2.725.
+Ours 881 → 843 → **872**, reference 868. Ink *improved* at the intermediate state already:
+`diff%` 2.766 → 2.725. The paragraphs below describe the intermediate 843, because that is the
+state the diagnosis was made in and § 11a/b is what closed it.
 
 The reference's own tokens say why it counts 868: it draws the nine `Delta n` category labels
 **rotated**, so `pdftotext` reads each as three tokens — the reference's page-1 token multiset
@@ -191,9 +200,11 @@ the left half draws none"*; and, exactly the item at issue, *"the right half dra
 and the left draws six … the right half's are rotated ~45°, the left half's are horizontal"*, all
 at high confidence.
 
-**So the loss is real and the pass before it was not.** That is worth saying plainly rather than
-netting it away: this round moved a document from a passing verdict it did not deserve to a failing
-verdict it does, and it did so while getting closer to the page.
+**So the loss was real and the pass before it was not.** It is worth saying plainly rather than
+netting it away: this round first moved a document from a passing verdict it did not deserve to a
+failing verdict it did — while getting closer to the page — and only then found the reason and
+closed it. The document now passes at 872 against 868 *and* draws the reference's twelve rotated
+category labels rather than six horizontal ones, which is a different thing from passing at 881.
 
 ## 6. Two decisions inside the law, both argued at the site rather than fitted
 
@@ -398,21 +409,47 @@ does not have to find them:
 1. **Re-derive the bracket against the reference with the corrected ruler.** The decks and the
    generator already exist and the boundaries are read off LibreOffice's own
    `chart:coordinate-region`, so this is a re-run and not a new probe — the shape round 59's
-   `a:fillToRect` re-check had, which was the cheapest re-check on the audit list.
-2. **Or keep `Wraps` on the unquantised measurement until it is re-derived**, which is what makes
-   this round change only what it measured. It was *not* done here because `Wraps` lives in
-   `Paperless.Core` and reaches its ruler through `IChartTextMeasurer`, so it would mean adding a
-   second method to a shared interface in order to preserve a measurement now known to be wrong.
-   That is a worse thing to ship than a stated regression.
+   `a:fillToRect` re-check had, which was the cheapest re-check on the audit list. **Not done this
+   round**, and it is § 12's first item.
+2. **Compare the width against the limit in the units the limit was fitted in**, which is what
+   this round ships. See § 11b.
+
+## 11b. What was done about it, and why it is not a fit
+
+The experiment first: a flat `× 0.975` on the limit — the correction at 10 pt — was implemented,
+built and rendered. `023_Waterfall` went **843 → 872** against a reference of 868 and the four pies
+did not move. That says the direction is right, but a flat constant is wrong on its face, because
+the correction is a **sawtooth** and those decks were at one size.
+
+The shipped form is not a constant and is not fitted. The calibration says
+`w_old ≤ 1.000 × spacing`, and `w_old = w_new / scale(size)`, so the same test in the new ruler's
+units is `w_new ≤ spacing × scale(size)` — an identity, at every size, with nothing chosen.
+`IChartTextMeasurer` gains a **defaulted** `AdvanceScale(size) => 1.0`, overridden only by the
+sheets measurer with `MetricGrid.Chart.PixelEmScale`. A slide's and a document's chart text takes
+the default and is therefore **provably** unchanged; every test in both projects passes untouched.
+
+| document | base | intermediate | shipped | reference |
+|---|---:|---:|---:|---:|
+| `023_Waterfall` | 881 | 843 | **872** | 868 |
+| `058_Social_media_engagement_data` | 206 | 100 | **200** | 194 |
+| `046_Cost_analysis_with_Pareto_chart` | 159 | 161 | **161** | 157 |
+| `003` / `011` / `019` / `027` | 145 / 142 / 142 / 142 | 143 / 140 / 140 / 140 | **143 / 140 / 140 / 140** | 143 / 140 / 140 / 140 |
+
+`058` is 3.1% from the reference where it started at 6.2%, and still fails. `046` is untouched by
+this and is the one verdict this round costs on our side.
+
+**It is a stop-gap and the site says so in those words.** When the bracket is re-derived against the
+reference, `AdvanceScale` returns to one everywhere and the method can go.
 
 ## 12. What the next round should do first
 
-1. **The axis-label wrap limit, re-derived with the corrected ruler** — § 11a. It is what this
-   round cost two verdicts on, the mechanism is traced to `VCartesianAxis.cxx`:889-903 and
-   :753-759, and a blind reader gave the direction at high confidence: on `023` the reference draws
-   **twelve rotated** category labels where we draw **six horizontal**. `046` and `058` are the same
-   class (`058`: the reference draws ~24 consecutive horizontal dates, we draw ten). Three
-   documents, one constant, and the two lost verdicts come back with it.
+1. **The axis-label wrap limit, re-derived against the reference with the corrected ruler** —
+   § 11a/b. This round ships a units correction that restores the *old* calibration exactly, which
+   is honest but is still a fitted 1.000 underneath; the C++ says `0.95 × spacing` less two text
+   insets and the bracket that rejected it was measured with a ruler that was 2.5% long. Round 30's
+   decks and generator both still exist, so it is a re-run. `058` is the document that will say
+   whether it worked: the reference draws ~24 consecutive horizontal dates and we draw ten, at
+   200 against 194.
 2. **`023_Waterfall`'s chart itself**, which is worse than its verdict ever suggested: **nine of
    twelve bars are not drawn at all**, there are no waterfall connector lines, and the value axis
    runs to 25000 against the reference's 8000.
