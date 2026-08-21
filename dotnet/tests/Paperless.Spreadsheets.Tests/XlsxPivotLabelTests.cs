@@ -136,18 +136,56 @@ public sealed class XlsxPivotLabelTests
         Cell(table, 3, 2).ShouldBe("150");
     }
 
-    /// <summary>The header row is above <c>firstDataRow</c> and is never blanked.</summary>
+    /// <summary>
+    /// The first data row is never blanked, even when the header above it reads the same.
+    /// </summary>
     /// <remarks>
-    /// The first data row cannot be a repeat of anything either — there is no row above it inside
-    /// the pivot — which is why the scan starts one row further down.
+    /// The scan starts at <c>firstDataRow + 1</c> because the first data row has no row above it
+    /// <em>inside the pivot</em>. A field named the same as one of its own items is the shape that
+    /// tells the two starting points apart: comparing against the header would blank the first
+    /// group's label and leave the pivot with no label at all.
     /// </remarks>
     [Fact]
-    public void TheHeaderRowAndTheFirstDataRowAreNeverBlanked()
+    public void TheFirstDataRowIsNotBlankedByAHeaderThatReadsTheSame()
     {
-        ContentTable table = Read(Pivot());
+        const string Echoed = """
+            <row r="1"><c r="A1" t="inlineStr"><is><t>Finance</t></is></c><c r="B1" t="inlineStr"><is><t>Risk</t></is></c></row>
+            <row r="2"><c r="A2" t="inlineStr"><is><t>Finance</t></is></c><c r="B2"><v>1</v></c></row>
+            <row r="3"><c r="A3" t="inlineStr"><is><t>Finance</t></is></c><c r="B3"><v>2</v></c></row>
+            """;
 
-        Cell(table, 0, 0).ShouldBe("Dept");
-        Cell(table, 1, 0).ShouldBe("Finance");
+        ContentTable table = Read(Echoed, [Pivot("A1:B3", firstDataCol: 1)]);
+
+        Cell(table, 0, 0).ShouldBe("Finance");   // the header
+        Cell(table, 1, 0).ShouldBe("Finance");   // the group starts here and must survive
+        Cell(table, 2, 0).ShouldBeEmpty();       // this one is the repeat
+    }
+
+    /// <summary>
+    /// A column at or beyond <c>firstDataCol</c> is data and is printed even when the whole label
+    /// prefix repeats.
+    /// </summary>
+    /// <remarks>
+    /// Synthetic, and deliberately so: a real pivot's row-label tuples are distinct, so no corpus
+    /// document can put two identical label prefixes on consecutive rows. What the case pins is the
+    /// <em>definition</em> of a label column — that it is <c>firstDataCol</c> that separates the two
+    /// halves of the location, and not the location's whole width. Getting that wrong would blank
+    /// a measure whose value happens to repeat.
+    /// </remarks>
+    [Fact]
+    public void ADataColumnIsPrintedEvenWhenTheWholeLabelPrefixRepeats()
+    {
+        const string Twinned = """
+            <row r="1"><c r="A1" t="inlineStr"><is><t>Dept</t></is></c><c r="B1" t="inlineStr"><is><t>Item</t></is></c><c r="C1" t="inlineStr"><is><t>Cost</t></is></c></row>
+            <row r="2"><c r="A2" t="inlineStr"><is><t>Finance</t></is></c><c r="B2" t="inlineStr"><is><t>Rent</t></is></c><c r="C2"><v>150</v></c></row>
+            <row r="3"><c r="A3" t="inlineStr"><is><t>Finance</t></is></c><c r="B3" t="inlineStr"><is><t>Rent</t></is></c><c r="C3"><v>150</v></c></row>
+            """;
+
+        ContentTable table = Read(Twinned, [Pivot("A1:C3", firstDataCol: 2)]);
+
+        Cell(table, 2, 0).ShouldBeEmpty();   // label, repeated
+        Cell(table, 2, 1).ShouldBeEmpty();   // label, prefix repeated too
+        Cell(table, 2, 2).ShouldBe("150");   // data, always printed
     }
 
     /// <summary>
