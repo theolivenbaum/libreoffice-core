@@ -634,6 +634,22 @@ filesystem, fold case and deduplicate before counting.
 **Do not delete the aliases.** As in the corpus, `rm -rf dotnet/src/paperless.core` is a request to
 unlink that inode, and the inode is the source tree.
 
+**`verify-test.sh` rebuilds twice, so running it during a sweep replaces the binary under that
+sweep.** The rule "a sweep and a rebuild must never overlap" has always been written as though the
+rebuild would be an explicit `dotnet build`. It need not be: the mutation harness builds on both
+legs by design, and a round that runs it while a cross-track sweep is in flight silently swaps
+`Paperless.Core.dll` mid-sweep.
+
+**It announces itself as documents moving between two sweeps of the same unmodified tree** — round
+60 saw **31 words documents** differ that way, one by 19.82 of ink on a chartless questionnaire.
+Rendering is deterministic, so that cannot happen; a fresh render matched one sweep's copy and not
+the other's (157 696 against 157 807 bytes), which is what identified it.
+
+The check is cheap and belongs in the routine: **re-render one document after a sweep and compare it
+byte for byte against that sweep's own copy.** If they differ, the binary changed under you and the
+sweep is void. Anything that builds — `verify-test.sh`, a test run without `--no-build`, an IDE —
+counts as a rebuild.
+
 **An agent's cross-track figure is measured at its own base, and the manifest tracks HEAD. They
 disagree, and the disagreement is not an error.** Three times in one session a round has swept the
 other two tracks, found a manifest row it could not reproduce, and proposed a correction — each time
