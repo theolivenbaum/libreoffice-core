@@ -298,6 +298,25 @@ internal static class PptTextBody
         // The properties in force at the paragraph's first character, kept for the empty-paragraph
         // case below: an empty paragraph covers no characters, so the loop places nothing from it,
         // and the run it sits inside is the only thing that says how tall its blank line is.
+        //
+        // The loop below must therefore be allowed to run PAST `end` until it has found that run.
+        // For an empty paragraph `start == end`, and the character runs are contiguous from zero,
+        // so the run that *ends* at `start` is the last one the old `position >= end` break saw --
+        // one short of the run that *contains* `start`. `atStart` was consequently never found for
+        // any empty paragraph other than one at text position 0, and every blank line in the
+        // corpus fell back to the master level's character height.
+        //
+        // Measured on `slides/done-005/ppt/ITE106-Chapter 4.ppt` p7, whose bullets are separated
+        // by paired carriage returns: its blank paragraphs sit on one-character runs stating
+        // 12 pt, the level default is 32, and the reference draws the blank line at 12 -- both in
+        // its own flat-ODF export, which gives those paragraphs `fo:margin-top="0.106cm"`
+        // (= 12 x 20/80 pt) against the text paragraphs' `"0.212cm"` (= 24 x 20/80), and in the
+        // rendered page, whose inter-bullet baseline gap decomposes as
+        // 28.800 + 3.004 + 1.2x12 + 6.008 = 52.212 pt against the 52.214 it draws.
+        //
+        // Not a fraction of a line: 32 against 12 is 24 pt of surplus height per blank paragraph,
+        // which on this page pushed the shrink-to-fit walk two rows down `constScaleLevels` and
+        // cost the whole body 2 pt of em.
         PptCharacterRun atStart = default;
         bool found = false;
 
@@ -311,7 +330,11 @@ internal static class PptTextBody
             if (to > from) runs.Add(Run(character, scheme, fonts, level, from - start, to - from));
 
             position = runEnd;
-            if (position >= end) break;
+
+            // `found`, not just `position >= end`: see the note above `atStart`. A paragraph that
+            // covers characters finds its run on the first overlapping iteration, so this stops
+            // exactly where it used to for every non-empty paragraph.
+            if (position >= end && found) break;
         }
 
         // Text past the last stated run, and a run that states none at all, both take the level's
