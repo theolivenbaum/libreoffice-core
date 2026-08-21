@@ -52,6 +52,16 @@ public interface IFontResolver
 /// request for <c>Garamond</c> declared <c>swiss</c> falls back to DejaVu Sans where the same name
 /// undeclared falls back to DejaVu Serif, and <c>Futura</c> declared <c>roman</c> falls back to
 /// DejaVu Serif where undeclared it falls back to DejaVu Sans.
+/// <para>
+/// <strong>Both halves of that last sentence are measurements through <em>different filters</em>,
+/// which round 54 separated and this comment used to run together.</strong> Undeclared,
+/// <c>Futura</c> falls back to DejaVu Sans through the ODF, XLSX and PPTX filters and to DejaVu
+/// <em>Serif</em> through the DOCX, DOC and RTF ones, because those three default the class to
+/// roman before the request is built — so a word-processing reader hands
+/// <see cref="FontFamilyClass.Serif"/> here for a family its font table never mentions. See
+/// <c>Paperless.WordProcessing.Layout.WordFallbackClass</c>, which is where that default lives and
+/// why it is not in the resolver.
+/// </para>
 /// <see cref="FontFamilyClass.Unknown"/> when the document says nothing, which is the common case.
 /// <para>
 /// <strong>It is consulted before the substitution chain, not after it.</strong>
