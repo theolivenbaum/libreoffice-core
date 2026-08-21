@@ -3,6 +3,7 @@ using System.Xml.Linq;
 using Paperless.Core.Graphics;
 using Paperless.Core.Units;
 using Paperless.Ooxml.DrawingML;
+using Paperless.Text.Fonts;
 using Paperless.Text.Layout;
 using Paperless.WordProcessing.Layout;
 
@@ -37,6 +38,12 @@ namespace Paperless.WordProcessing.Ooxml;
 /// lives in <c>w:rPr</c>, is stated in twips, and is commonly negative. See
 /// <see cref="Paperless.Text.Layout.FormattedRun.Tracking"/> for what a reader owes it.
 /// </param>
+/// <param name="DeclaredClass">
+/// The generic class the document has in force at this run — <see cref="FontFamilyClass.Unknown"/>
+/// when nothing states one — for a family the font matcher cannot find.
+/// <strong>It is inherited, and it is not a property of <see cref="FamilyName"/>.</strong>
+/// See <see cref="WordParagraphFormats.StatedClass"/> for the rule and the probe behind it.
+/// </param>
 public readonly record struct WordTextStyle(
     string? FamilyName,
     Length Size,
@@ -50,10 +57,17 @@ public readonly record struct WordTextStyle(
     bool IsUnderlined = false,
     bool IsStruckThrough = false,
     bool AutoKerning = false,
-    Length Tracking = default)
+    Length Tracking = default,
+    FontFamilyClass DeclaredClass = FontFamilyClass.Unknown)
 {
     /// <summary>The key a face cache is keyed on: what actually decides which font file is loaded.</summary>
-    public (string? Family, int Weight, bool Italic) FaceKey => (FamilyName, Weight, IsItalic);
+    /// <remarks>
+    /// <see cref="DeclaredClass"/> is part of it, and leaving it out is a cache collision rather than an
+    /// omission: one family named under a <c>swiss</c> ancestor and under a <c>roman</c> one resolves to
+    /// two different faces, and whichever run reached the cache first would decide for both.
+    /// </remarks>
+    public (string? Family, int Weight, bool Italic, FontFamilyClass Class) FaceKey
+        => (FamilyName, Weight, IsItalic, DeclaredClass);
 }
 
 /// <summary>
@@ -390,7 +404,8 @@ internal static class WordParagraphFormats
         WordStyles styles,
         XElement? paragraphProperties,
         DrawingTheme? theme = null,
-        IReadOnlyList<XElement>? tableStyleRunProperties = null)
+        IReadOnlyList<XElement>? tableStyleRunProperties = null,
+        WordFontTable? fontTable = null)
     {
         ArgumentNullException.ThrowIfNull(styles);
 
@@ -398,7 +413,7 @@ internal static class WordParagraphFormats
         // of its own inherits.
         return ResolveRun(
             styles, paragraphProperties, Word.Child(paragraphProperties, "rPr"), theme,
-            tableStyleRunProperties);
+            tableStyleRunProperties, fontTable);
     }
 
     /// <summary>
@@ -426,12 +441,19 @@ internal static class WordParagraphFormats
     /// The enclosing table style's <c>w:rPr</c> layers for this cell, most specific first, or null
     /// outside a table. See <see cref="WordStyles.TableStyleRunProperties"/>.
     /// </param>
+    /// <param name="fontTable">
+    /// The document's <c>word/fontTable.xml</c>, or null when the class is not wanted. It is needed
+    /// here rather than where the face is resolved because the class is decided by which
+    /// <em>layer</em> named a classified font, and the layers are gone by then — see
+    /// <see cref="StatedClass"/>.
+    /// </param>
     internal static WordTextStyle ResolveRun(
         WordStyles styles,
         XElement? paragraphProperties,
         XElement? runProperties,
         DrawingTheme? theme = null,
-        IReadOnlyList<XElement>? tableStyleRunProperties = null)
+        IReadOnlyList<XElement>? tableStyleRunProperties = null,
+        WordFontTable? fontTable = null)
     {
         ArgumentNullException.ThrowIfNull(styles);
 
@@ -495,7 +517,8 @@ internal static class WordParagraphFormats
             // rather than a different decoration, and nothing below this models a doubled rule.
             strike.IsOn || doubleStrike.IsOn,
             AutoKerningOf(kerning),
-            TrackingOf(tracking));
+            TrackingOf(tracking),
+            StatedClass(fonts, fontTable));
     }
 
     /// <summary>
@@ -1035,6 +1058,73 @@ internal static class WordParagraphFormats
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// The generic class the document has in force across these layers, or
+    /// <see cref="FontFamilyClass.Unknown"/> when no layer states one.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>The class is inherited and the family name is not a property of it.</strong> It is
+    /// set only where <c>w:rFonts/@w:ascii</c> names a font <c>word/fontTable.xml</c> files under
+    /// <c>roman</c> or <c>swiss</c>; every other statement of a family leaves whatever an outer
+    /// layer put there. So the innermost layer that files its <c>w:ascii</c> name wins, and a layer
+    /// that names an unfiled font — or names it through the theme, or does not name one at all —
+    /// contributes nothing.
+    /// </para>
+    /// <para>
+    /// That is <c>DomainMapper::lcl_attribute</c>
+    /// (<c>sw/source/writerfilter/dmapper/DomainMapper.cxx</c>:436): <c>LN_CT_Fonts_ascii</c>
+    /// inserts <c>PROP_CHAR_FONT_NAME</c> unconditionally and <c>PROP_CHAR_FONT_FAMILY</c> only when
+    /// <c>FontTable::getFontEntryByName</c> answered something other than <c>DONTKNOW</c> — and
+    /// <c>FontTable::lcl_sprm</c> maps <em>only</em> <c>roman</c> and <c>swiss</c>, dropping
+    /// <c>auto</c>, <c>modern</c>, <c>script</c>, <c>decorative</c> and <c>w:pitch</c> on the floor.
+    /// <c>LN_CT_Fonts_asciiTheme</c> inserts the name and never the family, and
+    /// <c>LN_CT_Fonts_hAnsi</c> is <c>break; //unsupported</c>.
+    /// </para>
+    /// <para>
+    /// Measured on 26.2.4.2 with 28 authored packages of one paragraph and one run, so the PDF's
+    /// font list has exactly one entry that can move
+    /// (<c>probes/words-r55/family-inheritance.py</c>): a family the table files <c>auto</c> answers
+    /// DejaVu <b>Sans</b> under a <c>swiss</c> <c>docDefaults</c>, under a <c>swiss</c> <c>Normal</c>
+    /// consumed by a style <c>basedOn</c> it, through two style levels, and when the consumer is
+    /// direct run formatting; DejaVu Serif under a <c>roman</c> ancestor or with its own
+    /// <c>roman</c> entry; and DejaVu Serif when nothing anywhere states a class, which is the roman
+    /// default round 54 measured. A font named through <c>w:asciiTheme</c> takes the ancestor's class
+    /// even when the table files that same name <c>swiss</c>.
+    /// </para>
+    /// <para>
+    /// <strong>Round 54 recorded this refuted and it is not.</strong> Its counter-example was read
+    /// off the whole of <c>24-25_FAA_Holdover_Tables.docx</c>'s embedded font list, and that document
+    /// draws DejaVu Sans for four other reasons — <c>Century Gothic</c>, <c>Tahoma</c>,
+    /// <c>Charlotte Sans Book</c> and <c>CWFZGM+Myriad-BoldItalic</c> are all declared <c>swiss</c>
+    /// in the same table — so the observable could not move whatever the edit did. Its own shape is
+    /// the mechanism exactly: <c>Normal</c> names <c>Arial</c>, filed <c>swiss</c>, and
+    /// <c>Heading2</c>, <c>Heading3</c> and <c>Caption</c> are <c>basedOn Normal</c> and name
+    /// <c>Arial Bold</c>, filed <c>auto</c>.
+    /// </para>
+    /// </remarks>
+    /// <param name="layers">The <c>w:rFonts</c> layers, innermost first.</param>
+    /// <param name="fontTable">The document's font table, or null when there is nothing to ask.</param>
+    internal static FontFamilyClass StatedClass(
+        IReadOnlyList<XElement> layers, WordFontTable? fontTable)
+    {
+        if (fontTable is null || layers is null) return FontFamilyClass.Unknown;
+
+        foreach (XElement fonts in layers)
+        {
+            // The direct attribute only. A layer naming its font through the theme sets the name and
+            // leaves the class where it was, which is measured rather than inferred: a theme font the
+            // table files `swiss` still comes out DejaVu Serif under a roman ancestor.
+            if (Word.Attribute(fonts, "ascii") is not { Length: > 0 } name) continue;
+            if (fontTable.ShapeOf(name).Class is var stated and not FontFamilyClass.Unknown)
+            {
+                return stated;
+            }
+        }
+
+        return FontFamilyClass.Unknown;
     }
 
     /// <summary>

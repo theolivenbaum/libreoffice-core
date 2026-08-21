@@ -207,8 +207,19 @@ public sealed partial class DocxLayoutSource
     {
         FontReference? own = _references.GetValueOrDefault(text.FaceKey);
 
+        XElement? levelFonts = Word.Child(definition.RunProperties, "rFonts");
+
         string? family = WordParagraphFormats.SlotFamily(
-            Word.Child(definition.RunProperties, "rFonts"), _theme?.Fonts, "ascii", "asciiTheme");
+            levelFonts, _theme?.Fonts, "ascii", "asciiTheme");
+
+        // The level's own `w:rFonts` is a property layer like any other, so it states a class only
+        // when its `w:ascii` names a font the table files; otherwise the paragraph's stands. See
+        // `WordParagraphFormats.StatedClass`.
+        FontFamilyClass levelClass =
+            WordParagraphFormats.StatedClass(levelFonts is { } stated ? [stated] : [], _fontTable)
+                is var declared and not FontFamilyClass.Unknown
+                ? declared
+                : text.DeclaredClass;
 
         if (definition.LevelText is [>= '\uE000' and <= '\uF8FF' and var slot])
         {
@@ -217,7 +228,7 @@ public sealed partial class DocxLayoutSource
 
         if (family is not { Length: > 0 }) return (drawn, face, own);
 
-        WordTextStyle named = text with { FamilyName = family };
+        WordTextStyle named = text with { FamilyName = family, DeclaredClass = levelClass };
 
         return Face(named) is { } resolved
             ? (drawn, resolved, _references.GetValueOrDefault(named.FaceKey))

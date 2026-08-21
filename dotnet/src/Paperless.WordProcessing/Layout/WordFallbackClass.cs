@@ -44,6 +44,18 @@ namespace Paperless.WordProcessing.Layout;
 /// default at all.
 /// </para>
 /// <para>
+/// <strong>And the declared class is inherited rather than looked up per name — measured in round
+/// 55, after round 54 shipped the per-name reading and lost a verdict to it.</strong> Through a
+/// DOCX the class is set only where <c>w:rFonts/@w:ascii</c> names a font the font table files
+/// under <c>roman</c> or <c>swiss</c>; <c>auto</c>, <c>modern</c>, a pitch-only entry, an absent
+/// entry and <c>w:asciiTheme</c> all leave whatever an ancestor put there, and nothing anywhere
+/// stating one leaves it roman. So this method's second argument is <em>the class in force at the
+/// run</em>, which <see cref="Ooxml.WordParagraphFormats.StatedClass"/> resolves from the layer
+/// stack — not the class of the family the run names. The DOC arm keeps handing over the
+/// named font's own <c>FFN</c> class, because <c>SwWW8ImplReader</c> builds an
+/// <c>SvxFontItem</c> per font there and there is no inheritance to model.
+/// </para>
+/// <para>
 /// <b>Only the declared class is read, never the declared pitch.</b> Both are in every one of these
 /// font tables and only the first moves the reference: <c>Aptos</c> declared <c>pitch="fixed"</c>
 /// answers DejaVu Serif, and so does <c>Consolas</c> declared <c>modern</c>. Passing the pitch on
@@ -70,8 +82,12 @@ internal static class WordFallbackClass
     /// DejaVu Serif and lost 17 verdicts.
     /// </param>
     /// <param name="declared">
-    /// What the document's own font table says, or <see cref="FontFamilyClass.Unknown"/> when it
-    /// says nothing — which is the common case, and is the case this method exists for.
+    /// <strong>The class in force at this run</strong>, or <see cref="FontFamilyClass.Unknown"/>
+    /// when nothing in the layer stack states one — which is the common case, and is the case this
+    /// method exists for. Through a DOCX that is
+    /// <see cref="Ooxml.WordParagraphFormats.StatedClass"/>'s answer and <em>not</em> the font
+    /// table's entry for <paramref name="familyName"/>; through DOC and RTF, which have no
+    /// inheritance to model, it is the named font's own.
     /// </param>
     /// <returns>
     /// <see cref="FontFamilyClass.Unknown"/> for a run naming no family at all;
