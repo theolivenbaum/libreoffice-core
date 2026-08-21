@@ -3360,6 +3360,10 @@ public static partial class ChartLayout
         LegendBox box = Legend(plot, space, measurer);
         if (box.Columns <= 0 || box.Rows <= 0) return;
 
+        // See Legend: the walk across the columns steps by each column's own widest name, so it
+        // must measure in the same face the box was reserved in.
+        ChartText legendText = measurer.For(plot.LegendFamily);
+
         bool vertical = plot.Legend is ChartLegendPosition.Left or ChartLegendPosition.Right;
 
         // A side legend is centred on the page; a top or bottom one is set one legend margin
@@ -3440,10 +3444,11 @@ public static partial class ChartLayout
                     ChartLabelAnchor.LeftMiddle,
                     plot.LegendFont,
                     plot.LegendColour,
+                    Family: plot.LegendFamily,
                     IsBold: plot.LegendBold));
 
                 Length text =
-                    MeasureLines(measurer, name, plot.LegendFont, plot.LegendBold).Width;
+                    MeasureLines(legendText, name, plot.LegendFont, plot.LegendBold).Width;
                 if (text > widest) widest = text;
             }
 
@@ -3517,6 +3522,12 @@ public static partial class ChartLayout
                 name, series.Fill, series.Line, series.LineWidth,
                 DrawsLineKey(plot, series), series.DashPattern, series.LineCap));
         }
+
+        // A horizontal bar chart, and a chart stacked in Y beside a side legend, list their
+        // series the other way up. See ChartPlot.LegendReversed for the rule and its four
+        // measured arms. The pie branch above returns before this, which is right: the rule
+        // reads a stacking direction and a swapped coordinate system, and a pie has neither.
+        if (plot.LegendReversed) entries.Reverse();
 
         return entries;
     }
@@ -3643,6 +3654,11 @@ public static partial class ChartLayout
         List<LegendEntry> named = Entries(plot);
         if (named.Count == 0) return default;
 
+        // The legend's own face, which is not always the chart's. See ChartPlot.LegendFamily: the
+        // room reserved for an entry has to be measured in the face it is drawn in or the box is
+        // the wrong width and the plot rectangle's right edge pays for it.
+        ChartText legendText = measurer.For(plot.LegendFamily);
+
         Length font = plot.LegendFont;
         Length paddingX = Larger(Millimetre, font * 0.33);
         Length offsetX = Larger(Millimetre, font * 0.66);
@@ -3659,7 +3675,7 @@ public static partial class ChartLayout
 
         foreach (LegendEntry entry in named)
         {
-            DocSize text = MeasureLines(measurer, entry.Name, font, plot.LegendBold);
+            DocSize text = MeasureLines(legendText, entry.Name, font, plot.LegendBold);
             widths.Add(text.Width);
             if (text.Width > widest) widest = text.Width;
             if (text.Height > tallest) tallest = text.Height;

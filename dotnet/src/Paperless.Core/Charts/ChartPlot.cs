@@ -954,6 +954,106 @@ public sealed partial record ChartPlot
     /// <summary>Whether a legend entry is drawn bold, falling back to the axis labels'.</summary>
     public bool LegendBold => IsLegendBold ?? IsLabelBold;
 
+    /// <summary>Whether the legend lists the series in reverse.</summary>
+    /// <remarks>
+    /// <para>
+    /// <c>VSeriesPlotter::createLegendEntries</c>
+    /// (<c>chart2/source/view/charttypes/VSeriesPlotter.cxx</c>:2432-2447) inserts each series'
+    /// entries at the <em>front</em> of the list under two conditions and appends them otherwise:
+    /// with the coordinate system's <c>SwapXAndYAxis</c> set — which is a horizontal bar chart and
+    /// nothing else — the entries reverse unless the series stack in Y; and with it unset, and
+    /// only for a legend at the line start or the line end, they reverse when the series
+    /// <em>do</em> stack in Y. A top or bottom legend on an unswapped chart never reverses.
+    /// </para>
+    /// <para>
+    /// Four arms measured on 26.2.4.2 rather than taken from the source, two of them controls:
+    /// <c>001_advanced_powerpoint_bar.pptx</c> (horizontal bar, clustered, legend right) lists
+    /// <em>Plan</em> above <em>Actual</em> where <c>002_advanced_powerpoint_column.pptx</c> and
+    /// <c>006_advanced_powerpoint_area.pptx</c> — same two series, same legend position — list
+    /// <em>Actual</em> above <em>Plan</em>; and <c>stacked_bar_chart.pptx</c> and
+    /// <c>stacked_area_chart.pptx</c> (stacked, legend right) list <em>In-Store Sales</em> above
+    /// <em>Online Sales</em> where we listed them the other way round.
+    /// </para>
+    /// <para>
+    /// It changes the order and not the box: each column of a legend takes its own widest entry,
+    /// so a one-column legend reserves the same width either way. 17 corpus documents are
+    /// affected — 8 slides, 9 sheets, no words.
+    /// </para>
+    /// </remarks>
+    public bool LegendReversed
+    {
+        get
+        {
+            bool stacked = IsStacked || IsPercentStacked;
+
+            // SwapXAndYAxis is set by the bar template for a horizontal bar chart, so a plot that
+            // is not a bar chart at all cannot be swapped whatever its Direction defaulted to.
+            bool swapped = Direction == ChartBarDirection.Bar && IsBarLike;
+
+            if (swapped) return !stacked;
+
+            return Legend is ChartLegendPosition.Left or ChartLegendPosition.Right && stacked;
+        }
+    }
+
+    /// <summary>Whether any of the chart's type groups draws bars.</summary>
+    private bool IsBarLike
+    {
+        get
+        {
+            if (Kind == ChartPlotKind.Bar) return true;
+
+            foreach (ChartSeries series in Series)
+                if (series.Kind == ChartPlotKind.Bar) return true;
+
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// The face a legend entry's name is set in, or null to take <see cref="TextFamily"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>A chart is not set in one face, and the legend is where that shows.</strong>
+    /// <see cref="TextFamily"/> is one answer for the whole chart, and the OOXML reader arrives
+    /// at it by taking the first literal <c>a:latin</c> anywhere in the part when the chart space
+    /// states none of its own. That is an approximation, and on a deck whose <em>axes</em> state
+    /// a face and whose legend states nothing it hands the axes' face to the legend.
+    /// </para>
+    /// <para>
+    /// Measured on <c>001_advanced_powerpoint_bar.pptx</c> page 1, whose <c>c:catAx/c:txPr</c> and
+    /// <c>c:valAx/c:txPr</c> both state <c>Arial</c>, whose <c>c:legend</c> states nothing and
+    /// whose chart space states nothing: 26.2.4.2 draws the page's seventeen ten-point axis and
+    /// category runs in <strong>LiberationSans</strong> — Arial's metric substitute — and its two
+    /// ten-point legend runs in <strong>Carlito</strong>, the theme's Calibri. We drew all
+    /// nineteen in LiberationSans. Carlito is the narrower face, so the legend's widest entry
+    /// measured 27.81 pt against the reference's 25.12, the legend box came out 2.69 pt too wide,
+    /// and the plot rectangle's right edge — which is
+    /// <c>frame.Right − margin − legend.Width − LegendMarginX</c> — gave up exactly that. It is
+    /// the residue seventeen of the corpus' fifty-seven chart pages were sitting at.
+    /// </para>
+    /// <para>
+    /// The reference resolves each chart object separately: <c>ObjectFormatter</c>'s automatic
+    /// text table names <c>XML_minor</c> for every entry it has
+    /// (<c>oox/source/drawingml/chart/objectformatter.cxx</c>:415-434) and an object's own
+    /// <c>c:txPr</c> overrides it for that object alone. So the precedence here is the legend's
+    /// own <c>c:txPr</c>, then the chart space's, then the theme's minor face — and pointedly
+    /// <em>not</em> "some other element's".
+    /// </para>
+    /// <para>
+    /// Null keeps <see cref="TextFamily"/>, which is what the ODF and BIFF readers set and what a
+    /// consumer with no theme falls back to, so nothing outside the OOXML reader moves. The other
+    /// four roles — axis labels, axis titles, data labels and the main title — are <strong>not</strong>
+    /// resolved this way yet, deliberately: the same census says an axis label's face differs from
+    /// the one-face answer on 45 corpus documents, but every slides one among them is a pie or
+    /// doughnut deck that draws no axis label at all, so there is nothing on this track to measure
+    /// such a change against. See <see cref="TitleFamily"/>, which is the one other role that has
+    /// its own face for its own measured reason.
+    /// </para>
+    /// </remarks>
+    public string? LegendFamily { get; init; }
+
     /// <summary>
     /// The family the chart's own text is set in, or null when the file states none.
     /// </summary>
