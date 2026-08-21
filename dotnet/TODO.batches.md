@@ -17658,3 +17658,106 @@ prediction for the parent's sweep.
 **Next**: the pass-1 consumed rectangle, whose arithmetic is now solved and which should take `003`
 back and `027` with it; the 9.57 pt chart title; `cellIs` in two arms; `c:dPt`; and the same 96 dpi
 law for `SlideChart` and `FrameChart`, which were deliberately not touched.
+
+---
+
+## Merge note — round 59 words and round 60 sheets (2026-08-21)
+
+**Words 319, slides 200, sheets 279. Corpus 798 of 946.** Both rounds gated over all 946 documents.
+
+```
+Core 376   Containers 109   Text 624   Vector 302   Rendering 153(1 skipped)   Markup 259
+OpenDocument 125   WordProcessing 1220   Spreadsheets 1020   Presentations 846     = 5034
+0 failed
+```
+
+### Round 60 sheets asked the parent whether to merge, and the answer is yes
+
+The round measured a correct metric, shipped it, and it cost a verdict one-for-one: `011` closes,
+`003` re-opens, **our own side nets zero**. It offered to hand over everything *except* the single
+behavioural commit. **Merged whole**, because:
+
+- **The metric is measured right, not argued right.** 117 one-variable rewrites over 13 sizes and 3
+  faces, and **every one of the 39 baseline pitches is an integer multiple of 0.75 pt** — one pixel
+  at 96 dpi, line gap **excluded**. Max error **0.089 pt** against **2.476** for what we shipped.
+  Carlito's `hhea` gap is 0 and both Liberation faces' is not, so the three faces **separate the gap
+  term outright**. An independent check on ascent (a centred label's block centre must be
+  size-independent) gives 0.042–0.069 pt spread under the pixel law against 0.58–0.70 under ours.
+- **It corrects two visible quantities on 97 documents** the gate cannot see: legend pitch
+  15.04 → **14.09** (reference 14.08), wrapped-label pitch 12.21 → **11.25** (reference 11.23).
+- **`003` was passing by cancellation.** Solving the reference backwards from its own answer:
+  `consumed.Left ≤ 279.04` where ours is now 291.76 and **was 232.12** — our base reached *too far
+  left* and matched anyway. The right answer is between our before and our after, and the arithmetic
+  to reach it is written down. Holding a correct metric out of the tree to protect a cancellation is
+  the wrong trade, and this project has made the opposite call twice before and recorded it as right.
+
+### The reference is not deterministic on one document, and the alias trap is what revealed it
+
+`ans_mappings_of_eccairs_terms.xlsx`: **within a single sweep, one alias read 191 pages and the other
+190** — the case-alias pair renders the same inode twice. Nine further renderings gave **191 × 8,
+190 × 1**, words wandering across four values, while **our side stayed pinned at 191 / 27894**. No
+`TODAY`, `NOW` or `RAND`: **layout instability, not the calendar.** Re-filed `unstable`. **Any sweep
+can lose that verdict at random**; this one did not.
+
+**The trap became the instrument.** The case-alias duplication this project has been working around
+for a dozen rounds is the only reason the non-determinism was visible at all.
+
+### Round 59 words: zero movement, ten refutations
+
+Verdicts 319/199/276 → **319/199/276**, and page counts, extractable words and font lists all
+**0 / 0 / 0** changed over 337 words paths. 38 renderings' bytes changed.
+
+- **`Color::IsDark()` is two formulas on 26.2.4.2.** `0x729FCF` takes `GetLuminance() <= 62` and is
+  **bright** where WCAG says dark — the reference draws it black, and `6F9BCB`, one step away, white.
+  **Round 58's 22-fill ramp could not see it**, and I relayed that ramp as exact.
+- **The label rule is level-if-stated, else the mark** — not "level OR mark". `<w:i w:val="0"/>` on a
+  level beats an italic mark; 13 of 271 `.docx` write that.
+- **A floating frame's fill is not the background either** — the one arm the round *inferred rather
+  than measured* turned **383 glyphs white that the reference draws black**. Removed, and recorded
+  as its own refutation.
+- **A per-document net is the wrong statistic for a per-label change** — round 58's summed-census
+  trap, this time in the round's own instrument. Five documents whose aggregate lean fell all moved
+  **toward** the reference.
+- **`097` does not overflow.** The reference's page 2 is **empty**; it is a trailing empty page. That
+  reframes an item carried for six rounds, and makes it a **class of three** — `097`,
+  `012_Project_Timeline`, `015_Project_Timeline`, all 1 page against 2, all with an empty reference
+  page 2.
+
+### The audit site I named was wrong, and I named it from prose
+
+I sent sheets r60 at `Paperless.Core/Graphics/GlyphRun.cs`, on the grounds that a vertical-metric
+divergence had just been measured there. **Its two open hits are `a:blip/a:lum` brightness and
+contrast — `Bitmap::Adjust` — with no vertical-metric claim at all.** I named it from a round's
+*prose* rather than from the file. Recorded in `TODO.24-2-7-audit.md`.
+
+### A cross-track figure measured at an agent's base is not a manifest error
+
+Third instance this session, and now in `CLAUDE.md`. Round 59 words proposed re-opening `003` and
+`019_advanced_excel_pie` on the grounds that the manifest recorded 278 where it measured 276, three
+rounds running, both sides stable so not date volatility. **The reasoning was sound and the
+conclusion wrong**: the sheets round that closed them merged three commits after its own base. Run
+`git log <agent-base>..HEAD -- <source>` before editing the manifest.
+
+### Vision, on both rounds, committed
+
+Words: a blind reader on `AFS` p2 named the defect **and its true cause** unprompted — "drawn in a
+colour equal to the fill" — presence right, colour wrong at 9 pt; after the fix the same bands read
+as *identical*, and two **pre-existing** leads surfaced. On `097` p1 the reader's first-ranked
+finding, blind, was the line-height deficit **with the direction**, and a second instrument then
+confirmed direction (−2.06 pt) while **refuting the monotonic shape and the failure's story**.
+
+Sheets: **two reviewers on two unrelated documents both said the reference's chart title sits
+lower** — ours 601.44, the reference 591.87 on **both**, **9.57 pt too high**, x agreeing to 0.10 pt.
+Pre-existing (601.61 before this round) and reaching **every chart title in the corpus**. Recorded at
+`ChartLayout.AddTitles`, deliberately unfitted. Two further readers hit the `011` right-edge illusion
+again (frames agree to 0.4 pt) — **one of them flagged her own confidence as low**, which is the
+first time a reviewer has done that.
+
+### Next
+
+**Sheets** — the pass-1 consumed rectangle (arithmetic solved; should take `003` back and `027` with
+it; **insets are not the answer, measured twice, once per metric**), then the 9.57 pt chart title,
+then `cellIs` in two arms.
+**Words** — the empty-paragraph height, now a **class of three verdicts**, then the `.doc` label
+slant at a named seat (`Ww8DocumentReader.Describe` resolves the character layout at the paragraph's
+*first character* where the rule wants the mark's direct CHPX — 80 of the 81 remaining glyphs).
