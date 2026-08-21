@@ -193,8 +193,17 @@ internal static class SheetFonts
     /// figure it was fitted to recorded Carlito 121.64 → <em>121</em>; the installed 26.2.4.2
     /// answers 122 for the same face at the same size, measured off a filled cell's rectangle in
     /// its own PDF. Ground truth moved, so the old window <c>(0.64, 0.70]</c> and the new one no
-    /// longer overlap. Any figure here calibrated against 24.2.7.2 needs re-measuring before it
-    /// is relied on, and this is one of them.
+    /// longer overlap.
+    /// </para>
+    /// <para>
+    /// <strong>Re-checked against LibreOffice 26.2.4.2 on 2026-08-21 and correct.</strong> Thirty
+    /// authored workbooks, six faces (Calibri, Liberation Sans, Times New Roman, Courier New at
+    /// 11 pt and Calibri and Liberation Sans at 12 pt) against five stated column widths (8.43,
+    /// 10, 12.5, 20, 30), each measuring the x of a glyph in the *next* column — which is the
+    /// first column's width, reported by <c>pdftotext -bbox</c> without decoding a content
+    /// stream. **Thirty of thirty agree to within 0.001 pt.**
+    /// <c>dotnet/probes/sheets-r53-totalsrow/audit_colwidth.py</c> reproduces it. This site and
+    /// the digit-width model below it are no longer 24.2.7.2 claims.
     /// </para>
     /// <para>
     /// A one-twip column width is normally invisible, which is why truncation survived several
