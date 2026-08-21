@@ -150,8 +150,7 @@ public static class OoxmlXml
             foreach (XElement choice in element.Elements(
                          XName.Get("Choice", OoxmlNamespaces.MarkupCompatibility)))
             {
-                if ((IsUnderstood(choice) && !WrapsAnUnreadableGraphic(element, choice))
-                    || IsAdvisoryPlaceholderFallback(element, choice))
+                if (IsUnderstood(choice) || IsAdvisoryPlaceholderFallback(element, choice))
                 {
                     chosen = choice;
                     break;
@@ -187,6 +186,15 @@ public static class OoxmlXml
         // suppressing advisories in general would be wrong. Censused prefix-agnostically over the
         // 946-document corpus, the chartex URI occurs in two documents, both spreadsheets.
         //
+        // A slicer needs no rule of its own any more, and this is where the one it had used to
+        // sit. It was keyed on the slicer graphic-data URI and existed because `a14` was in
+        // `UnderstoodExtensions`, so an `a14` slicer choice was taken and drew nothing where the
+        // reference draws its advisory rectangle. `a14` is no longer understood — `oox` and
+        // writerfilter both refuse it, see `OoxmlNamespaces.UnderstoodExtensions` — so the general
+        // rule now reaches every one of the corpus's seven `a14` slicer choices, and the special
+        // case was unreachable. `cx1` is genuinely different: `oox` *does* support it, which is why
+        // the chartex clause above is a real exception and the slicer one never was.
+        //
         // The frame then draws empty, because no cx:chart reader exists yet. That is a smaller
         // error than the sentence: both are wrong about the ink, and only one invents text.
         static bool IsAdvisoryPlaceholderFallback(XElement element, XElement choice)
@@ -198,38 +206,6 @@ public static class OoxmlXml
                          XName.Get("graphicData", OoxmlNamespaces.DrawingML)))
             {
                 if (data.Attribute("uri")?.Value == OoxmlNamespaces.ExtendedChart) return true;
-            }
-            return false;
-        }
-
-        // The mirror of the rule above, and the case that shows why neither generalises.
-        //
-        // Excel writes a slicer as a `graphicFrame` in a `Requires="a14"` choice beside a plain
-        // rectangle holding "This shape represents a slicer. Slicers are supported in Excel 2010
-        // or later. …". `a14` is DrawingML2010, which *is* in UnderstoodExtensions — so the
-        // choice was taken, the frame it holds is a slicer nothing here can draw, and the anchor
-        // produced no ink and no words at all. LibreOffice 26.2.4.2 draws the rectangle:
-        // measured, it holds the advisory 3 times on `049_Expenses_calculator`, 2 on
-        // `037_Personal_money_tracker` and 1 on `DynamicBubbleChart`, against 0 in ours.
-        //
-        // So "understood" cannot be decided from `Requires` alone. `Requires` names the
-        // *vocabulary* the choice is written in, not whether its content is something a reader
-        // can draw, and for a slicer the two answers differ.
-        //
-        // Keyed on the slicer graphic-data URI and on nothing else, exactly as the chartex rule
-        // is. Censused over the 946-document corpus for every choice whose `Requires` resolves
-        // entirely to understood namespaces: the slicer URI occurs in 3 of them, all
-        // spreadsheets, against 108 `wps`, 51 `wpg` and 4 `wpc` word-processing documents that
-        // share this code path and are not keyed on.
-        static bool WrapsAnUnreadableGraphic(XElement element, XElement choice)
-        {
-            if (element.Element(XName.Get("Fallback", OoxmlNamespaces.MarkupCompatibility)) is null)
-                return false;
-
-            foreach (XElement data in choice.Descendants(
-                         XName.Get("graphicData", OoxmlNamespaces.DrawingML)))
-            {
-                if (data.Attribute("uri")?.Value == OoxmlNamespaces.Slicer) return true;
             }
             return false;
         }

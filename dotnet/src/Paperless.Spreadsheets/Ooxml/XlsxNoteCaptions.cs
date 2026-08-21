@@ -62,19 +62,10 @@ internal static class XlsxNoteCaptions
     private const string RelationshipNamespace =
         "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
 
-    private const string VmlNamespace = OoxmlNamespaces.Vml;
+    private const string VmlNamespace = XlsxVml.Namespace;
 
     /// <summary>The <c>x:</c> namespace, VML's Excel extensions.</summary>
-    private const string VmlExcelNamespace = "urn:schemas-microsoft-com:office:excel";
-
-    /// <summary>How many of a VML anchor's pixels make an inch.</summary>
-    /// <remarks>
-    /// <c>UnitConverter</c>'s <c>Unit::ScreenX</c>, which is the reference device's resolution and
-    /// is 96 on every platform Calc runs headless on. Measured rather than assumed: an anchor
-    /// stating a row offset of 111 pixels comes back as 83.25 pt in the flat-ODF export, and
-    /// 111 / 96 x 72 is 83.25 exactly.
-    /// </remarks>
-    private const double PixelsPerInch = 96;
+    private const string VmlExcelNamespace = XlsxVml.ExcelNamespace;
 
     /// <summary>The fill Excel gives a comment caption when its VML states none.</summary>
     private static readonly Colour DefaultFill = Colour.FromRgb(0xFFFFE1);
@@ -194,12 +185,12 @@ internal static class XlsxNoteCaptions
                 if (column is not { } atColumn || row is not { } atRow) continue;
 
                 string? anchor = client.Element(XName.Get("Anchor", VmlExcelNamespace))?.Value;
-                if (ParseAnchor(anchor) is not { } placed) continue;
+                if (XlsxVml.ParseAnchor(anchor) is not { } placed) continue;
 
                 shapes[(atColumn, atRow)] = new NoteShape(
                     placed.From,
                     placed.To,
-                    IsVisible(shape.Attribute("style")?.Value),
+                    XlsxVml.IsVisible(shape.Attribute("style")?.Value),
                     Fill(shape.Attribute("fillcolor")?.Value));
             }
         }
@@ -214,32 +205,6 @@ internal static class XlsxNoteCaptions
             ? value
             : null;
 
-    /// <summary>
-    /// Whether a VML shape's style says it is shown.
-    /// </summary>
-    /// <remarks>
-    /// A shape stating no <c>visibility</c> at all is shown, which is CSS's own default and what
-    /// <c>ShapeTypeModel</c> initialises <c>mbVisible</c> to
-    /// (<c>oox/source/vml/vmlshape.cxx</c>, <c>ShapeTypeModel::ShapeTypeModel</c>).
-    /// </remarks>
-    private static bool IsVisible(string? style)
-    {
-        if (style is null) return true;
-
-        foreach (string declaration in style.Split(';'))
-        {
-            int colon = declaration.IndexOf(':', StringComparison.Ordinal);
-            if (colon < 0) continue;
-
-            if (!declaration.AsSpan(0, colon).Trim().Equals("visibility", StringComparison.Ordinal))
-                continue;
-
-            return !declaration.AsSpan(colon + 1).Trim().Equals("hidden", StringComparison.Ordinal);
-        }
-
-        return true;
-    }
-
     /// <summary>A VML <c>fillcolor</c>, or null when it names nothing this understands.</summary>
     private static Colour? Fill(string? value)
     {
@@ -253,42 +218,6 @@ internal static class XlsxNoteCaptions
             ? Colour.FromRgb(rgb)
             : null;
     }
-
-    /// <summary>
-    /// The eight comma-separated numbers of an <c>x:Anchor</c>, as two cell points.
-    /// </summary>
-    /// <remarks>
-    /// The order is column, column offset, row, row offset, twice —
-    /// <c>ShapeAnchor::importVmlAnchor</c> assigns them in exactly that sequence
-    /// (<c>drawingbase.cxx:157-172</c>) — which is <em>not</em> the row-first order the
-    /// <c>x:Row</c> and <c>x:Column</c> elements above it are written in.
-    /// </remarks>
-    private static (SheetCellPoint From, SheetCellPoint To)? ParseAnchor(string? anchor)
-    {
-        if (anchor is null) return null;
-
-        string[] parts = anchor.Split(',');
-        if (parts.Length < 8) return null;
-
-        Span<int> values = stackalloc int[8];
-        for (int at = 0; at < 8; at++)
-        {
-            if (!int.TryParse(parts[at].Trim(), NumberStyles.Integer,
-                              CultureInfo.InvariantCulture, out values[at]))
-            {
-                return null;
-            }
-        }
-
-        if (values[0] < 0 || values[2] < 0 || values[4] < 0 || values[6] < 0) return null;
-
-        return (new SheetCellPoint(values[0], Pixels(values[1]), values[2], Pixels(values[3])),
-                new SheetCellPoint(values[4], Pixels(values[5]), values[6], Pixels(values[7])));
-    }
-
-    /// <summary>A screen pixel offset as a length.</summary>
-    private static Length Pixels(int pixels)
-        => Length.FromInches(pixels / PixelsPerInch);
 
     /// <summary>
     /// A comment's rich text as the paragraphs of a caption.
