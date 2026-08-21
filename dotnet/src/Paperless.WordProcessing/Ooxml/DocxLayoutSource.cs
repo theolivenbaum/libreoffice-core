@@ -781,6 +781,23 @@ public sealed partial class DocxLayoutSource
         // `mark` is not dead weight: an empty paragraph has nothing *but* its mark, and its height
         // is the mark's. Same probe: the mark alone carrying `w:sz w:val="72"` gives the empty
         // paragraph 36 pt of height in the reference.
+        //
+        // [24.2.7-audit: VERIFIED 2026-08-21, round words-r63 — all three claims re-measured on
+        // 26.2.4.2 by `probes/words-r63/audit_markstyle.py`, on the reference alone, each arm with
+        // a control whose answer was known first. A `Heavy` paragraph whose mark says
+        // `<w:b w:val="0"/>` is drawn in LiberationSans-**Bold** while the same style with the
+        // *run* saying it is drawn regular — so the pair separates "the mark formats the text"
+        // from "it does not" rather than only confirming one side. A mark saying
+        // `<w:b/><w:sz w:val="48"/>` leaves the text LiberationSans at 10.00 pt where the run
+        // saying it gives Bold at 24.00 pt. And the empty paragraph's height is the mark's to
+        // 0.00 pt: the baseline pitch across it is 52.90 pt against a control's 23.00, a
+        // difference of 29.90, so the paragraph itself is 11.50 + 29.90 = 41.40 pt, which is
+        // 36 pt x 1.15 exactly. **This was the last open site in this project that a corpus
+        // document can reach**: of the other ten hits in it, five sit inside an existing marker
+        // and five are prose recording that a superseded-binary measurement has already been
+        // re-measured on 26.2.4.2 in the same comment, two of those in readers
+        // (`OdtLayoutSource`, `RtfDocumentReader`) whose format has no witness in this corpus at
+        // all. See `TODO.24-2-7-audit.md`, round 63.]
         WordTextStyle mark =
             WordParagraphFormats.ResolveText(_styles, properties, _theme, _tableStyleRun, _fontTable);
         WordTextStyle body =
