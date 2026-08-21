@@ -2,6 +2,7 @@ using System.IO.Compression;
 using System.Text;
 using Paperless.Core.Documents;
 using Paperless.Core.Units;
+using Paperless.TestKit;
 using Paperless.WordProcessing.Layout;
 using Shouldly;
 
@@ -144,6 +145,34 @@ public sealed class SyntheticObliqueRunTests
                 @"{\rtf1\ansi\deff0{\fonttbl{\f0\fnil " + NoItalic + @";}}"
                 + @"\f0\fs24 plain \i slanted\i0\par}"),
             "oblique.rtf");
+
+        paragraph.HasRuns.ShouldBeTrue();
+        paragraph.Runs.Any(run => Oblique(run)).ShouldBeTrue();
+        paragraph.Runs.Any(run => !Oblique(run)).ShouldBeTrue();
+    }
+
+    /// <summary>The WW8 arm, whose fixture had to be made rather than written.</summary>
+    /// <remarks>
+    /// <para>
+    /// A <c>.doc</c> cannot be authored from a string, so <c>features/synthetic-oblique-run.doc</c> is
+    /// LibreOffice's own Word 97 export of a flat ODF holding one paragraph of two runs in a family
+    /// nothing resolves. That route matters: a <c>.docx</c> round trip bakes in Word's roman default,
+    /// where an ODF <c>style:font-face</c> with no <c>style:font-family-generic</c> leaves the family
+    /// at <c>FAMILY_DONTKNOW</c> and <c>wwFont::Write</c> puts <c>ff = 0</c> in the font table — so the
+    /// reader really does resolve the fallback face here rather than a declared one.
+    /// </para>
+    /// <para>
+    /// This is the arm with the largest measured effect on the corpus and it had no test at all:
+    /// <c>644730BRI0mna000BOX361539B00public0.doc</c> leaned 6 643 glyphs against the reference's
+    /// 2 171 before this change and 2 124 after.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void TheWw8ReaderKeepsALeaningRunToo()
+    {
+        PageParagraph paragraph = Read(
+            File.ReadAllBytes(Corpus.Require("features/synthetic-oblique-run.doc")),
+            "synthetic-oblique-run.doc");
 
         paragraph.HasRuns.ShouldBeTrue();
         paragraph.Runs.Any(run => Oblique(run)).ShouldBeTrue();
