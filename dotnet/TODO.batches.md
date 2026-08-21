@@ -18784,3 +18784,109 @@ column, value axis to 7000 against none, no connector, **on a document that pass
 ellipsis, the chart title colour (two readers, two documents, no instrument yet), the data-label
 colour, and the 96 dpi width law for `SlideChart`/`FrameChart` — **now the only reason the three
 chart rulers differ.**
+
+### Parent verification — round 63 slides, and the sweep total now equals the manifest
+
+**803 of 946 unchanged: words 323, slides 200, sheets 280. Zero movement in either direction.**
+Tests **5147, 0 failed**.
+
+**The gate's own `TOTAL` line reads 946 for the first time this session** — every previous sweep read
+1033, and the scorer had to reconcile against `MANIFEST.tsv` to mean anything. `alias rows 0`. See
+the instrument fix below.
+
+### The fitted bullet: seven rounds named the wrong object
+
+This is the round's largest result and it closes an item I pushed on three briefs running.
+
+**It is not a placement defect.** A 21-slide probe puts the rule against 26.2.4.2 over four text
+sizes, four bullet faces, five bullet sizes, four line spacings and a numbered-bullet control:
+**20 of 20 arms agree to ≤0.10 pt, control exact at 0.000 on both sides.**
+
+The 251 pages are **at least three mechanisms** — 206 are `.ppt`, **50 are a marker *size*
+difference**, 33 a text *size* difference — and the metric constant the reference's placements imply
+**is not constant**. Not implemented, **and that is the finding rather than a deferral.**
+
+The reach census I insisted on producing is what made this visible: with one document it looked like
+one placement rule; with 251 pages it resolves into three unrelated causes.
+
+### The brief's headline was wrong again, and refuted two ways
+
+I sent this round at *"`Demick_JetBlue`'s plot area is 11% shorter in the reference"*. It is
+**181.55 pt against 181.76 — the reference's is 0.12% *taller***. Refuted by a gridline census over
+37 + 44 matched gridlines **and independently by a blind reader asked the question directly**. The
+clearance above the axis title is real but is **not the same phenomenon**: **no plot rectangle moved
+on any of the 57 chart pages.**
+
+### What shipped
+
+**The below-plot axis title is centred on the wrong rectangle and has no clearance.**
+`lcl_createTitle` is only provisional; `changePositionOfAxisTitle` runs again once the diagram exists
+and its `ALIGN_BOTTOM` arm is `diagramPlusAxes.X + Width/2` across and `+ h/2 + pageHeight × 0.02`
+down. **The two passes use different constants** — the reservation's flat 420 mm100 against two per
+cent — **which is why only the reservation had ever been transcribed.** Title centre 374.55 →
+**352.81** against the reference's 352.78.
+
+**An OOXML marker's `c:size` is stated and we ignored it**: `round(6 × 2540/72) = 212` mm100 =
+**6.0094 pt**; ours 7.00 → **6.01**. That is the other half of round 62's refutation landing — the
+*size* defect was real, the *legend key* one was not.
+
+**Six of nineteen census documents could not move**, each for a reason the prediction wrote down —
+four decks draw no marks at all on either side, one is `radarStyle="filled"`, one has both axis
+titles on a value axis. **Naming a blind spot is not bounding it**: the round named both and did not
+widen the band, and documents-moved missed for the eighth round, this time **in both directions at
+once**.
+
+**And a fact about the metric worth keeping**: the four line decks **worsened by a hundredth while
+becoming exact**. Our oversized marker *contained* the reference's, so only the annulus differed; the
+correctly-sized one is still 0.41 pt to its left, so two slivers differ. **A correctly-sized mark
+that is displaced can differ on more pixels than an oversized one that covers its target.**
+
+### The instrument fix: one inode, one render
+
+The round found `slides/done-005/ppt/ITE106-Chapter 4` present as `.ppt` **and** `.PPT` — one inode,
+one manifest row — **worth 94.14 of a 989 `abs_ink` total, appearing and disappearing between sweeps
+of an unchanged tree**. The per-format identity lower-cases the extension, so both spellings map to
+the same id and therefore **the same output path**: two workers render one document to one file while
+a third step reads it.
+
+Both sweep scripts now enumerate **one path per inode**, keyed on device and inode through
+`find -printf` so there is no shell round trip and the corpus's filenames with spaces, brackets and
+per-cent signs are safe.
+
+**Which spelling survives took three attempts and the first two were wrong** — that is the part worth
+recording. Some aliases are an upper-cased *extension*, some are a wholly lower-cased *name*, so
+prefer-lower-case and prefer-upper-case are each right for one family and wrong for the other, and
+keeping the wrong one makes every manifest-keyed scorer report the document **unswept**. **git is the
+authority** — it tracks exactly one spelling per inode — and **`core.quotePath=false` is required
+rather than cosmetic**, because git escapes non-ASCII by default and the corpus's CJK filename would
+otherwise not match what `find` emits.
+
+Verified set for set against the manifest's 946 paths, nothing on either side, and the live gate now
+reports `TOTAL 946`.
+
+### Vision — including a refusal that was the right answer
+
+**`003` p1**, on the markers: *"I cannot separate them… I am explicitly declining to say one half's is
+bigger."* **That is correct and it is not a confirmation** — 0.99 pt is 1.8 px after compositing and
+the reviewer's floor is 1–2 px. The fill census is what confirms it. **A reviewer declining to call a
+difference below her own resolution is a better outcome than one who calls it.**
+
+**`Reporting_responsibilities_matrix` p254**, chosen because round 62 read p138: the justified-line
+lead **recurred on a different page with a different reader**, and the reviewer **named the
+discriminating measurement itself**. Run as specified: the ragged control line is +0.144% (the known
+advance divergence) while our **justified right margin is 1.30 pt further right** over nine lines,
+left edges agreeing to 0.03. **Both rivals real; the geometry one is four times the larger and alone
+accounts for the wrap** — the advance divergence, which both rounds would have blamed, is a quarter
+of it.
+
+### The audit under-reports too, in the opposite direction to the over-read
+
+**Three of the nine unmarked files carry their round-53 re-check as prose with full figures and no
+marker**, so the count under-reports by three. Together with the four-fold over-read recorded
+yesterday, that file's raw number is wrong in **both** directions at once.
+
+### Slides does next
+
+The legend key marker — **sixth sighting, second document, and now one draw call**. Then
+`Reporting_responsibilities_matrix`'s measured 1.30 pt, then the `.ppt` half of the bullet (50 pages
+where our bullet's own em differs — **not** the placement rule).
