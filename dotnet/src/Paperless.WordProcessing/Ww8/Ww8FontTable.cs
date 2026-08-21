@@ -65,11 +65,25 @@ public sealed class Ww8FontTable
     /// The shape the document declares for a family, or the default when it names no such family.
     /// </summary>
     /// <remarks>
-    /// The DOC counterpart of <c>WordFontTable.ShapeOf</c>, and it says the same two things: an
-    /// <c>FFN</c>'s first byte packs the pitch in its low two bits and the font family in bits 4-6,
-    /// which are the <c>prq</c> and <c>ff</c> fields LibreOffice reads at the top of
-    /// <c>WW8Fonts::WW8Fonts</c>. Only <c>FF_ROMAN</c> and <c>FF_SWISS</c> are carried across, for
-    /// the reason recorded there: the other family codes leave LibreOffice's answer unchanged.
+    /// <para>
+    /// The DOC counterpart of <c>WordFontTable.ShapeOf</c> for the reading: an <c>FFN</c>'s first
+    /// byte packs the pitch in its low two bits and the font family in bits 4-6, which are the
+    /// <c>prq</c> and <c>ff</c> fields LibreOffice reads at the top of <c>WW8Fonts::WW8Fonts</c>.
+    /// </para>
+    /// <para>
+    /// <strong>It is not its counterpart for the meaning, and the sentence that stood here — "the
+    /// other family codes leave LibreOffice's answer unchanged" — is measurably false.</strong>
+    /// <c>GetFontParams</c> maps <c>ff</c> 0, 6 and 7 onto <c>FAMILY_DONTKNOW</c> and
+    /// <c>SetNewFontAttr</c> <em>sets</em> that on the item, where the DOCX filter would have left
+    /// an inherited value; a <c>DONTKNOW</c> family appends no generic to the fontconfig pre-match,
+    /// so the answer is fontconfig's own rather than the roman default. Nine flat-ODF fixtures
+    /// exported to Word 97 and back (<c>probes/words-r55/doc-family-code.py</c>) say only
+    /// <c>roman</c> draws DejaVu Serif; <c>modern</c>, <c>decorative</c> and no code at all all draw
+    /// DejaVu Sans. The claim came from round 54's DOCX round trip, which could not produce an
+    /// undeclared <c>FFN</c> at all — the DOCX import applied the roman default before the export
+    /// ran. <see cref="Paperless.WordProcessing.Layout.WordFallbackClass.ForWw8Font"/> is where the
+    /// difference is acted on.
+    /// </para>
     /// </remarks>
     public DeclaredFontShape ShapeOf(string? name)
     {
