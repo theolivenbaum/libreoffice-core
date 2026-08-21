@@ -106,6 +106,19 @@ public sealed record SheetShapeText
     /// as 11 pt and 12 pt in two spans, and every one of the three shapes' default paragraph style
     /// states 18 pt while none of their runs does.
     /// </para>
+    /// <para>
+    /// [24.2.7-audit: VERIFIED 2026-08-21, round 56 — 12 pt on 26.2.4.2, by two instruments.]
+    /// <c>probes/sheets-r56/audit_shapetext.py</c> re-authors that workbook and runs it through
+    /// the installed binary twice over: the flat-ODS export gives the bare run
+    /// <c>fo:font-size="12pt"</c>, and the <em>rendering</em> — which does not depend on the
+    /// exporter agreeing with the layout — gives it an ink-box height of 13.274 pt against
+    /// 12.175 for a run stating <c>sz="1100"</c> and 19.926 for one stating <c>sz="1800"</c>.
+    /// Twelve over eleven is 13.28 and twelve over eighteen is 13.28, so the rendered size is
+    /// 12 pt to three figures on both ratios. <strong>The control ran first</strong>: the 1100
+    /// box has to come back 11 pt or nothing else the probe says means anything, and it does. The
+    /// 1800 box is there because 18 is the other candidate and a reader that always answered 12
+    /// could not otherwise be told from one that read the shape's own default.
+    /// </para>
     /// </remarks>
     public static Length DefaultSize { get; } = Length.FromPoints(12);
 

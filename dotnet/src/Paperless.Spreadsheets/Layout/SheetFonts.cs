@@ -144,11 +144,26 @@ internal static class SheetFonts
     /// <param name="family">The family name, or null for the default.</param>
     /// <param name="bold">Whether the family's bold face is wanted.</param>
     public static SheetFace? ForFamily(string? family, bool bold)
+        => ForFamily(family, bold, italic: false);
+
+    /// <summary>One family at one of two weights, upright or slanted.</summary>
+    /// <remarks>
+    /// The slant is here for a header or footer band, whose face is the workbook's own default
+    /// cell font — and that font can be italic, which the reference honours: a workbook whose
+    /// <c>fonts[0]</c> carries <c>&lt;i/&gt;</c> has its band drawn in <c>LiberationSans-Italic</c>
+    /// on 26.2.4.2 (<c>probes/sheets-r56</c>, seven authored workbooks keyed on the PDF's own
+    /// font list rather than on advance widths, because the Liberation faces are
+    /// metric-compatible and a bold band is the same width as an upright one).
+    /// </remarks>
+    /// <param name="family">The family name, or null for the default.</param>
+    /// <param name="bold">Whether the family's bold face is wanted.</param>
+    /// <param name="italic">Whether its italic face is wanted.</param>
+    public static SheetFace? ForFamily(string? family, bool bold, bool italic)
         => Cache.GetOrAdd(
             // Unknown class: a chart's font is named directly and carries no generic-family
             // declaration for a fallback to honour, unlike a cell's, which comes from a
             // SpreadsheetML <font> that may state <family val="N"/>.
-            (string.IsNullOrWhiteSpace(family) ? DefaultFamily : family, bold ? 700 : 400, false,
+            (string.IsNullOrWhiteSpace(family) ? DefaultFamily : family, bold ? 700 : 400, italic,
              FontFamilyClass.Unknown),
             Load);
 

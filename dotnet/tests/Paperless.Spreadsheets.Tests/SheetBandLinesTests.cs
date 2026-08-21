@@ -184,4 +184,112 @@ public sealed class SheetBandLinesTests
         lines[1].ShouldBeEmpty();
         lines[2][0].Text.ShouldBe("two");
     }
+
+    /// <summary>
+    /// The <c>&amp;"Family,Style"</c> code names the face its own run is drawn in.
+    /// </summary>
+    /// <remarks>
+    /// It was read and thrown away until round 56 — the parser consumed the whole specification
+    /// so that <c>Arial,Bold</c> would not print, and then kept none of it. <see cref="SheetBandHeight"/>
+    /// has read the same code to size the band since it was written, so the band was measured in
+    /// one face and drawn in another. Null means the workbook's own default cell family, which is
+    /// what <see cref="SheetPrintSetup.BandFont"/> supplies.
+    /// </remarks>
+    [Fact]
+    public void AFaceCodeIsKeptOnTheSegmentsThatFollowIt()
+    {
+        SheetHeaderFooter band = SheetHeaderFooter.ParseCodes(
+            "&Lplain&C&\"Courier New\"named&Rafter");
+
+        band.Left.Segments[0].Family.ShouldBeNull();
+        band.Centre.Segments[0].Family.ShouldBe("Courier New");
+
+        // A section switch resets the face to the workbook's default, exactly as it resets the
+        // size — `ResetFontData` (xihelper.cxx:534-542), `setNewPortion` (pagesettings.cxx:868).
+        band.Right.Segments[0].Family.ShouldBeNull();
+    }
+
+    /// <summary>A leading <c>-</c> in the specification means "keep the face I already have".</summary>
+    /// <remarks>
+    /// Excel writes <c>&amp;"-,Bold"</c> when it states a style and no family, and Calc reads it
+    /// the same way. Taking the <c>-</c> as a family name puts every such band into a face that
+    /// does not exist.
+    /// </remarks>
+    [Fact]
+    public void ADashKeepsTheFaceTheBandAlreadyHas()
+    {
+        SheetHeaderFooter withDash = SheetHeaderFooter.ParseCodes(
+            "&C&\"Courier New\"one&\"-,Bold\"two");
+
+        // Two segments: the `-` keeps the family and the `Bold` beside it changes the weight, so
+        // the run splits on the weight and both halves keep Courier.
+        withDash.Centre.Segments.Count.ShouldBe(2);
+        withDash.Centre.Segments[0].Family.ShouldBe("Courier New");
+        withDash.Centre.Segments[0].Bold.ShouldBeNull();
+        withDash.Centre.Segments[1].Family.ShouldBe("Courier New");
+        withDash.Centre.Segments[1].Bold.ShouldBe(true);
+
+        SheetHeaderFooter alone = SheetHeaderFooter.ParseCodes("&C&\"-,Bold\"only");
+        alone.Centre.Segments[0].Family.ShouldBeNull();
+        alone.Centre.Segments[0].Bold.ShouldBe(true);
+    }
+
+    /// <summary>Two runs are one run only when they agree on the face as well as the size.</summary>
+    /// <remarks>
+    /// <c>Lines</c> coalesces neighbouring pieces so that a PDF reader does not infer a word
+    /// boundary at every reposition. Coalescing on the size alone merges a Courier run into a
+    /// serif one and draws both in whichever came first.
+    /// </remarks>
+    [Fact]
+    public void PiecesAtDifferentFacesAreNotCoalesced()
+    {
+        SheetHeaderFooter band = SheetHeaderFooter.ParseCodes("&Cone&\"Courier New\"two");
+        IReadOnlyList<SheetHeaderPiece> line = band.Centre.Lines(new SheetHeaderContext())[0];
+
+        line.Count.ShouldBe(2);
+        line[0].Family.ShouldBeNull();
+        line[1].Family.ShouldBe("Courier New");
+    }
+
+    /// <summary>
+    /// The weight and the slant come from the band's own codes, and from the workbook where the
+    /// codes say nothing.
+    /// </summary>
+    /// <remarks>
+    /// All three arms are measured on 26.2.4.2 (<c>probes/sheets-r56</c>, seven authored
+    /// workbooks): a workbook whose <c>fonts[0]</c> is bold draws its band in
+    /// <c>LiberationSans-Bold</c>, one whose <c>fonts[0]</c> is italic in
+    /// <c>LiberationSans-Italic</c>, <c>&amp;B</c> makes the band bold over a regular workbook
+    /// font, and <c>&amp;"Family,Regular"</c> makes it upright over a bold one.
+    /// <strong>Keyed on the PDF's font list and not on advance widths</strong>, because the
+    /// Liberation faces are metric-compatible: a bold band is exactly as wide as an upright one,
+    /// which is why an earlier reading of the same probe concluded the style was ignored.
+    /// </remarks>
+    [Fact]
+    public void TheToggleCodesSetTheWeightAndTheSlant()
+    {
+        SheetHeaderFooter band = SheetHeaderFooter.ParseCodes("&Cplain&Bbold&Iboth&Bitalic");
+        IReadOnlyList<SheetHeaderSegment> segments = band.Centre.Segments;
+
+        segments[0].Bold.ShouldBeNull();
+        segments[0].Italic.ShouldBeNull();
+        segments[1].Bold.ShouldBe(true);
+        segments[2].Italic.ShouldBe(true);
+
+        // `&B` flips rather than sets, which is the whole reason these are nullable.
+        segments[3].Bold.ShouldBe(false);
+        segments[3].Italic.ShouldBe(true);
+    }
+
+    /// <summary>A section switch puts the weight and the slant back to the workbook's.</summary>
+    [Fact]
+    public void ASectionSwitchResetsTheWeightAndTheSlantToo()
+    {
+        SheetHeaderFooter band = SheetHeaderFooter.ParseCodes("&L&B&Ileft&Rright");
+
+        band.Left.Segments[0].Bold.ShouldBe(true);
+        band.Left.Segments[0].Italic.ShouldBe(true);
+        band.Right.Segments[0].Bold.ShouldBeNull();
+        band.Right.Segments[0].Italic.ShouldBeNull();
+    }
 }

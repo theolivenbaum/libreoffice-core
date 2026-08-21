@@ -140,9 +140,14 @@ public sealed class SheetSmallBandTests
         // against those same twelve probes with the clip in and with it out: **the two agree on
         // all twelve**, so the rule earns nothing that the page boundary does not already give.
         //
-        // What is left genuinely unexplained is a header of eight empty lines followed by a text
-        // line, which LibreOffice draws as nothing at either band size tried and we draw in full.
-        // `FAA-2019-0995-0002_attachment_2.xlsx` is the corpus instance, at twenty words.
+        // That last sentence used to say a header of eight empty lines followed by a text line
+        // was "genuinely unexplained", with `FAA-2019-0995-0002_attachment_2.xlsx` as the corpus
+        // instance at twenty words. **It is explained and it is fixed.** `PrintHF` clips each
+        // area to the band's own rectangle and `DrawText_ToPosition` emits nothing for an area
+        // whose ink misses it entirely — see `SheetBandFaceAndClipTests`, whose `Areas` sheet is
+        // that shape. The reason it is not a *per-line* rule, and so does not touch the three
+        // lines here, is the same measurement: LibreOffice keeps every line of an area that
+        // overlaps the clip at all.
         DrawnGlyphRun third = runs.Single(run => run.Text == "SPILLTHREE");
         third.Origin.Y.Points.ShouldBeGreaterThan(792.0);
     }

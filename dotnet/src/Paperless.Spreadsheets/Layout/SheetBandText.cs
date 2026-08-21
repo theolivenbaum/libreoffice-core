@@ -116,18 +116,20 @@ internal static class SheetBandText
     /// </remarks>
     /// <param name="family">The family name, or null for the furniture's own face.</param>
     /// <param name="bold">
-    /// Whether the family's bold face is wanted. The furniture never asks for one — a header and
-    /// a column heading are drawn in whatever a plain cell would be — but a chart's title does,
-    /// and asking for bold of a family that has no bold face resolves back to its regular one
-    /// rather than to nothing.
+    /// Whether the family's bold face is wanted. Asking for bold of a family that has no bold
+    /// face resolves back to its regular one rather than to nothing.
+    /// </param>
+    /// <param name="italic">
+    /// Whether its italic face is wanted, on the same terms. A band takes both from the
+    /// workbook's own default cell font, which the reference honours.
     /// </param>
     private static (OpenTypeFace? Face, FontReference Reference, LineMetrics? Metrics) FaceFor(
-        string? family, bool bold = false)
+        string? family, bool bold = false, bool italic = false)
     {
-        if (string.IsNullOrWhiteSpace(family) && !bold)
+        if (string.IsNullOrWhiteSpace(family) && !bold && !italic)
             return (Resolved.Value.Face, Description, Metrics.Value);
 
-        return SheetFonts.ForFamily(family, bold) is { } named
+        return SheetFonts.ForFamily(family, bold, italic) is { } named
             ? (named.Face, named.Reference, named.Metrics)
             : (Resolved.Value.Face, Description, Metrics.Value);
     }
@@ -138,11 +140,31 @@ internal static class SheetBandText
     public static Length AscentAt(Length size, string? family)
         => FaceFor(family).Metrics is { } metrics ? metrics.ScaledAscent(size) : size * 0.9;
 
+    /// <inheritdoc cref="AscentAt(Length, string?)"/>
+    /// <param name="size">The em size.</param>
+    /// <param name="family">The family name, or null for the furniture's own face.</param>
+    /// <param name="bold">Whether the family's bold face is wanted.</param>
+    /// <param name="italic">Whether its italic face is wanted.</param>
+    public static Length AscentAt(Length size, string? family, bool bold, bool italic)
+        => FaceFor(family, bold, italic).Metrics is { } metrics
+            ? metrics.ScaledAscent(size)
+            : size * 0.9;
+
     /// <inheritdoc cref="LineHeightAt(Length)"/>
     /// <param name="size">The em size.</param>
     /// <param name="family">The family name, or null for the furniture's own face.</param>
     public static Length LineHeightAt(Length size, string? family)
         => FaceFor(family).Metrics is { } metrics
+            ? metrics.ScaledAscent(size) + metrics.ScaledDescent(size)
+            : size * 1.15;
+
+    /// <inheritdoc cref="LineHeightAt(Length, string?)"/>
+    /// <param name="size">The em size.</param>
+    /// <param name="family">The family name, or null for the furniture's own face.</param>
+    /// <param name="bold">Whether the family's bold face is wanted.</param>
+    /// <param name="italic">Whether its italic face is wanted.</param>
+    public static Length LineHeightAt(Length size, string? family, bool bold, bool italic)
+        => FaceFor(family, bold, italic).Metrics is { } metrics
             ? metrics.ScaledAscent(size) + metrics.ScaledDescent(size)
             : size * 1.15;
 
@@ -168,6 +190,99 @@ internal static class SheetBandText
     public static Length AscentAt(Length size, string? family, bool bold)
         => FaceFor(family, bold).Metrics is { } metrics ? metrics.ScaledAscent(size) : size * 0.9;
 
+    /// <summary>
+    /// How far above the baseline a capital reaches, at a size — the top of a line's <em>ink</em>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Wanted because <c>ScPrintFunc::PrintHF</c> clips a band's text to the band's own rectangle
+    /// and <c>ImpEditEngine::DrawText_ToPosition</c> throws away an area whose <em>primitive
+    /// range</em> does not meet that rectangle
+    /// (<c>editeng/source/editeng/impedit3.cxx:3367-3372</c>) — and a primitive range is the ink,
+    /// not the line box. The distance from a line's top to its ink is therefore what decides
+    /// whether a short band draws anything at all, and it is <c>ascent - capHeight</c>: 0.217 em
+    /// for Liberation Sans, so 1.74 pt at 8 pt and 4.34 pt at 20 pt.
+    /// </para>
+    /// <para>
+    /// Those two numbers are why this is here. Round 55 measured that a band draws nothing at
+    /// 1.44 pt of 8 pt text and everything at 2.16 pt, and recorded an unexplained "text-fit
+    /// threshold, about 0.27x the point size". It is not a threshold and nothing is fitted; it is
+    /// this distance, and <c>probes/sheets-r56/probe-bandclip.py</c> reproduces both brackets from
+    /// it with no free parameter.
+    /// </para>
+    /// <para>
+    /// <strong>Cap height is a proxy for the glyph bounding box</strong>, which is what
+    /// drawinglayer actually measures. It is exact for capitals and too high for text that reaches
+    /// no further than the x-height, where it makes us draw a little more readily than the
+    /// reference. The alternative is parsing <c>glyf</c> per glyph, which buys nothing on this
+    /// corpus: the nearest case to the boundary is 85 pt clear of it.
+    /// </para>
+    /// </remarks>
+    /// <param name="size">The em size.</param>
+    /// <param name="family">The family name, or null for the furniture's own face.</param>
+    public static Length CapHeightAt(Length size, string? family)
+        => CapHeightAt(size, family, bold: false, italic: false);
+
+    /// <inheritdoc cref="CapHeightAt(Length, string?)"/>
+    /// <param name="size">The em size.</param>
+    /// <param name="family">The family name, or null for the furniture's own face.</param>
+    /// <param name="bold">Whether the family's bold face is wanted.</param>
+    /// <param name="italic">Whether its italic face is wanted.</param>
+    public static Length CapHeightAt(Length size, string? family, bool bold, bool italic)
+    {
+        (OpenTypeFace? face, _, LineMetrics? metrics) = FaceFor(family, bold, italic);
+        Length ascent = metrics is { } resolved ? resolved.ScaledAscent(size) : size * 0.9;
+
+        int units = face?.UnitsPerEm > 0 ? face.UnitsPerEm : 1000;
+        int cap = face?.Os2?.CapHeight ?? 0;
+        Length height = cap > 0
+            ? size * ((double)cap / units * (1 + RoundCapitalOvershoot))
+            : size * DefaultCapHeightRatio * (1 + RoundCapitalOvershoot);
+
+        // Never taller than the ascent the same face reports, because the caller subtracts this
+        // from the ascent and a negative answer would put a line's ink above its own box.
+        return height > ascent ? ascent : height;
+    }
+
+    /// <summary>
+    /// How far a round capital rises above the cap line, as a fraction of the cap height.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The reference measures a line's ink with <c>OutputDevice::GetTextBoundRect</c>, which is
+    /// the <em>glyph</em> bounding rectangle, and <c>O</c>, <c>C</c>, <c>S</c> and every other
+    /// round capital is drawn a little above the flat ones so that it does not read as short.
+    /// Cap height alone therefore under-states the ink of ordinary header text and, because the
+    /// caller subtracts it from the ascent, over-states how tall a band has to be before anything
+    /// is drawn in it — which is the failure that loses text.
+    /// </para>
+    /// <para>
+    /// Measured rather than assumed. <c>probes/sheets-r56/probe-bandclip.py</c> bisects the band
+    /// at which 26.2.4.2 starts drawing, in 0.1 pt steps at three sizes, and the mm100 rounding
+    /// the margins go through brackets the ratio at <strong>0.2056 to 0.2087 em</strong> — 8 pt
+    /// turns over between 1.59 and 1.70, 11 pt between 2.21 and 2.30, 20 pt between 4.11 and
+    /// 4.20. Liberation Sans' bare <c>ascent - capHeight</c> is 0.2173 em, which is outside that
+    /// bracket on the wrong side; two per cent of overshoot puts it at 0.2035, which is outside
+    /// it on the side that draws.
+    /// </para>
+    /// <para>
+    /// <strong>Deliberately biased towards drawing.</strong> Two per cent is a little more than
+    /// the bracket needs, because being wrong here in the other direction deletes a header
+    /// nobody asked to delete, and the only corpus case this rule reaches is 85 pt clear of the
+    /// boundary either way.
+    /// </para>
+    /// </remarks>
+    private const double RoundCapitalOvershoot = 0.02;
+
+    /// <summary>What a face with no usable <c>OS/2</c> capital height is assumed to have.</summary>
+    /// <remarks>
+    /// 0.7 em, which is within a few thousandths of every face this corpus resolves to —
+    /// Liberation Sans is 0.688, Liberation Serif 0.662, DejaVu Sans 0.729. It is only ever
+    /// reached by a version-0 or version-1 <c>OS/2</c> table, which states no capital height at
+    /// all.
+    /// </remarks>
+    private const double DefaultCapHeightRatio = 0.7;
+
     /// <summary>Shapes one line, or null when there is no face to shape it with.</summary>
     /// <param name="text">The text.</param>
     /// <param name="size">The em size.</param>
@@ -190,10 +305,19 @@ internal static class SheetBandText
     /// reserved — which is why <c>SheetChart</c> passes the same flag to both.
     /// </param>
     public static BandRun? Shape(string text, Length size, string? family, bool bold)
+        => Shape(text, size, family, bold, italic: false);
+
+    /// <inheritdoc cref="Shape(string, Length, string?, bool)"/>
+    /// <param name="text">The text.</param>
+    /// <param name="size">The em size.</param>
+    /// <param name="family">The family name, or null for the furniture's own face.</param>
+    /// <param name="bold">Whether to shape in the family's bold face.</param>
+    /// <param name="italic">Whether to shape in its italic face.</param>
+    public static BandRun? Shape(string text, Length size, string? family, bool bold, bool italic)
     {
         if (text.Length == 0) return null;
 
-        (OpenTypeFace? resolved, FontReference reference, _) = FaceFor(family, bold);
+        (OpenTypeFace? resolved, FontReference reference, _) = FaceFor(family, bold, italic);
         if (resolved is not { } face) return null;
 
         ShapedText shaped = TextShaper.Default.Shape(face, text);

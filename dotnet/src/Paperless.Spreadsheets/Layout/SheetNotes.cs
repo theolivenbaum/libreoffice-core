@@ -34,6 +34,14 @@ public readonly record struct SheetNote(int Column, int Row, string Text);
 /// D1, F2, H2, J2, L1, N2, P2, R2.
 /// </para>
 /// <para>
+/// [24.2.7-audit: VERIFIED 2026-08-21, round 56 — the same eight addresses in the same order on
+/// 26.2.4.2.] Re-read straight off that document's reference rendering under the installed
+/// binary: pages 2 and 3 list <c>D1 F2 H2 J2 L1 N2 P2 R2</c> and ours lists the same eight in the
+/// same order. The claim is discriminating rather than trivially true, which is the reason this
+/// document is the witness: reading order would put <c>L1</c> second, because it is the only
+/// other note on row 1, and both renderings put it fifth.
+/// </para>
+/// <para>
 /// Notes outside the printed range are not listed at all, which is why this is a sheet-level
 /// collection filtered at pagination rather than a filtered list built by the reader: the printed
 /// range is not known until the print setup and the used area have both been read.
