@@ -16,12 +16,37 @@ wrong**, and both announced themselves in their own comments.
 
 ## Counting them: use `git grep`, not `grep -r` — and count the marker, not the string
 
-**So the prior on these is not "probably still fine".** One in one had been wrong, and the one
-that was wrong announced itself in its own comment.
+```sh
+git grep -n '24\.2\.7' -- 'dotnet/src/**/*.cs' | grep -v '24\.2\.7-audit'          # open sites
+git grep -c '24\.2\.7-audit' -- 'dotnet/src/**/*.cs' | awk -F: '{s+=$2} END{print s}' # done
+grep  -rn '24\.2\.7' dotnet/src --include=*.cs                                       # DOUBLE — never use
+```
 
-Round 53 (sheets) then re-checked **four** and found **all four still correct** — so the running
-score is **one wrong in five**, and the useful reading is not "these are fine" but *"a site cannot
-be trusted either way until a probe has been pointed at it"*. A verified site is worth as much as a
+`grep -r` returns exactly twice as many hits and files as `git grep`, because every project under
+`dotnet/src` has a lower-case alias directory entry on this case-insensitive mount (same inode,
+link count 1, untracked, invisible to `git ls-tree` and `git status`). See `CLAUDE.md`
+§ "This container". **Never `rm` one — it unlinks the source tree.**
+
+**And the string alone is not the metric, because it self-corrupts.** The first rounds to work this
+list annotated their sites with sentences like *"…was calibrated to 24.2.7.2 and has been
+re-checked"*, which **adds** matches for the very string being counted: the list appeared to grow
+from 48 to 50 while it was being worked. So a re-checked site carries an explicit marker, and
+progress counts the marker:
+
+```
+[24.2.7-audit: VERIFIED  <date>, <round> — …]     the claim still holds on 26.2.4.2
+[24.2.7-audit: WRONG     <date>, <round> — …]     it does not; say whether it was fixed
+[24.2.7-audit: UNDECIDED <date>, <round> — …]     the probe could not separate it; say why
+```
+
+**A marker is a claim like any other and can be wrong in either direction.** One site was marked
+`WRONG` and later verified correct; another was `UNDECIDED` and later settled. Re-marking is
+normal and the date plus round is what makes it followable.
+
+
+**The running score is one wrong in eleven** (see the outcomes table below), and the useful reading
+is not "these are fine" but *"a site cannot be trusted either way until a probe has been pointed at
+it"*. A verified site is worth as much as a
 broken one, because it is the only thing that stops the next round paying for the same probe.
 
 | project | site | round | outcome |
@@ -37,56 +62,6 @@ by LibreOffice, so a font-size probe reads a constant 10 pt on the reference at 
 and reports 46 of 48 cases wrong. `dotnet/probes/sheets-r53-totalsrow/audit_mkwb.py` is a fixture
 generator that is known to be read correctly by 26.2.4.2; start from it. Confirm any new fixture by
 `soffice --convert-to fods` and reading `fo:font-size` back before trusting a single measurement.
-
-## Counting them: use `git grep`, not `grep -r`
-
-```sh
-git grep -n "24\.2\.7" -- 'dotnet/src/**/*.cs' | grep -v '24\.2\.7-audit'   # open sites
-grep  -rn "24\.2\.7" dotnet/src --include=*.cs                              # exactly DOUBLE — do not use
-```
-
-`grep -r` returns twice as many hits and files as `git grep`, because every project under
-`dotnet/src` has a lower-case alias directory entry on this case-insensitive mount (same inode,
-link count 1, untracked). See `CLAUDE.md` § "This container".
-
-**And the string alone is not the metric — it self-corrupts.** The first two rounds to work this
-list annotated their sites with sentences like *"…was calibrated to 24.2.7.2 and has been
-re-checked"*, which **adds** matches for the very string being counted. The list appeared to grow
-while it was being worked. That is why a re-checked site now carries an explicit marker:
-
-```
-[24.2.7-audit: VERIFIED  <date>, <round> — …]     the claim still holds on 26.2.4.2
-[24.2.7-audit: WRONG     <date>, <round> — …]     it does not; say whether it was fixed
-[24.2.7-audit: UNDECIDED <date>, <round> — …]     the probe could not separate it; say why
-
-## Where they are
-
-| project | sites | reaches |
-|---|---:|---|
-| `Paperless.Presentations` | 15 | slides |
-| `Paperless.WordProcessing` | 11 | words |
-| `Paperless.Spreadsheets` | 9 | sheets — **4 re-checked r53, all still correct** |
-| **`Paperless.Text`** | **4** | **all three tracks** |
-| `Paperless.Core` | 2 | all three tracks |
-| `Paperless.Rendering` | 1 | all three tracks |
-| `Paperless.Ooxml` | 1 | all three tracks |
-
-Densest files:
-
-```
-6  Paperless.Presentations/Layout/SlideTextLayout.cs
-4  Paperless.Presentations/Layout/SlideAutofit.cs        <- re-checked r52, WAS WRONG
-3  Paperless.Text/Fonts/SystemFontResolver.cs
-3  Paperless.Presentations/Ooxml/PptxSlideLayout.cs
-2  Paperless.WordProcessing/OpenDocument/OdtLayoutSource.cs
-2  Paperless.WordProcessing/Ooxml/WriterPoolSpacing.cs
-2  Paperless.WordProcessing/Ooxml/WordStyles.cs
-2  Paperless.Spreadsheets/Layout/SheetFonts.cs          <- re-checked r53, still correct
-2  Paperless.Presentations/Layout/SlideDrawing.cs
-2  Paperless.Core/Graphics/GlyphRun.cs
-```
-
-Progress is `git grep -c '24\.2\.7-audit'`, never a count of `24.2.7`.
 
 ## Progress
 
@@ -135,70 +110,53 @@ git grep -n  '24\.2\.7' -- 'dotnet/src/**/*.cs' | grep -vc '24\.2\.7-audit'   # 
 git grep -c  '24\.2\.7-audit' -- 'dotnet/src/**/*.cs' | awk -F: '{s+=$2} END{print s}'  # done
 ```
 
-## Outcomes so far — two of five re-checked sites were wrong
+## Outcomes so far — eleven sites re-checked, **one** wrong
 
 | site | outcome |
 |---|---|
-| `SlideAutofit.cs` (4 hits, one claim) | **WRONG**, fixed r52 — 25.2 replaced 24.2's bisection with `constScaleLevels`. −155.40 `abs_ink`, **11.1% of the slides track** |
-| `SystemFontResolver.cs:406` | **VERIFIED** r53 — unrecognised families still all land on DejaVu |
-| `SystemFontResolver.cs:439` | **UNDECIDED** r53 → **VERIFIED r54** — two fixtures that reach `DefaultFonts` both answer Liberation Serif |
-| `SystemFontResolver.cs:637` | **WRONG** r53 → **VERIFIED r54, and the seat was elsewhere** — see below |
-| `MeasuredParagraph.cs:744` | **VERIFIED** r53 — unchanged on 26.2.4.2 |
+| `SlideAutofit.cs` (one claim, 4 hits) | **WRONG**, fixed r52 — 25.2 replaced 24.2's bisection with `constScaleLevels`. −155.40 `abs_ink`, **11.1% of the slides track** |
+| `SlideTextLayout.cs` (6 sites) | **VERIFIED** r53 — and authoring the probe exposed a chain arm all six described and none implemented, worth 769 sites' worth of fix |
+| `SheetFonts.cs` (2), `SheetGeneralWidth.cs`, `SheetDeviceUnits.cs` | **VERIFIED** r53 — 30/30, 27/27, 45/45 authored cases exact |
+| `SystemFontResolver.cs:406` | **VERIFIED** r53 |
+| `SystemFontResolver.cs:441` | **VERIFIED** r54 — was UNDECIDED; settled with two fixtures that actually reach `DefaultFonts` |
+| `SystemFontResolver.cs:657` (`GenericFallbacks`) | **VERIFIED** r54 — **was recorded WRONG by r53 and is not.** See below |
+| `MeasuredParagraph.cs` | **VERIFIED** r53 |
 
-**Two of five.** The prior on an unverified site is not "probably fine".
+### The one that was recorded WRONG and was not — read this before trusting any entry here
 
-### And a re-check can be wrong in the other direction too
+Round 53 probed `GenericFallbacks`, found ten unrecognised families answering DejaVu **Serif** where
+the code says Sans, measured that **86 of 337 words renderings disagree with the reference's font
+list**, and recorded the site `WRONG`. I read that as the largest single known defect on the project
+and dispatched a round to fix it.
 
-Round 54 re-ran round 53's `GenericFallbacks` finding and **reproduced its measurement exactly**
-while **reversing its verdict**. Ten unrecognised families really do answer DejaVu Serif through
-the DOCX filter; `fc-match` really does answer Sans; the site really does disagree with the
-reference on 32 words renderings. What round 53 could not see, because every family it probed was
-one fontconfig files under *no* generic and every file it probed was a DOCX, is that **the answer
-belongs to the filter and not to the resolver**:
+**The site is correct. The rule simply does not live there.** Round 54 established it on **126
+authored files** through the installed `soffice`, with five known-answer controls:
 
 | filter | an unrecognised family, nothing declared |
 |---|---|
-| DOCX, DOC, RTF | **DejaVu Serif** — a roman default applied before the request is built |
-| ODF text, XLSX, PPTX, flat ODS | **fontconfig's own generic** — `Consolas` → DejaVu Sans **Mono** |
+| DOCX, DOC, RTF | **DejaVu Serif** — only `w:family="swiss"` moves it, to Sans; RTF's `\fnil`/`\froman`/`\fswiss`/`\fmodern` are all inert |
+| ODF text, XLSX, PPTX, flat ODS | **fontconfig's own generic** — `Consolas` → DejaVu Sans *Mono* |
 
-So `GenericFallbacks` is right for every caller that reaches it, and the one-line change the audit
-recommended would have set every slide and every sheet in a serif face that 26.2.4.2 sets in a
-grotesque. **A site can be simultaneously the right diagnosis and the wrong seat**, and the way
-that showed was varying the *format* — a variable the first probe held fixed without noticing it
-was one.
+**The answer belongs to the filter, not the resolver.** Round 53's probe was DOCX-only: it held the
+*format* fixed without noticing the format was the variable. The discriminator it lacked is that
+`45-latin.conf` files 60 families under a generic and none is installed here, so `fc-match`
+separates three answers rather than one.
 
-### The one that was open, and how it closed
+**Had the recommended one-line change been made in `Paperless.Text`, it would have reflowed 202
+slides and 130 sheets renderings, every one of them currently correct.** The fix belongs in
+`Paperless.WordProcessing/Layout/WordFallbackClass.cs`, and that is where it went; the diff in
+`Paperless.Text` is comment-only, verified by diff.
 
-`SystemFontResolver.GenericFallbacks` says an unrecognised family resolves to **DejaVu Sans**.
-On 26.2.4.2 **all ten unrecognised families probed answer DejaVu *Serif*** — one authored DOCX per
-family through the installed `soffice`, face read out of the PDF, with four controls agreeing
-(Liberation Serif → itself, Calibri → Carlito, Cambria → Caladea, Arial → Liberation Sans). Two
-authored nonsense names, one with a serif hint and one without, **both** answer Serif, so the shape
-of the name does not decide it either.
+**Three lessons, all of which this project already states somewhere and none of which stopped it:**
 
-**The stated reason is falsified independently of the answer**: `fc-match Aptos` and `fc-match ""`
-both return `DejaVuSans.ttf`, so whatever 26.2.4.2 does here, it is not "ask fontconfig and take
-its default" — the second time this project has caught that assumption.
-
-Cost, measured rather than assumed: over all 337 words renderings, **86 disagree with the
-reference's embedded font list and 73 of those carry DejaVu Sans on our side**, mostly the plain
-pair `ours=DejaVuSans, ref=DejaVuSerif`. The two faces have different advances, so each is a
-line-breaking difference as well as a visible one.
-
-**It is deliberately not fixed.** A one-line change in `Paperless.Text` owes a measured sweep of
-all three tracks, and that is the parent's to run, not a track round's to slip in at the end.
-
-> **Closed by round 54, and not where this section expected.** The measurement above reproduces —
-> 86 disagreeing font lists reproduces exactly; the "73 carry DejaVu Sans" does **not** reproduce
-> under any reading round 54 could construct (70 by the broadest, 40 by the strict difference,
-> 32 being the plain `ours=DejaVuSans, ref=DejaVuSerif` pair). The **seat** is
-> `Paperless.WordProcessing.Layout.WordFallbackClass`, not `Paperless.Text`: DOCX, DOC and RTF
-> default an unrecognised family's class to roman, while ODF text, XLSX, PPTX and flat ODS take
-> fontconfig's generic, so `GenericFallbacks` is correct for every caller that actually reaches it.
-> **The three-track sweep this section demanded was run anyway and is the evidence**: over 302
-> slides and 307 sheets renderings, *zero* show ours DejaVu Sans against the reference's DejaVu
-> Serif, and authored PPTX/XLSX/ODS files answer DejaVu Sans Mono for `Consolas` where a DOCX
-> answers DejaVu Serif. See `probes/words-r54/`.
+1. **A probe that varies one thing must know what it is holding fixed.** "One variable at a time" is
+   satisfied by a DOCX-only sweep and is still wrong, because the constant was the answer.
+2. **An audit entry is a claim like any other.** `WRONG` earns no more trust than the comment it
+   contradicts — this is § 7's "a refutation inherits no privilege from being a refutation",
+   arriving for the second time in three rounds.
+3. **A figure quoted rather than re-derived decays.** Round 53's "73 of 337 carry DejaVu Sans"
+   **does not reproduce at any reading** — the candidates are 70, 40 and 32. Its companion figure,
+   86, reproduces exactly. I repeated the 73 in a brief and in a report.
 
 ## How to work it, and the order
 

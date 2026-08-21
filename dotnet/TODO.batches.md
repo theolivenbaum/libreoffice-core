@@ -15229,3 +15229,108 @@ three good arguments into three measurements at a cost of about twenty minutes e
 quoted into three consecutive briefs after it had been fixed. From here, **an item quoted into a
 brief carries the commit or measurement that last confirmed it is still open**, and where it cannot,
 the brief says so and the round re-measures it first. Both round-54 briefs are written that way.
+
+---
+
+## Merge note — round 54, words (2026-08-21)
+
+**Words 318 → 317 of 337. Corpus 790 of 946.** The first round this session to cost a verdict, and
+the change is right.
+
+```
+Core 337   Containers 109   Text 611   Vector 295   Rendering 150(1 skipped)   Markup 259
+OpenDocument 125   WordProcessing 1123   Spreadsheets 925   Presentations 788     = 4722
+0 failed
+```
+
+Verified by sweeping all 337 words documents in the primary after the merge: **one regression, zero
+gains**, exactly as the round reported.
+
+### The round refuted the fix it was dispatched to make, and that is the result
+
+I read round 53's `[24.2.7-audit: WRONG]` on `SystemFontResolver.GenericFallbacks` as **the largest
+single known defect on the project** and dispatched a round to fix it. **The site is correct. The
+rule does not live there.**
+
+Established on **126 authored files** through the installed `soffice`, five known-answer controls
+agreeing (`Liberation Serif`→itself, `Calibri`→Carlito, `Cambria`→Caladea, `Arial`→Liberation Sans,
+`Courier New`→Liberation Mono):
+
+| filter | an unrecognised family, nothing declared |
+|---|---|
+| DOCX, DOC, RTF | **DejaVu Serif** — only `w:family="swiss"` moves it, to Sans; RTF's `\fnil`/`\froman`/`\fswiss`/`\fmodern` are **all inert** |
+| ODF text, XLSX, PPTX, flat ODS | **fontconfig's own generic** — `Consolas` → DejaVu Sans **Mono** |
+
+**The answer belongs to the filter, not the resolver.** Round 53's probe was DOCX-only: it varied
+one thing and *held the answer fixed without noticing*. The discriminator it lacked is that
+`45-latin.conf` files 60 families under a generic and none is installed here, so `fc-match`
+separates three answers rather than one. The answer does **not** depend on the request — bold,
+italic, 8 pt, 40 pt and an east-Asian hint all give the same family, and the round says so
+explicitly because it was asked to either way.
+
+**Had the recommended one-line `Paperless.Text` change been made, it would have reflowed 202 slides
+and 130 sheets renderings, every one of them currently correct.** The fix went to
+`Paperless.WordProcessing/Layout/WordFallbackClass.cs`; the `Paperless.Text` diff is **comment-only,
+verified by diff**. Nothing cross-track is owed, and independently **0 of 302 slides and 0 of 307
+sheets** show the Sans-for-Serif pair.
+
+### What it bought, and what it cost
+
+| | before | after |
+|---|---:|---:|
+| font-list disagreements vs the reference | 86 of 337 | **66** |
+| wrong pair `ours=DejaVuSans, ref=DejaVuSerif` | 32 | **8** |
+| new wrong direction `ours=Serif, ref=Sans` | 0 | **6** |
+| renderings changed | — | **45** (predicted 32–60) |
+| verdicts | 318 | **317** |
+
+Prediction: 0 verdicts with a stated risk of −1 to −3. Measured −1. **The prediction named the risk
+and the risk fired** — that is a well-run round, not a failed one.
+
+**The regression, stated not netted.** `24-25_FAA_Holdover_Tables.docx` 155/155 → **165/155 pages**,
+re-opened in the manifest. Isolated to `Arial Bold`: **in that document alone, any unrecognised name
+answers DejaVu Sans on the reference side.** Eight one-variable edits to the real package rule out
+the font-table entry, its `w:family`, `w:altName`, `w:panose1`, the name itself, and — by authored
+probe — inheritance of the class through the paragraph style. **The variable is unfound.** The 8
+documents still wrong the old way are the same puzzle inverted: `ESPN-R` declares `Verdana`/`Segoe
+UI` as *swiss* and the reference sets them Serif.
+
+### Three further refutations, two of them of the round's own work
+
+- **"73 of 337 carry DejaVu Sans" does not reproduce at any reading** — the candidates are 70, 40
+  and 32. Its companion figure, 86, reproduces exactly. **I repeated the 73 in a brief and in a
+  report.** Second time in three rounds that a quoted-not-re-derived figure has propagated.
+- **The round's own `.doc` probe was confounded**: a DOCX→DOC round trip through LibreOffice bakes
+  in the roman default, so it measured "declared roman" rather than "declared nothing". The corpus
+  refuted it in one sweep.
+- **Its first attempt shipped without the empty-family guard: −18 verdicts**, 29 `.doc` documents
+  moved off Liberation Serif, because a declared class is consulted *before* `GenericFallbacks`
+  separates "no font named" from "a font nobody has". **Only the whole-track sweep could see it** —
+  a batch sweep would have shipped it.
+
+`SystemFontResolver.cs:441`, previously `UNDECIDED`, is now **VERIFIED**: two fixtures that actually
+reach `DefaultFonts` — a flat ODF declaring no font anywhere, and a DOCX whose `docDefaults` state
+an empty `w:rFonts` — both answer Liberation Serif. (`w:ascii=""` is a *third* state and answers
+DejaVu Serif.)
+
+### The audit's own record needed correcting, twice over
+
+Running score is now **one wrong in eleven**, not two in five: the `GenericFallbacks` marker flipped
+`WRONG` → `VERIFIED` and the `UNDECIDED` one was settled. Written into
+`TODO.24-2-7-audit.md` with the lesson attached:
+
+1. **A probe that varies one thing must know what it is holding fixed.** "One variable at a time"
+   was satisfied by a DOCX-only sweep and was still wrong, because the constant *was* the answer.
+2. **An audit entry is a claim like any other.** `WRONG` earns no more trust than the comment it
+   contradicts — § 7's "a refutation inherits no privilege from being a refutation", for the second
+   time in three rounds.
+3. A marker can be wrong in either direction; re-marking with a date and round is normal.
+
+### Words does next
+
+1. **Find the document-level variable that flips the DOCX default from roman to swiss.** Worth 14
+   documents and the verdict this round lost. Untried: `settings.xml` compatibility mode, the theme,
+   `w:rPrDefault`, and "a property of the first font resolved rather than of the run".
+2. `w:altName` — parsed, never used.
+3. `097`'s 1.7 pt boundary case: the standing line-height deficit, 11.50 against 12.65 per empty
+   paragraph, worth 1.15 pt on every empty paragraph in the corpus.
