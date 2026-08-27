@@ -192,6 +192,37 @@ public sealed partial record ChartSeries(
     public Colour? MarkerLine { get; init; }
 
     /// <summary>
+    /// The marker's side, or null when the file states none.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>c:marker/c:size</c>, <strong>in whole points</strong>, which
+    /// <c>TypeGroupConverter::convertMarker</c> turns into a square symbol of
+    /// <c>convertPointToMm100(size)</c> hundredths of a millimetre
+    /// (<c>typegroupconverter.cxx:652-654</c>). A part that states no size still gets one:
+    /// <c>SeriesModel</c>'s constructor is <c>mnMarkerSize( 5 )</c>
+    /// (<c>seriesmodel.cxx:118</c>), so an OOXML marker is 5 pt unless the file says otherwise
+    /// and is never the 250 hundredths of a millimetre that <see cref="ChartLayout"/> falls back
+    /// to.
+    /// </para>
+    /// <para>
+    /// <strong>Null is not "5 pt", it is "no OOXML marker element reached here".</strong> That
+    /// distinction is the whole point of the property: an ODF or binary chart has no
+    /// <c>c:marker</c> to read and its symbol keeps chart2's own unset default of 250 × 250
+    /// (<c>VDataSeries::getSymbolProperties</c>), which is 7.09 pt and a different number. Giving
+    /// this a non-null default would silently move every ODF and <c>.ppt</c> chart in the corpus.
+    /// </para>
+    /// <para>
+    /// Measured on <c>003_advanced_powerpoint_line.pptx</c>, which states
+    /// <c>&lt;c:symbol val="circle"/&gt;&lt;c:size val="6"/&gt;</c>: <c>6 × 2540 / 72</c> rounds to
+    /// 212 hundredths of a millimetre, which is <b>6.01 pt</b> — exactly the width round 62
+    /// measured the reference drawing on that page, and exactly the figure it refuted as a
+    /// <em>legend key</em> claim while confirming it as a plot-marker one.
+    /// </para>
+    /// </remarks>
+    public Length? MarkerSize { get; init; }
+
+    /// <summary>
     /// The dash array the series' line is stroked with, or null for a solid line.
     /// </summary>
     /// <remarks>
@@ -403,6 +434,75 @@ public sealed partial record ChartPlot
     /// <remarks><c>c:valAx/c:tickLblPos</c>; see <see cref="ValueLabelsVisible"/>.</remarks>
     public bool SecondaryLabelsVisible { get; init; } = true;
 
+    /// <summary>How the value axis' own line and tick marks are painted.</summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>An axis line is not black, and this reader drew every one of them black.</strong>
+    /// <c>spAxisLines</c> (<c>oox/source/drawingml/chart/objectformatter.cxx:215-220</c>) gives it
+    /// the theme's <c>tx1</c> at <c>tint 75000</c> — the same entry as a major gridline — and the
+    /// theme's subtle line style supplies its width. On <c>Demick_JetBlue.pptx</c> page 4 the
+    /// reference draws its two axis lines <c>#666666</c> at 0.73 pt where we drew <c>#000000</c>
+    /// hairlines.
+    /// </para>
+    /// <para>
+    /// The <em>tick labels</em> are a separate statement and do not move with it: both stacks
+    /// draw that page's labels <c>#000000</c>, which is <c>c:txPr</c>'s answer and not this one.
+    /// </para>
+    /// <para>
+    /// Not nullable — an axis that is drawn at all has a stroke — and the default is the black
+    /// hairline every non-OOXML reader has always produced, so ODF and BIFF are unchanged.
+    /// </para>
+    /// </remarks>
+    public ChartGrid ValueAxisLine { get; init; } = new(Colour.Black);
+
+    /// <summary>How the category axis' own line and tick marks are painted.</summary>
+    /// <remarks><c>c:catAx/c:spPr/a:ln</c>; see <see cref="ValueAxisLine"/>.</remarks>
+    public ChartGrid CategoryAxisLine { get; init; } = new(Colour.Black);
+
+    /// <summary>How the secondary value axis' own line and tick marks are painted.</summary>
+    /// <remarks>See <see cref="ValueAxisLine"/>.</remarks>
+    public ChartGrid SecondaryAxisLine { get; init; } = new(Colour.Black);
+
+    /// <summary>Where the value axis puts its major tick marks.</summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>An axis reserves its tick length only when it actually draws a tick outside the
+    /// plot area.</strong> <c>c:majorTickMark</c> takes <c>out</c>, <c>cross</c>, <c>in</c> and
+    /// <c>none</c>; <c>lclGetTickMark</c>
+    /// (<c>oox/source/drawingml/chart/axisconverter.cxx:104-115</c>) maps the first two to a
+    /// style carrying <c>OUTER</c> and the last two to one that does not, and only an outward
+    /// tick extends past the plot area and is therefore charged to it by
+    /// <c>VDiagram::adjustInnerSize</c>.
+    /// </para>
+    /// <para>
+    /// Measured one property and one axis at a time on a corpus chart already stating
+    /// <c>none</c> on both axes — six arms, and the plot edge moves by <c>AXIS2D_TICKLENGTH</c>
+    /// exactly, on that axis' own edge and on no other:
+    /// <c>none 0.00 / in 0.00 / out +4.25 / cross +4.25</c>. The labels do not move with it: the
+    /// leftmost value label's pen sits at the same <c>x</c> in all four arms, so what the tick
+    /// buys is the gap between the label and the axis and not the label's own place.
+    /// </para>
+    /// <para>
+    /// The default is <see cref="ChartTickMark.Outer"/> because an <em>absent</em>
+    /// <c>c:majorTickMark</c> is not <c>none</c>: <c>AxisModel</c>'s constructor defaults it to
+    /// <c>out</c> for a 2007 chart and to <c>cross</c> for a later one
+    /// (<c>oox/source/drawingml/chart/axismodel.cxx:42-48</c>), and both of those reserve. Only a
+    /// stated <c>none</c> or <c>in</c> changes anything, and ODF — which has no census behind it
+    /// here — is left on the default.
+    /// </para>
+    /// </remarks>
+    public ChartTickMark ValueTicks { get; init; } = ChartTickMark.Outer;
+
+    /// <summary>Where the category axis puts its major tick marks.</summary>
+    /// <remarks><c>c:catAx/c:majorTickMark</c>; see <see cref="ValueTicks"/>.</remarks>
+    public ChartTickMark CategoryTicks { get; init; } = ChartTickMark.Outer;
+
+    /// <summary>Where the secondary value axis puts its major tick marks.</summary>
+    /// <remarks>
+    /// <c>c:majorTickMark</c> on the secondary <c>c:valAx</c>; see <see cref="ValueTicks"/>.
+    /// </remarks>
+    public ChartTickMark SecondaryTicks { get; init; } = ChartTickMark.Outer;
+
     /// <summary>Whether the chart has a pair of axes at all.</summary>
     /// <remarks>
     /// A pie has neither, so it gets no axis lines, no ticks, no gridlines and — the part that
@@ -439,14 +539,57 @@ public sealed partial record ChartPlot
             // (CandleStickChart.cxx:160-180) — so a stock chart's categories are slots exactly as
             // a bar chart's are, and its whiskers stand in the middle of each rather than on the
             // plot area's edges.
+            //
+            // The bar test comes *first* and is not overridable, which is a measurement and not a
+            // reading of the source: on 26.2.4.2 a column chart stating c:crossBetween="midCat"
+            // renders byte-for-byte as the same chart stating "between". See CategoriesBetween.
             if (Kind is ChartPlotKind.Bar or ChartPlotKind.Stock) return true;
 
             foreach (ChartSeries series in Series)
                 if (series.Kind is ChartPlotKind.Bar or ChartPlotKind.Stock) return true;
 
-            return false;
+            return CategoriesBetween ?? false;
         }
     }
+
+    /// <summary>
+    /// Whether the file itself says the categories occupy slots — <c>c:crossBetween</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>The chart type is not the whole rule for an OOXML chart, and for a line or an area
+    /// chart it is not the rule at all.</strong> <c>c:crossBetween</c> is stated on the value axis
+    /// the category axis crosses, and
+    /// <c>oox/source/drawingml/chart/axisconverter.cxx:292-301</c> reads it into
+    /// <c>ScaleData::ShiftedCategoryPosition</c> ahead of the type, falling back to the first type
+    /// group's own type only when the element is absent.
+    /// </para>
+    /// <para>
+    /// Measured on the running binary rather than read off that source, because the two disagree
+    /// about one of the nine cases. Nine arms — three chart types by
+    /// <c>between</c> / <c>midCat</c> / element deleted, one property patched per arm in a corpus
+    /// deck, each rendered through 26.2.4.2 and read back from the category labels' own pen
+    /// positions (<c>probes/slides-r60/make-crossbetween-probe.py</c>, <c>cbread.py</c>):
+    /// </para>
+    /// <code>
+    ///                between    midCat     absent
+    ///   areaChart    shifted    unshifted  unshifted
+    ///   lineChart    shifted    unshifted  SHIFTED
+    ///   barChart     shifted    SHIFTED    shifted
+    /// </code>
+    /// <para>
+    /// So a bar or column chart ignores the element outright — which is why the test for it in
+    /// <see cref="ShiftedCategories"/> runs before this one — and a line chart with the element
+    /// absent is shifted while an area chart with it absent is not.
+    /// </para>
+    /// <para>
+    /// <see langword="null"/> means the format made no statement, which is the case for every ODF
+    /// chart: ODF has no such attribute and <c>ChartTypeTemplate::adaptScales</c> shifts Column,
+    /// Bar and Close alone, so leaving it null keeps an ODF plot on exactly the answer the type
+    /// test gives.
+    /// </para>
+    /// </remarks>
+    public bool? CategoriesBetween { get; init; }
 
     /// <summary>The series drawn as one kind against one value axis, in file order.</summary>
     /// <param name="kind">The geometry.</param>
@@ -621,6 +764,49 @@ public sealed partial record ChartPlot
     public ChartLegendPosition Legend { get; init; } = ChartLegendPosition.None;
 
     /// <summary>The chart area's own fill, or null when it states none.</summary>
+    /// <summary>The colour an axis' tick labels are drawn in — the axes' own <c>c:txPr</c>.</summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>A chart's text is not black because LibreOffice draws chart text black.</strong>
+    /// It is black because <c>tx1</c> usually resolves to black, and a chart that names anything
+    /// else gets it. This reader drew every piece of chart text in one hardcoded
+    /// <c>Colour.Black</c> until round 60, which is right for the majority and wrong for every
+    /// chart on a dark master: <c>8_P-Pavese_AIRBUS-ATB-journee-CRATB.pptx</c> names
+    /// <c>a:schemeClr val="bg1"</c> on its title, on both axes and on its data labels, and the
+    /// reference draws all fourteen of page 8's text runs white where this reader drew
+    /// twenty-two black ones.
+    /// </para>
+    /// <para>
+    /// Five separate properties rather than one, because the five objects state the colour in
+    /// five different places and a chart routinely states it in only some of them — a corpus
+    /// census over every OOXML chart part counts <c>c:valAx</c>, <c>c:catAx</c>, <c>c:title</c>,
+    /// <c>c:dLbls</c> and <c>c:legend</c> separately, and the commonest single statement
+    /// (<c>tx1</c>, 385 times) sits on an axis while the second (<c>bg1</c>, 45) is spread over
+    /// data labels and titles.
+    /// </para>
+    /// <para>
+    /// The default is black on all five, so a format that states nothing — every ODF chart, every
+    /// binary workbook chart — keeps exactly the answer it had.
+    /// </para>
+    /// </remarks>
+    public Colour LabelColour { get; init; } = Colour.Black;
+
+    /// <summary>The colour the chart's main title is drawn in.</summary>
+    /// <remarks>See <see cref="LabelColour"/>.</remarks>
+    public Colour TitleColour { get; init; } = Colour.Black;
+
+    /// <summary>The colour an axis title is drawn in.</summary>
+    /// <remarks>See <see cref="LabelColour"/>.</remarks>
+    public Colour AxisTitleColour { get; init; } = Colour.Black;
+
+    /// <summary>The colour a series' data labels are drawn in.</summary>
+    /// <remarks>See <see cref="LabelColour"/>.</remarks>
+    public Colour DataLabelColour { get; init; } = Colour.Black;
+
+    /// <summary>The colour a legend entry's name is drawn in.</summary>
+    /// <remarks>See <see cref="LabelColour"/>.</remarks>
+    public Colour LegendColour { get; init; } = Colour.Black;
+
     public Colour? Background { get; init; }
 
     /// <summary>
@@ -799,6 +985,106 @@ public sealed partial record ChartPlot
     /// <summary>Whether a legend entry is drawn bold, falling back to the axis labels'.</summary>
     public bool LegendBold => IsLegendBold ?? IsLabelBold;
 
+    /// <summary>Whether the legend lists the series in reverse.</summary>
+    /// <remarks>
+    /// <para>
+    /// <c>VSeriesPlotter::createLegendEntries</c>
+    /// (<c>chart2/source/view/charttypes/VSeriesPlotter.cxx</c>:2432-2447) inserts each series'
+    /// entries at the <em>front</em> of the list under two conditions and appends them otherwise:
+    /// with the coordinate system's <c>SwapXAndYAxis</c> set — which is a horizontal bar chart and
+    /// nothing else — the entries reverse unless the series stack in Y; and with it unset, and
+    /// only for a legend at the line start or the line end, they reverse when the series
+    /// <em>do</em> stack in Y. A top or bottom legend on an unswapped chart never reverses.
+    /// </para>
+    /// <para>
+    /// Four arms measured on 26.2.4.2 rather than taken from the source, two of them controls:
+    /// <c>001_advanced_powerpoint_bar.pptx</c> (horizontal bar, clustered, legend right) lists
+    /// <em>Plan</em> above <em>Actual</em> where <c>002_advanced_powerpoint_column.pptx</c> and
+    /// <c>006_advanced_powerpoint_area.pptx</c> — same two series, same legend position — list
+    /// <em>Actual</em> above <em>Plan</em>; and <c>stacked_bar_chart.pptx</c> and
+    /// <c>stacked_area_chart.pptx</c> (stacked, legend right) list <em>In-Store Sales</em> above
+    /// <em>Online Sales</em> where we listed them the other way round.
+    /// </para>
+    /// <para>
+    /// It changes the order and not the box: each column of a legend takes its own widest entry,
+    /// so a one-column legend reserves the same width either way. 17 corpus documents are
+    /// affected — 8 slides, 9 sheets, no words.
+    /// </para>
+    /// </remarks>
+    public bool LegendReversed
+    {
+        get
+        {
+            bool stacked = IsStacked || IsPercentStacked;
+
+            // SwapXAndYAxis is set by the bar template for a horizontal bar chart, so a plot that
+            // is not a bar chart at all cannot be swapped whatever its Direction defaulted to.
+            bool swapped = Direction == ChartBarDirection.Bar && IsBarLike;
+
+            if (swapped) return !stacked;
+
+            return Legend is ChartLegendPosition.Left or ChartLegendPosition.Right && stacked;
+        }
+    }
+
+    /// <summary>Whether any of the chart's type groups draws bars.</summary>
+    private bool IsBarLike
+    {
+        get
+        {
+            if (Kind == ChartPlotKind.Bar) return true;
+
+            foreach (ChartSeries series in Series)
+                if (series.Kind == ChartPlotKind.Bar) return true;
+
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// The face a legend entry's name is set in, or null to take <see cref="TextFamily"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>A chart is not set in one face, and the legend is where that shows.</strong>
+    /// <see cref="TextFamily"/> is one answer for the whole chart, and the OOXML reader arrives
+    /// at it by taking the first literal <c>a:latin</c> anywhere in the part when the chart space
+    /// states none of its own. That is an approximation, and on a deck whose <em>axes</em> state
+    /// a face and whose legend states nothing it hands the axes' face to the legend.
+    /// </para>
+    /// <para>
+    /// Measured on <c>001_advanced_powerpoint_bar.pptx</c> page 1, whose <c>c:catAx/c:txPr</c> and
+    /// <c>c:valAx/c:txPr</c> both state <c>Arial</c>, whose <c>c:legend</c> states nothing and
+    /// whose chart space states nothing: 26.2.4.2 draws the page's seventeen ten-point axis and
+    /// category runs in <strong>LiberationSans</strong> — Arial's metric substitute — and its two
+    /// ten-point legend runs in <strong>Carlito</strong>, the theme's Calibri. We drew all
+    /// nineteen in LiberationSans. Carlito is the narrower face, so the legend's widest entry
+    /// measured 27.81 pt against the reference's 25.12, the legend box came out 2.69 pt too wide,
+    /// and the plot rectangle's right edge — which is
+    /// <c>frame.Right − margin − legend.Width − LegendMarginX</c> — gave up exactly that. It is
+    /// the residue seventeen of the corpus' fifty-seven chart pages were sitting at.
+    /// </para>
+    /// <para>
+    /// The reference resolves each chart object separately: <c>ObjectFormatter</c>'s automatic
+    /// text table names <c>XML_minor</c> for every entry it has
+    /// (<c>oox/source/drawingml/chart/objectformatter.cxx</c>:415-434) and an object's own
+    /// <c>c:txPr</c> overrides it for that object alone. So the precedence here is the legend's
+    /// own <c>c:txPr</c>, then the chart space's, then the theme's minor face — and pointedly
+    /// <em>not</em> "some other element's".
+    /// </para>
+    /// <para>
+    /// Null keeps <see cref="TextFamily"/>, which is what the ODF and BIFF readers set and what a
+    /// consumer with no theme falls back to, so nothing outside the OOXML reader moves. The other
+    /// four roles — axis labels, axis titles, data labels and the main title — are <strong>not</strong>
+    /// resolved this way yet, deliberately: the same census says an axis label's face differs from
+    /// the one-face answer on 45 corpus documents, but every slides one among them is a pie or
+    /// doughnut deck that draws no axis label at all, so there is nothing on this track to measure
+    /// such a change against. See <see cref="TitleFamily"/>, which is the one other role that has
+    /// its own face for its own measured reason.
+    /// </para>
+    /// </remarks>
+    public string? LegendFamily { get; init; }
+
     /// <summary>
     /// The family the chart's own text is set in, or null when the file states none.
     /// </summary>
@@ -856,21 +1142,88 @@ public sealed partial record ChartPlot
     public Colour? PlotBackground { get; init; }
 
     /// <summary>
-    /// The colour the value axis' major gridlines are drawn in, or null when it has none.
+    /// How the value axis' major gridlines are painted, or null when it has none.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// Present rather than absent is the question the file answers — <c>c:majorGridlines</c>,
-    /// <c>chart:grid class="major"</c> — and both default the colour rather than stating it.
-    /// <c>0xB3B3B3</c> is chart2's own default, set on <c>GridProperties</c> as
+    /// <c>chart:grid class="major"</c> — and both usually leave the paint to a default.
+    /// <c>0xB3B3B3</c> is chart2's own, set on <c>GridProperties</c> as
     /// <c>LINE_COLOR = 0xb3b3b3 // gray30</c>
-    /// (<c>chart2/source/model/main/GridProperties.cxx:64-66</c>), and it is what a reader must
-    /// supply for a gridline that states nothing about itself.
+    /// (<c>chart2/source/model/main/GridProperties.cxx:64-66</c>), and it is what the ODF and
+    /// BIFF readers supply.
+    /// </para>
+    /// <para>
+    /// <strong>It is not what an OOXML chart draws.</strong> <c>ObjectFormatter</c>'s automatic
+    /// table gives a major gridline the theme's <c>tx1</c> at <c>tint 75000</c> put through the
+    /// theme's subtle line style, which on a black <c>tx1</c> is <c>0x666666</c> and not
+    /// <c>0xB3B3B3</c> — and the same line style states the width, which is 0.75 pt on every
+    /// theme Office ships and not a hairline. See
+    /// <c>DrawingChartAutoFormat.LineColourOf</c>.
+    /// </para>
+    /// <para>
+    /// A <see cref="ChartGrid"/> rather than a bare colour for the same reason the minor grid is
+    /// one: the width is as visible as the colour and there is no reason for the two grids to
+    /// carry different amounts of information about themselves.
+    /// </para>
     /// </remarks>
-    public Colour? ValueGrid { get; init; }
+    public ChartGrid? ValueGrid { get; init; }
 
-    /// <summary>The colour the category axis' major gridlines are drawn in, or null.</summary>
-    /// <remarks>Far rarer than <see cref="ValueGrid"/>; see it for the default.</remarks>
-    public Colour? CategoryGrid { get; init; }
+    /// <summary>How the category axis' major gridlines are painted, or null.</summary>
+    /// <remarks>Far rarer than <see cref="ValueGrid"/>; see it for the defaults.</remarks>
+    public ChartGrid? CategoryGrid { get; init; }
+
+    /// <summary>
+    /// The colour the value axis' <em>minor</em> gridlines are drawn in, or null when it has none.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>c:minorGridlines</c>, <c>chart:grid class="minor"</c>. A separate element from
+    /// <see cref="ValueGrid"/> and a separate answer: an axis may state either, both or neither.
+    /// </para>
+    /// <para>
+    /// <strong>What this is worth is a whole page, and no gate column can see it.</strong> On
+    /// <c>Demick_JetBlue.pptx</c> page 4 the reference draws 28 horizontal and 21 vertical minor
+    /// lines over the plot area and we drew none, which is the <c>pdf-image-diff</c> report's
+    /// <em>"a solid area drawn differently, 31.18% of page"</em> — 31% of a page of pure ink
+    /// difference, on a document whose only gate failure is a word count that a gridline cannot
+    /// move. The brief that sent this round looking at that page had it diagnosed as a rotated
+    /// category axis; the axis is drawn identically on both sides.
+    /// </para>
+    /// </remarks>
+    public ChartGrid? ValueMinorGrid { get; init; }
+
+    /// <summary>The colour the category axis' minor gridlines are drawn in, or null.</summary>
+    /// <inheritdoc cref="ValueMinorGrid"/>
+    public ChartGrid? CategoryMinorGrid { get; init; }
+
+    /// <summary>
+    /// How many sub-intervals a minor gridline divides one major interval into.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>chart2</c> models the minor grid as a <em>count of sub-intervals</em> rather than as a
+    /// step, so <c>n</c> here draws <c>n − 1</c> lines strictly between each pair of major ticks
+    /// and none outside them. Its own default is 2 (<c>ScaleAutomatism.cxx:75</c>) and that is
+    /// what a category axis gets, because <c>AxisConverter</c>'s <c>CATEGORY</c> branch never sets
+    /// a sub-increment.
+    /// </para>
+    /// <para>
+    /// <strong>A value axis is 5, not 2, and the reason is in the reference's source.</strong>
+    /// <c>AxisConverter::convertFromModel</c> (<c>oox/source/drawingml/chart/axisconverter.cxx:405-409</c>)
+    /// ends its <c>REALNUMBER</c> branch with <c>// tdf#114168 If minor unit is not set then set
+    /// interval to 5, as MS Excel do</c>. With both units stated it is
+    /// <c>round(majorUnit / minorUnit)</c>, and a logarithmic axis stating a minor unit is 9.
+    /// Measured on 26.2.4.2: <c>Demick_JetBlue.pptx</c> page 4's left axis has 8 major ticks
+    /// 25.97 pt apart and 28 minor lines 5.19 pt apart — 25.97 / 5.19 = 5.00 exactly — while its
+    /// category axis draws one minor line per interval, at the midpoint.
+    /// </para>
+    /// </remarks>
+    public int ValueMinorIntervals { get; init; } = 5;
+
+    /// <summary>How many sub-intervals the category axis' minor grid divides an interval into.</summary>
+    /// <inheritdoc cref="ValueMinorIntervals"/>
+    public int CategoryMinorIntervals { get; init; } = 2;
 
     /// <summary>
     /// The inner plot rectangle the file states, relative to the chart frame, or null.
@@ -1048,4 +1401,27 @@ public sealed partial record ChartPlot
         foreach (ChartSeries series in Series) count = Math.Max(count, series.Values.Count);
         return count;
     }
+}
+
+/// <summary>Where an axis draws its major tick marks.</summary>
+/// <remarks>
+/// <c>chart2::TickmarkStyle</c>, which is a flag pair — <c>INNER = 1</c>, <c>OUTER = 2</c> — and
+/// <c>c:majorTickMark</c>'s four tokens map onto it exactly
+/// (<c>oox/source/drawingml/chart/axisconverter.cxx:104-115</c>). Kept as four named states
+/// rather than as two booleans because the reservation asks only about <c>OUTER</c> and the
+/// drawing asks about both, and a pair of booleans lets the two questions drift apart.
+/// </remarks>
+public enum ChartTickMark
+{
+    /// <summary><c>none</c> — no tick drawn, and nothing reserved.</summary>
+    None,
+
+    /// <summary><c>in</c> — a tick inside the plot area. Reserves nothing.</summary>
+    Inner,
+
+    /// <summary><c>out</c> — a tick outside the plot area. Reserves its length.</summary>
+    Outer,
+
+    /// <summary><c>cross</c> — a tick on both sides. Reserves its outward half's length.</summary>
+    Cross,
 }

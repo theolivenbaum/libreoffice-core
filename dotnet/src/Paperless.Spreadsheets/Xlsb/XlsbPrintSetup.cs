@@ -297,10 +297,31 @@ internal static class XlsbPrintSetup
                 ? SheetBandHeight.Printed(
                     footerText, Length.FromInches(Math.Max(0, bottom - footer)), defaultFont)
                 : Length.Zero,
+            // Calc's `nDistance`, zero when the band is pinned — see
+            // `SheetBandHeight.BodyDistance`, and the note beside the twin in `XlsxPrintSetup`
+            // for what leaving it at the ODF default cost.
+            HeaderGap = hasHeader
+                ? SheetBandHeight.BodyDistance(
+                    headerText, Length.FromInches(Math.Max(0, top - header)), defaultFont,
+                    SheetPrintSetup.Default.HeaderGap)
+                : SheetPrintSetup.Default.HeaderGap,
+            FooterGap = hasFooter
+                ? SheetBandHeight.BodyDistance(
+                    footerText, Length.FromInches(Math.Max(0, bottom - footer)), defaultFont,
+                    SheetPrintSetup.Default.FooterGap)
+                : SheetPrintSetup.Default.FooterGap,
+
             HeaderText = headerText,
             FooterText = footerText,
             Header = headerText is null ? null : SheetHeaderFooter.ParseCodes(headerText),
             Footer = footerText is null ? null : SheetHeaderFooter.ParseCodes(footerText),
+
+            // The face the band's own codes fall back to: the workbook's default cell font,
+            // family and size. `SheetBandHeight` above is already given the same object to size
+            // the band with; until round 56 the *drawing* used a fixed ten-point Liberation Sans
+            // instead, so the two halves of the same band disagreed on every workbook whose
+            // default is not that. See `SheetPrintSetup.BandFont`.
+            BandFont = defaultFont,
 
             // Every Excel band is dynamic — see `SheetPrintSetup.HeaderIsDynamic`.
             HeaderIsDynamic = true,

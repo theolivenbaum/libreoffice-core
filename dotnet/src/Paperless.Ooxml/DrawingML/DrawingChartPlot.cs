@@ -1,9 +1,10 @@
 using System.Globalization;
+using System.Text;
 using System.Xml.Linq;
 using Paperless.Core.Charts;
 using Paperless.Core.Geometry;
-using Paperless.Core.Numbers;
 using Paperless.Core.Graphics;
+using Paperless.Core.Numbers;
 using Paperless.Core.Units;
 
 namespace Paperless.Ooxml.DrawingML;
@@ -40,6 +41,38 @@ namespace Paperless.Ooxml.DrawingML;
 /// </remarks>
 public static class DrawingChartPlot
 {
+    /// <summary>
+    /// The line a chart space with no <c>a:ln</c> of its own is drawn with, outside Impress.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>LineFormatter</c>'s constructor (<c>oox/source/drawingml/chart/objectformatter.cxx:826-852</c>)
+    /// gives every <c>OBJECTTYPE_CHARTSPACE</c> a solid line of
+    /// <c>GraphicHelper::getDefaultChartAreaLineStyle()</c> at
+    /// <c>getDefaultChartAreaLineWidth()</c> — 9525 EMU, 0.75 pt, "what MSO 2016 writes fixing
+    /// incomplete MSO 2010 documents" — coloured <c>D9D9D9</c>, "what MSO 2016 use as a default
+    /// color for chartspace border". tdf#81437 and tdf#82217.
+    /// </para>
+    /// <para>
+    /// <strong>The Impress filter is the exception, not the rule</strong>, and reading it as the
+    /// rule is what left this unimplemented for two rounds: the guard is
+    /// <c>!aFilterName.startsWithIgnoreAsciiCase("Impress")</c> (tdf#150176), so a Calc or Writer
+    /// chart gets the border and a slide's does not. Four blind readers across rounds 61 and 62
+    /// reported it on three unrelated <em>spreadsheet</em> documents and <c>pdf-ops.py</c> agreed
+    /// every time; the reference's own stroke on <c>023_Waterfall_Chart_Template_for_Excel</c> is
+    /// at (68.17, 425.79)-(530.67, 755.77).
+    /// </para>
+    /// <para>
+    /// A stated <c>a:ln</c> still wins, because <c>convertFormatting</c> assigns the automatic
+    /// line first and the shape's own over it — and an <c>a:ln/a:noFill</c> is a line the file
+    /// turns off, which is why <see cref="SuppressesLine"/> and not <see cref="LineOf"/> decides.
+    /// </para>
+    /// </remarks>
+    private static readonly Colour AutomaticChartAreaLine = Colour.FromRgb(0xD9D9D9);
+
+    /// <summary>0.75 pt — <c>getDefaultChartAreaLineWidth()</c>'s 9525 EMU.</summary>
+    private static readonly Length AutomaticChartAreaLineWidth = Length.FromEmu(9525);
+
     /// <summary>How many <c>c:pt</c> a cache is trusted to declare.</summary>
     /// <remarks>The same ceiling <see cref="DrawingChart"/> applies, for the same reason.</remarks>
     private const int MaxPointCount = 65536;
@@ -65,12 +98,19 @@ public static class DrawingChartPlot
     /// word-processing readers pass — keeps the cached points as the only source. See
     /// <see cref="ChartRangeResolver"/> for why the two differ.
     /// </param>
+    /// <param name="automaticChartAreaLine">
+    /// Whether a chart space that states no line of its own gets the automatic grey one. True for
+    /// every host but Impress — see <see cref="ChartPlot.Border"/>. It defaults to the Impress
+    /// answer because the exception is Impress's and because this reader's fixtures are
+    /// presentations; the two hosts that want it pass it explicitly.
+    /// </param>
     public static ChartPlot? Read(
         XElement chartSpace,
         DrawingTheme? theme = null,
         bool office2007 = false,
         DrawingStyleMatrix? styles = null,
-        ChartRangeResolver? ranges = null)
+        ChartRangeResolver? ranges = null,
+        bool automaticChartAreaLine = false)
     {
         ArgumentNullException.ThrowIfNull(chartSpace);
 
@@ -183,7 +223,11 @@ public static class DrawingChartPlot
         return new ChartPlot
         {
             DateAxis = dateAxis,
-            Title = TitleText(Child(chart, "title")),
+            // The automatic title LibreOffice substitutes when the part states an empty
+            // <c:title> — or none at all and has not deleted it. See DrawingChartTitle, which
+            // carries the rule, the corpus census and the four controls that measured it.
+            Title = TitleText(Child(chart, "title"))
+                    ?? DrawingChartTitle.Automatic(chart, office2007),
             // A scatter chart's horizontal axis is its domain and not its category axis, and its
             // title hangs off that element — so reading only c:catAx loses it entirely. The same
             // fallback CategoryAxisVisible already takes, and tdf127720.pptx is what shows it:
@@ -227,13 +271,38 @@ public static class DrawingChartPlot
             ValueLabelsVisible = Labelled(axes.Value),
             SecondaryLabelsVisible = Labelled(axes.Secondary),
             CategoryLabelsVisible = Labelled(axes.Domain ?? axes.Category),
+            ValueTicks = TicksOf(axes.Value),
+            SecondaryTicks = TicksOf(axes.Secondary),
+            CategoryTicks = TicksOf(axes.Domain ?? axes.Category),
+            CategoriesBetween = CrossBetween(axes, group),
             Legend = LegendOf(Child(chart, "legend")),
-            Background = FillOf(Child(chartSpace, "spPr"), theme),
-            Border = LineOf(Child(chartSpace, "spPr"), theme),
-            BorderWidth = LineWidthOf(Child(chartSpace, "spPr")),
-            PlotBackground = FillOf(Child(plotArea, "spPr"), theme),
-            ValueGrid = GridOf(axes.Value, theme),
-            CategoryGrid = GridOf(axes.Category, theme) ?? GridOf(axes.Domain, theme),
+            Background = FillOf(Child(chartSpace, "spPr"), theme)
+                         ?? DrawingChartAutoFormat.FrameFillOf(
+                                automatic.Style, ChartAutoFrame.ChartSpace, theme),
+            Border = LineOf(Child(chartSpace, "spPr"), theme)
+                     ?? (automaticChartAreaLine && !SuppressesLine(Child(chartSpace, "spPr"))
+                         ? AutomaticChartAreaLine
+                         : null),
+            BorderWidth = LineWidthOf(Child(chartSpace, "spPr")) is { } stated
+                          && stated > Length.Zero
+                ? stated
+                : automaticChartAreaLine && LineOf(Child(chartSpace, "spPr"), theme) is null
+                    && !SuppressesLine(Child(chartSpace, "spPr"))
+                    ? AutomaticChartAreaLineWidth
+                    : Length.Zero,
+            PlotBackground = FillOf(Child(plotArea, "spPr"), theme)
+                             ?? DrawingChartAutoFormat.FrameFillOf(
+                                    automatic.Style, ChartAutoFrame.PlotArea, theme),
+            ValueGrid = GridOf(axes.Value, theme, automatic),
+            CategoryGrid = GridOf(axes.Category, theme, automatic)
+                           ?? GridOf(axes.Domain, theme, automatic),
+            ValueMinorGrid = MinorGridOf(axes.Value, theme, automatic),
+            CategoryMinorGrid = MinorGridOf(axes.Category, theme, automatic)
+                                ?? MinorGridOf(axes.Domain, theme, automatic),
+            ValueAxisLine = AxisLineOf(axes.Value, theme, automatic),
+            SecondaryAxisLine = AxisLineOf(axes.Secondary, theme, automatic),
+            CategoryAxisLine = AxisLineOf(axes.Domain ?? axes.Category, theme, automatic),
+            ValueMinorIntervals = MinorIntervals(axes.Value),
             // The three automatic-text sizes and weights, which are *not* chart2's model
             // defaults — see AutoText below for why an OOXML chart never reaches those.
             TitleSize = SizeOf(Child(chart, "title"))
@@ -250,11 +319,27 @@ public static class DrawingChartPlot
             // regular — so an unstated weight and a stated b="0" mean the same thing here.
             IsLabelBold = AxisLabelBoldOf(plotArea) ?? false,
 
+            // The five text colours. Each is read where its own object states it, and each falls
+            // back to black — which is what every one of them was before round 60, and what a
+            // chart naming tx1 on a light theme resolves to anyway. See ChartPlot.LabelColour.
+            LabelColour = AxisLabelColourOf(plotArea, theme) ?? Colour.Black,
+            TitleColour = ColourOf(Child(chart, "title"), theme) ?? Colour.Black,
+            AxisTitleColour = AxisTitleColourOf(plotArea, theme)
+                              ?? ColourOf(Child(chart, "title"), theme) ?? Colour.Black,
+            DataLabelColour = DataLabelColourOf(plotArea, theme)
+                              ?? AxisLabelColourOf(plotArea, theme) ?? Colour.Black,
+            LegendColour = ColourOf(Child(chart, "legend"), theme)
+                           ?? AxisLabelColourOf(plotArea, theme) ?? Colour.Black,
+
             // The legend's own c:txPr, not the axes' — every length in the legend is a fraction
             // of it. Read from the legend element directly rather than through its descendants,
             // because a c:legendEntry carries a c:txPr of its own and precedes the legend's.
             LegendSize = SizeOf(Child(Child(chart, "legend"), "txPr")),
             IsLegendBold = BoldOf(Child(Child(chart, "legend"), "txPr")),
+
+            // And the legend's own face, which FamilyOf's part-wide search gets wrong whenever
+            // some *other* element of the part states one. See LegendFamilyOf.
+            LegendFamily = LegendFamilyOf(chart, chartSpace, theme),
 
             // A series' c:dLbls/c:txPr, which is where a data label states its own size — not on
             // an axis. 20 of the corpus's 61 chart parts state one that differs from the axes'.
@@ -397,14 +482,104 @@ public static class DrawingChartPlot
     /// <c>a:ln/a:noFill</c> means no gridline at all, which is how a chart turns one off without
     /// removing the element.
     /// </remarks>
-    private static Colour? GridOf(XElement? axis, DrawingTheme? theme)
+    private static ChartGrid? GridOf(
+        XElement? axis, DrawingTheme? theme, ChartAutoContext automatic)
     {
         if (Child(axis, "majorGridlines") is not { } grid) return null;
 
         XElement? properties = Child(grid, "spPr");
         if (Drawing.Child(Drawing.Child(properties, "ln"), "noFill") is not null) return null;
 
-        return LineOf(properties, theme) ?? DefaultGrid;
+        return AutomaticLine(ChartAutoLine.MajorGrid, properties, theme, automatic);
+    }
+
+    /// <summary>
+    /// One piece of a chart's furniture: what it states, and the automatic format under it.
+    /// </summary>
+    /// <remarks>
+    /// <c>LineFormatter::convertFormatting</c> is two lines —
+    /// <c>aLineProps.assignUsed(*mxAutoLine)</c> then <c>assignUsed(shape's own)</c> — so the
+    /// automatic entry is the base and each thing the shape states wins over it *separately*.
+    /// That is why an <c>a:ln</c> carrying only a <c>w</c> keeps the automatic colour, which is
+    /// exactly what <c>Demick_JetBlue.pptx</c>'s value axis does, and why reading "states an
+    /// <c>a:ln</c>" as "states everything" draws it black.
+    /// </remarks>
+    private static ChartGrid AutomaticLine(
+        ChartAutoLine what,
+        XElement? properties,
+        DrawingTheme? theme,
+        ChartAutoContext automatic)
+    {
+        Colour? colour = LineOf(properties, theme)
+                         ?? DrawingChartAutoFormat.LineColourOf(
+                             what, automatic.Style, theme, automatic.Styles);
+
+        Length width = StatedLineWidth(properties)
+                       ?? DrawingChartAutoFormat.AutomaticLineWidth(automatic.Styles);
+
+        return new ChartGrid(colour ?? DefaultGrid, width, DashOf(properties));
+    }
+
+    /// <summary>
+    /// How an axis draws its own line and tick marks — <c>c:spPr/a:ln</c> over the automatic
+    /// entry.
+    /// </summary>
+    /// <remarks>
+    /// A deleted axis is not drawn at all, so this is never asked about one; an
+    /// <c>a:ln/a:noFill</c> is a line the file turns off, and there is nowhere in
+    /// <see cref="ChartGrid"/> to say so, so it is drawn as the automatic colour rather than
+    /// invented away. Two corpus axes state it and both are also <c>c:delete val="1"</c>.
+    /// </remarks>
+    private static ChartGrid AxisLineOf(
+        XElement? axis, DrawingTheme? theme, ChartAutoContext automatic)
+        => AutomaticLine(ChartAutoLine.Axis, Child(axis, "spPr"), theme, automatic);
+
+    /// <summary>
+    /// An axis' minor gridlines, with the width and dash they state, or null when it has none.
+    /// </summary>
+    /// <remarks>
+    /// Unlike <c>c:majorGridlines</c>, a <c>c:minorGridlines</c> in the corpus usually carries an
+    /// <c>a:ln</c>, and both of the things it puts there are visible: a stated width and a stated
+    /// <c>a:prstDash</c>. Reading only the colour draws 110 solid hairlines where the reference
+    /// draws 110 dashed half-point ones — see <see cref="ChartGrid"/>.
+    /// </remarks>
+    private static ChartGrid? MinorGridOf(
+        XElement? axis, DrawingTheme? theme, ChartAutoContext automatic)
+    {
+        if (Child(axis, "minorGridlines") is not { } grid) return null;
+
+        XElement? properties = Child(grid, "spPr");
+        if (Drawing.Child(Drawing.Child(properties, "ln"), "noFill") is not null) return null;
+
+        return AutomaticLine(ChartAutoLine.MinorGrid, properties, theme, automatic);
+    }
+
+    /// <summary>
+    /// How many sub-intervals this axis' minor grid divides one major interval into.
+    /// </summary>
+    /// <remarks>
+    /// <c>AxisConverter::convertFromModel</c>'s <c>REALNUMBER</c>/<c>PERCENT</c> branch
+    /// (<c>oox/source/drawingml/chart/axisconverter.cxx:389-409</c>), which is the only place the
+    /// count is decided for an OOXML axis: <c>round(majorUnit / minorUnit)</c> when both are
+    /// stated and the quotient is sane, <b>5</b> when <c>c:minorUnit</c> is absent — its own
+    /// comment is <c>tdf#114168 … as MS Excel do</c> — and 9 for a logarithmic axis that states
+    /// one. A stated minor unit alone, with no major, leaves the count <em>unset</em> and
+    /// <c>ScaleAutomatism</c>'s default of 2 stands.
+    /// </remarks>
+    private static int MinorIntervals(XElement? axis)
+    {
+        bool logarithmic = Value(Child(Child(axis, "scaling"), "logBase")) is not null;
+        double? major = Number(Child(axis, "majorUnit"));
+        double? minor = Number(Child(axis, "minorUnit"));
+
+        if (logarithmic) return minor is null ? 2 : 9;
+        if (major is { } step && minor is { } sub && sub > 0 && sub <= step)
+        {
+            double count = (step / sub) + 0.5;
+            return count is >= 1.0 and < 1001.0 ? (int)count : 2;
+        }
+
+        return minor is null ? 5 : 2;
     }
 
     /// <summary>
@@ -445,6 +620,71 @@ public static class DrawingChartPlot
     /// </remarks>
     private static bool Labelled(XElement? axis)
         => !string.Equals(Value(Child(axis, "tickLblPos")), "none", StringComparison.Ordinal);
+
+    /// <summary>Where an axis puts its major tick marks — <c>c:majorTickMark</c>.</summary>
+    /// <remarks>
+    /// <para>
+    /// <c>lclGetTickMark</c> (<c>oox/source/drawingml/chart/axisconverter.cxx:104-115</c>):
+    /// <c>in</c> is <c>INNER</c>, <c>out</c> is <c>OUTER</c>, <c>cross</c> is both, and anything
+    /// else is neither. Only <c>OUTER</c> is charged to the plot area, which is why this is read
+    /// at all — see <c>ChartPlot.ValueTicks</c> and the six-arm probe behind it.
+    /// </para>
+    /// <para>
+    /// <strong>An absent element is not <c>none</c>.</strong> <c>AxisModel</c>'s constructor
+    /// defaults it to <c>out</c> for an MSO-2007 chart part and to <c>cross</c> for a later one
+    /// (<c>oox/source/drawingml/chart/axismodel.cxx:42-48</c>) — the two differ in where the tick
+    /// is drawn and not in what it reserves, so the distinction between them is invisible to the
+    /// plot rectangle and <c>Outer</c> is taken for both. The corpus states the element on 481 of
+    /// its 494 axes, so the default decides 13 of them, in two documents.
+    /// </para>
+    /// </remarks>
+    private static ChartTickMark TicksOf(XElement? axis) => Value(Child(axis, "majorTickMark")) switch
+    {
+        "none" => ChartTickMark.None,
+        "in" => ChartTickMark.Inner,
+        "cross" => ChartTickMark.Cross,
+        _ => ChartTickMark.Outer,
+    };
+
+    /// <summary>
+    /// Whether the file says the categories occupy slots — <c>c:crossBetween</c> on the value
+    /// axis the category axis crosses — or null when it says nothing that reaches the question.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Feeds <see cref="ChartPlot.CategoriesBetween"/>, which carries the nine-arm measurement
+    /// this is written from. Three things happen here and each is one of that table's columns:
+    /// </para>
+    /// <list type="bullet">
+    /// <item>a chart with no <c>c:catAx</c> at all — a scatter, a bubble, a pie — has no category
+    /// axis to shift, and answers null;</item>
+    /// <item>a radar chart answers null whatever the element says, because
+    /// <c>axisconverter.cxx:295-296</c> forces <c>RADARLINE</c> and <c>RADARAREA</c> to unshifted
+    /// ahead of reading it — and the corpus holds three slides radar charts stating
+    /// <c>between</c>, which is exactly the case that would go wrong;</item>
+    /// <item>with the element absent, a <c>c:lineChart</c> or a <c>c:stockChart</c> is shifted and
+    /// everything else answers null and keeps the type test's own answer.</item>
+    /// </list>
+    /// <para>
+    /// A bar or column chart is not special-cased here: it is
+    /// <see cref="ChartPlot.ShiftedCategories"/> that ignores this value for one, and it does so
+    /// because the running binary does.
+    /// </para>
+    /// </remarks>
+    private static bool? CrossBetween(ChartAxes axes, XElement group)
+    {
+        if (axes.Category is null) return null;
+
+        string name = group.Name.LocalName;
+        if (name is "radarChart") return null;
+
+        return Value(Child(axes.Crossing, "crossBetween")) switch
+        {
+            "between" => true,
+            "midCat" => false,
+            _ => name is "lineChart" or "line3DChart" or "stockChart" ? true : null,
+        };
+    }
 
     /// <summary>
     /// The date axis a <c>c:dateAx</c> asks for, or null when the category axis is an ordinary
@@ -608,8 +848,17 @@ public static class DrawingChartPlot
                 Flag(table, "showKeys") ?? false,
                 LineOf(Child(table, "spPr"), theme) ?? DefaultGrid);
 
-    /// <summary>chart2's own gridline colour, gray30.</summary>
+    /// <summary>
+    /// chart2's own gridline colour, gray30 — the last resort when there is no theme to ask.
+    /// </summary>
+    /// <remarks>
+    /// <strong>It is not what an OOXML chart draws</strong>, and reaching it means
+    /// <see cref="DrawingChartAutoFormat.LineColourOf"/> found neither a theme nor a format
+    /// matrix. Kept because inventing black there would be worse than the value chart2's own
+    /// model carries (<c>chart2/source/model/main/GridProperties.cxx:64-66</c>).
+    /// </remarks>
     private static readonly Colour DefaultGrid = Colour.FromRgb(0xB3B3B3);
+
 
     /// <summary>What one axis states about its scale.</summary>
     private static ChartScaleRequest ScaleOf(XElement? axis)
@@ -660,6 +909,18 @@ public static class DrawingChartPlot
         /// <summary>A scatter chart's X axis, or null for a category chart.</summary>
         public XElement? Domain { get; private init; }
 
+        /// <summary>
+        /// The value axis the category axis crosses — <c>c:catAx/c:crossAx</c> — or null.
+        /// </summary>
+        /// <remarks>
+        /// <c>c:crossBetween</c> is stated on this axis and on no other, and
+        /// <c>oox/source/drawingml/chart/plotareaconverter.cxx:229-231</c> hands exactly this
+        /// axis to the category axis' converter as its <c>pCrossingAxis</c>. On a chart with one
+        /// value axis it is <see cref="Value"/>; on a combination chart with a secondary axis it
+        /// need not be, and taking the primary would read the wrong element.
+        /// </remarks>
+        public XElement? Crossing { get; private init; }
+
         private readonly Dictionary<XElement, int> _byGroup = [];
 
         /// <summary>Which value axis a plot group is measured against: 0 or 1.</summary>
@@ -705,6 +966,8 @@ public static class DrawingChartPlot
                 Domain = axes.Domain,
                 Value = remaining.Count > 0 ? remaining[0] : null,
                 Secondary = remaining.Count > 1 ? remaining[1] : null,
+                Crossing = Matching(value, Value(Child(category, "crossAx")))
+                           ?? (remaining.Count > 0 ? remaining[0] : null),
             };
 
             if (resolved.Secondary is { } second && IdOf(second) is { } secondId)
@@ -920,6 +1183,7 @@ public static class DrawingChartPlot
                 Marker = MarkerOf(element, kind, scatterStyle, radarStyle, seriesIndex),
                 MarkerFill = MarkerFillOf(element, theme),
                 MarkerLine = LineOf(MarkerProperties(element), theme),
+                MarkerSize = MarkerSizeOf(element),
                 HasLine = scatterLine && !SuppressesLine(properties),
                 DashPattern = DashOf(properties),
                 LineCap = CapOf(properties),
@@ -1153,10 +1417,21 @@ public static class DrawingChartPlot
         // A percentage is a pie's business and nobody else's: bShowPercent is ANDed with
         // meTypeCategory == TYPECATEGORY_PIE (seriesconverter.cxx:141). Honouring it on a column
         // chart puts a second number on every bar of several corpus decks.
-        bool percent = kind == ChartPlotKind.Pie
+        //
+        // A bar-of-pie is in that category too, and leaving it out cost every label of
+        // 028_Unit_Circle_Chart_Optimized_Graph its percentage: TYPEID_OFPIE sits beside
+        // TYPEID_PIE and TYPEID_DOUGHNUT on TYPECATEGORY_PIE in the type table
+        // (oox/source/drawingml/chart/typegroupconverter.cxx:103-105).
+        bool percent = kind is ChartPlotKind.Pie or ChartPlotKind.OfPie
                        && (Flag(labels, "showPercent") ?? inherited?.ShowPercent ?? shown);
         bool category = Flag(labels, "showCatName") ?? inherited?.ShowCategory ?? shown;
         bool name = Flag(labels, "showSerName") ?? inherited?.ShowSeries ?? shown;
+
+        // c:showLegendKey. Unlike the other four this one defaults *off* even outside the Office
+        // 2007 arm: `lclConvertLabelFormatting` initialises `ShowLegendSymbol` from
+        // `rDataLabel.mobShowLegendKey.get(false)` and never from `bDefaultShown`
+        // (seriesconverter.cxx:139). Sixty-two of them in five sheets documents.
+        bool key = Flag(labels, "showLegendKey") ?? inherited?.ShowLegendKey ?? false;
 
         // The stated format goes to whichever of the two properties the label will use, which is
         // the percentage one whenever a percentage is shown and the format is not source-linked.
@@ -1179,6 +1454,7 @@ public static class DrawingChartPlot
             ShowPercent = percent,
             ShowCategory = category,
             ShowSeries = name,
+            ShowLegendKey = key,
             ValueFormat = asPercent || general
                 ? inherited?.ValueFormat
                 : Parsed(code),
@@ -1634,6 +1910,48 @@ public static class DrawingChartPlot
         => Child(Child(series, "marker"), "spPr");
 
     /// <summary>
+    /// The side of a series' marker, which an OOXML chart always has.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>c:marker/c:size</c> is in whole points and
+    /// <c>TypeGroupConverter::convertMarker</c> makes the symbol
+    /// <c>convertPointToMm100(nOoxSize)</c> square (<c>typegroupconverter.cxx:652-654</c>).
+    /// That conversion is <c>o3tl::convert(n, pt, mm100)</c>, which is
+    /// <c>round(n × 2540 / 72)</c> — so a stated 6 is 212 hundredths of a millimetre and
+    /// <b>6.0094 pt</b> rather than 6, and the hundredth matters because it is what the
+    /// reference's own operators carry.
+    /// </para>
+    /// <para>
+    /// <strong>This never returns null, and that is the rule rather than an oversight.</strong>
+    /// <c>SeriesModel</c>'s constructor is <c>mnMarkerSize( 5 )</c>
+    /// (<c>seriesmodel.cxx:118</c>) and <c>convertMarker</c> is reached for every series of a
+    /// chart type that is not a <c>seriesFrameFormat</c>, so an OOXML marker's size is stated or
+    /// it is five points — it is never chart2's unset 250 × 250 default. A series whose chart
+    /// type <em>is</em> a frame format never draws a marker at all, so the value is inert there.
+    /// The null that <see cref="ChartSeries.MarkerSize"/> documents belongs to the ODF and binary
+    /// readers, which have no such element and must keep the 250.
+    /// </para>
+    /// <para>
+    /// Out-of-range values are clamped the way the schema states the type: <c>c:size/@val</c> is
+    /// 2 … 72, and one corpus part states 62. Anything outside that is treated as unstated,
+    /// which is what a reader that cannot trust its input should do with a number it cannot draw.
+    /// </para>
+    /// </remarks>
+    private static Length MarkerSizeOf(XElement? series)
+    {
+        const int defaultPoints = 5;
+
+        double points = Number(Child(Child(series, "marker"), "size")) is { } stated
+                        && stated is >= 2 and <= 72
+            ? stated
+            : defaultPoints;
+
+        return Length.FromMm100((long)Math.Round(points * 2540.0 / 72.0,
+                                                 MidpointRounding.AwayFromZero));
+    }
+
+    /// <summary>
     /// The colour a marker is filled in when it states shape properties of its own.
     /// </summary>
     /// <remarks>
@@ -1705,18 +2023,56 @@ public static class DrawingChartPlot
     /// </remarks>
     private static Length? SizeOf(XElement? element)
     {
-        if (element is null) return null;
-
-        foreach (XElement properties in element.Descendants())
+        foreach (XElement properties in RunProperties(element))
         {
-            if (properties.Name.NamespaceName != OoxmlNamespaces.DrawingML) continue;
-            if (properties.Name.LocalName is not ("defRPr" or "rPr")) continue;
             if (Drawing.Number(properties, "sz") is not { } hundredths || hundredths <= 0) continue;
 
             return Length.FromPoints(hundredths / 100.0);
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// The character-property elements under a titled element, <strong>runs first</strong>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A <c>c:rich</c> writes its paragraph's <c>a:pPr/a:defRPr</c> before the runs it defaults,
+    /// so document order puts the *default* first and taking the first of either reads the value
+    /// the run overrides rather than the value the run states. That is not a corner: on
+    /// <c>003_advanced_excel_pie</c> the title's paragraph default is <c>sz="1300" b="0"</c> in
+    /// Arial and its single run is <c>sz="1800" b="1"</c> in Calibri, and LibreOffice 26.2.4.2
+    /// draws the run — <strong>18.01 pt Carlito Bold</strong>, measured off its own PDF, against
+    /// the 13.00 pt Liberation Sans this used to produce.
+    /// </para>
+    /// <para>
+    /// The fallback is what keeps every other caller unchanged: an axis' <c>c:txPr</c> and a
+    /// <c>c:dLbls</c> hold a paragraph and no runs at all, so there is no <c>a:rPr</c> to prefer
+    /// and the <c>a:defRPr</c> is read exactly as before. Censused over all 946 corpus documents:
+    /// 169 hold a chart part and <strong>39 hold a run that states something different from its
+    /// paragraph's default</strong> — 37 sheets, one deck and one document.
+    /// </para>
+    /// <para>
+    /// A title of several runs in different faces still collapses to one answer, because the
+    /// model carries one size, one weight and one family per titled element. The first run is a
+    /// better single answer than the paragraph default it overrides.
+    /// </para>
+    /// </remarks>
+    private static IEnumerable<XElement> RunProperties(XElement? element)
+    {
+        if (element is null) yield break;
+
+        foreach (bool runsOnly in (bool[])[true, false])
+        {
+            foreach (XElement properties in element.Descendants())
+            {
+                if (properties.Name.NamespaceName != OoxmlNamespaces.DrawingML) continue;
+                if (properties.Name.LocalName != (runsOnly ? "rPr" : "defRPr")) continue;
+
+                yield return properties;
+            }
+        }
     }
 
     /// <summary>
@@ -1770,22 +2126,63 @@ public static class DrawingChartPlot
            ?? LiteralFamily(chartSpace)
            ?? theme?.Fonts?.MinorLatin;
 
+    /// <summary>The face the legend's entries are set in.</summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>The legend's own <c>c:txPr</c>, then the chart space's, then the theme's minor
+    /// face — and never some other element's.</strong> <see cref="FamilyOf"/>'s middle term is a
+    /// search of the whole part, which is a reasonable approximation for a chart whose objects
+    /// all state the same thing and wrong for one whose axes state a face its legend does not.
+    /// </para>
+    /// <para>
+    /// <c>001_advanced_powerpoint_bar.pptx</c> is the case, and it is 33 of the corpus' slides
+    /// decks and 36 of its sheets ones: <c>c:catAx/c:txPr</c> and <c>c:valAx/c:txPr</c> state
+    /// <c>Arial</c>, <c>c:legend</c> and <c>c:chartSpace</c> state nothing, and 26.2.4.2 draws the
+    /// axis labels in LiberationSans and the legend in Carlito — the theme's Calibri. That is
+    /// <c>ObjectFormatter</c>'s automatic text table, which names <c>XML_minor</c> for every
+    /// automatic entry (<c>objectformatter.cxx</c>:415-434) and lets an object's own
+    /// <c>c:txPr</c> override it for that object alone.
+    /// </para>
+    /// <para>
+    /// Null when the part states nothing and there is no theme, which leaves
+    /// <see cref="ChartPlot.TextFamily"/> deciding exactly as before.
+    /// </para>
+    /// </remarks>
+    private static string? LegendFamilyOf(
+        XElement? chart, XElement chartSpace, DrawingTheme? theme)
+        => LiteralFamily(Child(Child(chart, "legend"), "txPr"))
+           ?? LiteralFamily(Child(chartSpace, "txPr"))
+           ?? theme?.Fonts?.MinorLatin;
+
     /// <summary>The first literal <c>a:latin/@typeface</c> under an element, or null.</summary>
     private static string? LiteralFamily(XElement? element)
     {
         if (element is null) return null;
 
+        // A run's own face before the paragraph default it overrides, for the reason
+        // `RunProperties` gives; then any other literal face under the element, which is what
+        // reaches a `c:txPr` that states one outside a run.
+        foreach (XElement properties in RunProperties(element))
+        {
+            if (Face(properties.Element(XName.Get("latin", OoxmlNamespaces.DrawingML))) is { } named)
+                return named;
+        }
+
         foreach (XElement latin in element.Descendants(
                      XName.Get("latin", OoxmlNamespaces.DrawingML)))
         {
-            string? typeface = latin.Attribute("typeface")?.Value;
-            if (string.IsNullOrWhiteSpace(typeface)) continue;
-            if (typeface[0] == '+') continue;
-
-            return typeface;
+            if (Face(latin) is { } named) return named;
         }
 
         return null;
+
+        static string? Face(XElement? latin)
+        {
+            string? typeface = latin?.Attribute("typeface")?.Value;
+            if (string.IsNullOrWhiteSpace(typeface)) return null;
+
+            return typeface[0] == '+' ? null : typeface;
+        }
     }
 
     /// <summary>
@@ -1836,12 +2233,8 @@ public static class DrawingChartPlot
     /// </remarks>
     private static bool? BoldOf(XElement? element)
     {
-        if (element is null) return null;
-
-        foreach (XElement properties in element.Descendants())
+        foreach (XElement properties in RunProperties(element))
         {
-            if (properties.Name.NamespaceName != OoxmlNamespaces.DrawingML) continue;
-            if (properties.Name.LocalName is not ("defRPr" or "rPr")) continue;
             if (properties.Attribute("b")?.Value is not { Length: > 0 } stated) continue;
 
             return stated is "1" or "true";
@@ -1947,6 +2340,79 @@ public static class DrawingChartPlot
         }
     }
 
+    /// <summary>
+    /// The colour a run of chart text states, resolved, or null when it states none.
+    /// </summary>
+    /// <remarks>
+    /// The same descent <see cref="SizeOf"/> makes — a real <c>a:rPr</c> first, then the
+    /// <c>a:defRPr</c> that stands in for one — because a <c>c:title</c> carries its colour on
+    /// its runs and a <c>c:txPr</c> carries it on the paragraph's default, and a title that
+    /// states both must answer with the run's.
+    /// </remarks>
+    private static Colour? ColourOf(XElement? element, DrawingTheme? theme)
+    {
+        foreach (XElement properties in RunProperties(element))
+        {
+            if (Drawing.Child(properties, "solidFill") is not { } fill) continue;
+
+            foreach (XElement child in fill.Elements())
+                if (DrawingColour.Read(child)?.Resolve(theme) is { } colour) return colour;
+        }
+
+        return null;
+    }
+
+    /// <summary>The tick-label colour, from whichever axis states one first.</summary>
+    /// <remarks>The shape of <see cref="AxisLabelSizeOf"/>, over <c>c:txPr</c>.</remarks>
+    private static Colour? AxisLabelColourOf(XElement plotArea, DrawingTheme? theme)
+    {
+        foreach (XElement axis in plotArea.Elements())
+        {
+            if (axis.Name.NamespaceName != OoxmlNamespaces.DrawingMLChart) continue;
+            if (!axis.Name.LocalName.EndsWith("Ax", StringComparison.Ordinal)) continue;
+            if (ColourOf(Child(axis, "txPr"), theme) is { } colour) return colour;
+        }
+
+        return null;
+    }
+
+    /// <summary>The axis-title colour, from whichever axis title states one first.</summary>
+    /// <remarks>The shape of <see cref="AxisTitleSizeOf"/>.</remarks>
+    private static Colour? AxisTitleColourOf(XElement plotArea, DrawingTheme? theme)
+    {
+        foreach (XElement axis in plotArea.Elements())
+        {
+            if (axis.Name.NamespaceName != OoxmlNamespaces.DrawingMLChart) continue;
+            if (!axis.Name.LocalName.EndsWith("Ax", StringComparison.Ordinal)) continue;
+            if (ColourOf(Child(axis, "title"), theme) is { } colour) return colour;
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// The data-label colour, from the plot area's own <c>c:dLbls</c> or from a group's.
+    /// </summary>
+    /// <remarks>
+    /// A <c>c:dLbls</c> hangs off the plot area, off a type group and off each <c>c:ser</c>, and
+    /// the outermost one that states a colour is taken. Per-series data-label colours are not
+    /// modelled: <see cref="ChartPlot.DataLabelColour"/> is one colour for the plot, which is
+    /// what every corpus chart that states one uses it as.
+    /// </remarks>
+    private static Colour? DataLabelColourOf(XElement plotArea, DrawingTheme? theme)
+    {
+        if (ColourOf(Child(plotArea, "dLbls"), theme) is { } stated) return stated;
+
+        foreach (XElement group in plotArea.Elements())
+        {
+            if (group.Name.NamespaceName != OoxmlNamespaces.DrawingMLChart) continue;
+            if (!group.Name.LocalName.EndsWith("Chart", StringComparison.Ordinal)) continue;
+            if (ColourOf(Child(group, "dLbls"), theme) is { } colour) return colour;
+        }
+
+        return null;
+    }
+
     private static Length? AxisLabelSizeOf(XElement plotArea)
     {
         foreach (XElement axis in plotArea.Elements())
@@ -2001,18 +2467,27 @@ public static class DrawingChartPlot
     {
         if (source is null) return ([], []);
 
+        // An *empty* resolved sequence is a real answer — a range every cell of which is an
+        // Excel table's totals row — and must not fall through to the cache. See
+        // ChartRangeResolver for the two states a resolver distinguishes.
         if (ranges is not null && FormulaOf(source) is { } formula
-            && ranges(formula) is { } live && live.Text.Count > 0)
+            && ranges(formula) is { } live)
         {
             return ([.. live.Text], [.. live.Numbers]);
         }
+
+        // A multi-level cache before the flat ones, because it must not be walked as one: its
+        // c:lvl elements each restart at idx 0 and the flat walk below lets every level overwrite
+        // the one before it, so the last level written wins and a three-level category comes out
+        // as its outermost level alone.
+        if (Child(Child(source, "multiLvlStrRef"), "multiLvlStrCache") is { } levelled)
+            return ReadMultiLevel(levelled);
 
         XElement? cache =
             Child(Child(source, "strRef"), "strCache")
             ?? Child(source, "strLit")
             ?? Child(Child(source, "numRef"), "numCache")
-            ?? Child(source, "numLit")
-            ?? Child(Child(source, "multiLvlStrRef"), "multiLvlStrCache");
+            ?? Child(source, "numLit");
 
         if (cache is null) return ([], []);
 
@@ -2041,6 +2516,72 @@ public static class DrawingChartPlot
         }
 
         return (text, numbers);
+    }
+
+    /// <summary>
+    /// A <c>c:multiLvlStrCache</c> flattened into one label per point, outermost level first.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>This used to be read by the flat walk above and that was a silent defect.</strong>
+    /// Each <c>c:lvl</c> numbers its own points from zero, so walking every <c>c:pt</c> descendant
+    /// and assigning by <c>@idx</c> makes each level overwrite the one before it. Excel writes the
+    /// levels innermost first, so the survivor was the <em>outermost</em> level and every label
+    /// and legend entry of a three-level category came out as <c>Branch 1</c> where the reference
+    /// draws <c>Branch 1 Stem 2 Leaf 5</c>. Two blind reviewers, each given only a rendered page
+    /// and forbidden to read anything else, transcribed both halves of
+    /// <c>027_Unit_Circle_Chart_Graphical_Chart</c> and
+    /// <c>028_Unit_Circle_Chart_Optimized_Graph</c> and reported exactly that.
+    /// </para>
+    /// <para>
+    /// Joined with a space from the outermost level inwards, skipping the levels that state
+    /// nothing at an index — <c>lcl_getExplicitSimpleCategories</c>,
+    /// <c>chart2/source/tools/ExplicitCategoriesProvider.cxx:376-395</c>, which builds exactly
+    /// this string and is what <c>getSimpleCategories</c> hands to the legend and to every data
+    /// label. LibreOffice keeps the levels apart as well, as the rows of a complex category axis;
+    /// one label per point cannot hold that, and the join is what the reference draws wherever a
+    /// single string is drawn. <see cref="DrawingChart"/>'s extraction reader has always joined
+    /// them this way, so this also stops the two readers of one element disagreeing.
+    /// </para>
+    /// <para>
+    /// No numbers: a category level is a string, and parsing <c>Leaf 12</c> as a double gives
+    /// nothing anyway.
+    /// </para>
+    /// </remarks>
+    private static (string?[] Text, double?[] Numbers) ReadMultiLevel(XElement cache)
+    {
+        int declared = Drawing.Number(Child(cache, "ptCount"), "val") ?? -1;
+        if (declared < 0)
+        {
+            foreach (XElement point in cache.Descendants(Name("pt")))
+                declared = Math.Max(declared, (Drawing.Number(point, "idx") ?? -1) + 1);
+        }
+
+        int count = Math.Clamp(declared, 0, MaxPointCount);
+        List<XElement> levels = [.. cache.Elements(Name("lvl"))];
+        StringBuilder[] labels = new StringBuilder[count];
+        for (int at = 0; at < count; at++) labels[at] = new StringBuilder();
+
+        for (int level = levels.Count - 1; level >= 0; level--)
+        {
+            foreach (XElement point in levels[level].Elements(Name("pt")))
+            {
+                int index = Drawing.Number(point, "idx") ?? -1;
+                if (index < 0 || index >= count) continue;
+
+                string value = Child(point, "v")?.Value ?? string.Empty;
+                if (value.Length == 0) continue;
+
+                if (labels[index].Length > 0) labels[index].Append(' ');
+                labels[index].Append(value);
+            }
+        }
+
+        string?[] text = new string?[count];
+        for (int at = 0; at < count; at++)
+            text[at] = labels[at].Length == 0 ? null : labels[at].ToString();
+
+        return (text, new double?[count]);
     }
 
     /// <summary>The <c>c:f</c> a reference states, or null when the sequence is a literal.</summary>

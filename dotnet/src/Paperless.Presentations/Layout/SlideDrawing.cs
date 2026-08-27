@@ -366,6 +366,18 @@ public static class SlideDrawing
     /// Escher metafile blip, and suppressing it cost 8.44 and 9.33 unaccounted ink.
     /// </para>
     /// <para>
+    /// [24.2.7-audit: VERIFIED 2026-08-21, round 56 — both halves hold on 26.2.4.2, and the
+    /// second was checked with a <b>discriminating pair</b> rather than a single rendering.
+    /// The package-entry half: <c>2014BSA_Sunday_Killion.pptx</c> rendered as found, with the
+    /// frame's fill changed to red, and with it replaced by <c>a:noFill</c> gives three
+    /// <em>byte-identical</em> page-5 images, so no fill reaches the page whatever the frame
+    /// states. The inline half: one authored flat ODP holding that same 306 kB EMF as
+    /// <c>office:binary-data</c> under a red-filled frame draws <b>108 304 red pixels</b>, and
+    /// the reference's own <c>--convert-to odp</c> of it — the same fill, the same frame, the
+    /// bytes moved to <c>Pictures/</c> — draws <b>none</b>. One rendering of either alone says
+    /// nothing; the pair is the measurement. <c>probes/slides-r56/audit_picturefill.py</c>.]
+    /// </para>
+    /// <para>
     /// <strong>The correlation is storage; the cause may not be.</strong> Across five measured
     /// cases every inline metafile keeps its fill and every package entry loses it, which fits
     /// LibreOffice building a <c>GDIMetaFile</c> graphic for the first and a

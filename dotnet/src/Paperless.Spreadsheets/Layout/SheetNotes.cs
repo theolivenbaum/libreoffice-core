@@ -34,6 +34,14 @@ public readonly record struct SheetNote(int Column, int Row, string Text);
 /// D1, F2, H2, J2, L1, N2, P2, R2.
 /// </para>
 /// <para>
+/// [24.2.7-audit: VERIFIED 2026-08-21, round 56 — the same eight addresses in the same order on
+/// 26.2.4.2.] Re-read straight off that document's reference rendering under the installed
+/// binary: pages 2 and 3 list <c>D1 F2 H2 J2 L1 N2 P2 R2</c> and ours lists the same eight in the
+/// same order. The claim is discriminating rather than trivially true, which is the reason this
+/// document is the witness: reading order would put <c>L1</c> second, because it is the only
+/// other note on row 1, and both renderings put it fifth.
+/// </para>
+/// <para>
 /// Notes outside the printed range are not listed at all, which is why this is a sheet-level
 /// collection filtered at pagination rather than a filtered list built by the reader: the printed
 /// range is not known until the print setup and the used area have both been read.
@@ -143,7 +151,17 @@ internal static class SheetNotePages
         List<SheetNote> notes = sheet.Notes.Printed(ranges);
         if (notes.Count == 0) return pages;
 
-        DocRect area = sheet.Setup.PrintableArea;
+        // Unscaled, which is what this path has always used and is **not** the reference's own
+        // rule: `ScPrintFunc::PrintNotes` shares `aPageRect` with `PrintPage`
+        // (`sc/source/ui/view/printfun.cxx:2004-2066`), so a note page's furniture bands are
+        // scaled by the sheet's print zoom exactly as a cell page's are. Left at 1.0 here because
+        // this round measured the cell page and not the note page, and because no xlsx-family
+        // document in the corpus sets `cellComments="atEnd"` at all — the arm is unreachable from
+        // 243 of the 307 sheets documents and unmeasured from the rest. See
+        // `probes/sheets-r57/prediction.md` blind spot 5, which also names the companion defect:
+        // `SheetPage`'s note constructor leaves `Placement` at its default, so the band on a note
+        // page is drawn at a one per cent zoom.
+        DocRect area = sheet.Setup.PrintableAreaAt(1.0);
         if (area.Width <= Length.Zero || area.Height <= Length.Zero) return pages;
 
         Length mark = MarkWidth(area.Width);
@@ -260,7 +278,8 @@ internal sealed class SheetNotePageDrawing(SheetLayout sheet, IReadOnlyList<Plac
         sink.BeginPage(sheet.Setup.PageSize);
         try
         {
-            DocRect area = sheet.Setup.PrintableArea;
+            // Unscaled, matching `SheetNotePages.Paginate`, which carries the reasoning.
+            DocRect area = sheet.Setup.PrintableAreaAt(1.0);
             Length mark = SheetNotePages.MarkWidth(area.Width);
             Length size = SheetBandText.DefaultSize;
             Length height = SheetBandText.LineHeightAt(size);

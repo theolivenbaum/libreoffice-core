@@ -14028,3 +14028,4865 @@ Worth recording separately, found on the way and not chased: EHEST's `w:sectPr` 
 on and the first page is numbered as though it were not. `DocxPageGeometry.RestartAt` reads the
 attribute and `Paginator.cs`:634 seeds `pageNumber` from it, so the zero survives the reader; the
 divergence is one page wide and sits somewhere after that.
+
+---
+
+## Merge note — round 50, sheets and slides (2026-08-20)
+
+Two tracks merged into `claude/paperless-odf-phase-1-rnyzcu` at `ac147b7e5bb`. Words was still
+running at the time of writing and is not in these figures.
+
+### Combined test counts at the merged tree, measured here rather than inherited
+
+```
+Core 337   Containers 109   Text 596   Vector 295   Rendering 150(1 skipped)   Markup 259
+OpenDocument 125   WordProcessing 1052   Spreadsheets 886   Presentations 747      = 4556
+0 failed
+```
+
+**Neither round's own count is the combined count, and the arithmetic says which base each was
+measured on.** Sheets reported 4545, slides reported 4552; the merged tree is 4556. The gap is
+exactly sheets' four `OoxmlAlternateContentTests` — slides measured before the sheets merge
+existed, so its "other tracks" columns were stale by construction. This is § 5 step 7's stated
+reason for recombining rather than quoting, and it reproduced on the first round it was applied to.
+
+### Verdict movement
+
+| track | before | after | source |
+|---|---|---|---|
+| sheets | 265 / 307 | **267 / 307** | `054_Problem_analysis_with_Pareto_chart`, `051_Manufacturer_defect_analysis` |
+| slides | 198 / 302 | **199 / 302** | `7-Zulkefli_Part147n66_IKMAS.pptx` |
+| words | 300 / 337 | — | round still running |
+
+Corpus total **763 → 766 of 946**.
+
+### Sheets: the briefed lead was refuted and the fix came from underneath it
+
+`[CELLRANGE]` chart data labels were the named next action on the track and the brief guessed
+they might explain the 30-document `text` pool. Censused prefix-independently over all 307 sheets
+documents, `c15:datalabelsRange` occurs in **5**, our renderings contain the literal
+`[CELLRANGE]` on exactly those 5, and the reference's contain it on **0**. So it is a real defect
+of ours reaching **4 of 42 open documents, not 30** — and `061_Regional_sales_chart` carries it and
+passes anyway, so closing it would not have bought four verdicts either. The round pivoted, which
+is what the brief asked for and what the pool deserved.
+
+Two further framing claims died with it: **7 of the 30 open `text` documents have no chart part of
+any kind**, and 2 carry `chartEx` rather than `c:chart`. "They all have a chart in them" was mine
+and it was wrong.
+
+What survived and shipped: Excel writes an extended (chartex) chart as a `Requires="cx1"` choice
+beside a generated rectangle whose only text is *"This chart isn't available in your version of
+Excel…"*. A reader that cannot draw the choice is otherwise supposed to take the fallback, so we
+drew **26 words of English advice** where the chart belongs, and they land in the extracted text of
+every downstream consumer. `OoxmlXml.ResolveAlternateContent` now lets a chartex choice win.
+Keyed on the chartex `graphicData/@uri` **only** — the slicer placeholder has an identical shape
+and the reference *does* draw that one, so suppressing advisories in general would be wrong.
+
+Also worth keeping: the charstream test returns `CONTENT` on **36 of 36** open sheets documents.
+Zero tokenisation ceilings on this track, independently confirming that its failure pool is real
+in a way slides' is not.
+
+### Slides: the brief's own ceiling mechanism was wrong, and the ceiling label was hiding a verdict
+
+**`spc="150"` does not explain the 75 ceilings.** That `spc` is not in the affected titles'
+inheritance chain at all. Six single-attribute re-zips isolate the cause to **`pitchFamily`'s
+family nibble** — 622.40 pt over 11 tokens with it, 541.55 over 6 without — reproduced on four
+substituted families and **inert on all five installed ones**. `SlideText.cs` already declined to
+implement it; the measurement it asked for now exists, and the answer is that implementing it
+would match LibreOffice at the cost of matching PowerPoint. **That is a decision to be taken, not
+a patch to be written.**
+
+**17 of the 75 `ceiling` documents are misfiled**, found by running the charstream test over all
+75 rather than the sampled 10 the brief asked for. Several are not marginal — `OnTrac` at 0.787
+jaccard, `Demick_JetBlue` 0.886, `W3_Case_Study` 0.899, `16 - UTM` 0.904. One of them,
+`7-Zulkefli`, was hiding a **winnable verdict** behind the label. This is the exact failure mode
+the brief named — a misfiled ceiling tells every future round not to look — and it was worth one
+verdict on its first application.
+
+**And the control that keeps it honest:** the same test over the 198 *passing* documents finds
+**138 with differing characters**. Character difference alone is therefore not a classifier, which
+is § 7's "run every classifier over the documents that already match" firing correctly for once —
+it caught the instrument before the instrument manufactured a class.
+
+The fix that shipped: `a:bodyPr/@wrap="none"` is honoured **only while the autofit leaves the shape
+alone**, established on nine authored variants over both axes (`none`+`spAutoFit`/`normAutofit`
+wrap; `none`+`noAutofit`/absent do not). We read the attribute alone, so unbounded lines ran off
+the **page** and everything past the media box vanished from the text layer — 30 of our renderings
+drew off-page text against the reference's 9.
+
+Prediction 0 verdicts, measured +1: wrong in the safe direction, and the round says why — it
+argued no document sat near the band from below and one did. Renderings predicted 30–60, measured
+59. All eight documents named in advance as the regression surface held `match`. Page counts moved
+on 0 of 302.
+
+The whole-track ink sweep round 41 never ran **has now been run**: |ink| 1419.70 → 1409.36, signed
+1041.64 → 1040.62, the `|signed| ≤ |ink|` invariant holding on both sides, 57 documents improved
+and 2 worsened. One honest regression recorded rather than buried: `iris07.12.12` 881/881 → 871/881
+(still passing), same 5010 characters, changed emission order on rotated labels.
+
+### Two instrument defects, one fixed
+
+`track-ink-sweep.sh` was still scoring the **retired raw `wc -w` metric**, so its verdict column
+disagreed with `MANIFEST.tsv`. Fixed and committed. Still open, and it is the two-measurements-one-name
+trap living *inside a single skill*: its `INK` summary sums the **signed** column while
+`ink-ranking.py` reports the **unsigned** one.
+
+### An environment fact that invalidates sweep totals
+
+**`/c/sandbox/workdir` is a case-insensitive virtiofs mount.** The `.pptx`/`.PPTX` pairs are one
+inode, not two files. `look.py`'s upper-case `rglob` *materialises* the second spelling
+permanently, so a sweep total went 305 → 311 with the corpus unchanged. **Any `find`-based sweep
+total on this mount is unstable and must be reconciled case-folded.** This also revises the
+`CLAUDE.md` note that four corpus files are upper-case on disk: on this mount that is not a second
+file to be missed by a case-sensitive glob, it is the same file under a second name.
+
+### Owed and pending
+
+- The sheets diff touches **`Paperless.Ooxml`**, which reaches all three tracks. A shared-layer
+  merge owes a **measurement, not an argument**; the cross-track render-and-compare over all 666
+  words and slides documents is running at the time of writing and its result belongs beside this
+  note. The round's own census — chartex in 2 documents, both sheets — is the hypothesis being
+  tested, not the answer.
+- The slides diff touches `Paperless.Presentations` only. Nothing owed.
+- **`MANIFEST.tsv` is stale again in three ways** and lives in the corpus repo, so neither agent
+  touched it: `054` and `051` (sheets) and `7-Zulkefli` (slides) now pass, and 17 slides documents
+  need re-filing off `kind=ceiling`.
+
+### What each track does next
+
+**Sheets** — the chart legend selection rule. Two blind reviewers, on unrelated documents
+(`003_advanced_excel_pie`, `057_Simple_balance_sheet`), independently named *"the reference draws a
+legend, ours draws none"* as the most prominent defect on their page, while two others saw the
+reverse. Legends are implemented and the selection disagrees in **both directions**. Independent
+agreement between two blind readers is this project's strongest evidence standard and this is
+unexplored. Then `077` (twelve extra `1` tokens, exactly the twelve column-B `=IF(...)*valHighlight`
+cells; and we draw a bare `1` where `numFmtId=165` says `$1`), then volatile-formula recalculation
+(`TODAY()`, ~7 documents, costs `071` a page). **Do not implement chartex expecting a scoreboard
+gain** — LibreOffice's own chartex rendering draws zero words, so a correct implementation with
+tick labels would overshoot the gate this round just closed.
+
+**Slides** — `social-media-app-bulletin-january__pptx` p3, where we paint an **opaque black
+rectangle** behind a transparent picture and occlude the title. Found blind, on a *passing*
+document, previously unrecorded. Then autofit on the `.ppt` path: two blind readings of passing
+documents found the same class with **opposite signs**, one reviewer naming "font scale applied
+without the matching spacing reduction" unprompted — HANDOVER § 8's largest named front,
+reproduced on two documents nothing had flagged.
+
+### The cross-track measurement owed by the Ooxml change — done, and it is zero
+
+All **666** words and slides documents rendered at the merged commit, and again with **only** the
+`Paperless.Ooxml` diff reverted (`OoxmlXml.cs` + `OoxmlNamespaces.cs` checked out at
+`ac147b7e5bb`, `obj`/`bin` deleted, rebuilt), `SOURCE_DATE_EPOCH=1700000000` and `TZ=UTC` pinned
+so the two runs are byte-comparable with nothing masked:
+
+```
+TOTAL compared=666  identical=666  changed=0  unrenderable_either_side=0
+```
+
+666 renderable both sides, 0 failures either leg. **The round's census predicted this** — chartex
+in 2 documents, both sheets — and the measurement agrees with it, which is the point: § 5 says a
+shared-layer merge owes a measurement *rather than* an argument, and the census was the argument.
+The documents named as sharing the code path but not the branch (109 words `wps`, 51 words `wpg`,
+4 words `wpc`, 1 words picture, 7 sheets slicer) are all inside the 666 and all byte-identical, so
+the narrowness of the URI key is measured rather than asserted.
+
+### A third variant of "a measurement of the wrong tree announces nothing", and this one nearly landed
+
+`CLAUDE.md` records two instances where a round's own code was reverted into the branch while
+`git status` stayed clean. This is a third route to the same place, and it is worth writing down
+because it is the *restore* step of the documented-safe procedure that produces it:
+
+**`git checkout <commit> -- <path>` writes the index as well as the working tree.** So the
+before-leg of any A/B measurement leaves the *base* blob staged. Restoring the working file
+afterwards — correctly, with `cp` + `touch`, exactly as CLAUDE.md prescribes — makes
+`git diff HEAD` empty and the rebuilt binary correct, while the index still holds a **staged
+revert of the round's fix**. `git status --short` shows `MM`, which reads as ordinary local edits.
+A commit at that moment lands the revert, the tests pass because they run against the correct
+binary, and nothing announces it.
+
+Caught here by an explicit post-restore assertion in the measurement script rather than by
+noticing. The check is one line and belongs in every A/B script:
+
+```sh
+git diff --cached --stat -- <the files>     # must be empty; git reset HEAD -- <files> if not
+```
+
+The general lesson stands where CLAUDE.md already puts it: **the numbers being right is not
+evidence you measured the right thing** — and here, the numbers being right was *produced by* the
+tree being wrong in a way only the index could show.
+
+---
+
+## Merge note — round 50, words (2026-08-20)
+
+Merged at `ac147b7e5bb`, on top of the sheets and slides rounds already merged above.
+
+### Combined test counts at the merged tree
+
+```
+Core 337   Containers 109   Text 596   Vector 295   Rendering 150(1 skipped)   Markup 259
+OpenDocument 125   WordProcessing 1061   Spreadsheets 886   Presentations 747      = 4565
+0 failed
+```
+
+Words' own report said 4550 — again a base-relative figure, short by sheets' 4 and slides' 11.
+Third round in a row where recombining changed the number.
+
+### Verdict movement — round 50 complete
+
+| track | start | end | Δ |
+|---|---:|---:|---:|
+| words | 300 / 337 | **309 / 337** | +10 −1 |
+| sheets | 265 / 307 | **267 / 307** | +2 |
+| slides | 198 / 302 | **199 / 302** | +1 |
+| **total** | 763 / 946 | **775 / 946** | **+12** |
+
+### The prediction missed *upwards*, and that is the round's most useful result
+
+Predicted +5 — the five `Printable_Graph_Paper_Template` documents — and **explicitly declined**
+the six `Project_Timeline_Template` documents, reasoning that they fail on *words* rather than
+*pages* so a pagination fix could not close them. Measured **+10**. The timelines' missing words
+were **falling off the page**; `011` went 41/158 → **158/158**.
+
+That is the brief's own "one cause seen through two gate columns" arriving and being argued away.
+It matters because § 7 warns that an under-reaching census *conceals itself* — a low prediction
+that comes true reads as well-calibrated. Here the round predicted low, was wrong, and only found
+out because it swept the whole batch instead of the five documents it had named. **Sweep the
+population, not the prediction.**
+
+### Two defects, not one, and the passing siblings are what separate them
+
+The brief asserted the five graph-paper documents were one defect with five witnesses. **They are
+two, with 3 and 2.** The control that establishes it is § 7's: `082`, `085`, `087` carry the same
+`w:tblpPr` and **pass**. Running the classifier over the documents that already match separated a
+class that the failing documents alone could not.
+
+- **A paragraph holding only a floating `w:drawing`** was sized by the body style rather than by
+  its own 2 pt paragraph mark, because the walk emitted an anchor character for a `wp:anchor`
+  exactly as for an inline drawing. Eleven authored variants of `088`, one variable each: deleting
+  the drawing run alone fixes it; raising the mark to 11 pt gives two pages on **both** stacks;
+  and offset, extent, `behindDoc`, wrap mode and anchor origin all change nothing.
+- **`w:tblpPr` makes a body table a fly.** Predicting the reference's first table rule from
+  `w:tblpY`/`w:vertAnchor` alone was within 1.15 pt on 7 of 8 documents and out by up to 26 pt on
+  the others; after the change all ten agree within 0.55 pt. The verdict cost was the **flow**,
+  not the position — on `080` both sides draw the identical 86 strokes on page 1 and the reference
+  then draws on page 1 what we had pushed to page 2, at the same offsets.
+
+### The regression, stated rather than netted
+
+`AFS-050-004-F2_0i.docx` goes `match` → `words`, 2503/2228. Its **pages are now right** (8/8;
+6/8 in the unguarded run). Page 3 holds 364 words against the reference's 53 — **318 extra tokens
+and none missing**. Its flow starts clear of a fly and grows into it, and we draw through where
+Writer wraps past. This document *is* the measurement for the next item on the track.
+
+### The alias-directory trap, found independently on two tracks in one round
+
+`look.py` resolves a document by `rglob(stem.ext)` **plus** `rglob(stem.EXT)`, and on this
+case-insensitive virtiofs mount the upper-case probe **materialises a second directory entry** for
+the same inode. `cmp` says identical, git sees one file, and every later glob double-counts:
+`words/*` swept **355 rows for 337 documents**, and a slides total went 305 → 311. **12 of the 18
+words aliases predate this round**, so they are already in the tree and will keep inflating totals.
+
+The mitigation is not to fix the totals but to stop trusting them: **score against `MANIFEST.tsv`'s
+path list, never against a sweep's own `TOTAL`.** Both agents reached this independently, which is
+the strongest form the evidence takes here.
+
+### Owed
+
+Nothing. The words diff is entirely inside `Paperless.WordProcessing` — 5 source files, 2 test
+files — so no shared layer is touched and no cross-track sweep is due. The `Paperless.Ooxml`
+sweep owed by the sheets round is recorded above: **666 of 666 byte-identical.**
+
+### Words does next, in order
+
+1. **The wrap.** A body fly takes Writer's parallel surround; we now place flies correctly and
+   never push text clear of them. The measurement is already banked (`AFS` page 3: 53 against
+   364). Implement in the paragraph arm of `Paginator.Fill`, then **re-measure the ten graph
+   papers and five timelines**, which is what it can break.
+2. **Shape text inside groups — seven witnesses.** `068` is 19/86, and its blind reviewer, given
+   the image alone, reported the reference drawing 41 boxes and the full connector tree against
+   our 0 boxes and 6 of 41 labels — then proposed the discriminator itself: *if every rendered
+   item is nesting depth ≤ 1 and every missing one is ≥ 2, it is a recursion limit rather than a
+   fill problem.* `056` (24/56) shows the same from the other side: 25 boxes against 5, ours piled
+   top-left. `057`, `025`, `030`, `008`, `071` all carry a `wpg:wgp` and are open on `text`.
+3. **Chart data labels — 4 documents, the largest word gaps left.** `028` is 191/327; its reviewer
+   read the reference's labels as `Branch 3 Stem 6 Leaf 14 / 15%` against our `Branch 3`, with no
+   percentages anywhere on our chart. `c:multiLvlStrRef` taken at one level plus an unread
+   `showPercent` accounts for ~123 of the 136 missing words.
+4. The three `pages 1/2` timelines (`097`, `012`, `015`) are the **opposite sign** and were not
+   investigated.
+
+### Parent verification of the round-50 manifest edits
+
+The manifest was updated from the three agents' reports rather than from the parent's own
+measurement, which by this project's own standards is a stored figure and not evidence. Re-swept
+in the **primary** tree at the merged commit, over the fifteen batches holding every edited row —
+`words/chartset-{005,006,007,008,009,012,013,014}`, `words/done-014`,
+`sheets/chartset-{007,008}`, `slides/ceiling-{001,002}`, `slides/chartset-{007,012}`:
+
+```
+TOTAL 152  MATCH 102  MISMATCH 50  REF-CANNOT-RENDER 0
+→ reconciled against MANIFEST.tsv path-by-path: 145 covered, AGREE 145, DISAGREE 0
+```
+
+All thirteen edited rows verified, and the 132 unedited neighbours swept with them are the
+regression control — none moved. The seven-row gap between the sweep's `TOTAL` of 152 and the 145
+manifest rows is the alias-spelling artifact below, not a discrepancy.
+
+### The alias entries are one file wearing two names, and they must not be "cleaned up"
+
+Both the words and slides agents hit this independently in round 50. Measured here to settle its
+shape: `grants-2005.xls` and `grants-2005.XLS` report the **same inode** (`35184372089472271`),
+the same size, and a **link count of 1**. `git ls-files` lists only the lower-case name and
+`git status` reports nothing untracked, so git resolves the second spelling to the tracked file.
+
+**There are 45 corpus-wide** — words 18, sheets 18, slides 9 — which is exactly the gap between
+`find` counts (355 / 325 / 311) and manifest rows (337 / 307 / 302).
+
+**Do not delete them.** `rm <NAME>.XLS` on a case-insensitive mount is a request to unlink that
+inode, and the inode is the corpus document. The corpus separately holds four documents whose only
+name *is* upper-case; they are manifest rows and are real, and telling them apart from an alias is
+precisely what the manifest is for. Verdicts are unaffected either way — per-format identity keys
+on the extension as spelled, so `report__xls` and `report__XLS` are two identities and neither
+overwrites the other. Only the counts inflate. **Score against `MANIFEST.tsv`, never a sweep
+`TOTAL`.**
+
+---
+
+## Merge note — round 51, slides (2026-08-20)
+
+Slides **199 / 302**, unchanged, **as predicted**. Prediction file committed before any
+post-change rendering: 0 verdict movement, 11 named documents, and an explicit statement of what
+the census could not see. Measured: **0 verdicts, 0 page counts, 0 word counts.** What moved is
+the rendering — `abs_ink` 1409.36 → **1394.03**, signed 1040.62 → 1026.61, major pages 498 → 494,
+16 documents moved, **13 improved and 3 worsened by ≤ 0.04**.
+
+Test counts at the merged tree: **4590 passed, 0 failed, 1 skipped** (Presentations 747 → 772,
+exactly the 25 new `BlipColourChangeTests`).
+
+### `a:clrChange` was a route, not a rule — the seventh instance
+
+`ColourKnockout`, its box match, its binary alpha and the decoder that applies it **all already
+existed**, and the `.ppt` path had been populating them from Escher for rounds. `grep clrChange
+dotnet/src` returned **0 hits**. On `social-media-app` page 3 the black slab covering the wordmark
+went **91.6% → 0.1%** of the region, ink 6.21 → 0.93 — on a document that passes every gate column.
+
+The blind reviewer named `a:clrChange` among its candidates **unprompted**, and the discriminating
+measurement it proposed was the one already run. That is the second round running in which a
+reviewer given only the image handed over the discriminator.
+
+**This shape now has seven instances on this project.** Before writing an implementation for a
+property that looks unimplemented, grep for it: it is more often unrouted than unwritten.
+
+### The round refuted its own fix, via its own sweep
+
+`vv_summit` went from an **exact** page 13 to 0.28. Two authored decks varying one thing show
+LibreOffice knocks out an **RGB** PNG and leaves an **RGBA** one alone — `Graphic::colorChange`
+branches on `HasAlpha()`. Implemented; both documents returned to their exact baseline with the
+wins retained.
+
+### Two further refutations worth keeping
+
+- **The comment beside `PptSlideLayout.Autofits`** said "no deck in the slides corpus holds that
+  combination". **36 of 51 `.ppt` documents do.** `2015-Civil-Rights` holds 14 and was
+  independently found overflowing by a blind reviewer; `ITE106` holds 0 and moves the **opposite**
+  way — so those are **two defects sharing a symptom**, not one. The 36 is an upper bound until
+  the Escher OPT tables are tied to `TextHeaderAtom` kinds, and the round said so rather than
+  quoting it as reach.
+- **A small ink rise is not automatically a regression.** On `system_design` the ink rose while
+  the colour the change controls went **3.374% → 0.048% against the reference's 0.040%** — our
+  stray grey had been *offsetting* a pre-existing deficit in the same regions. Check the quantity
+  the change controls, not the aggregate.
+
+And the prediction's stated limit came true as written: a tolerance-0 census is a **lower** bound,
+and 8 documents it called inert moved — all of them improving — because LibreOffice's JPEG
+tolerance is 15 where the census used 0.
+
+### The cross-track measurement, run by the parent
+
+The diff reaches `DocxPictures.cs` (words) and `XlsxDrawings.cs` (sheets) as well as the shared
+DrawingML fill path, so it owed a measurement over the other two tracks. Every words and sheets
+document rendered at the merged commit and again with the round's `dotnet/src` diff reversed —
+by `git apply -R` rather than `git checkout <commit> -- <path>`, deliberately, because checkout
+writes the index and that is what left a staged revert behind two rounds ago. Both legs pinned to
+`SOURCE_DATE_EPOCH`, `obj`/`bin` deleted between them:
+
+```
+TOTAL compared=680  identical=673  changed=7  unrenderable=0
+worktree vs HEAD: clean      index vs HEAD: clean
+```
+
+Then the gate over the seven documents' batches, because reach is not verdicts:
+
+```
+74 rows swept, 70 manifest rows covered, AGREE 70, DISAGREE 0
+```
+
+**All seven changed renderings are documents that were exact before and are exact after** — four
+`Business_Case_Template`, two `Volunteer_Sign_Up_Sheet_Template`, and `system_design`. Seven
+renderings moved and not one gate column did, which is round 44's shape reproduced exactly.
+
+The round's own census predicted 9 (7 words + 2 sheets); the measurement says **7** (5 words +
+2 sheets). The census over-reached by two, in the safe direction, and the difference is why the
+sweep is owed rather than the census accepted.
+
+### Instruments
+
+- `track-ink-sweep.sh`'s two-measurements-under-one-name defect is **fixed** — named columns, an
+  invariant check, and a known-answer check against the independent round-19 script.
+- `look.py`'s upper-case `rglob`, which *materialised* the second spelling, is **fixed**.
+- New trap: **`sed -i` drops the exec bit on this mount.** It produced a silent `Permission
+  denied` after every other check had passed. `chmod +x` after any in-place edit of a script.
+
+---
+
+## Merge note — round 51, words (2026-08-20)
+
+**Words 309 → 316 of 337.** Corpus **782 of 946.** Combined test counts at the merged tree:
+
+```
+Core 337   Containers 109   Text 596   Vector 295   Rendering 150(1 skipped)   Markup 259
+OpenDocument 125   WordProcessing 1066   Spreadsheets 886   Presentations 772      = 4595
+0 failed
+```
+
+**A load artifact worth recording, because it looked exactly like a regression.** The first run of
+the ten projects after this merge reported **`Vector: Failed 15, Passed 280`** — in a project the
+words diff cannot reach, with two agents mid-sweep. Re-run alone: **295 / 295, 0 failed**, with
+5.2 GB free on `/`. `CLAUDE.md` § "Under load a test run can also report failures that are not
+there" firing exactly as written. **A failure in a family the change cannot reach is the tell**;
+re-run before believing it, and do not start bisecting.
+
+### Both predictions came true to the document
+
+| | predicted | measured |
+|---|---|---|
+| fixes A+B (`prediction.md`, committed before any change) | +2 → 311 | **+2 → 311** |
+| fix C (`prediction-2.md`, committed before its sweep) | +5 → 316 | **+5 → 316** |
+| regressions | 0 | **0** |
+
+### The brief's own next-step was the thing that got refuted
+
+Round 50 recorded a regression honestly — `AFS-050-004-F2_0i` at 2503 words against 2228, **page
+count correct**, 318 extra tokens and none missing — and I briefed this round to implement the
+body-fly text wrap it appeared to demand. **That reading was wrong.**
+
+Not one of the 318 extra tokens is a string the reference never draws. **Our pages 2 and 3 differ
+by five tokens: it is the same positioned table drawn twice** — placed in the flow on page 2
+(`from=0 to=36`) and then floated whole on page 3, because `PlaceFloatedTable` never read
+`lineIndex`. A `w:tblpPr`-stripped variant renders the reference's exact raw total of 2384.
+
+**So there is no witness anywhere in this corpus for a missing body-fly wrap**, and implementing
+one would have moved all ten graph papers and five timelines with nothing asking for it — a change
+with reach and no evidence. That is the fifth consecutive round to refute its brief's central
+item, and the first where the brief was built on a *correctly measured* observable that had been
+read wrong.
+
+### Two more refutations, each closing a line the brief opened
+
+- **`MaxGroupNesting = 8` is not the organogram defect.** Raising it to 64 changes six documents'
+  word counts by **zero**.
+- **Six of the seven claimed `wpg:wgp` witnesses are not witnesses.** They keep their group inside
+  an `mc:Fallback`; deleting `056`'s entire fallback leaves its word count unchanged. **Exactly
+  one** words document holds a nested `v:group` our reader reaches. `065`/`068`/`069` are not one
+  class.
+
+### What shipped
+
+- `Paginator.Fill`: guard `PlaceFloatedTable` to `lineIndex == 0 && rowDrawn == Zero`.
+- `DocxVmlFrames`: recurse into a nested `v:group` instead of `continue`.
+- `DocxFrames`: `GroupTransform.Composed` added `inner.ShiftX`, which `TransformOf` never sets, so
+  a nested `a:grpSpPr/a:xfrm/a:off` was dropped entirely and nested members came out **the right
+  size in the wrong place**. Replaced with `Around(group, inner)`.
+
+Gains: `AFS-050-004-F2_0i` 2503/2228 → **2228/2228**; `068` 19/86 → 85/86; `056` 24/56 → 56/56;
+`057` 21/36 → 36/36; `025` 121/141 → 141/141; `030` 101/114 → 114/114; `071` 6/21 → 21/21.
+`008` improves 57/70 → 66/70 and stays open. Two already-passing documents became exact.
+
+**Verified by the parent** after the merge, in the primary tree: all seven confirmed, and the 73
+other manifest rows in the same batches unchanged.
+
+### `look.py` was fixed twice, independently, and neither fix was complete
+
+Both this round and slides r51 fixed the alias-materialising glob. The merge conflicted, and
+resolving it was worth more than either side:
+
+- **`os.walk` beats `rglob(f"{stem}.*")`** even though both are wildcard-safe, because the stem
+  goes into the pattern and two corpus documents have `[` in their names —
+  `[Christophe]NLP_reseau_inge_stat.pptx` and `Technical_Report_Elements[1].pptx`. fnmatch reads
+  those as character classes, so the glob form finds nothing and exits `no corpus file`, which
+  reads as a missing document rather than as a quoting bug. Verified: both now resolve to exactly
+  one hit.
+- **`casefold`, not `lower`** — the corpus holds `Elastizität` and `手机免提系统TSB`.
+- **`sorted`**, which neither side had: `os.walk` order is arbitrary and the function returns
+  `hits[0]`, so on an alias pair the same query could answer differently on two runs.
+
+### Words does next, in order
+
+1. **VML shapes are drawn with no fill and no stroke.** `068` now places all 41 labels correctly
+   and draws **0 boxes, 0 connectors**; its `v:rect`s carry theme-indexed
+   `fillcolor="#e2efd9 [665]"` and its connectors are `v:shape type="#_x0000_t32"`. `065` (28/41)
+   and `069` (108/117) are the same family. No gate column sees it.
+2. **DrawingML connectors dropped by a one-line predicate.** `056` is word-exact and still missing
+   ~15 lines: they are `wsp` with `ext cx="0"`, and `DocxFrames.Leaf` rejects any member whose
+   mapped rectangle has zero width or height.
+3. **Chart data labels — now the largest word gaps left.** `028` 191/327, `027` 261/378, plus
+   `029` and `024`. The blind reading transcribed both halves: reference labels read
+   `Branch 1 Stem 2 Leaf 5 / 15%` where ours read `Branch 1`, and our chart carries no percentages
+   at all.
+4. **The three `pages 1/2` documents, half-measured.** The reference's page 2 is **blank in all
+   three** — zero words, and zero non-white pixels at 30 dpi on `097` and `015`. All three end
+   with a table plus the mandatory empty `w:p`. On `097` the arithmetic fits: lowest page-1 ink at
+   758.2 pt against our 738.7, body bottom 770.4 pt, an empty 11 pt Cambria line needing ~12.7 pt
+   — **our table is ~20 pt too short**, and the reviewer measured where (the reference leaves
+   ~78 px above the History and Approvals tables where we leave ~30). `012` and `015` do **not**
+   share that shape, so it is at least two causes.
+
+---
+
+## Merge note — round 51, sheets (2026-08-20)
+
+**Sheets 267 → 268 of 307.** Corpus **783 of 946.** Combined test counts at the merged tree:
+
+```
+Core 337   Containers 109   Text 596   Vector 295   Rendering 150(1 skipped)   Markup 259
+OpenDocument 125   WordProcessing 1066   Spreadsheets 895   Presentations 772      = 4604
+0 failed
+```
+
+**Verified over the whole track, not per batch**, because the change reaches every workbook that
+has a header or a footer: all 307 sheets documents swept in the primary after the merge —
+**268 match, 1 newly matching, 0 regressions.** (The sweep's raw `TOTAL` is 325; 18 of those are
+alias spellings.)
+
+### What shipped
+
+`XlsxPrintSetup` and `XlsbPrintSetup` **never set `HeaderGap`/`FooterGap`**, so both inherited the
+ODF default of 142 twips. `DrawBand` lays text into `bandHeight − gap` and returns on a negative
+rectangle, so **every XLSX/XLSB band under 7.1 pt was dropped outright.** With it: a band shorter
+than its text starts at the band's top edge; a band whose margins are equal draws nothing; and
+`&K` consumed six characters whatever they were, so Excel's theme form `&K01+049` stopped drawing
+`+049` — 30 occurrences across five workbooks against a reference that draws it none. Six authored
+margin variants pin all of it, and the two previously-broken placements now sit **0.079 pt** from
+the reference.
+
+Prediction: nine documents named, **+1 verdict**, `020` landing on **133/133** derived rather than
+observed (the reference draws the footer on 4 of 6 pages at 4 word-tokens a page), 0 page-count
+changes, six stated blind spots. Measured: **+1, `020` at exactly 133/133**, 0 page counts, no
+regressions. Six of nine predicted to the digit. The one unpredicted mover — `PC1000.xls` — is the
+prediction's own **named blind spot #1**: the census parsed OPC worksheet XML and could not read
+BIFF `HEADER`/`FOOTER` records. It moved *toward* the reference and now matches it exactly.
+
+### The round refuted its own addendum, and kept the measurement
+
+A per-line clip against the band's bottom edge was implemented, swept, and **broke** `fm-provider`
+(two-line footer lost its second line). Twelve probes then showed a header keeps all nine lines out
+of a 3.6 pt band while a footer keeps two — so **the boundary is the paper, not the band**. The
+version was then measured with the clip in and out over all twelve probes: **identical**, because
+the PDF writer already drops off-page runs. Reverted; the probes stay.
+
+### The briefed chart-legend lead was an instrument artefact, and this revises an evidence standard
+
+I dispatched this round on "two blind reviewers, on unrelated documents, independently named *the
+reference draws a legend and we draw none*", calling that the project's strongest evidence
+standard. **Neither observation meant what the agreement implied.**
+
+- On `003_advanced_excel_pie` **both sides draw a five-entry legend** — on page 2. `--worst`
+  selects page 1, and the "legend swatch" described there is the reference's M1 data label. The
+  round's own fresh reviewer, given the same image, **reproduced the misreading** — which is what
+  identifies the instrument rather than the reader as the source.
+- On `057_Simple_balance_sheet` the observation is real but the mechanism is not selection: the
+  chart *declares* `<c:legend legendPos="b">`. Its series carry no `c:tx`, so the entries are
+  LibreOffice-synthesised `Column C`/`Column D` — a **naming** hypothesis, untested.
+
+The agreement was **on a description, not on a mechanism**. Two readers can produce the same
+sentence about two different causes, and one of them can be an artefact of which page the tooling
+chose. Written up in `HANDOVER.md` § 7 with what to do instead: ask for direction and location,
+check the two reports are about the same object before treating them as corroboration, and when a
+reading is going to launch a round, re-derive it from a page chosen for a stated reason rather than
+from `--worst`.
+
+The pie family's *real* defect, found underneath: the reference moves the M1 label outside the pie
+so it lands wholly on page 2, where the horizontal page split cuts ours — 4 documents, 5 words each.
+
+### The reference half of the gate is not reproducible for date-bearing sheets
+
+Across three sweeps hours apart, **four documents' reference counts moved with the wall clock while
+ours stayed pinned**. `batch-check.sh` renders the reference through `soffice` with no
+`SOURCE_DATE_EPOCH`, and a sheet whose header holds `&D`/`&T` or whose cells hold `TODAY()` prints
+today; `paperless render` honours the reproducible-builds convention on our side. **The two halves
+of the gate do not have the same reproducibility properties**, so a stored verdict can go stale
+with nobody touching the code. Split any sweep diff **by which side moved** — that separated nine
+real movements from three calendar ones here. **Volatile dates reach 16 of the 40 open documents**,
+not the ~7 previously carried. Recorded in `CLAUDE.md` § "This container".
+
+Also refuted: `SheetPinnedBandTests.AFooterPinnedAtNothingIsStillDrawnAtTheMargin`, a 24.2.7.2-era
+assertion, on four independent measurements including the project's own `sheet-zero-band-xls.xls`
+fixture.
+
+### Sheets does next, in order
+
+1. **`077_Inventory_list_with_highlighting`** — a blind reviewer named the mechanism, and it
+   answers round 50's sub-puzzle *on a false premise*. The reference **does** draw the thirteen
+   `0`s, replaces the twelve `1`s with a **red flag glyph**, shades those twelve rows full-width
+   olive, and strikes through the three discontinued rows. `numFmtId=165` is **not** in force; a
+   conditional format is. Twelve tokens against a band of 6.46 — one verdict, on a large template
+   family.
+2. **The `057` legend-entry hypothesis** — a legend whose series carry no `c:tx` losing its
+   entries — tested on an authored chart, together with the reverse direction on `037`/`029`.
+3. **The pie family's `bestFit` data-label placement** — 4 documents, one defect, two words each
+   past the band.
+4. **The eight-blank-line header** — twelve probes in `dotnet/probes/sheets-r51-bands/` bracket it
+   and none explains it; twenty words on `FAA-2019-0995-0002`.
+
+From the blind readings and not yet worked: `068_Blue_inventory_list`'s entire 10-word deficit is
+two undrawn arrow autoshapes (plus a grey-for-teal title colour); `017_Timeline_Templates` is
+missing its whole navy spine, five year badges and every leader line; and `065` draws the literal
+`aaaa` where the reference draws `Thursday`.
+
+---
+
+## Merge note — round 52, words and slides (2026-08-20)
+
+**Words 316 → 318 of 337. Slides 199 → 199 of 302, as predicted. Corpus 785 of 946.**
+
+```
+Core 337   Containers 109   Text 596   Vector 295   Rendering 150(1 skipped)   Markup 259
+OpenDocument 125   WordProcessing 1083   Spreadsheets 895   Presentations 780     = 4629
+0 failed
+```
+
+Verified after the merge by sweeping **all 639 words and slides documents** in the primary:
+two gains, **zero regressions**, and slides unchanged while its rendering moved more than the two
+preceding rounds combined.
+
+### Slides: a re-check of a superseded-binary claim was worth 11% of the track's ink
+
+`SlideAutofit` was a port of **24.2.7.2**'s bisection search. Its own remarks said so, and said to
+check the reference version first. The reference has been **26.2.4.2** for many rounds, and 25.2
+replaced the search with `constScaleLevels` — **twelve discrete `(font, spacing)` rows, first that
+fits**. Measured on 36 one-slide decks with one variable: the reference's nine distinct sizes are
+exactly `40 ×` the table and nothing else, with spacing 0.90 above 0.85 and 0.80 at and below, both
+0.850 rows present. Ours answered essentially every whole point and agreed on 13 of 36.
+
+| round | `abs_ink` movement |
+|---|---:|
+| r50 | −10.34 |
+| r51 | −15.33 |
+| **r52** | **−155.40 (−11.1%)** |
+
+Known-answer checks after the change: 36/36, 21/21, 12/12, 23/23. 101 renderings moved, 73 improved
+and 28 worsened; 14 test expectations moved, **all re-measured against 26.2.4.2, none adjusted to
+fit**. The discriminating pair the theory gained: 120 pt and 135 pt both draw 17 pt and differ only
+in spacing — **no font-scale search can produce that.**
+
+**Targets 1 and 2 turned out to be the same table.** The blind reviewer's "font scale applied
+without the matching spacing reduction" is height 168: both sides draw 28 pt, reference pitch 26.90
+against our 33.62, because our search chose `(0.700, 1.000)` — a pair **the table does not
+contain**.
+
+### And it refuted round 51's refutation
+
+Round 51 refuted the comment beside `PptSlideLayout.Autofits` ("no deck in the slides corpus holds
+that combination") with a census returning 36 documents. **Round 52 refutes the refutation.** Tying
+the OPT tables to their `TextHeaderAtom` kinds collapses 36 documents to **25 shapes in 1
+document**, and all 25 lack an `OEPlaceholderAtom` — the only condition under which
+`svdfppt.cxx:1052` reaches `bAutoGrowWidth = !bWordWrap`, since line 846 nulls `pRet` for any
+placeholder-bearing shape. On every one of the 25, LibreOffice suppresses autofit exactly as we do.
+
+**Known-answer control:** the same walker restricted to round 51's population returns 36, round 51's
+figure exactly — so the collapse is the Body-kind restriction and not a different parser. **The
+comment was right; round 51's refutation measured the wrong population.** A refutation is a claim
+like any other and inherits no privilege from being a refutation.
+
+Named regressions rather than netted: 8 word counts moved and **5 are worse** (`Framing Europe.ppt`
+2237→2245, `1200-Assigning-Club-officers` 165→163 both losing exactness), all inside the band; and
+28 ink regressions led by `Lepore.ppt` +4.69, all `.ppt`. A new instrument, `tf-agreement.py`,
+confirms they are real and independent: mean `/Tf` agreement 0.72571 → 0.75160, exact-size pages
+1388 → 1552 of 4515, 77 documents improved and **8 worsened — the same eight**.
+
+Two of the round's own claims died too: its "reference state leak" was an `awk` filter of its own
+that collapsed on the `/Tf` column; and "the reference draws fractional em sizes there" fails on
+the improved documents, 45 of 77 of which also carry >5% fractional sizes.
+
+### Words: a one-line fix would have shipped a confident zero
+
+The brief's item 2 said `056`'s ~15 missing connectors are `wsp` members with `ext cx="0"` rejected
+by `DocxFrames.Leaf`. **They are 39, not ~15, and 34 of them state no `a:ln` at all** — their line
+comes from `wps:style/a:lnRef` against the theme's `lnStyleLst`, which `DocxFrames.Appearance`
+deliberately does not read. Relaxing the predicate alone would have admitted 34 frames with
+`Fill=null, BorderColour=null` and **painted nothing**, while the gate and the verdict count both
+said the round had succeeded. The real seat is that **`DrawingStyleMatrix` never reaches
+`DocxFrames`** — 458 shapes across 40 documents, the *seventh* instance of "a route, not a rule".
+
+Also refuted: `024` is not a chart document at all (its graphic is `word/diagrams/` SmartArt), and
+`069`'s "PROJECT NAME" is not a regression from the new fills — `pdftotext -bbox` puts it at
+`yMin=156.128` before *and* after, to the thousandth, so the fills merely **exposed** a pre-existing
+77 pt misplacement.
+
+What shipped: VML `fillcolor`/`strokecolor`/`filled`/`stroked`/`strokeweight` and `v:fill`/`v:stroke`
+(establishing from the reference that a theme-indexed VML colour resolves to the **literal RGB
+beside the index** — the index is never consulted); a `c:multiLvlStrCache` joined outermost-first
+instead of each level overwriting the last; `ofPieChart` counted as a pie for `showPercent`; and a
+`\n`-separated label no longer shaped as one run, which had been fusing `Leaf 11` + `15%` into
+`Leaf 1115%`.
+
+### Measured and deliberately not shipped — the `w:br`-only paragraph
+
+**The reference gives a paragraph with N breaks N+1 lines. We agree in every case where the
+paragraph holds any other content — one space is enough. A paragraph whose whole content is breaks
+contributes 0.00 pt on our side against 25.30.** Nine authored variants, re-runs identical. The
+reader is fine; the seat is in layout.
+
+**Reach: 469 such paragraphs in 66 of 271 documents**, including several large page-count documents
+that currently pass — which is why it was measured and left rather than shipped at the end of a
+round. Correct call. It is `097`'s cause and **not** `012`'s or `015`'s, which hold 0 of 142 and 0
+of 158, so the three `pages 1/2` documents are at least two causes.
+
+### Cross-track
+
+- **Words** touched `Paperless.Ooxml/DrawingML/DrawingChartPlot.cs`, shared. The round swept the 7
+  affected batches both ways with the index asserted clean: of 71 rows **exactly one changed** —
+  `slides/done-011/171128IPAP.pptx` 4640 → 4653 against 4670, `match` → `match`. The parent's
+  639-document sweep above confirms slides verdicts are unmoved.
+- **Slides** touched one file, `Paperless.Presentations/Layout/SlideAutofit.cs`. Nothing owed.
+- Left open by words on purpose: `SheetChart`/`SlideChart` still run multi-line labels together.
+  `FrameChart` was fixed for words only. **Sheets and slides both inherit this defect** and it is
+  now a known, localised, cross-track item.
+
+## Round 52 — sheets — two rules, three verdicts, and a test that passed for the wrong reason
+
+`dotnet/probes/sheets-r52-condvalue/` — `prediction.md` (`6812e8ff019`) and
+`prediction-addendum.md` (`8e214f29695`) were each committed before the change they predict and
+before anything was rendered with it. **sheets 268 → 271 of 307**, predicted +1 then +1, measured
++1 then +2. Zero regressions; **0 of 307 page counts changed**; ten new tests, all detectors.
+
+### A conditional format can hide a cell's value — and does not hide all of them
+
+`showValue="0"` on an icon set or data bar suppresses the cell's **text**, not the icon
+(`output2.cxx:1691`). The subtlety that decides the corpus case: `GetIconSetInfo` returns
+**nullptr** when the band a value falls in has a `NoIcons` entry in a *custom* icon vector
+(`colorscale.cxx:1231`), and a cell with no icon information keeps its text. So one rule hides some
+of its cells and prints the rest — which is why `077_Inventory_list_with_highlighting` draws
+thirteen `0`s and replaces twelve `1`s with a red flag. Bands are the **last** threshold satisfied,
+not the first; `gte="0"` makes the boundary strict; `percent`/`percentile` resolve against the
+range's own sorted values. `showValue` occurs in exactly **3** of 946 corpus documents.
+
+**Two round-50 claims about `077` are refuted.** The reference *does* draw the thirteen `0`s — both
+sides do, `pdftotext` says so — so the whole 12-token gap is the twelve `1`s. And column B is
+`cellXfs[16]`, `numFmtId="0"`, **General**: `165` belongs to `cellXfs[19]`, column H. There is no
+number-format defect on that document; its open sub-puzzle had a false premise on both halves.
+
+### `Requires` names a vocabulary, not a capability
+
+`037`, `049` and `DynamicBubbleChart` write a slicer `graphicFrame` in a `Requires="a14"` choice
+beside a fallback rectangle reading *"This shape represents a slicer…"*. **`a14` is `DrawingML2010`,
+which is in `UnderstoodExtensions`** — so the choice won, the frame had no reader, and the anchor
+drew nothing at all. LibreOffice draws the rectangle: 3 / 2 / 1 advisories against 0 in ours.
+
+Round 50 wrote the chartex rule, left a comment saying the slicer must *not* follow it "because the
+reference draws that one", and a test asserting exactly that — **which passed for the wrong
+reason**, because its helper left the `a14` prefix unbound so the fallback won by the general rule
+and the corpus's actual shape was never exercised. The dominant pattern of this project, found in
+its own test rather than in a brief.
+
+Fixed by the exact mirror of the chartex constant: a choice whose `a:graphicData/@uri` is the 2010
+slicer URI loses to a sibling `mc:Fallback`. **Shared layer (`Paperless.Ooxml`)** — censused over
+946 documents, the URI occurs in 7, **all sheets, 0 words, 0 slides**; the parent still owes the
+cross-track sweep and the documents to watch are the 108 `wps` / 51 `wpg` / 4 `wpc` words documents
+that share the path but not the key.
+
+### The `057` legend hypothesis is confirmed, costed, and deliberately not implemented
+
+Two authored copies of `057` differing in **one thing** — a `c:tx` on each series — settle it:
+with names, both sides draw them; without, **the reference draws `Column C` / `Column D` and we
+draw no legend at all**. `ChartLayout.Entries:3198` drops an unnamed series; LibreOffice's names
+come from the Calc data provider (`chart2uno.cxx:3173`, `STR_COLUMN` + the values range's column
+letter). Worth **4 tokens**, on a document that fails on page count — and the only other corpus
+witness is a **passing slides deck**. A `Paperless.Core` change for zero verdict gain; measured and
+left with the mechanism written down.
+
+**And the round-50 "reverse direction" legend framing dies too.** `037` was never a legend defect —
+it was the slicer advisory, and it now matches. `029` is a **chart-data** defect: a blind reviewer
+of its page 2 found the reference plots **no bars at all** on one chart (axis collapsed to its
+`$0–$12` default) where we plot everything, and drops the `Total` category from the other, which is
+what rescales its axis from $3,000 to $900. The legend we draw and it does not *follows* from the
+empty series. All three charts state `<c:plotVisOnly val="1"/>`.
+
+### Method notes
+
+- **Blind readings, with the round-51 caveat applied.** Four reviewers, none on a `--worst` page —
+  each page was chosen because a per-page token count said it carried the document's whole deficit.
+  Two of them, on unrelated documents, named the **same object** (not merely the same sentence),
+  and `pdftotext` confirmed it independently before any code moved.
+- **And the page-choosing criterion has a failure mode.** On `048_Expense_trends_budget` the
+  reviewer's "~270 px horizontal offset" is real — both PDFs are 612×792 with 14 pages, and the
+  reference's page 1 starts at `TIPS` where ours starts at `TEMPLATE`. The two sides' **horizontal
+  strips do not line up**, so a per-page word comparison on such a document measures the tiling,
+  not the content.
+- Seven reference-side-only movements in the same sweeps (`047` went 818 → 838 → 819 across three)
+  were separated from the six real ones by splitting the diff by which side moved.
+
+### Sheets does next, in order
+
+1. **`029_Annual_budget` and `plotVisOnly`** — measure whether its source rows are hidden. One
+   mechanism would explain an empty plot, a missing category, an axis scale and a legend at once;
+   29 tokens against a band of 6.24.
+2. **`DynamicBubbleChart`** — now 8 words outside a band of 6.82, the nearest miss on the track.
+3. **The pie family's `bestFit` data-label placement** — 4 documents, ~2 words each past the band.
+4. **The eight-blank-line header** — `probes/sheets-r51-bands/` brackets it; 20 words on
+   `FAA-2019-0995-0002`.
+
+### Parent verification and the cross-track measurement — round 52 sheets
+
+**Sheets 268 → 271 of 307. Corpus 788 of 946.** Combined test counts at the merged tree:
+
+```
+Core 337   Containers 109   Text 596   Vector 295   Rendering 150(1 skipped)   Markup 259
+OpenDocument 125   WordProcessing 1083   Spreadsheets 905   Presentations 780     = 4639
+0 failed
+```
+
+Whole sheets track re-swept in the primary: **271 match, 3 gains, 0 regressions, 0 of 307 page
+counts moved.** Swept whole rather than by batch because one of the two changes is in a shared
+layer.
+
+The `Paperless.Ooxml` change then measured across the other two tracks — all 666 words and slides
+documents rendered at the merged commit and again with only that diff reversed (`git apply -R`, not
+`git checkout`, `obj`/`bin` deleted between legs, `SOURCE_DATE_EPOCH` pinned):
+
+```
+TOTAL compared=666  identical=666  changed=0  unrenderable=0
+worktree vs HEAD: clean      index vs HEAD: clean
+```
+
+Zero reach, matching the round's census (the 2010 slicer URI in 7 documents, all sheets). Two
+`Paperless.Ooxml` changes have now been measured this way and both came back at exactly zero, which
+is worth knowing about the *shape* of these fixes: they are keyed on a single literal URI and the
+key is doing its job.
+
+### A test that asserted the right thing and passed for the wrong reason
+
+Round 50 wrote `ASlicerChoiceStillLosesToItsFallback` and **asserted exactly the correct
+behaviour**. It passed. Its helper left `a14` unbound, so the fallback won by the general rule and
+**the corpus's actual shape was never exercised** — `Requires="a14"` resolves to `DrawingML2010`,
+which *is* in `UnderstoodExtensions`, so in the real documents the slicer choice won, had no
+reader, and the anchor drew nothing where the reference draws its green advisory.
+
+This is § 7's dominant pattern — *every predecessor claim reproduces and the sentence attached to
+it is wrong* — appearing **inside the project's own regression test**. The general lesson: a green
+test proves the code does what the test set up, and the setup is a claim about the corpus that
+nothing checks. When a test encodes a corpus shape, **assert the shape is present** (here: that the
+`Requires` token actually resolves to a namespace the reader understands), or the test silently
+becomes a test of a different case.
+
+### The blind-reader standard, with a positive control this time
+
+Round 51 produced a false lead from two blind reviewers agreeing, and § 7 of `HANDOVER.md` records
+why. **This round is the control that shows the rule is not "distrust blind readers".** Two
+reviewers, on unrelated documents *and unrelated pages, neither chosen by `--worst`*, named the
+**same object** — the reference's green slicer advisories, absent from ours — and `pdftotext`
+confirmed it independently at 3/2/1 against 0. It was real, and it was one of the round's two fixes.
+
+The discriminator between the two cases is not the number of readers. It is whether the reports are
+about the **same object**, whether the page was chosen for a stated reason rather than by maximum
+ink, and whether a **different instrument** confirms it. All three held here and none held in
+round 51.
+
+---
+
+## Merge note — round 53, words (2026-08-21)
+
+**Words 318 → 318 of 337. Net zero, and the round is worth more than several that moved verdicts.**
+
+```
+Core 337   Containers 109   Text 611   Vector 295   Rendering 150(1 skipped)   Markup 259
+OpenDocument 125   WordProcessing 1096   Spreadsheets 905   Presentations 780     = 4667
+0 failed
+```
+
+### The verdict prediction was wrong; every mechanism prediction was right
+
+Predicted +2. Measured **0** — but not because nothing happened. `097` and `096` **traded places
+twice**: change 1 closed `097` and opened `096` (a regression the prediction had **named in
+advance**), change 2 recovered `096` and lost `097` again. Final state is byte-equal to baseline on
+every other document.
+
+**41 of 337 renderings moved: 27 towards the reference, 6 away, 8 neutral.** Mean vertical error:
+`644730BRI….doc` 59.25 → **6.04 pt**, `096` 39.09 → **0.38**, `097` 29.15 → **1.61**, `090`
+19.45 → **1.21**. The six that worsened are named, worst `098` at +1.34 pt.
+
+### Two fixes, both against a mechanism the previous round had located wrongly
+
+- **`TextItemiser` cuts U+2028 out of every sub-run**, so a paragraph made only of breaks reached
+  `MeasuredParagraph` with **zero runs**, and `MeasureLine`'s empty-paragraph fallback — guarded on
+  `_runs.Length > 0` — could not fire. Every line measured 0 pt. **`TextMeasurer` was never the
+  seat**, which is where round 52 put it.
+- **A run holding nothing but a frame anchor (U+0001) raised the line to its own font size.** Ten
+  authored variants: the reference's answer is identical at 10 pt and 26 pt on every row — 0.00
+  anchored, 7.00 as-character, 9.70 with text. Worth 34 pt on `097`.
+
+### The brief's reach figure was wrong by 20× and is not reproducible
+
+I briefed this round with round 52's "**469 such paragraphs in 66 of 271 documents**", called it
+the risk, and required a whole-track sweep because of it. The real figure is **22 in 13**. The named
+heavy witnesses hold 1, 1, 1 and 0; `OM template`'s "37" is its count of `w:br` *elements*, not of
+break-only paragraphs. **No census producing 469 was ever committed, and none the round could
+construct reproduces it.**
+
+That is a stored figure that decayed to zero evidential value in one round, inside this project's
+own probe record, and it propagated into a brief because it was quoted rather than re-derived. It
+is § 7's "stored evidence decays silently" in the shortest cycle yet observed: **one round.** The
+standing rule follows — *a figure that will steer a round must be re-derived by the round that
+steers on it, not quoted from the round that found it.*
+
+Two more refutations: **`068`'s strokes run the other way** — the reference strokes **71**, not 36
+(36 is its single-line count), and like for like we draw 6 *more* box outlines and 24 *fewer*
+connector strokes; and **`090`'s missing navy banners look exactly like the `DrawingStyleMatrix`
+item and are not** — three `#_x0000_t15` VML shapes with `fillcolor` stated literally, zero
+`wps:wsp`, zero `a:lnRef`. *A description matching a brief is not corroboration of its mechanism.*
+
+### Shared-layer reach, measured
+
+`MeasuredParagraph.cs` is shared. The **anchor half has no reach outside word processing** — no
+presentation or spreadsheet reader emits U+0001. The **break half was swept both ways** over the 6
+slides batches holding all 17 witnesses (55 documents; base via `git show` + `cp` + `touch`, index
+asserted empty): **0 gate rows and 0 renderings changed, byte for byte.** Sheets has no witness.
+Nothing further owed.
+
+### The 24.2.7.2 audit: two of the first five re-checked sites were wrong
+
+The round took four shared-layer sites and **found one wrong, one undecided, two verified** —
+recording all four **at the site, in both directions**, which is the convention that stops the next
+round re-checking them.
+
+**`SystemFontResolver.GenericFallbacks` is wrong and is deliberately not fixed.** It says an
+unrecognised family resolves to DejaVu **Sans**; on 26.2.4.2 all ten probed answer DejaVu
+**Serif** — one authored DOCX per family through the installed `soffice`, four controls agreeing,
+and two nonsense names (one with a serif hint, one without) **both** answering Serif, so the name's
+shape does not decide it. The **stated reason is falsified independently**: `fc-match Aptos` and
+`fc-match ""` both return `DejaVuSans.ttf`, so 26.2.4.2 is not "asking fontconfig and taking its
+default" — the second time this project has caught that assumption.
+
+Cost, measured: **86 of 337 words renderings disagree with the reference's embedded font list, and
+73 carry DejaVu Sans on our side**, mostly `ours=DejaVuSans, ref=DejaVuSerif`. Different advances,
+so each is a line-breaking difference as well as a visible one. **A one-line change in
+`Paperless.Text` owing a three-track sweep is the parent's to schedule, and it is now the largest
+single known defect on the project.**
+
+### The audit's own metric was self-corrupting, and its table was wrong
+
+Both caught by this round, and both are fixed in `TODO.24-2-7-audit.md`:
+
+- **The table conflated hits with files.** It is 50 hits in 30 files, and the shared layer is
+  **12 hits in 7 files**, not the "8 sites" the audit claimed.
+- **Counting the string `24.2.7` cannot measure progress**, because annotating a site with *"was
+  calibrated to 24.2.7.2, re-checked"* **adds** a match. The list appears to grow as it is worked —
+  it went 48 → 50 during this round for that reason alone. Re-checked sites now carry an explicit
+  marker, `[24.2.7-audit: VERIFIED|WRONG|UNDECIDED <date>, <round> — …]`, and progress is
+  `git grep -c '24\.2\.7-audit'`, never a count of `24.2.7`.
+
+### Words does next
+
+1. **`097` is now a 1.7 pt boundary case** — the standing line-height deficit (11.50 against 12.65
+   per empty paragraph) is all that is left on it, and it is worth 1.15 pt on **every** empty
+   paragraph in the corpus.
+2. `#_x0000_t15` VML (3 shapes, `090`), then the `DrawingStyleMatrix` route into `DocxFrames`
+   (458 shapes, 40 documents) — with arrow ends being **5** shapes, not a bulk job.
+
+---
+
+## Merge note — round 53, slides (2026-08-21)
+
+**Slides 199 → 199 of 302, predicted 0 and measured 0.** `abs_ink` 1238.56 → **1233.54**, major
+pages 434 → **432**, `tf-agreement` 0.75160 → 0.75210, exact-size pages 1552 → 1558 of 4515.
+**35 documents moved: 23 improved, 12 worsened.** Tests at the merged tree **4674, 0 failed**.
+
+The round reconciled its own baseline against two prior figures and explained a 0.08 discrepancy
+rather than ignoring it: r52 closed at `abs_ink` 1238.64 and this round's base leg reads 1238.56,
+the difference being the **words** track's `DrawingChartPlot.cs`, merged after r52's slides leg.
+`tf-agreement.py` on the base leg reproduced r52's closing 0.75160 to the digit.
+
+### Two fixes, and the second came out of the audit rather than the brief
+
+- **`PptTextBody.Runs` — a `.ppt` blank line takes the height of the run it sits in.** The
+  character-run walk broke one run early for a zero-length paragraph, so `atStart` was never found
+  and every blank line fell back to the master level's height. **Three independent routes agree** on
+  `ITE106` p7: the record (a Python parser sharing nothing with the C# reader), LibreOffice's own
+  flat-ODF export (`fo:margin-top="0.106cm"` = 12×20/80), and the rendered geometry
+  (`28.800+3.004+1.2×12+6.008 = 52.212` against the 52.214 drawn). **673 blank paragraphs in 26 of
+  51 `.ppt` documents.**
+- **`SlideTextLayout.Stated` — a stated line *height* moves the ascent with it.** EditEngine's
+  four-way chain has `SvxLineSpaceRule::Min` and `::Fix` *before* the two proportional arms the file
+  already transcribed, and **neither was implemented** — a stated height went through Writer's
+  whole-twip `Apply` and the ascent stayed at one em: **9.58 pt of vertical displacement** for 12 pt
+  text in an exact 24 pt line. **769 `a:lnSpc/a:spcPts` sites in 23 documents.**
+
+### An instrument built to check the round's own regressions, with a known-answer control
+
+Five documents' `abs_ink` rose. `baseline-agreement.py` pairs baselines **in order** within a `/Tf`
+bucket — never nearest-neighbour, which is the pairing that manufactured round 50's 142 phantom box
+notes — and only where line counts match. Known-answer control on two untouched documents:
+**identical to the digit on both legs.** Every document examined improved, *including all five ink
+rises*: `undp` mean |dy| **8.3728 → 1.2307**, `Lepore` **1.1579 → 0.0264**, `iep-amount-frequency`
+1.7024 → 0.0360, `AATF-Fact-Sheet` 40 → **68 of 69** baselines within 0.1 pt.
+
+`NAS` p8 worked through: its ten stated-height baselines were 1.58 pt out and are now within
+**0.014 pt**, one for one — while the page draws **66** text blocks to the reference's **61**. The
+surplus is what turns a correct move into a higher unsigned figure. That is round 52's "check the
+quantity the change controls, not the aggregate" holding on a second, independent case.
+
+### The brief's item 3 was stale, and it was stale in exactly the way this project has a rule about
+
+`8_P-Pavese_AIRBUS…pptx`'s missing table fills have been **drawn since `c2fa7537f6b`** — 30
+`#FBECE7` + 25 `#F8D7CD` counted off our own render, matching the reference exactly, route traced
+through `PptxSlideLayout.cs:737` → `DrawingTableStyle.cs:185` → the 74-entry built-in map, entry
+`{21E4AEA4-…}` = Medium-Style-2/accent2. Its 47.76 `abs_ink` is spread over 26 pages with **one**
+major page — never the shape of 55 missing fills.
+
+**I carried that item forward in three consecutive briefs.** `HANDOVER.md` § 8 records the identical
+failure — an arrow-shape entry that "outlived its fix by twenty-six handovers" — and states the
+lesson: *a defect list is not self-expiring; an item no round re-measures survives every handover it
+appears in.* Writing that down did not stop me repeating it. **The fix is procedural: an item quoted
+into a brief must carry the commit or measurement that last confirmed it is still open**, and if it
+cannot, the first thing the round does is re-measure it.
+
+Also refuted: **`SlideChart` does not have `FrameChart`'s run-fusing defect** — `FrameChart` shapes
+the label in one call, `SlideChart` routes it through `SlideTextLayout`, which breaks on `\n`.
+Measured on the 12 corpus documents with a two-line data label: no fused tokens. My cross-track
+claim was wrong. **This says nothing about `SheetChart`.**
+
+### The audit: all six `SlideTextLayout.cs` sites cleared, and a clean re-check still paid
+
+Each by a probe against the installed 26.2.4.2, not a reading. `:145 OnGrid` — twelve boxes stepping
+by 40 EMU draw at exactly two baselines 0.0280 pt apart, transition on the half: quantised by
+`round`. `:297 HeightToLastNonEmpty` — four trailing empty paragraphs fit at 18.992 pt/12 lines,
+three moved into the middle at 15.987/9. The four `a:lnSpc` sites — 44 authored boxes, pitch exact
+on **40 of 40** proportional cases.
+
+**And the round's second fix came out of writing that probe.** All six sites collectively described
+a chain and none implemented its first two arms. **A re-check is worth running even when it comes
+back clean, because authoring the probe is what exposes what the site does not say.** It also
+promoted a recorded *divergence* from judgement to measurement: at 40% the reference draws
+`fround(0.40 × natural)`, so 26.2.4.2 has no 50% clamp either.
+
+The brief's premise — "if one of the six is stale it *is* item 1's answer" — was **false**; item 1's
+answer was in `PptTextBody`, found by measuring the page.
+
+### A second test this session that asserted the right property and never reached the defect
+
+`PptBlankParagraphTests` **already asserted** that a blank line takes its run's height, and
+**passed before the fix**, because its fixture states one run over the whole text so the blank sits
+strictly inside it. Real decks split the runs at the blank. Round 52 found the same shape in
+`ASlicerChoiceStillLosesToItsFallback`. **Two instances in two rounds: when a test encodes a corpus
+shape, assert the shape is present, or the test quietly tests a different case.**
+
+### Audit bookkeeping fixed by the parent
+
+The slides round predated the marker convention and recorded its six clearances in prose, so
+`git grep -c '24\.2\.7-audit'` could not see them. Markers added. Live figures, recomputed from the
+tree rather than by hand: **44 open hits in 26 files; 11 marked — 8 verified, 2 wrong, 1 undecided.**
+
+### Slides does next
+
+1. **The `.ppt` autofit's spacing reduction is disabled by a hard font index** — the one understood
+   cause of a `tf-agreement` fall this round. `gfopportunities` p6: the reference draws 26/22/17
+   where the record states 28/24/18 (a 0.925 font scale) at a pitch of `1.2 × em`, spacing **1.000**
+   — a pair `constScaleLevels` does not contain. Nailed to three lines: `svdfppt.cxx:6267-6271` sets
+   `bIsHardAttribute` on a hard typeface index; `:6285` puts `SvxLineSpacingItem` with
+   `SetPropLineSpace(100)`, which `lspcitem.hxx:86-91` shows *also* sets
+   `eInterLineSpaceRule = Prop`; `impedit3.cxx:1553-1602` is an `else if` chain whose `Prop` arm does
+   nothing at 100, making the `::Off` arm — the only place the fit's `fSpacingY` is applied —
+   unreachable. Needs `LineSpacingRule` to distinguish "states exactly 100%" from "states nothing".
+2. **`Lepore.ppt` is half answered** — baselines now at 0.0264 pt mean error, from 1.1579. What
+   remains is purely the drawn size, and 20.4 = 24 × 0.850 exactly. A clean single-variable question.
+3. **`NAS-Infrastructure-Roadmaps-v16.0.pptx`**, `abs_ink` 159.88, twice the next document: page 8
+   draws 66 text blocks to the reference's 61. A visibility question, worth more than anything left
+   in text layout.
+
+## Round 53 — sheets — three chart rules, and two predecessor mechanisms replaced
+
+`dotnet/probes/sheets-r53-totalsrow/` — `prediction.md` (`409e444b85d`), `prediction-addendum.md`
+(`ffd41a33ad4`) and `prediction-newline.md` were each committed before the sweep that measures them.
+**sheets 271 → 274 of 307**, predicted +1 / +1 / 0, measured **+1 / +1 / +1**. Zero regressions;
+**0 of 307 page counts changed**; twenty-one new tests, all detectors bar two deliberate shape
+controls.
+
+### `plotVisOnly` is refuted; a chart range stops before an Excel table's totals row
+
+Round 52 handed over *"measure whether `029_Annual_budget`'s source rows are hidden"*. **They are
+not** — the sheet carries no `hidden` attribute anywhere and the reference prints rows 18 and 39 in
+its body — and an authored `plotVisOnly="0"` variant renders with the observable unchanged.
+
+The mechanism is `ScChart2DataSequence::BuildDataCache` (`chart2uno.cxx:2616-2632`), whose own
+comment reads *"Excel behavior: if the last row is the totals row, the data is not added to the
+chart"*. A SpreadsheetML `table` part becomes a **named** database range carrying `TotalsRow`
+(`tablebuffer.cxx:133-137`), and `GetDBAtCursor` searches the named ranges first — an `autoFilter`'s
+anonymous range never has totals, so a table is the only thing that can hide a cell from a chart.
+The test is **per column**, and only on the range's own last row.
+
+Flipping `totalsRowCount="1"` to `"0"` turns **both** of `029`'s observables on together — the empty
+plot *and* the missing `Total` category with its $3,000 → $900 axis. That is the single mechanism
+round 52 predicted, and not the one it named. **Excel's own caches corroborate it on three
+documents**: `ptCount` 17 for an 18-cell range on `029`, 8 for 9 on `040`, 3 for 4 on `041`.
+Censused over 946 documents: **3 hits, all sheets**.
+
+**Null and empty are different answers.** A resolver answering null means "cannot resolve" and the
+cache stands; a range every cell of which is a totals row **resolved** and named nothing, and
+falling back to the cache there draws the whole plot the reference leaves blank. That is the one
+`Paperless.Ooxml` edit — two gates drop a `Count > 0` clause — and its reach is zero *by type*: the
+clause only fires when a resolver is supplied and the only implementation is reached from
+`XlsxReader`.
+
+### Calc lays a pivot table out itself and does not print the cells Excel left behind
+
+`DynamicBubbleChart`'s rows 29–41 are a pivot table whose five row fields all carry
+`x14:pivotField/@fillDownLabels="1"`. Calc regenerates the output through `ScDPOutput` and writes a
+row field's label only where its group starts; **`fillDownLabels` is ignored**. Three variants
+settle it, the decisive one being that **removing the pivot part makes the reference print all three
+copies of each department** — exactly what we printed.
+
+The rule tests the whole row-field **prefix**, not the cell above: the `Cost` column holds `150`
+twice under two different risk values and the reference prints both. And **the scan stops at the
+first already-blank label**, which is what makes it a no-op on the ten corpus pivot documents Excel
+laid out normally — a property with a test rather than an argument. Censused: 11 pivot documents,
+**1** with `fillDownLabels`.
+
+### `SheetChart` fused a two-line label — predicted 0 verdicts, worth 1
+
+The defect the words track fixed in `FrameChart` in round 52 and left here deliberately.
+`005_Contextures_chart_sample` moved as predicted (289 → 293, still failing). The **unpredicted**
+gain is `019_Free_Blood_Sugar_Chart`, **798 → 870 against 872**, whose *multi-level category axis*
+joins a date and a time with a newline — 54 `0:00`, 18 `12:00` and a tail of `11/2`, `11/3` … all
+fused into `11/212:00`. The prediction's census keyed on `showPercent` and **named that exact gap as
+blind spot #1**. `SlideChart` still carries the defect; it is the slides track's.
+
+### The 24.2.7.2 audit — four sites re-checked, all four still correct
+
+`SheetFonts.cs` (2 sites) 30 of 30 authored column widths exact to 0.001 pt; `SheetGeneralWidth.cs`
+27 of 27 across every `###`/`1E+05` threshold crossing; `SheetDeviceUnits.cs` 45 of 45 within 0.1%
+relative. Comments now name **26.2.4.2** and **2026-08-21**. The running score on the audit is **one
+wrong in five** — see `TODO.24-2-7-audit.md`.
+
+**And the probe failed its own control first.** A minimal authored `.xlsx` with no `<cellStyles>`
+element has its `cellXf` font discarded outright by LibreOffice, so the device probe read a constant
+101.08 pt at every stated size and reported 46 of 48 cases wrong. `soffice --convert-to fods` and
+reading `fo:font-size` back is what caught it. An incidental real finding recorded and deliberately
+not acted on: in that shape **we honour the font where LibreOffice does not**, and 5 of the 242
+`.xlsx` sheets documents lack `<cellStyles>` — all five currently pass.
+
+### Sheets does next, in order
+
+1. **The automatic chart title.** `005_Contextures_chart_sample`'s remaining 7 words are five charts
+   stating `<c:title>` with no text and one series named `Sales`;
+   `chartspaceconverter.cxx:181-204` fills it from `getSingleSeriesTitle` and we draw nothing. It
+   lands the document exactly on 300/300 — and it is a `Paperless.Ooxml` change owing a cross-track
+   census first, because the same block substitutes a literal `Chart Title` when there is no single
+   series.
+2. **The four `_advanced_excel_pie` documents** — now known to be *clipping at the horizontal page
+   split* (our `17%` and `trend` come out `7%` and `rend`), not a fused label.
+3. **The eight-blank-line header** — `probes/sheets-r51-bands/` brackets it; 20 words on
+   `FAA-2019-0995-0002`, whose reference half is date-volatile.
+4. **`SheetOptimalRowHeights.cs`'s 24.2.7.2 site** — row heights are the axis this track already
+   established for a 14-document cluster, and that site claims thirty exact reproductions against a
+   *superseded* binary.
+
+### Parent verification and cross-track measurement — round 53 sheets and slides
+
+**Sheets 271 → 274 of 307. Slides 199 → 199. Corpus 791 of 946.** Combined test counts at the
+merged tree:
+
+```
+Core 337   Containers 109   Text 611   Vector 295   Rendering 150(1 skipped)   Markup 259
+OpenDocument 125   WordProcessing 1096   Spreadsheets 925   Presentations 788     = 4695
+0 failed
+```
+
+All 307 sheets and 302 slides documents re-swept in the primary after the merge: **3 gains, 0
+regressions, 0 page counts moved on either track.**
+
+The sheets round's `Paperless.Ooxml` edit then measured across the other two tracks — 666 words and
+slides documents rendered at the merged commit and again with only that diff reversed (`git apply
+-R`, `obj`/`bin` deleted between legs, `SOURCE_DATE_EPOCH` pinned):
+
+```
+TOTAL compared=666  identical=666  changed=0  unrenderable=0
+worktree vs HEAD: clean      index vs HEAD: clean
+```
+
+The round predicted 0 of 666 and argued it **by type rather than by census** — the changed clause
+only fires when a `ChartRangeResolver` is supplied, and the only implementation is reached from
+`XlsxReader`, with words and slides passing `null`. The measurement agrees.
+
+**That is the third `Paperless.Ooxml` change measured this way and the third to come back at exactly
+zero.** Worth stating as a pattern rather than three coincidences: these fixes are each keyed on a
+single literal — a namespace URI, a graphic-data URI, a resolver's presence — and the key is doing
+its job. It does **not** license skipping the sweep. The rule is that a shared-layer merge owes a
+measurement rather than an argument, and the value of these three is precisely that they converted
+three good arguments into three measurements at a cost of about twenty minutes each.
+
+**A procedural fix, adopted after the AIRBUS item.** Round 53's slides brief carried a defect I had
+quoted into three consecutive briefs after it had been fixed. From here, **an item quoted into a
+brief carries the commit or measurement that last confirmed it is still open**, and where it cannot,
+the brief says so and the round re-measures it first. Both round-54 briefs are written that way.
+
+---
+
+## Merge note — round 54, words (2026-08-21)
+
+**Words 318 → 317 of 337. Corpus 790 of 946.** The first round this session to cost a verdict, and
+the change is right.
+
+```
+Core 337   Containers 109   Text 611   Vector 295   Rendering 150(1 skipped)   Markup 259
+OpenDocument 125   WordProcessing 1123   Spreadsheets 925   Presentations 788     = 4722
+0 failed
+```
+
+Verified by sweeping all 337 words documents in the primary after the merge: **one regression, zero
+gains**, exactly as the round reported.
+
+### The round refuted the fix it was dispatched to make, and that is the result
+
+I read round 53's `[24.2.7-audit: WRONG]` on `SystemFontResolver.GenericFallbacks` as **the largest
+single known defect on the project** and dispatched a round to fix it. **The site is correct. The
+rule does not live there.**
+
+Established on **126 authored files** through the installed `soffice`, five known-answer controls
+agreeing (`Liberation Serif`→itself, `Calibri`→Carlito, `Cambria`→Caladea, `Arial`→Liberation Sans,
+`Courier New`→Liberation Mono):
+
+| filter | an unrecognised family, nothing declared |
+|---|---|
+| DOCX, DOC, RTF | **DejaVu Serif** — only `w:family="swiss"` moves it, to Sans; RTF's `\fnil`/`\froman`/`\fswiss`/`\fmodern` are **all inert** |
+| ODF text, XLSX, PPTX, flat ODS | **fontconfig's own generic** — `Consolas` → DejaVu Sans **Mono** |
+
+**The answer belongs to the filter, not the resolver.** Round 53's probe was DOCX-only: it varied
+one thing and *held the answer fixed without noticing*. The discriminator it lacked is that
+`45-latin.conf` files 60 families under a generic and none is installed here, so `fc-match`
+separates three answers rather than one. The answer does **not** depend on the request — bold,
+italic, 8 pt, 40 pt and an east-Asian hint all give the same family, and the round says so
+explicitly because it was asked to either way.
+
+**Had the recommended one-line `Paperless.Text` change been made, it would have reflowed 202 slides
+and 130 sheets renderings, every one of them currently correct.** The fix went to
+`Paperless.WordProcessing/Layout/WordFallbackClass.cs`; the `Paperless.Text` diff is **comment-only,
+verified by diff**. Nothing cross-track is owed, and independently **0 of 302 slides and 0 of 307
+sheets** show the Sans-for-Serif pair.
+
+### What it bought, and what it cost
+
+| | before | after |
+|---|---:|---:|
+| font-list disagreements vs the reference | 86 of 337 | **66** |
+| wrong pair `ours=DejaVuSans, ref=DejaVuSerif` | 32 | **8** |
+| new wrong direction `ours=Serif, ref=Sans` | 0 | **6** |
+| renderings changed | — | **45** (predicted 32–60) |
+| verdicts | 318 | **317** |
+
+Prediction: 0 verdicts with a stated risk of −1 to −3. Measured −1. **The prediction named the risk
+and the risk fired** — that is a well-run round, not a failed one.
+
+**The regression, stated not netted.** `24-25_FAA_Holdover_Tables.docx` 155/155 → **165/155 pages**,
+re-opened in the manifest. Isolated to `Arial Bold`: **in that document alone, any unrecognised name
+answers DejaVu Sans on the reference side.** Eight one-variable edits to the real package rule out
+the font-table entry, its `w:family`, `w:altName`, `w:panose1`, the name itself, and — by authored
+probe — inheritance of the class through the paragraph style. **The variable is unfound.** The 8
+documents still wrong the old way are the same puzzle inverted: `ESPN-R` declares `Verdana`/`Segoe
+UI` as *swiss* and the reference sets them Serif.
+
+### Three further refutations, two of them of the round's own work
+
+- **"73 of 337 carry DejaVu Sans" does not reproduce at any reading** — the candidates are 70, 40
+  and 32. Its companion figure, 86, reproduces exactly. **I repeated the 73 in a brief and in a
+  report.** Second time in three rounds that a quoted-not-re-derived figure has propagated.
+- **The round's own `.doc` probe was confounded**: a DOCX→DOC round trip through LibreOffice bakes
+  in the roman default, so it measured "declared roman" rather than "declared nothing". The corpus
+  refuted it in one sweep.
+- **Its first attempt shipped without the empty-family guard: −18 verdicts**, 29 `.doc` documents
+  moved off Liberation Serif, because a declared class is consulted *before* `GenericFallbacks`
+  separates "no font named" from "a font nobody has". **Only the whole-track sweep could see it** —
+  a batch sweep would have shipped it.
+
+`SystemFontResolver.cs:441`, previously `UNDECIDED`, is now **VERIFIED**: two fixtures that actually
+reach `DefaultFonts` — a flat ODF declaring no font anywhere, and a DOCX whose `docDefaults` state
+an empty `w:rFonts` — both answer Liberation Serif. (`w:ascii=""` is a *third* state and answers
+DejaVu Serif.)
+
+### The audit's own record needed correcting, twice over
+
+Running score is now **one wrong in eleven**, not two in five: the `GenericFallbacks` marker flipped
+`WRONG` → `VERIFIED` and the `UNDECIDED` one was settled. Written into
+`TODO.24-2-7-audit.md` with the lesson attached:
+
+1. **A probe that varies one thing must know what it is holding fixed.** "One variable at a time"
+   was satisfied by a DOCX-only sweep and was still wrong, because the constant *was* the answer.
+2. **An audit entry is a claim like any other.** `WRONG` earns no more trust than the comment it
+   contradicts — § 7's "a refutation inherits no privilege from being a refutation", for the second
+   time in three rounds.
+3. A marker can be wrong in either direction; re-marking with a date and round is normal.
+
+### Words does next
+
+1. **Find the document-level variable that flips the DOCX default from roman to swiss.** Worth 14
+   documents and the verdict this round lost. Untried: `settings.xml` compatibility mode, the theme,
+   `w:rPrDefault`, and "a property of the first font resolved rather than of the run".
+2. `w:altName` — parsed, never used.
+3. `097`'s 1.7 pt boundary case: the standing line-height deficit, 11.50 against 12.65 per empty
+   paragraph, worth 1.15 pt on every empty paragraph in the corpus.
+
+## Round 54 — sheets — the automatic chart title, and a verdict that was passing by cancellation
+
+`dotnet/probes/sheets-r54/` — `prediction.md` (`22aa807a4de`) was committed before a line of the
+change was written. **sheets 274 → 274 of 307**: `005_Contextures_chart_sample` gained a verdict and
+`013_Contextures_chart_sample` lost one, both named below. **Zero page counts changed anywhere.**
+Cross-track, measured: `words/chartset-001` **9 → 10 of 10**, `slides/chartset-007` 1 → 1.
+Eighteen new tests, fifteen distinct mutations, all detected, no drift guards.
+
+### The rule, and both of its arms measured on corpus documents rather than authored ones
+
+`ChartSpaceConverter::convertFromModel` (`chartspaceconverter.cxx:177-208`) fills an empty
+`<c:title>` with the single series' name (`typegroupconverter.cxx:272`, only when the first axes set
+holds one type group, and a second axes set *clears* it at `plotareaconverter.cxx:491`), or failing
+that with the localized literal `Chart Title` — unless one of tdf#146487's two escapes says the
+author meant the title to stay empty. `DrawingChart` had said for eleven rounds that reporting
+either "would claim the file said something it does not"; the substitute is on the reference's page.
+
+The reference draws `Sales` **13** times on `005` where we drew 6, `East` **7** times on `013` where
+we drew 6, `Production in 2017` once on each of the two words pie-chart documents where we drew
+none, and `Chart Title` **twice** on `035_Chemistry_Column_PowerPoint_Chart` where we drew none.
+The two *negative* arms have controls too: three sheets documents whose census-named string would
+appear if the `autoTitleDeleted` default went the other way read ours = ref = one (the worksheet
+cell), and `005`'s own chart6 — not deleted, no title element, a series with no `c:tx` — reads ours
+= ref = one on its page.
+
+Censused over all 946 documents and all **307** `c:chartSpace` parts, with a second pass keying on
+the root element that confirms the filename filter misses none: **ten parts in five documents**,
+two sheets, two words, one slides, and **every one states `<c:autoTitleDeleted val="0"/>`
+explicitly**, so no corpus hit rests on the default. All fourteen chart parts in the twenty
+MSO-2007 documents already carry their own title text.
+
+### The regression is the gate, not the change, and the prediction named the gap it fell into
+
+`013` was **passing by error cancellation**. Four spurious value-axis tick labels were masking four
+genuinely missing tokens. Adding the title takes its height off the top of the diagram area, our
+interval law then picks the reference's step, and **page 4 of our rendering is now the reference's
+page 4** — same title, same five ticks. 168/169 (`d=1`) became 165/169 (`d=4`) and the band is 3.38.
+The document is measurably closer and one token the wrong side of a threshold. `005` moved the other
+way for the same reason, and its page 2 is now identical to the reference's.
+
+The prediction's blind spot 3 said in advance that the census counts titles and cannot see whether a
+shrunk plot moves anything, and called it "the regression risk". It is exactly what happened; the
+direction was the opposite of the one feared.
+
+### What that exposed, and two hypotheses refuted on the way
+
+`013`'s residual four tokens are its page-1 **camera-tool picture** — an `mc:AlternateContent`
+`twoCellAnchor editAs="oneCell"` holding an EMF of the chart on the other sheet. We draw it at the
+stated 326.25 pt; **26.2.4.2 draws it about 100 pt wider**, which is what puts the reference's legend
+across the page split. Four authored variants: the reference's width answers to **neither** `editAs`,
+`a:ext`, nor the anchor's second corner, and the one change on our side that reproduces it to 0.2 pt
+is honouring the two-cell span. Not implemented — the current behaviour was measured on
+`SIL_TDB648.xlsx` and a change owes a census and a full sweep. **Refuted on the way:** it is not the
+default column width (four authored workbooks, 48.13 pt on both sides in every case; markers in
+columns A–J of `013`'s own sheet agree to 0.0005 pt) and it is not a font-face divergence.
+
+`005`'s residual four are `ChartLayout.IntervalsThatFit`: its plot rectangle now agrees with the
+reference to 1.2 pt while `available / needed` gives 8 intervals where
+`estimateMaximumAutoMainIncrementCount` gives 9 on the same geometry.
+
+And, so it is not read as this round's doing: our chart title is drawn **9.8 pt above** the
+reference's on every chart measured, and that is pre-existing —
+`Keywords_Mapping_Graphs_and_Charts.xlsx`, which states its own titles and matches, shows the same
+9.78. `lcl_createTitle`'s `nYDistance` explains 3.83 pt of it; 6 pt is unexplained and untouched.
+
+### The 24.2.7.2 audit — `SheetOptimalRowHeights.cs`, still correct
+
+Thirty freshly authored wrapped rows on 26.2.4.2 — six sizes against one to five unbreakable words,
+no `ht` and no `customHeight` — **30 of 30 within 0.05 twips**. Read twice over (marker deltas off
+both PDFs, and the reference's own `fods` `style:row-height`, agreeing to 0.6 twips) and the control
+ran first: the twelve-point single-line row reads the **300** twips the site already claims.
+`Paperless.Spreadsheets` is now five of nine re-checked and all five still correct.
+
+### Sheets does next, in order
+
+1. **`013`'s camera-tool picture** — four tokens, four measured variants, the reproducing change
+   named; owes an `editAs` census and must not break `SIL_TDB648`.
+2. **`ChartLayout.IntervalsThatFit`** — four tokens on `005`, and a law that reaches every column
+   chart on the track.
+3. **The four `_advanced_excel_pie` documents** — the largest cluster left, and the gate needs only
+   two of their five tokens.
+4. **`SheetPageDecoration.cs`'s 24.2.7.2 site** — page furniture is what the remaining page-count
+   outliers hang off and it has no probe harness yet.
+
+### The vision pass found two ink defects and one artefact
+
+Two paired images on pages chosen for a stated reason, each to a fresh blind subagent. **Both
+reviewers, on unrelated documents and unrelated pages, named the same object: the reference draws a
+thin light-grey border around every chart area and we draw none.** A third instrument agrees —
+`005_Contextures`'s reference sets a light-grey stroke colour **8** times and issues **387** stroke
+operators against our **0** and **155**. And its pie data labels are white in the reference and
+black in ours, where the part states `schemeClr val="bg1"`: **33** white fills against **0**.
+Neither can move a token.
+
+**One reading was an artefact and is recorded as one**: the reviewer's "the reference's charts sit
+6–8% further right" is contradicted by the bounding boxes (509.32 against 509.52), and comes from
+the composition scaling each half to 78%. Two of three real, which is § 7's ratio again.
+
+---
+
+## Merge note — round 54 sheets and round 55 words (2026-08-21)
+
+**Words 317 → 319. Sheets 274 → 274 (one gain, one regression). Slides 199. Corpus 792 of 946.**
+
+```
+Core 337   Containers 109   Text 611   Vector 295   Rendering 150(1 skipped)   Markup 259
+OpenDocument 125   WordProcessing 1155   Spreadsheets 925   Presentations 806     = 4772
+0 failed
+```
+
+The sheets round's diff is in `Paperless.Ooxml` and reaches all three tracks, so **the whole corpus
+was gated** — all 337 words, 302 slides and 307 sheets documents — rather than measuring reach and
+inferring verdicts. Words was then swept whole again after round 55.
+
+### A three-round refutation chain, and the middle link was the wrong one
+
+This is the clearest instance yet of § 7's dominant pattern, because it runs three deep:
+
+| round | claim | verdict |
+|---|---|---|
+| 53 | `SystemFontResolver.GenericFallbacks` is **WRONG**; unrecognised families answer DejaVu Serif | the observation was right, the **seat** was wrong |
+| 54 | the site is **correct**; the rule belongs to the *filter*. And **style inheritance is refuted** | the first half stands; the second half was **wrong** |
+| 55 | style inheritance **is** the mechanism | stands, on 28 authored packages with 3 controls |
+
+**Why round 54's refutation failed, and it is a reusable trap.** Its counter-measurement was the
+*whole document's* font list — and that document draws DejaVu Sans for **four other reasons**
+(`Century Gothic`, `Tahoma`, `Charlotte Sans Book` and a `Myriad` subset are all declared swiss).
+**The observable could not move whatever the edit did.** A null result from an instrument that
+cannot register the effect is not evidence of absence. Its authored run-level probe does not
+reproduce on 26.2.4.2 either.
+
+The fix in method, which round 55 used: **28 authored packages of one paragraph and one run each**,
+so the PDF's font list has exactly one entry that *can* move. Build the fixture so the observable is
+one-dimensional, and a null result means something.
+
+### The rule, now unified across three filters
+
+**The DOCX family class is an inherited property, and the family name is not a property of it.** It
+is set only where `w:rFonts/@w:ascii` names a font the table files under `roman` or `swiss`; `auto`,
+`modern`, `script`, `decorative`, a pitch-only entry, an absent entry and `w:asciiTheme` **all leave
+whatever an ancestor put there**. `24-25_FAA_Holdover_Tables` is exactly that shape — `Normal` names
+`Arial` (swiss), and `Heading2`/`Heading3`/`Caption` are `basedOn Normal` naming `Arial Bold` (auto).
+
+**The DOC arm is different again**, and round 54 had left it explicitly unmeasured: **only
+`ff = roman` gives Serif**; every other code *and no code at all* reaches fontconfig's own generic.
+Measured on nine flat-ODF fixtures exported to Word 97 and back — a route that reaches the WW8
+*import* with a genuine `ff = 0`, which a DOCX round trip **cannot**. `Garamond` is the control,
+forced ROMAN by `GetFontParams`'s fourteen-prefix name-override list, and it returns Serif where the
+otherwise identical `Aptos` returns Sans.
+
+**This unifies the three filters rather than adding a third rule.** `FAMILY_DONTKNOW` always reaches
+fontconfig; DOCX never *sets* it (it leaves an inherited value floored at Writer's roman pool
+default), RTF never sets the family at all — hence its inert `\fswiss` — and DOC sets it per font.
+
+Font-list disagreements: **86 → 66 → 53 → 52** of 337 across rounds 54 and 55. `ours=Sans/ref=Serif`
+8 → 2; `ours=Serif/ref=Sans` 6 → 1. **Zero documents newly disagree at any step.**
+
+### Sheets: the regression had been passing by cancellation
+
+`005_Contextures_chart_sample` closes (293 → 296 of 300) and `pie-chart-result.docx` closes on the
+**words** track as a measured side effect. `013_Contextures_chart_sample` re-opens, 168/169 →
+165/169 — and **it had been passing by error cancellation**: four spurious value-axis tick labels
+were masking four genuinely missing tokens. With the automatic title drawn, our interval law picks
+the reference's step and **our page 4 is now the reference's page 4**, same title, same five ticks.
+Measurably closer, one token the wrong side of a threshold. The round judged that the right trade
+and argued it rather than reverting.
+
+The change is LibreOffice's automatic chart title, censused over **946 documents / 307
+`c:chartSpace` parts**, with a second pass keying on the root element proving the filename filter
+misses none: **ten parts in five documents**, every one stating `<c:autoTitleDeleted val="0"/>`
+explicitly, so **no hit rests on a default**. Both arms measured on corpus documents, **and both
+negative arms too** — three documents whose suppressed string would have appeared read ours = ref,
+and one chart inside the target document is a negative control.
+
+### Audit
+
+`SheetOptimalRowHeights.cs` **VERIFIED** (30 of 30 wrapped rows within 0.05 twips, read twice over,
+**control ran first and passed**). `SystemFontResolver.GenericFallbacks` re-marked **VERIFIED** from
+a fifth caller, with an over-general sentence corrected — **re-verifying an already-`VERIFIED` site
+found a real correction.** `Ww8FontTable.ShapeOf`'s "the other family codes leave LibreOffice's
+answer unchanged" is measurably false and is corrected at the site. Markers 11 → 12; open hits 42.
+
+### Vision found three defects larger than the ones the rounds were pointed at
+
+- **675 undrawn legacy `FORMCHECKBOX` fields in 12 documents** (`FO.FCTOA.00010` 249,
+  `Form-SM-76A` 152, `FO.FCTOA_.000129` 60, `A1. EASA Form 2` 52…). Previously "established,
+  deliberately not implemented" at a count of 249 in 16; the real census is larger.
+- **`AFS-050-004-F2_0i` p2: five black banner rows whose white reversed-out text we do not draw at
+  all**, plus a missing page-border rectangle and a header row we set blue where the reference sets
+  black.
+- **A chart-area border and a data-label fill colour**, named by *two* reviewers on unrelated
+  documents and unrelated pages, neither chosen by `--worst`, and confirmed by a third instrument:
+  `005`'s reference issues **387 strokes against our 0** in a light grey it sets 8 times, and its pie
+  labels are white in the reference against **33 white fills to our 0**. Neither can move a token.
+
+### Next
+
+**Words** — the `ascii` slot fallback: our `Family()` falls `ascii` → `hAnsi` → `cs` → `eastAsia`,
+where `DomainMapper` treats `w:hAnsi` as unsupported and never takes a western family from
+`w:cs`/`w:eastAsia`. Four documents reach a family that way. Then the 675 checkboxes, the banner
+rows, and `097`'s 1.7 pt line-height deficit (untouched for three rounds). **`w:altName` needs
+re-checking before anyone acts on it** — *this* checkout's `FontTable.cxx` ignores it too
+(`case LN_CT_Font_altName: break;`), so round 54's claim that LibreOffice uses it is unverified.
+
+**Sheets** — `013`'s camera-tool picture (an `editAs="oneCell"` EMF we draw at the stated 326.25 pt
+where 26.2.4.2 draws ~100 pt wider; dropping `editAs` on our side reproduces the reference to 0.2 pt,
+and it must not break `SIL_TDB648`); then `ChartLayout.IntervalsThatFit`; then the four
+`_advanced_excel_pie` documents, where the gate needs only two of their five tokens.
+
+## Round 54 — slides — the brief's mechanism was right and its condition was wrong
+
+`dotnet/probes/slides-r54/` — `prediction.md` (`e7a62caeeb8`) committed before anything was built or
+rendered post-change. **199 of 302 unchanged, `abs_ink` 1233.54 → 1147.17, major pages 432 → 403,
+`tf-agreement` 0.75210 → 0.77053, exact `/Tf` pages 1558 → 1709.** 42 documents moved, 38 improved,
+4 worsened; **0 of 302 page counts changed**. Four source files, all in `Paperless.Presentations`;
+no cross-track sweep owed. Tests 4695 → **4703**, 0 failed, 1 skipped.
+
+### The `.ppt` autofit's spacing reduction: measured, then its condition refuted by A/B
+
+Round 53 nailed the chain to three lines and did not measure it. It is now measured on an **authored
+known-answer `.ppt`**, and authoring it needed a fact round 53's plan did not have: **`soffice
+--convert-to ppt` cannot preserve `a:normAutofit`, because autofit is not spelled anywhere in the
+binary format.** `svdfppt.cxx:1030-1039` infers it from the TextHeaderAtom's *instance*, and a
+round-tripped text box comes out TextInShape — the first cut of the probe drew all fifteen slides at
+40 pt over 21 overflowing lines. `ppt-patch-kind.py` flips the atom to Body; the body is one
+`uint32`, so the edit is length-preserving. **The `.pptx` half of the same deck draws
+`1.2 × 0.8 × em` and the `.ppt` half draws `1.2 × em`**, and because the binary side's lines are
+taller the fit *search* lands on a different row.
+
+A second confirmation the source gives and round 53 did not have: `SvxLineSpacingItem::PutValue`
+(`paraitem.cxx:194-202`) — the path every OOXML and ODF line spacing takes — writes
+`eInterLineSpaceRule = Off` **when the height is exactly 100**, where the `.ppt` importer's
+`SetPropLineSpace(100)` writes `Prop`. The defect is binary-only by construction and
+`Paperless.Text` was not touched.
+
+**But the brief's condition is wrong.** Implementing the record's own hardness disjunction — the
+paragraph states a line feed, or its first portion states a typeface index — is worth **−13.06
+`abs_ink` over 13 documents**. Treating **every** `.ppt` paragraph as stating its spacing is worth
+**−85.96 over 34, 30 of them improvements**, and moves major pages 432 → 403. `Lepore.ppt`
+identifies it decisively rather than statistically: its body paragraph's mask is **0** and its
+character run states only a font *height*, so the record makes it soft by every term this reader can
+evaluate, and the reference still draws it at `1.2 × em` under a 0.850 font scale. **The authored
+deck could not have chosen between the two rules** — LibreOffice's PPT export writes `lf=100` *and*
+`font=1` on every paragraph, so both rules pass it 15 of 15. A known-answer deck built by round trip
+inherits the exporter's habits; the corpus A/B is what discriminated.
+
+### `Lepore.ppt` closed: a fitted bullet takes the font scale without the round-to-whole-point
+
+Page 2 draws 20.0 × 11 and 20.4 × 6 and the pair is the answer — **the 20.4s are the six bullets**.
+`Outliner::setRoundFontSizeToPt` rounds a run's scaled height to a whole point;
+`Outliner::ImpCalcBulletFont` (`outliner.cxx:851-855`) never reaches it and is one multiplication
+and one `fround` in hundredths of a millimetre. 24 pt is 847 units, `fround(847 × 0.85) = 720` =
+20.409 pt, against `round(24 × 0.85) = 20` for the text. We drew both at 20.013; we now draw both.
+`Lepore.ppt` **9.76 → 0.53**.
+
+**Worth −0.41 `abs_ink` and +0.0119 `tf-agreement` with 144 more exact-`/Tf` pages** — a bullet is
+almost no ink and is a whole entry in the size multiset. Measure the quantity the change controls.
+
+### `NAS` is rotated text, not surplus shapes — and the vision round refuted its own reviewers
+
+Three fresh blind reviewers. **Both page-8 reviewers ranked the same finding first, in the same
+terms, both marked confident, and both were wrong**: they reported the page's largest coloured area
+as pale on our side and saturated on the reference's, and a colour histogram of the region says both
+sides draw the same two colours in the same proportions, in the rasters *and* in the composed image
+they saw. Third instance of `HANDOVER.md` § 7. The two discriminators § 7 offers — same object, page
+chosen for a stated reason — both held here. **Only the third, a different instrument, caught it.**
+
+Reviewer B, asked to count, reported the object inventories match item for item, and our page 8
+writes 102 `BT` blocks to the reference's 99 — so **round 53's "66 text blocks to the reference's 61,
+a visibility question" is not what the page shows.** Reviewer C on page 99 found the real defect and
+a second instrument confirmed it: the reference's page 99 carries **101 rotated `Tm`** and ours
+carries none.
+
+`rotated-text-census.py`, **whose first cut was wrong in an instructive way and says so** — the two
+stacks rotate through different operators, LibreOffice with a rotated `Tm` and Paperless with a
+rotated `cm`, so a `Tm`-only count reports 18832 rotated operators to nought — gives:
+**73 of 302 documents draw rotated text on either side; 1097 blocks ours to 1905 the reference's;
+and 197 pages where the reference rotates text and we rotate none.** NAS alone is 307 of the
+shortfall over 33 pages, which is what its 159.88 `abs_ink` actually is. It runs both ways:
+`Demick_JetBlue.pptx` rotates **76** blocks where the reference rotates **8**.
+
+**NAS is not a "we render better" false positive.** Page 8 is 3.18% differing pixels, page 99 4.43%,
+55 of its 137 pages are major, and the reference draws rotated labels we draw flat on 33 pages.
+
+### The prediction, and the `abs_ink` estimate failing the other way round
+
+Verdicts 0 predicted, 0 measured. Page counts 0 predicted, 0 measured. The known-answer deck 15 of
+15. `gfopportunities` p6 predicted to draw 26/22/17 — every baseline on that page now matches.
+**`abs_ink` was predicted −5 to −25 and measured −86.37.** Round 53 over-shot by three by
+extrapolating a census of *candidates*; round 54 under-shot by three by censusing *symptoms already
+visible*, because a rule that changes the fit **search** changes pages a symptom census cannot see —
+which the prediction's own blind-spot list named before the sweep. **Predict a sign and a rank, not
+a range, until someone has a model of how much of a page moves.** My control — that documents
+outside the change list would not move — was also refuted.
+
+### The audit: one site verified, and the marker itself sprang the file's own trap
+
+`PptxSlideLayout.cs:763` **VERIFIED on 26.2.4.2** — six stated sizes 10–40 pt put a table cell's
+first baseline 1.0007 … 1.0002 ems below the cell's top, one em on all six, not the 0.907 em of
+24.2.7.2, and our six land on the reference's to 0.000 pt. **The `[24.2.7-audit: …]` marker ran to a
+second line and that line named `24.2.7.2` in prose, so the open count went UP by one while a site
+was being cleared.** No line of a multi-line marker may contain the bare string. 44 open hits in 29
+files, 12 marked.
+
+### Slides does next
+
+1. **Rotated text — 197 pages.** The track's largest unworked front, both directions, and it is what
+   NAS's ink is. `a:bodyPr/@vert` and `@rot` on the OOXML side, Escher `txflTextFlow` on the binary
+   side. Use `rotated-text-census.py` and read its remarks first.
+2. **The fitted bullet's vertical placement** — `Lepore.ppt` p2 now has both sizes exact and puts the
+   bullet 1.9 pt too high. `Outliner::StripBullet` draws a symbol from `aBulletArea.Bottom()` with
+   `ALIGN_BOTTOM` and a number at `nFirstLineMaxAscent` (`outliner.cxx:909-919`); `SlideMarker`
+   already carries the discriminator.
+3. **`2015-Civil-Rights-Website-training.ppt`**, now the track's second-largest at 30.32, with a
+   `baseline-agreement` mean of 1.4915 over 1228 pairs — the largest single-document text residue.
+4. The audit: `PptxSlideLayout.cs` 2 left, `SlideDrawing.cs` 2, `PptxTextStyles.cs` 1,
+   `OdpSlideLayout.cs` 1 — the last being the ODF half of the claim round 54 verified for OOXML.
+
+---
+
+## Merge note — round 54, slides (2026-08-21)
+
+**Slides 199 → 199 of 302, verified over all 302 documents: 0 gains, 0 regressions, 0 page counts
+moved.** And the largest rendering movement any round has produced on this track:
+
+| | base | after |
+|---|---:|---:|
+| `abs_ink` | 1233.54 | **1147.17** (−86.37, −7.0%) |
+| major pages | 432 | **403** |
+| `tf-agreement` | 0.75210 | **0.77053** |
+| exact `/Tf` pages | 1558 | **1709** of 4515 |
+
+42 documents moved, 38 improved, **4 worsened and all four are named**: `undp` 20.30→20.57,
+`ws_prod…European-Safety` 7.09→7.23, `pods05` 9.02→9.16, `Thailand17` 17.74→17.87. Two of the four
+are round 53's shape — `baseline-agreement.py` puts European-Safety at **1.0764 → 0.0282** mean |dy|
+and pods05 at 1.0251 → 0.7319 *while their ink rose*. Only `undp` and `Thailand17` are genuine, both
+under 0.3. Test counts at the merged tree **4780, 0 failed**. *(Corrected: this note first said 4790, which is an addition slip by the parent — the ten project figures sum to 4780. The round-55 slides brief was dispatched carrying the wrong figure and will report its delta against it.)*
+
+### The brief's condition was wrong and the corpus is what decided it
+
+I briefed the `.ppt` spacing-reduction rule as gated on a **hard font index**, from a three-line
+chain round 53 read out of the C++. The mechanism is right; **the condition is not**. Implementing
+the record's hardness disjunction in full: −13.06 `abs_ink` over 13 documents. Implementing it for
+**every `.ppt` paragraph**: **−85.96 over 34 documents**, 30 improvements, major pages 432 → 403.
+
+`Lepore.ppt` decides it — paragraph mask 0, character run stating only a font *height*, **soft by
+every term the record offers**, and the reference still draws it at `1.2 × em` under a 0.850 scale.
+
+**And the authored deck could not have chosen between the two rules**: LibreOffice's own exporter
+writes `lf=100` *and* `font=1` on every paragraph, so both candidate rules pass it 15 of 15. **A
+known-answer fixture built by round-tripping through the reference inherits the reference's
+defaults, and those defaults can make two rival rules indistinguishable.** The corpus A/B is what
+separated them. Worth remembering the next time a round authors a fixture instead of sweeping.
+
+Authoring that deck also needed a fact round 53's plan lacked: **`soffice --convert-to ppt` cannot
+preserve `a:normAutofit`** — autofit is inferred from the `TextHeaderAtom`'s instance, and a
+round-tripped text box comes back `TextInShape`. `ppt-patch-kind.py` flips the atom
+length-preservingly. We were 6 of 15 on that deck; we are now **15 of 15**.
+
+### `Lepore.ppt` closed, and the bullet was never the text
+
+20.4 × 6 are the **bullets**, 20.0 × 11 the text. `Outliner::ImpCalcBulletFont` never reaches
+`setRoundFontSizeToPt`, so `fround(847 × 0.85) = 720` units = **20.409 pt** against
+`round(24 × 0.85) = 20`. We now draw 20.4094 and 20.0126 against the reference's 20.409 and 20.013.
+Only −0.41 ink, but **+0.0119 `tf-agreement` and 144 more exact-`/Tf` pages** — the ink column is
+the wrong instrument for a change of this shape. Still open: the bullet sits 1.9 pt too high.
+
+### Both blind reviewers ranked the same finding first, and both were wrong
+
+**Third instance of § 7's blind-reading trap, and the strongest.** Two reviewers on `NAS` page 8
+independently and confidently ranked the same finding first — a pale-versus-saturated colour
+difference. **A colour histogram says the region is the same two colours in the same proportions**,
+in the rasters *and* in the composed image.
+
+Both discriminators § 7 offers held: the reports were about the same object, and the page was chosen
+for a stated reason. **Only a different instrument caught it.** That is now the operative rule —
+*agreement between readers, however independent, is not confirmation; an instrument that can see the
+claimed quantity is.*
+
+Reviewer B counted the inventories as matching, and our p8 writes **102 `BT` to the reference's 99**
+— so round 53's "66 blocks to 61, a visibility question" **is not what the page shows**. Reviewer C,
+on a different page, found the real defect and it was confirmed independently.
+
+### The real NAS defect: rotated text, in both directions, 197 pages
+
+`rotated-text-census.py` — **whose first cut was wrong and says so in its own remarks**: the two
+stacks rotate through different operators, and a `Tm`-only count reports 18832 to nought.
+Corrected: **73 of 302 documents, 1097 rotated blocks ours against 1905, and 197 pages where the
+reference rotates and we do not.** NAS is 307 of the shortfall over 33 pages. It runs **both ways** —
+`Demick_JetBlue` rotates 76 where the reference rotates 8.
+
+**`NAS-Infrastructure-Roadmaps-v16.0.pptx` is not a "we render better" false positive** — p8 3.18%
+differing pixels, p99 4.43%, 55 of 137 major. That entry on the do-not-work list is now measured
+and wrong.
+
+### The prediction failed 3× — in the opposite direction to round 53's
+
+`abs_ink` predicted −5…−25, measured **−86.37**. Round 53 extrapolated from candidates and
+over-shot 3×; this round censused *visible symptoms* and under-shot 3×, **because a rule that
+changes the fit search moves pages a symptom census cannot see**. The round's own stated control
+was refuted by its own measurement. Documents moved: predicted 18–30 "all `.ppt`", measured 13 for
+the briefed rule and **42 for what shipped, 8 of them `.pptx`**.
+
+### The audit sprang its own trap, and the file is now self-computing
+
+`PptxSlideLayout.cs:763` **VERIFIED** on 26.2.4.2 (six sizes, cell first baseline at one em, ours to
+0.000 pt). But the marker's *second line named `24.2.7.2` in prose*, which **pushed the open count
+up at the moment a site was cleared** — the file's own convention springing the file's own trap.
+
+`TODO.24-2-7-audit.md` now **carries the commands rather than a count**, because a hand-maintained
+figure has been wrong three times there: it conflated hits with files, it grew while being worked,
+and now a marker put a cleared site back. The rule added: **a marker's prose must not name the
+superseded version.** Live at this commit: **42 open, 14 marked — 13 verified, 1 wrong.**
+
+### Slides does next
+
+1. **Rotated text — 197 pages, both directions.** `a:bodyPr/@vert` and `@rot`, Escher
+   `txflTextFlow`. **Read `rotated-text-census.py`'s remarks before writing an instrument** — its
+   first cut was wrong in a way that reports a 18832-to-nothing gap.
+2. The fitted bullet's vertical placement (1.9 pt high, `ALIGN_BOTTOM` / `aBulletArea.Bottom()`).
+3. `2015-Civil-Rights-Website-training.ppt`, now second-largest at 30.32 `abs_ink`,
+   `baseline-agreement` 1.4915 over 1228 pairs.
+
+---
+
+## Round 55 — sheets
+
+**274 → 276 of 307**, and **slides `ceiling-002` 0 → 1 of 5** as a measured side effect. No
+regression anywhere. `013_Contextures_chart_sample` closes (165/169 → **169/169**),
+`012_Contextures_chart_sample` closes (**5/6 pages** and 126/130 → 6/6 and 130/130), and
+`WiGr_2021W_1_…pptx` closes on the slides track (2157/1958 → **1956/1958**). Both `012` and `013`
+now reproduce the reference **token for token, page by page**, including the reference's own
+clipping artefact — page 2 of each holds `outh Jan Feb Mar` on both sides.
+
+### The brief's central item reproduced and its explanation was wrong
+
+Round 54 said `013`'s picture is an `editAs="oneCell"` EMF the reference draws ~100 pt wider than
+its stated `a:ext`, that the reference answers to neither `editAs` nor `a:ext` nor the anchor's
+second corner, and that dropping `editAs` reproduces it to 0.2 pt. **Every measurement
+reproduces.** The reference was not reading that anchor at all.
+
+`ContextHandler2Helper::prepareMceContext` keeps the list of MCE namespaces the `oox` filters
+honour and **`a14` is on it commented out** — `// We do not currently support inline formulas and
+other a14 stuff` — and writerfilter's own list (`wps`, `wpg`, `w14`, `wpc`) excludes it too. `013`'s
+whole `xdr:twoCellAnchor` is inside `mc:Choice Requires="a14"` beside an *empty* fallback, so Calc
+reads no DrawingML anchor and round 54's three variants could not have moved anything. The picture
+Calc draws is the `v:shape` in the sheet's legacy VML, sized by `x:ClientData/x:Anchor`.
+
+**The variant that settles it**: unwrap the `mc:AlternateContent` and the reference draws the
+picture **twice** — at 129.5 from the DrawingML anchor it can now see and at 133.8 from the VML
+shape it was already drawing, 41 extractable words against 23. 129.524 against our own 129.540, so
+the `editAs` reading `SIL_TDB648` depends on is *validated*, not merely unbroken.
+
+Five more variants on the VML side, one edit each with a stated expected direction: removing the
+sheet's `legacyDrawing` relationship makes the picture disappear (23 words → 5); moving the VML
+anchor's `to` column widens it; halving the VML CSS width changes nothing; deleting the `x:Anchor`
+narrows it to the CSS rectangle.
+
+### The change, and the trap it walked around
+
+`a14` out of `UnderstoodExtensions` (shared, `Paperless.Ooxml`), plus a legacy-VML picture reader
+keyed on the worksheet's own `<legacyDrawing r:id>`. **The relationship type is the wrong key**:
+`legacyDrawingHF` shares it and points at header watermarks, so keying on the type would have drawn
+`PBN Matrix NAAs (V01)`'s 24 header images and one each on two more **matching** documents as
+objects on the grid. That trap was written into the prediction file as blind spot 4 before the
+reader existed.
+
+The slicer special case in `OoxmlXml` is removed: it existed only because `a14` was understood, and
+the general rule now reaches all seven of the corpus's `a14` slicer choices with byte-identical
+output on all three documents.
+
+Census over 946 documents, keyed on the **resolved URI** of every `Requires` prefix and confirmed by
+a second, dumber instrument: 2324 choices, **34 resolve to `a14` in 10 documents** — 7 sheets, 3
+slides, **0 words**.
+
+### Prediction: eight of nine exact
+
+The miss is `WiGr`, predicted to stay open and measured closed — and the prediction file had already
+said its *direction* was unbounded, only its verdict claimed. That is the second round running in
+which the blind-spot section was the most accurate part of the prediction.
+
+### Audit
+
+`SheetPageDecoration.cs` **WRONG in half**. The zero-band guard holds on 26.2.4.2 (and every
+negative band); "the reference draws the footer at every stated band above zero" is false — nothing
+at 0.72 or 1.44 pt of 8 pt text, and the threshold *scales with the point size*. Reported, not
+implemented: four corpus worksheets have a positive band under 6 pt and all four pass today. The
+probe found a real **18 pt** body displacement at a *negative* band beside it, which is fixed and
+which moves **nothing** in the corpus — verified by a whole-track re-sweep in which all 8 differing
+rows differ on the reference side only. Markers 13 → 14; open hits 42. **The audit file's own
+`44`/`12` do not reproduce and are corrected to `42`/`13`.**
+
+### Vision: two of four readings refuted by a second instrument within a minute
+
+The `013` and `012` page-1 reviewers reported a missing legend and differently-spaced clusters;
+`pdftotext` puts every token within **0.12 pt** on both. The `FAA-2019-0995-0002_attachment_2`
+reviewer was right, and larger than it read: **five pages draw `PAGE n OF 33` in ours and none in
+the reference — twenty tokens, which is that document's entire word surplus (10015 against 9995)**.
+The string is in no cell, no `oddHeader` and no `oddFooter`, and it is pre-existing.
+
+### Next
+
+**Sheets** — the five `PAGE n OF 33` blocks on `FAA-2019-0995-0002_attachment_2`; then
+`ChartLayout.IntervalsThatFit` (still untouched, four tokens on `005`, a law reaching every column
+chart); then the four `_advanced_excel_pie` documents, where the gate needs two of five tokens.
+
+### Parent verification — round 55 sheets
+
+**Sheets 274 → 276, slides 199 → 200, words 319. Corpus 795 of 946.** Whole corpus gated (all 946
+documents) because the diff is in `Paperless.Ooxml`: **three gains, zero regressions.**
+
+```
+Core 337   Containers 109   Text 611   Vector 295   Rendering 150(1 skipped)   Markup 259
+OpenDocument 125   WordProcessing 1155   Spreadsheets 940   Presentations 814     = 4795
+0 failed
+```
+
+The first ten-project run reported `Vector: Failed 1` — a project the diff cannot reach. Alone:
+**295 of 295**, 4.9 GB free. The documented load artifact, third sighting; the tell is unchanged.
+
+**An arithmetic correction of the parent's own.** The round-54 slides note recorded the merged tree
+as **4790**; the ten project figures sum to **4780**. The round-55 slides brief was dispatched
+carrying the wrong figure, so that round will report its delta against 4790 and be ten out. Fixed at
+the note. Same failure class as the quoted-not-re-derived figures the last three rounds have caught,
+with the parent as the source this time.
+
+**The cross-track measurement this diff owed was folded into the corpus gate** rather than run as a
+separate byte-reach pass — the change alters which `mc:AlternateContent` branch is taken, so
+verdicts are the quantity of interest and reach alone would not have shown the slides gain.
+
+### A dead special case removed, one round after it shipped
+
+Round 52 added a slicer exemption to `OoxmlXml` so a slicer `graphicFrame` would lose to its
+fallback. This round removed it as **unreachable**: with `a14` no longer in `UnderstoodExtensions`,
+the general rule already produces that outcome, and its three documents render **byte-identically**
+either way. A special case that was correct when written and became dead when the general rule was
+fixed — worth removing rather than leaving as a second, silent authority on the same question.
+
+### The audit's numbers were wrong in this file too
+
+The round found the audit file's `44` open / `12` marked did not reproduce at its base (`42`/`13`).
+That file now carries the **commands rather than counts**, for exactly this reason; any figure
+quoted from it elsewhere — including in this scoreboard — is a snapshot and should be re-run.
+
+`SheetPageDecoration.cs` is **WRONG in half**, marked at the site and **reported rather than
+implemented**. The zero-band guard and every negative band hold on 26.2.4.2, but *"the reference
+draws at every stated band above zero"* is false: nothing at 0.72 or 1.44 pt of 8 pt text, and the
+threshold **scales with the point size** (1.44–2.16 pt at 8 pt, 4.32–5.76 pt at 20 pt) — a text-fit
+rule. Four corpus worksheets have a positive band under 6 pt, all passing today, all above the
+bracket. **The probe found a real defect beside it, and that one is fixed**: at a *negative* band the
+reference starts the body at the page margin where we started it 18 pt lower.
+
+### `verify-test.sh` earned its place again
+
+The round's first ten tests all drove the reader directly, so **blanking its call site broke none of
+them**. The wiring test exists because that mutation came back clean. This is the third distinct
+shape of "a test that passes without reaching the defect" found in four rounds — after the unbound
+namespace and the single-run fixture.
+
+## Round 55 — slides — the brief's largest number was its own instrument, and the defect underneath it is project-wide
+
+**199 → 199 of 302, 0 page counts moved, 0 manifest disagreements.** `abs_ink` 1147.14 →
+**1136.53**, major pages 402 → **395**, `tf-agreement` 0.77054 → 0.77061.
+
+The largest of the eight ink regressions is **not one**: `Sylva introduction session.pptx` goes
+2.99 → 3.26 on unsigned ink while its **differing pixels fall 50.97 → 48.81** and its turn count
+goes from *34 blocks the reference does not turn* to **0, the reference's own figure**. By
+differing pixels only one document worsens by more than a quarter point:
+`ws_prod…M.017-(French)-France.ppt`, +1.04 on a deck already at 738.13.
+
+**And the headline number of this round is not in that table.** Summed differing-pixel percentage
+over the track's 4530 pages: **19823.86 → 19731.15, −92.71**, 46 documents moved, 38 better,
+8 worse. The synthetic-oblique fix alone is worth **−1.92 `abs_ink`** and **−76.89 differing
+pixels** over the same pages, because a leaning glyph and an upright one cover nearly the same
+area. Third round running in which the ink column is the wrong instrument for what shipped.
+
+### The brief's item 1 — "197 pages where the reference rotates and we do not" — is 43 + 157
+
+`rotated-text-census.py` calls a matrix rotated whenever `b` **or** `c` is non-zero. A
+synthetic-oblique text matrix is `[1 0 tan(θ) 1]` — `b` zero, `c` not — so **every fake-italic run
+counted as rotated.** Round 54 fixed one artefact in that instrument and left a second in place.
+
+The document that gives it away is the census's own **number two**:
+`section_1_our_rights_presentation.pptx`, 81 "rotated" blocks over 11 pages, of which the reference
+turns **zero** — all 81 read `c = 0.3462535606`. A scan of every text matrix in all 302 reference
+renderings finds **exactly one** non-zero shear value, repeated 587 times.
+
+Split properly: the reference **turns** 1318 blocks to our 1097 (43 pages we miss) and **shears**
+587 to our **0** (157 pages). And the shear is not a slides defect:
+
+| track | reference sheared **glyphs** | ours | pages | documents |
+|---|---:|---:|---:|---:|
+| slides | 16 008 | **0** | 157 | 44 |
+| **words** | **154 501** | **0** | **759** | 55 |
+| sheets | 15 497 | **0** | 106 | 10 |
+
+**186 006 glyphs over 1022 pages in 109 documents, and we drew none of them.** That is the largest
+single measured rendering defect the project has found.
+
+### Two instruments, both of which had to be replaced to get the number right
+
+`turn-census.py` separates turns from shears. Then `shear-chars.py` had to replace *it*, because
+counting text **blocks** is not comparable between the stacks — LibreOffice writes one `BT … ET`
+per text object with a `Tm` per run inside, we write one per glyph run, so a paragraph of three
+italic runs is one block there and three here. The block reading after the fix says we over-shear
+by 20%; the **glyph** reading says 16 740 to 16 008 and puts 1057 of that surplus in three named
+documents. The round nearly shipped "we over-shear" as a finding.
+
+### The rule, and a fixture built to discriminate
+
+`NeedsArtificialItalic()` is *the request is italic and the resolved face is not*, and
+`ARTIFICIAL_ITALIC_SKEW` is `float((1<<16)/3)/(1<<16)` handed to `Matrix3::skew`, **which takes it
+as an angle** — so the page gets `tan(0.3333333432674408) = 0.3462535606` and a shear of exactly
+one third would be wrong in the fourth decimal.
+
+Round 54's rule was taken seriously: the deck is authored by hand, and its columns give three
+candidate rules three different answers. **15 of 15 for "the face has no italic"**; refuted that
+the answer follows the *stated* family (`Verdana` substitutes onto DejaVu Sans and takes DejaVu
+Sans's answer) and that real italics lean too (Liberation Sans and Serif do not). The roman and
+italic halves carry the **same `TJ` array and the same pen origin**, so nothing reflows.
+
+### `a:bodyPr/@vert`, and the insets that travel with it
+
+−8.69 `abs_ink` and major 402 → 395 on six documents. `NAS-Infrastructure-Roadmaps-v16.0.pptx`
+turns **111 → 393 blocks** against the reference's 403, pages missing a turn **32 → 0**,
+159.88 → 151.76 with major 55 → 49.
+
+**`vert` and `eaVert` are one rendering** — different importer paths, 165 identical glyph matrices
+at identical positions. **The insets rotate with the turn**, which is not neutral on a body that
+states nothing: the DrawingML defaults come out 0.05 inch across and 0.1 inch down. The mapping
+derived from the C++ was **wrong by two slots** and an asymmetric 10/20/30/40 pt fixture corrected
+it. `mongolianVert` and `wordArtVert` are deliberately not turns and that too was measured.
+
+### The prediction failed a third time, and in a new way
+
+Documents moved: predicted 40–52, measured 32. Round 53 over-shot by extrapolating *candidates*,
+round 54 under-shot by censusing *visible symptoms*, and this round over-shot by censusing **the
+reference's own output** — the most direct census available. It was **right about the documents
+and wrong about the column**: 46 documents carry a reference shear, 27 moved on ink and 43 on
+differing pixels, because a deck with two sheared runs over thirty pages moves less ink than the
+column prints. The missing discipline is naming the *instrument* alongside the count, not a better
+census.
+
+The round's own stated control **held to the digit**: the oblique moved `tf-agreement` 0.77054 →
+0.77054 and exact-`/Tf` pages 1709 → 1709, exactly as predicted, which is what says the change did
+only what it was meant to.
+
+### The audit sprang its own trap for the second round running
+
+`OdpSlideLayout.cs:302` — **WRONG on 26.2.4.2, reported and not fixed.** The rule is no longer
+fixed at all: the reference obeys `style:font-independent-line-spacing` as stated, one em when
+true and the face's own 0.903 em when absent. **And the method is the finding**: `--convert-to
+odp` writes that attribute onto every cell it emits, so one rendering of a round-tripped fixture
+measures the exporter's habit and not the rule — round 54's lesson in a second form. A
+discriminating pair separates them on four sizes. Not fixed because **the slides corpus holds no
+ODF presentation at all** (251 `.pptx`, 51 `.ppt`).
+
+Open sites **42 → 40**. One of the two removed was a re-check; the other was **round 54's own
+marker prose naming the superseded version**, keeping a cleared site in the open count — the
+file's trap, sprung inside the file that documents it, one round after it was written down.
+
+### Cross-track, measured rather than argued
+
+The diff touches `Paperless.Core`, `Paperless.Text` and `Paperless.Rendering`. **Both other
+tracks were swept.** Words: **319 of 337, 0 manifest disagreements — no verdict moves**, sheared
+glyphs 0 → **158 673** against the reference's 154 501. Sheets: **272 `match` of 307**, sheared
+glyphs 0 → **15 509** against 15 497 with only **11 of 106** pages still disagreeing, and all ten
+affected documents `match` — the cleanest of the three. Of the 845 words pages with a shear on either side, we drew none
+on 759 before and **162** after. The 162 and a further 360 pages that differ by more than 2% are
+the **words track's own font-resolution divergence**, now visible for the first time because a
+wrong face and a right face both used to draw upright.
+
+Tests **4794 passed, 0 failed, 1 skipped** — and **the briefed base of 4790 does not reconcile**:
+4794 less this round's 14 new tests is 4780, with only three new test files in the diff. Re-derive
+it rather than quote it.
+
+### Slides does next
+
+1. **`.ppt` vertical text** — Escher `txflTextFlow` (0x88), 31 non-zero values in 4 documents,
+   unread. `PptSlideLayout` has no `Turned` equivalent; the OOXML half of this round built
+   everything else it needs.
+2. **Over-rotation is now the whole of the turn gap, and its biggest case is diagnosed.**
+   `Demick_JetBlue.pptx` is the track's **third-largest document — 26.10 `abs_ink`, 6 of 10 pages
+   major** — and its 76 turned blocks are **68 at 45° and 8 at 90°**. The eight match the
+   reference's eight exactly; the sixty-eight are a **chart's category axis** that the reference
+   **does not draw at all**: page 4 writes 52 `BT` to its 31 and extracts **163 words to its 79**,
+   one date fragment per rotated block. `SlideChart`'s axis-label placement, not `@vert`.
+   `8_P-Pavese_AIRBUS` 21 to 1 and `171128IPAP` 45 to 70 are next to classify. `Sylva` went
+   **34-to-0 → 0-to-0** as a side effect of `@vert` and `@rot` cancelling on one body.
+3. **The font-resolution divergence the shear exposed** — `2014BSA_Sunday_Killion` shears 948
+   glyphs where the reference shears none, and 360 words pages disagree by more than 2%. Same face
+   *lists* on both sides; the divergence is per-run.
+4. The fitted bullet's vertical placement (1.9 pt high, `ALIGN_BOTTOM` / `aBulletArea.Bottom()`),
+   untouched this round.
+5. `2015-Civil-Rights-Website-training.ppt`, 30.32 → 29.64 and still second largest.
+
+### Parent verification — round 55 slides
+
+**795 of 946 unchanged: words 319, slides 200, sheets 276. Zero gains, zero regressions, all 946
+documents gated** (the diff reaches `Paperless.Core`, `Paperless.Text` and `Paperless.Rendering`).
+That settles the round's own sheets figure of 272, which was harness loss — two `.xlsm` dropped
+under load and one 4372-page workbook timed out — not a regression.
+
+```
+Core 337   Containers 109   Text 617   Vector 295   Rendering 153(1 skipped)   Markup 259
+OpenDocument 125   WordProcessing 1155   Spreadsheets 940   Presentations 819     = 4809
+0 failed
+```
+
+`Vector` reported 1 failure in the ten-project run and **295 of 295 alone** — the load artifact,
+**fourth sighting**. The round independently re-derived the base as 4780 and said so, confirming the
+parent's own correction of 4790.
+
+### The largest defect found this session, and no gate column can see it
+
+**We drew zero synthetic-oblique glyphs. Anywhere.** The reference shears **186 006 glyphs across
+1022 pages in 109 documents** — slides 16 008, words 154 501, sheets 15 497 — and our output had
+none. After the fix: slides 16 740 against 16 008, words 158 673 against 154 501, sheets 15 509
+against 15 497; pages where the reference shears and we draw none fall from 157/759/106 to
+**3/162/11**.
+
+`NeedsArtificialItalic()` fires when the request is italic and the **resolved face** is not. The
+constant is `float((1<<16)/3)/(1<<16)` handed to `Matrix3::skew`, **which takes it as an angle**, so
+the page carries `tan(0.3333333432674408) = 0.3462535606` — exactly a third would be wrong in the
+fourth decimal.
+
+The hand-authored five-family deck was built to **discriminate** rather than to confirm (round 54's
+lesson, applied): 15 of 15 for *"the face has no italic"*, refuting *"by stated family"* — `Verdana`
+substitutes onto DejaVu Sans and takes its answer — and *"real italics lean too"*. The roman and
+italic halves carry the **same `TJ` array and the same pen origin**, so nothing reflows, which is
+why the gate is blind to all 186 006 glyphs.
+
+### The brief's item 1 was an artefact of the instrument round 54 had already fixed once
+
+`rotated-text-census.py` called a matrix rotated whenever `b` **or** `c` was non-zero. A synthetic
+oblique is `[1 0 tan θ 1]` — `b` zero, `c` not — so **every fake-italic run counted as rotated**.
+Round 54 fixed one artefact in that instrument and left a second.
+
+The giveaway was the census's own number two: 81 "rotated" blocks on a deck where the reference
+turns **zero**, all 81 reading the identical `c = 0.3462535606`, and a scan of every text matrix in
+all 302 reference renderings finding exactly **one** shear value, 587 times.
+
+Split properly: the reference **turns** 1318 blocks to our 1097, and **shears** 587 to our 0.
+
+**And the replacement instrument was nearly wrong too.** `turn-census.py` counts *blocks*, which are
+not comparable between the stacks — the reference writes one `BT` per text object with a `Tm` per
+run, we write one per glyph run — and it reads as a 20% over-shear that is **entirely granularity**.
+`shear-chars.py` counts glyphs. **The round nearly shipped "we over-shear" as a finding.** Three
+instrument defects in two rounds on the same question; the discipline that caught each was running
+it on a case whose answer was already known.
+
+### `a:bodyPr/@vert`, and a C++ derivation corrected by a fixture
+
+`vert`/`eaVert` turn a quarter clockwise, `vert270` the other way; `vert` and `eaVert` are **one
+rendering** (different importer paths, 165 identical glyph matrices at identical positions).
+`mongolianVert` and `wordArtVert` measured as **not** turns. **The insets rotate with the turn** —
+the round's first derivation from the C++ was **wrong by two slots**, and an asymmetric
+10/20/30/40 pt fixture corrected it. Cite the C++ for intent, measure for truth, again.
+
+Turned blocks 1097 → **1385** (reference 1318); pages the reference turns and we do not, 43 → **7**.
+Differing pixels over 4530 pages: 19823.86 → **19731.15**.
+
+**Eight ink regressions, named — and the largest is not one.** `Sylva` +0.27 ink while its differing
+pixels *fall* 50.97 → 48.81 and its turn count goes from **34 blocks the reference does not turn**
+to **0, its exact figure**. By differing pixels only one deck worsens by more than a quarter point.
+**The ink column is the wrong instrument for this class**, as it was for round 54's bullet.
+
+### Prediction
+
+Verdicts 0 ✓, page counts 0 ✓, `abs_ink` direction ✓, and **the stated control held to the digit** —
+the oblique moved `tf-agreement` 0.77054 → 0.77054 and exact-`/Tf` 1709 → 1709 exactly as predicted.
+Failed on documents-moved: predicted 40–52, measured 32. **Third consecutive miss on that quantity
+and a new failure mode** — this round censused the *reference's own output*, the most direct census
+available, and was **right about the documents and wrong about the column**: a deck with two sheared
+runs over thirty pages moves less ink than the column prints.
+
+### Audit
+
+`OdpSlideLayout.cs:302` **WRONG on 26.2.4.2, reported not fixed** — the reference obeys
+`style:font-independent-line-spacing` as stated (one em true, 0.903 em absent). Not fixed because
+**the slides corpus holds no ODF presentation at all**.
+
+**The method is the finding**: `--convert-to odp` writes that attribute onto every cell, so a
+round-tripped fixture measures the *exporter's habit* — round 54's lesson in a second form. A
+**discriminating pair** (byte-identical copy, one attribute deleted) separates them at four sizes.
+Round 54's own marker prose naming the superseded version was also cleared. Open **42 → 40**,
+marked 15 (13 verified, 2 wrong).
+
+### Slides does next
+
+1. **`.ppt` vertical text** — Escher `txflTextFlow` (0x88), 31 non-zero in 4 documents, unread;
+   `PptSlideLayout` has no `Turned` equivalent and everything else is built.
+2. **Over-rotation, and its biggest case is diagnosed**: `Demick_JetBlue.pptx` is third-largest at
+   26.10 ink with 6 of 10 pages major, and its 76 turned blocks are **68 at 45° + 8 at 90°**. The
+   eight match the reference; the sixty-eight are a **chart category axis the reference does not
+   draw at all** — p4 writes 52 `BT` to its 31 and extracts 163 words to its 79. **`SlideChart`, not
+   `@vert`.**
+3. **A font-resolution divergence the shear exposed** — `2014BSA_Sunday_Killion` shears 948 glyphs
+   where the reference shears none; same face *lists*, per-run divergence. **Invisible until now
+   because a wrong face and a right face both drew upright.**
+4. The fitted bullet's vertical placement (1.9 pt high), untouched.
+
+---
+
+## Round 56 — sheets
+
+**276 → 276 of 307. Zero verdict movement, predicted and measured.** What moved is ink, and the
+round's own instrument says how much: **46 rows where our font count moved, every one towards the
+reference and none away**; **41 of 81 banded documents whose header/footer agreement moved, 39
+improved and 2 worsened**; median per-document band displacement **1.515 pt → 0.220 pt**. Base
+`d968553554e`, reproduced to the document (`TOTAL 325 MATCH 290`, 276/31 against `MANIFEST.tsv`,
+zero disagreements). `dotnet/probes/sheets-r56/`, `prediction.md` at `015ecc19c73`.
+
+### The `PAGE n OF 33` blocks are an `oddHeader`, and round 55 said they were not
+
+`sheet10` — the *ACC list* sheet, pages 28 to 32 — states
+`&R\n\n\n\n\n\n\n&9PAGE \n&P OF &N`: the right area, **seven empty leading lines**, then 9 pt text.
+Round 55's "the string is in no cell, no `oddHeader` and no `oddFooter`" is an artefact of the
+search: `PAGE.*OF` cannot match a string split by a newline and a `&9`. **10015 → 9995, which is
+the reference's figure exactly**, on both case aliases.
+
+### There is no text-fit threshold. There is a clip rectangle.
+
+`PrintHF` sets a clip of exactly `Rectangle(aStart, nHeight − nDistance)` (`printfun.cxx:1870`) and
+`DrawText_ToPosition` **emits nothing at all** for an area whose primitive range misses it
+(`impedit3.cxx:3367-3372`); an area that meets it partly is wrapped in a `MaskPrimitive2D` and
+keeps every line. Round 55's "threshold, about 0.27× the point size" is `ascent − inkAscent`, and a
+bisection in 0.1 pt steps at three sizes brackets it at **0.2056–0.2087 em** — 8 pt turns over
+between 1.59 and 1.70 pt, 11 pt between 2.21 and 2.30, 20 pt between 4.11 and 4.20. **Round 55's
+20 pt bracket is refuted**: 4.32 pt draws. The clip is **per area, not per line**, which one
+authored case discriminates and which the *existing* three-line footer test detects when mutated.
+
+**The case a threshold could never have produced** is the corpus one: a 5.67 pt band, far above
+every bracket, drawing nothing because empty lines put the ink 90 pt below it.
+
+### And the band's face is the workbook's own default cell font
+
+Family, size, weight and posture — plus the `&"Family,Style"`, `&B` and `&I` codes, all of which
+26.2.4.2 honours. We drew every band in a hard-coded ten-point upright Liberation Sans while
+`SheetBandHeight`, the file that decides how *tall* the same band is, had always used the
+workbook's own font and had always read the `&"Family"` code. **The two halves of the same band
+disagreed on all 81 corpus workbooks that state band content.**
+
+**Key the weight on the PDF's font list, not on advance widths.** The Liberation faces are
+metric-compatible, so a bold band is exactly as wide as an upright one; a first pass at this probe
+measured x positions, found them identical and concluded the style code was ignored. It is not.
+
+### Blind spot 1 fired exactly where it was pointed
+
+The prediction named `.xls` as invisible to both censuses. `NPIAS_App_A.xls` came out of the first
+sweep emitting a font the reference does not — its app font is **MS Sans Serif bold**, and drawing
+the family without the weight put `DejaVuSans` where the reference draws `DejaVuSans-Bold`. Three
+of the four word-count movements are `.xls` too, and none of the four is content: our base glued
+header tokens together (`PageII:6Architecture`) because a whole area was one run; the run now
+splits where the face changes and the tokens come apart — **towards** the reference's own
+tokenisation while the *count* moves away from it. Worth stating plainly: on those three the gate's
+metric is the worse of the two available readings.
+
+### Vision: two confirmed, two refuted, and a phantom that has now fooled two rounds
+
+Three blind reviewers, three pages. **Confirmed by a second instrument**: three `#C0C0C0` cell
+fills on `FAA…attachment_2` p28 that we do not draw at all; and an **18.46 pt uniform downward
+translation of the body** on `fm-provider-service-measures` p36 whose *band* agrees to 0.0005 pt —
+with `FY2023-AIP-grants` p1 showing the same defect at 18.49 pt, both pre-existing, both on
+passing documents. **Refuted**: "we draw vertical rules the reference does not" on `NPIAS_App_A`
+(we draw 22, it draws 24 — the claim points the wrong way); and "the reference runs
+`FILTER ASSY HYD291143 CMM` together where we break it", which is the **second round running** that
+a reviewer has reported that exact difference on that exact cell and been wrong.
+
+### Audit
+
+`SheetShapeText.cs`'s 12 pt default **VERIFIED** by two instruments with the control first;
+`SheetNotes.cs`'s column-major note order **VERIFIED** on its own witness, which discriminates
+(reading order would put `L1` second and both put it fifth); `SheetPageDecoration.cs` **re-marked**
+and now implemented. Counters re-derived: **42 open, 17 marker lines (15 verified, 2 wrong)** —
+the file's `14 — 9/3/1/1` reproduces at neither this tree nor the base. **One of the three commands
+that file gives is wrong under a tree-ish argument** and silently returns 0; fixed there.
+`Paperless.Spreadsheets` is **eight of ten** re-checked, seven correct, and the one wrong is still
+the only *furniture* claim among them — which is now a pattern and is why `XlsxNoteCaptions.cs`
+should be taken before `SheetText.cs`.
+
+### `IntervalsThatFit`: censused, not touched
+
+**256 automatic value axes against 30 stated ones, in 129 documents — 79 sheets, 47 slides, 3
+words** — and `ChartLayout` is in `Paperless.Core`. Not four tokens on `005`. The round leaves
+three candidate divergences with one already bounded: the mm100 truncation can only raise the
+quotient by `1/floor(needed)` ≈ 0.25%, and **the label shape's insets cannot be the explanation
+because the sign is wrong** — the reference gets *more* intervals than we do, so its divisor is
+smaller, not larger.
+
+### Tests and shared layer
+
+**4795 → 4811, 0 failed, 1 skipped**, all +16 in `Paperless.Spreadsheets`. Eight mutations through
+`verify-test.sh`, seven detected and the eighth an equivalent formulation (reported as such).
+**No shared layer touched** — every file is in `Paperless.Spreadsheets` — so no cross-track sweep
+is owed. `MANIFEST.tsv` unchanged: no row moves status.
+
+### Next
+
+The **18.46 pt body offset** (two witnesses, and `statedBand − nominal` is 18.4 on one of them, so
+test whether the header height is counted twice); then the **grey cell fills**; then
+`IntervalsThatFit` from authored charts rather than from `005`; then the four `_advanced_excel_pie`
+documents.
+
+### Parent verification — round 56 sheets
+
+**Sheets 276 → 276 of 307, verified over all 307 documents: zero in either direction, as predicted.
+Corpus 795 of 946.** Tests at the merged tree **4827, 0 failed** (Spreadsheets 940 → 956).
+
+The diff is entirely inside `Paperless.Spreadsheets` — **no cross-track sweep owed**, and
+`OdsPrintSetup` was deliberately left alone.
+
+### Two of round 55's own sentences refuted, and both were search artefacts of a kind worth naming
+
+- **"The `PAGE n OF 33` string is in no cell, no `oddHeader` and no `oddFooter`."** It is in an
+  `oddHeader`: `sheet10` states `&R\n\n\n\n\n\n\n&9PAGE \n&P OF &N`. **`PAGE.*OF` cannot match a
+  string split by a newline and a `&9`.** The claim was true of the regex and false of the document.
+- **"There is a text-fit threshold scaling at about 0.27× the point size."** There is **no
+  threshold**; there is a **clip rectangle**. `PrintHF` sets `Rectangle(aStart, nHeight − nDistance)`
+  and `DrawText_ToPosition` emits *nothing at all* for an area whose primitive range misses it,
+  while an area that meets it partly is masked and **keeps every line**. The 0.27 figure is
+  `ascent − inkAscent`; bisection at three sizes brackets the real quantity at **0.2056–0.2087 em**,
+  and round 55's 20 pt bracket is refuted outright — 4.32 pt draws.
+
+`FAA-2019-0995-0002_attachment_2` now reads **9995 words, the reference's figure exactly**, on both
+case aliases.
+
+### The larger defect the same probe found
+
+**The reference draws band text in the workbook's own default cell font** — family, size, weight and
+posture — plus the `&"Family,Style"`, `&B` and `&I` codes. We drew every band in hard-coded ten-point
+upright Liberation Sans, **while `SheetBandHeight`, which sizes the same band, had always used the
+workbook's font and read the `&"Family"` code.** Two halves of one band disagreeing, on all **81**
+banded workbooks.
+
+**And the instrument nearly hid it: key on the PDF's font list, not on advance widths.** The
+Liberation faces are metric-compatible, so a first pass measuring x positions concluded the style
+code was ignored. Font-count agreement moved on **46 rows, all towards the reference and none away**;
+band agreement moved on **41 of 81 documents, 39 improved and 2 worsened**; median per-document
+displacement **1.515 → 0.220 pt**.
+
+Four word counts moved and **none is content**: header tokens that used to be glued
+(`PageII:6Architecture`) now split where the face changes — *towards* the reference's tokenisation
+while the count moves away from it. Three of the four are `.xls`, exactly where the prediction's
+blind spot 1 pointed.
+
+### `IntervalsThatFit` is not a four-token fix, and the census is why it was not started
+
+**256 automatic value axes against 30 stated, in 129 documents — 79 sheets, 47 slides, 3 words —
+and `ChartLayout` lives in `Paperless.Core`.** Three briefs of mine described it as "four tokens on
+`005`". Censused and left, with the mm100 truncation bounded to 0.25% and the shape-inset hypothesis
+ruled out on sign. **This is the right call**: a `Paperless.Core` change reaching 129 documents is
+not something to start at the end of a round.
+
+### The audit gains a fourth outcome, because the count could not answer the question that matters
+
+A `WRONG` marker whose prose said *"fixed"* was indistinguishable from one whose prose said
+*"reported, not fixed"*, so **no command could report how many claims known to be false are still
+shipping**. `FIXED` added; the two repaired sites re-marked. **`WRONG` now means the defect is
+live.** At this commit: **40 open, 15 verified, 2 fixed, 1 wrong** — and the one live wrong claim is
+`OdpSlideLayout.cs`, unfixable here because the slides corpus holds no ODF presentation at all.
+
+The round also found **one of the three commands this file gives silently returned 0** under a
+tree-ish argument, and re-derived the counters the file had stored. Fixed. Per-project totals now
+cross-check against the global figure.
+
+Audit sites: `SheetShapeText.cs` **VERIFIED** (12 pt, two instruments, control first);
+`SheetNotes.cs` **VERIFIED**; `SheetPageDecoration.cs` **FIXED**. `Paperless.Spreadsheets` is 8 of 10
+re-checked, 7 correct, and the only wrong one was the only *furniture* claim.
+
+### Vision
+
+Confirmed by a second instrument: **three `#C0C0C0` cell fills on FAA p28 we do not draw at all**;
+and an **18.46 pt uniform downward translation of the body** on `fm-provider-service-measures` p36
+whose *band* agrees to 0.0005 pt — `FY2023-AIP-grants` p1 shows the same at 18.49 pt. Both
+pre-existing, both on passing documents.
+
+Refuted: *"we draw vertical rules the reference does not"* — we draw 22 and it draws 24, **the wrong
+direction**. And the `FILTER ASSY HYD291143 CMM` wrap is now the **second round running** that a
+reviewer has reported that exact phantom on that exact cell — worth treating as a property of the
+composite rather than of the document.
+
+### Sheets does next
+
+1. **The 18.46 pt body offset** — two witnesses agreeing to a twentieth of a point, both on passing
+   documents; on `fm-provider` sheet 7, `statedBand − nominal` is **18.4 pt exactly**, so test
+   whether the header height is being counted twice.
+2. **The grey cell fills** — census before writing.
+3. `IntervalsThatFit` **from authored charts, not from `005`** — and it is a `Paperless.Core` change
+   reaching 129 documents, so it owes a corpus gate.
+4. The four `_advanced_excel_pie` documents. 5. `XlsxNoteCaptions.cs`, then `SheetText.cs`.
+
+---
+
+## Round 57 — sheets
+
+**276 → 276 of 307, zero verdict movement, as predicted. Corpus 795 of 946.** The baseline came
+back **277** and the extra one was the calendar, not the code: the corpus mount gives
+`fse_identification_form` two names, `batch-check.sh` rendered it twice minutes apart, and the
+*reference's* word count moved 427 → 440 between them while ours stayed pinned at 440. **The case
+alias, normally a counting nuisance, is the cheapest available control on the reference's own
+reproducibility.**
+
+### The 18.46 pt body offset is a band that is not scaled, not a header height counted twice
+
+Both of round 56's witnesses are **scaled** worksheets — `fitToHeight="17"` and `scale="43"` —
+and `ScPrintFunc::GetDocPageSize` (`printfun.cxx:3002`) builds the page rectangle in *document
+twips*: `(top + nTopMargin) * 100 / nZoom + aHdr.nHeight`, each margin divided by the zoom and
+each band added whole. A document twip reaches the paper at `zoom/100` of a physical twip, so the
+margin comes back out at full size and **the band arrives at `nHeight × zoom/100`**.
+
+`SheetPagination.DocPageSize` had ported that arithmetic since it was written — which is why no
+page count was ever wrong — but its *comment* said the bands "are printed at full size whatever
+the sheet's scale", and `SheetPrintSetup.PrintableArea`, which places what a page holds,
+implemented the comment. **Two ports of one formula, one written from the prose of the other.**
+
+Five authored scales with the 100 % control first: `ours − ref` on the first body token was
+0.03 / 6.86 / 13.65 / 20.44 / 25.57 and is now **0.03 / 0.08 / 0.02 / 0.00 / 0.03**. Median
+displacement over the witnesses' paired tokens: `fm-provider` p36 **18.460 → 0.006** (550 tokens),
+`FY2023-AIP-grants` p1 **18.489 → 0.035** (2242). `FY2023-AIP-grants` now reads **51045 words, the
+reference's figure exactly**, and `fm-provider` p15 went 599/610 to **610/610 with an empty
+`ours − ref` difference**.
+
+**The band's own text was already right and agrees at all five scales** — `DrawBand` has taken the
+zoom since it was written. That is why a scaled sheet's header was the correct size over a body in
+the wrong place, and it is what made the defect look like a mystery rather than a scale.
+
+**Six word counts moved and every one is an increase**, which is what the prediction said the
+mechanism could only produce — the body moves *up*, so a row that ran off the bottom comes back.
+**Three of the six are `.xls`**, the third round running that blind spot has fired where it was
+pointed. `fm-provider`'s total moved *away* from the reference and the change is still right: the
+whole movement is on one page, where it closed exactly.
+
+### The grey fills are conditional formatting, and the census says do not start there
+
+The three `#C0C0C0` fills on `FAA…attachment_2` p28 are a `cfRule type="expression"` with the
+formula `MID($C5,1,7)="MISSING"` and a `dxf` of `bgColor indexed="22"`. Not style inheritance —
+both the `cellXf` and its `xfId="6"` cell style state `fillId="0"`. **89 of 243 xlsx-family
+documents carry a `cfRule` and we draw none of them**: `colorScale` 38, `expression` 34, `cellIs`
+18, `dataBar` 6, `containsText` 5. So "three grey fills" is the *hardest* arm of a subsystem
+reaching 89 documents, and the order to take it in is `colorScale` (no formula at all), then
+`cellIs` (a comparison), then `expression` last.
+
+### The `_advanced_excel_pie` cluster is not clipping — refuted
+
+Both renderers emit **every** glyph of every label; `17%`/`7%` and `trend`/`rend` are `pdftotext`
+decoding a run whose origin is off the left edge of the MediaBox. The labels are in different
+*places*, for two measured reasons: **the reference wraps each pie data label onto two lines**
+(`M2; Actual; 100;` then `19%` 11.2 pt below, against our single 20-glyph run) which moves a
+centred label 27 pt sideways; and **every chart run is in the wrong face** — the reference's title
+is **18.01 pt Carlito Bold** against our **13.00 pt Liberation Sans**. Both reported independently
+by a blind reviewer on a page chosen for a stated reason.
+
+### Vision: one confirmation, one extension, two refutations — and a class
+
+The reviewer on the page the change targets declined to call a vertical difference at all, which
+is the fix seen from outside. The FAA grey shading was **confirmed** and its *extent* misread —
+three rectangles spanning whole rows, read as stripes down seven columns.
+
+**Refuted:** *"ours reads `Page 24 of 18` where the reference reads `Page 18 of 18`"* — neither
+string is in either document; both read `Page 34 of 38` … `Page 37 of 38` identically. A 3.79 pt
+footer at 150 dpi is below what a reader can resolve, and this is the first invented *token* on
+this track rather than a misjudged position. And *"ours draws a black outer border the reference
+does not"* — the reference draws **90 horizontal and 5 vertical** strokes on that page against our
+**44 and 4**. **Second consecutive round a reviewer has reported a rule the reference supposedly
+omits, and the second in which the reference draws more of them than we do.** Treat over-reported
+borders on our side as a class.
+
+### Audit: `XlsxNoteCaptions.cs` **VERIFIED**, and the pattern that sent us there did not repeat
+
+96 dpi exactly on 26.2.4.2 — control first (offset 0 lands on the row grid to 0.012 pt), then
+three steps of 14.998 pt for 20 px. **The probe's first cut read "neither" at every step and was
+measuring a clamp**: 20 pt rows are 26.7 px, so offsets of 48, 96 and 144 all saturated at one
+row. That clamp is a rule the site never stated and we do not implement — recorded, not fixed, at
+**5 anchors of 365 in one document of fifteen**. *And that census also had to be written twice*:
+its first cut compared every anchor against the tallest row anywhere in the workbook and answered
+zero. Counters re-derived: **39 open, 19 marker lines (16/2/1/0)**; at the base **40 and 18**,
+against a stored **42** with `Presentations 11`. Round 56's "the only wrong sheets site is the
+only furniture claim" was two observations of one event and did not repeat.
+`Paperless.Spreadsheets` is **nine of ten**, eight correct; `Layout/SheetText.cs` is the last.
+
+### Tests and shared layer
+
+**4825 → 4830, 0 failed, 1 skipped**, all +5 in `Paperless.Spreadsheets` (956 → 961). Three
+mutations through `verify-test.sh`, all three detected, including **the wiring** — the unit test
+alone passes under `PrintableAreaAt(1.0)` at the call site, because the unit is still correct and
+simply never asked for the page's scale. **No shared layer touched**; no cross-track sweep owed.
+`MANIFEST.tsv` unchanged.
+
+### Next
+
+1. **Conditional formatting, `colorScale` first** (38 documents, no formula needed). 2. **The
+chart face** — Carlito against our Liberation Sans, a font-resolution question before it is a
+layout one. 3. The **pie data-label wrap** (`Paperless.Core`, owes a corpus gate). 4.
+`Layout/SheetText.cs`, the last audit site. 5. `IntervalsThatFit`, still untouched. 6. The **note
+page's own scale**, left at 1.0 on purpose and written down at the call site, together with the
+note page's `Placement = default` that draws its band at a **one per cent** zoom.
+
+## Round 56 — words — the over-shear and the under-shear were the same line of code
+
+`dotnet/probes/words-r56/` — `prediction.md` (`3c9619f3bd1`) and `prediction-checkbox.md`
+(`c7325332de9`), each committed before the change it covers and before any post-change rendering.
+Baseline reproduced exactly: **319 of 337, zero disagreements with `MANIFEST.tsv` document for
+document.** After both changes: **319 of 337, zero verdicts moved, zero page counts, zero word
+counts, zero font lists** — over the whole track, `done-*` included, swept three times.
+
+**The whole diff is confined to `Paperless.WordProcessing`.** No shared layer is touched, so slides
+and sheets cannot be reached and no cross-track sweep is owed.
+
+### Synthetic oblique did not survive the uniform-paragraph shortcut, at any of the four readers
+
+Every word-processing reader folds a paragraph whose formatting does not *vary* into a single run,
+and each of the four sites writes the list of properties that count out longhand — highlight,
+underline, strike-through and case map each with a sentence saying why it is there. Slant was not on
+it, and **for nearly every family it did not need to be**: an italic run of `Arial` resolves to
+`LiberationSans-Italic`, a different `OpenTypeFace`, so `face != paragraphFace` already fires. The
+families with **no italic installed at all** are exactly the fallback faces — DejaVu Sans and DejaVu
+Serif ship Book and Bold and nothing else here — so an italic run that falls back resolves to the
+*same* face as its upright neighbour and is drawn upright.
+
+**And the same fold read the other way drew whole paragraphs of upright prose leaning**, because an
+italic paragraph mark donates its own font to every run folded into it. **The brief posed the
+over-shear and the under-shear as two problems. They are one line of code**, and one clause at each
+of four sites moved both:
+
+| | baseline | after |
+|---|---:|---:|
+| sheared glyphs, ours (reference 154 501) | 158 673 | **153 806** |
+| documents the reference shears more of | 38 (6 819 glyphs) | **39 (1 611)** |
+| documents **we** shear more of | 8 (10 991 glyphs) | **5 (916)** |
+| documents where we shear none and it shears some | 15 | **11** |
+| pages where the reference shears and we draw none | 162 | **148** |
+| pages that agree outright | 4 382 | **4 394** |
+
+`644730BRI…doc` 6 643 → **2 124** against 2 171; `SPA-02_mcar` 58 011 → **54 175** against 54 694;
+`EHEST-SMS` 8 470 → **13 629** against 13 473; `review-welsh…mandelson` 0 → **105** against 105.
+
+Seated by a **discriminating pair**, ten authored one-paragraph two-run packages: a run stating only
+`w:i` in a fallback family is 23 sheared glyphs on the reference and **0** on ours; the same run with
+a `w:sz` added — a property the predicate already tests — is 23 and **22**. The two differ by one
+thing and no reading of `w:i` predicts it. Five negative controls are nought on both sides
+throughout, including `w:iCs`, which **does not lean Latin text on 26.2.4.2** and was a live
+candidate for the over-shear.
+
+### The prediction missed seven columns and was right about the two it staked its reasoning on
+
+Verdict movement 0 ✓ and page counts 0 ✓ — and the page-count zero was the *stated control*, because
+`FormattedRun` does not carry the font reference, so `PageContent.Coalesce` rejoins a paragraph split
+only by this into exactly the shaping it had. Everything else missed, **in the direction the
+prediction had written down as the thing it could not see**: blind spot 2 said it *"cannot rule out
+that this fix makes the over-shear worse"*, and the fix cured it. **Predicting a band for a defect
+while modelling only half of it produces a confident band that misses on both edges.**
+
+### The legacy `FORMCHECKBOX`: the record's premise was false and the fix shipped
+
+Since round 38: *"249 fields across 16 documents — deliberately not implemented: the drawn square's
+size would not pin (9.0…15.9 pt, not following `w:checkBox/w:size`)"*. **Both halves are wrong.**
+
+The census is **675 boxes in 12 documents**, all `.docx`, read over every part of every package. And
+the size pins exactly: the portion is a square of `rInf.GetTextHeight()` with the line's own ascent
+(`portxt.cxx`:1492) and the drawn rectangle is that square deflated by a hard **25 twips a side**
+(`inftxt.cxx`:1247), crossed corner to corner when ticked. **9.0…15.9 pt was a range of font sizes
+read as a failure to pin.** Measured on seven sizes and five faces with a duplicate-input control
+that ran first: 184/134, 276/226, 552/502, 920/870 twips — a constant 50 at every size — and the
+square changes with the *face* at one stated size. Four fixtures stating `w:size` of 5 to 40 pt all
+draw the run's own 11.300; **`w:size` is inert**, and 109 of the 675 state one.
+
+**The width is the half that moves a line**: 675 positions were reserving nothing where the reference
+reserves the line's whole text height. Against the reference: `FO.FCTOA.00010` **249 to 249**,
+`Form-SM-76A` **152 to 152**, `te.iors.00048-002` **48 to 48**, sides identical to 0.000 pt. Byte
+reach **exactly the 12 censused documents and nothing outside them**, which is the prediction hit
+outright — and all 12 were already passing, so the change could gain nothing on the gate and lost
+nothing either.
+
+### The audit, and a probe that manufactured nine findings before it manufactured none
+
+`WriterPoolSpacing.cs` **VERIFIED 2026-08-21, round 56** — the whole table re-measured on 26.2.4.2,
+28 names, both halves of every row, two controls first. **27 of 28 agree**; lower-case `body text`
+answers nought on both sides where the table claims 0/140 and is removed (zero corpus documents name
+a parent that way, 80 name `Body Text`). That row is the one the site's own prose had already put in
+doubt and left standing for whichever round re-measured the table.
+
+**The probe's first run reported nine rows wrong and every one was an artefact.** It named the two
+case variants of a heading `heading-5` and `Heading-5`, which are **one file** on this
+case-insensitive mount, so 28 of 58 conversions were silently missing — and a missing file reads as
+nought, which reads as a finding. The tell was the *shape*: `heading 5` and `heading 8` wrong,
+`heading 4` and `heading 6` right, which is not a rule any binary could implement. It now numbers its
+packages and refuses to print anything unless every conversion produced output. **Fourth instrument
+defect in three rounds on this project, and the fourth caught by the same control.**
+
+Counts re-derived, not quoted: **40 open sites in 21 files, markers 16 → 17 (14 verified, 3 wrong).**
+
+### Vision found the round's mechanism before the round did
+
+Three pages, each chosen for a stated reason, each handed to a reader forbidden from reading anything
+else. On `644730BRI…doc` page 2 the reviewer reported **an entire lead paragraph set slanted on our
+side and upright on the reference's** — which is what turned "we lose leans" into "the fold loses the
+disagreement in both directions", before the mechanism was understood. On `AFS-050-004-F2_0i` page 2
+the five undrawn banner rows are confirmed **and the standing record's direction is corrected**: our
+rows are the *looser* ones, and it is the reference that runs out of page a row earlier. On
+`FO.FCTOA.00010` page 3 the reader put the missing square at *"the cap-height of the adjacent bold
+label text"* — an independent reading of a rule this round then pinned to the twip.
+
+### Tests
+
+```
+Core 337   Containers 109   Text 617   Vector 295   Rendering 153(1 skipped)   Markup 259
+OpenDocument 125   WordProcessing 1180   Spreadsheets 940   Presentations 819     = 4834
+0 failed, 1 skipped
+```
+
+**4809 → 4834, +25**, all in `WordProcessing`. **Seven mutations, seven detected**, and all four
+reader arms individually. The fourth only became so inside the round: `verify-test.sh` first reported
+the `DocReader` site **not detected by any of the 1164 WordProcessing tests**, and it is the arm with
+the largest measured corpus effect. A `.doc` cannot be authored from a string, so the new fixture is
+LibreOffice's own Word 97 export of a flat ODF whose font face declares no generic — the one route
+that reaches the WW8 import with a real `ff = 0`. Two tests are labelled **drift guards** rather than
+counted as detectors.
+
+### Words does next
+
+1. **Synthetic oblique is lost a *second* time, on the glyph-fallback face.**
+   `SystemFontResolver.ReferenceFor` is a reverse lookup from a face with **no request to compare
+   against**, so a run whose glyph comes from a fallback face is drawn upright however italic it is.
+   289 of the residual 1 611 short glyphs are in faces no document names — WenQuanYi Zen Hei 177,
+   OpenSymbol 112 — led by `手机免提系统TSB.doc` 82 and `A320SimNotes.doc` 75. **In `Paperless.Text`;
+   owes a measured cross-track sweep.**
+2. `AFS-050-004-F2_0i` page 2's five banner rows — extract our text layer for `0.000 General
+   Information…` and `CE-1 …` and separate present-but-unpainted from never-read.
+3. `2024-12_Comlux…docx`: the reference draws `LiberationSans-Italic` on 652 glyphs where we draw
+   `DejaVuSans`. Same face *count*, different face — visible only because both stacks no longer draw
+   upright.
+4. The `ascii` slot fallback (four documents), then `097`'s 1.7 pt line-height deficit, untouched for
+   five rounds.
+5. The `.doc` and `.rtf` arms of the form checkbox — WW8's `PLCF` of field characters and RTF's
+   `\*\formfield`, neither censused. "675 in 12" is exact for OOXML and a floor for the corpus.
+
+---
+
+## Merge note — round 56 words and round 57 sheets (2026-08-21)
+
+**Words 319, sheets 276, slides 200. Corpus 795 of 946 — unchanged, and both rounds predicted
+that.** Verified over all 337 words and 307 sheets documents: **zero gains, zero regressions, zero
+page counts, zero word counts on the words track.**
+
+```
+Core 337   Containers 109   Text 617   Vector 295   Rendering 153(1 skipped)   Markup 259
+OpenDocument 125   WordProcessing 1180   Spreadsheets 961   Presentations 819     = 4855
+0 failed
+```
+
+`Paperless.Text` returned an **empty result** in the ten-project run and 617 of 617 alone — the
+load artefact in a new form: not a false failure but **no output at all**. Fifth sighting, first
+time silent. A blank cell in that column must be re-run, never read as zero.
+
+### Words: the over-shear and the under-shear were one line, and the brief said they were two
+
+Round 55 left the words track shearing **158 673 glyphs against the reference's 154 501**, with
+**162 pages** where the reference sheared and we drew none. I briefed those as two problems.
+
+**Synthetic oblique did not survive the uniform-paragraph shortcut**, at any of the four readers.
+Each site writes out longhand which properties count as "varying" — highlight, underline,
+strike-through, case map — and **slant was not on the list**. For most families it did not need to
+be: an italic `Arial` resolves to `LiberationSans-Italic`, a different face, so the fold already
+breaks. **But the families with no italic installed are exactly the fallback faces** — DejaVu Sans
+and Serif ship Book and Bold here and nothing else — so an italic run that falls back resolves to
+the *same* face as its upright neighbour and is folded away. **And the same fold read the other way
+drew whole paragraphs of upright prose leaning**, because an italic paragraph mark donates its font
+to every run folded into it. One clause at each of four sites moved both directions.
+
+| | before | after | reference |
+|---|---:|---:|---:|
+| sheared glyphs (ours) | 158 673 | **153 806** | 154 501 |
+| documents we shear more of | 8 (10 991 glyphs) | **5 (916)** | |
+| documents the reference shears more of | 38 (6 819) | **39 (1 611)** | |
+| pages the reference shears and we draw none | 162 | **148** | |
+
+Seated by a **discriminating pair**: a run stating only `w:i` in a fallback family is 23 sheared
+glyphs on the reference and **0** on ours; the same run with a `w:sz` added — a property the
+predicate already tests — is 23 and **22**.
+
+### The `FORMCHECKBOX` record was wrong in both halves, and the decision that rested on it was wrong
+
+The standing record said **249 fields in 16 documents**, and that they were *deliberately not
+implemented* because the drawn square would not pin — "9.0…15.9 pt, not following
+`w:checkBox/w:size`".
+
+- The census is **675 in 12**, all `.docx`, read over every part of every package.
+- **The size pins exactly.** The portion is a square of `rInf.GetTextHeight()` on the line's own
+  ascent, and the drawn rectangle is that square deflated by a hard **25 twips a side**: 184/134,
+  276/226, 552/502, 920/870 — **a constant 50 at every size**, over seven sizes and five faces with
+  a duplicate-input control that ran first. **"9.0…15.9 pt" was a range of font sizes read as a
+  failure to pin.**
+- `w:checkBox/w:size`, which 109 of the 675 state, is **inert** on four values from 5 to 40 pt.
+
+Implemented: `FO.FCTOA.00010` **249 of 249**, `Form-SM-76A` **152 of 152**, `te.iors.00048-002`
+**48 of 48**, sides identical to 0.000 pt. **675 positions had been reserving nothing**, and the
+width is the half that moves a line. Byte reach: exactly the 12 censused documents, nothing outside.
+
+### The round's own audit probe produced an artefact and recorded it as one
+
+It reported **nine pool-spacing rows wrong**. The probe named two case variants, `heading-5` and
+`Heading-5`, which are **one file on this mount**, losing 28 of 58 conversions — **a missing file
+read as nought read as a finding.** Caught by shape rather than by luck: *"`heading 5` wrong and
+`heading 4` right" is not a rule any binary implements.* It now numbers packages and refuses to
+print unless every conversion produced output. `WriterPoolSpacing.cs` is **VERIFIED**, 27 of 28
+names right; the lower-case `body text` row is wrong and removed (0 corpus documents name a parent
+that way, 80 name `Body Text`).
+
+### Sheets: the offset was the print scale, and two ports of one formula disagreed
+
+Not a header height counted twice — that was my lead and it was wrong. **Both witnesses are scaled
+worksheets** (`fitToHeight="17"`, `scale="43"`), and `ScPrintFunc::GetDocPageSize` builds the page
+rectangle in *document twips*, so the band reaches the paper at `nHeight × zoom/100`.
+`SheetPagination.DocPageSize` had ported that arithmetic correctly since it was written;
+**`SheetPrintSetup.PrintableArea` implemented `SheetPagination`'s *comment* instead.** Two ports of
+one formula, one written from the prose of the other — a failure mode worth naming, because the
+prose was not wrong, it was just not the arithmetic.
+
+Five authored scales with a 100% control first: `ours − ref` on the first body token went
+`0.03 / 6.86 / 13.65 / 20.44 / 25.57` → **`0.03 / 0.08 / 0.02 / 0.00 / 0.03`**. Corpus medians:
+`fm-provider` p36 **18.460 → 0.006** over 550 tokens, `FY2023-AIP-grants` p1 **18.489 → 0.035** over
+2242. `FY2023-AIP-grants` now reads **51045 words, the reference's figure exactly**.
+
+### The `_advanced_excel_pie` cluster is not clipping — and I briefed it as clipping three times
+
+**Both renderers emit every glyph.** `17%` → `7%` is `pdftotext` decoding a run whose origin is off
+the MediaBox. Two measured causes instead: the reference **wraps each pie data label onto two
+lines** (17 + 3 glyphs, 11.2 pt apart), which moves a centred label 27 pt sideways; and **every
+chart run is in the wrong face** — the title is **18.01 pt Carlito Bold** against our **13.00 pt
+Liberation Sans**.
+
+### A new subsystem, censused not started
+
+**Conditional formatting: 89 of 243 xlsx-family documents carry a `cfRule` and we draw none** —
+`colorScale` 38, `expression` 34, `cellIs` 18. The FAA grey fills are `cfRule type="expression"`
+with `MID($C5,1,7)="MISSING"`, which is the **hardest** arm. `colorScale` first: 38 documents and no
+formula evaluator needed.
+
+### The baseline refuted itself, correctly
+
+The sheets round measured **277**, one above the brief. The cause is the calendar plus the case
+alias: `batch-check.sh` rendered `fse_identification_form` **twice minutes apart** and the
+**reference's** count moved 427 → 440 while ours stayed pinned at 440. Reproducible baseline 276.
+That is the date-volatility trap and the alias trap arriving together, and the round separated them.
+
+### Two reviewer reports refuted, and a pattern in them
+
+*"Ours reads `Page 24 of 18`"* — **neither string exists**; both sides read `Page 34…37 of 38`
+identically. First invented **token** on this track. And *"ours draws a border the reference does
+not"* — the reference draws **90 h / 5 v** strokes against our **44 / 4**. **Second consecutive
+round a reviewer over-reports a border on our side and points the wrong way.**
+
+Against that: on `644730BRI…doc` p2 a reviewer reported an entire lead paragraph slanted on our side
+and upright on the reference's — **that reading is what turned the words round's hypothesis into the
+right one before the mechanism was understood.** Vision is still where the leads come from; it is
+confirmation it cannot supply.
+
+### The audit file no longer keeps a snapshot
+
+Three consecutive rounds re-derived its stored counts and found them wrong each time — 42 against 40
+against 39, with a per-project figure wrong alongside. **A number in that file is a number someone
+quotes instead of running the command.** Removed. Live at this commit: **39 open, 17 verified,
+2 fixed, 1 wrong.**
+
+`XlsxNoteCaptions.cs` **VERIFIED** (96 dpi exactly; the probe's first cut read "neither" at every
+step because 20 pt rows are 26.7 px and every offset saturated a clamp — **a clamp the site never
+stated and we do not implement**, recorded at 5 anchors of 365 in one document).
+`WriterPoolSpacing.cs` **VERIFIED**.
+
+### Next
+
+**Words** — synthetic oblique is lost a *second* time, on the glyph-fallback face:
+`SystemFontResolver.ReferenceFor` is a reverse lookup **with no request to compare against**, so a
+run whose glyph comes from a fallback face draws upright however italic it is. 289 of the residual
+1 611 short glyphs are in faces no document names (WenQuanYi Zen Hei 177, OpenSymbol 112). **This
+one is in `Paperless.Text` and owes a measured cross-track sweep.** Then `AFS-050-004-F2_0i`'s
+banner rows — and note the standing record's **direction is corrected: our rows are the looser
+ones**. Then `2024-12_Comlux…docx`, where the reference draws `LiberationSans-Italic` on 652 glyphs
+against our `DejaVuSans` — visible only now that both stacks no longer draw upright.
+
+**Sheets** — `colorScale` conditional formatting; the chart face (a font-resolution question before
+it is a layout one); then the pie data-label wrap, which is `Paperless.Core` and owes a corpus gate,
+and is what actually moves the four pie verdicts.
+
+## Round 56 — slides — the brief's items 2 and 3 were both real signals read one level too high
+
+**200 → 199 of 302, 0 page counts moved, one named verdict regression.** `abs_ink` 1131.78 →
+**1106.97 (−24.81)**, major pages 390 → **385**, differing pixels over 4530 pages 19735.47 →
+**19702.17**. Eight documents moved; two of them land on the **reference's own extractable word
+count exactly**, which is the gate's own column saying so.
+
+The briefed `abs_ink` of 1136.53 is the **pre-merge** figure. `ink.tsv` at this base is
+byte-identical to round 55's final sweep on 306 of 311 rows, and the five that differ are round 55
+*sheets*' `mc:AlternateContent` change arriving through the merge — including the parent's own
+199 → 200. The baseline reproduces at **200 of 302, 0 manifest disagreements**.
+
+### The largest single fix is one line in the EMF reader, and the brief pointed at its shadow
+
+The brief: *`2014BSA_Sunday_Killion` shears 948 glyphs where the reference shears none — same face
+lists, per-run divergence.* The face lists are not the same: we embedded a `DejaVuSans` roman the
+reference never embeds. All 469 of its uses are the text of one EMF chart, whose 28
+`EMR_EXTCREATEFONTINDIRECTW` records all name **`Times New Roman`** — followed, inside the 64-byte
+`lfFaceName` field, by **twelve code units of stack rubbish** behind the terminator.
+`EmfReader.CreateFont` *skipped* the NULs instead of stopping at one, so it asked for
+`"Times New Roman፿䍥…"`, which nothing recognises and which fell through to the generic sans.
+`WmfReader.CreateFont` has always read the same field correctly. **Two readers of one structure
+disagreed and the wrong one had the corpus behind it.**
+
+`if (c == 0) continue;` → `break;`
+
+| `2014BSA_Sunday_Killion.pptx` | before | after |
+|---|---:|---:|
+| `abs_ink` | 19.39 | **6.89** |
+| differing pixels | 158.26 | **113.12** |
+| major pages | 6 | **1** |
+| sheared glyphs (reference 0) | 948 | **0** |
+| extractable words (reference 3559) | 3619 | **3559** |
+| embedded font list | one face more | **the reference's exactly** |
+
+**Invisible for thirty rounds because a wrong face and a right face both drew upright.** Round 55
+taught the stack to synthesise an oblique; the wrong face, having no italic, began to lean where
+the reference does not, and that lean is what led here. Reach over the whole corpus: **1879
+records in 19 documents** — 13 slides decks, 4 words documents, 2 workbooks.
+
+### `Demick_JetBlue` page 4 is a gridline mesh, not a rotated axis
+
+The reference **does** draw all 21 rotated category labels, at our angle, as **glyph outlines** —
+1.9 MB of content stream, 1502 curve operators, 200 subpath moves in the label band against 124
+subpaths on our whole page. So "52 `BT` to 31" and "163 words to 79" are a *representation*
+difference and the block-counting turn census makes exactly the granularity mistake round 55
+nearly shipped.
+
+What the page was missing is `c:minorGridlines`, unread in `Core/Charts` — which is the diff
+report's own *"a solid area drawn differently (31.18% of page)"*. **26.10 → 12.85, major 6 → 5.**
+
+The sub-interval count is **not** chart2's default of 2: `AxisConverter` sets **5** for a value
+axis stating no `c:minorUnit` (`axisconverter.cxx:405-409`, its own comment cites `tdf#114168`),
+`round(major/minor)` when both are stated, 9 for a log axis; the `CATEGORY` branch sets nothing, so
+2 stands there. The reference's own page confirms both — 25.97 pt majors, 5.19 pt minors, one
+category minor per interval at the midpoint. A minor gridline also states a **width and a dash**,
+and reading only its colour cost 0.66 ink on `N2_E_Maestroni` for two attributes.
+
+**It costs differing pixels on two documents and that is a different defect made visible**: our
+plot rectangles are displaced from the reference's — JetBlue's floor 5.5 pt low against a top edge
+agreeing to 1 pt, N2's whole plot 15.6 pt right — so a mesh right in count, pitch, dash and width
+lands beside the reference's. Coverage improved and placement did not; both instruments are
+telling the truth.
+
+### `.ppt` `txflTextFlow`, and the DrawingML answer was the wrong one to reuse
+
+Six values, three answers, 6 of 6 on a fixture whose arms differ in **four bytes**: 1, 3 and 5 are
+vertical, 2 is the other quarter, 0 and 4 are not turns. Refutes "any non-zero turns the same way"
+and "only `TtoBA`".
+
+**The insets are where reuse would have been wrong.** `oox`'s `pushTextDistances` shifts them
+cyclically; `svdfppt.cxx` does not, and a probe isolating **one inset at a time against an all-zero
+arm** — which cancels the first line's ascent instead of having to know it — says the identity in
+both directions to the hundredth of a point. After the correction, **18 of 18 pen origins on the
+reference's to 0.05 pt** over three anchors and two directions. Pages the reference turns and we
+do not: 7 → 2, and `introduction_to_bea_tuxedo.ppt` goes 1785 words to **1767/1767**.
+
+Reach is small and the census says so in both directions: 5 documents carry a non-zero flow and 4
+moved; the one that did not carries **22 of the 33** and states no `TextId`. And
+`concepts-surrounding-cloud-computing…ppt` states the property on **106** shapes of which **104
+state `HorzN`** — counting "states the property" would over-report reach 50:1.
+
+### The one verdict regression, named rather than netted
+
+`010605Vul.ppt` **`match` → `words`**: 960 → 963 extractable words against the reference's 944,
+where the 2% band is 962.88. **It crossed by 0.12 of a word.** Its unsigned ink went 1.90 → 1.07
+and its embedded-font count 7/6 → **6/6** — the font list is now the reference's exactly, which is
+the change that caused it.
+
+### The composed page pair is not an instrument below ten points
+
+Two independent reviewers, given only the pair image and forbidden the source, **both** reported
+that our render of `Demick_JetBlue` page 4 had no data-point markers and no vertical gridlines. A
+200 dpi crop of the same PDF shows squares, diamonds and triangles at every vertex and a full
+major grid. The pair is a good instrument for structure and a bad one for small marks, and the
+round nearly took "we draw no markers" as a finding. **Two observers making the identical error is
+a property of the instrument, not of the observers.**
+
+### Prediction
+
+Verdicts **−1** against a predicted 0 in a −2…+1 band; page counts **0** ✓; documents moved **8**
+against a predicted 4–8 — **inside the band for the first time in four rounds, and the composition
+is wrong**: the prediction named eight documents, five moved, and three more came from a change
+that did not exist when it was written. A count landing in its band is not a census being right.
+
+**The stated control earned its keep by failing.** `tf-agreement` held (0.85188 → 0.85173, exact
+`/Tf` pages 1678 unmoved) but the sheared-glyph count was predicted to stay at 16740 exactly and
+moved to **15792** — and the whole −948 is the EMF fix, a change made after the prediction. The
+column named the third change's entire effect on it.
+
+### Audit
+
+`Layout/SlideDrawing.cs` :341, :360 (`FillReachesThePage`) — **VERIFIED on 26.2.4.2, both halves.**
+Open **40** unchanged, marked 15 → **17** (14 verified, 3 wrong), re-derived with the file's own
+commands. The package-entry arm is three byte-identical page images of one corpus deck under three
+different stated fills. The inline arm is the half a single rendering cannot settle, so it took a
+**discriminating pair**: the same 306 kB EMF as `office:binary-data` draws **108 304 red pixels**
+and, moved to `Pictures/` by the reference's own exporter with nothing else changed, **none**.
+Second re-check in three to turn on a discriminating pair.
+
+### Cross-track — measured, not argued
+
+`c:minorGridlines` reaches `Paperless.Core/Charts` and `Paperless.Ooxml`: **4 sheets documents and
+1 words document**, all named and rendered before and after, two moving by +0.04 and +0.14 ink and
+none changing a page count or a major page. `EmfReader` reaches `Paperless.Vector`: **4 words
+documents and 2 workbooks**, all six better or level on both instruments, none crossing a
+word-count band, and `bulletin.docx` going from 0.37% off the reference's word count to **0.00%**.
+The parent still owes both tracks a whole sweep.
+
+### Tests
+
+**4824 passed, 0 failed, 1 skipped**, and it reconciles: 4809 + **15 new**. Four mutations
+detected; **one came back clean and is reported as such** — collapsing the `BtoT` arm onto the
+transposing one breaks no test, because the fixture's two-glyph line never shows the width the
+frame breaks at. That arm has zero corpus reach and is validated by the probe, not by the suite.
+
+### Slides does next
+
+1. **The chart plot rectangle.** Both of this round's ink regressions are that one defect, and the
+   mesh has made it measurable for the first time.
+2. **The gridline colour** — the OOXML automatic-format layer for gridlines. `objectformatter.cxx`
+   says major = `tx1` at `tint 75000` and minor at `tint 50000`; the reference draws `0x666666`
+   and `0x8B8B8B` and we draw `0xB3B3B3` for both, which predates this round and reaches every
+   OOXML chart with a grid.
+3. **The other 11 EMF face-name documents**, and `WmfReader`'s *other* fixed fields for the same
+   padded-versus-terminated confusion.
+4. `010605Vul.ppt`'s three extra words — the charstream test first.
+5. The fitted bullet's vertical placement, 1.9 pt high, untouched for three rounds.
+
+---
+
+## Merge note — round 56 slides and round 58 sheets (2026-08-21)
+
+**Words 319, slides 199, sheets 276. Corpus 794 of 946** — one down. Both rounds gated over all 946
+documents because both touch shared layers.
+
+```
+Core 337   Containers 109   Text 617   Vector 298   Rendering 153(1 skipped)   Markup 259
+OpenDocument 125   WordProcessing 1180   Spreadsheets 974   Presentations 831     = 4883
+0 failed
+```
+
+### The verdict lost, and what it cost to lose it
+
+`010605Vul.ppt` `match` → `words`: 960 → **963** extractable words against the reference's 944, on a
+band of **962.88**. **It crossed by twelve hundredths of a word.** On the same document our ink went
+1.90 → 1.07 and the embedded font count 7/6 → **6/6**, and two other documents became **exact** on
+the gate's own column in the same change — `introduction_to_bea_tuxedo` 1785 → 1767/1767 and
+`2014BSA` 3619 → 3559/3559. Re-opened in the manifest as `kind=text`.
+
+### One line, 1879 records, three tracks
+
+`EmfReader.CreateFont` treated the **NUL-terminated** `lfFaceName` as **NUL-padded** and skipped the
+terminators, so `Times New Roman\0\0` plus twelve code units of stack rubbish became an unrecognised
+family falling through to the generic sans. **`WmfReader` has always read the same field
+correctly** — two readers of one structure, disagreeing for as long as both have existed.
+**1879 records in 19 documents across all three tracks.** The affected words and sheets documents are
+all better or level on both instruments; `bulletin.docx` goes 0.37% → **0.00%** off the reference's
+word count.
+
+### Both of that brief's remaining items were refuted one level down
+
+- **The reference *does* draw JetBlue's 68 rotated labels, at our angle** — as **glyph outlines**
+  (1.9 MB stream, 1502 curves, 200 subpath moves in the label band against our 124 subpaths in
+  total). The page's real defect was **`c:minorGridlines`, unread**, which the diff report had been
+  calling "solid area drawn differently, 31.18% of page" all along. A value axis takes **five**
+  sub-intervals, not chart2's two (`axisconverter.cxx:405-409`, tdf#114168), confirmed on the
+  reference's own page. A minor gridline also states **width and dash**; reading only colour cost
+  0.66 ink elsewhere.
+- **The "per-run font-resolution divergence" was the EMF field**, not a resolver problem at all.
+
+### Reusing a rule across formats was wrong, and the probe said so in both directions
+
+Round 55 established that OOXML rotates a turned text frame's **insets** with the turn. Reusing that
+for `.ppt` was wrong: **`oox` shifts cyclically, `svdfppt` does not.** A one-inset-at-a-time probe
+differenced against an all-zero arm gives the identity in both directions; after correction, **18 of
+18 pen origins land on the reference's to 0.05 pt.**
+
+### Sheets: a whole subsystem, and the law read off the reference before the source
+
+**`colorScale` conditional formatting shipped.** 89 of 243 xlsx-family documents carry a `cfRule`
+and we drew none. **The interpolation law was read off a reference PDF *before* the C++ was
+consulted**: `c1 + (int)((v−v1)/(v2−v1) × (c2−c1))` — a truncation of the **delta**, exact on 36 of
+36 channel values and **exact only that way** (rounding the sum and flooring the sum each satisfy
+half). Colour-scale fill rectangles over the 35 computable documents: reference 452, **ours 22 →
+441**; 34 documents went 0-of-12 predicted colours to **12-of-12**, positions to 0.03 pt.
+
+**And the 27.2-alpha tree in this checkout is wrong about the running binary on two counts** —
+`fillinfo.cxx:776` applies a colour scale only when another style-named condition matched (26.2.4.2
+draws it alone, measured twice), and **priority, not document order**, decides between overlapping
+scales. Sixth or seventh time the checked-out source has contradicted the installed binary.
+
+**The chart face was one wrong element, not a fallback.** `SizeOf`/`BoldOf`/`LiteralFamily` took the
+first `a:defRPr`-or-`a:rPr` in document order, and a `c:rich` writes the paragraph default first —
+so they read exactly the value the run overrides. Title now **18.00 pt Carlito Bold** against the
+reference's 18.01, embedded font list identical. **Ten word counts moved on our side and all ten
+moved toward the reference, eight to exact agreement.**
+
+The round also **refuted its own first reach census** — 37/1/1 became **36/1/0** once *both* readers
+were simulated, because the old reader already skipped a `defRPr` stating nothing. Both cuts
+committed; the difference is the finding.
+
+### The alias count is not static, and that is now in `CLAUDE.md`
+
+The sheets round's third sweep reported `TOTAL 363` where its first two reported 325 — **38
+lower-case aliases materialised on the mount by `look.py`/`pair.sh` during the round.** The
+whole-corpus figure moved **991 → 1033 with the corpus unchanged and no commit to it**. Distinct
+lower-cased paths stayed 307, and both scorers key on the manifest, so **no reported figure moved**.
+**A sweep `TOTAL` is not comparable with the same sweep's `TOTAL` an hour earlier.** The scorer that
+refuses to print unless every manifest path found a row is what makes this safe.
+
+### Audit
+
+`SlideDrawing.cs` :341 and :360 **VERIFIED** — the inline arm needed a **discriminating pair**: the
+same 306 kB EMF as `office:binary-data` draws 108 304 red pixels, and moved to `Pictures/` by the
+reference's own exporter, **none**. `Layout/SheetText.cs` **VERIFIED** — 216 of 216 turned-cell row
+heights, the discriminator inside the fixture (rounding the total instead fails 26 of 36 through
+`verify-test.sh`). **`Paperless.Spreadsheets` is ten of ten re-checked, nine correct**, and round
+56's "furniture claims are the ones that break" prior is nine-to-one and dead.
+
+### Instruments
+
+**The paired composite is unreliable below about 10 pt.** Two independent reviewers, given only the
+composed pair, **both** reported our render had no markers and no vertical gridlines; a 200 dpi crop
+shows both. And a reviewer's "we draw no legend" was refuted for the **third round, third reader,
+same page, same sentence** — this time on a page chosen for a stated reason, so the cause is the
+horizontal page split rather than `--worst` selection.
+
+### Next
+
+**Slides** — the **chart plot rectangle**: both of round 56's ink regressions are that one defect
+(JetBlue's floor 5.5 pt low, N2's plot 15.6 pt right), and the minor-gridline mesh has made it
+measurable for the first time. Then the gridline colour (`tx1` tint 75000/50000 → `0x666666`/
+`0x8B8B8B`; we draw `0xB3B3B3` for both, predating this round), the other 11 EMF face-name
+documents, and `WmfReader`'s other fixed fields.
+
+**Sheets** — the pie data-label wrap, now with a second measured defect beside it: **our pie is 18%
+larger than the reference's**, 235.8 pt against 199.8, centre 6.4 pt left and 3.2 pt low.
+`Paperless.Core`, owes a corpus gate, and these four pies are the only sheets failures with a chart
+cause left. Then `cellIs` (18 documents, now cheap — reader, range walk, priority order and overlay
+all exist), then `c:dPt` per-point fills (35 in 7 sheets documents; slides has 144 on pies and 31 on
+bars). **`.xls` colour scales are still uncensused** — they live in `CF12` 0x087A, which no census
+here has read — and the **`x14` extension arm is invisible to every census so far**.
+
+---
+
+## Words, round 58 — handover (2026-08-21)
+
+**Words 319 of 337, slides 200 of 302, sheets 276 of 307 — measured before and after each of two
+changes, per document, zero gains and zero regressions on all three tracks.** Both changes are in
+`Paperless.Text` and both owed a cross-track measurement; both got one.
+
+1. **Synthetic oblique was lost a second time, at glyph fallback.**
+   `IGlyphFallbackResolver.ReferenceFor` is a reverse lookup from a face with no request to compare
+   against. Fixed by a default interface method carrying the request, with three call sites passing
+   it. Measured over **six** filters — `.docx`, `.fodt`, `.fodp`, `.fods`, `.pptx`, `.xlsx` — 41
+   authored two-run packages, four controls at nought on both sides in all six. **The reference does
+   not go looking for an italic face**: Hebrew from an italic Carlito run is drawn in DejaVu Sans
+   *sheared*, not Liberation Sans Italic upright, so the fallback order was already right.
+   Byte reach: words 2, slides 0, sheets 1.
+
+2. **`LineBreaker.cs`'s number-opening hyphen was calibrated backwards**, and the 24.2.7.2 audit is
+   what found it. Three of the site's own five worked examples are false on 26.2.4.2. The rule is
+   **a hyphen opens a number unless a digit precedes it** — 7 of 10 authored cases agreed before,
+   10 of 10 after. Byte reach words 15 / slides 11 / sheets 22, **zero page counts and zero fonts on
+   all three**, and extractable-word counts moved on 19 rows of which 3 are the reference moving and
+   14 of the remaining 16 move toward it — `STC_WebList.xlsx`'s error 1 102 → 46,
+   `MinCh-…-Report.xlsx` 90 → 2, `review-welsh-…-mandelson.docx` and `429_BLISc…pptx` to the exact
+   figure. **This is one commit, `91172e3b99c`, and separable.**
+
+**A census can be wrong in a way that hides itself, and this round's was.** `fallbackfaces.py`
+summed the pure-fallback faces per document, which turned a *face-selection* divergence into an
+apparent lean defect: `outlook_of_nigerian_pension_sector.ppt` draws 355 WenQuanYi Zen Hei glyphs on
+the reference and **none at all** on ours, and the census predicted 341 glyphs of slides movement
+where the answer was nought. Per face the words split is **206 reachable, 83 unreachable**; slides is
+**0 reachable, 341 unreachable**. The probe now prints the two separately.
+
+**`batch-check.sh`'s TOTAL moved without anything moving.** Slides enumerated 311 rows before and
+315 after; sheets 325 and 363. Every extra row is an upper-case alias entry of a document already
+counted, and which aliases a glob enumerates is **not stable between runs** on this mount. Read
+naively that is "+4 slides, +10 sheets". Scored against `MANIFEST.tsv` it is 200 and 276 both times.
+
+### Pinned this round, not implemented
+
+- **The list label's slant.** The level's own `w:rPr` leans the bullet and so does the paragraph
+  mark's; a run's does not. Five authored packages with a control. This is **164 of the 206
+  reachable glyphs** — the whole OpenSymbol column, ten documents, `A320SimNotes.doc` 75 — and it
+  reaches the page through `PageDrawing`'s label branch, never through `ByFace`.
+- **The automatic font colour on a dark background.** `AFS-050-004-F2_0i.docx` page 2's banner text
+  is present, painted and **black on black**: the reference draws 305 glyphs `1 1 1 rg` there and we
+  draw none. White when `Color::IsDark()`, which is `GetWCAGLuminance() <= 87` — confirmed to the
+  single sRGB step over 22 fills, grey `0x9E` white and `0x9F` black. The work is getting the
+  background behind a run to the drawing pass.
+- **The `FORMCHECKBOX` census is closed at 778 in 16.** The `.doc` arm is 103 in 4, by two
+  independent instruments that agree to the digit. **The `.rtf` arm has no witness**: the words
+  corpus is 271 `.docx` and 66 `.doc` and nothing else.
+
+### Next
+
+The list label's slant, then the automatic font colour, then the fallback *order*
+(`outlook_of_nigerian_pension_sector.ppt` 355 glyphs, `1228841571067…doc` 74) — and note that this
+round's own `sym-italic` probe is a second, authored witness for the ordering question: the
+reference draws ☒ and ➢ from **DejaVu Sans** where we draw them from **OpenSymbol**, though
+LibreOffice's own list has `opensymbol` before `dejavusans`.
+
+---
+
+## Merge note — round 58, words (2026-08-21)
+
+**Words 319, slides 200→199 unchanged by this round, sheets 276. Corpus 794 of 946 — no movement
+in either direction, on any track, which the round predicted.** Gated over all 946 documents
+because the primary change is in `Paperless.Text`.
+
+```
+Core 337   Containers 109   Text 624   Vector 298   Rendering 153(1 skipped)   Markup 259
+OpenDocument 125   WordProcessing 1188   Spreadsheets 980   Presentations 836     = 4909
+0 failed
+```
+
+### The rule came out clean, and the discriminator could have refused it
+
+`SystemFontResolver.ReferenceFor` is a **reverse lookup from a face with no request to compare
+against**, so every glyph-fallback face was drawn upright however italic the run. 41 authored
+two-run packages over **six filters** — `.docx`, `.fodt`, `.fodp`, `.fods`, `.pptx`, `.xlsx` — with
+**format deliberately varied**, because round 53's error on this same file was holding format fixed
+without noticing it was the variable. The answer is identical in all six.
+
+**The discriminator was built to be able to say no.** Hebrew from an italic *Carlito* run is covered
+by DejaVu Sans (no italic) and by Liberation Sans (italic installed). Had 26.2.4.2 preferred the
+italic-bearing family, setting a synthetic lean would be wrong. It draws **DejaVu Sans, sheared** —
+fallback order wins over slant, so the face was already right and only the lean was missing.
+41 of 41 rows agree glyph for glyph after.
+
+### The census was wrong, and its shape is the result
+
+Predicted 190–210 words leans and 340–350 slides leans; measured **42** and **4**.
+`fallbackfaces.py` **summed** WQY + OpenSymbol + IPA Gothic per document. Per *face*: words
+**206 reachable / 83 unreachable**, slides **0 reachable / 341 unreachable**, sheets 4 / 0.
+`outlook_of_nigerian_pension_sector.ppt` draws **355 WQY glyphs on the reference and none at all on
+ours** — a fallback-**order** divergence no slant fix can reach, which a summing census read as a
+lean defect and predicted 345 glyphs where the answer was nought. The round's own blind spot 2 named
+that shape for words and it did not apply it to slides.
+
+**And of the 206 reachable, 42 moved.** The 164 that did not are, to the glyph, the OpenSymbol
+column (112, ten documents) plus 52 WQY — single `<01>` draws one per line at x≈104.5: **list
+bullets**, which reach the page through `PageDrawing`'s label branch and never through `ByFace`.
+
+### A shared-layer audit site was wrong, and it is fixed
+
+`Paperless.Text/Layout/LineBreaker.cs:473` said LibreOffice never lets a hyphen open a number, and
+that "dropping HY is the whole of the rule". **Three of its own five worked examples are false on
+26.2.4.2**, the code implemented the false version, **and a test asserted it.** Ten authored
+packages with **no width tuning** (each token longer than its line, so *where* it breaks decides) and
+two controls: `E-2222`, `$-2222`, `abc-22`, `-22222` do **not** break after the hyphen; `A -222`
+breaks at the *space*; only `10-`, `5-`, `222-abc` break. **One rule: a hyphen opens a number unless
+a digit precedes it.** The i#83229 case is the exception, not the instance. 7 of 10 before, **10 of
+10 after**; measured separately on all three tracks at zero verdict movement, with 14 of 16 moved
+word counts going **toward** the reference (`STC_WebList.xlsx` error 1102 → 46).
+
+### Refutations
+
+- **`AFS-050-004-F2_0i` p2 is neither "unpainted" nor "never read"** — my brief offered both. Both
+  strings are in our text layer at the reference's positions and we draw all five banner rectangles
+  to a twip. **The reference draws 305 glyphs `1 1 1 rg` there and we draw none — white on black.**
+  The rule is pinned over 22 fills: white when `Color::IsDark()` = `GetWCAGLuminance() <= 87`,
+  **confirmed to the single sRGB step** (grey `0x9E` white, `0x9F` black) and on all seven primaries.
+  Not implemented: it needs *the background behind a run* at the drawing pass, which the table
+  renderer owns.
+- **The list label's slant**: the level's `w:rPr` leans the bullet and the paragraph mark's leans it;
+  **a run's does not.** We lean it in none of the three.
+- **`FORMCHECKBOX` is no longer a floor — 778 in 16.** The `.doc` arm is 103 in 4, by two independent
+  instruments agreeing to the digit. **The `.rtf` arm needs no probe: the words corpus holds no
+  `.rtf` at all** (271 `.docx`, 66 `.doc`).
+- **`batch-check.sh`'s `TOTAL` moved with nothing moving** — slides 311 → 315, sheets 325 → 363.
+  Every extra row is an alias of a document already counted, and **which aliases a glob enumerates is
+  not stable between runs on this mount.** Scored against `MANIFEST.tsv`, every sweep gives
+  337/302/307 with exactly one row each.
+
+### The round ran no vision, and said so
+
+Its item 2 was settled by a text-layer extraction instead, which is the right instrument for
+"present but unpainted versus never read" — and it is what produced the white-on-black finding. **The
+round stating that plainly is the behaviour wanted**; three earlier rounds committed no vision
+section and did not say why. `briefs-r50/COMMON.md` now requires the vision section in `results.md`,
+with the page, the reason it was chosen, the direction reported, and what a second instrument said —
+or the sentence saying none was run and why.
+
+## Round 59 — sheets (2026-08-21, unmerged)
+
+**Sheets 277 → 278 of 307.** Branch `wt-sheets-r59`, base `dc9ca5900c2`. Full record in
+`dotnet/probes/sheets-r59/results.md`.
+
+**The baseline was 277, not the briefed 276, and only the reference side moved**:
+`fse_identification_form.xlsx` `REF words 427 → 440` with ours pinned — the calendar volatility
+round 57 separated. It moved back to 427 during the round and took the verdict with it, which is
+why the net is +1 where our own side gained two.
+
+**Round 58's "our pie is 18% larger than the reference's" is refuted and the cause is the
+instrument.** `pdf-ops.py`'s path bounding box includes a bezier's control points; we emit cubics
+where LibreOffice emits polygonised arcs, so our wedge boxes bulge up to 8.11 pt outside the circle
+and the reference's 0.11. Read off the wedge corner instead — the first wedge's box's lower-left
+corner *is* the pie centre — the figures are 221.24 against 199.56, **10.9%**. The centre offset
+reproduces exactly.
+
+**A pie's `bestFit` data labels, their legend keys and the diagram shrink now ship.**
+`c:showLegendKey` was parsed and never drawn; its only call site was inside an existence test.
+`bestFit` is `AVOID_OVERLAP`: drawn as `CENTER`, run through `performLabelBestFitInnerPlacement`,
+and a label that will not fit inside its slice is **rebuilt at the `OUTSIDE` anchor** — the rim
+point on the bisector plus a flat 150 mm100. The pie branch of `impl_createDiagramAndContent` then
+recreates the whole diagram at `adjustInnerSize(consumedOuterRect)`, which is why a pie with
+best-fit labels is smaller than the same pie without them: **99.78 against 110.44**, measured over
+sixteen one-variable rewrites of the corpus witness's own chart part.
+
+**The port is verified against the reference's own answers**: given the reference's block width its
+four inner placements reproduce to **0.12 pt** and its one failure reproduces as a failure. And the
+reference draws **six label keys for five labels** — the outside fallback removes the text shape and
+leaves the discarded attempt's key behind — which is reproduced and pinned.
+
+**Predicted +4 verdicts and measured +2**, and both misses are the same axis. Chasing them found a
+defect nothing on this project had measured: **our chart label line height for Carlito is 1.2207 em
+where the reference's is 1.1219 at 10 pt and 1.2241 at 15.89** — sub-linear, so no scaled sum of the
+face's metrics is right at both — and **our single-line labels agree only because the ascent error
+cancels the height error**. Recorded at `SheetBandText.ChartLineHeightAt`, unfixed.
+
+**A one-bit alternative was tested and rejected on the measurement**: putting
+`ShapeFactory::createText`'s 0.18/0.30 em insets into the label's box halves the radius error on two
+authored probes and *breaks the page* — the label structure goes from the reference's one-outside
+four-wrapped to three-outside, the centre error triples and the word count overshoots to the `outEnd`
+figure. Both cuts are in the results file.
+
+**Shared layer, and the round's own reach census was refuted by its own sweep.** The first census
+matched `<c:pieChart>` and answered 5/3/2. A chart part may bind the chart namespace **as the
+default**, with no prefix — `microsoft_learn_multi_chart_examples.xlsx` does, and its word count
+moved from a document the census said could not be touched — and `c:dLblPos` is optional with a
+pie's default being `bestFit`. Corrected: **7 sheets, 5 slides, 4 words documents**, all named in
+`results.md` § 7. Both affected `done` sheets documents were **measured** and neither moved.
+
+**Two censuses that had never been run, both negative.** `.xls` colour scales live in `CF12`
+(0x087A): **42 records in 2 documents and every one is `ct=1`, `cellIs`** — there is no `.xls`
+colour scale, data bar or icon set in this corpus. The `x14` extension arm: **27 rules in 11 sheets
+documents, all `dataBar` and `iconSet`, zero `colorScale`** — so round 58's colour-scale reach is
+the whole-corpus figure.
+
+**`cellIs` was censused and not implemented, and the census changes the plan**: 123 rules in 18
+documents, every one carrying a `dxfId`, 118 of 125 operands literal — but **87 of the 123 `dxf`s
+state a font and no fill at all**. It is two arms, not one.
+
+**Vision.** Two independent readers on two unrelated pages named the shipped change from outside
+(the outside label, its key, the identical wrap) and independently measured the residual on `011`
+at "+50 px right" and "4–5% smaller", which `pdf-ops.py` confirms at 28.1 pt and 4.5%. **And the
+same page produced its page-split misreading for the fourth and fifth reader** — this time as "the
+reference's chart frame is narrower on the right" — where the two frames agree to 0.4 pt and the
+frame simply runs off an A4 MediaBox on page 1 in both.
+
+**Next**: the chart label's vertical metrics (it is what the two unflipped pies need, one word
+each); `cellIs` in two arms; `c:dPt` on bars; `showLegendKey` on a bar chart (38 undrawn keys in
+`Keywords_Mapping_Graphs_and_Charts` alone); and `c:dLblPos="outEnd"`, which still takes the old
+1.1-radius rule this round measured to be wrong.
+
+### Parent verification — round 59 sheets
+
+**Sheets 276 → 278, corpus 796 of 946.** All 946 documents gated: **two gains, zero regressions.**
+
+```
+Core 345   Containers 109   Text 624   Vector 298   Rendering 153(1 skipped)   Markup 259
+OpenDocument 125   WordProcessing 1188   Spreadsheets 980   Presentations 836     = 4917
+0 failed
+```
+
+`Vector` reported **27 failures** in the ten-project run on a binary this round does not touch;
+alone, **298 of 298**. Sixth sighting of the load artefact, and the largest false count yet — worth
+noting because 27 is big enough to look like a real breakage rather than noise.
+
+### The parent's own census was wrong, and the round caught it
+
+I looked at `003_advanced_excel_pie` directly, found the undrawn data-label legend keys, censused
+them at **68 elements in 5 documents**, and handed that to the round mid-flight. **The figure is 62.**
+The walk counted `003_advanced_excel_pie.XLSX` and `.xlsx` — one inode, two names — as two documents;
+the per-document listing beside it *had* case-folded and read 5 documents correctly, so only the
+accumulation was wrong. **Case-fold where you accumulate, not only where you print.**
+
+That is the alias trap, which I have put into every brief for a dozen rounds, in my own census, on
+the document I was looking at. The round had reproduced the finding independently before my message
+arrived and corrected the number within the hour.
+
+**Its second correction matters more.** I reported that the reference's page 1 carries `M1; Actual;`
+and page 2 carries `93; 17%`. **That is the raster.** `pdftotext` gives the whole nineteen-glyph run
+on **both** pages — and that is precisely where the extra words come from. Reading a split off the
+image and describing it as a property of the text layer is the same class of error as the reviewer
+readings the project keeps refuting.
+
+### The framing measurement was itself an instrument artefact
+
+**"Our pie is 18% larger" is refuted.** `pdf-ops.py`'s path bounding box includes bezier **control
+points**, and we emit cubics where LibreOffice emits polygonised arcs — so our wedge boxes bulge
+**8.11 pt** outside the circle and the reference's **0.11**. Measured at the wedge corner instead:
+**221.24 against 199.56, 10.9%.** The centre offset reproduces exactly (6.36 left, 3.18 low).
+
+A one-bit alternative was tested and **rejected on evidence rather than taste**: putting the
+text-shape insets in the label's box halves the radius error on two probes (4.36% → 1.47%,
+7.38% → 0.72%) and **breaks the page** — label structure goes 1-outside-4-wrapped to 3-outside, the
+centre error triples, and words overshoot to 146. **Both cuts committed.**
+
+### And the round refuted its own reach census, from its own sweep
+
+5/3/2 → **7 sheets, 5 slides, 4 words**, because a chart part may bind the chart namespace **as the
+default** (no `c:` prefix) — `microsoft_learn_multi_chart_examples` does, and it moved — and
+`c:dLblPos` is optional with a pie defaulting to `bestFit`. Both `done` sheets documents in the
+affected set were measured and neither moved. `outEnd` was deliberately not changed, which made "the
+four `outEnd`-only documents will not move" a falsifiable prediction; the gate confirms it.
+
+### The residual is a text metric, measured and recorded at its site
+
+**Our chart label line height for Carlito is 1.2207 em; the reference's is 1.1219 at 10.01 pt and
+1.2241 at 15.89 pt.** Sub-linear — so **no scaled sum of the face's metrics is right at both**, and
+Carlito's `hhea`, `typo` and `win` tables all give 1.2207. **Our single-line labels agree today only
+because the ascent error (9.51 against 9.00) cancels the height error.** This is what `011` and
+`027` need — one word each — and it moves the radius and centre on all seven affected documents.
+
+### Three censuses that had never been run
+
+- **`.xls` `CF12` (0x087A): 42 records in 2 documents, all `ct=1` (`cellIs`).** There is **no `.xls`
+  colour scale in this corpus** — so round 58's `colorScale` reach was already the whole-corpus
+  figure.
+- **The `x14` arm: 27 rules in 11 documents, all `dataBar`/`iconSet`, zero `colorScale`.** Same
+  conclusion from the other side.
+- **`cellIs`: 123 rules in 18 documents**, every one with a `dxfId`, 118/125 operands literal — but
+  **87 of 123 `dxf`s state a font and no fill. It is two arms, not one.** Not implemented; the
+  census is the deliverable.
+
+### Audit
+
+**No site re-checked this round, stated deliberately** rather than left silent, with
+`Paperless.Core/Graphics/GlyphRun.cs` named next because the line-height work just measured a live
+vertical-metric divergence there. Re-derived: **39 open in 27 files, 22 markers (19 VERIFIED,
+2 FIXED, 1 WRONG).**
+
+### Sheets does next
+
+The chart label's vertical metrics — one word each on `011` and `027`, and it moves the radius and
+centre on all seven affected documents. Then `cellIs`, now known to be **two arms** (fill and font)
+rather than one.
+
+## Round 59 — slides (not yet merged; branch `wt-slides-r59`)
+
+**Slides 199 → 200 of 302.** `abs_ink` 1107.04 → **1039.95**, major pages 385 → **375**, differing
+pixels over 4530 pages 19702.23 → **19414.43**. Page counts moved on 0 of 302. Verdict regained:
+`010605Vul.ppt` `words` → `match`, 963 → **947** extractable words against a 944 reference.
+
+Five changes, four of them measured against a probe built to discriminate before anything shipped.
+
+- **The plot rectangle was an unreserved tick length, not a displacement.** `c:majorTickMark` was
+  not read at all and `AXIS2D_TICKLENGTH` was reserved for every visible axis. Six probe arms on
+  one corpus chart: `none 0.00 / in 0.00 / out +4.25 / cross +4.25`, on that axis' own edge only,
+  and the labels' own pen does not move with it. An **absent** element is not `none` —
+  `axismodel.cxx` defaults it to `out` or `cross`, both of which reserve.
+- **The automatic gridline and axis line are the theme's subtle line style.** Major = `tx1` at
+  `tint 75000`, minor at `tint 50000`, axis line at `tint 75000`, each substituted for the
+  `phClr` inside `Theme::getLineStyle(THEMED_STYLE_SUBTLE)` so the theme's own `shade` acts on it,
+  and the same line style supplies the **width**. Five arms; a `tx1` of white gives `#BCBCBC` for
+  *both* tints, which no tint alone can produce. **Every axis line in this reader was black.**
+- **A symbol-charset metafile font stores a glyph slot, not a letter.** `010605Vul.ppt` page 9 is
+  an EMF whose 25 runs name `Monotype Sorts` at `lfCharSet = 2`; the charstream test shows both
+  extractions are 5989 characters and differ only by 25 substitutions of a Private Use Area code
+  point for a Latin letter. 92 font objects in 10 documents across all three tracks.
+- **The 24.2.7.2 audit was the largest single item.** `PptxSlideLayout.cs:1591`'s three rules,
+  re-run through round 39's own fixture on 26.2.4.2: the clamp and the truncation still hold, and
+  the branch they fed does **not** — a corner-focus circle gradient is `radial` now, not a 45°
+  linear ramp. `Wildlife for REDAC September 11.pptx` **61.92 → 7.66** ink, 346.73 → 102.53
+  differing pixels.
+- **`WmfReader`'s other fixed fields: asked and answered.** One real gap — a 32-byte face-name
+  read with no record bound — with 8 short records of 450 in the corpus and **no** document
+  drawing a wrong face because of it. Recorded, not fixed.
+
+**Shared layers.** `Paperless.Core/Charts`, `Paperless.Ooxml`, `Paperless.Vector`. Measured at
+this tree against `MANIFEST.tsv`: **words 319 of 337, 0 disagreements**; **sheets 275 of 307**,
+whose three disagreements are two *stale* manifest rows (both `advanced_excel_pie`, already
+`words` in round 58's own base and after sweeps with identical counts, and a pie takes no tick,
+no gridline and no axis line) and one **gain** — `044_Cash_flow_forecast…xlsx` 427/438 →
+**438/438**, the reference's count exactly.
+
+**`track-ink-sweep.sh` cannot see an `.xlsm`.** Its `find` filter lists `.xls`, `.xlsx`, `.ods`
+and `.csv`, so two sheets manifest paths are unreachable by it. The scorer beside it now refuses
+to print rather than silently scoring 305 of 307.
+
+**`tf-agreement.py` prints 0.77063 at this base**, reproducing the *original* briefed 0.77061 and
+not round 56's 0.85188. Two of three readings agree and round 56's is the outlier — most likely a
+different `ours` directory, since the script's mean is per document.
+
+### Next, slides
+
+**The plot rectangle's RIGHT edge.** Left and bottom are largely settled (`dLeft` over 1 pt on 22
+of 57 chart pages → 9; `dBottom` 23 → 11) and `dRight` did not move: **31 of 57, before and
+after**. Three independent sightings this round. Then `8_P-Pavese_AIRBUS…pptx` — now the track's
+largest at 47.26 — where a page reading says the reference draws a black chart background, a grey
+plot wall, a white title and gradient bars, and we draw none of the four. Then
+`N2_E_Maestroni`'s `c:manualLayout`, whose 15.6 pt is real, reproduces, and is **not** the defect
+this round fixed.
+
+### Parent verification — round 59 slides
+
+**Slides 199 → 200, sheets 278 → 279, corpus 798 of 946.** All 946 documents gated: **two gains,
+zero regressions.** `abs_ink` 1107.04 → **1039.95 (−67.09)**, major pages 385 → **375**, differing
+pixels 19702 → **19414 (−288)**.
+
+```
+Core 355   Containers 109   Text 624   Vector 302   Rendering 153(1 skipped)   Markup 259
+OpenDocument 125   WordProcessing 1188   Spreadsheets 980   Presentations 846     = 4941
+0 failed
+```
+
+**Two projects reported failures in the ten-project run and neither is real** — `Text` returned
+**no output at all**, `Vector` reported **21 failures**; alone, 624 of 624 and 302 of 302. Seventh
+sighting, and the first time two appeared in one run.
+
+### The verdict comes back, and its "three words" were never words
+
+`010605Vul.ppt` `words` → `match`, 963 → **947** against 944. The charstream test settles what two
+rounds could not: **both extractions are 5989 characters**, differing only by **25 substitutions of
+a private-use code point for a Latin letter**. Page 9 is an **EMF whose 25 runs name `Monotype
+Sorts` at `lfCharSet = 2`**, and **the `.ppt` font table holds no symbol font at all** — which is
+exactly why every presentation-format census missed it. 92 font objects in 10 documents, all three
+tracks.
+
+### The audit produced the largest single item, again, and it was not in the plan
+
+`PptxSlideLayout.cs:1591`, re-run through **round 39's own four-arm fixture**: the clamp
+**VERIFIED**, the truncation **VERIFIED**, and **corner→linear is WRONG on 26.2.4.2** — all four arms
+export `radial`. `Wildlife for REDAC September 11.pptx` **61.92 → 7.66** ink and **346.73 → 102.53**
+differing pixels. That is 54 of the round's 67 ink points, from a site the brief never mentioned.
+
+**Second round running where a re-check of a superseded-binary claim outweighed the briefed target.**
+
+### The brief's item was half right, and the half it got wrong was mine
+
+**The plot rectangle is an unreserved tick length, not a displacement.** `c:majorTickMark` was not
+read at all, and **an absent element is not `none`** — `axismodel.cxx` defaults to `out`/`cross`,
+both of which reserve. Six probe arms, one property and one axis at a time, in a corpus chart already
+stating `none`: `none 0.00 / in 0.00 / out +4.25 / cross +4.25`, on that axis' own edge only.
+
+**And `N2_E_Maestroni` is not the same defect.** I briefed both ink regressions as one; its 15.6 pt
+reproduces exactly and is a **`c:manualLayout`** defect item 1 cannot reach. Round 56's "one defect"
+is two.
+
+**The automatic gridline colour is three things, not a tint.** `tx1` black → `#666666`/`#8B8B8B`;
+`2050C0` → `#676E9C`/`#8B8FA7`; **white → `#BCBCBC` for both tints**, which no tint alone can
+produce — the theme's own `shade 50000` around the substituted `phClr` is the other half. The same
+style supplies the **width** (9525/38100/4763 EMU → 0.73/3.00/0.37 pt). **Every axis line in this
+reader was black**, which the brief did not name.
+
+### `abs_ink` refuted as this round's instrument, on a case where the pixels disagree with it
+
+`bar_chart.pptx`: plot rect `dLeft +4.21, dBottom +4.89` → **`−0.05 / +0.64`**, and `diff%`
+**4.98 → 2.85** while `|ink|%` **0.24 → 0.34**. One one-sided offset became seventeen small
+two-sided ones. 41 documents moved on ink (22 improved, 19 worsened) against 42 on differing pixels
+(**39 improved, 3 worsened**). **The ink column reports the fix as a regression and the pixels
+refute it.**
+
+### A sibling instrument was blind in exactly the way its twin had been fixed for
+
+The round found **two sheets manifest paths `track-ink-sweep.sh` cannot reach**. The **first commit
+of this session** widened `batch-check.sh` from thirteen in-scope extensions to thirty-four, after
+two `.xlsm` in `sheets/chartset-*` turned out to have been silently unmeasured. `track-ink-sweep.sh`
+was written from the same list, **kept the narrow one, and stayed blind to the same two documents
+for a dozen rounds afterwards**.
+
+**Fixing an instrument does not fix its twin.** The list is now byte-identical in both, with a note
+in the sibling asking that any change be made in both places; verified reaching both `.xlsm`, and the
+two scripts now agree at 36 extensions each.
+
+### An instrument reading that disagrees three ways, reported not chased
+
+`tf-agreement.py` prints **0.77063** at this base — reproducing the *original* briefed 0.77061 and
+**not** round 56's 0.85188. Two of three readings agree and round 56's is the outlier, most likely a
+different `ours` directory since the mean is per document. Recorded as unresolved rather than
+explained away.
+
+### Vision, all three readings committed
+
+JetBlue p4 at a **200 dpi crop** independently found the **down-versus-up automatic marker** — round
+56's open item 8 — from a reader who had never seen it. `010605Vul` p9 named the **symbol-font
+fallback** from the pixels, with the right mechanism, which is §4 above. Pavese p8 (now the track's
+largest at 47.26) reports the reference drawing a **black chart background, a grey plot wall, a white
+title and gradient bars** where we draw none of the four.
+
+### Slides does next
+
+**The plot rectangle's right edge** — `dLeft` and `dBottom` are largely settled, `dRight` did not
+move on **31 of 57 chart pages, before and after**, and three independent sightings this round point
+at it. Then `8_P-Pavese_AIRBUS…pptx` (47.26, four unchecked claims from a page reading), then
+`N2_E_Maestroni`'s manual layout. **The fitted bullet's 1.9 pt is now untouched for five rounds.**
+
+---
+
+## Merge note — round 59, words (2026-08-21)
+
+**Words 319 of 337, slides 199 of 302, sheets 276 of 307 — corpus 794 of 946, no movement in either
+direction on any track, which both predictions said in advance.** Gated over all 946 because the
+second change touches `Paperless.Core`.
+
+```
+Core 358   Containers 109   Text 624   Vector 298   Rendering 153(1 skipped)   Markup 259
+OpenDocument 125   WordProcessing 1220   Spreadsheets 980   Presentations 836     = 4962
+0 failed
+```
+
+### The list label's slant: round 58's five-row table was true and incomplete, in two ways
+
+**The level wins outright wherever it states a posture, in either direction.** `<w:i w:val="0"/>` on
+the level over an italic paragraph mark draws the label upright; `<w:i/>` on the level over
+`<w:i w:val="0"/>` on the mark draws it leaning. So it is *level-if-stated, else the mark*, and
+**13 of the corpus's 271 `.docx` write the first shape**. **And a bullet's base font is not a
+number's**: `#i53199` resets posture and weight for a bullet and only underline and overline for a
+number, so a paragraph *style*'s `w:i` leans a number label and leaves a bullet upright, while the
+same `w:i` written directly on `w:pPr/w:rPr` leans both. 16 authored packages in four formats,
+round-tripped through 26.2.4.2 itself: **docx 16 of 16 and doc 16 of 16 agreeing after, against 9
+and 11 before.**
+
+**The OpenSymbol column is 112 → 81, and the `.docx` arm 32 → 1.** The `.doc` arm did not move and
+the reason is now measured: `A320SimNotes.doc` round-tripped through the reference's own flat-ODF
+export has **1 014 `WW8Numz` character-style references and not one `fo:font-style`**, so its 75
+sheared bullets come from `RES_PARATR_LIST_AUTOFMT` — built by `ww8par.cxx`:2622 from the control
+stack at the **paragraph mark**, direct CHPX only. Substituting our resolved first-run posture
+overshoots in both directions (120 against 75, 4 against 2, 0 against 3), and the seat is named:
+`Ww8DocumentReader.Describe` resolves the character layout at the paragraph's **first character**
+despite its comment saying the mark.
+
+**A per-document net is the wrong statistic for a per-label change, and my own instrument said the
+opposite of the truth.** Five documents' aggregate lean counts fell and `facegap.py` read that as
+getting worse; every one of them moved *toward* the reference — `UG.CAO.00133` 306 → 259 against
+260, an error of 46 reduced to 1 — and the runs we stopped shearing are ones the reference never
+sheared. Round 58's summed census, arriving again, caught by asking the reference about the specific
+run rather than reading the aggregate.
+
+### The automatic font colour: 305 glyphs on one page, and three separate things had to be true
+
+The readers turned an unstated colour into opaque black; nothing carried the background to the
+drawing pass; and `w:shd` is a **pattern** rather than a fill. All three fixed. `AFS-050-004-F2_0i`
+goes from **0 white glyphs to 569** against the reference's 571 and now fills the same **8**
+rectangles on page 2, header cells included, to 0.05 pt. Corpus-wide, white glyphs the reference
+draws and we do not: **5 145 in 48 documents → 2 728 in 38**.
+
+Two rules no reading of the source gives you, both measured over 20 authored packages:
+
+- **`Color::IsDark()` is two formulas and 26.2.4.2 still has both.** `0x729FCF` —
+  `COL_DEFAULT_SHAPE_FILLING` — takes `GetLuminance() <= 62` and comes out **bright** where WCAG's
+  83 ≤ 87 says dark. The reference draws its text **black** and draws `6F9BCB` one step away white.
+  It is the only input in the domain that separates the two, and round 58's 22-fill ramp did not
+  contain it.
+- **A character highlight is not a background**, in both directions: yellow in a black cell is drawn
+  white, `darkBlue` in a white cell is drawn black.
+- **`w:shd` blends `w:color` (auto = black) over `w:fill` (auto = white) at a per-mille weight** —
+  `solid` 1000, `pctN` N×10, every striped value 333 — and `w:val="nil"` is *not* "no fill". All
+  eight patterns reproduce byte for byte.
+
+**And the LONG column caught a defect the gate cannot see, which is what it was for.** The first cut
+passed a floating frame's own fill down as the background, because `GetBackgroundBrush` walks fly
+frames. It turned **383 glyphs white that the reference draws black** — 371 in
+`docs-quality-MA.IMS.00001…docx` page 9 (`#0070C0`, WCAG 38) and 12 in
+`069_Work_Breakdown_Structure…`. Page count, word count and font list are all unchanged by painting
+text out of a page. The prediction named the risk and named the control; the arm is removed and the
+LONG column is back to **34 in 2, its exact pre-round value**.
+
+### The fallback-*order* census, all three tracks — and the largest item is not fallback order
+
+`facechoice.py`, per document and per face, printed as unique-to-reference, unique-to-us and
+**paired**, never netted. Three classes:
+
+1. **A font embedded in the package**, and it is the biggest single item anywhere in the census.
+   `Sean Monogue.pptx` carries four `ppt/fonts/*.fntdata` and a `p:embeddedFontLst`; the reference
+   draws **5 527 glyphs of Verdana** from them where `fc-match Verdana` answers `DejaVuSans.ttf`.
+   Plus `Liturgical-Commission-2025…pptx` and its embedded `Play`, 93. **Six slides documents embed
+   a font; no words or sheets document does.**
+2. **Serif against sans — the generic class, not the family.** `HC-Bulletin-template.docx` 2 315,
+   `template---tpr…` 23, and **five sheets documents** ~2 240, in both directions. On all three
+   tracks and the most repeated shape.
+3. **Carlito against Liberation Serif.** `AAC-AD-No-2021-01-Boeing-737-8-and-737-9-MAX.doc` alone is
+   **46 637 glyphs** — the single largest number in the words census, and one a slant-only view
+   never surfaced — plus `f111.doc` 275, `SPA-06` 313, `t_TEMPforInvProgs` 250 and two sheets files.
+
+Round 58's item, `outlook_of_nigerian_pension_sector.ppt` at 355 WQY glyphs, is **seventh** by size.
+
+### The vision round, and it earned its place three times
+
+- **`AFS-050-004-F2_0i` p2 before**: a blind reader named the defect — "all five black separator
+  bands on the left are blank black bars" — and its first unprompted candidate, "the text runs exist
+  but are drawn in a colour equal to the fill", is the truth. It described the reference's white
+  band text as "dark-on-dark"; **presence right, colour wrong**, which is the split the skill file
+  predicts at 9 pt in a composed half.
+- **The same page after**: the same defect appears under *identical* — "identical white bold centred
+  text" on both sides. And it raised two **pre-existing** items no metric had named: we draw
+  **9 runs** of `#0000FF` in the header row where the reference draws **2** (measured on the content
+  stream, unchanged by this round), and our intra-group separator rules are solid where the
+  reference's are dotted.
+- **`097` page 1**: the reviewer's first-ranked difference, blind, is "the reference creeps down the
+  page… the reference's rows are on average a hair taller" — the brief's line-height item, with the
+  direction, found without being told. A second instrument confirms the direction (`−2.06` pt by the
+  last band) and **refutes the shape**: the ramp is not monotonic, the whole deficit sits between
+  bands 3 and 4, which is where the reviewer's *fifth* item put it. **And it refutes the failure's
+  story**: `097` fails 1 page against 2 and the reference's **page 2 is empty** — every word is on
+  page 1 on both sides. The failure is a trailing empty page, and the per-empty-paragraph deficit is
+  what decides whether the final empty paragraph fits. `097`, `012_Project_Timeline…` and
+  `015_Project_Timeline…` are one class.
+
+### Also
+
+- **24.2.7-audit**: `WordCompatibility.AddsParagraphSpacing` **VERIFIED** on 26.2.4.2, four of four
+  arms to 0.00 pt, measured by baseline pitch. Base tree 38 open / 23 markers (19 V / 3 F / 1 W);
+  this tree 38 open / 24 markers (20 V / 3 F / 1 W), counted with the file's own commands. Round
+  58's quoted "17 VERIFIED" does not reproduce — trust the commands in `TODO.24-2-7-audit.md`.
+- **`MANIFEST.tsv`'s sheets status column over-counts by two** and has done since at least round 58:
+  it records 278 done where three consecutive sweeps measure 276.
+  `sheets/chartset-002/xlsx/003_advanced_excel_pie.xlsx` and
+  `sheets/chartset-004/xlsx/019_advanced_excel_pie.xlsx` should read `open`. Both are stable across
+  repeated renderings on both sides, so this is not the date-volatility trap. Not committed — the
+  corpus repo is not this branch's to write.
+- **`Paperless.Vector` reported phantom failures twice** under concurrent load (1 of 298, then 21 of
+  298) and passed 298 of 298 alone both times.
+- **`Paperless.Core` gains `Colour.IsDark`, `WcagLuminance`, `PerceivedLuminance`** — additive, no
+  consumer outside Core and WordProcessing by `git grep`, and both other tracks swept anyway.
+
+### Next
+
+1. **The empty-paragraph height, and it is now a class rather than a document.** `097`, `012` and
+   `015` each score 1 page against 2 and each of the reference's second pages is **empty**. Worth
+   1.15 pt on every empty paragraph in the corpus, and it decides three verdicts.
+2. **The `.doc` label slant, on a named seat.** `Ww8DocumentReader.Describe` resolves the character
+   layout at the paragraph's first character where the rule wants the mark's *direct* CHPX. 80 of
+   the 81 remaining OpenSymbol glyphs.
+3. **The Carlito-versus-Liberation-Serif and serif-versus-sans classes**, which between them are
+   ~50 000 glyphs across all three tracks, and **embedded package fonts**, which are 5 620 on slides
+   and the largest single item in the census.
+4. Then: the blue-versus-black header runs on `AFS-050-004-F2_0i` (9 runs against 2); solid versus
+   dotted table separators; the `.doc` `FORMCHECKBOX` arm (103 in 4, census exact); and the RTF
+   `{\listtext}` destination, which discards both the label's face and its slant and has no witness
+   in this corpus.
+
+## Round 60 — sheets (2026-08-21, unmerged)
+
+**Sheets 278 → 277 of 307.** Branch `wt-sheets-r60`, base `c17996f89cb`. Full record in
+`dotnet/probes/sheets-r60/results.md`.
+
+**Baseline reproduced at 278**, the briefed figure, with `fse_identification_form.xlsx` already
+inside the mismatches at 440/427 — so the brief's carry-on clause was not needed.
+
+**The chart label's vertical metric is measured and closed: a chart's text is laid out on a
+96 dpi device.** `probe-chartvmetrics2.py` renders 117 one-variable rewrites of the corpus witness's
+own chart part — thirteen sizes from 6 to 40 pt on Carlito, Liberation Sans and Liberation Serif,
+each as a one-line and a three-line chart title, plus a `ctr` data-label series — and **every one of
+the 39 measured baseline pitches is an integer multiple of 0.75 pt**, one pixel at 96 dpi, with
+
+```
+hpx   = round(size_pt * 96 / 72)
+pitch = ( round(asc/upem * hpx) + round(-desc/upem * hpx) ) * 72/96
+```
+
+and the `hhea` line gap **excluded**. Max error 0.089 pt against 2.476 for the continuous
+`ascent + descent + lineGap` the tree shipped. Carlito's gap is zero and both Liberation faces' is
+not, so the three faces separate the gap term outright. The ascent is the same rounding, checked
+independently by requiring a CENTER label's block centre to come out size-independent: 0.042–0.069 pt
+under the pixel law against 0.58–0.70 under ours. **`chart2` does not use *no* device, it uses a
+different one** — `MetricGrid` already carried this arithmetic for Impress at 600 dpi and Calc at
+720, and `SheetBandText.Ungridded` dropped the grid entirely.
+
+**278 → 277, and the three moves are three different things.** `011_advanced_excel_pie`
+`words` → `match` (136 → 137 of 140) — **ours, a gain**. `003_advanced_excel_pie` `match` → `words`
+(143 → 139 of 143) — **ours, a regression**. `ans_mappings_of_eccairs_terms.xlsx` `match` → `pages`
+— **the reference's**. Our own side is net nought, and the corrected quantities are right where the
+gate cannot see them: the legend entry pitch goes 15.04 → 14.09 against the reference's 14.08 and
+the wrapped-label pitch 12.21 → 11.25 against 11.23, on **97 chart-bearing sheets documents**.
+
+**`ans_mappings_of_eccairs_terms.xlsx`'s reference rendering is non-deterministic**, and this is the
+round's second result. The mount gives it two directory entries for one inode, so a sweep renders it
+twice — the usual trap becomes an instrument — and within the *same* sweep one alias read 191 pages
+and the other 190. Nine further renderings, three serial and six under load: **one in nine loses a
+page**, and the word count wanders over 28081–28084 while our side is pinned at 191/27894. The file
+holds no `TODAY`, `NOW` or `RAND`, so this is not calendar volatility: it is instability in the
+reference's own layout of a 191-page workbook, and **any sweep can lose that verdict at random**.
+
+**The regression is understood rather than merely reported.** A temporary trace at the call site
+gives the real rectangles; `VDiagram::adjustInnerSize` is transcribed correctly line for line; and
+solving the reference's own arithmetic backwards from its answer proves its **pass-1 consumed
+rectangle reaches left of the pie** (`consumed.Left ≤ 279.04`, ours 291.76) and is 10 pt taller. Our
+base rendering matched by cancellation — its consumed rect reached *too* far left, to 232.12 — so
+the right answer lies between the two. `003`'s four lost words are the tokens `M1;` and `19%`, which
+the A4 MediaBox makes the reference draw twice.
+
+**The shape-factory insets are refuted a second time, and this time in a different place.**
+`ShapeFactory::createText` really does set 0.18 em horizontal and 0.30 em vertical text distances,
+so a label shape's box is bigger than its text; round 59 rejected putting them in the label box, and
+round 60 put them **in the fit test only**, with the corrected metric. Every pie jumps to the
+`outEnd` word count (146/143/143/143 against 143/140/140/140) and it **breaks `019`, which passes**.
+Both cuts committed.
+
+**Vision found what no metric had: our chart title is 9.57 pt too high.** Two blind reviewers on two
+unrelated documents both reported the reference's title sitting lower; `pdf-ops.py` puts ours at
+601.44 and the reference's at 591.87 on *both*, with the x agreeing to 0.10 pt and the size to 0.01.
+It is **pre-existing** — the same title was at 601.61 before this round — and it reaches every chart
+title in the corpus. Recorded at `ChartLayout.AddTitles`. The same pages produced the sixth and
+seventh readers of the `011` right-edge illusion, one of whom flagged her own confidence on it.
+
+**The brief's named audit site is refuted.** `Paperless.Core/Graphics/GlyphRun.cs`'s two open hits
+are `a:blip/a:lum` brightness and contrast — PowerPoint's washout and `Bitmap::Adjust` — and carry
+no vertical-metric claim at all. The site was named from the text of a round's own write-up rather
+than from the file; one `git grep` separates them, and `TODO.24-2-7-audit.md` now says so.
+Counters re-derived: **38 open hits in 26 files, 23 markers (19 VERIFIED, 3 FIXED, 1 WRONG)**.
+
+**Tests +40** (`Paperless.Spreadsheets` 980 → 1020), 35 of them the reference's own measured
+pitches. **4957 passed, 0 failed, 1 skipped.** Four mutations through `verify-test.sh`, **all four
+detected**, none a drift guard.
+
+**Shared layer**: the `Paperless.Text` edit is a single new `MetricGrid` constant and changes no
+existing caller, so words and slides cannot move **by construction**. That is a falsifiable
+prediction for the parent's sweep.
+
+**Next**: the pass-1 consumed rectangle, whose arithmetic is now solved and which should take `003`
+back and `027` with it; the 9.57 pt chart title; `cellIs` in two arms; `c:dPt`; and the same 96 dpi
+law for `SlideChart` and `FrameChart`, which were deliberately not touched.
+
+---
+
+## Merge note — round 59 words and round 60 sheets (2026-08-21)
+
+**Words 319, slides 200, sheets 279. Corpus 798 of 946.** Both rounds gated over all 946 documents.
+
+```
+Core 376   Containers 109   Text 624   Vector 302   Rendering 153(1 skipped)   Markup 259
+OpenDocument 125   WordProcessing 1220   Spreadsheets 1020   Presentations 846     = 5034
+0 failed
+```
+
+### Round 60 sheets asked the parent whether to merge, and the answer is yes
+
+The round measured a correct metric, shipped it, and it cost a verdict one-for-one: `011` closes,
+`003` re-opens, **our own side nets zero**. It offered to hand over everything *except* the single
+behavioural commit. **Merged whole**, because:
+
+- **The metric is measured right, not argued right.** 117 one-variable rewrites over 13 sizes and 3
+  faces, and **every one of the 39 baseline pitches is an integer multiple of 0.75 pt** — one pixel
+  at 96 dpi, line gap **excluded**. Max error **0.089 pt** against **2.476** for what we shipped.
+  Carlito's `hhea` gap is 0 and both Liberation faces' is not, so the three faces **separate the gap
+  term outright**. An independent check on ascent (a centred label's block centre must be
+  size-independent) gives 0.042–0.069 pt spread under the pixel law against 0.58–0.70 under ours.
+- **It corrects two visible quantities on 97 documents** the gate cannot see: legend pitch
+  15.04 → **14.09** (reference 14.08), wrapped-label pitch 12.21 → **11.25** (reference 11.23).
+- **`003` was passing by cancellation.** Solving the reference backwards from its own answer:
+  `consumed.Left ≤ 279.04` where ours is now 291.76 and **was 232.12** — our base reached *too far
+  left* and matched anyway. The right answer is between our before and our after, and the arithmetic
+  to reach it is written down. Holding a correct metric out of the tree to protect a cancellation is
+  the wrong trade, and this project has made the opposite call twice before and recorded it as right.
+
+### The reference is not deterministic on one document, and the alias trap is what revealed it
+
+`ans_mappings_of_eccairs_terms.xlsx`: **within a single sweep, one alias read 191 pages and the other
+190** — the case-alias pair renders the same inode twice. Nine further renderings gave **191 × 8,
+190 × 1**, words wandering across four values, while **our side stayed pinned at 191 / 27894**. No
+`TODAY`, `NOW` or `RAND`: **layout instability, not the calendar.** Re-filed `unstable`. **Any sweep
+can lose that verdict at random**; this one did not.
+
+**The trap became the instrument.** The case-alias duplication this project has been working around
+for a dozen rounds is the only reason the non-determinism was visible at all.
+
+### Round 59 words: zero movement, ten refutations
+
+Verdicts 319/199/276 → **319/199/276**, and page counts, extractable words and font lists all
+**0 / 0 / 0** changed over 337 words paths. 38 renderings' bytes changed.
+
+- **`Color::IsDark()` is two formulas on 26.2.4.2.** `0x729FCF` takes `GetLuminance() <= 62` and is
+  **bright** where WCAG says dark — the reference draws it black, and `6F9BCB`, one step away, white.
+  **Round 58's 22-fill ramp could not see it**, and I relayed that ramp as exact.
+- **The label rule is level-if-stated, else the mark** — not "level OR mark". `<w:i w:val="0"/>` on a
+  level beats an italic mark; 13 of 271 `.docx` write that.
+- **A floating frame's fill is not the background either** — the one arm the round *inferred rather
+  than measured* turned **383 glyphs white that the reference draws black**. Removed, and recorded
+  as its own refutation.
+- **A per-document net is the wrong statistic for a per-label change** — round 58's summed-census
+  trap, this time in the round's own instrument. Five documents whose aggregate lean fell all moved
+  **toward** the reference.
+- **`097` does not overflow.** The reference's page 2 is **empty**; it is a trailing empty page. That
+  reframes an item carried for six rounds, and makes it a **class of three** — `097`,
+  `012_Project_Timeline`, `015_Project_Timeline`, all 1 page against 2, all with an empty reference
+  page 2.
+
+### The audit site I named was wrong, and I named it from prose
+
+I sent sheets r60 at `Paperless.Core/Graphics/GlyphRun.cs`, on the grounds that a vertical-metric
+divergence had just been measured there. **Its two open hits are `a:blip/a:lum` brightness and
+contrast — `Bitmap::Adjust` — with no vertical-metric claim at all.** I named it from a round's
+*prose* rather than from the file. Recorded in `TODO.24-2-7-audit.md`.
+
+### A cross-track figure measured at an agent's base is not a manifest error
+
+Third instance this session, and now in `CLAUDE.md`. Round 59 words proposed re-opening `003` and
+`019_advanced_excel_pie` on the grounds that the manifest recorded 278 where it measured 276, three
+rounds running, both sides stable so not date volatility. **The reasoning was sound and the
+conclusion wrong**: the sheets round that closed them merged three commits after its own base. Run
+`git log <agent-base>..HEAD -- <source>` before editing the manifest.
+
+### Vision, on both rounds, committed
+
+Words: a blind reader on `AFS` p2 named the defect **and its true cause** unprompted — "drawn in a
+colour equal to the fill" — presence right, colour wrong at 9 pt; after the fix the same bands read
+as *identical*, and two **pre-existing** leads surfaced. On `097` p1 the reader's first-ranked
+finding, blind, was the line-height deficit **with the direction**, and a second instrument then
+confirmed direction (−2.06 pt) while **refuting the monotonic shape and the failure's story**.
+
+Sheets: **two reviewers on two unrelated documents both said the reference's chart title sits
+lower** — ours 601.44, the reference 591.87 on **both**, **9.57 pt too high**, x agreeing to 0.10 pt.
+Pre-existing (601.61 before this round) and reaching **every chart title in the corpus**. Recorded at
+`ChartLayout.AddTitles`, deliberately unfitted. Two further readers hit the `011` right-edge illusion
+again (frames agree to 0.4 pt) — **one of them flagged her own confidence as low**, which is the
+first time a reviewer has done that.
+
+### Next
+
+**Sheets** — the pass-1 consumed rectangle (arithmetic solved; should take `003` back and `027` with
+it; **insets are not the answer, measured twice, once per metric**), then the 9.57 pt chart title,
+then `cellIs` in two arms.
+**Words** — the empty-paragraph height, now a **class of three verdicts**, then the `.doc` label
+slant at a named seat (`Ww8DocumentReader.Describe` resolves the character layout at the paragraph's
+*first character* where the rule wants the mark's direct CHPX — 80 of the 81 remaining glyphs).
+
+## Round 60 — slides (not yet merged; branch `wt-slides-r60`)
+
+**Slides 200 → 200 of 302, 0 manifest disagreements.** `abs_ink` 1036.75 → **990.13**, major pages
+365 → **364**, differing pixels over 4530 pages 19402.35 → **19240.53 (−161.82)**. Page counts moved
+on 0 of 302. **26 documents moved on differing pixels — 24 improved, 2 worsened — and 26 on ink,
+22 improved and 4 worsened.**
+
+Baseline: the gate reproduced exactly; `abs_ink` measured **1036.75** against the briefed 1039.95
+and major pages 365 against 375. Reference reuse was excluded as the cause (two documents
+re-rendered give the *same* `|ink|%` on every page) and `dotnet/` was unmodified. Recorded.
+
+Three changes, each measured before it shipped, plus two audit re-checks.
+
+- **`c:crossBetween` decides shifted categories, not the chart type.** The brief's item 1 — the
+  plot rectangle's right edge — was not a right-edge reservation. `ChartPlot.ShiftedCategories`
+  read `Bar or Stock` and nothing else, so every OOXML line and area chart stating
+  `crossBetween="between"` was drawn a half-slot wrong: its categories as points on the plot's own
+  corners, its last label then overhanging, and half of that label taken off the right edge to make
+  room. **Nine probe arms, one property each, read back from the category labels' own pen
+  positions** (span/width is `(n−1)/n` shifted, 1 unshifted):
+
+  | | `between` | `midCat` | absent |
+  |---|---|---|---|
+  | `areaChart` | shifted | unshifted | unshifted |
+  | `lineChart` | shifted | unshifted | **shifted** |
+  | `barChart` | shifted | **shifted** | shifted |
+
+  **The 27.2 tree and the running binary disagree on the bar row** — `axisconverter.cxx:292-301`
+  reads the element ahead of the type for everything but a 3-D bar, and 26.2.4.2 renders a column
+  chart stating `midCat` byte-identically to the same chart stating `between`. The bar test now
+  runs first. The element is read from the axis the category axis *crosses*, not the first
+  `c:valAx`. Reach: **28 slides chart parts in 13 documents**, 12 sheets parts in 8, no words.
+  Worth 13 documents on differing pixels, 13 improved and none worsened.
+- **The automatic chart-space and plot-area fills above style 32, and five text colours.** The
+  brief's item 2 asked for the four claims on `8_P-Pavese_AIRBUS…pptx` page 8 to be *checked*
+  first. A fill census confirms three exactly — the reference paints `#000000` over
+  (0, 36.03)–(719.97, 427.49) and `#454545` over (68.74, 85.52)–(708.95, 377.18) where this reader
+  painted neither, and draws each bar as **16 nested rectangles** from `#FEFEFE` to `#DDDDDD` — and
+  a text-colour census confirms the fourth, **14 white runs against our 22 black**.
+  `ObjectFormatter`'s two fill tables are ported for styles 33 and up, where the pptx `noFill`
+  quirk stops applying (three corpus chart parts, all style 42), and `ChartLayout`'s one hardcoded
+  `AxisColour` black is split into five per-object colours read from the parts that state them,
+  each defaulting to black so no other format moves. Page 8: `|ink|% 43.67 → 0.23`, `diff% 51.45 →
+  3.53`, MAJOR → shifted; the document **47.26 → 3.92**, and it was the track's largest.
+  **And one claim is corrected**: our bars are near-white and so are the reference's — what made
+  the reference's visible was the black panel behind them, not the bars' own colour.
+- **An unstacked area chart paints its first series last.** Not in the plan; it came out of this
+  round's own page reading. `AreaChart::createShapes` reverses its slot list
+  (`AreaChart.cxx:565-568`). `006_advanced_powerpoint_area.pptx` page 1: `diff% 18.67 → 0.84`,
+  `|ink|% 1.54 → 0.03`, MAJOR → ok. **A stacked area is exempt and that is a measurement, not the
+  source**: `stacked_area_chart.pptx` is `1.82 / 0.16` in file order and `1.87 / 0.22` reversed.
+- **Audit: two re-checks, both VERIFIED.** `PptxSlideLayout.Shadow`'s three-arm rule re-run through
+  26.2.4.2's flat-ODF export of its own fixture — the empty `a:effectLst` and the lone `a:glow`
+  both still keep the theme's 38% shadow, 3 of 3. And `SlideAutofit.Quantised`'s
+  `(n * 127 + 36) / 72` still holds, but the expression has moved out of `textitem.cxx` into
+  `o3tl::convert`, and the citation is corrected. **37 open sites in 26 files, 25 markers.**
+  **First round in three where the audit did not outweigh the plan.**
+
+**Shared layers.** `Paperless.Core/Charts` and `Paperless.Ooxml`. Measured at this tree against
+`MANIFEST.tsv`: **words 319 of 337, 0 disagreements**; **sheets 279 of 307**, whose two
+disagreements are **stale manifest rows verified at the base commit** — `003_advanced_excel_pie`
+reads 143/143 (`match`, manifest `open`) and `011_advanced_excel_pie` reads 136/140 (`words`,
+manifest `done`) *both here and at `2870991a4dd`'s own chart sources*.
+
+### The right edge is now one number, and it is the legend
+
+`dRight` over 1 pt went **31 → 27** and the prediction said 20–24. The eight `line`/`area` template
+pages did not go to zero: they went from `−9.66/−9.68` to `−2.71/−2.73`, which is where the
+`column` and `bar` pages already sat. **Seventeen of the twenty-seven remaining pages are at
+exactly `−2.71`, `−2.73` or `−2.88`**, and `legend-census.py` locates it: the key's own size and
+the key-to-text gap agree with the reference to within 0.02 pt and the whole legend sits **2.70 pt
+to the left**, so the legend box is 2.70 pt too wide on its right and the plot gives that up. A
+second, smaller defect is in the same table — a *line* series' legend key is drawn 7.00 pt wide
+against the reference's 6.01.
+
+### A sweep spoiled by a rebuild, and the byte comparison that caught it
+
+Two cross-track sweeps were run while `verify-test.sh` — which mutates a source file, **rebuilds**,
+tests, restores and rebuilds again — was running, and its build replaced `Paperless.Core.dll` under
+them. It announced itself as **31 words documents moving between two sweeps**, one by 19.82 of ink
+on a questionnaire with no chart in it. Rendering is deterministic (the same document twice gives
+byte-identical PDFs); the *fresh* render matched one sweep's copy and not the other's, 157 696
+bytes against 157 807. Both were re-run clean. **The check is cheap and should be routine: re-render
+two or three of a finished sweep's documents and `cmp` them against the copies it kept.** The
+slides sweep was verified this way — eight documents, byte-identical.
+
+### `abs_ink` refuted again, and this time the mechanism is visible in one page's coordinates
+
+`006_advanced_powerpoint_area.pptx` went `|ink|% 0.19 → 1.54` for a change that moved its filled
+polygon from `x 85.99 … 572.84` onto the reference's `116.62 … 551.45` (`116.85 … 548.93`). The ink
+rose **because** the polygons came into register and exposed a paint-order difference that had been
+smeared across the page before; fixing that took the same page to `0.03`.
+
+### Vision, three readings committed, and one of them produced a change no metric found
+
+Pavese p8 re-read after the fix: a reader who had never seen round 59's claims lists the black
+panel, the charcoal wall, the white title and the bar geometry as **identical**, and ranks the
+missing bar **gradient** first — now measured as 16 bands from `#FEFEFE` to `#DDDDDD`. The area
+chart p1 reader answered the geometry question ("both left edges land on the M1 tick") and then,
+unprompted, ranked **"the dominant colour flips from blue to red … the two series are painted in
+opposite order"** first while noting the silhouettes and the crossing point are identical — which
+is the discriminator between a paint order and a value, and is the round's third change. JetBlue p4
+reports our rotated labels 25–30 px right of their ticks and the reference's 15–20 px left of
+theirs, ≈45 px apart — the size of an **anchor** rather than a category. **Not confirmed by a
+second instrument and left that way**: our rotated runs carry the rotation in the CTM and the
+reference's in the text matrix, so the naive pen census cannot band them.
+
+And one vision claim **refuted by an instrument**: "the top half's black panel extends further
+down" — the two panels are the same rectangle to 0.03 pt.
+
+### Slides does next
+
+**The legend's 2.70 pt**, which is 17 of 57 chart pages and one number. Then **Pavese's gradient
+bars** — the last of round 59's four claims, `Theme::getFillStyle`'s gradient for a chart above
+style 32, and what is left of that document. Then the **rotated category label's anchor**, with the
+instrument built before the hypothesis is believed. **The fitted bullet's 1.9 pt is now untouched
+for six rounds**; this round deferred it as a decision — three chart items with direct measurements
+outranked it — and the next round should either take it or say why in the same words.
+
+---
+
+## Round 61 — sheets (2026-08-21), branch `wt-sheets-r61`, base `3f079cea621`
+
+**Sheets 279 → 281 of 307. Zero regressions. `003` and `027` both close.**
+`dotnet/probes/sheets-r61/` — `prediction.md` committed before any code, `results.md` beside it.
+
+**The pie's first pass is `reduceToMinimumSize`, not the diagram.** Round 60 solved the arithmetic
+backwards from the reference's answer and named the unknown right; what it assumed wrong is that
+pass 1 runs at the full diagram rectangle. `ChartView.cxx:557-560` reduces the diagram to
+`round(side/2.2)` before any series exists, and the axis-label pass that would grow it straight back
+is guarded by `!bIsPieOrDonut` — so a **pie**, and only a pie, lays its first-pass labels out around
+a radius of 50.33 pt instead of 110.72. `git blame` dates that line 2019-05-28, so it is in
+26.2.4.2. The best-fit allowance falls from 88.6 pt to 40.3, every label fails the inner fit instead
+of one, and the consumed rectangle overruns on all four sides. `adjustInnerSize` needed no change.
+
+| | before | after | reference |
+|---|---:|---:|---:|
+| `003` pie centre | (382.80, 467.68) | **(408.81, 464.81)** | (408.84, 464.74) |
+| `019` pie centre | (412.44, 467.77) | **(408.90, 464.88)** | (408.95, 464.82) |
+| `003` radius | 104.70 | **100.01** | 99.78 |
+
+**26.04 pt of centre error to 0.03, on all four corpus pies at once**, with nothing fitted.
+
+**The 9.57 pt chart title is two terms that were already in the tree — in the reservation, not in
+the pen.** `lcl_createTitle`'s flat **135** for a `MAIN_TITLE` and `ShapeFactory::createText`'s
+`round(fontHeight × 0.30)` upper inset. `DiagramAreaOf` has carried both since the layout was
+written and `AddTitles` carried neither. Measured over **eighteen** one-variable rewrites, nine
+sizes 6-36 pt × bold and regular, both sides rendered: `y_ours − y_ref` tracks
+`(135 + round(0.30·size))/100 mm` across the whole range with **no free parameter**.
+601.44 → **592.20** against 591.87; **the 0.33 pt residual is left unfitted** and looks like an
+absolute chart-device ascent offset that round 60's slope-based control could not have seen.
+
+**Prediction 12 of 13.** The miss is that all four pies come out **two words over** the reference —
+inside the 2% band on all four, which is why four verdicts came out right off a number that was
+wrong four times.
+
+**Vision: two new findings, each confirmed by a second instrument, each with a census.**
+- **The chart area's default `#D9D9D9` border.** Two blind readers on two unrelated documents; the
+  reference draws exactly one per chart where `c:chartSpace` states no `c:spPr` (3 against our 0 on
+  each of `005_Contextures` and `microsoft_learn_multi_chart_examples`), and **both sides draw one**
+  on the four `advanced_excel_pie` documents, which do state one — the control that separates the
+  rule from the observation. Round 60 read 63 strokes against 66 and said "none" was wrong as
+  stated; **the three it could not account for are the three chart frames.** 10 sheets documents /
+  23 parts, 2 slides, 1 words.
+- **A data label's stated text colour.** `005`'s pie states
+  `<a:defRPr b="1"><a:solidFill><a:schemeClr val="bg1"/>` — white. Ours draws 4203 dark pixels over
+  the pie to the reference's 720, and 410 light to its 3053. `ChartDataLabel` carries **no colour
+  field** and every label is drawn in a hardcoded black. **22 sheets documents / 40 parts, 49 slides
+  / 93, 7 words / 7** — mostly a slides item.
+- And on `003` the reader called the pie geometry **identical**, where round 60's reader on the same
+  page measured 45 px of centre offset. Her first-ranked difference — M3 inside the slice on the
+  reference and outside on ours — is confirmed by the ghost-key count, **2 against 1**, and is
+  where the two surplus words come from.
+
+**24.2.7.2 audit**: counters re-derived — **37 open in 26 files, 26 marker lines (21 VERIFIED, 4
+FIXED, 1 WRONG)**. `Paperless.Ooxml/DrawingML/DrawingFill.cs`:115 (`a:lum` as a whole per cent)
+**VERIFIED on 26.2.4.2**, by a probe that never runs our renderer: `70999/-70999` renders
+byte-identically to `70000/-70000` (truncation) and `69500/-69500` does not (not rounding) — **the
+two cases fail under the two readings in opposite directions** — with two controls first.
+`Paperless.Ooxml` is one of one.
+
+**Tests +11** (`Paperless.Core` 376 → 387). **5045 passed, 0 failed, 1 skipped.** Build 0/0.
+Five mutations: four detected; the fifth (squaring before intersecting) is an **equivalent
+formulation, not a drift guard** — the reduced rectangle is always strictly inside the available
+one, which also refutes one of the round's own stated blind spots.
+
+**Shared layer**: the diff is `Paperless.Core/Charts/ChartLayout*.cs`. Census over all 946: **62
+sheets / 14 slides / 3 words** documents have a titled chart; **7 / 5 / 2** have a best-fit pie
+(slides `bitesize-writing-a-report.pptx`, `3495.pptx`; words `pie-chart-result.docx`,
+`pie-chart-template.docx` are the `done` ones at risk). **Falsifiable: 0 verdicts move on words and
+0 on slides.**
+
+**`MANIFEST.tsv`** (not touched; proposed): `003_advanced_excel_pie.xlsx` and
+`027_advanced_excel_pie.xlsx` `open` → `done`.
+
+**A refutation the round paid for rather than reasoned about.** `005_Contextures`'s page-1 pie is
+`dLblPos="inEnd"`, so our gate skips the second pass entirely and its radius is **131.82 against the
+reference's 125.21** — 5.3%, the same class, unchanged by this round. Widening the gate to *any*
+drawn pie label was implemented and rendered: the pie moved **0.81 pt and did not shrink at all**,
+because we place an `inEnd` label at half the radius (the `CENTER` arm) so the consumed rectangle
+never leaves the reduced wall. **The missing piece is the `INSIDE`/`OUTSIDE` placement geometry, not
+the gate.** Reverted, restored by `cp` + `touch`, rebuilt, and the shipped state re-rendered to
+prove it.
+
+**Next**: the inner-fit test that rejects one label of five (`003`'s M3, ghost keys 2 against 1);
+the data-label text colour; the default chart border; then `cellIs`.
+
+---
+
+## Merge note — round 60 slides, round 61 sheets, round 61 words (2026-08-21)
+
+**Words 321, slides 200, sheets 281. Corpus 802 of 946** — up four, **zero regressions anywhere**,
+each round gated over all 946 documents.
+
+```
+Core 390   Containers 109   Text 624   Vector 302   Rendering 153(1 skipped)   Markup 259
+OpenDocument 125   WordProcessing 1225   Spreadsheets 1020   Presentations 872     = 5079
+0 failed
+```
+
+### Slides r60 — zero verdicts, and the track's largest document fell by an order of magnitude
+
+`abs_ink` 1036.75 → **990.13**, differing pixels −161.82, **24 of 26 moved documents improved**.
+`8_P-Pavese_AIRBUS…pptx` **47.26 → 3.92**, page 8 `|ink|%` **43.67 → 0.23**, its only major page
+gone.
+
+**The brief's item was wrong and the real seat was `c:crossBetween`.** `ShiftedCategories` read the
+chart *type* only, so every OOXML line/area chart stating `between` was drawn a **half-slot** wrong.
+Nine probe arms, one property each: area `shifted/unshifted/unshifted`, line
+`shifted/unshifted/**shifted**`, bar `shifted/**shifted**/shifted`. 13 documents, 13 improved, 0
+worsened.
+
+**Pavese's four claims were checked before anything was fixed** — a fill census confirmed three
+exactly and a text-colour census the fourth. That is the discipline the earlier "legend" episode
+called for, applied unprompted.
+
+**And its own page reading found what no metric had**: an unstacked area chart **paints its first
+series last**. `006_advanced_powerpoint_area` p1 `diff% 18.67 → 0.84`.
+
+### Sheets r61 — a pie's first pass runs at half the diagram, and only a pie's
+
+**279 → 281**, and the last two of the pie cluster close. Round 60 solved the arithmetic backwards
+from the reference's own answer and named the unknown right; what it assumed wrong is that pass 1
+runs at the full diagram. **`ChartView.cxx:557-560` reduces the diagram to `round(side/2.2)` before
+any series exists**, and the axis-label pass that would grow it back is guarded by `!bIsPieOrDonut`
+— so a pie lays its first-pass labels around radius **50.33 instead of 110.72**. `git blame` dates
+that line to 2019, so it is in 26.2.4.2. `adjustInnerSize` needed no change, exactly as round 60
+said.
+
+**26.04 pt of centre error to 0.03, on all four corpus pies at once, nothing fitted.** Prediction
+**12 of 13**, and the one miss is systematic and understood.
+
+**The 9.57 pt chart title closed with it, and both its terms were already in the tree** — a flat
+`135` for a main title and `round(fontHeight × 0.30)` — carried by the *reservation* since the
+layout was written and by the *pen* never. Eighteen one-variable rewrites, nine sizes × both
+weights, no free parameter. It reaches **four** documents, not the two the vision reading found.
+
+### Words r61 — a table takes the leading of the paragraph above it
+
+**319 → 321.** `SwFlowFrame::CalcUpperSpace` adds `nPrevLineSpacing` in all four branches and its
+`pOwn->IsTextFrame()` guard covers only the frame's *own* leading, so a `SwTabFrame` takes it. 275
+sites in 85 of 271 `.docx`. With it: an `atLeast` line keeps its raise on a **first** line, because
+`SvxLineSpaceRule::Min` sits *outside* `CalcRealHeight`'s `IsParaLine` guard.
+
+**Seven refutations, and the brief's central grouping is one of them.** `012` and `015` are **not**
+in `097`'s class — their reference page 2 carries a **positioned table's ninth row**, not a trailing
+empty paragraph. The round predicted them unchanged and they were. The deficit is **not** 1.15 pt
+per empty paragraph but **1.00 pt per paragraph-then-table boundary**, and **`097`'s failure was
+never a line height** — our per-line and per-paragraph costs were already exact to 0.01 pt.
+
+**A control that paid twice**: `012` p1 was read blind *because* it was predicted not to move. Its
+reader's first finding — "the reference is missing the entire title block" — is confirmed **and
+corrected** by a second instrument: both text layers hold the title, and the reference draws 433
+dark pixels in the top 125 rows against our 13 669. **We draw it black where the reference draws it
+white**, which points the *opposite* way to the frame-fill arm round 59 measured and removed.
+
+### Three instrument failures, all found and handled correctly
+
+- **`verify-test.sh` rebuilds twice, so it voids a sweep it runs beside.** Round 60 ran it during
+  two cross-track sweeps and `Paperless.Core.dll` was replaced under them; it announced itself as
+  **31 words documents moving between two sweeps of the same unmodified tree**, one by 19.82 of ink
+  on a chartless questionnaire. Rendering is deterministic, so a fresh render matching one copy and
+  not the other is what identified it. Now in `CLAUDE.md` with the one-render check.
+- **`/tmp` is on the 20 GB overlay and this workflow fills it.** Words r61's sweep returned
+  **`REF-CANNOT-RENDER 13`** with `/` at 100% — ~120 000 entries, 17 GB — and it **discarded that
+  figure rather than reporting it**, which would otherwise have read as an 11-verdict regression.
+  The parent then measured the classes: **114 122 aged `MSBuildTemp*`**, ours, one per `dotnet
+  build`. Clearing entries older than two hours freed 0.8 GB and dropped `/tmp` from 119 512 entries
+  to 4 275 **with a sweep running throughout, unaffected** — the age bound is what makes it safe.
+  Later gates run with `TMPDIR` on the host mount.
+- **A reviewer refuted by an instrument**, again: "the black panel extends further down" — the two
+  panels are the same rectangle to **0.03 pt**.
+
+### Two `abs_ink` refutations in one cycle
+
+Slides r60, **third round running**, and this time visible in coordinates:
+`006_advanced_powerpoint_area` went `0.19 → 1.54` for a change that moved its polygon **onto** the
+reference's, and fixing the paint order it exposed took it to `0.03`. Sheets r61 refuted the obvious
+gate widening by **measurement** — implemented, built, rendered, moved a pie 0.81 pt without
+shrinking it, reverted with `cp` + `touch` and the shipped state re-rendered to prove it.
+
+### Next
+
+**Slides** — the legend's **2.70 pt** (17 of 57 chart pages, one number, instrument written), then
+Pavese's gradient bars, then the rotated label's anchor (**build the instrument before believing the
+hypothesis**). **The fitted bullet's 1.9 pt is untouched for six rounds and round 60 deferred it as
+a stated decision; the next round takes it or says why in the same words.**
+
+**Sheets** — the inner-fit test rejecting one label of five the reference keeps (`003`'s M3; ghost
+keys 2 against 1) — it is what makes all four pies two words over. Then a data label's stated text
+colour (**no colour field in the model at all**; 22 sheets / 49 slides / 7 words documents), then
+the default `#D9D9D9` chart border.
+
+**Words** — `012` and `015`: **split a fly-held table across a page**. Two verdicts, fully
+characterised, and the overflowing row is **empty**, so word counts already match and only the page
+count is at stake.
+
+### Words r62 — a fly-held table splits, and where it stops is a compatibility flag
+
+**321 → 323**, `012` and `015` close, **zero regressions**, exactly **2** of 337 renderings changed
+and **no word count anywhere moved**. 26.2.4.2 marks every DOCX floating table's frame splittable
+without exception (`DomainMapperTableHandler.cxx`:1765), and the continuation starts at the top
+margin — `012`'s ninth row is `12.40 489.65 99.95 50.35 re f*`, a top edge at 72.00 exactly.
+
+**The first cut gained 2 and lost 2, and the intermediate sweep is what said so.** Splitting at the
+body's bottom broke the two graph-paper templates. The seat is `GetFlyAnchorBottom`
+(`sw/source/core/layout/fly.cxx`:114) and `isLegacyBehavior` above it: a Word ≤ 2010 file
+(`compatibilityMode` ≤ 14, `TAB_OVER_MARGIN`) whose fly is anchored to the **page frame** may hang
+into the bottom margin and the footer instead of splitting. **Both conditions are needed and each
+alone is insufficient**, measured in both directions on both documents — raise `080` to mode 15
+alone: two pages; move its anchor to `text` alone: two; give `012` *both* mode 14 and a page anchor:
+one. Nine renderings at rising `w:tblpY` put `080` at y = 835 on an 841.9 pt sheet, still one page.
+
+**Three refutations before a line was written**: `w:vertAnchor` alone is not the discriminator (four
+one-variable renderings of `012`, geometrically identical), nor is `w:hRule="exact"`, nor is the flow
+after the table.
+
+**The prediction said "0 regressions" and that is falsified** — and it had named the cause in advance
+as the census's largest blind spot, content-sized rows. A changed-rendering band should be stated
+**per direction**, not as a magnitude.
+
+**The COL_AUTO question is settled and deliberately not implemented.** Four arms, both variables
+inverted: `012`'s title box is `noFill` and anchored inside a **black table cell**, and turning the
+cells white turns the title black while filling the box white turns it black under black cells. So
+the shape's own fill wins when it has one and the **anchor's** background decides when it has none.
+That rule predicts *white* where round 59 measured *black* on `#0070C0`, so neither direction ships
+until that document is re-measured. A first cut of the probe used `#00B050`, which `Color::IsDark`
+calls dark, so both hypotheses predicted the same answer — **a non-discriminating arm reads exactly
+like a confirmation**.
+
+**Three vision readings, and the control paid twice again.** `080` p1 after both changes — chosen
+because it was predicted to be *restored* — came back "no content, layout, or geometry difference",
+confirmed at 86 strokes against 86 and under a pixel of offset. `015` p2, the page the change
+creates, came back **blank and identical on both sides and the reader refused to invent a
+difference** — correctly: the row is five **white** rules on white paper, invisible to the composite
+and to `pdftotext` alike, and exact to 0.00 pt in the operator dump. A fresh reader on `012` p1
+reproduced round 61's white-title finding independently *and* supplied second-instrument
+confirmation for the two of round 61's findings that had none: the reference draws 48 `#F2F2F2`
+band fills we draw none of, and strokes seven bar outlines we stroke none of.
+
+**`012`'s 56 missing fills are not `w:shd`.** The document holds twelve `w:shd` elements and we draw
+twelve fills from them; the rest is `w:tblStylePr`'s `firstCol` and `band1Horz` layers, whose
+`w:tcPr` half this reader does not read. `WordTableStyleConditions`'s own remark asked for a document
+to measure the bands on and `012` is it.
+
+Audit: `WordStyles.HasDefaultParagraphPropertiesElement` **VERIFIED** on 26.2.4.2 — a bare
+`<w:pPrDefault/>` turns widow/orphan control on, 45 renderings, and the document-level
+`w:settings/w:widowControl` is inert at every filler count.
+
+**Next on words**: the `w:tblStylePr` `w:tcPr` half; then round 59's counter-witness re-measured;
+then the tall-table guard, whose two protected documents are named and passing.
+
+
+---
+
+## Round 62 — sheets — a chart's advance width goes through the same 96 dpi device its line height already did (2026-08-21)
+
+**282 → 280.** The round's named item closed exactly and the round cost one verdict on our side,
+and both facts are load-bearing. (It read 279 before the wrap-limit units were restored — below.)
+
+**The brief's item 1 had the wrong seat.** `BestFitInner` is a faithful port; it missed `003`'s
+`M3` by **0.33 of a degree** because its *input* was 1.7 pt too wide. Round 60 put a chart's
+vertical metrics on `MetricGrid.Chart` and left the advance width on the face's unquantised
+metrics. 26.2.4.2 instantiates the em at a whole number of 96 dpi pixels — 13 for 13.333 at 10 pt,
+**15 for 14.667 at 11**, so the correction is a **sawtooth** and not a narrowing.
+
+**Read off the reference at fourteen sizes, our renderer never running**, out of its own `TJ`
+adjustments, which are in thousandths of the text em and so are scale-free. Sign and size right at
+every one, residual ≤0.005, no free parameter. All five of `003`'s label boxes now match the
+reference's drawn width to **0.03 pt** and their centres to **0.16**, and the four corpus pies are
+**word-exact** where they were two over — round 61's one miss, closed.
+
+**The cost, stated and not netted.** `046_Cost_analysis` `match` → `words` (159 → 161, ref 157),
+and its character stream is **754 characters before and after** — pure re-ordering, a tokenisation
+ceiling. A second, `fse_identification_form`, moved on the **reference's** side. `023_Waterfall`
+went `match` → `words` (881 → 843) and then **back to `match` at 872/868** once the cause was
+found; its pass at 881 was never agreement, because the reference draws its nine `Delta` category
+labels **rotated** into three tokens each and we drew them horizontally. Ink improved on 5 of the 6
+documents measured, `023` among them.
+
+**The prediction named its own failure.** `prediction.md`: *"the thing most likely to be wrong is a
+regression among the other 93 chart-bearing documents … I predict 0 and I expect that to be the
+prediction that fails"*, with an accepted band of −2 to +1. Measured −2 on our side.
+
+**Four blind readers, and the instrument split them the right way.** Two on `003` now report the
+four in-pie labels as *identical* where round 61's reader called `M3` "placed completely
+differently". One ranked a chart-frame difference first at high confidence and was **refuted** —
+the two rectangles agree to 0.4 pt; the reader who flagged the same observation *low-to-medium and
+named the crop as the likely cause* was right. And round 61's attribution of `M1`'s truncation to
+the A4 MediaBox is **refuted by a column profile**: the reference's ink stops at **516.24 pt**, not
+595.
+
+**The `#D9D9D9` chart-area border is now four readers, two rounds, three documents**, with
+`pdf-ops.py` at 3-against-0 and 1-against-0.
+
+**And the mechanism behind both losses is traced to the line, and it is a calibration and not a
+bug.** `ChartAxisLabels.Resolve`'s only route to auto-rotation runs through `Wraps`
+(`VCartesianAxis.cxx`:889-903); narrower labels stop wrapping, so the loop thins instead of
+rotating. The limit `Wraps` uses is a fitted **1.000 × tick spacing**, bracketed at [0.990, 1.056]
+on round 30's decks — **and every one of those boundaries was found with the ruler this round just
+corrected**, so the fit is a measurement of `true ÷ 0.975` and the true limit is near 0.975, which
+is where the C++'s own `0.95 × spacing` plus two text insets already sat. The decks and the
+generator still exist, so re-deriving it is a re-run rather than a new probe.
+
+**The shipped repair restores the calibration's units and is not a constant**: the same test in
+the new ruler is `w_new ≤ spacing × scale(size)`, an identity at every size.
+`IChartTextMeasurer` gains a **defaulted** `AdvanceScale => 1.0` overridden only by the sheets
+measurer, so slides and words are provably untouched. `023` comes back at 872/868 and `058` goes
+from 6.2% off the reference to 3.1%.
+
+**Next**: re-derive that bracket against the reference (round 30's decks and generator both still
+exist); then `023`'s nine undrawn bars; then the chart border (four readers, two rounds, three
+documents, `pdf-ops.py` at 3-0 and 1-0); then the data-label colour.
+
+---
+
+## Merge note — round 62, words and sheets (2026-08-21)
+
+**Words 323, slides 200, sheets 280. Corpus 803 of 946.** Both rounds gated over all 946 documents.
+
+```
+Core 390   Containers 109   Text 625   Vector 302   Rendering 153(1 skipped)   Markup 259
+OpenDocument 125   WordProcessing 1231   Spreadsheets 1035   Presentations 872     = 5101
+0 failed
+```
+
+### Words +2: a Word 2010 page-anchored fly hangs into the margin instead of splitting
+
+**Two conditions, each alone insufficient**, on eight one-variable renderings in both directions:
+`compatibilityMode ≤ 14` **and** a fly anchored to the **page frame**. Raise `080` to mode 15 alone →
+splits. Move its anchor to `text` alone → splits. Give `012` both → holds. Nine renderings at rising
+`w:tblpY` put a table at y = 835 on an 841.9 pt sheet and it still holds one page; doubling its rows
+brings the split back, so the third term is **content height, not position**.
+
+**The round falsified its own zero-regression prediction mid-flight and caught it with an
+intermediate sweep.** The first cut gained 2 and **lost 2**, on documents with content-sized rows —
+**the census's largest stated blind spot, named in the prediction file before the sweep ran**.
+
+**The lesson, now in `COMMON.md`: state a changed-rendering band per direction, not as a magnitude.**
+"2–6 renderings change" was satisfied by 2 gains and 2 losses. **A band a regression cannot violate
+is not a control.**
+
+Two more instrument lessons from the same round: **a non-discriminating probe arm reads exactly like
+a confirmation** (one arm used a colour dark under *both* hypotheses, so both predicted white and it
+proved nothing while looking like evidence); and **assert the baseline, not only the consequence** —
+a continuation placed wrongly a second time produces the same page count, so every consequence-level
+assertion passes.
+
+The `COL_AUTO` rule is established on four inverted arms — **a shape's own fill wins when it has one;
+with `noFill` the walk continues to the anchor's background** — and **deliberately not implemented**,
+because it contradicts round 59's counter-witness. Nothing ships until that document is re-measured.
+
+### Sheets: four documents become exact, and one pays for it
+
+**Chart advances are quantised to a whole number of device pixels.** Round 60 put a chart's
+*vertical* metrics through `chart2`'s 96 dpi device and left the **advance width** on the face's
+unquantised metrics — 13 px for 13.333 at 10 pt (2.5% narrow), **15 for 14.667 at 11 pt (2.3%
+wide)**, so the error **alternates in sign with size**.
+
+Fourteen one-variable rewrites, with the drawn advance read out of **the reference's own `TJ`
+adjustments** — thousandths of the text em, and therefore independent of the chart's scale, the page
+and the writer's chosen size. **The sawtooth reproduces at all fourteen**, residual ≤ 0.005, no free
+parameter. All five labels on the target document now match the reference's drawn width to **0.03 pt**
+and their centres to **0.16 pt**; one had been **60 pt** away.
+
+**The brief's item was a real observation with the wrong seat, and the round proved it without
+running our code**: fed **our** block, the `BestFitInner` port answers `FAIL(CM 36.33 > 36.00)` — it
+misses by **0.33 of a degree**; fed the reference's box, it fits. **The port is faithful and its
+input was 1.7 pt too wide.**
+
+`003` 145→**143/143**; `011`/`019`/`027` 142→**140/140**. `023_Waterfall` went through `words` and
+came back at 872/868, now drawing the reference's **twelve rotated category labels instead of six
+horizontal ones** — a different thing from passing at 881, which was our own fragmentation making up
+the difference.
+
+### The re-opened document is filed `text`, not `ceiling`, and the parent's own check is why
+
+`046_Cost_analysis_with_Pareto_chart` `match` → `words`, 161/157. The round reported it as **pure
+re-ordering**, on the grounds that our character count is **754 before and after its change** — which
+is true, and is a statement about **our side only**.
+
+Measured against the **reference**: **754 against 753**, the multisets **differ**, and the difference
+is exactly **`ment` on our side against three full stops on theirs**. **The reference truncates a
+rotated category label with an ellipsis where we draw the word in full.** Pre-existing, real, and it
+belongs with the axis-label fitting work the next round is already taking.
+
+**A "ceiling" claim has to be made against the reference, not against our own previous output.**
+
+### `AdvanceScale` is a stop-gap and the round said so at the site
+
+`023`'s route from "the labels collide" to "turn them 45°" runs through `Wraps`
+(`VCartesianAxis.cxx`:889-903), and **the limit it uses is a fitted 1.000 × tick spacing, bracketed
+on round 30's decks by comparing LibreOffice's rotation against *our* word widths — the ones this
+round just corrected.** So that fit is a measurement of `true ÷ 0.975`. The repair shipped is an
+**identity** (`w_old ≤ spacing` becomes `w_new ≤ spacing × scale(size)`) via a **defaulted**
+interface method, so words and slides take 1.0 and are provably unchanged. **Re-deriving the bracket
+retires it entirely**, and that is the next round's first item.
+
+### Refuted, and each by a different instrument
+
+- **The reference does not clip page 1 at the A4 media box.** A 200 dpi column profile puts its last
+  ink at **516.24 pt**, zero from 517 to 560 — it clips at the **last printed column's own right
+  edge**; we run on to 550.80. Moves no words, which is why it needed a raster.
+- **A high-confidence blind reading refuted**: "the reference closes the chart frame with a right
+  border and ours does not" — the same rectangle to **0.4 pt**, both running past the media box. The
+  reader who reported it at *low-to-medium* and named the crop as the likely cause was right; the one
+  who ranked it first at high confidence was not. **Confidence self-reports are carrying real
+  information and should keep being asked for.**
+- **Per-glyph rounding** — measured on the reference, implemented, swept, and **removed**: worth
+  ≤0.014 pt a glyph, and it moved a word count with no measurement saying it moved it the right way.
+
+### The `#D9D9D9` chart border has now been reported by four readers across two rounds
+
+Three unrelated documents, `pdf-ops.py` agreeing every time (reference 3 strokes to our 0; reference
+1 to our 0). **The strongest-shaped reading this project records, arrived a fourth time**, and still
+unimplemented: 10 sheets / 23 parts, 2 slides, 1 words.
+
+### Next
+
+**Sheets** — re-derive the axis wrap-limit bracket against the reference with the corrected ruler
+(round 30's decks and generator both still exist; `058` is the document that says whether it worked,
+200 against 194). Then `023_Waterfall`'s chart, which draws **three of twelve bars**, no connectors,
+and a value axis to 25000 against 8000 — **on a document that passes**.
+
+**Words** — `012`'s 56 missing fills and 8 missing strokes (`w:tblStylePr`'s `w:tcPr` half, which
+this reader never reads), then round 59's counter-witness re-measured, then the tall-table guard
+whose two protected documents are named and passing.
+
+### Parent verification — round 62 slides
+
+**803 of 946 unchanged: words 323, slides 200, sheets 280.** All 946 gated: **zero movement in
+either direction.** Tests **5124, 0 failed**.
+
+```
+Core 407   Containers 109   Text 625   Vector 302   Rendering 153(1 skipped)   Markup 259
+OpenDocument 125   WordProcessing 1231   Spreadsheets 1035   Presentations 878     = 5124
+```
+
+The round moved `dRight` over 1 pt from **27 to 10 of 57 chart pages**, and **28 documents moved on
+differing pixels, 28 improved and 0 worsened**.
+
+### The brief's 2.70 pt was a typeface, not legend arithmetic
+
+The key size, gap, padding and margin were **already exact**. The reference sets its two 10 pt legend
+runs in **Carlito** and its seventeen 10 pt axis runs in **LiberationSans**; we set all nineteen in
+LiberationSans. The seat is `FamilyOf`'s *"first literal `a:latin` anywhere in the part"*, handing the
+axes' Arial to a legend that states none. The widest entry's **right edges agree to 0.005 pt while
+its width differs by 2.692** — structural, because that edge is `frame.Right − margin − paddingX`
+whatever the text measures. The 17 pages went `−2.71/−2.73/−2.88` → `−0.62/−0.63/−0.79`, and the
+residue is the reference's own `TJ` tracking at 56/1000 em.
+
+### Its cross-track gain did not survive at HEAD, and that is the two rounds interacting
+
+The round measured `064_Small_business_cash_flow` `open` → `match` at 510 words, **and confirmed it
+was its own with a base-source control** (three files checked out at the base, CLI rebuilt, renders
+508; restored, rebuilt, three documents byte-identical to their sweeps). At HEAD it reads **509 of
+520 on a band of 10.4** — one word the wrong side. Sheets r62's advance-width quantisation, merged in
+between, took it back.
+
+Neither round is wrong. **This is why the parent's gate at HEAD is the authority and a round's
+cross-track sweep is evidence about its own worktree** — now demonstrated by interaction rather than
+by base-commit lag.
+
+### Three inherited claims refuted, one of them an instrument the round had just built
+
+- **Round 60's "a line series' legend key is 7.00 pt against the reference's 6.01" does not exist.**
+  `legend-census.py`'s floor admitted the **plot's own data markers**. The reference's real legend key
+  there is a **5.98 pt round marker at x 589.24**, centred in a 22.68 pt slot exactly as
+  `getPreferredLegendKeyAspectRatio` predicts. **Two real defects had been fused into one wrong one.**
+- **Round 60's rotated-anchor hypothesis is dead.** The round built the instrument that brief asked
+  for and the reference draws **no 45° runs at all** on that page.
+- **And that instrument was then refuted by a blind reader** — the reverse of the usual direction. A
+  reviewer reported the same 24 rotated labels on *both* halves; a fill census found **126 glyph-sized
+  filled paths** in the reference's label band.
+
+### A third ceiling class, verified by the parent
+
+**26.2.4.2 emits a 45°-rotated chart label as outlines, not text** (its 90° and 0° labels stay text),
+so **its own PDF loses those words**. Checked independently rather than taken from the round:
+
+- `Demick_JetBlue` extracts **812 words to the reference's 608**, and the whole **204-word deficit
+  falls on pages 4, 5 and 7 — 63, 78, 63**.
+- On page 4 the reference draws **192 glyph-sized filled paths against our 63** with the same number
+  of text shows, and the tokens in our text layer and absent from the reference's are exactly the
+  rotated category labels: `06 07 08 09 10 11 12 20 -7 -8 -9`.
+- `N2_E_Maestroni_Swarm_COP` is **5296 against 5126**, a 170-word deficit on a band of 102.5.
+
+**Both stacks draw the same glyphs; only the reference's PDF loses them. Our output is the searchable
+one and the gate scores it as failure** — the raster ceiling's shape by a different mechanism. Both
+re-filed `kind=ceiling`.
+
+**And both had been filed `ceiling` once before.** Round 50 re-filed them `text` on the charstream
+test, which **correctly** reported that the characters differ — they do, because the reference is
+missing 204 of them. **The measurement was right and the interpretation was wrong.** The charstream
+test cannot separate *"we drew different text"* from *"the reference drew this text as outlines"*,
+and that is the third class it does not name.
+
+### The fitted bullet: the decision, taken in the same words, with the reach finally measured
+
+**Not taken, and not by default.** Confirmed still live and unchanged at **1.91 pt**, identical to
+round 54's figure. Deferred because its demonstration page is `diff% 0.82, |ink|% 0.00` and the
+document is 0.53 of 989.29.
+
+**What seven rounds never produced is the reach, and it is now committed: 251 pages over 0.25 pt out,
+in 58 documents**, median 0.056 pt, max 5.003 (`wells08_basic.ppt` 25 pages, `berlin.ppt` 19,
+`RESPA` 18). **The item is 251 pages, not one**, and the next round can rank it against that.
+
+### Documents-moved missed a seventh round — downward this time, which is new
+
+Predicted 33–39, measured **28**. The eight over-counted are named exactly: four scatter and four
+bubble template decks whose parts carry a `c:legend` — which is what the census reads — while **none
+of their series carries a `c:tx`**, so neither stack has a name to put in a legend and **neither
+draws one**. That is `COMMON.md`'s "estimate reach from what a shape resolves to, not what a part
+declares" arriving from the other side, and it was not among the four blind spots listed.
+
+The round also noted its own band was stated as a magnitude rather than per direction, which the
+updated `COMMON.md` now forbids; stated properly it was **28 improved / 0 worsened**.
+
+### Hygiene stated rather than hidden
+
+`verify-test.sh` was run only with no sweep in flight, and finished sweeps were checked byte for byte
+against fresh renders — **including after a build that overlapped the sheets sweep, which the round
+states plainly rather than omitting.** A census bug was caught on the way: the theme lookup was
+hardcoded to `theme1.xml` and two workbooks call theirs `theme11.xml`, so it was reporting the wrong
+answer **for the very document that produced the verdict**.
+
+## Round 63 — words
+
+**323 of 337, unchanged, and that was the prediction.** Two draw-only changes, 51 renderings moved,
+**0 verdicts gained and 0 lost**, and 0 page counts, 0 word counts and 0 font lists moved anywhere in
+the 337. `probes/words-r63/results.md`.
+
+### `012`'s 56 missing fills are closed, and the seat was two omissions in one element
+
+`WordStyle` **discarded any `w:tblStylePr` carrying no `w:rPr`** — which is every band and column
+layer of `PlainTable5` — and `WordTableStyleConditions.Names` never offered the four band layers at
+all. `012` page 1 goes **19 fills → 75**, colour for colour against the reference (`#F2F2F2` 0→48,
+`#FFFFFF` 0→8) and rectangle for rectangle to **0.10 pt**; page 2 goes 0 → 1. Reach resolved rather
+than declared: **749 cells in 42 documents**, against 34 977 declared layers — thirty-three documents
+carry Word's whole built-in style set as latent styles and name three of them. **42 renderings
+changed and all 42 are the census's own 42; 42 improved, 0 worsened.**
+
+The one route by which it could have moved a line was closed before the change rather than after:
+adding bands to `Names` feeds them to the run resolver too, and **0 of 271 documents name a style
+whose `w:basedOn` chain reaches a band layer carrying a `w:rPr`.**
+
+### Round 59's counter-witnesses are Writer text boxes, and the missing term is alpha
+
+The brief asked whether those shapes are text boxes at all. **They are, their fills are consulted,
+and round 59 and round 62 were both right.** `docs-quality-MA.IMS.00001-…` states
+`<a:alpha val="52941"/>` and `069_Work_Breakdown_Structure…` — which holds **no DrawingML shape at
+all**, it is entirely VML — states `<v:fill opacity="26214f"/>`. `ApplyAutoColor` asks
+`getAverageColor(aGlobalRetoucheColor)`, which blends the fill toward white by its transparency
+before `IsDark` sees it: those two are luminance **105** and **168**, both bright, both black.
+
+Ten arms across three corpus documents, each chosen so the two hypotheses answer *differently* —
+including `012`'s title box given a black fill at `a:alpha val="20000"`, which turns its text
+**black on a black anchor** and so refutes "the anchor decides" in the same arm. Then the blend
+itself pinned with no free parameter: it predicts a **different** flip transparency for every fill
+colour, and **11 of 11** arms straddling 9.571 % / 37.454 % / 62.222 % land where it says.
+
+`v:fill/@opacity` was read by nothing; it is read now, which also makes the box translucent — all
+three of `069`'s fill colours now match the reference's rendered pixels **exactly** where none did.
+**Round 59's LONG column is the gate this was staked on and it did not move: 34 glyphs in 2
+documents.** SHORT went 2728 in 38 → **2571 in 37**. Nine renderings, 8 improved, 1 unchanged
+(the counter-witness itself), 0 worsened.
+
+**Not shipped: the other limb** — a `noFill` box continuing to its *anchor's* background. It needs
+the anchor to reach `PageDrawing.DrawFrame`, which draws from a per-page list. `012`'s white title
+waits on it.
+
+### An instrument reported two regressions that do not exist, and the fix's first cut was worse
+
+`textcolour.py`'s `page_streams` ate a whitespace byte off the **compressed** data — `0x0A` is an
+ordinary deflate byte — so two of the 337 reference PDFs came back with no operators at all and read
+as *zero fills on a page the reference plainly paints*. A 100 dpi raster refuted it in one step.
+And the fix's first cut read `/Length` as a literal where it is an **indirect reference** in every
+PDF LibreOffice writes, which emptied every stream in the corpus. Both are in the docstring.
+
+**Every earlier probe PDF of the round was re-read with the corrected reader and not one number
+moved**, so the brackets stand as first measured.
+
+### Vision: a sentence three readers gave over three rounds has changed side
+
+On `012` page 1, round 61's and round 62's readers each reported *"the reference draws alternating
+grey row bands; ours draws none."* This round's reader, who had seen neither, lists the row banding
+among the things that are **identical**. Confirmed at 48 fills to 48, rectangles to 0.10 pt. The same
+reader still reports the two things this round did not fix — the title, and the seven bar outlines —
+in the right direction both times.
+
+On `airbus…v1-4` page 5, the highest-reach document of change 1 and one that already passes, a reader
+asked directly about row shading: *"I do not see a case where the top shades a row grey that the
+bottom leaves white, or vice versa."*
+
+And a **new lead** neither change touches, unprompted and at high confidence: `069` draws
+`PROJECT NAME` below and right of the box that should hold it, overlapping the row beneath. Not yet
+checked by a second instrument; the document fails on words, 108 against 117.
+
+### The 24.2.7.2 audit — one site VERIFIED, and the list's over-read counted for the first time
+
+`DocxLayoutSource.cs`:777, all three claims about `w:pPr/w:rPr` being the paragraph *mark's*
+formatting, re-measured on the reference alone with a mark/run control for each. The empty
+paragraph's height lands on 36 × 1.15 = **41.40 pt exactly**.
+
+More useful than the verdict: **`Paperless.WordProcessing` shows 11 open hits and has 1 reachable
+open site.** Five sit inside an existing marker; five state a 26.2.4.2 measurement in the same
+comment as the older one they replaced, two of those in the ODT and RTF readers, whose formats have
+**no witness in this corpus** (271 `.docx`, 66 `.doc`, 0 `.rtf`, 0 `.odt`). The header has warned
+three times that the string over-reads; this is the first count of by how much.
+
+### Tests, and one that did not detect its own rule
+
+5144, 0 failed, 1 skipped; words 1231 → **1251**. Eight mutations through `verify-test.sh`, all
+eight detected — but `TheHeadingRowIsNotCountedAsABand` **did not fire at first**: at the fixture's
+band size of two, counting the heading row leaves the first body row in band 0 under both readings,
+so the test named after the rule passed under the rule's own mutation. It asks rows 2 and 4 now.
+That is `COMMON.md`'s "assert the baseline, not only the consequence" arriving from a third
+direction — assert the case that *discriminates*, not the case the sentence mentions.
+
+### Shared layers: none
+
+Seven files, all under `Paperless.WordProcessing`. The blend was deliberately kept out of
+`Paperless.Core`'s `Colour`, where it would have been a natural home and a shared-layer diff.
+For whoever extends it: `v:fill/@opacity` is read in one other place in the tree,
+`Paperless.Spreadsheets/Ooxml/XlsxNoteCaptions.cs`, and the other two corpora hold **5 such
+attributes in 3 slides documents and none in sheets**.
+
+### Next
+
+**Words** — the anchor limb of the auto-colour rule (the control already exists: round 59's LONG
+column at 34), then `012`'s remaining 8 strokes, which are the *border* half of the very element
+whose shading half this round implemented plus seven shape `a:ln`s, then `069`'s displaced text,
+then the tall-table guard and `097`'s 1.65 pt.
+
+### Parent verification — round 63 words
+
+**803 of 946 unchanged: words 323, slides 200, sheets 280.** All 946 gated: **zero movement in
+either direction, as predicted.** Tests **5144, 0 failed** (WordProcessing 1231 → 1251).
+
+Both changes were predicted **per direction**, which the round's own previous cycle earned: change 1
+predicted 38–46 changed / 0 gained / **0 lost** and measured **42 / 0 / 0**, with the 42 being exactly
+the 42 the census named and **42 improved, 0 worsened** on fill agreement.
+
+### The counter-witness question is answered, and both earlier rounds were right
+
+Round 59 measured a frame-fill arm that turned 383 glyphs white the reference draws black and removed
+it. Round 62 measured the opposite on a different document. **The missing term is fill
+transparency.** Both witnesses state one (`a:alpha val="52941"`, `v:fill opacity="26214f"`), and
+`ApplyAutoColor` asks `getAverageColor(aGlobalRetoucheColor)` — **which blends toward white first**.
+Luminance **105** and **168**: both bright, both black. Ten arms across three documents, **each built
+so the rivals answer differently** — including `012`'s title given a black fill at `a:alpha 20000`,
+which turns its text **black on a black anchor** and refutes "the anchor decides" *in the same arm*.
+The blend then pinned with **no free parameter**: three colours, three different predicted flips
+(9.571 / 37.454 / 62.222 %), **11 of 11**.
+
+`v:fill/@opacity`, read by nothing before, now also makes the box translucent — **all three of
+`069`'s fill colours match the reference's pixels exactly where none did.**
+
+**The anchor limb is deliberately not shipped**: it needs the anchor to reach `PageDrawing.DrawFrame`,
+which draws from a per-page list.
+
+### `w:tblStylePr`'s `w:tcPr` half — two omissions in one element
+
+`WordStyle` **discarded any layer carrying no `w:rPr`** (every band and column layer of
+`PlainTable5`), and `Names` **never offered the bands**. `012` page 1 goes **19 fills → 75**, colour
+for colour against the reference and rectangle for rectangle to **0.10 pt**. Reach **resolved, not
+declared**: 749 cells in 42 documents against **34 977 declared layers**.
+
+**The line-moving risk was closed before the change**: 0 of 271 documents name a style whose
+`w:basedOn` chain reaches a band layer with a `w:rPr`.
+
+### Two regressions that never existed, and a fix whose own first cut was worse
+
+`page_streams` **ate a whitespace byte off compressed data**, so two of 337 reference PDFs read as
+zero fills on pages they plainly paint. A 100 dpi raster refuted it in one step.
+
+**And the repair's first cut was worse than the bug**: `/Length` is an **indirect reference in every
+LibreOffice PDF**, and reading it literally emptied every stream in the corpus. All earlier probe
+PDFs were then re-read with the corrected reader and **not one number moved** — which is the check
+that makes the correction safe to trust rather than merely plausible.
+
+### A test named after a rule passed under that rule's own mutation
+
+`verify-test.sh` caught `TheHeadingRowIsNotCountedAsABand` detecting nothing: **at band size two,
+counting the heading leaves body row 1 in band 0 either way.** It asks rows 2 and 4 now. That is the
+fourth distinct shape of "a test that passes without reaching the defect" this session — after the
+unbound namespace, the single-run fixture, and the unit test that never touched its call site.
+
+### `Color::IsDark`'s threshold is not continuous, and the round's own probe had it wrong first
+
+`GetWCAGLuminance` returns a `sal_uInt8`. **One arm of eleven separates the two readings**, and it
+went the truncating way. The round's first cut was 5 of 6; corrected, 11 of 11.
+
+### The audit's open count over-states four-fold, and the parent confirmed it
+
+The round noticed `Paperless.WordProcessing` shows **11 open hits and has one reachable open site**.
+Measured corpus-wide by the parent: **37 raw, 9 in files carrying no marker at all** — and of those,
+two sit in the ODT and RTF readers, and **the words corpus holds no `.rtf` at all**.
+
+Most of the 37 are prose *inside or beside* an already-marked site, or historical narrative about a
+superseded port. **This is the fourth correction to that file's metric** — it conflated hits with
+files, it grew while being worked, a marker's own prose put a cleared site back into the count, and
+now it over-states the backlog four-fold. **Every one was found by a round, not by the file.** The
+honest command is now in `TODO.24-2-7-audit.md`.
+
+### Vision — including a sentence that changed side
+
+**`012` p1**: a sentence three readers gave over three rounds — *"the reference draws alternating grey
+row bands; ours draws none"* — **now lists the banding among the things that are identical**. Second
+instrument: 48 fills to 48, rectangles to 0.10 pt. The same reader still reports, correctly, the two
+things not fixed.
+
+**`069` p1** was change 2's control, and the reader answered *"looks identical, not different"* **at
+her own stated low confidence** — confirmed far more sharply at pixel level. She then volunteered a
+new high-confidence lead: `PROJECT NAME` drawn below and right of its box, overlapping the row
+beneath. **Unchecked by a second instrument and flagged as such.**
+
+### Words does next
+
+1. **The anchor limb** — the control already exists (LONG at 34); plumbing, not measurement.
+2. **`012`'s remaining 8 strokes** — the **border half of the very element whose shading half just
+   shipped**; `ConditionalCellProperties` already holds it, plus seven shape `a:ln`.
+3. `069`'s displaced text (new lead, needs a second instrument), then the tall-table guard, `097`'s
+   1.65 pt, the `.doc` label slant and the Carlito class.
+
+## Round 63 — sheets: the axis wrap limit is 0.95, `AdvanceScale` is gone, and the chart-area border is in
+
+**803 of 946 unchanged — sheets 280, slides 200, words 323, zero verdict movement in either
+direction on any of the three tracks**, all three swept in this worktree because the diff touches
+`Paperless.Core` and `Paperless.Ooxml`. Tests **5133, 0 failed, 1 skipped**; build 0/0.
+
+### Round 30's fitted 1.000 is refuted, and it had located a different boundary
+
+`lcl_hasWordBreak` does not turn the axis — it turns line breaking **off** and restarts, and the
+45° follows only if the labels then collide as single lines. **Every deck round 30 used carried a
+one-word label**, for which the wrap limit and the collision boundary are 0.95 and 1.00 of the
+tick spacing and only the outer one leaves a trace: a word wider than 0.95 of a tick and narrower
+than a whole one breaks, unbreaks and comes out upright. So the deck turns at 1.000 whatever the
+wrap limit is, and 0.95 was rejected for being invisible.
+
+Give one label a **space** and the two separate. 328 decks, the tick spacing swept continuously by
+the chart frame's own width rather than by an integer category count, LibreOffice's decision read
+twice — from its own `chart:coordinate-region` and from whether the labels survive in the exported
+PDF's text layer, which they do not at 45° — and the two readings agree on all 328:
+
+| decks | quantised ruler | unquantised |
+|---|---|---|
+| one word, six sizes | [0.9805, 1.0102) | **EMPTY** |
+| one word, frame width, 10 and 11 pt | [0.9974, 0.9988) | **EMPTY** |
+| **two words**, 10 pt | **[0.9470, 0.9505)** | [0.9713, 0.9748) |
+| **two words**, 11 pt | **[0.9486, 0.9524)** | [0.9276, 0.9312) |
+
+0.95 is in both two-word brackets and 1.000 is in neither, and **0.95 is `createTextShapes`'s own
+5% reduction with nothing fitted**. The empty unquantised intersections are round 62's pixel-em
+law confirmed from a second, independent observable. A four-arm control (vary the first word, the
+second word, both) shows the trigger is any word over the limit; a fifth deck shows the **first**
+label is never tested (`nTick > 0`); a sixth shows a **trailing blank hangs** and is not part of
+the word's width.
+
+`IChartTextMeasurer.AdvanceScale`, `ChartText.AdvanceScale` and the `SheetChart` override are
+**deleted**. Round 62's account of the method — a units patch on a fitted constant — is superseded:
+it was a fitted constant that had measured the wrong thing.
+
+**And it moves nothing.** 0 of 307 sheets renderings differ byte for byte, and 0 of the 34 slides
+and words documents that hold a labelled category axis, measured by reverting the rule in this
+tree and rendering both ways. The live control that the constant is in the rendering path: our own
+boundary on the two-word deck moves from 34.46 to **36.30**, which is `33.597 / 0.95` on the
+slides measurer's still-unquantised ruler, against the reference's 35.41.
+
+### The `D9D9D9` chart-area border: the code's own citation was an exception read as a rule
+
+`objectformatter.cxx:838-848` applies the grey 0.75 pt chart-space line **for every host but
+Impress** (tdf#150176). `ChartPlot.Border` cited that line for "a chart with no `a:ln` has no
+frame", which is why four blind readers across two rounds, all on **spreadsheets**, kept reporting
+a border the code was sure did not exist.
+
+Implemented; **10 sheets renderings change and every one lands on the reference's own stroke count
+exactly** — 12/12 on `microsoft_learn_multi_chart_examples`, 8/8 on `005_Contextures`, 2/2 on
+`023_Waterfall`, whose page-1 rectangle comes out at (67.78, 425.91)-(530.84, 756.17) against
+(68.17, 425.79)-(530.67, 755.77). No word count moves anywhere, which is what a stroke must do.
+A blind reader on `023` page 2, told nothing, listed the outline among what is **identical**.
+
+**The shape census over-reaches by nine times and the ink says so**: 90 sheets documents state a
+border-less non-Impress chart space; the reference actually draws more grey strokes than we did on
+21 documents, 12 of them a clean 0-against-N, and **10** of those changed. A chart part on a sheet
+that is never printed states everything and draws nothing.
+
+### `058_Social_media_engagement_data` is a `TODAY()` workbook, not an axis-fitting case
+
+A blind reader ranked first, at high confidence, that the two halves' date columns differ
+wholesale — 2/20/2023 on ours against 8/21/2026 on the reference's, twenty-four rows deep, with
+the impressions column unchanged. **24 `TODAY` formulas in `sheet11.xml`**: the reference
+recomputes them at render time and we draw the cached value. She also refuted the brief's other
+claim about the document — *"both halves draw 24 category labels … both rotated … neither
+truncated"* — where the brief has "the reference draws about 24 where we draw ten".
+**Proposed `kind` `text` → `unstable`.**
+
+### `046`'s ellipsis, confirmed to the character
+
+The parent's correction to round 62 holds exactly: ours 754 characters to the reference's 753,
+`only ours {t,n,e,m}` against `only ref {'.','.','.'}`. **The reference truncates a rotated
+category label with an ellipsis where we draw the word in full.** A blind reader who was not told
+the claim reported our labels colliding into "an unreadable clot" where the reference's are
+separated — and flagged at **low** confidence that she could not tell whether an ellipsis was
+hiding in it. She named the limit of her own instrument and was right about it.
+
+### Next
+
+**Sheets** — `023_Waterfall`'s page-2 chart, which a blind reader shows is not the same chart as
+the reference's at all (three horizontal bars against a stacked column, a value axis to 7000
+against none, no connector). Then the rotated-label ellipsis, which `046` settles to the
+character. Then a chart **title**'s stated colour: two readers, two unrelated documents, same
+direction, no instrument yet — the shape the `D9D9D9` border had before it turned out to be exact.
+
+### Parent verification — round 63 sheets
+
+**803 of 946 unchanged: words 323, slides 200, sheets 280.** All 946 gated: **zero movement in either
+direction on any track.** Tests **5133, 0 failed** (Core 407 → 412, Presentations 878 → 882).
+
+### Round 30's wrap constant is refuted, and `AdvanceScale` is deleted
+
+The stop-gap round 62 shipped **with its own retirement written into the site** is gone —
+`IChartTextMeasurer.AdvanceScale`, `ChartText.AdvanceScale` and the `SheetChart` override all
+removed.
+
+**Round 30's fitted 1.000 measured the wrong boundary.** `lcl_hasWordBreak` does not turn the axis;
+it turns line breaking **off** and restarts, and the 45° follows only if the labels then collide as
+single lines. **Every deck round 30 used carried a one-word label** — for which the wrap limit (0.95)
+and the collision boundary (1.00) both exist but **only the outer one leaves a trace**. So those
+decks turn at 1.000 whatever the limit is, and the C++'s own 0.95 was rejected **for being
+invisible**.
+
+328 decks, tick spacing swept **continuously by the chart frame width**, LibreOffice's decision read
+**two independent ways** (its own `chart:coordinate-region`, and whether the labels survive in the
+PDF text layer) — agreeing on all 328:
+
+| decks | quantised ruler | unquantised |
+|---|---|---|
+| one word | [0.9805, 1.0102) | **empty** |
+| two words, 10 pt | **[0.9470, 0.9505)** | [0.9713, 0.9748) |
+| two words, 11 pt | **[0.9486, 0.9524)** | [0.9276, 0.9312) |
+
+**0.95 is in both two-word brackets, 1.000 in neither, nothing fitted.** And **the empty unquantised
+intersections are round 62's pixel-em law confirmed from a second, independent observable** — a
+stronger corroboration than the fourteen-size sawtooth that established it.
+
+It moves nothing: **0 of 307 sheets renderings byte-for-byte**, and 0 of the 34 slides/words
+documents with a labelled category axis. The live control that the constant is in the rendering path
+at all: our own boundary moves 34.46 → **36.30 = 33.597 / 0.95**.
+
+### The `#D9D9D9` border: the citation was an exception read as a rule
+
+`objectformatter.cxx:838-848` applies it for **every host but Impress** (tdf#150176) — **which is why
+four readers, all on spreadsheets, kept reporting it and the slides track never did.** Ten renderings
+change, each landing on the reference's **exact stroke count** (12/12, 8/8, 3/3, 2/2, 1/1).
+
+**The census over-reaches nine-fold**: 90 documents state it, the ink says 21 with a deficit, 12
+clean, 10 changed.
+
+**A deviation, stated plainly by the round rather than folded away**: the border was **not** in the
+committed prediction. It was implemented only after the wrap change had been proved **byte-null on
+all 307**, so attribution is clean — but those ten renderings were unpredicted. That is the
+acceptable form of a mid-round addition, and it is now written into `COMMON.md` as such.
+
+### The brief's witness was refuted, and the parent's proposal from it does not survive either
+
+I sent this round at `058_Social_media_engagement_data` on the grounds that "the reference draws ~24
+consecutive date labels where we draw ten". **Both draw 24, both rotated, neither truncated.** What
+the round found instead is **25 volatile calls**: the reference draws a date series starting *today*
+and we draw the cached series.
+
+It proposed re-filing the document `unstable`. **Measured by the parent, that does not hold either.**
+Both sides emit **24 whole date tokens**, so the volatility is **token-neutral and cannot move the
+gate**. The residual six-token gap is **differential fragmentation of the rotated date labels** —
+ours splits into `2/`, `/2`, `20`, `23`; the reference's into `1/2`, `2/2`, `3`, `02`. Both fragment,
+neither is right, and **the boundaries differ because the drawn glyph positions do**.
+
+So it stays `kind=text`: a real difference in drawn output, expressed through tokenisation, and
+**winnable by matching the geometry** — which is what the chart work is already doing. Filing it
+`unstable` would have told every future round to skip a document that is in fact on the critical
+path.
+
+### Confirmed independently
+
+The parent's `046` correction, to the character: ours 754 / reference 753, `only ours {t,n,e,m}`
+against `only ref {. . .}` — **the reference ellipsises a rotated category label.**
+
+### Vision
+
+`058` p1 produced the `TODAY()` lead **no metric found**, and **refuted the brief** in the same
+reading. `046` p1 confirmed the ellipsis object and **flagged her own inability to see the ellipsis
+at low confidence — correctly**. `023` p2 listed the chart outline among what is **identical**, an
+unprompted blind confirmation of this round's *own* border fix, and then found that **our page-2
+chart is a different chart entirely** from the reference's — three horizontal bars against a stacked
+column, value axis to 7000 against none, no connector, **on a document that passes**.
+
+### Sheets does next
+
+`023_Waterfall`'s page-2 chart — **the wrong chart, on a passing document**. Then the rotated-label
+ellipsis, the chart title colour (two readers, two documents, no instrument yet), the data-label
+colour, and the 96 dpi width law for `SlideChart`/`FrameChart` — **now the only reason the three
+chart rulers differ.**
+
+### Parent verification — round 63 slides, and the sweep total now equals the manifest
+
+**803 of 946 unchanged: words 323, slides 200, sheets 280. Zero movement in either direction.**
+Tests **5147, 0 failed**.
+
+**The gate's own `TOTAL` line reads 946 for the first time this session** — every previous sweep read
+1033, and the scorer had to reconcile against `MANIFEST.tsv` to mean anything. `alias rows 0`. See
+the instrument fix below.
+
+### The fitted bullet: seven rounds named the wrong object
+
+This is the round's largest result and it closes an item I pushed on three briefs running.
+
+**It is not a placement defect.** A 21-slide probe puts the rule against 26.2.4.2 over four text
+sizes, four bullet faces, five bullet sizes, four line spacings and a numbered-bullet control:
+**20 of 20 arms agree to ≤0.10 pt, control exact at 0.000 on both sides.**
+
+The 251 pages are **at least three mechanisms** — 206 are `.ppt`, **50 are a marker *size*
+difference**, 33 a text *size* difference — and the metric constant the reference's placements imply
+**is not constant**. Not implemented, **and that is the finding rather than a deferral.**
+
+The reach census I insisted on producing is what made this visible: with one document it looked like
+one placement rule; with 251 pages it resolves into three unrelated causes.
+
+### The brief's headline was wrong again, and refuted two ways
+
+I sent this round at *"`Demick_JetBlue`'s plot area is 11% shorter in the reference"*. It is
+**181.55 pt against 181.76 — the reference's is 0.12% *taller***. Refuted by a gridline census over
+37 + 44 matched gridlines **and independently by a blind reader asked the question directly**. The
+clearance above the axis title is real but is **not the same phenomenon**: **no plot rectangle moved
+on any of the 57 chart pages.**
+
+### What shipped
+
+**The below-plot axis title is centred on the wrong rectangle and has no clearance.**
+`lcl_createTitle` is only provisional; `changePositionOfAxisTitle` runs again once the diagram exists
+and its `ALIGN_BOTTOM` arm is `diagramPlusAxes.X + Width/2` across and `+ h/2 + pageHeight × 0.02`
+down. **The two passes use different constants** — the reservation's flat 420 mm100 against two per
+cent — **which is why only the reservation had ever been transcribed.** Title centre 374.55 →
+**352.81** against the reference's 352.78.
+
+**An OOXML marker's `c:size` is stated and we ignored it**: `round(6 × 2540/72) = 212` mm100 =
+**6.0094 pt**; ours 7.00 → **6.01**. That is the other half of round 62's refutation landing — the
+*size* defect was real, the *legend key* one was not.
+
+**Six of nineteen census documents could not move**, each for a reason the prediction wrote down —
+four decks draw no marks at all on either side, one is `radarStyle="filled"`, one has both axis
+titles on a value axis. **Naming a blind spot is not bounding it**: the round named both and did not
+widen the band, and documents-moved missed for the eighth round, this time **in both directions at
+once**.
+
+**And a fact about the metric worth keeping**: the four line decks **worsened by a hundredth while
+becoming exact**. Our oversized marker *contained* the reference's, so only the annulus differed; the
+correctly-sized one is still 0.41 pt to its left, so two slivers differ. **A correctly-sized mark
+that is displaced can differ on more pixels than an oversized one that covers its target.**
+
+### The instrument fix: one inode, one render
+
+The round found `slides/done-005/ppt/ITE106-Chapter 4` present as `.ppt` **and** `.PPT` — one inode,
+one manifest row — **worth 94.14 of a 989 `abs_ink` total, appearing and disappearing between sweeps
+of an unchanged tree**. The per-format identity lower-cases the extension, so both spellings map to
+the same id and therefore **the same output path**: two workers render one document to one file while
+a third step reads it.
+
+Both sweep scripts now enumerate **one path per inode**, keyed on device and inode through
+`find -printf` so there is no shell round trip and the corpus's filenames with spaces, brackets and
+per-cent signs are safe.
+
+**Which spelling survives took three attempts and the first two were wrong** — that is the part worth
+recording. Some aliases are an upper-cased *extension*, some are a wholly lower-cased *name*, so
+prefer-lower-case and prefer-upper-case are each right for one family and wrong for the other, and
+keeping the wrong one makes every manifest-keyed scorer report the document **unswept**. **git is the
+authority** — it tracks exactly one spelling per inode — and **`core.quotePath=false` is required
+rather than cosmetic**, because git escapes non-ASCII by default and the corpus's CJK filename would
+otherwise not match what `find` emits.
+
+Verified set for set against the manifest's 946 paths, nothing on either side, and the live gate now
+reports `TOTAL 946`.
+
+### Vision — including a refusal that was the right answer
+
+**`003` p1**, on the markers: *"I cannot separate them… I am explicitly declining to say one half's is
+bigger."* **That is correct and it is not a confirmation** — 0.99 pt is 1.8 px after compositing and
+the reviewer's floor is 1–2 px. The fill census is what confirms it. **A reviewer declining to call a
+difference below her own resolution is a better outcome than one who calls it.**
+
+**`Reporting_responsibilities_matrix` p254**, chosen because round 62 read p138: the justified-line
+lead **recurred on a different page with a different reader**, and the reviewer **named the
+discriminating measurement itself**. Run as specified: the ragged control line is +0.144% (the known
+advance divergence) while our **justified right margin is 1.30 pt further right** over nine lines,
+left edges agreeing to 0.03. **Both rivals real; the geometry one is four times the larger and alone
+accounts for the wrap** — the advance divergence, which both rounds would have blamed, is a quarter
+of it.
+
+### The audit under-reports too, in the opposite direction to the over-read
+
+**Three of the nine unmarked files carry their round-53 re-check as prose with full figures and no
+marker**, so the count under-reports by three. Together with the four-fold over-read recorded
+yesterday, that file's raw number is wrong in **both** directions at once.
+
+### Slides does next
+
+The legend key marker — **sixth sighting, second document, and now one draw call**. Then
+`Reporting_responsibilities_matrix`'s measured 1.30 pt, then the `.ppt` half of the bullet (50 pages
+where our bullet's own em differs — **not** the placement rule).

@@ -352,7 +352,7 @@ public sealed class RtfDocument : IWordProcessingDocument, IPaginatedDocument
                 Text = CaseMapping.Apply(paragraph.Text, runs),
                 Face = face,
                 Font = font,
-                Colour = paragraph.Colour ?? Colour.Black,
+                Colour = paragraph.Colour ?? Colour.Transparent,
                 Format = paragraph.Format,
                 Label = Label(paragraph, face, font),
                 EmSize = paragraph.Size,
@@ -400,7 +400,7 @@ public sealed class RtfDocument : IWordProcessingDocument, IPaginatedDocument
                     Language: paragraph.Language, DisableKerning: !paragraph.AutoKerning)) with
             {
                 Font = font,
-                Colour = paragraph.Colour ?? Colour.Black,
+                Colour = paragraph.Colour ?? Colour.Transparent,
                 Follow = LabelFollow.Nothing,
             }
             : null;
@@ -590,11 +590,14 @@ public sealed class RtfDocument : IWordProcessingDocument, IPaginatedDocument
         IReadOnlyList<RtfLayoutRun> stated = paragraph.Runs ?? [];
         List<PageRun> runs = new(stated.Count);
         bool varies = false;
+        FontReference? paragraphFont =
+            fonts.Reference(paragraph.FamilyName, paragraph.Weight, paragraph.IsItalic);
 
         foreach (RtfLayoutRun run in stated)
         {
             OpenTypeFace face =
                 fonts.Face(run.FamilyName, run.Weight, run.IsItalic) ?? paragraphFace;
+            FontReference? font = fonts.Reference(run.FamilyName, run.Weight, run.IsItalic);
 
             // The escapement is resolved here rather than where it was read, because its rise is a
             // fraction of the face's height and the face is only known now.
@@ -619,7 +622,12 @@ public sealed class RtfDocument : IWordProcessingDocument, IPaginatedDocument
                 // Kerning, unlike the two rules, does change a measurement — so a run that kerns
                 // inside a paragraph that does not has to survive the shortcut or its width is the
                 // paragraph's answer rather than its own.
-                || run.AutoKerning != paragraph.AutoKerning)
+                || run.AutoKerning != paragraph.AutoKerning
+                // And a synthetic oblique, which is drawing-only in the same way and was the one
+                // missing from this list: an italic run whose family has no italic installed resolves to
+                // the *same* face as its upright neighbour, so nothing above can see it and the fold
+                // would draw it upright. See PageRun.LeansDifferently.
+                || PageRun.LeansDifferently(font, paragraphFont))
             {
                 varies = true;
             }
@@ -629,8 +637,8 @@ public sealed class RtfDocument : IWordProcessingDocument, IPaginatedDocument
                 run.Length,
                 face,
                 size,
-                fonts.Reference(run.FamilyName, run.Weight, run.IsItalic),
-                run.Colour ?? paragraph.Colour ?? Colour.Black,
+                font,
+                run.Colour ?? paragraph.Colour ?? Colour.Transparent,
                 new Text.Shaping.ShapingOptions(
                     Language: run.Language, DisableKerning: !run.AutoKerning),
                 rise,

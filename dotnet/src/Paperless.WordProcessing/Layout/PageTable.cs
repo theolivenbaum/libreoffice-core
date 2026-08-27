@@ -402,12 +402,55 @@ public sealed record PageTable : PageBlock
     /// separately rather than read off the alignment.
     /// </para>
     /// <para>
-    /// What it changes is <em>where the flow it sits in has got to</em>, and only in a running head or
-    /// foot — see <see cref="FlowLayouter.LayOut"/>. Everywhere else the table keeps the in-flow placement
-    /// it has always had.
+    /// What it changes is <em>where the flow it sits in has got to</em>: in a running head or foot
+    /// through <see cref="FlowLayouter.LayOut"/>, and in the body through <c>Paginator.Fill</c>, which
+    /// puts it at <see cref="VerticalOffset"/> from <see cref="VerticalOrigin"/> and leaves the flow
+    /// where it was.
     /// </para>
     /// </remarks>
     public bool IsPositioned { get; init; }
+
+    /// <summary>
+    /// How far the top of a positioned table sits below <see cref="VerticalOrigin"/> — OOXML's
+    /// <c>w:tblpY</c>. Meaningless unless <see cref="IsPositioned"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Read against the installed LibreOffice 26.2.4.2 on the corpus's eight positioned graph-paper
+    /// templates, taking the reference's own first horizontal table rule out of its PDF. Predicting that
+    /// rule's y from the page geometry and <c>w:tblpY</c> alone lands within <b>1.15 pt on seven of the
+    /// eight</b> — the residual being the half border width the stroke is centred on — while our own,
+    /// which ignored it, sat at the top margin on all eight and was out by up to 26 pt:
+    /// </para>
+    /// <code>
+    /// doc  anchor  tblpY   predicted   reference   ours
+    /// 080  page     1786      752.59      751.84   769.40
+    /// 084  page     1025      790.64      790.09   769.40
+    /// 089  page     1741      754.84      754.54   769.65
+    /// 082  page     1513      766.24      765.44   769.40
+    /// 085  page     1606      761.59      760.44   769.27
+    /// 087  page     1025      790.64      789.84   769.46
+    /// 083  (text)    525      743.40      743.34   769.65
+    /// 081  (text)    579      494.35      491.15   520.41
+    /// </code>
+    /// <para>
+    /// 081 is 3.2 pt out and is not explained; it is the one landscape document in the set and it passes
+    /// the gate either way.
+    /// </para>
+    /// </remarks>
+    public Length VerticalOffset { get; init; }
+
+    /// <summary>
+    /// What <see cref="VerticalOffset"/> is measured from — OOXML's <c>w:vertAnchor</c>.
+    /// </summary>
+    /// <remarks>
+    /// <c>page</c> is the sheet's own top edge, <c>margin</c> the text area's, and <c>text</c> — which is
+    /// also what an absent attribute means — the point the flow has reached, which is the anchor
+    /// paragraph's top. The same three <c>TablePositionHandler::getTablePosition</c> maps onto
+    /// <c>PAGE_FRAME</c>, <c>PAGE_PRINT_AREA</c> and <c>FRAME</c>
+    /// (<c>sw/source/writerfilter/dmapper/TablePositionHandler.cxx:133-141</c>).
+    /// </remarks>
+    public FrameVerticalOrigin VerticalOrigin { get; init; } = FrameVerticalOrigin.Paragraph;
 
     /// <summary>
     /// The space a positioned table keeps clear below itself — OOXML's <c>w:bottomFromText</c>.

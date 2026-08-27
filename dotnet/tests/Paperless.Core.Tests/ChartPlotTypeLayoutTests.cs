@@ -107,7 +107,7 @@ public class ChartPlotTypeLayoutTests
     [Fact]
     public void ARadarsWebHasThreeRingsAndNotTen()
     {
-        ChartDrawing drawing = Place(Radar() with { ValueGrid = Colour.FromRgb(0xB3B3B3) });
+        ChartDrawing drawing = Place(Radar() with { ValueGrid = new ChartGrid(Colour.FromRgb(0xB3B3B3)) });
 
         // One segment per category per ring, and the ring at zero is a point rather than a ring.
         List<ChartLine> web =

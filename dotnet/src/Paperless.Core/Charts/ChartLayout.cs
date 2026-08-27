@@ -105,6 +105,24 @@ public readonly record struct ChartBox(
     Colour? Line = null,
     Length LineWidth = default);
 
+/// <summary>
+/// How one axis' gridlines are painted.
+/// </summary>
+/// <remarks>
+/// A minor gridline states its own <c>a:ln</c> far more often than a major one does, and the two
+/// things it states — a width and a dash — are exactly what an ink measurement notices. On
+/// <c>N2_E_Maestroni_Swarm_COP.pptx</c> the minor grid is <c>&lt;a:ln w="6350"&gt;
+/// &lt;a:prstDash val="sysDash"/&gt;</c>, and drawing its 110 lines solid and hairline instead of
+/// dashed at half a point is worth 2.8 points of that document's unsigned ink on its own.
+/// </remarks>
+/// <param name="Colour">The colour to stroke in.</param>
+/// <param name="Width">The stroke width; zero is a hairline.</param>
+/// <param name="Dash">Alternating ink and gap lengths, or null for a solid line.</param>
+public readonly record struct ChartGrid(
+    Colour Colour,
+    Length Width = default,
+    IReadOnlyList<Length>? Dash = null);
+
 /// <summary>One straight line — an axis, a tick, a gridline.</summary>
 /// <param name="From">Its start.</param>
 /// <param name="To">Its end.</param>
@@ -300,6 +318,25 @@ public static partial class ChartLayout
     /// <remarks><c>AXIS2D_TICKLABELSPACING = 100</c> (<c>ViewDefines.hxx:31</c>).</remarks>
     private static readonly Length LabelSpacing = Length.FromMm100(100);
 
+    /// <summary>How far outside the plot area an axis' major ticks reach.</summary>
+    /// <remarks>
+    /// <strong>Only an outward tick is reserved, and only an outward tick moves the label away
+    /// from the axis.</strong> Measured on a six-arm probe over a corpus chart already stating
+    /// <c>c:majorTickMark val="none"</c> on both axes: <c>none</c> and <c>in</c> move the plot
+    /// edge by 0.00, <c>out</c> and <c>cross</c> move it by 4.25 pt — <c>AXIS2D_TICKLENGTH</c>
+    /// exactly — and on that axis' own edge only. See <see cref="ChartPlot.ValueTicks"/>.
+    /// </remarks>
+    private static Length OuterTick(ChartTickMark mark)
+        => mark is ChartTickMark.Outer or ChartTickMark.Cross ? TickLength : Length.Zero;
+
+    /// <summary>How far inside the plot area an axis' major ticks reach.</summary>
+    /// <remarks>
+    /// Drawn but never reserved: an inward tick lies inside a rectangle that already exists, so
+    /// <c>VDiagram::adjustInnerSize</c> is never charged for it. See <see cref="OuterTick"/>.
+    /// </remarks>
+    private static Length InnerTick(ChartTickMark mark)
+        => mark is ChartTickMark.Inner or ChartTickMark.Cross ? TickLength : Length.Zero;
+
     /// <summary>The extra gap below a main title, beyond the proportional one.</summary>
     /// <remarks>
     /// <c>lcl_createTitle</c> adds a flat 135 hundredths of a millimetre for a main title, on
@@ -356,7 +393,16 @@ public static partial class ChartLayout
     /// <remarks><c>VLegend.cxx:668-671</c>; see <see cref="LegendMarginX"/>.</remarks>
     private static readonly Length LegendMarginY = Length.FromMm100(185);
 
-    /// <summary>The colour LibreOffice draws an axis, its ticks and its labels in.</summary>
+    /// <summary>
+    /// The black a chart falls back to for a <em>stroke</em> it has no colour for.
+    /// </summary>
+    /// <remarks>
+    /// It was the colour of every piece of chart text as well until round 60, which is what made
+    /// a chart on a dark master draw black text on its own black background. Text now comes from
+    /// <see cref="ChartPlot.LabelColour"/> and its four siblings; what is left here is the
+    /// fallback for a radar spoke, a candlestick whisker and a marker with no fill of its own —
+    /// none of which any format states a colour for.
+    /// </remarks>
     private static readonly Colour AxisColour = Colour.Black;
 
     /// <summary>
@@ -801,6 +847,33 @@ public static partial class ChartLayout
             }
         }
 
+        // The pie's own second pass, and the only chart type that has one:
+        // impl_createDiagramAndContent draws the series once, takes the bounding box of everything
+        // the diagram group produced — the labels included — and recreates the whole thing at
+        // adjustInnerSize(consumedOuterRect). It is what makes a pie with best-fit labels smaller
+        // than a pie without them, measured at radius 99.78 against 110.44 on the corpus witness,
+        // and it is gated on there being a best-fit label because that is the only placement whose
+        // labels can leave the diagram rectangle at all.
+        if (HasBestFitLabels(plot))
+        {
+            DocRect outer = DiagramAreaOf(plot, frame, measurer);
+
+            // And pass 1 is NOT drawn at `area`. `reduceToMinimumSize` has already shrunk the
+            // diagram to a fraction of the available rectangle before any series exists, and for
+            // a pie nothing grows it back before the labels are laid out — see
+            // <see cref="ReducedToMinimum"/>. Modelling pass 1 at full size is what made round
+            // 60's trace read `consumed.Left = 291.76` on `003_advanced_excel_pie`: at radius
+            // 110.72 four of the five labels fit inside their own slices and nothing reaches
+            // left of the pie, where the reference's pass 1 puts labels on both sides.
+            DocRect first = ReducedToMinimum(plot, outer);
+
+            area = AdjustInnerSize(
+                plot, outer, first, PieConsumedRect(plot, first, outer, measurer));
+
+            if (area.Width <= Length.Zero || area.Height <= Length.Zero)
+                return new ChartDrawing(DocRect.Empty, boxes, lines, labels, shapes);
+        }
+
         if (plot.PlotBackground is { } wall) boxes.Add(new ChartBox(area, wall));
 
         if (plot.HasAxes)
@@ -849,7 +922,8 @@ public static partial class ChartLayout
                 switch (kind)
                 {
                     case ChartPlotKind.Pie:
-                        AddWedges(part, area, shapes, labels);
+                        AddWedges(part, area, DiagramAreaOf(plot, frame, measurer),
+                                  measurer, shapes, labels);
                         break;
                     case ChartPlotKind.Area:
                         AddAreas(part, area, against, categories, columns, shapes, labels);
@@ -868,7 +942,8 @@ public static partial class ChartLayout
                         AddCandles(part, area, against, categories, boxes, lines, labels);
                         break;
                     case ChartPlotKind.OfPie:
-                        AddOfPie(part, area, shapes, lines, labels);
+                        AddOfPie(part, area, DiagramAreaOf(plot, frame, measurer),
+                                 measurer, shapes, lines, labels);
                         break;
                     default:
                         AddBars(part, area, against, categories, columns, boxes, labels);
@@ -1027,7 +1102,7 @@ public static partial class ChartLayout
                 {
                     if (line.Length == 0) continue;
                     labels.Add(new ChartLabel(
-                        line, at, ChartLabelAnchor.LeftMiddle, plot.LabelSize, AxisColour));
+                        line, at, ChartLabelAnchor.LeftMiddle, plot.LabelSize, plot.LabelColour));
                     at = new DocPoint(at.X, at.Y + plot.LabelSize * ChartLineHeight);
                 }
             }
@@ -1410,10 +1485,10 @@ public static partial class ChartLayout
                 : WidestCategoryLabel(plot, categories, measurer);
 
         Length valueSpace = plot.ValueAxisVisible
-            ? TickLength + (valueLabels ? LabelSpacing : Length.Zero)
+            ? OuterTick(plot.ValueTicks) + (valueLabels ? LabelSpacing : Length.Zero)
             : Length.Zero;
         Length categorySpace = plot.CategoryAxisVisible
-            ? TickLength + (categoryLabels ? LabelSpacing : Length.Zero)
+            ? OuterTick(plot.CategoryTicks) + (categoryLabels ? LabelSpacing : Length.Zero)
             : Length.Zero;
         Length valueHeight = valueLabels ? labelHeight : Length.Zero;
 
@@ -1454,8 +1529,8 @@ public static partial class ChartLayout
                     ? WidestValueLabel(
                           second, plot.SecondaryValueFormat, plot.LabelSize, measurer,
                       plot.IsLabelBold)
-                      + TickLength + LabelSpacing
-                    : TickLength;
+                      + OuterTick(plot.SecondaryTicks) + LabelSpacing
+                    : OuterTick(plot.SecondaryTicks);
             }
 
             // On an unshifted axis the first and the last label are centred on the plot area's own
@@ -1522,16 +1597,50 @@ public static partial class ChartLayout
         bool labelled = visible
                         && (secondary ? plot.SecondaryLabelsVisible : plot.ValueLabelsVisible);
 
+        ChartTickMark mark = secondary ? plot.SecondaryTicks : plot.ValueTicks;
+        Length outer = OuterTick(mark);
+        Length inner = InnerTick(mark);
+        ChartGrid stroke = secondary ? plot.SecondaryAxisLine : plot.ValueAxisLine;
+
         if (visible)
         {
             lines.Add(columns
                 ? new ChartLine(
-                    new DocPoint(axisX, area.Top), new DocPoint(axisX, area.Bottom), AxisColour)
+                    new DocPoint(axisX, area.Top), new DocPoint(axisX, area.Bottom),
+                    stroke.Colour, stroke.Width, stroke.Dash)
                 : new ChartLine(
-                    new DocPoint(area.Left, axisY), new DocPoint(area.Right, axisY), AxisColour));
+                    new DocPoint(area.Left, axisY), new DocPoint(area.Right, axisY),
+                    stroke.Colour, stroke.Width, stroke.Dash));
         }
 
-        foreach (double tick in scale.MajorTicks())
+        // The minor grid needs the *next* tick, so the ticks are taken as a list rather than
+        // walked lazily. Only the primary axis draws a grid, exactly as for the major one.
+        List<double> ticks = [.. scale.MajorTicks()];
+
+        if (!secondary && plot.ValueMinorGrid is { } minor && plot.ValueMinorIntervals > 1)
+        {
+            for (int at = 0; at + 1 < ticks.Count; at++)
+            {
+                for (int step = 1; step < plot.ValueMinorIntervals; step++)
+                {
+                    double between = scale.Fraction(ticks[at])
+                        + ((scale.Fraction(ticks[at + 1]) - scale.Fraction(ticks[at]))
+                           * step / plot.ValueMinorIntervals);
+
+                    lines.Add(columns
+                        ? new ChartLine(
+                            new DocPoint(area.Left, area.Bottom - (area.Height * between)),
+                            new DocPoint(area.Right, area.Bottom - (area.Height * between)),
+                            minor.Colour, minor.Width, minor.Dash)
+                        : new ChartLine(
+                            new DocPoint(area.Left + (area.Width * between), area.Top),
+                            new DocPoint(area.Left + (area.Width * between), area.Bottom),
+                            minor.Colour, minor.Width, minor.Dash));
+                }
+            }
+        }
+
+        foreach (double tick in ticks)
         {
             double along = scale.Fraction(tick);
 
@@ -1544,24 +1653,28 @@ public static partial class ChartLayout
                 if (!secondary && plot.ValueGrid is { } grid)
                 {
                     lines.Add(new ChartLine(
-                        new DocPoint(area.Left, y), new DocPoint(area.Right, y), grid));
+                        new DocPoint(area.Left, y), new DocPoint(area.Right, y),
+                        grid.Colour, grid.Width, grid.Dash));
                 }
 
                 if (!visible) continue;
 
-                lines.Add(new ChartLine(
-                    new DocPoint(axisX + TickLength * outward, y),
-                    new DocPoint(axisX, y),
-                    AxisColour));
+                if (outer + inner > Length.Zero)
+                {
+                    lines.Add(new ChartLine(
+                        new DocPoint(axisX + (outer * outward), y),
+                        new DocPoint(axisX - (inner * outward), y),
+                        stroke.Colour, stroke.Width, stroke.Dash));
+                }
 
                 if (!labelled) continue;
 
                 labels.Add(new ChartLabel(
                     ChartDataLabel.Write(tick, format),
-                    new DocPoint(axisX + (TickLength + LabelSpacing) * outward, y),
+                    new DocPoint(axisX + ((outer + LabelSpacing) * outward), y),
                     secondary ? ChartLabelAnchor.LeftMiddle : ChartLabelAnchor.RightMiddle,
                     plot.LabelSize,
-                    AxisColour));
+                    plot.LabelColour));
             }
             else
             {
@@ -1570,24 +1683,28 @@ public static partial class ChartLayout
                 if (!secondary && plot.ValueGrid is { } grid)
                 {
                     lines.Add(new ChartLine(
-                        new DocPoint(x, area.Top), new DocPoint(x, area.Bottom), grid));
+                        new DocPoint(x, area.Top), new DocPoint(x, area.Bottom),
+                        grid.Colour, grid.Width, grid.Dash));
                 }
 
                 if (!visible) continue;
 
-                lines.Add(new ChartLine(
-                    new DocPoint(x, axisY),
-                    new DocPoint(x, axisY - TickLength * outward),
-                    AxisColour));
+                if (outer + inner > Length.Zero)
+                {
+                    lines.Add(new ChartLine(
+                        new DocPoint(x, axisY + (inner * outward)),
+                        new DocPoint(x, axisY - (outer * outward)),
+                        stroke.Colour, stroke.Width, stroke.Dash));
+                }
 
                 if (!labelled) continue;
 
                 labels.Add(new ChartLabel(
                     ChartDataLabel.Write(tick, format),
-                    new DocPoint(x, axisY - (TickLength + LabelSpacing) * outward),
+                    new DocPoint(x, axisY - ((outer + LabelSpacing) * outward)),
                     secondary ? ChartLabelAnchor.CentreBottom : ChartLabelAnchor.CentreTop,
                     plot.LabelSize,
-                    AxisColour));
+                    plot.LabelColour));
             }
         }
     }
@@ -1610,17 +1727,21 @@ public static partial class ChartLayout
         List<ChartLine> lines,
         List<ChartLabel> labels)
     {
+        Length outer = OuterTick(plot.CategoryTicks);
+        Length inner = InnerTick(plot.CategoryTicks);
+        ChartGrid stroke = plot.CategoryAxisLine;
+
         if (plot.CategoryAxisVisible)
         {
             lines.Add(columns
                 ? new ChartLine(
                     new DocPoint(area.Left, area.Bottom),
                     new DocPoint(area.Right, area.Bottom),
-                    AxisColour)
+                    stroke.Colour, stroke.Width, stroke.Dash)
                 : new ChartLine(
                     new DocPoint(area.Left, area.Top),
                     new DocPoint(area.Left, area.Bottom),
-                    AxisColour));
+                    stroke.Colour, stroke.Width, stroke.Dash));
         }
 
         foreach (double tick in domain.MajorTicks())
@@ -1635,39 +1756,50 @@ public static partial class ChartLayout
                 if (plot.CategoryGrid is { } grid)
                 {
                     lines.Add(new ChartLine(
-                        new DocPoint(x, area.Top), new DocPoint(x, area.Bottom), grid));
+                        new DocPoint(x, area.Top), new DocPoint(x, area.Bottom),
+                        grid.Colour, grid.Width, grid.Dash));
                 }
 
                 if (!plot.CategoryAxisVisible) continue;
 
-                lines.Add(new ChartLine(
-                    new DocPoint(x, area.Bottom), new DocPoint(x, area.Bottom + TickLength), AxisColour));
+                if (outer + inner > Length.Zero)
+                {
+                    lines.Add(new ChartLine(
+                        new DocPoint(x, area.Bottom - inner),
+                        new DocPoint(x, area.Bottom + outer),
+                        stroke.Colour, stroke.Width, stroke.Dash));
+                }
 
                 if (!plot.CategoryLabelsVisible) continue;
 
                 labels.Add(new ChartLabel(
                     text,
-                    new DocPoint(x, area.Bottom + TickLength + LabelSpacing),
+                    new DocPoint(x, area.Bottom + outer + LabelSpacing),
                     ChartLabelAnchor.CentreTop,
                     plot.LabelSize,
-                    AxisColour));
+                    plot.LabelColour));
             }
             else
             {
                 Length y = area.Bottom - area.Height * along;
                 if (!plot.CategoryAxisVisible) continue;
 
-                lines.Add(new ChartLine(
-                    new DocPoint(area.Left - TickLength, y), new DocPoint(area.Left, y), AxisColour));
+                if (outer + inner > Length.Zero)
+                {
+                    lines.Add(new ChartLine(
+                        new DocPoint(area.Left - outer, y),
+                        new DocPoint(area.Left + inner, y),
+                        stroke.Colour, stroke.Width, stroke.Dash));
+                }
 
                 if (!plot.CategoryLabelsVisible) continue;
 
                 labels.Add(new ChartLabel(
                     text,
-                    new DocPoint(area.Left - TickLength - LabelSpacing, y),
+                    new DocPoint(area.Left - outer - LabelSpacing, y),
                     ChartLabelAnchor.RightMiddle,
                     plot.LabelSize,
-                    AxisColour));
+                    plot.LabelColour));
             }
         }
     }
@@ -1693,17 +1825,21 @@ public static partial class ChartLayout
         List<ChartLine> lines,
         List<ChartLabel> labels)
     {
+        Length outer = OuterTick(plot.CategoryTicks);
+        Length inner = InnerTick(plot.CategoryTicks);
+        ChartGrid stroke = plot.CategoryAxisLine;
+
         if (plot.CategoryAxisVisible)
         {
             lines.Add(columns
                 ? new ChartLine(
                     new DocPoint(area.Left, area.Bottom),
                     new DocPoint(area.Right, area.Bottom),
-                    AxisColour)
+                    stroke.Colour, stroke.Width, stroke.Dash)
                 : new ChartLine(
                     new DocPoint(area.Left, area.Top),
                     new DocPoint(area.Left, area.Bottom),
-                    AxisColour));
+                    stroke.Colour, stroke.Width, stroke.Dash));
         }
 
         if (categories <= 0 && plot.DateAxis is null) return;
@@ -1716,11 +1852,35 @@ public static partial class ChartLayout
             ? dates.Ticks.Count - 1
             : plot.ShiftedCategories ? categories : categories - 1;
 
+        double Along(int at) => plot.DateAxis is { } dateScale
+            ? dateScale.Fraction(dateScale.Ticks[at])
+            : ticks == 0 ? 0.0 : (double)at / ticks;
+
+        if (plot.CategoryMinorGrid is { } categoryMinor && plot.CategoryMinorIntervals > 1)
+        {
+            for (int at = 0; at + 1 <= ticks; at++)
+            {
+                for (int step = 1; step < plot.CategoryMinorIntervals; step++)
+                {
+                    double between = Along(at)
+                        + ((Along(at + 1) - Along(at)) * step / plot.CategoryMinorIntervals);
+
+                    lines.Add(columns
+                        ? new ChartLine(
+                            new DocPoint(area.Left + (area.Width * between), area.Top),
+                            new DocPoint(area.Left + (area.Width * between), area.Bottom),
+                            categoryMinor.Colour, categoryMinor.Width, categoryMinor.Dash)
+                        : new ChartLine(
+                            new DocPoint(area.Left, area.Bottom - (area.Height * between)),
+                            new DocPoint(area.Right, area.Bottom - (area.Height * between)),
+                            categoryMinor.Colour, categoryMinor.Width, categoryMinor.Dash));
+                }
+            }
+        }
+
         for (int at = 0; at <= ticks; at++)
         {
-            double along = plot.DateAxis is { } scale
-                ? scale.Fraction(scale.Ticks[at])
-                : ticks == 0 ? 0.0 : (double)at / ticks;
+            double along = Along(at);
 
             if (columns)
             {
@@ -1729,15 +1889,16 @@ public static partial class ChartLayout
                 if (plot.CategoryGrid is { } grid)
                 {
                     lines.Add(new ChartLine(
-                        new DocPoint(x, area.Top), new DocPoint(x, area.Bottom), grid));
+                        new DocPoint(x, area.Top), new DocPoint(x, area.Bottom),
+                        grid.Colour, grid.Width, grid.Dash));
                 }
 
-                if (plot.CategoryAxisVisible)
+                if (plot.CategoryAxisVisible && outer + inner > Length.Zero)
                 {
                     lines.Add(new ChartLine(
-                        new DocPoint(x, area.Bottom),
-                        new DocPoint(x, area.Bottom + TickLength),
-                        AxisColour));
+                        new DocPoint(x, area.Bottom - inner),
+                        new DocPoint(x, area.Bottom + outer),
+                        stroke.Colour, stroke.Width, stroke.Dash));
                 }
             }
             else
@@ -1747,15 +1908,16 @@ public static partial class ChartLayout
                 if (plot.CategoryGrid is { } grid)
                 {
                     lines.Add(new ChartLine(
-                        new DocPoint(area.Left, y), new DocPoint(area.Right, y), grid));
+                        new DocPoint(area.Left, y), new DocPoint(area.Right, y),
+                        grid.Colour, grid.Width, grid.Dash));
                 }
 
-                if (plot.CategoryAxisVisible)
+                if (plot.CategoryAxisVisible && outer + inner > Length.Zero)
                 {
                     lines.Add(new ChartLine(
-                        new DocPoint(area.Left - TickLength, y),
-                        new DocPoint(area.Left, y),
-                        AxisColour));
+                        new DocPoint(area.Left - outer, y),
+                        new DocPoint(area.Left + inner, y),
+                        stroke.Colour, stroke.Width, stroke.Dash));
                 }
             }
         }
@@ -1808,17 +1970,17 @@ public static partial class ChartLayout
                 labels.Add(new ChartLabel(
                     text,
                     new DocPoint(
-                        area.Left - TickLength - LabelSpacing,
+                        area.Left - outer - LabelSpacing,
                         area.Bottom - area.Height * centre),
                     ChartLabelAnchor.RightMiddle,
                     plot.LabelSize,
-                    AxisColour));
+                    plot.LabelColour));
 
                 continue;
             }
 
             Length x = area.Left + area.Width * centre;
-            Length top = area.Bottom + TickLength + LabelSpacing;
+            Length top = area.Bottom + outer + LabelSpacing;
 
             // The second row of a staggered axis sits one row below the first.
             if (layout.Staggered && at / rhythm % 2 == 1) top += layout.Reserved / 2;
@@ -1827,7 +1989,7 @@ public static partial class ChartLayout
             {
                 labels.Add(new ChartLabel(
                     text, new DocPoint(x, top), ChartLabelAnchor.CentreTop,
-                    plot.LabelSize, AxisColour));
+                    plot.LabelSize, plot.LabelColour));
 
                 continue;
             }
@@ -1845,7 +2007,7 @@ public static partial class ChartLayout
                 new DocPoint(x, top + depth / 2),
                 ChartLabelAnchor.Centre,
                 plot.LabelSize,
-                AxisColour,
+                plot.LabelColour,
                 layout.Rotation));
         }
     }
@@ -1952,7 +2114,7 @@ public static partial class ChartLayout
                 new DocPoint(area.Left + column * (at + 0.5), top + row / 2),
                 ChartLabelAnchor.Centre,
                 plot.LabelSize,
-                AxisColour));
+                plot.LabelColour));
         }
 
         for (int series = 0; series < plot.Series.Count; series++)
@@ -1982,7 +2144,7 @@ public static partial class ChartLayout
                     new DocPoint(left + indent, middle),
                     ChartLabelAnchor.LeftMiddle,
                     plot.LabelSize,
-                    AxisColour));
+                    plot.LabelColour));
             }
 
             for (int at = 0; at < categories; at++)
@@ -1995,7 +2157,7 @@ public static partial class ChartLayout
                     new DocPoint(area.Left + column * (at + 0.5), middle),
                     ChartLabelAnchor.Centre,
                     plot.LabelSize,
-                    AxisColour));
+                    plot.LabelColour));
             }
         }
     }
@@ -2157,7 +2319,7 @@ public static partial class ChartLayout
                 // The marker's own colours first, and only then the series'. A symbol states its
                 // paint in c:marker/c:spPr and convertMarker reads it from there; the series
                 // colour is the fallback for a file that says nothing, not the rule.
-                Length size = plot.LabelSize * MarkerSize;
+                Length size = series.MarkerSize ?? plot.LabelSize * MarkerSize;
                 Colour marker = series.MarkerFill ?? series.Fill ?? stroke;
                 Colour outline = series.MarkerLine ?? stroke;
 
@@ -2248,17 +2410,29 @@ public static partial class ChartLayout
             if (where.X > area.Right) where = new DocPoint(area.Right, where.Y);
 
             labels.Add(new ChartLabel(
-                text, where, anchor, plot.DataLabelFont, AxisColour,
+                text, where, anchor, plot.DataLabelFont, plot.DataLabelColour,
                 IsBold: plot.IsDataLabelBold));
         }
     }
 
     /// <summary>A marker's side, as a fraction of the label size.</summary>
     /// <remarks>
+    /// <para>
     /// <c>VDataSeries::getSymbolProperties</c> defaults a symbol to 250 × 250 hundredths of a
     /// millimetre, which on the 10 pt labels every chart in the corpus uses is 0.71 of the em.
     /// Expressing it against the type rather than absolutely is what makes it survive the
     /// stretch an embedded chart goes through.
+    /// </para>
+    /// <para>
+    /// <strong>This is the fallback and not the rule.</strong> It is chart2's default for a
+    /// symbol nobody set, which is what an ODF or a binary chart leaves behind — and an OOXML
+    /// chart never gets here, because <c>TypeGroupConverter::convertMarker</c> always assigns a
+    /// size from <c>c:marker/c:size</c> or from <c>mnMarkerSize(5)</c>. See
+    /// <see cref="ChartSeries.MarkerSize"/>; using this for an OOXML series drew every marker in
+    /// the corpus at 7.00 pt where the reference drew the size the file stated — 6.01 on
+    /// <c>003_advanced_powerpoint_line</c>, and larger than 7.00 on the fourteen corpus series
+    /// that state 14 points or more.
+    /// </para>
     /// </remarks>
     private const double MarkerSize = 0.7;
 
@@ -2382,8 +2556,34 @@ public static partial class ChartLayout
 
         for (int at = 0; at < categories; at++) previous[at] = baseline;
 
+        // Series 1 is painted LAST, over the others.
+        //
+        // `AreaChart::createShapes` reverses its own slot list before it draws anything —
+        // `lcl_reorderSeries(m_aZSlots)` when `m_nDimension == 2 && (m_bArea || !m_bCategoryXAxis)`
+        // (`chart2/source/view/charttypes/AreaChart.cxx:565-568`) — so the first series ends up on
+        // top of the pile rather than under it. It is measured rather than only cited: on
+        // `006_advanced_powerpoint_area.pptx` the reference's page is dominated by the *first*
+        // series' brick red with a thin slate-blue rind on the left, and this reader drew the
+        // second series' blue over it with a thin red rind on the right. A reader given the two
+        // halves and nothing else ranked "the dominant colour of the area chart flips" as the
+        // loudest difference on the page and said the two silhouettes and the crossing point are
+        // identical, which is what says it is a paint order and not a value.
+        //
+        // Only the *emission* is reversed, not the accumulation: a stacked area's running total
+        // has to be built in file order or the bands come out in the wrong sequence.
+        //
+        // And a stacked area is exempt, which the reference's own condition does not say and a
+        // measurement does. `stacked_area_chart.pptx` is `diff% 1.82, |ink|% 0.16` in file order
+        // and `1.87 / 0.22` reversed, so the reference paints its stacked bands in file order
+        // after all — the bands abut rather than nest, so their shared edges are drawn by
+        // whichever polygon comes last and the order is visible there. Reversing it is a small,
+        // reproducible regression on the one corpus deck that can see it, and the binary wins
+        // over the source's unconditional `m_bArea`.
+        List<List<ChartShape>> painted = [];
+
         foreach (ChartSeries series in plot.Series)
         {
+            List<ChartShape> own = [];
             List<DocPoint> upper = [];
             List<DocPoint> lower = [];
             List<(DocPoint At, int Index, double Value)> points = [];
@@ -2398,7 +2598,7 @@ public static partial class ChartLayout
                     || !double.IsFinite(value)
                     || CategoryFraction(plot, at, categories) is not { } across)
                 {
-                    Emit(series, upper, lower, shapes);
+                    Emit(series, upper, lower, own);
                     continue;
                 }
 
@@ -2422,13 +2622,23 @@ public static partial class ChartLayout
                 points.Add((vertex, at, value));
             }
 
-            Emit(series, upper, lower, shapes);
+            Emit(series, upper, lower, own);
             AddPointLabels(plot, series, points, ChartLabelPlacement.Centre, area, labels);
+            painted.Add(own);
 
             if (plot.IsStacked)
             {
                 for (int at = 0; at < categories; at++) previous[at] = scale.Fraction(running[at]);
             }
+        }
+
+        if (plot.IsStacked)
+        {
+            foreach (List<ChartShape> own in painted) shapes.AddRange(own);
+        }
+        else
+        {
+            for (int at = painted.Count - 1; at >= 0; at--) shapes.AddRange(painted[at]);
         }
     }
 
@@ -2481,7 +2691,12 @@ public static partial class ChartLayout
     /// </para>
     /// </remarks>
     private static void AddWedges(
-        ChartPlot plot, DocRect area, List<ChartShape> shapes, List<ChartLabel> labels)
+        ChartPlot plot,
+        DocRect area,
+        DocRect available,
+        ChartText measurer,
+        List<ChartShape> shapes,
+        List<ChartLabel> labels)
     {
         if (plot.Series.Count == 0) return;
 
@@ -2503,6 +2718,8 @@ public static partial class ChartLayout
                 pieCentre,
                 plot.Rings ? outer * ((ring + 1) / (double)(rings + 1)) : Length.Zero,
                 plot.Rings ? outer * ((ring + 2) / (double)(rings + 1)) : outer,
+                available,
+                measurer,
                 shapes,
                 labels);
         }
@@ -2515,6 +2732,8 @@ public static partial class ChartLayout
         DocPoint centre,
         Length hole,
         Length radius,
+        DocRect available,
+        ChartText measurer,
         List<ChartShape> shapes,
         List<ChartLabel> labels)
     {
@@ -2545,7 +2764,10 @@ public static partial class ChartLayout
             // fLogicZ / bCenter branch), and OUTSIDE puts it just beyond the rim at 1.1. Putting
             // every pie label at the centre of the circle instead stacks them all on one another,
             // which reads as one label rather than as eight.
-            if (series.LabelAt(at) is { Draws: true } label)
+            // A whole pie's labels are laid out by ChartLayout.PieLabels below, which is where
+            // the best-fit placement, the legend key and the outside fallback live; this arm is
+            // now a *ring's* labels only, and for those AVOID_OVERLAP really is CENTER.
+            if (hole > Length.Zero && series.LabelAt(at) is { Draws: true } label)
             {
                 double middle = start - sweep / 2;
                 double reach = label.Placement is ChartLabelPlacement.Outside ? 1.1 : 0.5;
@@ -2569,13 +2791,53 @@ public static partial class ChartLayout
                             centre.Y - along * Math.Sin(middle)),
                         ChartLabelAnchor.Centre,
                         plot.DataLabelFont,
-                        AxisColour,
+                        plot.DataLabelColour,
                         IsBold: plot.IsDataLabelBold));
                 }
             }
 
             start -= sweep;
         }
+
+        if (hole > Length.Zero) return;
+
+        // The pie's own labels, block by block: the legend key is a shape of its own and the text
+        // is placed from the block rather than from the anchor, because the key is inside the box
+        // the best-fit test measures.
+        foreach (PiePlacedLabel placed in PieLabels(
+                     plot, series, centre, radius, available, measurer))
+        {
+            if (placed.GhostKey is { } ghost && placed.KeyFill is { } ghostFill)
+                shapes.Add(new ChartShape(GraphicsPath.Rectangle(ghost), ghostFill));
+
+            if (placed.Key is { } key && placed.KeyFill is { } fill)
+                shapes.Add(new ChartShape(GraphicsPath.Rectangle(key), fill));
+
+            Length gap = placed.Block.Width - TextWidthOf(placed, plot, measurer);
+
+            labels.Add(new ChartLabel(
+                string.Join('\n', placed.Lines),
+                new DocPoint(
+                    placed.Block.X + gap + ((placed.Block.Width - gap) / 2),
+                    placed.Block.Y + (placed.Block.Height / 2)),
+                ChartLabelAnchor.Centre,
+                plot.DataLabelFont,
+                plot.DataLabelColour,
+                IsBold: plot.IsDataLabelBold));
+        }
+    }
+
+    /// <summary>The measured width of a placed label's text, key and gap excluded.</summary>
+    private static Length TextWidthOf(PiePlacedLabel placed, ChartPlot plot, ChartText measurer)
+    {
+        Length width = Length.Zero;
+        foreach (string line in placed.Lines)
+        {
+            width = Length.Max(
+                width, measurer.Measure(line, plot.DataLabelFont, plot.DataLabelBold).Width);
+        }
+
+        return width;
     }
 
     /// <summary>
@@ -2899,7 +3161,7 @@ public static partial class ChartLayout
         }
 
         labels.Add(new ChartLabel(
-            text, at, anchor, plot.DataLabelFont, AxisColour,
+            text, at, anchor, plot.DataLabelFont, plot.DataLabelColour,
             IsBold: plot.IsDataLabelBold));
     }
 
@@ -2927,7 +3189,38 @@ public static partial class ChartLayout
 
             // Line by line, top down, from the same origin the reservation above measured from,
             // so a two-line title fills exactly the band that was kept for it.
-            Length pen = frame.Y + (frame.Height * PageMargin);
+            //
+            // <strong>Three terms, and for a long time only the first was here.</strong>
+            // `lcl_createTitle` puts a MAIN_TITLE shape's *top* at
+            // `rRemainingSpace.Y + int(pageHeight * 0.02) + 135` hundredths of a millimetre
+            // (`ChartView.cxx:1058-1069` — the flat 135 is added for `MAIN_TITLE` alone), and
+            // `ShapeFactory::createText` then insets the text inside that shape by
+            // `round(fontHeight_mm100 * 0.30)` (`ShapeFactory.cxx:2283-2286`). The reservation in
+            // `DiagramAreaOf` has always carried both — `TitleGap` and `Shape()`'s
+            // <see cref="TextShapeInsetY"/> — so until round 61 the band that was kept and the
+            // pen that drew into it disagreed by exactly those two terms.
+            //
+            // Measured on the binary rather than argued from the source
+            // (`probes/sheets-r61/probe-titlepos.py`): eighteen one-variable rewrites of
+            // `003_advanced_excel_pie`'s own chart part, nine title sizes from 6 to 36 pt in bold
+            // and regular, rendered through 26.2.4.2 and through this tree. `y_ours - y_ref` runs
+            // 6.040, 6.600, 7.220, 7.810, 8.390, 9.570, 10.780, 12.540, 14.920 pt against a
+            // predicted `(135 + round(0.30 * size)) / 100 mm` of 5.641, 6.236, 6.831, 7.427,
+            // 8.022, 9.213, 10.431, 12.217, 14.627 — no free parameter, and the slope and the
+            // constant are both right.
+            //
+            // <strong>A residual of 0.29-0.40 pt survives and is deliberately not fitted out.</strong>
+            // It shrinks slightly as the size grows, so it is neither a constant nor a proportion,
+            // and it is not the 0.75 pt quantum of the chart's 96 dpi grid. If it is an ascent
+            // difference then round 60's ascent law is about a third of a point out at every size,
+            // which that round's own control could not resolve. Whatever it is, correcting the two
+            // measured terms takes 9.57 pt of error down to 0.36 on the four corpus pies that
+            // carry an 18 pt title, and a constant fitted to close the rest would be a fit rather
+            // than a law.
+            Length pen = frame.Y + (frame.Height * PageMargin) + TitleGap
+                         + Length.FromMm100((long)Math.Round(
+                               plot.TitleSize.Mm100 * TextShapeInsetY,
+                               MidpointRounding.AwayFromZero));
             foreach (string line in LinesOf(
                          titles, title, plot.TitleSize, plot.IsTitleBold,
                          frame.Width * TitleWidthFraction))
@@ -2938,7 +3231,7 @@ public static partial class ChartLayout
                     new DocPoint(frame.X + frame.Width / 2, pen + height / 2),
                     ChartLabelAnchor.Centre,
                     plot.TitleSize,
-                    AxisColour,
+                    plot.TitleColour,
                     IsBold: plot.IsTitleBold,
                     Family: plot.TitleFamily));
                 pen += height;
@@ -2964,14 +3257,34 @@ public static partial class ChartLayout
             // Measuring from the frame instead put the title exactly where a bottom legend is:
             // on a probe with one, ours came out 30.3 pt below the reference's and did not move
             // at all when the legend was added.
+            // <strong>And it is centred on the diagram rectangle, not on the plot rectangle, with
+            // two per cent of the page's height between them.</strong> `lcl_createTitle`'s
+            // placement is only provisional: once the diagram exists,
+            // `changePositionOfAxisTitle` moves an auto-positioned axis title again
+            // (`ChartView.cxx:1996-1998`), and its `ALIGN_BOTTOM` arm is
+            // `diagramPlusAxes.X + Width/2` across and
+            // `diagramPlusAxes.Y + Height + h/2 + pageHeight * 0.02` down
+            // (`:1012-1015`). The distance there is `constPageLayoutDistancePercentage` and NOT
+            // the flat 420 the reservation used — two different constants for the two halves of
+            // the same title, which is why keeping only the reservation's one leaves the title
+            // flush against the label band.
+            //
+            // Measured on `Demick_JetBlue.pptx` page 4, whose chart carries a secondary value
+            // axis and so puts the plot well off the diagram rectangle's centre. Reference,
+            // by `pdftotext -bbox`: the title's ink runs x 294.39 … 411.17, centre **352.78**,
+            // and its top edge is at **389.79**. The inner plot rectangle's centre is 374.55 —
+            // which is exactly where we drew it — and this rectangle's centre is **352.80**.
+            // The vertical term is 6.50 pt measured against `frame.Height × 0.02` = 6.62.
             Length height =
                 Shape(measurer, under, plot.AxisTitleSize, plot.IsAxisTitleBold).Height;
             labels.Add(new ChartLabel(
                 under,
-                new DocPoint(area.X + area.Width / 2, diagram.Bottom + height / 2),
+                new DocPoint(
+                    diagram.X + diagram.Width / 2,
+                    diagram.Bottom + (frame.Height * PageMargin) + height / 2),
                 ChartLabelAnchor.Centre,
                 plot.AxisTitleSize,
-                AxisColour,
+                plot.AxisTitleColour,
                 IsBold: plot.IsAxisTitleBold));
         }
 
@@ -2986,7 +3299,7 @@ public static partial class ChartLayout
                     area.Y + area.Height / 2),
                 ChartLabelAnchor.Centre,
                 plot.AxisTitleSize,
-                AxisColour,
+                plot.AxisTitleColour,
                 Math.PI / 2,
                 IsBold: plot.IsAxisTitleBold));
         }
@@ -3009,7 +3322,7 @@ public static partial class ChartLayout
                     area.Y + area.Height / 2),
                 ChartLabelAnchor.Centre,
                 plot.AxisTitleSize,
-                AxisColour,
+                plot.AxisTitleColour,
                 Math.PI / 2,
                 IsBold: plot.IsAxisTitleBold));
         }
@@ -3043,6 +3356,10 @@ public static partial class ChartLayout
         DocRect space = LegendSpace(plot, frame, measurer);
         LegendBox box = Legend(plot, space, measurer);
         if (box.Columns <= 0 || box.Rows <= 0) return;
+
+        // See Legend: the walk across the columns steps by each column's own widest name, so it
+        // must measure in the same face the box was reserved in.
+        ChartText legendText = measurer.For(plot.LegendFamily);
 
         bool vertical = plot.Legend is ChartLegendPosition.Left or ChartLegendPosition.Right;
 
@@ -3123,11 +3440,12 @@ public static partial class ChartLayout
                         rowY + (box.RowHeight / 2)),
                     ChartLabelAnchor.LeftMiddle,
                     plot.LegendFont,
-                    AxisColour,
+                    plot.LegendColour,
+                    Family: plot.LegendFamily,
                     IsBold: plot.LegendBold));
 
                 Length text =
-                    MeasureLines(measurer, name, plot.LegendFont, plot.LegendBold).Width;
+                    MeasureLines(legendText, name, plot.LegendFont, plot.LegendBold).Width;
                 if (text > widest) widest = text;
             }
 
@@ -3201,6 +3519,12 @@ public static partial class ChartLayout
                 name, series.Fill, series.Line, series.LineWidth,
                 DrawsLineKey(plot, series), series.DashPattern, series.LineCap));
         }
+
+        // A horizontal bar chart, and a chart stacked in Y beside a side legend, list their
+        // series the other way up. See ChartPlot.LegendReversed for the rule and its four
+        // measured arms. The pie branch above returns before this, which is right: the rule
+        // reads a stacking direction and a swapped coordinate system, and a pie has neither.
+        if (plot.LegendReversed) entries.Reverse();
 
         return entries;
     }
@@ -3327,6 +3651,11 @@ public static partial class ChartLayout
         List<LegendEntry> named = Entries(plot);
         if (named.Count == 0) return default;
 
+        // The legend's own face, which is not always the chart's. See ChartPlot.LegendFamily: the
+        // room reserved for an entry has to be measured in the face it is drawn in or the box is
+        // the wrong width and the plot rectangle's right edge pays for it.
+        ChartText legendText = measurer.For(plot.LegendFamily);
+
         Length font = plot.LegendFont;
         Length paddingX = Larger(Millimetre, font * 0.33);
         Length offsetX = Larger(Millimetre, font * 0.66);
@@ -3343,7 +3672,7 @@ public static partial class ChartLayout
 
         foreach (LegendEntry entry in named)
         {
-            DocSize text = MeasureLines(measurer, entry.Name, font, plot.LegendBold);
+            DocSize text = MeasureLines(legendText, entry.Name, font, plot.LegendBold);
             widths.Add(text.Width);
             if (text.Width > widest) widest = text.Width;
             if (text.Height > tallest) tallest = text.Height;

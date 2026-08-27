@@ -329,9 +329,16 @@ internal static class SheetText
             // resolver cannot reference falls back again to the primary face's missing-glyph box —
             // which is what happened before this existed — rather than to a font the PDF would
             // announce without carrying.
-            SheetFace drawn = run.IsFallback && SheetFonts.ForFallback(run.Face) is { } resolved
-                ? resolved
-                : face;
+            // The request travels with the substitution: a fallback face is not the face the cell
+            // asked for, so its own IsItalic says nothing about whether the cell wanted a lean.
+            // Both states count — a real italic face, and an upright one already carrying a
+            // synthetic oblique. See IGlyphFallbackResolver.ReferenceFor(OpenTypeFace, bool).
+            bool italic = face.Face.IsItalic || face.Reference.SyntheticOblique;
+
+            SheetFace drawn =
+                run.IsFallback && SheetFonts.ForFallback(run.Face, italic) is { } resolved
+                    ? resolved
+                    : face;
 
             segments.Add(Segment(
                 text.Substring(run.Start, run.Length), drawn, size, colour, offset,
@@ -423,6 +430,18 @@ internal static class SheetText
     /// at ten, eleven and twelve point, read out of its flat-ODF round trip of
     /// <c>sheet-row-height-rotated.fods</c>. <strong>All eighteen are reproduced exactly by this
     /// and fourteen by rounding the total</strong>, which is what says the rounding is per glyph.
+    /// </para>
+    /// <para>
+    /// [24.2.7-audit: VERIFIED 2026-08-21, round 58 — the same fixture round-tripped through the
+    /// installed 26.2.4.2 gives <strong>216 of 216 row heights unchanged</strong>, including all
+    /// 72 quarter-turn heights, which are the ones that measure <c>GetTextWidth</c> directly: a
+    /// cell at exactly 90° or 270° takes <c>ScPatternAttr::GetCellOrientation</c>'s branch, where
+    /// the row height simply <em>is</em> the string's width, so nothing else stands between the
+    /// rule and the number. The discriminator is built into the fixture rather than argued: four
+    /// of its eighteen distinct widths — the twelve-point ones — differ between rounding per
+    /// glyph and rounding the total, by up to 1.4%, and none of them moved.
+    /// <c>probes/sheets-r58/audit_rotatedwidth.py</c>. This was the last unverified site in
+    /// <c>Paperless.Spreadsheets</c>.]
     /// </para>
     /// <para>
     /// Only <see cref="SheetOptimalRowHeights"/> wants this: it is the one place a length measured

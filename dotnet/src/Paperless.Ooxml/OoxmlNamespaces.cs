@@ -87,8 +87,26 @@ public static class OoxmlNamespaces
     /// <summary>Word 2012 markup extensions.</summary>
     public const string WordMl2012 = "http://schemas.microsoft.com/office/word/2012/wordml";
 
-    /// <summary>DrawingML 2010 extensions.</summary>
+    /// <summary>
+    /// DrawingML 2010 extensions — <c>a14</c>, and deliberately <strong>not</strong> in
+    /// <see cref="UnderstoodExtensions"/>.
+    /// </summary>
+    /// <remarks>
+    /// See the note on <see cref="UnderstoodExtensions"/>. The constant is still needed, because
+    /// the tests that pin the rule have to bind the prefix to something.
+    /// </remarks>
     public const string DrawingML2010 = "http://schemas.microsoft.com/office/drawing/2010/main";
+
+    /// <summary>
+    /// The <c>a:graphicData/@uri</c> of an extended ("chartex") chart — the family Excel 2016
+    /// added for Pareto, histogram, waterfall, treemap, sunburst, box-and-whisker and funnel.
+    /// </summary>
+    /// <remarks>
+    /// It is named here because it decides an <c>mc:AlternateContent</c> branch rather than
+    /// because anything reads the part yet. See
+    /// <see cref="OoxmlXml"/>'s note on preferring a choice whose content we cannot draw.
+    /// </remarks>
+    public const string ExtendedChart = "http://schemas.microsoft.com/office/drawing/2014/chartex";
 
     /// <summary>
     /// The ISO/IEC 29500 strict URIs, paired with the transitional URI each replaces.
@@ -124,10 +142,12 @@ public static class OoxmlNamespaces
     /// <c>mc:Choice</c> that requires them over the <c>mc:Fallback</c> beside it.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// Preferring a choice is only right when its content can actually be read: the fallback
     /// exists precisely because the choice may be unreadable. For the shape namespaces the
     /// choice is the higher-fidelity branch and its text body is plain WordprocessingML, so it
     /// is preferred; anything not listed here loses to the fallback.
+    /// </para>
     /// <para>
     /// <c>wpc</c> is listed for a reason worth stating: the word-processing frame reader has read a
     /// drawing canvas since it was written, and could never be reached, because the canvas is always
@@ -135,11 +155,37 @@ public static class OoxmlNamespaces
     /// shape in the canvas — measured on an EASA manual whose two organisation diagrams lost their
     /// text and, with it, 2.4 inches of declared height apiece.
     /// </para>
+    /// <para>
+    /// <strong><c>a14</c> is not listed, and that is the whole of the rule the slicer special case
+    /// used to approximate.</strong> LibreOffice keeps this same list twice —
+    /// <c>ContextHandler2Helper::prepareMceContext</c> for the <c>oox</c> filters (xlsx, pptx) and
+    /// <c>OOXMLFastContextHandler::prepareMceContext</c> for writerfilter — and
+    /// <see cref="DrawingML2010"/> is on neither. In <c>oox</c> it is present and commented out,
+    /// with the reason attached: <c>// We do not currently support inline formulas and other a14
+    /// stuff</c>. So all three filters take the fallback beside an <c>a14</c> choice, and this used
+    /// to take the choice.
+    /// </para>
+    /// <para>
+    /// Measured on 26.2.4.2 rather than read off the source. Unwrapping the
+    /// <c>mc:AlternateContent</c> around <c>013_Contextures_chart_sample</c>'s camera picture — one
+    /// edit, nothing else changed — makes the reference draw that picture **twice**, at 129.5 from
+    /// the DrawingML anchor it can now see and at 133.8 from the legacy VML shape it was already
+    /// drawing, 41 extractable words against 23. With the wrapper in place it draws the VML one
+    /// only. See <c>probes/sheets-r55/probe-vml-camera.py</c>.
+    /// </para>
+    /// <para>
+    /// Censused over all 946 corpus documents (<c>probes/sheets-r55/census-a14.py</c>, keyed on the
+    /// resolved URI of each <c>Requires</c> prefix rather than on the prefix text): 2324 choices, of
+    /// which <strong>34 resolve to <c>a14</c>, in 10 documents</strong> — seven slicer choices in
+    /// three spreadsheets that already lost to the fallback by the removed special case, five
+    /// spreadsheet anchors beside an <em>empty</em> fallback, and 22 <c>a14:m</c> inline-formula
+    /// choices in three decks, which is the case <c>oox</c>'s comment names. No word-processing
+    /// document in the corpus states one.
+    /// </para>
     /// </remarks>
     public static readonly IReadOnlySet<string> UnderstoodExtensions =
         new HashSet<string>(StringComparer.Ordinal)
         {
             WordShape, WordShapeGroup, WordCanvas, WordDrawing2010, WordMl2010, WordMl2012,
-            DrawingML2010,
         };
 }

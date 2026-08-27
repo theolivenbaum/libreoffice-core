@@ -101,6 +101,30 @@ public sealed record FontReference
     public bool IsItalic { get; init; }
 
     /// <summary>
+    /// True when italic was asked for and the resolved face has none, so the slant has to be
+    /// drawn rather than chosen.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// This is <c>LogicalFontInstance::NeedsArtificialItalic()</c>
+    /// (<c>vcl/source/font/LogicalFontInstance.cxx</c>): <em>the request is italic and the face
+    /// is not</em>. It is a property of the pairing and not of either half, which is why it sits
+    /// here beside <see cref="IsItalic"/> — that records what the face is, this records that the
+    /// request went unmet.
+    /// </para>
+    /// <para>
+    /// A backend honours it by shearing, and the shear is
+    /// <see cref="SyntheticObliqueShear"/>. Nothing about the run's metrics changes: the
+    /// reference passes the same slant to HarfBuzz as <c>hb_font_set_synthetic_slant</c>, which
+    /// moves outlines and mark attachments and leaves advances alone. Measured on an authored
+    /// five-family deck through 26.2.4.2 — the roman and italic halves of a `DejaVu Sans` line
+    /// carry the <em>same</em> <c>TJ</c> array and the same pen origin at 12, 24 and 40 pt. So a
+    /// document laid out without this and one laid out with it break their lines identically.
+    /// </para>
+    /// </remarks>
+    public bool SyntheticOblique { get; init; }
+
+    /// <summary>
     /// A stable key identifying the underlying face data, used to cache loaded faces
     /// and to deduplicate embedded fonts in PDF output.
     /// </summary>
@@ -112,6 +136,33 @@ public sealed record FontReference
     /// substitute's metric compatibility.
     /// </summary>
     public bool IsSubstituted => RequestedFamily is not null && RequestedFamily != FamilyName;
+
+    /// <summary>
+    /// How far a <see cref="SyntheticOblique"/> run leans: the <c>c</c> term of its text matrix,
+    /// so that a point <c>y</c> above the baseline moves right by <c>y</c> times this.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>0.3462535606, and the digits are not a rounding of a third.</strong> The reference
+    /// declares <c>ARTIFICIAL_ITALIC_SKEW</c> as
+    /// <c>float((1&lt;&lt;16)/3) / (1&lt;&lt;16)</c> = 0.3333333432674408
+    /// (<c>vcl/inc/font/LogicalFontInstance.hxx:52-53</c>) and then hands it to
+    /// <c>Matrix3::skew</c>, which takes its arguments as <em>angles</em> and writes
+    /// <c>tan</c> of them (<c>vcl/source/pdf/pdfwriter_impl.cxx:5707,5767</c>). So the number
+    /// that reaches the page is <c>tan(0.3333333432674408)</c>, and a shear of exactly one third
+    /// would be wrong in the fourth decimal.
+    /// </para>
+    /// <para>
+    /// It is one value for every face and every size: over the 302-document slides corpus the
+    /// reference writes <strong>587</strong> sheared text matrices and every one of them reads
+    /// <c>0.3462535606</c>.
+    /// </para>
+    /// <para>
+    /// The screen path is not the same number — <c>cairotextrender.cxx:251</c> applies the raw
+    /// 1/3 rather than its tangent — but the PDF is what this project is measured against.
+    /// </para>
+    /// </remarks>
+    public const double SyntheticObliqueShear = 0.3462535606;
 }
 
 /// <summary>
@@ -320,6 +371,20 @@ public readonly record struct DuotoneRecolour(Colour Dark, Colour Light);
 /// pixels from ours costs a mean absolute error of <strong>7.15 of 255</strong> under case one
 /// and <strong>30.98</strong> under the stated 70/−70 through the same modifier, against 163
 /// for drawing the picture untouched. The mapping is the binary's, not just the source's.
+/// </para>
+/// <para>
+/// [24.2.7-audit: VERIFIED 2026-08-21, slides-r62 — case one still holds on 26.2.4.2, measured
+/// on the same document. <c>N2_E_Maestroni_Swarm_COP.pptx</c>'s title slide renders against the
+/// 26.2.4.2 reference at <c>diff% 1.71, |ink|% 0.01</c> with case one implemented, and at 100 dpi
+/// its mean channel is <strong>224.02 against the reference's 223.68</strong>, MAE 2.23 over the
+/// whole page and 4.75 over the middle band. The competing reading — the stated 70/−70 put
+/// through the same modifier — was measured at MAE <strong>30.98</strong> when this site was
+/// written, so the two readings are more than an order of magnitude apart and the page separates
+/// them outright. Cases two and three are <strong>not</strong> re-checked: no corpus document
+/// states a lone <c>a:lum</c> brightness or a non-washout pair on a slide, so there is nothing on
+/// this track to point a probe at. The sibling claim in
+/// <c>Paperless.Ooxml/DrawingML/DrawingFill.cs</c> — that <c>a:lum</c>'s division is integer and
+/// truncating — was verified independently by the words track in round 61.]
 /// </para>
 /// <para>
 /// Carried to the decoder rather than applied by the reader for the same reason

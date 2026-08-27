@@ -98,19 +98,34 @@ public sealed class DocxPictures
 
         BlipReference.Choice choice = BlipReference.Choose(blip);
 
+        // `a:clrChange` — PowerPoint's Set Transparent Color, and Word states it identically.
+        // Read through the shared blip reader rather than off this element, because that reader
+        // is the one place the wrapper's three spellings are known to carry the same content.
+        // Withheld from a picture that resolved to a vector, because the reference applies the
+        // transform only to a GraphicType::Bitmap — see ColourKnockout.
+        DrawingBlipFill? fill = DrawingFill.ReadBlip(blip.Parent);
+
+        FramePicture KnockedOut(FramePicture picture)
+            => picture.Vector is null
+               && picture.Raster is { } raster
+               && DrawingPictureEffects.Knockout(fill, theme: null, raster.EncodedBytes.Span)
+                      is { } knockout
+                ? picture with { Raster = raster with { Knockout = knockout } }
+                : picture;
+
         if (choice.RelationshipId is { } chosen)
         {
             FramePicture picture = Embedded(chosen);
 
-            if (!choice.IsVector) return picture;
-            if (choice.FallbackRelationshipId is not { } fallback) return picture;
+            if (!choice.IsVector) return KnockedOut(picture);
+            if (choice.FallbackRelationshipId is not { } fallback) return KnockedOut(picture);
 
             // The vector was preferred. If nothing here can decode it, the raster is what the file put
             // beside it for exactly this; if something can, keep the raster anyway so an empty decode
             // still leaves a picture on the page.
-            return picture.Vector is null
+            return KnockedOut(picture.Vector is null
                 ? Embedded(fallback)
-                : picture with { Raster = Embedded(fallback).Raster };
+                : picture with { Raster = Embedded(fallback).Raster });
         }
 
         // r:link is a picture stored outside the package. Not fetched: reading a document must not
@@ -231,7 +246,10 @@ public sealed class DocxPictures
         if (chartSpace is null) return default;
 
         return new DocxChart(
-            DrawingChartPlot.Read(chartSpace, _file.Theme, _file.IsOffice2007),
+            // `automaticChartAreaLine`: the exception in objectformatter.cxx:838-848 is Impress's
+            // alone, so a Writer chart with no `a:ln` of its own carries the grey default border.
+            DrawingChartPlot.Read(chartSpace, _file.Theme, _file.IsOffice2007,
+                                  automaticChartAreaLine: true),
             LabelFamily(chartSpace));
     }
 

@@ -54,10 +54,15 @@ namespace Paperless.Ooxml.DrawingML;
 /// than inventing any; see the note on <see cref="ReadSequence"/>.
 /// </para>
 /// <para>
-/// <strong>No title is invented.</strong> LibreOffice substitutes the single series' name, or
-/// failing that the localised string "Chart Title"
-/// (<c>chartspaceconverter.cxx:185-204</c>), when a chart has no <c>c:title</c>. Reporting
-/// either would claim the file said something it does not, so a chart without a title has none.
+/// <strong>The title LibreOffice substitutes is reported, and it used to be suppressed.</strong>
+/// This reader said, for eleven rounds, that inventing a title would "claim the file said
+/// something it does not". Round 54 measured what the reference actually draws and the sentence
+/// was wrong twice over: the substitute is on the page in front of the reader, and the same
+/// substitute is what <see cref="DrawingChartPlot"/> now puts in a
+/// <see cref="Paperless.Core.Charts.ChartPlot.Title"/>, so suppressing it here would make one
+/// part's table and its picture disagree about what the chart is called. The rule, the
+/// 946-document census and the four corpus controls behind it are on
+/// <see cref="DrawingChartTitle"/>. Only five corpus documents are reached.
 /// </para>
 /// </remarks>
 public static class DrawingChart
@@ -98,7 +103,13 @@ public static class DrawingChart
     /// same split, and the content tree has to take the same side as the drawing or a chart's
     /// table and its picture disagree about how many points it has.
     /// </param>
-    public static ContentSection? Read(XElement chartSpace, ChartRangeResolver? ranges = null)
+    /// <param name="office2007">
+    /// Whether Office 2007 wrote the package. It decides the <c>c:autoTitleDeleted</c> default and
+    /// nothing else here; see <see cref="DrawingChartTitle"/>, which also records that no corpus
+    /// document can tell the two defaults apart.
+    /// </param>
+    public static ContentSection? Read(
+        XElement chartSpace, ChartRangeResolver? ranges = null, bool office2007 = false)
     {
         ArgumentNullException.ThrowIfNull(chartSpace);
 
@@ -107,7 +118,8 @@ public static class DrawingChart
 
         XElement? plotArea = Child(chart, "plotArea");
 
-        string? title = TitleText(Child(chart, "title"));
+        string? title = TitleText(Child(chart, "title"))
+                        ?? DrawingChartTitle.Automatic(chart, office2007);
         List<string> axisTitles = [];
         foreach (XElement axis in plotArea?.Elements() ?? [])
         {
@@ -316,8 +328,10 @@ public static class DrawingChart
     /// text body under <c>c:tx/c:rich</c>; failing that the paragraphs some producers put
     /// directly in <c>c:txPr</c>, which the schema means for formatting alone and which
     /// LibreOffice reads anyway with the comment "which seems odd, but handle it here"; and
-    /// failing that the cached string a <c>c:tx/c:strRef</c> points at. The fourth source
-    /// LibreOffice has — a manufactured default — is deliberately not ported.
+    /// failing that the cached string a <c>c:tx/c:strRef</c> points at. The fourth source —
+    /// LibreOffice's manufactured default — is <see cref="DrawingChartTitle"/>, and the caller
+    /// falls back to it exactly where <c>createStringSequence</c> does: after all three of these
+    /// have come back empty.
     /// </remarks>
     private static string? TitleText(XElement? title)
     {
@@ -369,8 +383,10 @@ public static class DrawingChart
         if (source is null) return ([], []);
 
         // The c:f wins where the caller can resolve it, exactly as it does in the drawing reader.
+        // An *empty* resolved sequence is a real answer and must not fall through to the cache —
+        // see ChartRangeResolver.
         if (ranges is not null && FormulaOf(source) is { } formula
-            && ranges(formula) is { } live && live.Text.Count > 0)
+            && ranges(formula) is { } live)
         {
             return ([.. live.Text], [.. live.Numbers]);
         }

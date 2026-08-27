@@ -152,15 +152,24 @@ internal static class PptxTextBody
 
         // The autofit choice is taken whole from the nearest a:bodyPr that states one of the
         // three: a slide's <a:bodyPr/> saying nothing is not the same as its saying a:noAutofit.
+        //
+        // `resizes` records *which* of the three that nearest one was, which @wrap needs and
+        // @fontScale does not — see Wraps below. Where one element states more than one, which is
+        // malformed, normAutofit wins over spAutoFit and both over noAutofit; the order of the
+        // tests is the precedence.
         XElement? autofit = null;
+        bool resizes = false;
         foreach (XElement source in bodyChain)
         {
-            if (Drawing.Child(source, "normAutofit") is { } stated) { autofit = stated; break; }
-            if (Drawing.Child(source, "spAutoFit") is not null
-                || Drawing.Child(source, "noAutofit") is not null)
+            if (Drawing.Child(source, "normAutofit") is { } stated)
             {
+                autofit = stated;
+                resizes = true;
                 break;
             }
+
+            if (Drawing.Child(source, "spAutoFit") is not null) { resizes = true; break; }
+            if (Drawing.Child(source, "noAutofit") is not null) break;
         }
 
         return new SlideTextBody
@@ -169,7 +178,22 @@ internal static class PptxTextBody
             Insets = Insets(bodyChain),
             Anchor = Anchor(Stated(bodyChain, "anchor")),
             Rotation = Rotation(bodyChain),
-            Wraps = Stated(bodyChain, "wrap") != "none",
+            // wrap="none" does not stand on its own: it suppresses wrapping only while the
+            // body's autofit leaves the shape alone. Measured on 26.2.4.2 with nine authored
+            // one-shape variants over both axes, a 236 pt box holding a 64-character line —
+            // `wrap="none"` draws one line with a:noAutofit and with no autofit element at all,
+            // and **four** lines with a:spAutoFit or a:normAutofit; `wrap="square"` draws four
+            // in all four autofit cases. So a fitting autofit beats the wrap, which is the one
+            // combination this read as unbounded.
+            //
+            // It is not a cosmetic difference. Treating a wrap="none" + spAutoFit body as
+            // unbounded runs its line off the *page*, not merely off the shape, and everything
+            // past the media box is lost from the text layer: 30 of the 305 baseline renderings
+            // drew text outside the page against the reference's 9, and one template family
+            // overhangs 720 pt by 8.7 pt so that `Google Slides` extracts as `Google Slid`.
+            // That two-character loss is the whole character difference on 15 of the 28
+            // documents filed as `text`.
+            Wraps = Stated(bodyChain, "wrap") != "none" || resizes,
             AutoFit = autofit is not null,
             FontScale = Thousandth(autofit, "fontScale", 1.0),
             WarpPreset = Warp(bodyChain),
@@ -189,11 +213,81 @@ internal static class PptxTextBody
     /// second box states them explicitly and whose first states zero: LibreOffice draws the two
     /// pens 7.2 pt apart.
     /// </remarks>
-    private static Margins Insets(List<XElement> chain) => new(
-        Length.FromEmu(Emu(Stated(chain, "lIns"), 91440)),
-        Length.FromEmu(Emu(Stated(chain, "tIns"), 45720)),
-        Length.FromEmu(Emu(Stated(chain, "rIns"), 91440)),
-        Length.FromEmu(Emu(Stated(chain, "bIns"), 45720)));
+    private static Margins Insets(List<XElement> chain)
+    {
+        Length left = Length.FromEmu(Emu(Stated(chain, "lIns"), 91440));
+        Length top = Length.FromEmu(Emu(Stated(chain, "tIns"), 45720));
+        Length right = Length.FromEmu(Emu(Stated(chain, "rIns"), 91440));
+        Length bottom = Length.FromEmu(Emu(Stated(chain, "bIns"), 45720));
+
+        // A vertical body's insets travel with its text, and they are stated against the shape
+        // rather than against the turned frame. `TextBodyProperties::pushTextDistances`
+        // (`oox/source/drawingml/textbodyproperties.cxx:68-129`) walks the four in order and
+        // writes them into slots starting at 3 for vert/eaVert and at 1 for vert270 — a cyclic
+        // shift, and the same one in the same direction as the turn.
+        //
+        // The layout here happens in the TRANSPOSED rectangle (see PptxSlideLayout.Turned), so
+        // what this has to produce is the quadruple that frame wants. Measured rather than
+        // reasoned: an authored box with lIns/tIns/rIns/bIns of 10/20/30/40 pt, rendered by
+        // 26.2.4.2, puts the first vert baseline 30 pt in from the transposed frame's top and
+        // 20 pt in from its left, and the vert270 one 10 pt and 40 pt — so
+        //
+        //     vert, eaVert:  (left, top, right, bottom) <- (tIns, rIns, bIns, lIns)
+        //     vert270:       (left, top, right, bottom) <- (bIns, lIns, tIns, rIns)
+        //
+        // This is not neutral on a body that states nothing: DrawingML's defaults are 0.1 inch
+        // across and 0.05 inch down, so a turned body gets 0.05 inch left and right and 0.1 inch
+        // top and bottom. Leaving the quadruple alone would be wrong by 3.6 pt on every edge of
+        // every vertical shape.
+        return Vertical(chain) switch
+        {
+            VerticalText.Clockwise => new Margins(top, right, bottom, left),
+            VerticalText.Anticlockwise => new Margins(bottom, left, top, right),
+            _ => new Margins(left, top, right, bottom),
+        };
+    }
+
+    /// <summary>Which quarter turn <c>a:bodyPr/@vert</c> asks for, if any.</summary>
+    private enum VerticalText
+    {
+        /// <summary>The body reads across, which is everything but the three values below.</summary>
+        None,
+
+        /// <summary><c>vert</c> and <c>eaVert</c>: the text reads downwards.</summary>
+        Clockwise,
+
+        /// <summary><c>vert270</c>: the text reads upwards.</summary>
+        Anticlockwise,
+    }
+
+    /// <summary>
+    /// Reads <c>a:bodyPr/@vert</c> as a quarter turn.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>eaVert</c> and <c>vert</c> are <b>the same rendering</b>, and that is measured rather
+    /// than assumed: the importer sends them down different property paths —
+    /// <c>WritingMode2::TB_RL</c> against <c>TB_RL90</c>, with a different horizontal and vertical
+    /// adjust apiece (<c>oox/source/drawingml/textbodypropertiescontext.cxx:126-200</c>) — and an
+    /// authored deck holding everything else fixed over the three anchors draws
+    /// <b>165 identical glyph matrices at identical positions</b> for the two. Latin text in an
+    /// East-Asian vertical frame is simply turned.
+    /// </para>
+    /// <para>
+    /// The two values the corpus does not use are deliberately <see cref="VerticalText.None"/>
+    /// and were measured too, on the same deck: <c>mongolianVert</c> draws <b>horizontally</b>
+    /// — the importer's own comment says the rendering is not implemented for shape text — and
+    /// <c>wordArtVert</c> draws one glyph per line, upright and stacked
+    /// (<c>WritingMode2::STACKED</c>), which is not a turn and would be wrong to model as one.
+    /// Over the 302-document slides corpus neither appears on any slide part.
+    /// </para>
+    /// </remarks>
+    private static VerticalText Vertical(List<XElement> chain) => Stated(chain, "vert") switch
+    {
+        "vert" or "eaVert" => VerticalText.Clockwise,
+        "vert270" => VerticalText.Anticlockwise,
+        _ => VerticalText.None,
+    };
 
     /// <summary>
     /// The turn <c>a:bodyPr/@rot</c> asks for, in radians clockwise.
@@ -211,6 +305,25 @@ internal static class PptxTextBody
             out int stated)
             ? stated
             : 0;
+
+        // @vert is the other half of the same quantity for everything downstream: a body that
+        // reads downwards is a body whose frame is transposed and whose runs travel with a
+        // quarter-turn matrix, which is exactly what a quarter of @rot already produces. Adding
+        // rather than replacing is what the reference does with the two — `a:bodyPr` can state
+        // both, and `Transform2DContext` accumulates into the same field.
+        //
+        // Measured against 26.2.4.2 on an authored deck: a 230 x 160 pt box at (15.748, 23.622)
+        // holding 14 pt text draws its first vert glyph at (231.732, 516.416) and its first
+        // vert270 glyph at (29.735, 356.428); transposing about the centre and turning by a
+        // quarter reproduces both to 0.03 pt, and the line pitch of 16.809 stacks leftwards for
+        // vert and rightwards for vert270 exactly as the reference stacks it.
+        units += Vertical(chain) switch
+        {
+            VerticalText.Clockwise => 90 * (int)ShapeTransform.RotationUnitsPerDegree,
+            VerticalText.Anticlockwise => -90 * (int)ShapeTransform.RotationUnitsPerDegree,
+            _ => 0,
+        };
+
         return units == 0
             ? 0
             : units / ShapeTransform.RotationUnitsPerDegree * Math.PI / 180.0;

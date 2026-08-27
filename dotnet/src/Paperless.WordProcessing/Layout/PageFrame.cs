@@ -339,6 +339,35 @@ public sealed record PageFrame
     public Length BorderWidth { get; init; }
 
     /// <summary>
+    /// How far inside its own rectangle the frame's border is stroked, zero for on the edge.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A frame's border is normally its rectangle. One thing draws a box <em>inside</em> the room it
+    /// takes: Writer's legacy form checkbox, whose portion is a square of the line's whole text height
+    /// and whose drawn rectangle is that square deflated by a hard <c>delta = 25</c> twips on every side
+    /// (<c>SwTextPaintInfo::DrawCheckBox</c>, <c>sw/source/core/text/inftxt.cxx</c>:1266). The two
+    /// cannot be folded into one number, because the outer square is what the line is charged and the
+    /// inner one is what the page shows.
+    /// </para>
+    /// <para>
+    /// Measured on 26.2.4.2 over seven sizes and five faces, <c>probes/words-r56/formcheckbox.py</c>:
+    /// at 12 pt Liberation Serif the text height is 276 twips and the square drawn is 226, at 24 pt it
+    /// is 552 and 502, and at 8 pt 184 and 134 — a constant 50 twips at every size, which is what says
+    /// it is an inset rather than a proportion.
+    /// </para>
+    /// </remarks>
+    public Length BorderInset { get; init; }
+
+    /// <summary>True when the frame is crossed corner to corner as well as bordered.</summary>
+    /// <remarks>
+    /// A checked form checkbox, and nothing else: <c>DrawCheckBox</c> strokes the same inset rectangle
+    /// and then both of its diagonals. Distinct from <see cref="IsLine"/>, which is a shape that
+    /// <em>is</em> one diagonal and has no rectangle at all.
+    /// </remarks>
+    public bool IsCrossed { get; init; }
+
+    /// <summary>
     /// True when the frame is a straight line across its own rectangle rather than a box.
     /// </summary>
     /// <remarks>

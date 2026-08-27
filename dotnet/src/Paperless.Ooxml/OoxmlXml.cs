@@ -124,9 +124,18 @@ public static class OoxmlXml
     /// and one that walks neither loses it entirely.
     /// </para>
     /// <para>
-    /// A choice is preferred only when every namespace its <c>Requires</c> names is one
-    /// Paperless can actually read, because the fallback exists precisely for the case where
-    /// the choice cannot be.
+    /// A choice is preferred when every namespace its <c>Requires</c> names is one Paperless
+    /// can actually read, because the fallback exists precisely for the case where the choice
+    /// cannot be.
+    /// </para>
+    /// <para>
+    /// The one exception is a fallback that is not content. Excel writes an extended
+    /// ("chartex") chart as a choice beside a generated rectangle whose only text tells the
+    /// reader their Excel is too old; taking that fallback draws the notice instead of the
+    /// chart. There the choice wins even though it cannot be drawn — see
+    /// <c>IsAdvisoryPlaceholderFallback</c>, which is keyed on the chartex graphic-data URI and
+    /// deliberately does not generalise to the identically-shaped slicer placeholder, because
+    /// the reference draws that one.
     /// </para>
     /// </remarks>
     private static void ResolveAlternateContent(XElement root)
@@ -141,7 +150,11 @@ public static class OoxmlXml
             foreach (XElement choice in element.Elements(
                          XName.Get("Choice", OoxmlNamespaces.MarkupCompatibility)))
             {
-                if (IsUnderstood(choice)) { chosen = choice; break; }
+                if (IsUnderstood(choice) || IsAdvisoryPlaceholderFallback(element, choice))
+                {
+                    chosen = choice;
+                    break;
+                }
             }
             chosen ??= element.Element(XName.Get("Fallback", OoxmlNamespaces.MarkupCompatibility));
 
@@ -152,6 +165,49 @@ public static class OoxmlXml
             }
 
             element.ReplaceWith(chosen.Nodes().ToList());
+        }
+
+        // A choice we cannot read still wins when the fallback beside it is not content but a
+        // notice addressed to a human running an older Excel.
+        //
+        // The case that forced this is the extended ("chartex") chart. Excel writes the chart in
+        // a Requires="cx1" choice and, beside it, a generated rectangle holding the sentence
+        // "This chart isn't available in your version of Excel. Editing this shape or saving this
+        // workbook into a different file format will permanently break the chart." Taking the
+        // fallback — which is what a reader that cannot draw the choice is otherwise supposed to
+        // do — puts 26 words of English advice onto the page where the chart should be, and they
+        // land in the extracted text of every consumer downstream. LibreOffice 26.2.4.2 draws the
+        // choice; measured over both corpus witnesses, its rendering contains none of that
+        // sentence.
+        //
+        // Deliberately narrow. It is keyed on the chartex graphic-data URI, not on the prose and
+        // not on the shape's shape: the same advisory pattern is used for slicers
+        // (Requires="a14"/"sle15"), and there the reference *does* draw the fallback, so
+        // suppressing advisories in general would be wrong. Censused prefix-agnostically over the
+        // 946-document corpus, the chartex URI occurs in two documents, both spreadsheets.
+        //
+        // A slicer needs no rule of its own any more, and this is where the one it had used to
+        // sit. It was keyed on the slicer graphic-data URI and existed because `a14` was in
+        // `UnderstoodExtensions`, so an `a14` slicer choice was taken and drew nothing where the
+        // reference draws its advisory rectangle. `a14` is no longer understood — `oox` and
+        // writerfilter both refuse it, see `OoxmlNamespaces.UnderstoodExtensions` — so the general
+        // rule now reaches every one of the corpus's seven `a14` slicer choices, and the special
+        // case was unreachable. `cx1` is genuinely different: `oox` *does* support it, which is why
+        // the chartex clause above is a real exception and the slicer one never was.
+        //
+        // The frame then draws empty, because no cx:chart reader exists yet. That is a smaller
+        // error than the sentence: both are wrong about the ink, and only one invents text.
+        static bool IsAdvisoryPlaceholderFallback(XElement element, XElement choice)
+        {
+            if (element.Element(XName.Get("Fallback", OoxmlNamespaces.MarkupCompatibility)) is null)
+                return false;
+
+            foreach (XElement data in choice.Descendants(
+                         XName.Get("graphicData", OoxmlNamespaces.DrawingML)))
+            {
+                if (data.Attribute("uri")?.Value == OoxmlNamespaces.ExtendedChart) return true;
+            }
+            return false;
         }
 
         static bool IsUnderstood(XElement choice)

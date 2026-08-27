@@ -611,6 +611,172 @@ apt-get update && apt-get install -y --no-install-recommends fonts-dejavu-core  
 The container's package index is stale, not the archive. `apt-get update` first, always, and
 re-check `fc-match` afterwards rather than trusting the installer's exit code.
 
+**`grep -r` and `find` over this repository return exactly double. Use `git grep`.**
+The case-insensitive mount has produced alias directory entries *inside the checkout* as well as
+in the corpus: every project under `dotnet/src` now has a lower-case twin —
+`dotnet/src/paperless.core` beside `dotnet/src/Paperless.Core`, same inode
+(`4785074604717685`), link count 1. `git ls-tree` lists only the canonical spelling and
+`git status` is clean, so nothing is wrong with the tree; but anything that walks the filesystem
+visits both names.
+
+Measured 2026-08-20 on the same query:
+
+| | hits | files |
+|---|---:|---:|
+| `grep -rn … dotnet/src --include=*.cs` | 96 | 60 |
+| `git grep -n … -- 'dotnet/src/**/*.cs'` | **48** | **30** |
+
+**Exactly 2×.** A reach census run with `grep -r` is therefore inflated by a factor of two, and
+this project dispatches rounds on reach censuses. `git grep` and `git ls-files` operate on tracked
+paths and cannot see an alias, so they are the correct instruments here; if you must walk the
+filesystem, fold case and deduplicate before counting.
+
+**Do not delete the aliases.** As in the corpus, `rm -rf dotnet/src/paperless.core` is a request to
+unlink that inode, and the inode is the source tree.
+
+**`/tmp` is on the 20 GB overlay and this workflow fills it, which reads as an 11-verdict
+regression.** A words round's post-change sweep returned **`REF-CANNOT-RENDER 13`** with `/` at
+100%: **~120 000 stale entries, 17 GB**. It discarded that figure rather than reporting it, which is
+the right call and is `HANDOVER.md`'s "a full disk looks exactly like a catastrophic regression"
+arriving for the second time.
+
+Measured by the parent shortly afterwards, on a `/tmp` holding **119 512 entries and 14 GB**:
+
+| class | aged >2 h |
+|---|---:|
+| `MSBuildTemp*` | **114 122** |
+| `paperless-lo-*` (soffice profiles) | 759 |
+| `clr-debug-pipe-*` | 350 |
+
+**`MSBuildTemp*` is the bulk and it is ours** — every `dotnet build` leaves one, and this session
+runs a build per merge. Clearing entries older than two hours took `/` from 4.6 GB free to 5.4 GB
+and `/tmp` from 119 512 entries to 4 275, with a sweep running throughout and unaffected.
+
+```sh
+find /tmp -maxdepth 1 -name 'MSBuildTemp*'    -mmin +120 -print0 | xargs -0 -r rm -rf
+find /tmp -maxdepth 1 -name 'paperless-lo-*'  -mmin +120 -print0 | xargs -0 -r rm -rf
+find /tmp -maxdepth 1 -name 'clr-debug-pipe-*' -mmin +120 -print0 | xargs -0 -r rm -rf
+```
+
+**The age bound is what makes it safe to run beside a live sweep** — nothing the sweep owns is two
+hours old. Better still, point a sweep's `TMPDIR` at the host mount (`/c/sandbox/workdir/...`),
+which has 150 GB free where `/` has five.
+
+**A reference PDF differs byte for byte between two sweeps and it means nothing — but one document's
+reference genuinely is non-deterministic, and the two must not be confused.**
+
+The spurious case: **98 bytes of XMP `dc:date`**, length unchanged, with page, word and font counts
+**identical across three sweeps of all 337 words paths**. `soffice` stamps the conversion time into
+the metadata. So a byte diff of two reference renderings is not evidence of anything until the date
+is masked out, and a round that byte-compares reference PDFs will otherwise find "changes"
+everywhere.
+
+The real case: **`ans_mappings_of_eccairs_terms.xlsx`** renders **191 pages eight times and 190
+once** over nine renderings, with words wandering across four values and our side pinned throughout.
+No `TODAY`/`NOW`/`RAND` — layout instability. It is filed `unstable`.
+
+**The discriminator is the gate columns, not the bytes.** Identical page/word/font counts with
+differing bytes is the date. Differing counts across renderings of one unchanged input is the real
+thing, and there is exactly one such document known.
+
+**`verify-test.sh` rebuilds twice, so running it during a sweep replaces the binary under that
+sweep.** The rule "a sweep and a rebuild must never overlap" has always been written as though the
+rebuild would be an explicit `dotnet build`. It need not be: the mutation harness builds on both
+legs by design, and a round that runs it while a cross-track sweep is in flight silently swaps
+`Paperless.Core.dll` mid-sweep.
+
+**It announces itself as documents moving between two sweeps of the same unmodified tree** — round
+60 saw **31 words documents** differ that way, one by 19.82 of ink on a chartless questionnaire.
+Rendering is deterministic, so that cannot happen; a fresh render matched one sweep's copy and not
+the other's (157 696 against 157 807 bytes), which is what identified it.
+
+The check is cheap and belongs in the routine: **re-render one document after a sweep and compare it
+byte for byte against that sweep's own copy.** If they differ, the binary changed under you and the
+sweep is void. Anything that builds — `verify-test.sh`, a test run without `--no-build`, an IDE —
+counts as a rebuild.
+
+**An agent's cross-track figure is measured at its own base, and the manifest tracks HEAD. They
+disagree, and the disagreement is not an error.** Three times in one session a round has swept the
+other two tracks, found a manifest row it could not reproduce, and proposed a correction — each time
+because the round that closed that document merged *after* its own base commit. The clearest case:
+a words round proposed re-opening two documents on the grounds that "278 recorded against 276
+measured, three rounds running, both sides stable, so not date volatility". Its reasoning was sound
+and its conclusion wrong; the fix that closed them was three commits newer than its base.
+
+So: **a cross-track sweep from an agent's worktree is evidence about that worktree**, and only the
+parent's gate at HEAD settles a manifest row. Agents should say which commit they measured at — and
+when a cross-track figure disagrees with the manifest, `git log <agent-base>..HEAD -- <the relevant
+source>` is the first thing to run, not a manifest edit.
+
+**The reference half of the gate is not reproducible for date-bearing sheets, and it decays the
+manifest on its own.** Measured across three sweeps hours apart in round 51: four documents'
+*reference* word counts moved with the wall clock while ours stayed pinned, because
+`batch-check.sh` renders the reference through `soffice` with no `SOURCE_DATE_EPOCH` and a sheet
+whose header holds `&D`/`&T`, or whose cells hold `TODAY()`, prints today. `paperless render`
+honours the reproducible-builds convention on our side, so **the two halves of the gate do not
+have the same reproducibility properties**, and a stored verdict on such a document can go stale
+with nobody touching the code.
+
+The practical rule when a sweep diff appears: **split it by which side moved.** Round 51 separated
+nine real movements from three calendar ones that way. Volatile dates reach **16 of the 40 open
+sheets documents**, not the ~7 previously carried.
+
+**`/c/sandbox/workdir` is a case-insensitive virtiofs mount, and this invalidates sweep totals.**
+The four corpus files described elsewhere as "upper-case on disk" are not a second file that a
+case-sensitive glob would miss — on this mount `049_….pptx` and `049_….PPTX` are the **same
+inode**, one md5, one file. The live trap is that a tool which probes both spellings *materialises*
+the second one permanently: `look.py` resolves a document by `CORPUS.rglob(stem.ext)` **plus**
+`CORPUS.rglob(stem.EXT)`, and a slides sweep total went **305 → 311 with the corpus unchanged**
+because of it. Reconcile every `find`-based total case-folded, and treat a total that grew without
+a corpus commit as this until proven otherwise.
+
+**And the alias count is not static — it grows when you look at a page.** Measured across one
+session: the corpus held 45 alias entries, then 38 more materialised on the sheets track alone, and
+a whole-corpus sweep's `TOTAL` went **991 → 1033 with the corpus unchanged and not one commit to
+it**. `look.py` and `pair.sh` create them by resolving a document. So a sweep `TOTAL` is not
+comparable with the same sweep's `TOTAL` an hour earlier, let alone with a stored one. **Score every
+sweep against `MANIFEST.tsv`'s path list, and have the scorer refuse to print unless every manifest
+path found a row** — that check is what keeps the figure meaningful while the denominator drifts
+underneath it.
+
+Measured 2026-08-20, so the shape of it is not in doubt: `grants-2005.xls` and `grants-2005.XLS`
+report the **same inode** (`35184372089472271`), the same size, and a **link count of 1**. `git
+ls-files` lists only the lower-case name and `git status` reports **nothing untracked**, so git
+resolves the second spelling to the tracked file. There is one file wearing two names in
+`readdir`, and the `nlink` of 1 is the filesystem telling you so.
+
+**Do not `rm` one. `rm <NAME>.XLS` deletes the document** — measured on a scratch file 2026-08-21:
+three names, one inode, link count 1, and `rm` on one name destroyed the file while leaving the
+others as stale entries pointing at nothing. The earlier form of this warning was inferred; it is now
+demonstrated.
+
+**They can be cleared safely, by renaming.** A rename round trip on the *tracked* name
+(`mv x .tmp && mv .tmp x`) invalidates every case-variant entry for that inode and leaves the file
+untouched. `.claude/skills/corpus-batches/scripts/dealias-corpus.py` does this; `--check` reports
+without changing anything.
+
+**Done 2026-08-21**: 77 aliased inodes carrying 87 extra names, all cleared, **zero hash changes**,
+`git status` clean, and the corpus now holds **946 files in 946 distinct inodes with no case-only
+collision anywhere**. A gate's `TOTAL` line therefore equals the manifest again, and the figures
+below (355 / 311 / 325, and 1033 corpus-wide) are the *historical* over-counts, not current ones.
+
+**git is the only authority for which spelling is real**, because no ordering rule works: some
+aliases upper-case the extension and some lower-case the whole filename. `core.quotePath=false` is
+required, since git escapes non-ASCII and the corpus holds a CJK filename.
+
+**The aliases can come back.** They are created by case-variant lookups — `look.py`'s upper-case
+`rglob` was one source and is fixed — so run `dealias-corpus.py --check` if a sweep `TOTAL` exceeds
+the manifest again. There are **45** such entries corpus-wide
+(words 18, sheets 18, slides 9), which is exactly the gap between `find` counts (words 355, slides
+311, sheets 325) and manifest rows (337, 302, 307).
+
+The corpus *does* separately contain four documents whose only name is upper-case — they are rows
+in `MANIFEST.tsv` and are real. Distinguishing them from an alias is what the manifest is for,
+which is the whole mitigation: **score against `MANIFEST.tsv`'s path list, never against a sweep's
+own `TOTAL`.** Verdicts are unaffected either way, because per-format identity keys on the
+extension as spelled (`report__xls` and `report__XLS` are two identities, so neither overwrites the
+other) — it is only the counts that inflate.
+
 Canonical reference renderings for this environment, all 534 documents at 26.2.4.2 with the
 correct font set, are kept at `/c/sandbox/workdir/refpdfs-26.2.4.2-fonts/` with a
 `ref-baseline-all.tsv` beside them. Reuse them rather than re-rendering the reference.

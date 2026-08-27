@@ -106,11 +106,14 @@ public static class PageDrawing
     /// the page. Single-column text — which is nearly everything — takes one group and one lookup.
     /// </remarks>
     private static void DrawBody(
-        LaidOutPage page, IReadOnlyList<PageBlock> blocks, IDrawingSink sink)
+        LaidOutPage page,
+        IReadOnlyList<PageBlock> blocks,
+        IDrawingSink sink,
+        Colour background = default)
     {
         if (page.ColumnCount <= 1 && page.Lines.All(line => line.Columns <= 1))
         {
-            DrawLines(page.BodyArea, page.Lines, blocks, sink);
+            DrawLines(page.BodyArea, page.Lines, blocks, sink, background);
             return;
         }
 
@@ -119,7 +122,7 @@ public static class PageDrawing
         foreach (IGrouping<(int Columns, int Column), PlacedLine> band in
                  page.Lines.GroupBy(line => (line.Columns, line.Column)))
         {
-            DrawLines(page.ColumnArea(band.First()), [.. band], blocks, sink);
+            DrawLines(page.ColumnArea(band.First()), [.. band], blocks, sink, background);
         }
     }
 
@@ -171,12 +174,18 @@ public static class PageDrawing
     }
 
     /// <summary>Draws a flow — a header, a footer or a cell — which is lines in their own rectangle.</summary>
-    private static void DrawFlow(PlacedFlow? flow, IDrawingSink sink)
+    /// <param name="flow">The flow, or null when there is none.</param>
+    /// <param name="sink">Receives the drawing commands.</param>
+    /// <param name="background">
+    /// What is painted behind this flow, for a run whose colour is automatic — see
+    /// <see cref="Automatic"/>. Transparent means the page, which is never dark.
+    /// </param>
+    private static void DrawFlow(PlacedFlow? flow, IDrawingSink sink, Colour background = default)
     {
         if (flow is null || flow.IsEmpty) return;
 
-        DrawLines(flow.Area, flow.Lines, flow.Blocks, sink);
-        foreach (PlacedTable table in flow.Tables) DrawTable(table, sink);
+        DrawLines(flow.Area, flow.Lines, flow.Blocks, sink, background);
+        foreach (PlacedTable table in flow.Tables) DrawTable(table, sink, background);
     }
 
     /// <summary>
@@ -228,13 +237,41 @@ public static class PageDrawing
             DrawPicture(sink, frame, vector, null);
         else if (frame.Frame.Image is { } image) DrawPicture(sink, frame, null, image);
 
-        DrawFlow(frame.Content, sink);
+        // The frame's own fill *is* the background an automatic font colour resolves against, and the
+        // reason it was not, for four rounds, is that the two witnesses against it were misread.
+        //
+        // Round 59 passed the fill, measured 383 glyphs turning white that the reference draws black
+        // across `docs-quality-MA.IMS.00001-…docx` page 9 (`#0070C0`, WCAG 39) and
+        // `069_Work_Breakdown_Structure_Template_Professional…` (`#8496B0`, WCAG 76), and removed the
+        // arm — concluding that such a shape's text must belong to the drawing layer and never reach
+        // `ApplyAutoColor`. Round 62 then established the opposite on four inverted arms of `012`.
+        // **Both measurements are right and neither hypothesis is**: both witnesses state a
+        // transparency, `ApplyAutoColor` asks `getAverageColor` and not the fill, and blended toward
+        // white those two fills are luminance 106 and 172. See `AutomaticColour`, which carries the
+        // three-colour bracket that pins the blend.
+        //
+        // A frame stating no fill still resolves to black here rather than continuing to its
+        // *anchor's* background, which is the other limb of round 62's rule and the one `012`'s white
+        // title needs. The anchor is not reachable from here — frames are drawn from a per-page list —
+        // so that limb is still open.
+        DrawFlow(frame.Content, sink, frame.Frame.Fill ?? default);
 
         if (frame.Frame.BorderColour is not { } colour) return;
         if (frame.Frame.BorderWidth <= Length.Zero) return;
 
         Stroke stroke = new(Paint.Solid(colour), frame.Frame.BorderWidth);
         DocRect area = frame.Area;
+
+        // The border is stroked inside the room the frame took, where it says so. See
+        // PageFrame.BorderInset -- a form checkbox is the only thing that does.
+        if (frame.Frame.BorderInset > Length.Zero)
+        {
+            Length inset = frame.Frame.BorderInset;
+            area = new DocRect(
+                area.X + inset, area.Y + inset,
+                Length.Max(Length.Zero, area.Width - inset - inset),
+                Length.Max(Length.Zero, area.Height - inset - inset));
+        }
 
         // A line shape's outline is its diagonal rather than its rectangle: corner to opposite corner,
         // which is the two-point path `ImportShape` builds for it, with the mirror flags choosing which
@@ -256,6 +293,20 @@ public static class PageDrawing
                 .LineTo(new DocPoint(area.Right, area.Bottom))
                 .LineTo(new DocPoint(area.X, area.Bottom))
                 .Close(),
+            stroke);
+
+        if (!frame.Frame.IsCrossed) return;
+
+        // Both diagonals of the same rectangle, which is what a *checked* box is.
+        sink.StrokePath(
+            new GraphicsPath()
+                .MoveTo(new DocPoint(area.X, area.Y))
+                .LineTo(new DocPoint(area.Right, area.Bottom)),
+            stroke);
+        sink.StrokePath(
+            new GraphicsPath()
+                .MoveTo(new DocPoint(area.Right, area.Y))
+                .LineTo(new DocPoint(area.X, area.Bottom)),
             stroke);
     }
 
@@ -321,7 +372,7 @@ public static class PageDrawing
     /// Shading behind the text and borders over it, which is paint order rather than preference: a border
     /// runs through the centre of a grid line, so half its width overlaps the cells either side of it.
     /// </remarks>
-    private static void DrawTable(PlacedTable table, IDrawingSink sink)
+    private static void DrawTable(PlacedTable table, IDrawingSink sink, Colour background = default)
     {
         // Every shade before any text, rather than each cell's shade before its own text: a shade is opaque,
         // and a cell whose content overflows into its neighbour would otherwise have that overflow painted
@@ -331,7 +382,13 @@ public static class PageDrawing
             if (cell.Cell.Shading is { } colour) Fill(cell.Area, colour, sink);
         }
 
-        foreach (PlacedTableCell cell in table.Cells) DrawCellContent(cell, sink);
+        foreach (PlacedTableCell cell in table.Cells)
+        {
+            // The cell's own fill where it has one, and whatever was behind the table where it has
+            // not: `SwFrame::GetBackgroundBrush` walks up the frame chain until something answers,
+            // so a cell in a shaded frame is on the frame's colour rather than on the page's.
+            DrawCellContent(cell, sink, cell.Cell.Shading ?? background);
+        }
 
         DrawBorders(table, sink);
     }
@@ -346,11 +403,12 @@ public static class PageDrawing
     /// and an otherwise unremarkable run — which is why the turned text stays real text in the output
     /// rather than becoming a picture of itself.
     /// </remarks>
-    private static void DrawCellContent(PlacedTableCell cell, IDrawingSink sink)
+    private static void DrawCellContent(
+        PlacedTableCell cell, IDrawingSink sink, Colour background = default)
     {
         if (cell.ContentTransform is not { } onto)
         {
-            DrawFlow(cell.Content, sink);
+            DrawFlow(cell.Content, sink, background);
             return;
         }
 
@@ -360,7 +418,7 @@ public static class PageDrawing
         try
         {
             sink.Transform(onto);
-            DrawFlow(cell.Content, sink);
+            DrawFlow(cell.Content, sink, background);
         }
         finally
         {
@@ -595,7 +653,8 @@ public static class PageDrawing
         DocRect area,
         IReadOnlyList<PlacedLine> lines,
         IReadOnlyList<PageBlock> blocks,
-        IDrawingSink sink)
+        IDrawingSink sink,
+        Colour background = default)
     {
         DrawParagraphShading(area, lines, blocks, sink);
         DrawParagraphBorders(area, lines, blocks, sink);
@@ -608,7 +667,8 @@ public static class PageDrawing
             List<(DocRect Area, Colour Colour)> highlights = [];
             List<(DocRect Area, Colour Colour)> rules = [];
             List<(GlyphRun Run, Colour Colour)> runs =
-                RunsIn(area, line, paragraph, highlights, rules);
+                RunsIn(area, line, paragraph, highlights, rules,
+                       paragraph.Shading ?? background);
 
             // Every band on the line before any of its glyphs, not band-then-glyphs run by run: two
             // adjacent highlighted runs overlap by a fraction of a point where one's advance ends and the
@@ -878,12 +938,19 @@ public static class PageDrawing
     /// caller wants only the glyphs. Out of this walk for the same reason the bands are: a rule spans the
     /// advance the pen just measured, and its offset and thickness come from the face this walk resolved.
     /// </param>
+    /// <param name="background">
+    /// What is painted behind this line — the paragraph's own shade, else its cell's, else its
+    /// frame's, else the page — for a run whose colour is <em>automatic</em>. Transparent means the
+    /// page, which is never dark, so the default preserves what a caller with no background to
+    /// offer used to get. See <see cref="Automatic"/>.
+    /// </param>
     public static List<(GlyphRun Run, Colour Colour)> RunsIn(
         DocRect area,
         PlacedLine line,
         PageParagraph paragraph,
         List<(DocRect Area, Colour Colour)>? highlights = null,
-        List<(DocRect Area, Colour Colour)>? rules = null)
+        List<(DocRect Area, Colour Colour)>? rules = null,
+        Colour background = default)
     {
         ArgumentNullException.ThrowIfNull(paragraph);
 
@@ -911,7 +978,7 @@ public static class PageDrawing
                         label.Font ?? Reference(paragraph, label.Face),
                         new DocPoint(lineLeft - paragraph.LabelAdvance, baseline),
                         Length.Zero),
-                    label.Colour.A == 0 ? Colour.Black : label.Colour));
+                    label.Colour.A == 0 ? Automatic(background) : label.Colour));
             }
         }
 
@@ -926,7 +993,10 @@ public static class PageDrawing
 
             // Before the emptiness test: a tab followed by nothing still draws its leader, which is what
             // a table-of-contents line whose page number sits on the next line looks like.
-            if (Leader(paragraph, segment, lineLeft, baseline) is { } filled) runs.Add(filled);
+            if (Leader(paragraph, segment, lineLeft, baseline, background) is { } filled)
+            {
+                runs.Add(filled);
+            }
 
             if (segment.IsEmpty) continue;
 
@@ -980,7 +1050,7 @@ public static class PageDrawing
                     spaceAdd,
                     run.Tracking);
 
-                runs.Add((glyphRun, run.EffectiveColour));
+                runs.Add((glyphRun, run.ColourOn(background)));
 
                 // The pen carries the justification with it, or the second run on a stretched line would
                 // start where the first would have ended unjustified and overlap the words before it.
@@ -993,7 +1063,7 @@ public static class PageDrawing
 
                 if (rules is not null && run.IsDecorated)
                 {
-                    Rules(run, pen, extent, baseline, rules);
+                    Rules(run, pen, extent, baseline, rules, background);
                 }
 
                 pen += extent;
@@ -1083,7 +1153,8 @@ public static class PageDrawing
         Length pen,
         Length extent,
         Length baseline,
-        List<(DocRect Area, Colour Colour)> rules)
+        List<(DocRect Area, Colour Colour)> rules,
+        Colour background = default)
     {
         if (run.EmSize <= Length.Zero || extent <= Length.Zero) return;
 
@@ -1106,7 +1177,7 @@ public static class PageDrawing
                 rules.Add((
                     new DocRect(
                         pen, baselineOfRun - Scaled(metrics.UnderlinePosition), extent, thickness),
-                    run.EffectiveColour));
+                    run.ColourOn(background)));
             }
         }
 
@@ -1118,7 +1189,7 @@ public static class PageDrawing
                 rules.Add((
                     new DocRect(
                         pen, baselineOfRun - Scaled(metrics.StrikeoutPosition), extent, thickness),
-                    run.EffectiveColour));
+                    run.ColourOn(background)));
             }
         }
     }
@@ -1197,7 +1268,11 @@ public static class PageDrawing
     /// </para>
     /// </remarks>
     private static (GlyphRun Run, Colour Colour)? Leader(
-        PageParagraph paragraph, TabbedSegment segment, Length lineLeft, Length baseline)
+        PageParagraph paragraph,
+        TabbedSegment segment,
+        Length lineLeft,
+        Length baseline,
+        Colour background = default)
     {
         if (!segment.HasLeader) return null;
 
@@ -1240,8 +1315,33 @@ public static class PageDrawing
                 new DocPoint(lineLeft + segment.GapLeft, baseline - at.Rise),
                 Length.Zero,
                 pitch - exact),
-            at.EffectiveColour);
+            at.ColourOn(background));
     }
+
+    /// <summary>
+    /// What an <em>automatic</em> font colour resolves to over a given background.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>SwDrawTextInfo::ApplyAutoColor</c> (<c>sw/source/core/txtnode/fntcache.cxx</c>:2369) asks
+    /// the frame chain for a background brush and answers <c>COL_WHITE</c> when the brush is dark
+    /// and <c>COL_BLACK</c> otherwise. With no brush at all it falls back to the application's
+    /// document colour, which is white — so a transparent background here means black, which is
+    /// what every caller got before a background existed to pass.
+    /// </para>
+    /// <para>
+    /// <strong>A character highlight is not a brush.</strong> Measured, and in both directions: a
+    /// yellow <c>w:highlight</c> on a run in a black cell is drawn <em>white</em>, and a
+    /// <c>darkBlue</c> highlight in a white cell is drawn <em>black</em>
+    /// (<c>probes/words-r59/autocolour.py</c>, cases <c>B/cell-dark-run-highlight-light</c> and
+    /// <c>B/cell-light-run-highlight-dark</c>). The brush the function asks for is the font's
+    /// <em>back colour</em>, which is <c>RES_CHRATR_BACKGROUND</c> — character shading — and
+    /// <c>w:highlight</c> is <c>RES_CHRATR_HIGHLIGHT</c>, a different item entirely. Reading the
+    /// highlight as the background is the obvious wrong answer and both those cases refuse it.
+    /// </para>
+    /// </remarks>
+    /// <param name="background">The brush behind the run, or transparent for none.</param>
+    private static Colour Automatic(Colour background) => AutomaticColour.Over(background);
 
     /// <summary>
     /// The formatting run covering a character, or the paragraph's own formatting where none does.
@@ -1435,7 +1535,7 @@ public static class PageDrawing
                         Start = face.Start,
                         Length = face.Length,
                         Face = face.Face,
-                        Font = fallback.ReferenceFor(face.Face),
+                        Font = fallback.ReferenceFor(face.Face, AsksForItalic(run)),
                     }
                     : run with { Start = face.Start, Length = face.Length });
             }
@@ -1443,6 +1543,21 @@ public static class PageDrawing
 
         return split;
     }
+
+    /// <summary>Whether a run asked for italic, however it was answered.</summary>
+    /// <remarks>
+    /// Two states, not one. A run whose family has an italic installed is answered with that face
+    /// and <see cref="OpenTypeFace.IsItalic"/> records it; a run whose family has none is answered
+    /// with the upright face and a <see cref="FontReference.SyntheticOblique"/> instead. Both asked
+    /// for italic, and 26.2.4.2 shears a fallback face for both — measured on
+    /// <c>probes/words-r58/fallback-oblique.py</c>'s <c>cjk-italic</c> and <c>cjk-italic-none</c>,
+    /// which differ by exactly that and agree at six sheared glyphs in every one of six formats.
+    /// Reading only the face would lose the second, which is the arm that reaches a document naming
+    /// a family nobody has installed — and those are the documents that fall back in the first
+    /// place.
+    /// </remarks>
+    private static bool AsksForItalic(PageRun run)
+        => run.Face.IsItalic || (run.Font?.SyntheticOblique ?? false);
 
     /// <summary>
     /// The runs cut at every as-character object's boundary, so the pen has somewhere to jump.

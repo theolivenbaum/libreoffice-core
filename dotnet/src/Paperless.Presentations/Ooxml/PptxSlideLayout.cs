@@ -760,7 +760,7 @@ internal sealed partial class PptxSlideLayout
         // — one em of ascent and a 1.2 em box — so nothing is set below and SlideTextBody's default
         // stands. It is worth saying why the *absence* of an override is the interesting part.
         //
-        // This was an override, and against LibreOffice 24.2.7.2 it was right: that binary drew
+        // This was an override, and against the superseded binary it was right: that binary drew
         // deck-features.pptx's first cell (18 pt Arial, substituted by Liberation Sans) with a
         // 16.33 pt ascent, 0.907 em — the face's own, not the em's. Its own C++ said otherwise even
         // then, and the note here recorded the disagreement rather than resolving it.
@@ -772,8 +772,20 @@ internal sealed partial class PptxSlideLayout
         // library already implements — SlideTextLayout's 1.2 em box, reached only when
         // FontIndependentLineSpacing is true — is now what the reference draws for cells as well.
         //
-        // Not touched: the ODP path, which states the flag per paragraph style and usually does not
-        // set it (OdpSlideLayout), because ODF has no such compatibility default to follow.
+        // The ODP path is a different rule and is NOT the same answer, which round 55 measured
+        // rather than assumed: on 26.2.4.2 an ODF drawing cell obeys
+        // `style:font-independent-line-spacing` as stated — one em when it is true, the face's own
+        // 0.903 em when the attribute is absent. LibreOffice's own ODP export writes it `true` on
+        // every cell it emits, so a real Impress deck lands on the same em this side does.
+        // See OdpSlideLayout.CellBody, which does not read the attribute at all.
+        //
+        // [24.2.7-audit: VERIFIED 26.2.4.2, 2026-08-21, round slides-r54 -- probed against the
+        // installed binary rather than read. probes/slides-r54/make-cell-baseline-probe.py: one
+        // table, one cell, zero margins, top-anchored, six stated sizes from 10 to 40 pt. The
+        // reference draws its first baseline at 1.0007, 1.0005, 1.0003, 1.0003, 1.0002 and 1.0002
+        // ems below the cell's top edge -- one em, quantised, on all six, and NOT the 0.907 em the
+        // superseded note above records. Our own six land on the reference's to 0.000 pt.
+        // The ODF side of the same claim, OdpSlideLayout.cs:302, was NOT covered by this probe.]
         return PptxTextBody.Read(
             body, theme.Colours, theme.MinorLatin,
             themed.Count == 0 ? null : _ => themed) with
@@ -941,6 +953,17 @@ internal sealed partial class PptxSlideLayout
     /// <c>slide-drop-shadow.pptx</c> gives the themed 38%-black shadow to all three of the shape
     /// that states nothing, the shape with an empty list and the shape with a glow. The binary
     /// made the reference PDFs, so the binary wins.
+    /// </para>
+    /// <para>
+    /// [24.2.7-audit: VERIFIED 2026-08-21, round 60 — re-run on 26.2.4.2 with this site's own
+    /// fixture, <c>tests/corpus/features/slide-drop-shadow.pptx</c>, through the reference
+    /// binary's flat-ODF export. Its five shapes come out
+    /// <c>Angled 0.149/0.149 #000000 100%</c>, <c>Themed 0/0.056 #000000 38%</c>,
+    /// <c>EmptyList 0/0.056 #000000 <b>38%</b></c>, <c>Glow 0/0.056 #000000 <b>38%</b></c>,
+    /// <c>Translucent 0/0 #000000 60%</c>. The two arms the rule exists for — the shape writing
+    /// an empty <c>a:effectLst</c> and the one holding only an <c>a:glow</c> — still keep the
+    /// theme's 38% shadow, so "the first source that states an <em>outer shadow</em>" holds and
+    /// <c>EffectProperties::assignUsed</c> still does not describe the binary. 3 of 3.]
     /// </para>
     /// </remarks>
     private static SlideShadow? Shadow(
@@ -1382,7 +1405,12 @@ internal sealed partial class PptxSlideLayout
         return destination is { } placed
             ? new PlacedPicture(
                   picture.Raster is { } raster
-                      ? Duotoned(raster, blip, ThemeFor(slide).Colours)
+                      // The knockout is withheld when a vector is present, for the reason
+                      // ColourKnockout records: the reference applies the transform only to a
+                      // GraphicType::Bitmap, so a WMF or EMF carrying it gets nothing. This is
+                      // the same guard the binary path applies at PptSlideLayout.Picture.
+                      ? Duotoned(raster, blip, ThemeFor(slide).Colours,
+                                 knockout: picture.Vector is null)
                       : null,
                   placed,
                   Math.Clamp(blip.Opacity, 0, 1))
@@ -1411,9 +1439,10 @@ internal sealed partial class PptxSlideLayout
     /// </para>
     /// </remarks>
     private static RasterImage Duotoned(
-        RasterImage image, DrawingBlipFill blip, DrawingTheme? theme)
+        RasterImage image, DrawingBlipFill blip, DrawingTheme? theme, bool knockout = true)
     {
         image = Adjusted(image, blip);
+        if (knockout) image = KnockedOut(image, blip, theme);
 
         if (blip.Duotone is not { } pair) return image;
         if (pair.Dark.Resolve(theme, placeholder: null) is not { } dark) return image;
@@ -1450,6 +1479,44 @@ internal sealed partial class PptxSlideLayout
     }
 
     /// <summary>
+    /// The picture with its <c>a:clrChange</c> attached — PowerPoint's <em>Set Transparent
+    /// Color</em>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Attached rather than applied, for the reason <see cref="Duotoned"/> gives: matching a
+    /// colour needs pixels and a reader has no codec.
+    /// </para>
+    /// <para>
+    /// <strong>This was a route, not a rule, and it is the seventh instance of that shape
+    /// here.</strong> <see cref="ColourKnockout"/>, the per-channel box match, the binary alpha
+    /// and the decoder that applies it all already existed and all already worked — the binary
+    /// <c>.ppt</c> path has populated them from Escher property 263 for rounds
+    /// (<c>MsBinary/PptSlideLayout.cs</c>). Nothing anywhere in the tree read
+    /// <c>a:clrChange</c>, so the OOXML half of the same feature drew the stored pixels.
+    /// </para>
+    /// <para>
+    /// <c>social-media-app-bulletin-january.pptx</c> page 3 is the corpus instance that found
+    /// it, and it was found by a blind reviewer on a document that <em>passes</em> every gate
+    /// column. Its wordmark is a 450 × 95 PNG that is <strong>91.6% pure #000000</strong> with
+    /// no alpha channel and no <c>tRNS</c>, under a <c>clrChange</c> knocking black out. Drawn
+    /// as stored it is a 337.5 × 71.25 pt opaque black slab that covers the words
+    /// <em>Social Media</em> in the title. No gate column can see it: the title is still in the
+    /// text layer, so the word count is unmoved and the document passes while the page is
+    /// visibly wrong.
+    /// </para>
+    /// <para>
+    /// Excluded for vectors by the caller, because the reference applies the transform only to
+    /// a <c>GraphicType::Bitmap</c> — see <see cref="ColourKnockout"/>.
+    /// </para>
+    /// </remarks>
+    private static RasterImage KnockedOut(
+        RasterImage image, DrawingBlipFill blip, DrawingTheme? theme)
+        => DrawingPictureEffects.Knockout(blip, theme, image.EncodedBytes.Span) is { } knockout
+            ? image with { Knockout = knockout }
+            : image;
+
+    /// <summary>
     /// An <c>a:gradFill</c>, resolved against the box it fills.
     /// </summary>
     /// <remarks>
@@ -1466,6 +1533,19 @@ internal sealed partial class PptxSlideLayout
     /// <c>a:path path="shape"</c> — a gradient following a custom outline — is drawn as a
     /// rectangular one, which is what LibreOffice does with it too: its comment says
     /// "XML_rect or XML_shape, but the latter is not implemented".
+    /// </para>
+    /// <para>
+    /// <strong>A <c>path="circle"</c> whose focus lands on a corner is a radial gradient and not
+    /// a diagonal linear one.</strong>
+    /// [24.2.7-audit: FIXED 2026-08-21, slides-r59 — round 39 measured the corner case as
+    /// <c>draw:style="linear"</c> with a 45° angle on the superseded binary and this reader was
+    /// built on that. Re-running that round's own four-arm fixture through 26.2.4.2's flat-ODF
+    /// export gives <c>radial</c> on all four, the two corner arms included:
+    /// <c>l="100000" t="100000"</c> exports <c>draw:style="radial" draw:cx="100%"
+    /// draw:cy="100%"</c> and <c>r="99000" b="99000"</c> exports <c>radial</c> at
+    /// <c>0%/0%</c>. The corner branch is removed. Corpus reach, counted on what the parts
+    /// state: 67 corner-focus circle paths in 7 documents — 6 slides decks and one words
+    /// document, with 42 of the 67 in two infographic funnel decks.]
     /// </para>
     /// </remarks>
     private static Paint? Gradient(XElement? element, in FillContext context)
@@ -1496,15 +1576,6 @@ internal sealed partial class PptxSlideLayout
         int cx = FocusPerCent(gradient.FillToRect.Left, gradient.FillToRect.Right);
         int cy = FocusPerCent(gradient.FillToRect.Top, gradient.FillToRect.Bottom);
 
-        if (gradient.Path == "circle" && (cx is 0 or 100) && (cy is 0 or 100))
-        {
-            // The focus is a corner: the reference draws the diagonal linear ramp instead,
-            // stop 0 at that corner. Direction runs corner-to-opposite-corner, and Linear
-            // spans the box's rotated extent, so the two corners land on the ramp's ends.
-            return SlideGradients.Linear(box, cx == 0 ? 1 : -1, cy == 0 ? 1 : -1, stops)
-                with { Transform = space };
-        }
-
         DocPoint centre = new(
             box.Left + (box.Width * (cx / 100.0)),
             box.Top + (box.Height * (cy / 100.0)));
@@ -1531,9 +1602,17 @@ internal sealed partial class PptxSlideLayout
     /// <c>a:fillStyleLst</c>, and not one of them changed a pixel when this landed — a theme's
     /// third fill style is almost never what a drawn shape resolves to. Correct, tested, and
     /// waiting for a document. The <b>truncation</b> to whole per cent decides the corner test in
-    /// <see cref="Gradient"/>, which is where the corpus movement was: measured against
-    /// LibreOffice 24.2.7.2, a stated centre of 0.5% is treated as 0 and takes the linear
-    /// branch, and 1% does not (<c>probes/slides-r39/gradient-path.md</c>).
+    /// <see cref="Gradient"/>. Measured against the superseded binary, a stated centre of 0.5%
+    /// was treated as 0 and took a *linear* branch there, and 1% did not
+    /// (<c>probes/slides-r39/gradient-path.md</c>).
+    ///
+    /// [24.2.7-audit: VERIFIED 2026-08-21, slides-r59 — the truncation and the clamp both still
+    /// hold on 26.2.4.2, and the branch they fed does not. Re-run of round 39's own four-arm
+    /// fixture through the reference's flat-ODF export: <c>l="0" r="99000"</c> (0.5%) exports
+    /// <c>draw:cx="0%"</c> and <c>l="0" r="98000"</c> (1%) exports <c>draw:cx="1%"</c>, so the
+    /// truncation is intact; <c>t="-80000" b="180000"</c> exports <c>draw:cy="0%"</c>, so the
+    /// clamp is intact. What changed is <see cref="Gradient"/>'s corner test — see the marker
+    /// there.]
     /// </remarks>
     private static int FocusPerCent(double nearInset, double farInset)
     {

@@ -150,7 +150,31 @@ internal sealed class EmfBuilder
     }
 
     /// <summary>Appends an <c>ExtCreateFontIndirectW</c>.</summary>
-    public EmfBuilder Font(int handle, string family, int height, int escapement = 0, int weight = 400)
+    /// <param name="handle">The object handle the font is stored under.</param>
+    /// <param name="family">The face name, which is terminated rather than padded to the field.</param>
+    /// <param name="height">The em height, negative for a cell height.</param>
+    /// <param name="escapement">The baseline's angle, in tenths of a degree.</param>
+    /// <param name="weight">The stated weight.</param>
+    /// <param name="faceTail">
+    /// Code units to write into the face-name field <em>after</em> its terminating NUL, which is
+    /// what a producer that does not zero the field leaves there. Writing rubbish here is the only
+    /// way to state the difference between "the name ends at the first NUL" and "the NULs are
+    /// padding to be skipped", and real files exercise it — see
+    /// <c>EmfFaceNameTests</c>.
+    /// </param>
+    /// <param name="charSet">
+    /// <c>lfCharSet</c>. <c>0x02</c> is <c>SYMBOL_CHARSET</c>, which says the run's bytes are
+    /// glyph slots rather than characters — see <c>MetafileSymbolFontTests</c>. The default is
+    /// <c>DEFAULT_CHARSET</c>, which is what every other test here means.
+    /// </param>
+    public EmfBuilder Font(
+        int handle,
+        string family,
+        int height,
+        int escapement = 0,
+        int weight = 400,
+        ushort[]? faceTail = null,
+        byte charSet = 1)
     {
         ArgumentNullException.ThrowIfNull(family);
 
@@ -162,9 +186,20 @@ internal sealed class EmfBuilder
         BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(16), escapement);
         BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(20), weight);
 
+        // lfCharSet is the fourth of the four bytes after lfWeight -- italic, underline,
+        // strikeOut, charSet -- so byte 23 of the LOGFONT and 27 of the payload.
+        payload[4 + 23] = charSet;
+
         for (int i = 0; i < family.Length && i < 31; i++)
         {
             BinaryPrimitives.WriteUInt16LittleEndian(payload.AsSpan(32 + (i * 2)), family[i]);
+        }
+
+        for (int i = 0; faceTail is not null && i < faceTail.Length; i++)
+        {
+            int at = 32 + ((family.Length + 1 + i) * 2);
+            if (at + 2 > 4 + 92) break;
+            BinaryPrimitives.WriteUInt16LittleEndian(payload.AsSpan(at), faceTail[i]);
         }
 
         return Raw(EmfFunction.ExtCreateFontIndirectW, payload);

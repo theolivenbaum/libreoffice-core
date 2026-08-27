@@ -59,15 +59,47 @@ internal static class SheetBandText
             : null);
 
     /// <summary>
-    /// The same metrics with no device, which is what a chart's text is measured with.
+    /// The same metrics on <c>chart2</c>'s own device, which is what a chart's text is measured
+    /// with.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// A chart's labels are not laid out by Calc and so are not quantised onto Calc's output
-    /// device: <c>chart2</c>'s view makes them as plain text shapes and takes the face's metrics
-    /// whole. Dropping the grid here rather than never adding one keeps the two answers beside
-    /// each other and keeps <see cref="ChartLineHeightAt(Length)"/>'s line gap, which
-    /// <see cref="LineMetrics.ScaledLineHeight"/> only includes when there is no device to round
-    /// it onto.
+    /// device: <c>chart2</c>'s view makes them as plain text shapes on a <c>VirtualDevice</c> of
+    /// its own. <b>That device is 96 dpi in 1/100 mm</b> — see <see cref="MetricGrid.Chart"/>,
+    /// which carries the measurement — where Calc's is 720 and Impress' 600.
+    /// </para>
+    /// <para>
+    /// <b>Until round 60 this dropped the grid entirely</b>, on the reasoning that a text shape
+    /// takes the face's metrics whole. It does not: it takes them through a coarse device, and a
+    /// 96 dpi pixel is 0.75 pt. That is what made <see cref="ChartLineHeightAt(Length)"/> answer
+    /// Carlito's 1.2207 em at every size where 26.2.4.2 stacks it at 1.1219 em at 10 pt and
+    /// 1.2241 at 15.89 — sub-linear, because the em itself is rounded to 13 pixels at 10 pt and
+    /// to 21 at 16.
+    /// </para>
+    /// <para>
+    /// Going through the grid also drops the external leading, which is right for the same reason
+    /// it is right everywhere else <see cref="MetricGrid"/> is used: <c>IsAddExtLeading()</c> is
+    /// false in EditEngine, and a chart's text shape is an EditEngine text. Carlito's line gap is
+    /// zero so this is invisible on nearly every OOXML workbook; both Liberation faces' is not,
+    /// and they are what separated the two laws.
+    /// </para>
+    /// </remarks>
+    private static LineMetrics OnChartDevice(LineMetrics metrics)
+        => metrics with { Grid = MetricGrid.Chart };
+
+    /// <summary>
+    /// The same metrics with no device at all — the arithmetic chart text used before round 60,
+    /// kept for the <em>drawing shape</em> text that also asks for it.
+    /// </summary>
+    /// <remarks>
+    /// <b>This is a preserved behaviour and not a measured one.</b> A Calc drawing object's text
+    /// is an EditEngine text like a chart's, but it is formatted against the draw layer's own
+    /// reference device rather than <c>chart2</c>'s, and which device that is on 26.2.4.2 has not
+    /// been measured on this project. Round 60 moved chart text onto
+    /// <see cref="MetricGrid.Chart"/> and deliberately left shape text exactly where it was, so
+    /// that a chart fix could not silently move every text box in the corpus. Naming it separately
+    /// is what makes the untested half visible; see <see cref="ShapeLineHeightAt(Length, string?)"/>.
     /// </remarks>
     private static LineMetrics Ungridded(LineMetrics metrics) => metrics with { Grid = null };
 
@@ -101,9 +133,49 @@ internal static class SheetBandText
     /// 1.1494 there, and the difference compounds through the insets that place the plot area
     /// rather than showing up in any one label.
     /// </remarks>
+    /// <para>
+    /// <strong>Round 59 measured the divergence and round 60 closed it.</strong> Read off
+    /// <c>003_advanced_excel_pie</c>'s reference rendering, 26.2.4.2 stacks Carlito's lines
+    /// <strong>11.23 pt apart at 10.01 pt</strong> — 1.1219 em — and <strong>19.45 pt apart at
+    /// 15.89 pt</strong> — 1.2241 em, where this function used to answer 1.2207 at both. Carlito's
+    /// hhea, OS/2 typo and OS/2 win metrics all give 1.2207, so the reference was not reading a
+    /// different table: it was reading the same table <em>through a device</em>. A size series on
+    /// three faces (<c>probes/sheets-r60/probe-chartvmetrics2.py</c>) puts every one of 39 measured
+    /// pitches on an integer multiple of 0.75 pt — one pixel at 96 dpi — and
+    /// <see cref="MetricGrid.Chart"/> is that device.
+    /// </para>
+    /// <para>
+    /// It went unnoticed for as long as it did because it cancelled: a chart label is drawn at
+    /// <c>blockCentre − blockHeight/2 + ascent</c>, and <see cref="AscentAt(Length)"/> is 9.51 at
+    /// 10 pt where the reference's is 9.00, so a <em>single-line</em> label landed within 0.01 pt of
+    /// the reference's while its box was 8.8% too tall. The error was only visible once a label
+    /// wrapped or its box was measured for a fit test — which is what a pie's best-fit placement
+    /// does to every one of them. <strong>The height and the ascent therefore had to move
+    /// together</strong>, which is why <see cref="ChartAscentAt(Length)"/> exists rather than the
+    /// drawing paths keeping <see cref="AscentAt(Length)"/>.
+    /// </para>
     /// <param name="size">The em size.</param>
     public static Length ChartLineHeightAt(Length size)
-        => Metrics.Value is { } metrics ? Ungridded(metrics).ScaledLineHeight(size) : size * 1.15;
+        => Metrics.Value is { } metrics ? OnChartDevice(metrics).ScaledLineHeight(size) : size * 1.15;
+
+    /// <summary>How far above a chart line's top its baseline sits, at a size.</summary>
+    /// <remarks>
+    /// The chart-device counterpart of <see cref="AscentAt(Length)"/>, and it exists for the same
+    /// reason <see cref="ChartLineHeightAt(Length)"/> does: a chart's text is quantised onto
+    /// <see cref="MetricGrid.Chart"/>'s 96 dpi pixels and Calc's own text onto 720 dpi ones. At
+    /// ten point in Carlito this answers <b>9.01</b> where <see cref="AscentAt(Length)"/> answers
+    /// 9.52, and the reference draws 9.00.
+    /// <para>
+    /// <b>The two errors used to cancel and that is why this went unseen.</b> A chart label is
+    /// drawn at <c>blockCentre − blockHeight/2 + ascent</c>; the old height was 0.50 pt too tall
+    /// and the old ascent 0.51 pt too high, so a <em>single-line</em> label landed within 0.01 pt
+    /// of the reference's. Both have to move together or the labels that agree today stop
+    /// agreeing.
+    /// </para>
+    /// </remarks>
+    /// <param name="size">The em size.</param>
+    public static Length ChartAscentAt(Length size)
+        => Metrics.Value is { } metrics ? OnChartDevice(metrics).ScaledAscent(size) : size * 0.9;
 
     /// <summary>
     /// The metrics of a named face, or the furniture's own where it names none.
@@ -116,18 +188,20 @@ internal static class SheetBandText
     /// </remarks>
     /// <param name="family">The family name, or null for the furniture's own face.</param>
     /// <param name="bold">
-    /// Whether the family's bold face is wanted. The furniture never asks for one — a header and
-    /// a column heading are drawn in whatever a plain cell would be — but a chart's title does,
-    /// and asking for bold of a family that has no bold face resolves back to its regular one
-    /// rather than to nothing.
+    /// Whether the family's bold face is wanted. Asking for bold of a family that has no bold
+    /// face resolves back to its regular one rather than to nothing.
+    /// </param>
+    /// <param name="italic">
+    /// Whether its italic face is wanted, on the same terms. A band takes both from the
+    /// workbook's own default cell font, which the reference honours.
     /// </param>
     private static (OpenTypeFace? Face, FontReference Reference, LineMetrics? Metrics) FaceFor(
-        string? family, bool bold = false)
+        string? family, bool bold = false, bool italic = false)
     {
-        if (string.IsNullOrWhiteSpace(family) && !bold)
+        if (string.IsNullOrWhiteSpace(family) && !bold && !italic)
             return (Resolved.Value.Face, Description, Metrics.Value);
 
-        return SheetFonts.ForFamily(family, bold) is { } named
+        return SheetFonts.ForFamily(family, bold, italic) is { } named
             ? (named.Face, named.Reference, named.Metrics)
             : (Resolved.Value.Face, Description, Metrics.Value);
     }
@@ -138,11 +212,31 @@ internal static class SheetBandText
     public static Length AscentAt(Length size, string? family)
         => FaceFor(family).Metrics is { } metrics ? metrics.ScaledAscent(size) : size * 0.9;
 
+    /// <inheritdoc cref="AscentAt(Length, string?)"/>
+    /// <param name="size">The em size.</param>
+    /// <param name="family">The family name, or null for the furniture's own face.</param>
+    /// <param name="bold">Whether the family's bold face is wanted.</param>
+    /// <param name="italic">Whether its italic face is wanted.</param>
+    public static Length AscentAt(Length size, string? family, bool bold, bool italic)
+        => FaceFor(family, bold, italic).Metrics is { } metrics
+            ? metrics.ScaledAscent(size)
+            : size * 0.9;
+
     /// <inheritdoc cref="LineHeightAt(Length)"/>
     /// <param name="size">The em size.</param>
     /// <param name="family">The family name, or null for the furniture's own face.</param>
     public static Length LineHeightAt(Length size, string? family)
         => FaceFor(family).Metrics is { } metrics
+            ? metrics.ScaledAscent(size) + metrics.ScaledDescent(size)
+            : size * 1.15;
+
+    /// <inheritdoc cref="LineHeightAt(Length, string?)"/>
+    /// <param name="size">The em size.</param>
+    /// <param name="family">The family name, or null for the furniture's own face.</param>
+    /// <param name="bold">Whether the family's bold face is wanted.</param>
+    /// <param name="italic">Whether its italic face is wanted.</param>
+    public static Length LineHeightAt(Length size, string? family, bool bold, bool italic)
+        => FaceFor(family, bold, italic).Metrics is { } metrics
             ? metrics.ScaledAscent(size) + metrics.ScaledDescent(size)
             : size * 1.15;
 
@@ -158,6 +252,38 @@ internal static class SheetBandText
     /// <param name="bold">Whether the family's bold face is wanted.</param>
     public static Length ChartLineHeightAt(Length size, string? family, bool bold)
         => FaceFor(family, bold).Metrics is { } metrics
+            ? OnChartDevice(metrics).ScaledLineHeight(size)
+            : size * 1.15;
+
+    /// <inheritdoc cref="ChartAscentAt(Length)"/>
+    /// <param name="size">The em size.</param>
+    /// <param name="family">The family name, or null for the furniture's own face.</param>
+    public static Length ChartAscentAt(Length size, string? family)
+        => ChartAscentAt(size, family, bold: false);
+
+    /// <inheritdoc cref="ChartAscentAt(Length)"/>
+    /// <param name="size">The em size.</param>
+    /// <param name="family">The family name, or null for the furniture's own face.</param>
+    /// <param name="bold">Whether the family's bold face is wanted.</param>
+    public static Length ChartAscentAt(Length size, string? family, bool bold)
+        => FaceFor(family, bold).Metrics is { } metrics
+            ? OnChartDevice(metrics).ScaledAscent(size)
+            : size * 0.9;
+
+    /// <summary>
+    /// How tall one line of a Calc <em>drawing shape's</em> text is, at a size.
+    /// </summary>
+    /// <remarks>
+    /// The arithmetic <see cref="ChartLineHeightAt(Length)"/> had before round 60 — the face's own
+    /// <c>ascent + descent + lineGap</c>, on no device — kept under its own name so that the shape
+    /// path is visibly a separate, <b>unmeasured</b> claim rather than an accident of sharing a
+    /// function with the chart path. See the remark on <see cref="Ungridded(LineMetrics)"/> for
+    /// what is and is not known about it.
+    /// </remarks>
+    /// <param name="size">The em size.</param>
+    /// <param name="family">The family name, or null for the furniture's own face.</param>
+    public static Length ShapeLineHeightAt(Length size, string? family)
+        => FaceFor(family).Metrics is { } metrics
             ? Ungridded(metrics).ScaledLineHeight(size)
             : size * 1.15;
 
@@ -167,6 +293,99 @@ internal static class SheetBandText
     /// <param name="bold">Whether the family's bold face is wanted.</param>
     public static Length AscentAt(Length size, string? family, bool bold)
         => FaceFor(family, bold).Metrics is { } metrics ? metrics.ScaledAscent(size) : size * 0.9;
+
+    /// <summary>
+    /// How far above the baseline a capital reaches, at a size — the top of a line's <em>ink</em>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Wanted because <c>ScPrintFunc::PrintHF</c> clips a band's text to the band's own rectangle
+    /// and <c>ImpEditEngine::DrawText_ToPosition</c> throws away an area whose <em>primitive
+    /// range</em> does not meet that rectangle
+    /// (<c>editeng/source/editeng/impedit3.cxx:3367-3372</c>) — and a primitive range is the ink,
+    /// not the line box. The distance from a line's top to its ink is therefore what decides
+    /// whether a short band draws anything at all, and it is <c>ascent - capHeight</c>: 0.217 em
+    /// for Liberation Sans, so 1.74 pt at 8 pt and 4.34 pt at 20 pt.
+    /// </para>
+    /// <para>
+    /// Those two numbers are why this is here. Round 55 measured that a band draws nothing at
+    /// 1.44 pt of 8 pt text and everything at 2.16 pt, and recorded an unexplained "text-fit
+    /// threshold, about 0.27x the point size". It is not a threshold and nothing is fitted; it is
+    /// this distance, and <c>probes/sheets-r56/probe-bandclip.py</c> reproduces both brackets from
+    /// it with no free parameter.
+    /// </para>
+    /// <para>
+    /// <strong>Cap height is a proxy for the glyph bounding box</strong>, which is what
+    /// drawinglayer actually measures. It is exact for capitals and too high for text that reaches
+    /// no further than the x-height, where it makes us draw a little more readily than the
+    /// reference. The alternative is parsing <c>glyf</c> per glyph, which buys nothing on this
+    /// corpus: the nearest case to the boundary is 85 pt clear of it.
+    /// </para>
+    /// </remarks>
+    /// <param name="size">The em size.</param>
+    /// <param name="family">The family name, or null for the furniture's own face.</param>
+    public static Length CapHeightAt(Length size, string? family)
+        => CapHeightAt(size, family, bold: false, italic: false);
+
+    /// <inheritdoc cref="CapHeightAt(Length, string?)"/>
+    /// <param name="size">The em size.</param>
+    /// <param name="family">The family name, or null for the furniture's own face.</param>
+    /// <param name="bold">Whether the family's bold face is wanted.</param>
+    /// <param name="italic">Whether its italic face is wanted.</param>
+    public static Length CapHeightAt(Length size, string? family, bool bold, bool italic)
+    {
+        (OpenTypeFace? face, _, LineMetrics? metrics) = FaceFor(family, bold, italic);
+        Length ascent = metrics is { } resolved ? resolved.ScaledAscent(size) : size * 0.9;
+
+        int units = face?.UnitsPerEm > 0 ? face.UnitsPerEm : 1000;
+        int cap = face?.Os2?.CapHeight ?? 0;
+        Length height = cap > 0
+            ? size * ((double)cap / units * (1 + RoundCapitalOvershoot))
+            : size * DefaultCapHeightRatio * (1 + RoundCapitalOvershoot);
+
+        // Never taller than the ascent the same face reports, because the caller subtracts this
+        // from the ascent and a negative answer would put a line's ink above its own box.
+        return height > ascent ? ascent : height;
+    }
+
+    /// <summary>
+    /// How far a round capital rises above the cap line, as a fraction of the cap height.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The reference measures a line's ink with <c>OutputDevice::GetTextBoundRect</c>, which is
+    /// the <em>glyph</em> bounding rectangle, and <c>O</c>, <c>C</c>, <c>S</c> and every other
+    /// round capital is drawn a little above the flat ones so that it does not read as short.
+    /// Cap height alone therefore under-states the ink of ordinary header text and, because the
+    /// caller subtracts it from the ascent, over-states how tall a band has to be before anything
+    /// is drawn in it — which is the failure that loses text.
+    /// </para>
+    /// <para>
+    /// Measured rather than assumed. <c>probes/sheets-r56/probe-bandclip.py</c> bisects the band
+    /// at which 26.2.4.2 starts drawing, in 0.1 pt steps at three sizes, and the mm100 rounding
+    /// the margins go through brackets the ratio at <strong>0.2056 to 0.2087 em</strong> — 8 pt
+    /// turns over between 1.59 and 1.70, 11 pt between 2.21 and 2.30, 20 pt between 4.11 and
+    /// 4.20. Liberation Sans' bare <c>ascent - capHeight</c> is 0.2173 em, which is outside that
+    /// bracket on the wrong side; two per cent of overshoot puts it at 0.2035, which is outside
+    /// it on the side that draws.
+    /// </para>
+    /// <para>
+    /// <strong>Deliberately biased towards drawing.</strong> Two per cent is a little more than
+    /// the bracket needs, because being wrong here in the other direction deletes a header
+    /// nobody asked to delete, and the only corpus case this rule reaches is 85 pt clear of the
+    /// boundary either way.
+    /// </para>
+    /// </remarks>
+    private const double RoundCapitalOvershoot = 0.02;
+
+    /// <summary>What a face with no usable <c>OS/2</c> capital height is assumed to have.</summary>
+    /// <remarks>
+    /// 0.7 em, which is within a few thousandths of every face this corpus resolves to —
+    /// Liberation Sans is 0.688, Liberation Serif 0.662, DejaVu Sans 0.729. It is only ever
+    /// reached by a version-0 or version-1 <c>OS/2</c> table, which states no capital height at
+    /// all.
+    /// </remarks>
+    private const double DefaultCapHeightRatio = 0.7;
 
     /// <summary>Shapes one line, or null when there is no face to shape it with.</summary>
     /// <param name="text">The text.</param>
@@ -190,10 +409,19 @@ internal static class SheetBandText
     /// reserved — which is why <c>SheetChart</c> passes the same flag to both.
     /// </param>
     public static BandRun? Shape(string text, Length size, string? family, bool bold)
+        => Shape(text, size, family, bold, italic: false);
+
+    /// <inheritdoc cref="Shape(string, Length, string?, bool)"/>
+    /// <param name="text">The text.</param>
+    /// <param name="size">The em size.</param>
+    /// <param name="family">The family name, or null for the furniture's own face.</param>
+    /// <param name="bold">Whether to shape in the family's bold face.</param>
+    /// <param name="italic">Whether to shape in its italic face.</param>
+    public static BandRun? Shape(string text, Length size, string? family, bool bold, bool italic)
     {
         if (text.Length == 0) return null;
 
-        (OpenTypeFace? resolved, FontReference reference, _) = FaceFor(family, bold);
+        (OpenTypeFace? resolved, FontReference reference, _) = FaceFor(family, bold, italic);
         if (resolved is not { } face) return null;
 
         ShapedText shaped = TextShaper.Default.Shape(face, text);
@@ -205,6 +433,81 @@ internal static class SheetBandText
         foreach (ShapedGlyph glyph in shaped.Glyphs)
         {
             Length advance = shaped.Scale(glyph.Advance, size);
+            glyphs.Add(new PositionedGlyph(
+                glyph.GlyphId,
+                new DocPoint(
+                    pen + shaped.Scale(glyph.OffsetX, size),
+                    -shaped.Scale(glyph.OffsetY, size)),
+                advance));
+            clusters.Add(glyph.Cluster);
+            pen += advance;
+        }
+
+        return new BandRun(glyphs, clusters, reference, size, text, pen);
+    }
+
+    /// <summary>
+    /// Shapes one line of a <em>chart's</em> text, or null when there is no face to shape it with.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The horizontal counterpart of <see cref="ChartLineHeightAt(Length, string?, bool)"/>, and it
+    /// exists for exactly the same reason. A chart's text is not laid out by Calc: <c>chart2</c>'s
+    /// view builds it as plain text shapes on a <c>VirtualDevice</c> of its own, and
+    /// <b>that device is 96 dpi</b> (<see cref="MetricGrid.Chart"/>). A font is instantiated at a
+    /// whole number of device pixels, so at 10 pt the device sets <b>13</b> for 13.333 and every
+    /// advance comes back <b>2.5% narrower</b> than the size the file states — and at 11 pt it sets
+    /// 15 for 14.667 and they come back 2.3% <em>wider</em>.
+    /// </para>
+    /// <para>
+    /// <b>Round 60 moved the vertical metrics onto that device and left the width behind.</b> That
+    /// is what made <c>003_advanced_excel_pie</c>'s <c>M3</c> label 1.7 pt too wide and so miss the
+    /// best-fit inner placement by <b>0.33 of a degree</b>, which pushed it outside the slice the
+    /// reference keeps it in and put two surplus words on the page-2 remainder of all four corpus
+    /// pies. The predicate was never wrong; its input was.
+    /// </para>
+    /// <para>
+    /// <b>Measured off 26.2.4.2 before the C++ was opened.</b>
+    /// <c>probes/sheets-r62/probe-chartwidth.py</c> renders fourteen one-variable rewrites of that
+    /// document's own chart part and reads the drawn advance out of the reference's own <c>TJ</c>
+    /// arrays — whose per-glyph adjustments are in thousandths of the text em and are therefore
+    /// independent of the chart's scale, of the page and of the size the PDF writer chose. The
+    /// measured drawn/natural ratio follows <c>round(size × 96/72) / (size × 96/72)</c> at every
+    /// one of the fourteen: above one at 8, 11, 14 and 20 pt and below it at 10, 13, 16, 22 and 28,
+    /// residual at most 0.005 with no free parameter. <b>A sawtooth in the size is a signature
+    /// nothing but a pixel em produces.</b>
+    /// </para>
+    /// <para>
+    /// <b>The glyphs keep the size the file states; only the pen moves.</b> The reference draws
+    /// those labels at 10.008 pt with the narrower advances, not at 9.75 pt, so the em is quantised
+    /// for the <em>advance</em> and not for the glyph. The drawing path takes this for the same
+    /// reason the measuring path does: a label measured narrow and drawn wide is centred on the
+    /// wrong width. The reference's further per-glyph rounding to a whole hundredth of a
+    /// millimetre is measured and deliberately <b>not</b> applied — see
+    /// <see cref="MetricGrid.PixelEmScale"/> for the reasoning and what it costs.
+    /// </para>
+    /// </remarks>
+    /// <param name="text">The text.</param>
+    /// <param name="size">The em size.</param>
+    /// <param name="family">The family name, or null for the furniture's own face.</param>
+    /// <param name="bold">Whether to shape in the family's bold face.</param>
+    public static BandRun? ChartShape(string text, Length size, string? family, bool bold)
+    {
+        if (text.Length == 0) return null;
+
+        (OpenTypeFace? resolved, FontReference reference, _) = FaceFor(family, bold);
+        if (resolved is not { } face) return null;
+
+        ShapedText shaped = TextShaper.Default.Shape(face, text);
+        double scale = MetricGrid.Chart.PixelEmScale(size);
+
+        List<PositionedGlyph> glyphs = new(shaped.Glyphs.Count);
+        List<int> clusters = new(shaped.Glyphs.Count);
+        Length pen = Length.Zero;
+
+        foreach (ShapedGlyph glyph in shaped.Glyphs)
+        {
+            Length advance = shaped.Scale(glyph.Advance, size) * scale;
             glyphs.Add(new PositionedGlyph(
                 glyph.GlyphId,
                 new DocPoint(

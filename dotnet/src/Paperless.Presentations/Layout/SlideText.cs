@@ -70,6 +70,14 @@ public sealed record SlideTextBody
     /// the same way, as <c>TextPreRotateAngle</c> beside <c>RotateAngle</c>.
     /// </para>
     /// <para>
+    /// <c>a:bodyPr/@vert</c> arrives here too, as a quarter turn added to <c>@rot</c> — a body
+    /// that reads downwards is a body whose frame is transposed and whose runs travel with a
+    /// quarter-turn matrix, which is the same quantity by a different spelling. <c>vert</c> and
+    /// <c>eaVert</c> add a quarter clockwise and <c>vert270</c> a quarter the other way; see
+    /// <c>PptxTextBody.Vertical</c> for what was measured and for the two values that are
+    /// deliberately not turns.
+    /// </para>
+    /// <para>
     /// A quarter turn swaps the text rectangle's width and height about its centre, because the
     /// lines then run down the shape rather than across it; a half turn leaves the rectangle
     /// alone. Only multiples of a quarter turn arise: <c>autoTxRot</c> produces nothing else.
@@ -176,9 +184,27 @@ public sealed record SlideTextBody
     /// Whether the text wraps at the shape's width.
     /// </summary>
     /// <remarks>
-    /// <c>a:bodyPr/@wrap="none"</c> means it does not: the line runs on past the shape and the
+    /// <para>
+    /// <c>a:bodyPr/@wrap="none"</c> asks that it does not: the line runs on past the shape and the
     /// shape grows around it. Modelled as an unbounded width rather than as clipping, which is
-    /// what makes a `wrap="none"` label come out on one line as its author saw it.
+    /// what makes a <c>wrap="none"</c> label come out on one line as its author saw it.
+    /// </para>
+    /// <para>
+    /// <strong>But the attribute does not stand on its own, and reading it as though it did loses
+    /// text.</strong> It suppresses wrapping only while the body's autofit leaves the shape alone.
+    /// Measured on 26.2.4.2 with nine authored one-shape variants over both axes — a 236 pt box
+    /// holding a 64-character line — <c>wrap="none"</c> draws **one** line with
+    /// <c>a:noAutofit</c> and with no autofit element at all, and **four** lines with
+    /// <c>a:spAutoFit</c> or <c>a:normAutofit</c>. <c>wrap="square"</c> draws four in all four
+    /// autofit cases. See <c>PptxTextBody</c>, where the two are combined.
+    /// </para>
+    /// <para>
+    /// The cost of the wrong reading is not cosmetic: an unbounded line runs off the *page*, not
+    /// merely off the shape, and everything past the media box is gone from the text layer. On the
+    /// 2026-08-19 baseline 30 of 305 slides renderings drew text outside the page where the
+    /// reference drew 9, and one template family overhangs a 720 pt page by 8.7 pt so that
+    /// <c>Google Slides</c> extracts as <c>Google Slid</c>.
+    /// </para>
     /// </remarks>
     public bool Wraps { get; init; } = true;
 
@@ -245,6 +271,45 @@ public sealed record SlideParagraph(
     /// a ten-inch slide is fifteen per cent of the page.
     /// </remarks>
     public Length DefaultTabInterval { get; init; } = DefaultTabDistance;
+
+    /// <summary>
+    /// Whether the paragraph <em>states</em> its line spacing, as opposed to leaving it at the
+    /// default — which is not the same question as whether <see cref="LineSpacing"/> resolves to
+    /// single spacing.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>It decides whether the shrink-to-fit's line-spacing reduction reaches the
+    /// paragraph at all, and only the binary PowerPoint reader ever sets it.</strong> EditEngine
+    /// tests four rules in order and stops at the first that applies
+    /// (<c>editeng/source/editeng/impedit3.cxx:1528-1602</c>):
+    /// <c>SvxLineSpaceRule::Min</c>, <c>::Fix</c>, <c>SvxInterLineSpaceRule::Prop</c>,
+    /// <c>::Off</c>. The <c>Prop</c> arm does <em>nothing at all</em> when the proportion is
+    /// exactly 100, and the <c>::Off</c> arm — the only place a paragraph picks up the fit's
+    /// <c>fSpacingY</c> — is then unreachable. So "states exactly 100%" and "states nothing" are
+    /// different answers, and <see cref="LineSpacingRule"/> spells them the same.
+    /// </para>
+    /// <para>
+    /// The two formats reach the item by different routes and that is what makes this
+    /// binary-only. Every OOXML and ODF line spacing goes through the UNO property, and
+    /// <c>SvxLineSpacingItem::PutValue</c> (<c>editeng/source/items/paraitem.cxx:194-202</c>)
+    /// reads <c>style::LineSpacingMode::PROP</c> and writes <c>eInterLineSpaceRule = Off</c>
+    /// <em>when the height is exactly 100</em>. The <c>.ppt</c> importer instead calls
+    /// <c>SvxLineSpacingItem::SetPropLineSpace(100)</c> directly
+    /// (<c>filter/source/msfilter/svdfppt.cxx:6285-6288</c>), and <c>lspcitem.hxx:86-91</c> shows
+    /// that setter writes <c>Prop</c> unconditionally.
+    /// </para>
+    /// <para>
+    /// Measured on an authored known-answer deck — <c>probes/slides-r54/make-ppt-fit-probe.py</c>
+    /// through <c>soffice --convert-to ppt</c> and <c>ppt-patch-kind.py</c>, fifteen fitted boxes
+    /// of one text — the <c>.pptx</c> half draws a baseline pitch of <c>1.2 × 0.8 × em</c> and the
+    /// <c>.ppt</c> half draws <c>1.2 × em</c>. Same box, same text, same fit table. And because
+    /// the binary side's lines are taller the fit <em>search</em> lands on a different row: at a
+    /// 150 pt box the reference draws 13.011 pt on the binary side against 15.987 on the OOXML
+    /// side.
+    /// </para>
+    /// </remarks>
+    public bool LineSpacingStated { get; init; }
 }
 
 /// <summary>

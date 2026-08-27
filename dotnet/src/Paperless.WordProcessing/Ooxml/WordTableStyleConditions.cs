@@ -25,20 +25,36 @@ namespace Paperless.WordProcessing.Ooxml;
 /// <param name="LastRow">The final row takes <c>lastRow</c>.</param>
 /// <param name="FirstColumn">The leading column takes <c>firstCol</c>.</param>
 /// <param name="LastColumn">The trailing column takes <c>lastCol</c>.</param>
+/// <param name="HorizontalBanding">Rows take <c>band1Horz</c>/<c>band2Horz</c> in turn.</param>
+/// <param name="VerticalBanding">Columns take <c>band1Vert</c>/<c>band2Vert</c> in turn.</param>
 public readonly record struct WordTableLook(
     bool FirstRow,
     bool LastRow,
     bool FirstColumn,
-    bool LastColumn)
+    bool LastColumn,
+    bool HorizontalBanding = false,
+    bool VerticalBanding = false)
 {
     /// <summary>What a table stating no <c>w:tblLook</c> at all asks for: nothing.</summary>
     public static WordTableLook None => default;
 
     /// <summary>Reads the look off a table's <c>w:tblPr</c>.</summary>
     /// <remarks>
+    /// <para>
     /// The bits are §17.4.56's: <c>0x0020</c> first row, <c>0x0040</c> last row, <c>0x0080</c> first
-    /// column, <c>0x0100</c> last column. The two band bits are read by nothing here — see
-    /// <see cref="WordTableStyleConditions"/> for why the band layers are not applied.
+    /// column, <c>0x0100</c> last column, <c>0x0200</c> <em>no</em> horizontal banding and
+    /// <c>0x0400</c> <em>no</em> vertical banding.
+    /// </para>
+    /// <para>
+    /// <strong>The two band bits are stated the other way up</strong> — the attribute is
+    /// <c>noHBand</c>, not <c>hBand</c> — so a table that says nothing about banding is banded, and
+    /// reading them like the other four turns banding on exactly where the file turns it off. That is
+    /// the one asymmetry in this element and it is worth the extra reader.
+    /// </para>
+    /// <para>
+    /// A table stating no <c>w:tblLook</c> at all still gets <see cref="None"/>, banding included: an
+    /// absent look asks for no conditional formatting rather than for the default one.
+    /// </para>
     /// </remarks>
     /// <param name="tableProperties">The table's <c>w:tblPr</c>, or null.</param>
     public static WordTableLook Read(XElement? tableProperties)
@@ -57,7 +73,9 @@ public readonly record struct WordTableLook(
             Flag(look, "firstRow", mask, 0x0020),
             Flag(look, "lastRow", mask, 0x0040),
             Flag(look, "firstColumn", mask, 0x0080),
-            Flag(look, "lastColumn", mask, 0x0100));
+            Flag(look, "lastColumn", mask, 0x0100),
+            !Flag(look, "noHBand", mask, 0x0200),
+            !Flag(look, "noVBand", mask, 0x0400));
 
         static bool Flag(XElement look, string name, int mask, int bit)
             => Word.Attribute(look, name) switch
@@ -81,19 +99,28 @@ public readonly record struct WordTableLook(
 /// specific first, because a resolver stops at the first layer that states the property it wants.
 /// </para>
 /// <para>
-/// <b>The band layers are deliberately absent.</b> Row and column banding needs
-/// <c>w:tblStyleRowBandSize</c>, the band a row falls in counted with the heading and total rows
-/// excluded, and it decides shading far more often than it decides text. Measured over the whole
-/// words track: 14 of the 134 DOCX files declare a <c>w:tblStylePr</c> at all, 7 name such a style
-/// from a table, and <b>not one of those 7 carries a <c>w:rPr</c> on a band layer</b> — every one of
-/// them carries it on <c>firstRow</c>. Implementing the bands here would be reach that cannot be
-/// measured, so they are left for a round that has a document to measure them on.
+/// <b>The band layers are here, and the document that measures them is
+/// <c>012_Project_Timeline_Template_Black_and_Brown_Theme</c>.</b> The remark this replaces said the
+/// bands were left "for a round that has a document to measure them on"; that document draws
+/// <b>48 <c>#F2F2F2</c> fills on its table rows 2, 4, 6 and 8</b> against none of ours, from
+/// <c>band1Horz</c> at <c>w:tblStyleRowBandSize="1"</c>, and its <c>firstCol</c> layer draws eight
+/// more. The band a cell falls in is counted with the <c>firstRow</c> and <c>lastRow</c> regions
+/// excluded — <c>012</c> fixes that, since counting the heading row would put its bands on rows
+/// 3, 5, 7 and 9 instead — and band 1 is the <em>first</em> band, so a zero-based index that is even
+/// takes <c>band1Horz</c>.
 /// </para>
 /// <para>
-/// <b>Only the run half of a layer is applied</b>, and that too is scope rather than principle: a
-/// <c>w:tblStylePr</c> may also carry <c>w:pPr</c>, <c>w:tcPr</c> and <c>w:tblPr</c>. Character
-/// formatting is what moves a line break, and a line break is what moves a page. The other three are
-/// recorded as not done in <c>dotnet/probes/words-regress-01/results.md</c>.
+/// Adding them here also hands them to <see cref="WordStyles.TableStyleRunProperties"/>, which is the
+/// half that could move a line break. Measured before the change rather than reasoned about: two
+/// corpus documents declare a band layer carrying a <c>w:rPr</c> and in both the styles are latent —
+/// <b>no table in the corpus names a style whose <c>w:basedOn</c> chain reaches one, 0 of 271</b>
+/// (<c>probes/words-r63/tblstylepr-census.py</c>).
+/// </para>
+/// <para>
+/// <b>The <c>w:pPr</c> and <c>w:tblPr</c> halves of a layer are still not applied</b>, and that is
+/// scope rather than principle. The <c>w:tcPr</c> half is, for shading only: 749 cells in 42
+/// documents (<c>probes/words-r63/tblstyle-reach.py</c>). A layer's <c>w:tcBorders</c> is read by
+/// nothing, which is one of the eight strokes <c>012</c> is still missing.
 /// </para>
 /// </remarks>
 /// <param name="Look">Which layers the table switched on.</param>
@@ -101,12 +128,21 @@ public readonly record struct WordTableLook(
 /// <param name="IsLastRow">Whether the cell is in the table's last row.</param>
 /// <param name="IsFirstColumn">Whether the cell is in the leading grid column.</param>
 /// <param name="IsLastColumn">Whether the cell is in the trailing grid column.</param>
+/// <param name="RowBand">
+/// Which horizontal band the cell's row falls in, zero-based, counting only rows outside the
+/// <c>firstRow</c> and <c>lastRow</c> regions and already divided by
+/// <c>w:tblStyleRowBandSize</c>; null for a row in one of those regions, or when the caller has no
+/// band size to count with.
+/// </param>
+/// <param name="ColumnBand">The same for vertical bands and <c>w:tblStyleColBandSize</c>.</param>
 public readonly record struct WordTableStyleConditions(
     WordTableLook Look,
     bool IsFirstRow,
     bool IsLastRow,
     bool IsFirstColumn,
-    bool IsLastColumn)
+    bool IsLastColumn,
+    int? RowBand = null,
+    int? ColumnBand = null)
 {
     /// <summary>A cell in no conditional region at all.</summary>
     public static WordTableStyleConditions None => default;
@@ -115,10 +151,18 @@ public readonly record struct WordTableStyleConditions(
     /// The layer names that apply, most specific first.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// A corner cell's layer is offered only when <em>both</em> of the edges meeting there are switched
     /// on, which is what makes <c>nwCell</c> a refinement of <c>firstRow</c> and <c>firstCol</c> rather
     /// than a third independent thing. <c>wholeTable</c> is last and needs no bit: a style's
     /// unconditional formatting applies to every cell of every table that names it.
+    /// </para>
+    /// <para>
+    /// <strong>A cell in a <c>firstRow</c> or <c>lastRow</c> region is in no horizontal band at all</strong>
+    /// — not "in band 1" — and the same for the column edges and the vertical bands. That is the same rule
+    /// as the one that excludes those rows from the count, seen from the other end, and getting it wrong
+    /// puts a band fill on the heading row where the file states one.
+    /// </para>
     /// </remarks>
     public IReadOnlyList<string> Names
     {
@@ -140,6 +184,15 @@ public readonly record struct WordTableStyleConditions(
             if (last) names.Add("lastRow");
             if (leading) names.Add("firstCol");
             if (trailing) names.Add("lastCol");
+
+            // §17.7.6 applies the bands before the edges and after the whole table, so they are less
+            // specific than either edge and more specific than the unconditional half. A cell is in at
+            // most one of each pair, so the two orders within a pair cannot both fire.
+            if (Look.HorizontalBanding && !first && !last && RowBand is { } row and >= 0)
+                names.Add(row % 2 == 0 ? "band1Horz" : "band2Horz");
+
+            if (Look.VerticalBanding && !leading && !trailing && ColumnBand is { } column and >= 0)
+                names.Add(column % 2 == 0 ? "band1Vert" : "band2Vert");
 
             names.Add("wholeTable");
             return names;

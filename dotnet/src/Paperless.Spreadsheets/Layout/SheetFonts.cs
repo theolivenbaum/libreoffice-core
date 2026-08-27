@@ -144,11 +144,26 @@ internal static class SheetFonts
     /// <param name="family">The family name, or null for the default.</param>
     /// <param name="bold">Whether the family's bold face is wanted.</param>
     public static SheetFace? ForFamily(string? family, bool bold)
+        => ForFamily(family, bold, italic: false);
+
+    /// <summary>One family at one of two weights, upright or slanted.</summary>
+    /// <remarks>
+    /// The slant is here for a header or footer band, whose face is the workbook's own default
+    /// cell font — and that font can be italic, which the reference honours: a workbook whose
+    /// <c>fonts[0]</c> carries <c>&lt;i/&gt;</c> has its band drawn in <c>LiberationSans-Italic</c>
+    /// on 26.2.4.2 (<c>probes/sheets-r56</c>, seven authored workbooks keyed on the PDF's own
+    /// font list rather than on advance widths, because the Liberation faces are
+    /// metric-compatible and a bold band is the same width as an upright one).
+    /// </remarks>
+    /// <param name="family">The family name, or null for the default.</param>
+    /// <param name="bold">Whether the family's bold face is wanted.</param>
+    /// <param name="italic">Whether its italic face is wanted.</param>
+    public static SheetFace? ForFamily(string? family, bool bold, bool italic)
         => Cache.GetOrAdd(
             // Unknown class: a chart's font is named directly and carries no generic-family
             // declaration for a fallback to honour, unlike a cell's, which comes from a
             // SpreadsheetML <font> that may state <family val="N"/>.
-            (string.IsNullOrWhiteSpace(family) ? DefaultFamily : family, bold ? 700 : 400, false,
+            (string.IsNullOrWhiteSpace(family) ? DefaultFamily : family, bold ? 700 : 400, italic,
              FontFamilyClass.Unknown),
             Load);
 
@@ -193,8 +208,17 @@ internal static class SheetFonts
     /// figure it was fitted to recorded Carlito 121.64 → <em>121</em>; the installed 26.2.4.2
     /// answers 122 for the same face at the same size, measured off a filled cell's rectangle in
     /// its own PDF. Ground truth moved, so the old window <c>(0.64, 0.70]</c> and the new one no
-    /// longer overlap. Any figure here calibrated against 24.2.7.2 needs re-measuring before it
-    /// is relied on, and this is one of them.
+    /// longer overlap.
+    /// </para>
+    /// <para>
+    /// <strong>Re-checked against LibreOffice 26.2.4.2 on 2026-08-21 and correct.</strong> Thirty
+    /// authored workbooks, six faces (Calibri, Liberation Sans, Times New Roman, Courier New at
+    /// 11 pt and Calibri and Liberation Sans at 12 pt) against five stated column widths (8.43,
+    /// 10, 12.5, 20, 30), each measuring the x of a glyph in the *next* column — which is the
+    /// first column's width, reported by <c>pdftotext -bbox</c> without decoding a content
+    /// stream. **Thirty of thirty agree to within 0.001 pt.**
+    /// <c>dotnet/probes/sheets-r53-totalsrow/audit_colwidth.py</c> reproduces it. This site and
+    /// the digit-width model below it are no longer 24.2.7.2 claims.
     /// </para>
     /// <para>
     /// A one-twip column width is normally invisible, which is why truncation survived several
@@ -288,8 +312,19 @@ internal static class SheetFonts
     private static readonly object Gate = new();
     private static SystemFontResolver? _shared;
 
-    private static readonly ConcurrentDictionary<OpenTypeFace, SheetFace?> FallbackFaces =
-        new(ReferenceEqualityComparer.Instance);
+    /// <summary>
+    /// Fallback faces already dressed, keyed by the face <em>and</em> by the request that reached
+    /// it.
+    /// </summary>
+    /// <remarks>
+    /// The slant is part of the key and not an afterthought: one substituted face answers both an
+    /// upright run and an italic one, and the two differ by
+    /// <see cref="FontReference.SyntheticOblique"/>. Keyed on the face alone, whichever run arrived
+    /// first would decide the lean for every other run in the workbook that fell back to the same
+    /// face.
+    /// </remarks>
+    private static readonly ConcurrentDictionary<(OpenTypeFace Face, bool Italic), SheetFace?>
+        FallbackFaces = new();
 
     /// <summary>
     /// The one resolver a workbook's faces are loaded through.
@@ -322,17 +357,23 @@ internal static class SheetFonts
     /// A fallback face dressed as a <see cref="SheetFace"/>, or null when it cannot be named.
     /// </summary>
     /// <param name="face">A face <see cref="Fallback"/> returned.</param>
-    public static SheetFace? ForFallback(OpenTypeFace face)
+    /// <param name="isItalicRequested">
+    /// Whether the cell's own run asked for italic. A substituted face has no memory of the
+    /// request, so without this a cell of italic text holding a character its face cannot draw
+    /// has that character drawn upright beside its leaning neighbours — measured on 26.2.4.2 in
+    /// <c>probes/words-r58/fallback-oblique-ooxml.py</c>, whose `.xlsx` arm shears six of six.
+    /// </param>
+    public static SheetFace? ForFallback(OpenTypeFace face, bool isItalicRequested = false)
     {
         ArgumentNullException.ThrowIfNull(face);
 
-        return FallbackFaces.GetOrAdd(face, static resolved =>
+        return FallbackFaces.GetOrAdd((face, isItalicRequested), static key =>
         {
-            FontReference? reference = Fallback.ReferenceFor(resolved);
+            FontReference? reference = Fallback.ReferenceFor(key.Face, key.Italic);
             return reference is null
                 ? null
                 : new SheetFace(
-                    resolved, reference, LineSpacing.Resolve(resolved, MetricGrid.Spreadsheet));
+                    key.Face, reference, LineSpacing.Resolve(key.Face, MetricGrid.Spreadsheet));
         });
     }
 

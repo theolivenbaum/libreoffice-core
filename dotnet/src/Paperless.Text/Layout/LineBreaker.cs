@@ -466,17 +466,44 @@ public sealed class LineBreaker : ILineBreaker
         LineBreakClass ClassAt(int index)
             => index < analysis.Count ? analysis.Resolved[index] : LineBreakClass.XX;
 
-        // An optional leading sign, then an optional bracket, then an optional separator.
+        // An optional leading sign, then an optional bracket or hyphen, then an optional separator.
         //
-        // UAX #14 lets a hyphen open a number here as well, so that "-5" holds together. LibreOffice
-        // does not, and the difference is visible on any narrow frame: measured against
-        // LibreOffice 24.2.7.2, "E-22", "$-22", "10-19" and a hyphen that begins its own token in
-        // "A -222" all break *after* the hyphen, while "(222" — an opening bracket, which this
-        // grammar still admits — does not break after the bracket. Dropping HY here is therefore the
-        // whole of the rule: it subsumes LibreOffice's own i#83229 number-range customisation, whose
-        // "100-199" case is just the instance where the hyphen happens to follow a digit.
+        // [24.2.7-audit: FIXED 2026-08-21, round words-r58 — the sentence that used to stand here
+        // was inverted, and the code implemented the inversion. It said LibreOffice never lets a
+        // hyphen open a number and that dropping HY was "the whole of the rule". 26.2.4.2 lets a
+        // hyphen open a number in every position but one, and it is the *digit* case that is the
+        // exception. Ten authored packages, two controls with known answers, in
+        // probes/words-r58/audit_hyphenbreak.py.]
+        //
+        // UAX #14 lets a hyphen open a number, so that "-5" holds together, and LibreOffice
+        // **agrees** — with one exception of its own. Each case below is one token longer than its
+        // line in a six-character column, so where the token breaks says which rule is in force
+        // without any need to find a width at which one candidate fits and the next does not:
+        //
+        //   "E-222222222222"    26.2.4.2 draws "E-2222"  — no break after the hyphen
+        //   "$-222222222222"                   "$-2222"  — no break
+        //   "abc-222222222222"                 "abc-22"  — no break
+        //   "-2222222222222"                   "-22222"  — no break
+        //   "A -222222222222"          "A" then "-22222" — breaks at the *space*, then holds
+        //   "10-1922222222222"                 "10-"     — DOES break after the hyphen
+        //   "5-2222222222222"                  "5-"      — DOES break
+        //   "222-abcdefghijkl"                 "222-"    — DOES break, into a non-number
+        //
+        // and the two controls: "abcd-efghijklmnop" breaks after its hyphen on both sides, which is
+        // what says the column width is not what is being measured; "(222222222222222" does not
+        // break after the bracket, which is the negative case the old comment already named and the
+        // only one of its five it had right.
+        //
+        // One rule covers all eight: a hyphen opens a number **unless a digit precedes it**. That
+        // last clause is LibreOffice's own i#83229 number-range customisation — the old comment had
+        // this half backwards too, calling "100-199" the instance rather than the exception.
         if (ClassAt(at) is LineBreakClass.PR or LineBreakClass.PO) at++;
-        if (ClassAt(at) == LineBreakClass.OP) at++;
+        if (ClassAt(at) == LineBreakClass.OP
+            || (ClassAt(at) == LineBreakClass.HY && OpensANumber(analysis, at)))
+        {
+            at++;
+        }
+
         if (ClassAt(at) == LineBreakClass.IS) at++;
 
         // The digits are what make it a number: without one, whatever was consumed was not a prefix.
@@ -494,6 +521,24 @@ public sealed class LineBreaker : ILineBreaker
 
         return at;
     }
+
+    /// <summary>
+    /// Whether a hyphen at an index opens the number after it, rather than separating two.
+    /// </summary>
+    /// <remarks>
+    /// It does everywhere but between two digits. <c>10-19</c> and <c>5-2</c> break after the
+    /// hyphen on 26.2.4.2 and <c>E-22</c>, <c>$-22</c>, <c>abc-22</c>, a hyphen opening the text and
+    /// a hyphen after a space all do not — so the discriminator is the class *before* the hyphen and
+    /// nothing else. Measured in <c>probes/words-r58/audit_hyphenbreak.py</c>.
+    /// <para>
+    /// The check is one position back rather than a state carried through <c>MarkNumbers</c>'s scan
+    /// because the scan restarts at the hyphen in the digit case: <c>10-19</c> matches <c>10</c>,
+    /// stops at the hyphen because <c>HY</c> is not one of the continuing classes, and asks again
+    /// from the hyphen — where the answer has to be no, or the two numbers would be marked as one.
+    /// </para>
+    /// </remarks>
+    private static bool OpensANumber(Analysis analysis, int index)
+        => index == 0 || analysis.Resolved[index - 1] != LineBreakClass.NU;
 
     /// <summary>
     /// True when a break before an index would fall inside a Brahmic orthographic syllable, per

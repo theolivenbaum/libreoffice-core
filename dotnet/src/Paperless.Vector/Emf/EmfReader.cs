@@ -1009,16 +1009,41 @@ internal sealed class EmfReader
         byte charSet = U8();
         Skip(4);                        // output and clipping precision, quality, pitch and family
 
-        // The face name is 32 UTF-16 code units, NUL-padded rather than NUL-terminated when it
-        // fills the field exactly.
+        // The face name is 32 UTF-16 code units and it ends at the first NUL — the rest of the
+        // field is whatever GDI happened to have there.
+        //
+        // **Skipping the NULs instead of stopping at the first one is a real defect and it was
+        // invisible for thirty rounds.** The field is only NUL-*padded* when the writer zeroes
+        // it; plenty do not. `2014BSA_Sunday_Killion.pptx`'s `image10.emf` writes
+        // `Times New Roman\0\0` followed by twelve code units of stack rubbish
+        // (`7f 13 65 43 18 ee a8 08 …`), and a reader that skips the terminators asks for
+        // `"Times New Roman\u137f\u4365…"` — a family no substitution table can recognise, so it
+        // falls through to the generic sans and every one of that chart's labels is drawn in the
+        // wrong face at the wrong widths.
+        //
+        // It was invisible because a wrong face and a right face both drew upright. Round 55
+        // taught this stack to synthesise an oblique, and the wrong face — having no italic —
+        // started to lean where the reference does not: 948 sheared glyphs on that document
+        // against the reference's nil, which is what led here.
+        //
+        // `WmfReader.CreateFont` has always read the same field correctly
+        // (`name.IndexOf((byte)0)`), so the two readers of one structure disagreed.
+        //
+        // Reach, over the whole corpus rather than this track:
+        // `probes/slides-r56/emf-facename-census.py` finds **1879 such records in 19 documents**
+        // — 1440 in 13 slides decks, 367 in 4 words documents and 72 in 2 workbooks — naming
+        // Times New Roman, Arial, Calibri, Calibri Light, System and Verdana.
         Span<char> name = stackalloc char[32];
         int length = 0;
         for (int i = 0; i < 32; i++)
         {
             char c = (char)U16();
-            if (c == 0) continue;
+            if (c == 0) break;
             name[length++] = c;
         }
+
+        // The reader must still consume the whole fixed-width field.
+        Skip((32 - length - (length < 32 ? 1 : 0)) * 2);
 
         if (_failed) return;
 
@@ -2271,7 +2296,11 @@ internal sealed class EmfReader
         int length = characters.Length;
         while (length > 0 && characters[length - 1] == '\0') length--;
 
-        return new string(characters[..length]);
+        // A 16-bit EMF text record in a symbol-charset font still stores the *slot* in each code
+        // unit -- widened, not translated -- so it takes the same Private Use Area move as the
+        // eight-bit path. `010605Vul.ppt`'s page 9 writes its Monotype Sorts arrows through
+        // EMR_EXTTEXTOUTW and every one of them arrives here.
+        return MetafileTextEngine.Symbolise(new string(characters[..length]), _context.Font);
     }
 
     private static ushort[] Glyphs(ReadOnlySpan<byte> data)

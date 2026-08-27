@@ -98,10 +98,14 @@ public sealed partial class DocxLayoutSource
         WordTableLook look = WordTableLook.Read(properties);
         int rowCount = CountRows(element, depth: 0);
 
+        // How wide a band is belongs to the *style*, not to the table: there is no table-level element
+        // for it at all. Resolved once here so that every row of the table counts in the same units.
+        (int Rows, int Columns) bands = _styles.TableStyleBandSizes(styleId);
+
         _tableDepth++;
         try
         {
-            ReadRows(element, rows, tablePadding, properties, depth: 0, styleId, look, rowCount);
+            ReadRows(element, rows, tablePadding, properties, depth: 0, styleId, look, rowCount, bands);
         }
         finally
         {
@@ -126,6 +130,8 @@ public sealed partial class DocxLayoutSource
             LeftIndent = LeftEdge(properties, rows, isNested: _tableDepth > 0),
             HorizontalPosition = HorizontalPositionOf(properties),
             IsPositioned = Word.Child(properties, "tblpPr") is not null,
+            VerticalOffset = Twips(Word.Child(properties, "tblpPr"), "tblpY") ?? Length.Zero,
+            VerticalOrigin = VerticalOriginOf(Word.Child(properties, "tblpPr")),
             LowerSpacing = Twips(Word.Child(properties, "tblpPr"), "bottomFromText") ?? Length.Zero,
             JoinsBordersLikeWord = true,
             MinHeightIncludesInsets = true,
@@ -153,11 +159,9 @@ public sealed partial class DocxLayoutSource
     /// the corpus's eighteen anchored tables say <c>page</c>.
     /// </para>
     /// <para>
-    /// The vertical half — <c>w:tblpY</c>, <c>w:tblpYSpec</c>, <c>w:vertAnchor</c> — is not read. Writer
-    /// makes a positioned table into a frame holding a table, and a frame here lays its content out with
-    /// <c>FlowLayouter</c>, which has no grid. Honouring the horizontal half alone is what stops an
-    /// over-wide table's right-hand columns falling off the paper, and that is the failure this was found
-    /// on.
+    /// The vertical half is read by <see cref="VerticalOriginOf"/> beside this — <c>w:tblpY</c> and
+    /// <c>w:vertAnchor</c>, but <em>not</em> <c>w:tblpYSpec</c>, which names an edge (<c>top</c>,
+    /// <c>center</c>, <c>bottom</c>) rather than a distance and which no corpus document states.
     /// </para>
     /// <para>
     /// The commoner mechanism by far is the plain <c>w:jc</c> beside it, which was not read either: 31 of
@@ -195,6 +199,31 @@ public sealed partial class DocxLayoutSource
             _ => null,
         };
     }
+
+    /// <summary>
+    /// What a positioned table's <c>w:tblpY</c> is measured from.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The three <c>w:vertAnchor</c> values map onto Writer's relation constants exactly as
+    /// <c>TablePositionHandler::getTablePosition</c> maps them
+    /// (<c>sw/source/writerfilter/dmapper/TablePositionHandler.cxx:133-141</c>): <c>page</c> is
+    /// <c>PAGE_FRAME</c>, <c>margin</c> is <c>PAGE_PRINT_AREA</c> and <c>text</c> is <c>FRAME</c>.
+    /// </para>
+    /// <para>
+    /// An absent attribute reads as <c>text</c>, which is ECMA-376's default and is what the two corpus
+    /// documents that omit it behave as: <c>083_Printable_Graph_Paper_Template_Customizable_Format</c>
+    /// states <c>w:tblpY="525"</c> with no anchor and 26.2.4.2 draws its first rule 26.25 twentieths of
+    /// a point below the flow's position, to 0.06 pt.
+    /// </para>
+    /// </remarks>
+    private static FrameVerticalOrigin VerticalOriginOf(XElement? position)
+        => Word.Attribute(position, "vertAnchor") switch
+        {
+            "page" => FrameVerticalOrigin.Page,
+            "margin" => FrameVerticalOrigin.PageMargin,
+            _ => FrameVerticalOrigin.Paragraph,
+        };
 
     /// <summary>
     /// Where the table's left edge goes, which is not what <c>w:tblInd</c> says.
@@ -344,7 +373,8 @@ public sealed partial class DocxLayoutSource
         int depth,
         string? styleId,
         WordTableLook look,
-        int rowCount)
+        int rowCount,
+        (int Rows, int Columns) bands)
     {
         if (depth > 8) return;
 
@@ -354,7 +384,8 @@ public sealed partial class DocxLayoutSource
 
             if (Word.Is(child, "tr"))
             {
-                rows.Add(Row(child, tablePadding, tableProperties, styleId, look, rows.Count, rowCount));
+                rows.Add(Row(
+                    child, tablePadding, tableProperties, styleId, look, rows.Count, rowCount, bands));
                 continue;
             }
 
@@ -363,7 +394,8 @@ public sealed partial class DocxLayoutSource
             if (Word.Is(child, "sdt") || Word.Is(child, "sdtContent")
                 || Word.Is(child, "customXml") || Word.Is(child, "ins"))
             {
-                ReadRows(child, rows, tablePadding, tableProperties, depth + 1, styleId, look, rowCount);
+                ReadRows(
+                    child, rows, tablePadding, tableProperties, depth + 1, styleId, look, rowCount, bands);
             }
         }
     }
@@ -402,7 +434,8 @@ public sealed partial class DocxLayoutSource
         string? styleId,
         WordTableLook look,
         int rowIndex,
-        int rowCount)
+        int rowCount,
+        (int Rows, int Columns) bands)
     {
         XElement? properties = Word.Child(element, "trPr");
         List<PendingCell> cells = [];
@@ -424,14 +457,25 @@ public sealed partial class DocxLayoutSource
 
             // Set around `ReadCell` alone: the cell's paragraphs are read inside it, and a nested table
             // there restores its own on the way out.
-            _tableStyleRun = _styles.TableStyleRunProperties(
-                styleId,
-                new WordTableStyleConditions(
-                    look,
-                    IsFirstRow: rowIndex == 0,
-                    IsLastRow: rowCount > 0 && rowIndex == rowCount - 1,
-                    IsFirstColumn: index == 0,
-                    IsLastColumn: index == lastIndex));
+            bool isFirstRow = rowIndex == 0;
+            bool isLastRow = rowCount > 0 && rowIndex == rowCount - 1;
+            bool isFirstColumn = index == 0;
+            bool isLastColumn = index == lastIndex;
+
+            WordTableStyleConditions conditions = new(
+                look,
+                isFirstRow,
+                isLastRow,
+                isFirstColumn,
+                isLastColumn,
+                // The band is counted over the rows and columns the edge layers do not claim, and
+                // `012_Project_Timeline_Template_Black_and_Brown_Theme` is what fixes that: its bands
+                // land on table rows 2, 4, 6 and 8, which is the heading row excluded. A row inside an
+                // edge region has no band at all rather than band nought.
+                Band(rowIndex, isFirstRow, isLastRow, look.FirstRow, look.LastRow, bands.Rows),
+                Band(index, isFirstColumn, isLastColumn, look.FirstColumn, look.LastColumn, bands.Columns));
+
+            _tableStyleRun = _styles.TableStyleRunProperties(styleId, conditions);
 
             cells.Add(new PendingCell(
                 new PageTableCell
@@ -442,7 +486,8 @@ public sealed partial class DocxLayoutSource
                     Padding = Padding(Word.Child(cellProperties, "tcMar"), tablePadding),
                     VerticalAlignment = VerticalAlignment(cellProperties),
                     TextDirection = TextDirection(cellProperties),
-                    Shading = Shading(cellProperties),
+                    Shading = Shading(cellProperties)
+                              ?? ConditionalShading(styleId, conditions),
                 },
                 Merge(cellProperties),
                 OwnBorders(cellProperties)));
@@ -460,6 +505,50 @@ public sealed partial class DocxLayoutSource
             // LibreOffice reads the same element the same way — "row can't break across pages if
             // nIntValue == 1" (`dmapper/TablePropertiesHandler.cxx`).
             CanSplit: !Word.IsOn(Word.Child(properties, "cantSplit")));
+    }
+
+    /// <summary>
+    /// Which band a row or column falls in, or null when an edge layer claims it.
+    /// </summary>
+    /// <remarks>
+    /// The index counts only the rows (or columns) outside the <c>firstRow</c>/<c>lastRow</c> regions
+    /// <em>the table asked for</em>: a style declaring a <c>firstRow</c> layer that the table's
+    /// <c>w:tblLook</c> switches off leaves its heading row in the banding, which is what Word does.
+    /// Only the first row and the last can be in a region, so subtracting one for a claimed leading
+    /// edge is the whole of the arithmetic.
+    /// </remarks>
+    /// <param name="index">The row's or cell's own index.</param>
+    /// <param name="isFirst">Whether it is the leading one.</param>
+    /// <param name="isLast">Whether it is the trailing one.</param>
+    /// <param name="claimsFirst">Whether the table asked for the leading edge's layer.</param>
+    /// <param name="claimsLast">Whether the table asked for the trailing edge's layer.</param>
+    /// <param name="size">The band size, at least one.</param>
+    private static int? Band(
+        int index, bool isFirst, bool isLast, bool claimsFirst, bool claimsLast, int size)
+    {
+        if ((claimsFirst && isFirst) || (claimsLast && isLast)) return null;
+
+        int within = index - (claimsFirst ? 1 : 0);
+        return within < 0 ? null : within / Math.Max(1, size);
+    }
+
+    /// <summary>
+    /// The fill a table style's conditional <c>w:tcPr</c> layers give a cell, or null for none.
+    /// </summary>
+    /// <remarks>
+    /// Asked only after the cell's own <c>w:shd</c>, which is direct formatting and absolute. The
+    /// layers arrive most specific first and the first one stating a <c>w:shd</c> wins outright —
+    /// there is no blending between layers, only between a <c>w:shd</c>'s own foreground and
+    /// background, which <see cref="ShadeColour"/> does.
+    /// </remarks>
+    private Colour? ConditionalShading(string? styleId, WordTableStyleConditions conditions)
+    {
+        foreach (XElement layer in _styles.TableStyleCellProperties(styleId, conditions))
+        {
+            if (Word.Child(layer, "shd") is { } shade) return ShadeColour(shade);
+        }
+
+        return null;
     }
 
     /// <summary>
@@ -670,19 +759,87 @@ public sealed partial class DocxLayoutSource
 
     /// <summary>The colour a <c>w:shd</c> fills with, or null when it fills with nothing.</summary>
     /// <remarks>
+    /// <para>
     /// Separate from <see cref="Shading"/> because a paragraph's shading is not simply the child of its own
     /// <c>w:pPr</c>: it can come from any layer of the style chain, and only the resolver knows which layer
     /// won. Both reach the same reading of the element once it has been found.
+    /// </para>
+    /// <para>
+    /// <strong><c>w:shd</c> is a pattern and not a fill, and reading only its <c>w:fill</c> is why three
+    /// black rectangles were missing from <c>AFS-050-004-F2_0i</c> page 2.</strong>
+    /// <c>CellColorHandler::getProperties</c> (<c>sw/source/writerfilter/dmapper</c>) turns <c>w:val</c>
+    /// into a weight out of a thousand and blends <c>w:color</c> over <c>w:fill</c> at it; only the
+    /// zero-weight case — <c>clear</c>, and anything the table does not name — is the fill on its own.
+    /// So <c>&lt;w:shd w:val="solid" w:color="auto" w:fill="auto"/&gt;</c> is a <em>black</em> cell, and
+    /// that is the ordinary way a Word document writes a reversed-out header row.
+    /// </para>
+    /// <para>
+    /// The two <c>auto</c>s are not the same value and that asymmetry is the file format's:
+    /// <c>w:color="auto"</c> is black and <c>w:fill="auto"</c> is white
+    /// (<c>CellColorHandler::lcl_attribute</c>). Measured on 26.2.4.2 over eight patterns —
+    /// <c>probes/words-r59/autocolour.py</c> — which reproduce exactly: <c>pct50</c> auto over auto is
+    /// <c>#7F7F7F</c>, <c>pct25</c> is <c>#BFBFBF</c>, <c>pct75</c> is <c>#3F3F3F</c>, every striped and
+    /// crossed value is 333 and comes out <c>#AAAAAA</c>, and <c>pct50</c> red over blue is
+    /// <c>#7F007F</c>. The division is integer and truncating, which is where those exact bytes come
+    /// from.
+    /// </para>
+    /// <para>
+    /// <strong><c>w:val="nil"</c> is not "no fill".</strong> It is absent from that table, so it takes
+    /// the zero-weight branch and paints its <c>w:fill</c> like <c>clear</c>: the reference fills
+    /// <c>nil</c> with <c>w:fill="000000"</c> black and reverses its text out. Returning null for it —
+    /// which is what stood here — is the one reading the probe refutes outright rather than refines.
+    /// </para>
     /// </remarks>
     private Colour? ShadeColour(XElement? shade)
     {
         if (shade is null) return null;
 
-        if (Word.Attribute(shade, "val") is "nil") return null;
-
-        return WordThemeColour.Read(
+        Colour? fill = WordThemeColour.Read(
             shade, _theme, "fill", "themeFill", "themeFillTint", "themeFillShade");
+
+        int weight = ShadingWeight(Word.Attribute(shade, "val"));
+        if (weight <= 0) return fill;
+
+        Colour foreground = WordThemeColour.Read(
+            shade, _theme, "color", "themeColor", "themeTint", "themeShade") ?? Colour.Black;
+        Colour background = fill ?? Colour.White;
+
+        return new Colour(
+            Mix(foreground.R, background.R, weight),
+            Mix(foreground.G, background.G, weight),
+            Mix(foreground.B, background.B, weight));
+
+        static byte Mix(byte foreground, byte background, int weight)
+            => (byte)(((foreground * weight) + (background * (1000 - weight))) / 1000);
     }
+
+    /// <summary>
+    /// How much of a <c>w:shd</c>'s foreground shows through, out of a thousand.
+    /// </summary>
+    /// <remarks>
+    /// <c>CellColorHandler::getProperties</c>'s own table, value for value. The percentages are not
+    /// uniformly ten times their name — <c>pct12</c> is 125, <c>pct15</c> 150, <c>pct37</c> 375,
+    /// <c>pct62</c> 625 and <c>pct87</c> 875, because those five are Word's names for eighths — and
+    /// every striped or crossed pattern, thin or not, is a flat 333 whatever its geometry, since
+    /// Writer has no pattern brush to draw it with. Anything the table does not name is zero, which is
+    /// the fill on its own.
+    /// </remarks>
+    private static int ShadingWeight(string? pattern) => pattern switch
+    {
+        null or "clear" or "nil" => 0,
+        "solid" => 1000,
+        "pct12" => 125,
+        "pct15" => 150,
+        "pct37" => 375,
+        "pct62" => 625,
+        "pct87" => 875,
+        ['p', 'c', 't', .. var digits] when int.TryParse(digits, out int percent)
+            && percent is > 0 and <= 100 => percent * 10,
+        "horzStripe" or "vertStripe" or "reverseDiagStripe" or "diagStripe" or "horzCross"
+            or "diagCross" or "thinHorzStripe" or "thinVertStripe" or "thinReverseDiagStripe"
+            or "thinDiagStripe" or "thinHorzCross" or "thinDiagCross" => 333,
+        _ => 0,
+    };
 
     /// <summary>
     /// A cell's own four borders — <c>w:tcBorders</c> and nothing else — with null for a side it

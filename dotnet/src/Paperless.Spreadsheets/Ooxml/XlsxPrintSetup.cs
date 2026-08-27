@@ -199,10 +199,44 @@ internal static class XlsxPrintSetup
             IsLandscape = landscape,
             LeftMargin = Length.FromInches(left),
             RightMargin = Length.FromInches(right),
-            TopMargin = Length.FromInches(hasHeader ? header : top),
-            BottomMargin = Length.FromInches(hasFooter ? footer : bottom),
+
+            // The body starts at the **page** margin whatever the band margin says, and the
+            // `Math.Min` is what makes that true when a file states a `header` larger than its
+            // `top` — a negative band. With a band of zero or more, `min(header, top) + max(0,
+            // top - header)` is `top` either way and the clamp is inert; without it, a negative
+            // band pushes the body down to the band margin.
+            //
+            // Measured on 26.2.4.2 (`probes/sheets-r55/audit_pagedecoration.py`): with
+            // `top="0.75" header="1.00"` the reference starts the body at the top margin, exactly
+            // where it starts it at every non-negative band, and we started it **18 pt** lower.
+            // Two corpus worksheets state a negative band — `023_Waterfall_Chart_Template`'s
+            // header at −3.6 pt and `2025_Active_Civil_Airmen_Statistics`' footer at −5.76 pt —
+            // and **both render byte-identically with and without this clamp**, because neither
+            // sheet's negative band is on a page whose body position the gate can see. So it is a
+            // correctness fix with a measured mechanism and no corpus witness, which is worth
+            // saying rather than implying.
+            TopMargin = Length.FromInches(hasHeader ? Math.Min(header, top) : top),
+            BottomMargin = Length.FromInches(hasFooter ? Math.Min(footer, bottom) : bottom),
             HeaderHeight = headerBand,
             FooterHeight = footerBand,
+            // Calc's `nDistance`, and **zero when the band is pinned** — see
+            // `SheetBandHeight.BodyDistance`. Setting this at all is the fix: leaving it at
+            // `SheetPrintSetup`'s ODF default of 142 twips made `FooterHeight - FooterGap`
+            // negative for every band under 7.1 pt, and `SheetPageDecoration.DrawBand` returns on
+            // a negative text rectangle, so those bands were dropped with no ink and no words.
+            // `XlsPrintSetup` has had the rule since it was written; this reader and the XLSB one
+            // simply never called it.
+            HeaderGap = hasHeader
+                ? SheetBandHeight.BodyDistance(
+                    headerText, Length.FromInches(Math.Max(0, top - header)), defaultFont,
+                    SheetPrintSetup.Default.HeaderGap)
+                : SheetPrintSetup.Default.HeaderGap,
+            FooterGap = hasFooter
+                ? SheetBandHeight.BodyDistance(
+                    footerText, Length.FromInches(Math.Max(0, bottom - footer)), defaultFont,
+                    SheetPrintSetup.Default.FooterGap)
+                : SheetPrintSetup.Default.FooterGap,
+
             HeaderText = headerText,
             FooterText = footerText,
 
@@ -219,6 +253,13 @@ internal static class XlsxPrintSetup
                 ? null
                 : SheetHeaderFooter.ParseCodes(firstFooterText),
             DifferentFirstPage = differentFirst,
+
+            // The face the band's own codes fall back to: the workbook's default cell font,
+            // family and size. `SheetBandHeight` above is already given the same object to size
+            // the band with; until round 56 the *drawing* used a fixed ten-point Liberation Sans
+            // instead, so the two halves of the same band disagreed on every workbook whose
+            // default is not that. See `SheetPrintSetup.BandFont`.
+            BandFont = defaultFont,
 
             // Every Excel band is dynamic — see `SheetPrintSetup.HeaderIsDynamic`.
             HeaderIsDynamic = true,

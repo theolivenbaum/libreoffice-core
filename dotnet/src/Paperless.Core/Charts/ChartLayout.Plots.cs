@@ -126,7 +126,7 @@ public static partial class ChartLayout
 
             if (series.Marker is not ChartMarker.None)
             {
-                Length size = plot.LabelSize * MarkerSize;
+                Length size = series.MarkerSize ?? plot.LabelSize * MarkerSize;
                 Colour fill = series.MarkerFill ?? series.Fill ?? series.Line ?? AxisColour;
                 Colour stroke = series.MarkerLine ?? series.Line ?? fill;
 
@@ -159,7 +159,7 @@ public static partial class ChartLayout
         if (categories <= 0) return;
         if (RadiusOf(area) is not { } web) return;
 
-        Colour grid = plot.ValueGrid ?? plot.CategoryGrid ?? AxisColour;
+        Colour grid = plot.ValueGrid?.Colour ?? plot.CategoryGrid?.Colour ?? AxisColour;
 
         foreach (double tick in scale.MajorTicks())
         {
@@ -197,7 +197,7 @@ public static partial class ChartLayout
             // placed by the ray and not by a side of the plot area.
             DocPoint beyond = RadarPoint(web, at, categories, 1.0 + RadarLabelReach);
             labels.Add(new ChartLabel(
-                text, beyond, ChartLabelAnchor.Centre, plot.LabelSize, AxisColour));
+                text, beyond, ChartLabelAnchor.Centre, plot.LabelSize, plot.LabelColour));
         }
 
         if (!plot.ValueAxisVisible) return;
@@ -210,7 +210,7 @@ public static partial class ChartLayout
                 new DocPoint(at.X - LabelSpacing, at.Y),
                 ChartLabelAnchor.RightMiddle,
                 plot.LabelSize,
-                AxisColour));
+                plot.LabelColour));
         }
     }
 
@@ -586,6 +586,8 @@ public static partial class ChartLayout
     private static void AddOfPie(
         ChartPlot plot,
         DocRect area,
+        DocRect available,
+        ChartText measurer,
         List<ChartShape> shapes,
         List<ChartLine> lines,
         List<ChartLabel> labels)
@@ -601,7 +603,7 @@ public static partial class ChartLayout
         int split = Math.Clamp(plot.SplitPosition, 1, Math.Max(1, points - 1));
         if (points < OfPieMinimumPoints)
         {
-            AddWedges(plot, area, shapes, labels);
+            AddWedges(plot, area, available, measurer, shapes, labels);
             return;
         }
 
@@ -740,7 +742,7 @@ public static partial class ChartLayout
                         new DocPoint(left + (right - left) / 2, top + height / 2),
                         ChartLabelAnchor.Centre,
                         plot.DataLabelFont,
-                        AxisColour,
+                        plot.DataLabelColour,
                         IsBold: plot.IsDataLabelBold));
                 }
 
@@ -798,7 +800,7 @@ public static partial class ChartLayout
                 centre.Y - radius * (reach * Math.Sin(middle))),
             ChartLabelAnchor.Centre,
             plot.DataLabelFont,
-            AxisColour,
+            plot.DataLabelColour,
             IsBold: plot.IsDataLabelBold));
     }
 }

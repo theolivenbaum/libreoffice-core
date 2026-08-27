@@ -150,7 +150,11 @@ internal sealed class PptxShapeReader
         if (_file.Relationship(_partName, relationshipId) is not { IsExternal: false } relationship)
             return false;
         if (_file.Load(relationship.Target) is not { } chartSpace) return false;
-        if (DrawingChart.Read(chartSpace) is not { } section) return false;
+        if (DrawingChart.Read(chartSpace, ranges: null, _file.IsOffice2007)
+            is not { } section)
+        {
+            return false;
+        }
 
         target.Children.Add(section);
         return true;

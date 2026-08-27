@@ -281,6 +281,53 @@ public readonly record struct MetricGrid(
     /// </remarks>
     public static MetricGrid Spreadsheet { get; } = new(720, false, MetricUnit.Mm100);
 
+    /// <summary>
+    /// The device <c>chart2</c>'s own view formats a chart's text against: <b>96 dpi in
+    /// 1/100 mm</b>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A chart's labels, titles and axis text are not laid out by Calc, Writer or Impress at all:
+    /// <c>chart2</c>'s view builds them as plain <c>SvxShapeText</c> objects on its own
+    /// <c>VirtualDevice</c>, which is created with no <c>RefDevMode</c> at all and therefore keeps
+    /// the platform default — 96 dpi — where Impress asks for 600 and the PDF writer for 720. A
+    /// device pixel is <b>0.75 pt</b>, twenty-six hundredths of a millimetre, and it is coarse
+    /// enough to be the dominant term in a ten-point line: 96 dpi rounds a 10 pt em down to 13
+    /// pixels, a 2.5% shrink before a single metric is read.
+    /// </para>
+    /// <para>
+    /// <b>Measured off 26.2.4.2, not read.</b> <c>probes/sheets-r60/probe-chartvmetrics2.py</c>
+    /// renders 117 one-variable rewrites of <c>003_advanced_excel_pie.xlsx</c>'s own chart part —
+    /// thirteen sizes from 6 to 40 pt on Carlito, Liberation Sans and Liberation Serif, each as a
+    /// one-line and a three-line chart title — and reads the baseline pitch back out of the
+    /// reference's own PDF. <b>Every one of the 39 pitches is an integer multiple of 0.75 pt</b>,
+    /// and the integer is <c>round(asc/upem × hpx) + round(−desc/upem × hpx)</c> with
+    /// <c>hpx = round(size × 96/72)</c>. Against the four candidate laws
+    /// (<c>probes/sheets-r60/law-chartvmetrics.py</c>):
+    /// </para>
+    /// <code>
+    ///   law                                      max err   mean err
+    ///   pixel, no line gap                        0.089      0.036
+    ///   pixel, with the line gap                  1.498      0.473
+    ///   continuous, no line gap                   0.988      0.309
+    ///   continuous, with the gap (was shipped)    2.476      0.613
+    /// </code>
+    /// <para>
+    /// Carlito's <c>hhea</c> line gap is zero and both Liberation faces' is not, so the three faces
+    /// separate the gap term outright rather than by argument; and the sizes where
+    /// <c>size × 4/3</c> is not a whole number separate the pixel rounding from exact scaling. The
+    /// ascent is the same rounding, checked independently by requiring a CENTER data label's block
+    /// centre to come out size-independent: it does, to 0.042–0.069 pt over ten sizes, where the
+    /// continuous model spreads it by 0.58–0.70.
+    /// </para>
+    /// <para>
+    /// This is why <c>SheetBandText.ChartLineHeightAt</c> read 1.2207 em for Carlito at every size
+    /// while 26.2.4.2 stacked it at 1.1219 em at 10 pt and 1.2241 at 15.89 — <b>chart2 does not use
+    /// no device, it uses a different one</b>, and dropping the grid entirely was the defect.
+    /// </para>
+    /// </remarks>
+    public static MetricGrid Chart { get; } = new(96, false, MetricUnit.Mm100);
+
     /// <summary>Logical units to the inch, for this grid's map unit.</summary>
     private int UnitsPerInch => Unit == MetricUnit.Mm100 ? 2540 : 1440;
 
@@ -360,6 +407,57 @@ public readonly record struct MetricGrid(
 
         double em = Math.Round(ToLogical(emSize) / UnitsPerPixel, MidpointRounding.AwayFromZero);
         return ToLength((long)Math.Floor(designUnits * em / unitsPerEm));
+    }
+
+    /// <summary>
+    /// How much narrower — or wider — every advance comes out because the device can only set the
+    /// em at a whole number of pixels.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>round(size × dpi / 72) / (size × dpi / 72)</c>. At 10 pt on a 96 dpi device that is
+    /// <b>13/13.333 = 0.975</b> and at 11 pt it is <b>15/14.667 = 1.023</b>, so the correction is a
+    /// <b>sawtooth in the size</b> and not a constant narrowing — which is the half of it that any
+    /// "charts measure narrow" rule gets wrong. At 9, 12 and 18 pt it is exactly one.
+    /// </para>
+    /// <para>
+    /// <b>Measured off 26.2.4.2 at fourteen sizes, and our renderer never ran.</b>
+    /// <c>probes/sheets-r62/probe-chartwidth.py</c> reads the drawn advance out of the reference's
+    /// own <c>TJ</c> arrays, whose per-glyph adjustments are in thousandths of the text em and are
+    /// therefore independent of the chart's scale, of the page and of the size the PDF writer
+    /// chose. The measured ratio follows this at every one of the fourteen, residual ≤0.005 and
+    /// almost always in the direction the estimator is known to be biased.
+    /// </para>
+    /// <para>
+    /// <b>The pixel count is taken from the size in points and not from the map unit, and that is a
+    /// decision rather than a shortcut.</b> Going through hundredths of a millimetre — as
+    /// <see cref="ToPixels"/> and <see cref="ToEmSize"/> do, because that is the device's own map
+    /// mode — makes 9 pt come out at 12.0189 pixels rather than 12, and so applies a 0.16%
+    /// correction at a size where the law says there is none. The probe cannot separate the two
+    /// readings: at 9, 12 and 18 pt they differ by less than the estimator's own 0.005 noise, while
+    /// the term this exists for is 2.5%. Taking the reading that leaves the exact sizes exactly
+    /// alone means a chart stating 9 pt renders byte for byte as it did before, which is a property
+    /// worth having when the alternative is unmeasurable either way.
+    /// </para>
+    /// <para>
+    /// <b>What is deliberately not here.</b> The reference also rounds <em>each glyph's</em>
+    /// advance to a whole hundredth of a millimetre: on <c>003_advanced_excel_pie</c>'s page 1
+    /// every one of the thirty <c>;</c> and twenty-two spaces carries an identical per-glyph
+    /// adjustment, which rounding the cumulative position cannot produce, and
+    /// <c>round(designUnits × ppem / upem)</c> matches 9 of 9 distinct glyphs where <c>floor</c>
+    /// fails 3. It is worth at most 0.014 pt a glyph and it is left out of the shipped rule,
+    /// because a perturbation that small moves knife-edge axis-label collision decisions in
+    /// documents where nothing else changed and this round has no measurement saying it moves them
+    /// the right way. See <c>probes/sheets-r62/results.md</c> § 6.
+    /// </para>
+    /// </remarks>
+    /// <param name="emSize">The font size the document asks for.</param>
+    public double PixelEmScale(Length emSize)
+    {
+        if (Dpi <= 0 || emSize <= Length.Zero) return 1.0;
+
+        double pixels = emSize.Points * Dpi / 72.0;
+        return pixels <= 0.0 ? 1.0 : Math.Round(pixels, MidpointRounding.AwayFromZero) / pixels;
     }
 
     /// <summary>

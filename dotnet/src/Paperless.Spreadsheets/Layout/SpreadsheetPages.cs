@@ -488,7 +488,10 @@ internal sealed class SheetPageDrawing(SheetLayout sheet, SheetPagePlacement pla
         get
         {
             SheetPrintSetup setup = sheet.Setup;
-            DocRect area = setup.PrintableArea;
+            // At the page's own print scale, because the two furniture bands reach the paper
+            // scaled and the four margins do not — see `SheetPrintSetup.PrintableAreaAt`. This
+            // is the whole of round 56's 18.46 pt body offset.
+            DocRect area = setup.PrintableAreaAt(_scale);
 
             // Two roundings and one scaling, in Calc's own order. The margin and the heading
             // strip each reach the device separately — nStartX = nLeftSpace * nScaleX and

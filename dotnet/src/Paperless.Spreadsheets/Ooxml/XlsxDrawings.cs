@@ -245,19 +245,25 @@ internal static class XlsxDrawings
         // through the shared blip reader rather than off the attribute here because that reader is
         // already the one place the element's three wrappers — `a:`, `p:` and `xdr:blipFill` — are
         // known to carry identical content. See `SheetDrawing.Opacity`.
-        drawing = drawing with { Opacity = DrawingFill.ReadBlip(blipFill)?.Opacity ?? 1 };
+        DrawingBlipFill? fill = DrawingFill.ReadBlip(blipFill);
+        drawing = drawing with { Opacity = fill?.Opacity ?? 1 };
 
-        (RasterImage? raster, Lazy<VectorImage>? vector) = Load(package, images, choice.RelationshipId);
+        (RasterImage? raster, Lazy<VectorImage>? vector) =
+            LoadImage(package, images, choice.RelationshipId);
 
         if (choice.IsVector && choice.FallbackRelationshipId is { } fallback)
         {
-            (RasterImage? spare, Lazy<VectorImage>? _) = Load(package, images, fallback);
-            if (vector is null) return drawing with { Image = spare };
+            (RasterImage? spare, Lazy<VectorImage>? _) = LoadImage(package, images, fallback);
+            if (vector is null) return drawing with { Image = KnockedOut(fill, spare) };
 
             raster = spare;
         }
 
-        return drawing with { Image = raster, Vector = vector };
+        return drawing with
+        {
+            Image = vector is null ? KnockedOut(fill, raster) : raster,
+            Vector = vector,
+        };
     }
 
     /// <summary>
@@ -302,8 +308,11 @@ internal static class XlsxDrawings
 
         return chartSpace is null
             ? null
+            // `automaticChartAreaLine`: the grey D9D9D9 default chart-area border is skipped only
+            // under the Impress filter (objectformatter.cxx:838-848, tdf#150176), and this is Calc.
             : DrawingChartPlot.Read(
-                chartSpace, theme, OoxmlMetadata.IsOffice2007(package), styles: null, ranges);
+                chartSpace, theme, OoxmlMetadata.IsOffice2007(package), styles: null, ranges,
+                automaticChartAreaLine: true);
     }
 
     /// <summary>
@@ -323,7 +332,29 @@ internal static class XlsxDrawings
     /// distinguishes an EMF from a WMF, let alone an EMF+ from an EMF.
     /// </para>
     /// </remarks>
-    private static (RasterImage? Raster, Lazy<VectorImage>? Vector) Load(
+    /// <summary>
+    /// The picture with its <c>a:clrChange</c> attached — PowerPoint's <em>Set Transparent
+    /// Color</em>, which SpreadsheetML states on the same <c>a:blip</c>.
+    /// </summary>
+    /// <remarks>
+    /// Attached rather than applied, the same split <c>SheetDrawing.Opacity</c> makes: matching
+    /// a colour needs decoded pixels and a reader has no codec. Withheld from a picture that
+    /// resolved to a vector, because the reference applies the transform only to a
+    /// <c>GraphicType::Bitmap</c> — see <see cref="ColourKnockout"/>.
+    /// </remarks>
+    private static RasterImage? KnockedOut(DrawingBlipFill? fill, RasterImage? raster)
+        => raster is { } image
+           && DrawingPictureEffects.Knockout(fill, theme: null, image.EncodedBytes.Span)
+                  is { } knockout
+            ? image with { Knockout = knockout }
+            : raster;
+
+    /// <summary>
+    /// Loads one picture part by relationship id. Shared with
+    /// <see cref="XlsxLegacyPictures"/>, whose VML shapes name their image the same way and must
+    /// not decide separately what an EMF is.
+    /// </summary>
+    internal static (RasterImage? Raster, Lazy<VectorImage>? Vector) LoadImage(
         OpcPackage package, Dictionary<string, OpcXml.Relationship> images, string? id)
     {
         if (id is null || !images.TryGetValue(id, out OpcXml.Relationship relationship)) return default;

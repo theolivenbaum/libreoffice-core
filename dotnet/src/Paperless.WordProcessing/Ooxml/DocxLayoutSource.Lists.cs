@@ -105,7 +105,10 @@ public sealed partial class DocxLayoutSource
         }
 
         (string labelText, OpenTypeFace labelFace, FontReference? labelFont) =
-            LabelFace(definition, text, face, drawn);
+            LabelFace(
+                definition, text, face, drawn,
+                Stated(definition.RunProperties),
+                Stated(Word.Child(properties, "rPr")));
 
         PageLabel label = PageLabel.Measured(
             labelText, labelFace, LabelSize(definition, text),
@@ -115,7 +118,7 @@ public sealed partial class DocxLayoutSource
             label with
             {
                 Font = labelFont,
-                Colour = text.Colour ?? Core.Graphics.Colour.Black,
+                Colour = text.Colour ?? Core.Graphics.Colour.Transparent,
                 Follow = follow,
                 TabStop = tabStop,
             },
@@ -186,7 +189,7 @@ public sealed partial class DocxLayoutSource
     /// use area, which means nothing anywhere else. <see cref="WordNumbering.FormatLabel"/> has turned
     /// such a code point into U+2022, which is the right answer only when nothing better is available —
     /// LibreOffice recodes the slot into OpenSymbol and draws the picture the document asked for. See
-    /// <see cref="Symbol"/>, which decides between the cases; U+2022 in the paragraph's own face is
+    /// <see cref="Symbol(string?, char, bool)"/>, which decides between the cases; U+2022 in the paragraph's own face is
     /// what is left when it declines.
     /// </para>
     /// <para>
@@ -203,26 +206,97 @@ public sealed partial class DocxLayoutSource
     /// body face in the same file embedded.
     /// </returns>
     private (string Text, OpenTypeFace Face, FontReference? Font) LabelFace(
-        WordNumberingLevel definition, WordTextStyle text, OpenTypeFace face, string drawn)
+        WordNumberingLevel definition,
+        WordTextStyle text,
+        OpenTypeFace face,
+        string drawn,
+        bool? levelItalic,
+        bool? markItalic)
     {
         FontReference? own = _references.GetValueOrDefault(text.FaceKey);
 
+        XElement? levelFonts = Word.Child(definition.RunProperties, "rFonts");
+
         string? family = WordParagraphFormats.SlotFamily(
-            Word.Child(definition.RunProperties, "rFonts"), _theme?.Fonts, "ascii", "asciiTheme");
+            levelFonts, _theme?.Fonts, "ascii", "asciiTheme");
+
+        // The level's own `w:rFonts` is a property layer like any other, so it states a class only
+        // when its `w:ascii` names a font the table files; otherwise the paragraph's stands. See
+        // `WordParagraphFormats.StatedClass`.
+        FontFamilyClass levelClass =
+            WordParagraphFormats.StatedClass(levelFonts is { } stated ? [stated] : [], _fontTable)
+                is var declared and not FontFamilyClass.Unknown
+                ? declared
+                : text.DeclaredClass;
 
         if (definition.LevelText is [>= '\uE000' and <= '\uF8FF' and var slot])
         {
-            return Symbol(family, slot) ?? (drawn, face, own);
+            // A bullet's base font is the paragraph's with its posture and weight reset — #i53199 in
+            // `SwTextFormatter::NewNumberPortion`, `sw/source/core/text/txtfld.cxx`:578-590 — so the
+            // paragraph's *style* cannot reach it and only the level's own character formatting and
+            // the paragraph mark's direct formatting can. Measured, `probes/words-r59/label-slant.py`:
+            // a `w:i` on the style leans the item's text and leaves the bullet upright, where the same
+            // `w:i` written directly on the paragraph's `w:pPr/w:rPr` leans both.
+            bool italic = levelItalic ?? markItalic ?? false;
+
+            return Symbol(family, slot, italic)
+                   ?? Restyled(text, face, own, italic, drawn);
         }
 
-        if (family is not { Length: > 0 }) return (drawn, face, own);
+        // A number label keeps the paragraph's own posture — the number branch of the same function
+        // resets only underline and overline — so the base is the mark's resolved italic and the
+        // level overrides it only where it states one. An explicit `<w:i w:val="0"/>` on the level
+        // therefore draws the number upright over an italic paragraph, which 13 of the corpus's
+        // `.docx` state and two of them draw.
+        bool numberItalic = levelItalic ?? text.IsItalic;
 
-        WordTextStyle named = text with { FamilyName = family };
+        if (family is not { Length: > 0 }) return Restyled(text, face, own, numberItalic, drawn);
+
+        WordTextStyle named = text with
+        {
+            FamilyName = family,
+            DeclaredClass = levelClass,
+            IsItalic = numberItalic,
+        };
 
         return Face(named) is { } resolved
             ? (drawn, resolved, _references.GetValueOrDefault(named.FaceKey))
+            : Restyled(text, face, own, numberItalic, drawn);
+    }
+
+    /// <summary>
+    /// The paragraph's own face at the label's posture, or the paragraph's face unchanged when the
+    /// two agree or when the restyled request resolves to nothing.
+    /// </summary>
+    /// <remarks>
+    /// The caller's fallback is the paragraph's face, and re-resolving it unconditionally would put a
+    /// second request through <see cref="Face"/> for every list paragraph in the corpus to get the
+    /// answer it already had. So the request is made only where the label's posture differs from the
+    /// paragraph's, which is the only case that can change what is drawn.
+    /// </remarks>
+    private (string Text, OpenTypeFace Face, FontReference? Font) Restyled(
+        WordTextStyle text, OpenTypeFace face, FontReference? own, bool italic, string drawn)
+    {
+        if (italic == text.IsItalic) return (drawn, face, own);
+
+        WordTextStyle leaned = text with { IsItalic = italic };
+
+        return Face(leaned) is { } resolved
+            ? (drawn, resolved, _references.GetValueOrDefault(leaned.FaceKey))
             : (drawn, face, own);
     }
+
+    /// <summary>
+    /// Whether a <c>w:rPr</c> states a posture, and which — null when it says nothing at all.
+    /// </summary>
+    /// <remarks>
+    /// Three states rather than two, because *stated off* is not the same as *unstated* for a list
+    /// label: the level's own <c>&lt;w:i w:val="0"/&gt;</c> beats an italic paragraph mark and an
+    /// absent <c>w:i</c> lets the mark through. Measured on `label-slant.py`'s `leveloff-markon` and
+    /// `levelon-markoff`, which differ by exactly that and disagree on both label kinds.
+    /// </remarks>
+    private static bool? Stated(XElement? runProperties)
+        => Word.Child(runProperties, "i") is { } posture ? Word.IsOn(posture) : null;
 
     /// <summary>
     /// A symbol level's slot, drawn from the face that can actually show it, or null when none can.
@@ -252,14 +326,31 @@ public sealed partial class DocxLayoutSource
     /// failed.
     /// </para>
     /// </remarks>
+    /// <summary>
+    /// The two-argument form the run walker binds to, for a <c>w:sym</c> inside ordinary text.
+    /// </summary>
+    /// <remarks>
+    /// Upright, because the walker is given a family and a slot and not the run's <c>w:rPr</c>.
+    /// Whether 26.2.4.2 leans a recoded <c>w:sym</c> in an italic run is <strong>not
+    /// measured</strong> — round 58's residual is a column of list bullets at one x position and
+    /// holds no run symbol at all, so no corpus witness separates the two answers. Named here so
+    /// that a round which finds one knows where it lives.
+    /// </remarks>
     private (string Text, OpenTypeFace Face, FontReference? Font)? Symbol(string? family, char slot)
+        => Symbol(family, slot, italic: false);
+
+    private (string Text, OpenTypeFace Face, FontReference? Font)? Symbol(
+        string? family, char slot, bool italic)
     {
         if (family is not { Length: > 0 }) return null;
         if (!SymbolFontRecode.IsRecodeable(family)) return null;
 
-        // Weight and italic are the level's own, and a symbol face has one of each; the size is
-        // decided by LabelSize and plays no part in which file is loaded.
-        WordTextStyle stated = new(family, Length.Zero, 400, false, null);
+        // The weight is the bullet's reset one and the size is decided by LabelSize and plays no
+        // part in which file is loaded. The posture is the level's, and it reaches the page as a
+        // synthetic lean rather than as a face: OpenSymbol ships one cut, so
+        // `SystemFontResolver.Resolve` answers the upright file with `SyntheticOblique` set — which
+        // is the same shear the reference draws, `1 0 0.3462 1 … Tm` in its own content stream.
+        WordTextStyle stated = new(family, Length.Zero, 400, italic, null);
         if (Face(stated) is not { } statedFace) return null;
 
         FontReference? reference = _references.GetValueOrDefault(stated.FaceKey);

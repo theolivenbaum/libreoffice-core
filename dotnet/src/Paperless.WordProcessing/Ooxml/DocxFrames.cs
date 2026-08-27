@@ -117,6 +117,34 @@ internal static class DocxFrames
     }
 
     /// <summary>
+    /// Whether a <c>w:drawing</c> floats — a <c>wp:anchor</c> rather than a <c>wp:inline</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Asked by the reader that builds the paragraph, not by this one, and it is the difference between
+    /// a run that takes room on its line and a run that takes none. A <c>wp:inline</c> is laid out as a
+    /// character; a <c>wp:anchor</c> becomes a fly, and Writer's own import leaves the paragraph it was
+    /// written in **empty** — which is why an anchor character standing for one must not make the
+    /// paragraph count as having text.
+    /// </para>
+    /// <para>
+    /// Measured on <c>088_Printable_Graph_Paper_Template_Quality_layout</c>, whose last paragraph is a
+    /// 2 pt mark holding one anchored logo 8.45 pt above the bottom margin. Read as text-bearing it takes
+    /// the 11 pt body size, overflows, and costs the document a whole second page; read as empty it takes
+    /// the mark's 2 pt and fits, which is what 26.2.4.2 does. Eleven authored variants of that document
+    /// are in <c>dotnet/probes/words-r50-chartset/</c>: deleting the drawing run fixes it and no property
+    /// of the frame — offset, extent, <c>behindDoc</c>, wrap mode or anchor origin — changes anything.
+    /// </para>
+    /// </remarks>
+    /// <param name="drawing">A <c>w:drawing</c> element.</param>
+    /// <returns>True when it carries a <c>wp:anchor</c>.</returns>
+    public static bool IsFloating(XElement drawing)
+    {
+        ArgumentNullException.ThrowIfNull(drawing);
+        return Child(drawing, "anchor") is not null;
+    }
+
+    /// <summary>
     /// Whether an anchored drawing belongs on the layer Writer paints before the text.
     /// </summary>
     /// <remarks>
@@ -313,7 +341,7 @@ internal static class DocxFrames
                 switch (child.Name.LocalName)
                 {
                     case "grpSp" or "wgp" or "wpc":
-                        Walk(child, transform.Composed(TransformOf(child, size)), depth + 1);
+                        Walk(child, transform.Around(child, TransformOf(child, size)), depth + 1);
                         break;
 
                     case "wsp" or "pic" or "sp":
@@ -415,12 +443,52 @@ internal static class DocxFrames
         /// <summary>The identity, for a group that states no child space of its own.</summary>
         public static GroupTransform Identity => new(0, 0, 1, 1, 0, 0);
 
-        /// <summary>This transform applied inside an enclosing one.</summary>
-        public GroupTransform Composed(GroupTransform inner)
-            => new(
+        /// <summary>
+        /// A nested group's transform, composed inside this one — <em>including where the nested group
+        /// itself sits</em>.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// This used to be <c>Composed(inner)</c>, which added <c>inner.ShiftX</c> — and
+        /// <see cref="TransformOf"/> never sets a shift, so it added nought. A nested
+        /// <c>a:grpSpPr/a:xfrm/a:off</c>, which is where the nested group sits inside its parent, was
+        /// therefore **dropped**, and every nested group's members were laid out as though the group
+        /// were at the parent's own origin. The scale composed correctly throughout, so the members
+        /// came out the right size in the wrong place, which is the hardest kind of this defect to see.
+        /// </para>
+        /// <para>
+        /// Measured on <c>056_Organogram_Template_Square_Theme</c>, whose <c>wpg:wgp</c> holds five
+        /// text-bearing <c>a:grpSp</c> at <c>a:off/@x</c> 141890, 1623848, 3200400, 4761186 and
+        /// 6258911 EMU. Every one has <c>chOff="0,0"</c> and a <c>chExt</c> equal to its <c>ext</c>, so
+        /// all five resolved to the same rectangle: their twenty <c>Text here</c> boxes landed on top of
+        /// one another at the drawing's own left edge, and the PDF's text layer holds **four** of the
+        /// twenty. 26.2.4.2 draws them as a 5 × 5 lattice. A blind reviewer given only the image, and
+        /// told nothing, reported *"the surviving leaves are piled into the left edge of the page, a
+        /// single vertical stack … the remaining 20 leaves are absent as boxes"*.
+        /// </para>
+        /// <para>
+        /// The composition is the ordinary one. The nested group's own <c>off</c> is a point in
+        /// <em>this</em> group's child space, so it maps through this transform exactly as a leaf's
+        /// does; the mapped point is where the nested group's own child space starts.
+        /// </para>
+        /// </remarks>
+        /// <param name="group">The nested group, for its own <c>a:off</c>.</param>
+        /// <param name="inner">The nested group's own child-space transform.</param>
+        public GroupTransform Around(XElement group, GroupTransform inner)
+        {
+            XElement? properties = group.Elements()
+                .FirstOrDefault(child => child.Name.LocalName is "grpSpPr" or "spPr");
+            XElement? transformation = properties is null ? null : Child(properties, "xfrm");
+            XElement? offset = transformation is null ? null : Child(transformation, "off");
+
+            double x = offset is null ? OriginX : Raw(offset, "x");
+            double y = offset is null ? OriginY : Raw(offset, "y");
+
+            return new GroupTransform(
                 inner.OriginX, inner.OriginY,
                 inner.ScaleX * ScaleX, inner.ScaleY * ScaleY,
-                ShiftX + (inner.ShiftX * ScaleX), ShiftY + (inner.ShiftY * ScaleY));
+                ShiftX + ((x - OriginX) * ScaleX), ShiftY + ((y - OriginY) * ScaleY));
+        }
 
         /// <summary>A child rectangle mapped into the group's own.</summary>
         public DocRect Map(double x, double y, double cx, double cy)

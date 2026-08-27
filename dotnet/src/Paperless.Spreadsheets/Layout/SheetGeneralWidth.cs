@@ -12,7 +12,13 @@ namespace Paperless.Spreadsheets.Layout;
 /// hashed when its format is something other than <c>General</c>. A <c>General</c> cell is
 /// re-rendered with fewer digits first, and falls back to scientific notation when even that is
 /// too long — which is why 123 456 789 012 in a 43 pt column draws as <c>1.2E+11</c> rather than
-/// as <c>###</c>. Measured against LibreOffice 24.2.7.2 on exactly that cell.
+/// as <c>###</c>. Measured against LibreOffice 24.2.7.2 on exactly that cell, and
+/// <strong>re-checked against 26.2.4.2 on 2026-08-21 and correct</strong>: twenty-seven
+/// authored workbooks — Calibri 11, Liberation Sans 11 and Calibri 14 against nine stated
+/// column widths from 3.0 to 8.0 characters, holding <c>123456.789</c> — extract the same
+/// text on both sides in **twenty-seven of twenty-seven**, including every crossing of the
+/// three thresholds (<c>###</c>, the <c>1E+05</c> scientific fallback, and the rounded
+/// decimal). <c>dotnet/probes/sheets-r53-totalsrow/audit_two.py</c> reproduces it.
 /// </para>
 /// <para>
 /// Ported from <c>SvNumberformat::GetOutputString(double, sal_uInt16 nCharCount, …)</c>

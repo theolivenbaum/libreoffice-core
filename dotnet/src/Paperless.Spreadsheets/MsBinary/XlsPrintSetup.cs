@@ -468,12 +468,8 @@ internal sealed class XlsSheetPrintState
     /// <param name="fallback">The gap a dynamic band keeps.</param>
     private static Length Gap(
         double inches, string? codes, SheetDefaultFont? defaultFont, Length fallback)
-    {
-        SheetBandHeight.Printed(
-            codes, Length.FromInches(Math.Max(0, inches)), defaultFont, out bool isDynamic);
-
-        return isDynamic ? fallback : Length.Zero;
-    }
+        => SheetBandHeight.BodyDistance(
+            codes, Length.FromInches(Math.Max(0, inches)), defaultFont, fallback);
 
     /// <summary>Calc's default header and footer band: 0.5 cm of text and a 0.25 cm gap.</summary>
     private static readonly Length DefaultBandHeight = Length.FromTwips(425);
@@ -518,6 +514,12 @@ internal sealed class XlsSheetPrintState
                 : DefaultBandGap,
             HeaderText = _header,
             FooterText = _footer,
+
+            // The face the band's own codes fall back to: the workbook's app font, which is what
+            // `Band` and `Gap` above are already given. Until round 56 the drawing used a fixed
+            // ten-point Liberation Sans while the sizing used this, so the two disagreed on every
+            // workbook whose FONT record zero is not that. See `SheetPrintSetup.BandFont`.
+            BandFont = DefaultFont,
 
             // BIFF's HEADER and FOOTER records carry the same &-code language SpreadsheetML
             // does, which is not a coincidence: the OOXML spelling was inherited from it.

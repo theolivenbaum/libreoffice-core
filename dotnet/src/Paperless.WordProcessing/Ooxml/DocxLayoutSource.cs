@@ -85,9 +85,10 @@ public sealed partial class DocxLayoutSource
     private readonly ConstantFields _constants;
 
     private readonly DrawingTheme? _theme;
-    private readonly Dictionary<(string? Family, int Weight, bool Italic), OpenTypeFace?> _faces = [];
-    private readonly Dictionary<(string? Family, int Weight, bool Italic), FontReference> _references =
-        [];
+    private readonly Dictionary<(string? Family, int Weight, bool Italic, FontFamilyClass Class),
+        OpenTypeFace?> _faces = [];
+    private readonly Dictionary<(string? Family, int Weight, bool Italic, FontFamilyClass Class),
+        FontReference> _references = [];
 
     /// <summary>Creates a source over a document's styles and settings.</summary>
     /// <param name="styles">The document's styles, including its <c>w:docDefaults</c>.</param>
@@ -253,7 +254,7 @@ public sealed partial class DocxLayoutSource
     {
         get
         {
-            WordTextStyle text = WordParagraphFormats.ResolveText(_styles, null, _theme);
+            WordTextStyle text = WordParagraphFormats.ResolveText(_styles, null, _theme, fontTable: _fontTable);
             if (Face(text) is not { } face) return Length.Zero;
 
             return LineSpacing.Resolve(face, _metrics, WriterLineBox.LeadingAboveText)
@@ -304,7 +305,9 @@ public sealed partial class DocxLayoutSource
             : LineNumbering.DefaultEmSize;
 
         WordTextStyle style = new(
-            Word.Attribute(fonts.Element, "ascii"), emSize, Weight: 400, IsItalic: false, Language: null);
+            Word.Attribute(fonts.Element, "ascii"), emSize, Weight: 400, IsItalic: false, Language: null,
+            DeclaredClass: WordParagraphFormats.StatedClass(
+                fonts.Element is { } element ? [element] : [], _fontTable));
 
         if (Face(style) is not { } face) return null;
 
@@ -778,10 +781,27 @@ public sealed partial class DocxLayoutSource
         // `mark` is not dead weight: an empty paragraph has nothing *but* its mark, and its height
         // is the mark's. Same probe: the mark alone carrying `w:sz w:val="72"` gives the empty
         // paragraph 36 pt of height in the reference.
+        //
+        // [24.2.7-audit: VERIFIED 2026-08-21, round words-r63 — all three claims re-measured on
+        // 26.2.4.2 by `probes/words-r63/audit_markstyle.py`, on the reference alone, each arm with
+        // a control whose answer was known first. A `Heavy` paragraph whose mark says
+        // `<w:b w:val="0"/>` is drawn in LiberationSans-**Bold** while the same style with the
+        // *run* saying it is drawn regular — so the pair separates "the mark formats the text"
+        // from "it does not" rather than only confirming one side. A mark saying
+        // `<w:b/><w:sz w:val="48"/>` leaves the text LiberationSans at 10.00 pt where the run
+        // saying it gives Bold at 24.00 pt. And the empty paragraph's height is the mark's to
+        // 0.00 pt: the baseline pitch across it is 52.90 pt against a control's 23.00, a
+        // difference of 29.90, so the paragraph itself is 11.50 + 29.90 = 41.40 pt, which is
+        // 36 pt x 1.15 exactly. **This was the last open site in this project that a corpus
+        // document can reach**: of the other ten hits in it, five sit inside an existing marker
+        // and five are prose recording that a superseded-binary measurement has already been
+        // re-measured on 26.2.4.2 in the same comment, two of those in readers
+        // (`OdtLayoutSource`, `RtfDocumentReader`) whose format has no witness in this corpus at
+        // all. See `TODO.24-2-7-audit.md`, round 63.]
         WordTextStyle mark =
-            WordParagraphFormats.ResolveText(_styles, properties, _theme, _tableStyleRun);
+            WordParagraphFormats.ResolveText(_styles, properties, _theme, _tableStyleRun, _fontTable);
         WordTextStyle body =
-            WordParagraphFormats.ResolveRun(_styles, properties, null, _theme, _tableStyleRun);
+            WordParagraphFormats.ResolveRun(_styles, properties, null, _theme, _tableStyleRun, _fontTable);
 
         // Both are resolved, not only the one this paragraph draws its text in, because `Face` is
         // also what fills `_references` — and a `FontReference` is the only thing a PDF can turn
@@ -832,8 +852,9 @@ public sealed partial class DocxLayoutSource
 
         // A paragraph with nothing in it is its mark, so that is what sizes it; one with text is
         // sized by the text, and its mark formats a pilcrow nobody draws.
-        WordTextStyle text = walker.Text.Length == 0 ? mark : body;
-        if (walker.Text.Length == 0) face = markFace ?? face;
+        bool empty = walker.Text.Length == 0 || HoldsOnlyFloatingFrames(walker);
+        WordTextStyle text = empty ? mark : body;
+        if (empty) face = markFace ?? face;
 
         PageParagraph read = new()
         {
@@ -841,7 +862,7 @@ public sealed partial class DocxLayoutSource
             Text = mapped,
             Face = face,
             Font = _references.GetValueOrDefault(text.FaceKey),
-            Colour = text.Colour ?? Colour.Black,
+            Colour = text.Colour ?? Colour.Transparent,
             Shading = ShadeColour(WordParagraphFormats.ShadingOf(_styles, properties)),
             Borders = ParagraphBorders(properties),
             Format = breaksPage || walker.BreaksPageHere
@@ -875,7 +896,7 @@ public sealed partial class DocxLayoutSource
             Runs = runs,
             Fields = walker.Fields,
             Notes = NotesOf(walker.Notes),
-            Frames = FramesOf(walker.Frames),
+            Frames = FramesOf(walker.Frames, walker.CheckBoxes, properties),
             Source = element,
         };
 
@@ -1071,13 +1092,15 @@ public sealed partial class DocxLayoutSource
     {
         List<PageRun> runs = new(ranges.Count);
         bool varies = false;
+        FontReference? paragraphFont = _references.GetValueOrDefault(paragraph.FaceKey);
 
         foreach (StyledRange range in ranges)
         {
             WordTextStyle style = range.RunProperties is null
                 ? paragraph
                 : WordParagraphFormats.ResolveRun(
-                    _styles, paragraphProperties, range.RunProperties, _theme, _tableStyleRun);
+                    _styles, paragraphProperties, range.RunProperties, _theme, _tableStyleRun,
+                    _fontTable);
 
             if (range.IsCitation) style = AsCitation(style);
 
@@ -1085,6 +1108,12 @@ public sealed partial class DocxLayoutSource
             // chosen. Everything else about the run — its size, its colour, its escapement — still comes
             // from the run, so only the face is taken from the symbol.
             OpenTypeFace face = range.Symbol?.Face ?? Face(style) ?? paragraphFace;
+
+            // Resolved before the predicate rather than inside the constructor call below, because the
+            // predicate needs it: `Face` is what fills `_references`, so the lookup is only valid here.
+            FontReference? font = range.Symbol is { } named
+                ? named.Font
+                : _references.GetValueOrDefault(style.FaceKey);
 
             // The escapement is resolved here rather than where it was read, because its rise is a fraction
             // of the face's height and the face is only known now.
@@ -1116,7 +1145,12 @@ public sealed partial class DocxLayoutSource
                 || style.AutoKerning != paragraph.AutoKerning
                 // And tracking, for the same reason and more sharply: it is a distance per character,
                 // so a run that disagrees with its paragraph mark is wrong by its own length.
-                || style.Tracking != paragraph.Tracking)
+                || style.Tracking != paragraph.Tracking
+                // And a synthetic oblique, which is drawing-only in the same way and was the one
+                // missing from this list: an italic run whose family has no italic installed resolves to
+                // the *same* face as its upright neighbour, so nothing above can see it and the fold
+                // would draw it upright. See PageRun.LeansDifferently.
+                || PageRun.LeansDifferently(font, paragraphFont))
             {
                 varies = true;
             }
@@ -1126,8 +1160,8 @@ public sealed partial class DocxLayoutSource
                 range.Length,
                 face,
                 size,
-                range.Symbol is { } symbol ? symbol.Font : _references.GetValueOrDefault(style.FaceKey),
-                style.Colour ?? paragraph.Colour ?? Colour.Black,
+                font,
+                style.Colour ?? paragraph.Colour ?? Colour.Transparent,
                 new ShapingOptions(Language: style.Language, DisableKerning: !style.AutoKerning),
                 rise,
                 style.CaseMap,
@@ -1175,6 +1209,61 @@ public sealed partial class DocxLayoutSource
     private readonly record struct FrameAnchor(int Offset, XElement Element);
 
     /// <summary>
+    /// Whether the paragraph produced nothing but the anchor characters of <em>floating</em> drawings —
+    /// in which case it is an empty paragraph, and its mark is what sizes it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The walk emits one <see cref="AnchorCharacter"/> per drawing, floating or inline, because an
+    /// offset has to mean the same thing wherever it was counted. That is right for the frame list and
+    /// wrong for the height: a <c>wp:inline</c> genuinely occupies its line, a <c>wp:anchor</c> does not
+    /// — Writer's import puts it in a fly and the paragraph it was written in is left empty, so the
+    /// paragraph's height is its mark's. Reading the anchor character as text instead takes the *body*
+    /// style, and where the mark states a smaller size than the document default the paragraph comes out
+    /// several times too tall.
+    /// </para>
+    /// <para>
+    /// Deliberately strict on all three counts, because the failure mode of getting this wrong is a
+    /// paragraph that silently loses height:
+    /// </para>
+    /// <list type="bullet">
+    ///   <item><description>every character must be the anchor character, so a caption beside a picture
+    ///   still measures its text;</description></item>
+    ///   <item><description>there must be exactly one frame anchor per character, so a field result, a
+    ///   note citation or a <c>w:commentReference</c> — which emit the same character and register no
+    ///   frame — keeps the paragraph text-bearing;</description></item>
+    ///   <item><description>and every anchor must be a floating <c>w:drawing</c>. A <c>w:pict</c> or
+    ///   <c>w:object</c> is excluded even when it floats: <c>DocxVmlFrames</c> already returns nothing
+    ///   for a floating VML shape, so its anchor character stands for something this reader never sized
+    ///   in the first place, and changing it would be a second rule with no measurement behind
+    ///   it.</description></item>
+    /// </list>
+    /// <para>
+    /// Reach over the corpus: 37 of 271 DOCX-family documents hold at least one such paragraph, 17 of
+    /// them with an explicit <c>w:pPr/w:rPr/w:sz</c> on it. Only those where the mark resolves to a
+    /// different height from the body can move at all.
+    /// </para>
+    /// </remarks>
+    private static bool HoldsOnlyFloatingFrames(RunWalker walker)
+    {
+        string text = walker.Text;
+        if (text.Length == 0 || walker.Frames.Count != text.Length) return false;
+
+        foreach (char character in text)
+        {
+            if (character != AnchorCharacter) return false;
+        }
+
+        foreach (FrameAnchor anchor in walker.Frames)
+        {
+            if (anchor.Element.Name.LocalName != "drawing") return false;
+            if (!DocxFrames.IsFloating(anchor.Element)) return false;
+        }
+
+        return true;
+    }
+
+    /// <summary>
     /// How deeply a frame's own text may hold further frames before the innermost is dropped.
     /// </summary>
     /// <remarks>
@@ -1206,11 +1295,87 @@ public sealed partial class DocxLayoutSource
     /// containing a table or a list needs nothing of its own. The reader therefore re-enters itself, which
     /// is why the depth is counted.
     /// </remarks>
-    private List<PageFrame> FramesOf(List<FrameAnchor> anchors)
+    /// <summary>
+    /// The square a legacy <c>FORMCHECKBOX</c> puts on the line, or null when its face is unresolvable.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>SwFieldFormCheckboxPortion::Format</c> (<c>sw/source/core/text/portxt.cxx</c>:1492) sets the
+    /// portion's width and height to <c>rInf.GetTextHeight()</c> and its ascent to
+    /// <c>rInf.GetAscent()</c> — <em>"the width of the checkbox portion is the same as its height since
+    /// it's a square and that size depends on the font size"</em> — and
+    /// <c>SwTextPaintInfo::DrawCheckBox</c> (<c>inftxt.cxx</c>:1247) then strokes that rectangle
+    /// deflated by 25 twips on each side, in black with no fill, plus both diagonals when it is ticked.
+    /// </para>
+    /// <para>
+    /// <strong>The standing record said this "would not pin (9.0…15.9 pt, not following
+    /// <c>w:checkBox/w:size</c>)" and left 675 fields in 12 documents undrawn. It pins exactly, and
+    /// <c>w:checkBox/w:size</c> is inert.</strong> Measured on 26.2.4.2,
+    /// <c>probes/words-r56/formcheckbox.py</c>, nineteen authored packages with a duplicate-input
+    /// control that agreed to the digit: at 12 pt Liberation Serif the square is 11.300 pt against a
+    /// 276-twip text height, at 8 pt 6.700 against 184, at 24 pt 25.100 against 552 and at 40 pt 43.500
+    /// against 920 — a constant 50 twips less, at every size. Four fixtures stating
+    /// <c>w:size</c> of 5, 10, 20 and 40 pt all draw the run's own 11.300, and the square changes with
+    /// the <em>face</em> at one size — Liberation Mono 11.100, DejaVu Sans 11.500, Carlito 12.150 —
+    /// which is what says it follows the line's text height rather than anything the field declares.
+    /// So 9.0…15.9 pt was a range of font sizes read as a failure to pin.
+    /// </para>
+    /// <para>
+    /// The width matters as much as the box: 675 of these across 12 corpus documents were taking no
+    /// room at all, so every line holding one was laid out narrower than the reference lays it out.
+    /// </para>
+    /// </remarks>
+    private PageFrame? CheckBoxFrame(CheckBoxAnchor box, XElement? paragraphProperties)
     {
-        if (anchors.Count == 0) return [];
+        WordTextStyle style = WordParagraphFormats.ResolveRun(
+            _styles, paragraphProperties, box.RunProperties, _theme, _tableStyleRun, _fontTable);
+
+        if (Face(style) is not { } face) return null;
+
+        LineMetrics metrics = LineSpacing.Resolve(face, _metrics, WriterLineBox.LeadingAboveText);
+        Length side = metrics.ScaledLineHeight(style.Size);
+        if (side <= CheckBoxInset + CheckBoxInset) return null;
+
+        return new PageFrame
+        {
+            Size = new Core.Geometry.DocSize(side, side),
+            Anchor = Layout.FrameAnchor.AsCharacter,
+            AnchorOffset = box.Offset,
+            InlineAscent = metrics.ScaledAscent(style.Size),
+            BorderColour = Colour.Black,
+            BorderWidth = CheckBoxStroke,
+            BorderInset = CheckBoxInset,
+            IsCrossed = box.IsChecked,
+        };
+    }
+
+    /// <summary>How far inside the portion the box is stroked — <c>DrawCheckBox</c>'s own 25 twips.</summary>
+    private static readonly Length CheckBoxInset = Length.FromTwips(25);
+
+    /// <summary>
+    /// The hairline the reference strokes it with — the 0.1 pt its PDF writer sets for a nought-width pen.
+    /// </summary>
+    private static readonly Length CheckBoxStroke = Length.FromPoints(0.1);
+
+    /// <summary>A legacy form checkbox, and where in the paragraph's text it sits.</summary>
+    /// <param name="Offset">The anchor character it stands behind.</param>
+    /// <param name="RunProperties">The <c>w:rPr</c> of the run holding its <c>w:fldChar</c>.</param>
+    /// <param name="IsChecked">Whether it is ticked, so that it is crossed as well as bordered.</param>
+    private sealed record CheckBoxAnchor(int Offset, XElement? RunProperties, bool IsChecked);
+
+    private List<PageFrame> FramesOf(
+        List<FrameAnchor> anchors,
+        List<CheckBoxAnchor> checkBoxes,
+        XElement? paragraphProperties)
+    {
+        if (anchors.Count == 0 && checkBoxes.Count == 0) return [];
 
         List<PageFrame> frames = [];
+
+        foreach (CheckBoxAnchor box in checkBoxes)
+        {
+            if (CheckBoxFrame(box, paragraphProperties) is { } drawn) frames.Add(drawn);
+        }
 
         foreach (FrameAnchor anchor in anchors)
         {
@@ -1482,6 +1647,22 @@ public sealed partial class DocxLayoutSource
         /// <summary>The floating frames anchored in the paragraph, with the offsets they sit at.</summary>
         internal List<FrameAnchor> Frames => _frames;
 
+        /// <summary>The legacy form checkboxes in the paragraph, with the offsets they sit at.</summary>
+        internal List<CheckBoxAnchor> CheckBoxes => _checkBoxes;
+
+        private readonly List<CheckBoxAnchor> _checkBoxes = [];
+
+        /// <summary>Whether a <c>w:checkBox</c> is ticked.</summary>
+        /// <remarks>
+        /// <c>w:checked</c> is the field's current state and <c>w:default</c> is what it reverts to, so
+        /// the first wins where both are present and the second answers where only it is. Both are
+        /// OOXML on/off toggles, so a bare element means true.
+        /// </remarks>
+        private static bool IsChecked(XElement checkBox)
+            => Word.Child(checkBox, "checked") is { } current
+                ? Word.IsOn(current)
+                : Word.Child(checkBox, "default") is { } fallback && Word.IsOn(fallback);
+
         /// <summary>Walks a <c>w:p</c>.</summary>
         /// <param name="paragraph">The paragraph element.</param>
         /// <param name="citation">
@@ -1532,6 +1713,21 @@ public sealed partial class DocxLayoutSource
                         switch (type)
                         {
                             case "begin":
+                                // A legacy form field states what it is on its `begin` marker, in a
+                                // `w:ffData`. A checkbox is the one kind that *draws*: Writer makes it a
+                                // portion a square of the line's text height wide, so it takes room on
+                                // the line as well as putting a box on the page. Recorded before the
+                                // instruction opens, because opening it suppresses every emit.
+                                if (_hidden == 0
+                                    && Word.Child(Word.Child(child, "ffData"), "checkBox")
+                                        is { } checkBox)
+                                {
+                                    _checkBoxes.Add(
+                                        new CheckBoxAnchor(
+                                            _builder.Length, _runProperties, IsChecked(checkBox)));
+                                    Emit(AnchorCharacter.ToString());
+                                }
+
                                 _inInstruction = true;
                                 if (_fields.Count < MaxDepth) _fields.Push(new OpenField());
                                 break;
@@ -1896,7 +2092,7 @@ public sealed partial class DocxLayoutSource
 
     private OpenTypeFace? Face(WordTextStyle text)
     {
-        (string? Family, int Weight, bool Italic) key = text.FaceKey;
+        (string? Family, int Weight, bool Italic, FontFamilyClass Class) key = text.FaceKey;
         if (_faces.TryGetValue(key, out OpenTypeFace? cached)) return cached;
 
         OpenTypeFace? face = null;
@@ -1909,7 +2105,14 @@ public sealed partial class DocxLayoutSource
             // Its ODF filter *does* honour `style:font-pitch`, so this is a difference between the
             // two importers rather than a property of the resolver, and passing the pitch here put
             // one corpus document into DejaVu Sans Mono that the reference sets in DejaVu Sans.
-            FontFamilyClass declared = _fontTable.ShapeOf(text.FamilyName).Class;
+            //
+            // And a family the table says nothing about is not undeclared as far as the *filter* is
+            // concerned: it takes Writer's roman default, which is why an unrecognised family drawn
+            // through this filter comes out DejaVu Serif where the same name through the ODF filter
+            // comes out whatever fontconfig files it under. See `WordFallbackClass`, and
+            // `probes/words-r54/font-fallback-rule.py` for the 98 files that measure it.
+            FontFamilyClass declared = WordFallbackClass.ForDeclared(
+                text.FamilyName, text.DeclaredClass);
 
             FontReference reference = _fonts.Resolve(
                 new FontRequest(

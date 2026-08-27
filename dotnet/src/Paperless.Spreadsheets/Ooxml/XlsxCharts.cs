@@ -44,6 +44,10 @@ internal static class XlsxCharts
         ArgumentNullException.ThrowIfNull(package);
         if (sheetPartName is null || package is not OpcPackage opc) yield break;
 
+        // Once per sheet rather than once per chart: it reads docProps/app.xml, and it decides
+        // only the c:autoTitleDeleted default. See DrawingChartTitle.
+        bool office2007 = OoxmlMetadata.IsOffice2007(opc);
+
         foreach (OpcXml.Relationship relationship in opc.GetRelationshipsByType(
                      OoxmlNamespaces.Relationships + "/drawing", sheetPartName))
         {
@@ -78,7 +82,8 @@ internal static class XlsxCharts
                     chartSpace = OoxmlXml.TryLoad(content, out _);
 
                 if (chartSpace is null) continue;
-                if (DrawingChart.Read(chartSpace, ranges) is { } section) yield return section;
+                if (DrawingChart.Read(chartSpace, ranges, office2007) is { } section)
+                    yield return section;
             }
         }
     }

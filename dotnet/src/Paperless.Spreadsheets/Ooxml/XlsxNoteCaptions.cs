@@ -42,9 +42,30 @@ namespace Paperless.Spreadsheets.Ooxml;
 /// <strong>The anchor's offsets are screen pixels, not EMUs.</strong>
 /// <c>ShapeAnchor::importVmlAnchor</c> sets <c>CellAnchorType::Pixel</c>
 /// (<c>sc/source/filter/oox/drawingbase.cxx:152-155</c>) and <c>calcCellAnchorEmu</c> scales them
-/// through <c>Unit::ScreenX</c>, which is 96 per inch. Checked against LibreOffice 24.2.7.2's own
-/// export of the workbook above: all four of its shown captions come back within two hundredths of
-/// a millimetre of the rectangle this arithmetic produces, and the CSS rectangle is out by inches.
+/// through <c>Unit::ScreenX</c>, which is 96 per inch.
+/// </para>
+/// <para>
+/// [24.2.7-audit: VERIFIED 2026-08-21, round sheets-r57 — 96 dpi exactly on 26.2.4.2, with the
+/// control first and a slope over three steps.] <c>probes/sheets-r57/audit_vmlanchor.py</c>:
+/// eight 60 pt rows and one shown comment whose anchor's row offset is the only thing that
+/// varies. The control — offset 0 against a row-2 anchor — puts the exported annotation at
+/// <strong>119.988 pt</strong> against the 120.0 the row grid alone predicts, so the fixture is
+/// read correctly before any law is fitted; the offsets 20, 40 and 60 px then step the annotation
+/// by <strong>14.998, 14.998 and 14.990 pt</strong>, which is 96.0, 96.0 and 96.1 implied dots
+/// per inch. Seventy-two would have given 20 pt a step and EMUs nothing.
+/// </para>
+/// <para>
+/// <strong>And a rule the site did not state, which authoring the probe exposed: 26.2.4.2 clamps
+/// the offset to the anchored cell's own extent.</strong> A row offset of 200 or 400 px into a
+/// 60 pt (80 px) row both land on exactly the next row's top — 179.885 pt against a row-3 top of
+/// 180.0 — and <c>XlsxVml.ParseAnchor</c> converts the offset without clamping it. <strong>Recorded
+/// and not implemented</strong>, because the clamp needs the sheet's grid at anchor-resolution
+/// time and because the corpus barely exercises it:
+/// <c>probes/sheets-r57/census-vmlclamp.py</c> resolves each VML part to its own worksheet and
+/// finds <strong>5 anchors of 365, in one document of fifteen</strong>
+/// (<c>023_Waterfall_Chart_Template_for_Excel</c>), overshooting their own cell, the worst by 20 %.
+/// The first cut of that census answered <em>zero</em> because it compared every anchor against
+/// the tallest row anywhere in the workbook — a bound generous enough that nothing can exceed it.
 /// </para>
 /// <para>
 /// <strong>One known difference, and it is in the height.</strong> Calc freezes the caption's size
@@ -62,19 +83,10 @@ internal static class XlsxNoteCaptions
     private const string RelationshipNamespace =
         "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
 
-    private const string VmlNamespace = OoxmlNamespaces.Vml;
+    private const string VmlNamespace = XlsxVml.Namespace;
 
     /// <summary>The <c>x:</c> namespace, VML's Excel extensions.</summary>
-    private const string VmlExcelNamespace = "urn:schemas-microsoft-com:office:excel";
-
-    /// <summary>How many of a VML anchor's pixels make an inch.</summary>
-    /// <remarks>
-    /// <c>UnitConverter</c>'s <c>Unit::ScreenX</c>, which is the reference device's resolution and
-    /// is 96 on every platform Calc runs headless on. Measured rather than assumed: an anchor
-    /// stating a row offset of 111 pixels comes back as 83.25 pt in the flat-ODF export, and
-    /// 111 / 96 x 72 is 83.25 exactly.
-    /// </remarks>
-    private const double PixelsPerInch = 96;
+    private const string VmlExcelNamespace = XlsxVml.ExcelNamespace;
 
     /// <summary>The fill Excel gives a comment caption when its VML states none.</summary>
     private static readonly Colour DefaultFill = Colour.FromRgb(0xFFFFE1);
@@ -194,12 +206,12 @@ internal static class XlsxNoteCaptions
                 if (column is not { } atColumn || row is not { } atRow) continue;
 
                 string? anchor = client.Element(XName.Get("Anchor", VmlExcelNamespace))?.Value;
-                if (ParseAnchor(anchor) is not { } placed) continue;
+                if (XlsxVml.ParseAnchor(anchor) is not { } placed) continue;
 
                 shapes[(atColumn, atRow)] = new NoteShape(
                     placed.From,
                     placed.To,
-                    IsVisible(shape.Attribute("style")?.Value),
+                    XlsxVml.IsVisible(shape.Attribute("style")?.Value),
                     Fill(shape.Attribute("fillcolor")?.Value));
             }
         }
@@ -214,32 +226,6 @@ internal static class XlsxNoteCaptions
             ? value
             : null;
 
-    /// <summary>
-    /// Whether a VML shape's style says it is shown.
-    /// </summary>
-    /// <remarks>
-    /// A shape stating no <c>visibility</c> at all is shown, which is CSS's own default and what
-    /// <c>ShapeTypeModel</c> initialises <c>mbVisible</c> to
-    /// (<c>oox/source/vml/vmlshape.cxx</c>, <c>ShapeTypeModel::ShapeTypeModel</c>).
-    /// </remarks>
-    private static bool IsVisible(string? style)
-    {
-        if (style is null) return true;
-
-        foreach (string declaration in style.Split(';'))
-        {
-            int colon = declaration.IndexOf(':', StringComparison.Ordinal);
-            if (colon < 0) continue;
-
-            if (!declaration.AsSpan(0, colon).Trim().Equals("visibility", StringComparison.Ordinal))
-                continue;
-
-            return !declaration.AsSpan(colon + 1).Trim().Equals("hidden", StringComparison.Ordinal);
-        }
-
-        return true;
-    }
-
     /// <summary>A VML <c>fillcolor</c>, or null when it names nothing this understands.</summary>
     private static Colour? Fill(string? value)
     {
@@ -253,42 +239,6 @@ internal static class XlsxNoteCaptions
             ? Colour.FromRgb(rgb)
             : null;
     }
-
-    /// <summary>
-    /// The eight comma-separated numbers of an <c>x:Anchor</c>, as two cell points.
-    /// </summary>
-    /// <remarks>
-    /// The order is column, column offset, row, row offset, twice —
-    /// <c>ShapeAnchor::importVmlAnchor</c> assigns them in exactly that sequence
-    /// (<c>drawingbase.cxx:157-172</c>) — which is <em>not</em> the row-first order the
-    /// <c>x:Row</c> and <c>x:Column</c> elements above it are written in.
-    /// </remarks>
-    private static (SheetCellPoint From, SheetCellPoint To)? ParseAnchor(string? anchor)
-    {
-        if (anchor is null) return null;
-
-        string[] parts = anchor.Split(',');
-        if (parts.Length < 8) return null;
-
-        Span<int> values = stackalloc int[8];
-        for (int at = 0; at < 8; at++)
-        {
-            if (!int.TryParse(parts[at].Trim(), NumberStyles.Integer,
-                              CultureInfo.InvariantCulture, out values[at]))
-            {
-                return null;
-            }
-        }
-
-        if (values[0] < 0 || values[2] < 0 || values[4] < 0 || values[6] < 0) return null;
-
-        return (new SheetCellPoint(values[0], Pixels(values[1]), values[2], Pixels(values[3])),
-                new SheetCellPoint(values[4], Pixels(values[5]), values[6], Pixels(values[7])));
-    }
-
-    /// <summary>A screen pixel offset as a length.</summary>
-    private static Length Pixels(int pixels)
-        => Length.FromInches(pixels / PixelsPerInch);
 
     /// <summary>
     /// A comment's rich text as the paragraphs of a caption.

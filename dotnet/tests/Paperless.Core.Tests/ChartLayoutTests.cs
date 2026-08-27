@@ -47,7 +47,7 @@ public class ChartLayoutTests
     public void AGridlineIsDrawnAcrossThePlotAreaAtEveryMajorTick()
     {
         ChartDrawing without = Place(Bars());
-        ChartDrawing with = Place(Bars() with { ValueGrid = Colour.FromRgb(0xB3B3B3) });
+        ChartDrawing with = Place(Bars() with { ValueGrid = new ChartGrid(Colour.FromRgb(0xB3B3B3)) });
 
         // Ten ticks on the corpus scale, so ten more lines and no other change.
         with.Lines.Count.ShouldBe(without.Lines.Count + 10);
@@ -227,5 +227,175 @@ public class ChartLayoutTests
 
         // The type is stretched with everything else, so a 10 pt label is drawn at 5 pt.
         half.Labels.ShouldAllBe(label => label.Size <= Length.FromPoints(7));
+    }
+
+    /// <summary>A pie whose data labels are single unbreakable tokens of a stated width.</summary>
+    /// <remarks>
+    /// One token and no spaces on purpose: <c>LinesOf</c> leaves a word wider than the whole
+    /// allowance whole rather than breaking it, so the label's block width is the same at both
+    /// candidate first-pass radii and the *only* thing that decides whether it fits inside its
+    /// slice is the radius. A label with spaces re-wraps as the radius changes and hides exactly
+    /// the difference these tests are about.
+    /// </remarks>
+    private static ChartPlot TokenLabelPie(int glyphs) => new()
+    {
+        Kind = ChartPlotKind.Pie,
+        Categories = ["A", "B", "C", "D"],
+        Series =
+        [
+            new ChartSeries("s", [1.0, 1.0, 1.0, 1.0], Colour.Black)
+            {
+                Label = new ChartDataLabel
+                {
+                    Text = new string('A', glyphs),
+                    Placement = ChartLabelPlacement.BestFit,
+                },
+            },
+        ],
+    };
+
+    /// <summary>
+    /// A pie's first pass is drawn at a fraction of the diagram, not at the whole of it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>VDiagram::reduceToMinimumSize</c> shrinks the diagram to <c>round(side / 2.2)</c> before
+    /// any series exists, and the axis-label pass that would normally grow it straight back is
+    /// guarded by <c>!bIsPieOrDonut</c> — so on a pie the best-fit labels of pass 1 are laid out
+    /// around a radius of 63.7 pt on this 400x300 frame, not 140.1.
+    /// </para>
+    /// <para>
+    /// <strong>This is a discriminator and not a golden number.</strong> A twenty-glyph token is
+    /// 100 pt wide under the <see cref="Ruler"/>: its diagonal clears
+    /// <c>0.975 x 140.1 = 136.6</c> and so would fit inside its own quarter slice at the full
+    /// radius, and does not clear <c>0.975 x 63.7 = 62.1</c> at the reduced one. Modelling pass 1
+    /// at full size therefore consumes exactly the diagram and shrinks nothing; modelling it at
+    /// the reduced size pushes all four labels outside and the pie comes out materially smaller.
+    /// The four-glyph control is the same chart with a label that fits at either radius, and it
+    /// must not shrink at all.
+    /// </para>
+    /// <para>
+    /// On the corpus this is worth the whole of round 60's open item:
+    /// <c>003_advanced_excel_pie</c>'s pie moves from centre (382.80, 467.68) radius 104.70 to
+    /// (408.81, 464.81) radius 100.01, against the reference's (408.84, 464.74) and 99.78 —
+    /// 26.04 pt of centre error down to 0.03, on all four corpus pies at once.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void APiesFirstPassIsLaidOutAtOneTwoPointTwothOfTheDiagram()
+    {
+        ChartDrawing control = Place(TokenLabelPie(4));
+        ChartDrawing shrunk = Place(TokenLabelPie(20));
+
+        // The control's labels fit inside their slices at either radius, so nothing is consumed
+        // outside the diagram and the pie keeps the whole square.
+        control.PlotArea.Height.ShouldBe(control.DiagramArea.Height);
+
+        // The twenty-glyph one does not fit at the reduced radius. Under a full-sized first pass
+        // it would fit, and this assertion would read `ShouldBe` rather than `ShouldBeLessThan`.
+        shrunk.PlotArea.Height.ShouldBeLessThan(control.PlotArea.Height);
+
+        // And it is a real shrink rather than a rounding: better than a tenth off the square.
+        (shrunk.PlotArea.Height.Points / control.PlotArea.Height.Points).ShouldBeLessThan(0.9);
+
+        // A pie stays square through the shrink — `calculateNewSizeRespectingAspectRatio` takes
+        // the smaller factor and `Squared` re-centres what is left.
+        shrunk.PlotArea.Width.ShouldBe(shrunk.PlotArea.Height);
+    }
+
+    /// <summary>The reduced first pass is centred on the diagram, not offset with it.</summary>
+    /// <remarks>
+    /// <c>reduceToMinimumSize</c> puts its rectangle at <c>(x + w, y + h)</c> — down and to the
+    /// right of the diagram's own corner, and *not* centred — and then
+    /// <c>adjustPosAndSize</c> squares it, which re-centres only the longer axis. The observable
+    /// consequence is that a pie whose labels all overflow comes out shifted; on the corpus that
+    /// shift is what takes <c>003</c>'s centre x from 382.80 to 408.81 against 408.84. Here it is
+    /// enough to pin that the shrunk pie has moved and is still inside the diagram.
+    /// </remarks>
+    [Fact]
+    public void AShrunkPieStaysInsideTheDiagramItWasReducedFrom()
+    {
+        ChartDrawing shrunk = Place(TokenLabelPie(20));
+
+        shrunk.PlotArea.Left.ShouldBeGreaterThanOrEqualTo(shrunk.DiagramArea.Left);
+        shrunk.PlotArea.Top.ShouldBeGreaterThanOrEqualTo(shrunk.DiagramArea.Top);
+        shrunk.PlotArea.Right.ShouldBeLessThanOrEqualTo(shrunk.DiagramArea.Right);
+        shrunk.PlotArea.Bottom.ShouldBeLessThanOrEqualTo(shrunk.DiagramArea.Bottom);
+    }
+
+    /// <summary>
+    /// A main title's first line starts a flat 135 plus its own text-shape inset below the two
+    /// per cent.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>lcl_createTitle</c> (<c>ChartView.cxx:1058-1069</c>) puts a <c>MAIN_TITLE</c> shape's
+    /// top at <c>rRemainingSpace.Y + int(pageHeight x 0.02) + 135</c> hundredths of a millimetre,
+    /// and <c>ShapeFactory::createText</c> (<c>ShapeFactory.cxx:2283-2286</c>) then insets the
+    /// text inside the shape by <c>round(fontHeight_mm100 x 0.30)</c>.
+    /// </para>
+    /// <para>
+    /// Measured on 26.2.4.2 rather than argued: <c>probes/sheets-r61/probe-titlepos.py</c> renders
+    /// eighteen one-variable rewrites of <c>003_advanced_excel_pie</c>'s chart part — nine sizes
+    /// from 6 to 36 pt, bold and regular — and <c>y_ours - y_ref</c> tracked
+    /// <c>(135 + round(0.30 x size)) / 100 mm</c> across the whole range with no free parameter.
+    /// Both terms were already in <c>DiagramAreaOf</c>'s reservation and neither was in the pen,
+    /// which is why the title sat 9.57 pt high on every chart in the corpus.
+    /// </para>
+    /// <para>
+    /// <strong>A drift guard, not a law test</strong> — it restates the arithmetic. What gives it
+    /// teeth is that dropping either term fails it, which is what
+    /// <c>verify-test.sh</c> was pointed at.
+    /// </para>
+    /// </remarks>
+    [Theory]
+    [InlineData(6.0)]
+    [InlineData(10.0)]
+    [InlineData(13.0)]
+    [InlineData(18.0)]
+    [InlineData(36.0)]
+    public void AMainTitlesFirstLineClearsTheFlatGapAndItsOwnUpperInset(double points)
+    {
+        Length size = Length.FromPoints(points);
+        ChartDrawing drawing = Place(Bars() with { Title = "Title", TitleSize = size });
+
+        ChartLabel title = drawing.Labels.Single(label => label.Text == "Title");
+
+        Length expected =
+            Frame.Y
+            + (Frame.Height * 0.02)
+            + Length.FromMm100(135)
+            + Length.FromMm100((long)Math.Round(size.Mm100 * 0.30, MidpointRounding.AwayFromZero))
+            + (size * 1.15 / 2);
+
+        title.At.Y.ShouldBe(expected);
+    }
+
+    /// <summary>The title is drawn inside the band the layout kept for it.</summary>
+    /// <remarks>
+    /// The reservation in <c>DiagramAreaOf</c> has carried the flat 135 and the 0.30 inset since
+    /// the layout was written; the pen carried neither until round 61, so the two disagreed by
+    /// exactly those terms and the title was drawn above the band that was reserved. This asserts
+    /// the property that failure violated, at four sizes, and it is the reason the fix could not
+    /// be a fitted constant: the constant is already in the tree, twice, and was simply not being
+    /// applied on the drawing path.
+    /// </remarks>
+    [Theory]
+    [InlineData(6.0)]
+    [InlineData(13.0)]
+    [InlineData(18.0)]
+    [InlineData(36.0)]
+    public void AMainTitleIsDrawnInsideTheBandTheDiagramReservedForIt(double points)
+    {
+        Length size = Length.FromPoints(points);
+        ChartDrawing drawing = Place(Bars() with { Title = "Title", TitleSize = size });
+
+        ChartLabel title = drawing.Labels.Single(label => label.Text == "Title");
+
+        Length top = title.At.Y - (size * 1.15 / 2);
+        Length bottom = title.At.Y + (size * 1.15 / 2);
+
+        top.ShouldBeGreaterThan(Frame.Y + (Frame.Height * 0.02));
+        bottom.ShouldBeLessThanOrEqualTo(drawing.DiagramArea.Top);
     }
 }

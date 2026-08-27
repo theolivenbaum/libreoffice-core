@@ -870,7 +870,11 @@ public sealed partial class DocxContentReader
         using (Stream content = part.Open()) chartSpace = OoxmlXml.TryLoad(content, out _);
 
         if (chartSpace is null) return false;
-        if (DrawingChart.Read(chartSpace) is not { } section) return false;
+        if (DrawingChart.Read(chartSpace, ranges: null, _file.IsOffice2007)
+            is not { } section)
+        {
+            return false;
+        }
 
         _hoisted.Add(section);
         return true;

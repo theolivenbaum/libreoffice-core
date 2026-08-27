@@ -130,6 +130,28 @@ public sealed record ChartDataLabel
     public bool ShowSeries { get; init; }
 
     /// <summary>
+    /// Whether a copy of the legend key is drawn to the left of the text —
+    /// <c>c:showLegendKey</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>DataPointLabel::ShowLegendSymbol</c>. <c>VSeriesPlotter::createDataLabel</c> builds the
+    /// key at <c>int(fontHeight × 0.6)</c> in hundredths of a millimetre and then moves the text
+    /// aside by <c>keyWidth + max(100, fontHeight × 0.22)</c> —
+    /// <c>VSeriesPlotter.cxx:1090-1110</c>, <c>:1420-1450</c>. On a 10 pt label that is a
+    /// <strong>5.98 pt</strong> square and an <strong>8.818 pt</strong> shift, both measured on
+    /// <c>003_advanced_excel_pie</c>'s reference rendering to the hundredth.
+    /// </para>
+    /// <para>
+    /// It is not decoration: the key is part of the label's bounding box, and the pie's best-fit
+    /// placement decides whether a label goes inside or outside its slice from exactly that box.
+    /// Omitting it makes every best-fit label 8.8 pt narrower than the reference measures it and
+    /// changes which side of the test it falls on.
+    /// </para>
+    /// </remarks>
+    public bool ShowLegendKey { get; init; }
+
+    /// <summary>
     /// What joins the shown fields.
     /// </summary>
     /// <remarks>

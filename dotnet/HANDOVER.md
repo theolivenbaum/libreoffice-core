@@ -70,6 +70,11 @@ merge, verify, record and re-dispatch**, one agent per track, indefinitely.
 Repository on `claude/paperless-odf-phase-1-rnyzcu`, pushed. Scoreboards measured at HEAD, not
 inherited from a round's report.
 
+> **Superseded by the 2026-08-19 sweep — read § 3a below before quoting any figure in this
+> section.** The corpus grew from 534 to 946 documents and the whole scoreboard was re-measured.
+> The per-track tables in § 3 and § 8 are the *pre-growth* record and are kept because the
+> refutations and mechanisms attached to them are still live; the counts are not.
+
 | track | verdicts |
 |---|---:|
 | words | **155 / 200** |
@@ -125,6 +130,67 @@ this way produced three findings, two previously unrecorded. See §9: the user's
 decks found **17 in a single class no gate column can see**.
 
 ---
+
+## 3a. The 2026-08-19 sweep, and the corpus growth that preceded it
+
+The corpus grew to **946 documents** (words 337, slides 302, sheets 307) with the addition of the
+`chartset-*` batches — 300 documents of chart-bearing and template material across all three
+tracks. Every batch was then swept against **26.2.4.2** and `MANIFEST.tsv` refreshed from it.
+
+| track | passing | of |
+|---|---:|---:|
+| words | 300 | 337 |
+| sheets | 265 | 307 |
+| slides | 198 | 302 |
+| **total** | **763** | **946** |
+
+What landed in that round: `batch-check.sh` measuring every in-scope extension rather than
+thirteen of thirty-four (two `.xlsm` were silently unmeasured); DrawingML `a:rPr/@cap`;
+`headerFooter/@differentFirst`; floating VML shapes and their text boxes.
+
+### Three findings from it that will mislead a round that does not know them
+
+**A real fix that moves no verdict.** `a:rPr/@cap` was a genuine defect — the reference drew
+`LOREM IPSUM` where we drew `Lorem Ipsum` — and fixing it moved **zero** gate verdicts, because
+the gate counts *words* and upper-casing a word does not change how many there are. The round
+predicted 20 documents and got none. **Do not go looking for the missing verdicts.** Character
+identity over the 100 new decks went 50/100 → 67/100, which is the only measurement that can see
+it. This is § 4's blind-spot rule arriving in its purest form yet.
+
+**Most of the slides failure pool is a measurement ceiling.** Those decks carry `spc="150"`
+letter spacing from their masters; LibreOffice positions each glyph separately enough that
+`pdftotext` splits *inside* words — `2-Way` extracts as `2` + `-W` + `ay` — so the reference is
+credited three tokens where we get one. 1585 phantom words. **Our output is the better one.**
+They are filed `kind=ceiling` in the manifest. No code change wins them; the honest reading of
+the new decks is 72 of 100 correct in content, not 12. The standing risk is the mirror of it:
+a *misfiled* ceiling hides a real defect behind a label that tells every future round not to
+look, so sample the class and re-check it rather than inheriting it.
+
+**Stored status decays.** `MANIFEST.tsv` was 41 rows behind a fresh sweep, all of them
+*understating* progress, and four were named open problems in the task list that earlier commits
+had already closed (`orbus_togaf_tool_csq.xls` 75/75, `sectors-defense-and-aerospace.xlsx`
+449/449, `grants-2005.xls` 201/201, `SIL_TDB648.xlsx` 90/90). **Re-sweep before trusting the
+manifest** — this is § 7's "stored evidence decays silently" with the manifest itself as the
+victim.
+
+### The method that found every fix in that round
+
+Not the gate. For each failing document, strip **all** whitespace from both `pdftotext`
+extractions and compare the characters that remain. That separates "we drew different text" from
+"we drew the same text and `pdftotext` tokenised it differently", and it is what turned an
+undifferentiated pile of 162 failures into four named mechanisms. It is sixty lines of shell and
+it is the first thing to run on any word-count failure.
+
+Then look for clusters in the **size** of the gap. Six sheets workbooks failing by exactly four
+words was `Page 1 of 1`. Seven words documents at exactly zero words was floating VML.
+
+### Two operational rules the round added
+
+- **Never `git add -A`.** This mount reports symlink size as 0, so git sees 57 symlinks as
+  emptied and staging everything replaces them with empty files. Stage explicit paths, then
+  verify `git ls-files -s <paths> | awk '$1=="120000"'` prints nothing.
+- **A session has a subagent cap** (200 was hit). Three parallel tracks is the intended shape;
+  budget the reviewers accordingly rather than discovering the ceiling mid-round.
 
 ## 4. The corpus and the gate
 
@@ -316,6 +382,67 @@ defect?"** A direct comparison of two font lists fired on 45% of matching docume
 *real* defect on half the corpus. A high rate on matching documents means the gate is blind to the
 class, which is worth knowing and is the opposite of a reason to drop it.
 
+### Two blind readers agreeing is weaker evidence than this project has been treating it as
+
+`page-vision` says a class showing up in several unrelated readings is worth more than one
+showing up in three pages a single reader looked at, and § 9 records the user's visual reports
+outperforming every metric. Both are true. But a round dispatched on the strength of *two blind
+reviewers, on unrelated documents, independently reporting "the reference draws a legend and we
+draw none"* found that neither observation meant what the agreement implied:
+
+- On `003_advanced_excel_pie` **both sides draw a five-entry legend** — on page 2. `--worst`
+  selects page 1, and the "legend swatch" the reviewer described there is the reference's M1 data
+  label. The round's own fresh reviewer, given the same image, **reproduced the misreading**, which
+  is what identifies it as the instrument rather than the reader.
+- On `057_Simple_balance_sheet` the observation is real but the mechanism is not selection at all:
+  the chart *declares* `<c:legend legendPos="b">`. Its series carry no `c:tx`, so the entries are
+  LibreOffice-synthesised `Column C` / `Column D` names — a naming hypothesis, not a selection one.
+
+**The agreement was on a description, not on a mechanism.** Two readers can produce the same
+sentence about two different causes, and one of them can be an artefact of which page the tooling
+chose to show. So:
+
+- Ask reviewers for **direction and location**, then check that the two reports are about the same
+  *object* before treating them as corroboration.
+- **A reading is an observation, never a diagnosis** — that is already in `page-vision`, and this
+  is what it costs when the step from one to the other is skipped.
+- When a reading is going to launch a round, **re-derive it from a page you chose for a stated
+  reason**, not from `--worst`. `--worst` ranks by ink and the largest ink difference on a document
+  is frequently not the defect being discussed.
+
+**And the positive control, so this is not read as "distrust blind readers".** One round later,
+two reviewers on unrelated documents *and unrelated pages, neither chosen by `--worst`*, named the
+same object — the reference's green slicer advisories, absent from ours — and `pdftotext` confirmed
+it independently at 3/2/1 against 0. Real, and it became one of that round's two shipped fixes.
+
+**And the mirror, found by the parent looking at a page directly on 2026-08-21 after the user asked
+whether vision was actually being used.** Three reviewers, over three rounds, reported *"the
+reference draws a legend and we draw none"* on one page. Three rounds refuted it — correctly, on
+the words used: **both sides draw the five-entry legend, on page 2.** The item was closed each time.
+
+**The readers were right about the observation and wrong about the name.** The reference draws a
+**legend-key swatch beside every data label** — `pdf-ops.py` counts 10 small filled rects on the
+reference's page 1 against our 5, the extra six sitting at the label positions in their series
+colours — from `c:showLegendKey val="1"`, which our source consults **only inside an existence
+test** and never draws. **62** elements in 5 documents, all sheets.
+
+**And the parent's own census of that figure was wrong, by the trap the parent had been warning
+every round about.** It first reported **68**, because the walk counted
+`003_advanced_excel_pie.XLSX` and `.xlsx` — one inode, two names — as two documents. The
+per-document listing beside it *had* case-folded and so read correctly at 5 documents; only the
+total summed over raw walked paths. The sheets round caught it within the hour. **Case-fold at the
+point you accumulate, not only at the point you print.**
+
+**A refutation of the description is not a refutation of the observation.** And the *recurrence* was
+itself the signal: one sentence from three independent readers across three rounds is evidence that
+something real is there, not evidence of a reliably-wrong reviewer. When a reading keeps coming back
+after being refuted, re-read the page rather than the refutation.
+
+**The discriminator is not the number of readers.** It is: are the reports about the *same object*;
+was the page chosen for a stated reason rather than by maximum ink; and does a *different
+instrument* confirm it. All three held there and none held in the false case. `--worst` ranks by ink and the largest ink difference on a document
+  is frequently not the defect being discussed.
+
 ### An instrument can manufacture a defect out of nothing
 
 `pdf-ops.py` anchored a stroke at its top-left corner, and the left and top edges of a rectangle
@@ -347,6 +474,19 @@ Two related traps, and the second was hit while merging the last three rounds.
 cross-track sweep by checking `dotnet/src` out at the base commit, and a following `git add -A`
 committed the revert. Twice. The branch held the round's tests and results with **none of its
 code**, and `git status` was clean throughout.
+
+**`git checkout <commit> -- <path>` writes the index too, so an A/B measurement leaves a staged
+revert behind.** This is a third route to the same destination and it was hit on 2026-08-20 while
+measuring a shared-layer change's cross-track reach. The before-leg checks the base version of the
+changed files out; the restore afterwards — done correctly, `cp` + `touch`, exactly as prescribed —
+makes `git diff HEAD` empty and rebuilds the right binary, while the **index still holds the base
+blob**. `git status --short` prints `MM`, which reads as ordinary local edits. Commit there and the
+round's own fix is reverted into the branch, with the full test suite green because it ran against
+the correct binary. Assert it away in the script rather than hoping to notice:
+
+```sh
+git diff --cached --stat -- <files>    # must be empty; `git reset HEAD -- <files>` if not
+```
 
 **The shell's working directory is not where the last `cd` put it.** A merge session ran
 `cd <primary> && git merge …` and then issued the next two merges with no `cd`. Both landed on the
@@ -466,10 +606,58 @@ foot of the page rather than assuming it, is the model.
   at all. We were honouring a table style the reference never resolved, setting cell text on a
   13.45 pt pitch against the reference's 15.45. **7/8 → match.** Also refuted there: that
   LibreOffice puts `w:docDefaults` *above* a table style — six authored variants say it does not.
-- **249 legacy `FORMCHECKBOX` fields across 16 documents** — established, deliberately not
+- ~~**249 legacy `FORMCHECKBOX` fields across 16 documents** — established, deliberately not
   implemented: the drawn square's size would not pin (9.0…15.9 pt, not following
-  `w:checkBox/w:size`; LibreOffice's own arithmetic gives 3.53 mm where the square measures
-  3.175 mm) and 12 of the 16 currently match.
+  `w:checkBox/w:size`).~~ **Both halves refuted and implemented, round 56.** The census is **675
+  boxes in 12 documents**, all `.docx`, counted over every part of every package. And the size pins
+  exactly: the portion is a square of `rInf.GetTextHeight()` with the line's own ascent
+  (`portxt.cxx`:1492) and the drawn rectangle is that square deflated by a hard **25 twips a side**
+  (`inftxt.cxx`:1247), crossed when ticked. **9.0…15.9 pt was a range of font sizes read as a
+  failure to pin**, and `w:checkBox/w:size` — which 109 of the 675 state — is inert on four values
+  from 5 to 40 pt. Drawn and, more to the point, *charged to the line*: 249/249, 152/152 and 48/48
+  squares against the reference on the three densest documents, sides identical to 0.000 pt, with
+  zero verdicts and zero page counts moved. **Censused in round 58**: the `.doc` arm is 103 boxes
+  in 4 documents and the `.rtf` arm has no witness in this corpus. Neither is implemented.
+- **Synthetic oblique was lost a *second* time, at glyph fallback — fixed, round 58, in
+  `Paperless.Text`.** `IGlyphFallbackResolver.ReferenceFor` is a reverse lookup from a face with no
+  request to compare against, so a run whose glyph came from a fallback face was drawn upright
+  however italic it was. Measured over **six** filters (`.docx`, `.fodt`, `.fodp`, `.fods`,
+  `.pptx`, `.xlsx`) on 41 authored two-run packages, four negative controls at nought on both sides
+  in all six. **The reference does not go looking for an italic face**: Hebrew from an italic
+  Carlito run is drawn in DejaVu Sans *sheared*, not in Liberation Sans Italic upright — so the
+  fallback order was already right and only the lean was missing. Reach measured, not argued:
+  words 2 renderings, slides 0, sheets 1; zero verdicts on all three tracks.
+- **The rest of the fallback-lean gap is two different things, and a summing census hid it.**
+  Per face (`probes/words-r58/fallbackfaces.py`): of the reference's 289 leaning glyphs in faces no
+  words document names, **206 are reachable** (we draw the same face, upright) and **83 are not**
+  (we do not draw that face at all — `1228841571067…doc` 74, `1257259179492…doc` 9, a
+  fallback-*order* divergence). On slides the split is **0 reachable and 341 unreachable**:
+  `outlook_of_nigerian_pension_sector.ppt` draws 355 WenQuanYi Zen Hei glyphs on the reference and
+  **none at all** on ours. A census that summed the fallback faces together read that as a lean
+  defect and predicted 345 glyphs of movement where the true answer was nought.
+- **164 of the 206 reachable glyphs are list bullets, and the label is a different seat.**
+  OpenSymbol's whole 112-glyph column across ten documents is single `<01>` draws one per line at
+  the left margin, which reach the page through `PageDrawing`'s label branch and never through
+  `ByFace`. The rule is pinned (`probes/words-r58/label-and-autocolour.py`, five authored
+  packages with a control): **the level's own `w:rPr` leans the bullet, the paragraph mark's
+  `w:rPr` leans it, a run's `w:rPr` does not.** We lean it in none of the three. Not implemented.
+- **`AFS-050-004-F2_0i.docx` page 2's banner rows are present, painted, and the wrong colour.**
+  The question the standing record could not answer — present-but-unpainted or never-read — is
+  answered: **neither.** Both strings are in our text layer at the reference's positions; the
+  reference draws **305 glyphs `1 1 1 rg`** on that page and we draw **none**, because we do not
+  resolve an automatic font colour against a dark cell fill. The rule is pinned exactly over 22
+  fills: **white when `Color::IsDark()`, which is `GetWCAGLuminance() <= 87`** — confirmed to the
+  single sRGB step, grey `0x9E` white and `0x9F` black, and correct on all seven primaries too.
+  Not implemented: it needs the *background behind a run* at the drawing pass, which the table
+  renderer owns and `PageDrawing.RunsIn` cannot see. The same page also shows three shaded header
+  cells the reference fills and we do not (8 filled rectangles against our 5).
+- **The `FORMCHECKBOX` corpus census is now complete: 778 boxes in 16 documents.** Round 56's
+  "675 in 12, a floor" is closed. The `.doc` arm is **103 boxes in 4 documents** — `f111.doc` 58,
+  `1528364855.doc` 37, `foca_form_1.doc` 4, `LHD-230-…-aircraftr.doc` 4 — by **two independent
+  instruments that agree to the digit**: a byte search for `FORMCHECKBOX` in both WW8 text
+  encodings, and LibreOffice's own reader via `.doc` → `.docx` counted by round 56's rule. **The
+  `.rtf` arm needs no probe at all: the words corpus holds no `.rtf`** — 271 `.docx` and 66
+  `.doc` — so it has zero witnesses. `probes/words-r58/doc-checkbox-census.py`.
 - **An ODF end-of-paragraph inline object contributes no height** — measured and reproducing, not
   fixed; the fix needs a line list `MeasureLine` does not have, and no ODF document is in this
   track.

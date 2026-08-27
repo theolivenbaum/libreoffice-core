@@ -1,8 +1,32 @@
 using System.Globalization;
 using System.Xml.Linq;
 using Paperless.Core.Graphics;
+using Paperless.Core.Units;
 
 namespace Paperless.Ooxml.DrawingML;
+
+/// <summary>
+/// Which piece of a chart's furniture an automatic <em>line</em> is being asked about.
+/// </summary>
+/// <remarks>
+/// <c>ObjectFormatter</c> keeps one automatic-format table per object kind
+/// (<c>oox/source/drawingml/chart/objectformatter.cxx:215-234</c>) and the three that matter to a
+/// plot's furniture differ only in the tint they put on <c>tx1</c>. They are named rather than
+/// folded into one because the minor grid's table has a different style split — 1…40 and 41…48
+/// against the other two's 1…32 and 33…48 — so a single table would be right for two of them and
+/// silently wrong for the third above style 32.
+/// </remarks>
+public enum ChartAutoLine
+{
+    /// <summary>The axis line itself — <c>spAxisLines</c>.</summary>
+    Axis,
+
+    /// <summary>An axis' major gridlines — <c>spMajorGridLines</c>.</summary>
+    MajorGrid,
+
+    /// <summary>An axis' minor gridlines — <c>spMinorGridLines</c>.</summary>
+    MinorGrid,
+}
 
 /// <summary>
 /// Which object a chart's automatic formatting is being asked about.
@@ -14,6 +38,18 @@ public enum ChartAutoObject
 
     /// <summary>A series drawn as an area — bar, pie, area. Its colour is its fill.</summary>
     FilledSeries,
+}
+
+/// <summary>
+/// Which of a chart's two framed backgrounds an automatic fill is being asked about.
+/// </summary>
+public enum ChartAutoFrame
+{
+    /// <summary>The whole chart object's background — <c>spChartSpaceFill</c>.</summary>
+    ChartSpace,
+
+    /// <summary>The two-dimensional plot area's wall — <c>spPlotArea2dFills</c>.</summary>
+    PlotArea,
 }
 
 /// <summary>
@@ -147,6 +183,36 @@ public static class DrawingChartAutoFormat
         .. FadedAccents(43, 100),
     ];
 
+    /// <summary><c>spAxisLines</c>: an axis line's colour, by chart style.</summary>
+    /// <remarks>
+    /// <c>objectformatter.cxx:215-220</c>. The comment beside both rows in the real table is
+    /// "tint not documented!?" — it is what LibreOffice does, and it is what 26.2.4.2 draws.
+    /// </remarks>
+    private static readonly AutoFormatEntry[] AxisLines =
+    [
+        Single(1, 32, "tx1", "tint", 75000),
+        Single(33, 48, "dk1", "tint", 75000),
+    ];
+
+    /// <summary><c>spMajorGridLines</c>: a major gridline's colour, by chart style.</summary>
+    /// <remarks><c>objectformatter.cxx:222-227</c>; the same two rows as the axis line.</remarks>
+    private static readonly AutoFormatEntry[] MajorGridLines =
+    [
+        Single(1, 32, "tx1", "tint", 75000),
+        Single(33, 48, "dk1", "tint", 75000),
+    ];
+
+    /// <summary><c>spMinorGridLines</c>: a minor gridline's colour, by chart style.</summary>
+    /// <remarks>
+    /// <c>objectformatter.cxx:229-234</c>. <strong>Its style split is not the other two's</strong>
+    /// — 1…40 and 41…48, and both rows name <c>tx1</c> rather than falling back to <c>dk1</c>.
+    /// </remarks>
+    private static readonly AutoFormatEntry[] MinorGridLines =
+    [
+        Single(1, 40, "tx1", "tint", 50000),
+        Single(41, 48, "tx1", "tint", 90000),
+    ];
+
     /// <summary><c>spFilledSeriesLines</c>: the outline of a filled series, by chart style.</summary>
     /// <remarks>
     /// Invisible for every style below 33 except 9 to 16, which outline in <c>lt1</c>. That is why
@@ -162,6 +228,71 @@ public static class DrawingChartAutoFormat
         .. AccentsModified(35, "shade", 50000),
         Invisible(41, 48),
     ];
+
+    /// <summary><c>spChartSpaceFill</c>: the chart object's own background, by chart style.</summary>
+    /// <remarks><c>objectformatter.cxx:174-180</c>.</remarks>
+    private static readonly AutoFormatEntry[] ChartSpaceFills =
+    [
+        Single(1, 32, "bg1", null, 0),
+        Single(33, 40, "lt1", null, 0),
+        Single(41, 48, "dk1", null, 0),
+    ];
+
+    /// <summary><c>spPlotArea2dFills</c>: the plot area's wall, by chart style.</summary>
+    /// <remarks>
+    /// <c>objectformatter.cxx:190-197</c>. The <c>tint</c> on the two dark rows carries the
+    /// source's own comment, "tint not documented!?" — it is what LibreOffice does.
+    /// </remarks>
+    private static readonly AutoFormatEntry[] PlotAreaFills =
+    [
+        Single(1, 32, "bg1", null, 0),
+        Single(33, 34, "dk1", "tint", 20000),
+        .. AccentsModified(35, "tint", 20000),
+        Single(41, 48, "dk1", "tint", 95000),
+    ];
+
+    /// <summary>
+    /// The background a chart space or a plot area takes when it states no <c>c:spPr</c>, or null
+    /// when it takes none.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>Below style 33 a pptx chart has no automatic background at all, and that is a
+    /// quirk rather than a table row.</strong> <c>ObjectTypeFormatter</c>'s constructor overrides
+    /// the fill *style* for exactly these two object types when the chart style is 32 or less —
+    /// <c>maFillFormatter.setAutoFill(rData.mrFilter.getGraphicHelper().getDefaultChartAreaFillStyle())</c>,
+    /// <c>objectformatter.cxx:956-959</c> — and <c>PptGraphicHelper</c> answers <c>XML_noFill</c>
+    /// (<c>oox/source/ppt/pptimport.cxx:309-312</c>) where the base helper answers
+    /// <c>XML_solidFill</c> (<c>oox/source/helper/graphichelper.cxx:139-142</c>). The source's own
+    /// comment on it is "this seems to be an undocumented quirk in the OOXML spec".
+    /// </para>
+    /// <para>
+    /// So the <c>bg1</c> row is reachable only from a workbook or a document, where it paints the
+    /// page's own white over a white page. This returns null for it rather than a colour: it is
+    /// today's behaviour on all three tracks, it is right for the format that holds 160 of the
+    /// corpus' 163 slides charts, and the two rows that <em>are</em> implemented — 33 and up —
+    /// are the ones that put ink on a page which has none today. The corpus states a style above
+    /// 32 on exactly three chart parts, all of them 42:
+    /// <c>8_P-Pavese_AIRBUS-ATB-journee-CRATB.pptx</c> and <c>DynamicBubbleChart.xlsx</c>.
+    /// </para>
+    /// <para>
+    /// Measured on Pavese's page 8: the reference paints <c>#000000</c> over the whole chart
+    /// object, 720 x 391 pt, and <c>#454545</c> over the plot wall, 640 x 292 pt, and this reader
+    /// painted neither — 72% of the page.
+    /// </para>
+    /// </remarks>
+    /// <param name="style">The chart's <c>c:style/@val</c>.</param>
+    /// <param name="what">Which of the two backgrounds.</param>
+    /// <param name="theme">The theme the scheme names resolve against.</param>
+    public static Colour? FrameFillOf(int style, ChartAutoFrame what, DrawingTheme? theme)
+    {
+        if (style <= 32) return null;
+
+        AutoFormatEntry[] table =
+            what == ChartAutoFrame.ChartSpace ? ChartSpaceFills : PlotAreaFills;
+
+        return Entry(table, style) is { } entry ? Resolve(entry, 0, 0, theme) : null;
+    }
 
     /// <summary>
     /// The colour a series takes when it states none, as a <c>a:solidFill</c>, or null for none.
@@ -246,6 +377,76 @@ public static class DrawingChartAutoFormat
             if (DrawingColour.Read(child)?.Resolve(theme) is { } resolved) return resolved;
 
         return placeholder;
+    }
+
+    /// <summary>
+    /// The colour a chart's axis line or gridline takes when it states none.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>It is a tint of the theme's <c>tx1</c>, put through the theme's subtle line
+    /// style — and the second half is what makes the numbers come out.</strong> A tint of 75000
+    /// on a black <c>tx1</c> is <c>0x8B8B8B</c> on its own; the reference draws a major gridline
+    /// <c>0x666666</c>, because <c>LineFormatter</c> substitutes that tint for the <c>phClr</c>
+    /// inside <c>Theme::getLineStyle(THEMED_STYLE_SUBTLE)</c> and every theme Office ships wraps
+    /// a <c>shade 50000</c> around it. See <see cref="ThroughSubtleLineStyle"/>.
+    /// </para>
+    /// <para>
+    /// Five arms on one deck, patching one thing at a time and rendering each on 26.2.4.2 —
+    /// theme <c>dk1</c> black, then <c>2050C0</c>, then <c>FFFFFF</c>:
+    /// </para>
+    /// <code>
+    ///   tx1        major     minor
+    ///   000000    #666666   #8B8B8B
+    ///   2050C0    #676E9C   #8B8FA7
+    ///   FFFFFF    #BCBCBC   #BCBCBC
+    /// </code>
+    /// <para>
+    /// The white arm is the one that decides it: a tint of white is white whatever the tint, so
+    /// two different tints can only collapse onto one value if something after them is doing the
+    /// darkening — and <c>shade 50000</c> of white is <c>0xBCBCBC</c> exactly. A constant grey,
+    /// which is what this reader drew before, cannot produce the middle row at all.
+    /// </para>
+    /// </remarks>
+    /// <param name="what">Which piece of furniture is being asked about.</param>
+    /// <param name="style">The chart's <c>c:style/@val</c>.</param>
+    /// <param name="theme">The theme <c>tx1</c> and <c>dk1</c> resolve against.</param>
+    /// <param name="styles">The theme's format matrix, or null to leave the tint raw.</param>
+    public static Colour? LineColourOf(
+        ChartAutoLine what, int style, DrawingTheme? theme, DrawingStyleMatrix? styles)
+    {
+        AutoFormatEntry[] table = what switch
+        {
+            ChartAutoLine.Axis => AxisLines,
+            ChartAutoLine.MajorGrid => MajorGridLines,
+            _ => MinorGridLines,
+        };
+
+        if (Entry(table, style) is not { } entry) return null;
+        if (Resolve(entry, 0, 0, theme) is not { } placeholder) return null;
+
+        return ThroughSubtleLineStyle(placeholder, styles, theme);
+    }
+
+    /// <summary>
+    /// How wide an automatic line is: the theme's subtle line style, at the stated percentage.
+    /// </summary>
+    /// <remarks>
+    /// <c>LineFormatter</c>'s constructor multiplies the themed line's width by
+    /// <c>mnRelLineWidth / 100</c> (<c>objectformatter.cxx:850-853</c>), and every furniture entry
+    /// states 100. Measured by patching the theme's own <c>a:lnStyleLst</c> first entry and
+    /// re-rendering: 9525 EMU draws every gridline and axis line at 0.73 pt, 38100 draws them at
+    /// 3.00 and 4763 at 0.37 — <c>round(EMU / 360)</c> hundredths of a millimetre, to the
+    /// hundredth of a point in all three.
+    /// </remarks>
+    /// <param name="styles">The theme's format matrix, or null.</param>
+    /// <param name="relative">The entry's relative width, in percent.</param>
+    public static Length AutomaticLineWidth(DrawingStyleMatrix? styles, int relative = 100)
+    {
+        if (styles?.LineStyle(SubtleStyleIndex) is not { } line) return Length.Zero;
+        if (Drawing.Number(line, "w") is not { } emu || emu <= 0) return Length.Zero;
+
+        return Length.FromEmu(emu * relative / 100);
     }
 
     /// <summary>
