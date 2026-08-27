@@ -226,8 +226,9 @@ internal static class DocxFrames
 
         (Length x, FrameHorizontalOrigin horigin, FrameHorizontalAlignment halign) = Horizontal(anchor);
         (Length y, FrameVerticalOrigin vorigin, FrameVerticalAlignment valign) = Vertical(anchor);
-        (Colour? fill, Colour? line, Length lineWidth) =
-            Appearance(ShapeProperties(placed), context.Theme);
+        XElement? shapeProperties = ShapeProperties(placed);
+        (Colour? fill, Colour? line, Length lineWidth) = Appearance(shapeProperties, context.Theme);
+        (bool isLine, bool isLineMirrored) = LineGeometry(shapeProperties);
 
         return new PageFrame
         {
@@ -236,6 +237,8 @@ internal static class DocxFrames
             BorderColour = line,
             BorderWidth = lineWidth,
             BehindText = BehindText(anchor, context),
+            IsLine = isLine,
+            IsLineMirrored = isLineMirrored,
             Anchor = anchor is null ? FrameAnchor.AsCharacter : FrameAnchor.Paragraph,
             AnchorOffset = anchorOffset,
             Wrap = anchor is null ? TextWrap.Through : WrapOf(anchor),
@@ -248,6 +251,7 @@ internal static class DocxFrames
             Spacing = Spacing(placed),
             IsImage = box is null && chart.Plot is null,
             Image = picture.Raster,
+            Crop = picture.Crop,
             Vector = picture.Vector,
             Chart = chart.Plot,
             ChartFontFamily = chart.Family,
@@ -401,6 +405,7 @@ internal static class DocxFrames
             : FramePicture.None;
 
         (Colour? fill, Colour? line, Length lineWidth) = Appearance(properties, context.Theme);
+        (bool isLine, bool isLineMirrored) = LineGeometry(properties);
 
         return envelope with
         {
@@ -410,6 +415,8 @@ internal static class DocxFrames
             BorderWidth = lineWidth,
             GroupSize = size,
             GroupOffset = new DocPoint(within.X, within.Y),
+            IsLine = isLine,
+            IsLineMirrored = isLineMirrored,
 
             // The envelope keeps the anchor's wrap; a member must not punch a hole of its own, or a
             // nineteen-shape letterhead would narrow the text nineteen times over.
@@ -417,6 +424,7 @@ internal static class DocxFrames
             Spacing = default,
             IsImage = box is null,
             Image = picture.Raster,
+            Crop = picture.Crop,
             Vector = picture.Vector,
             Chart = null,
             ChartFontFamily = null,
@@ -819,6 +827,48 @@ internal static class DocxFrames
     /// nested drawing of its own — so this reads the shape asked about and not one inside its text.
     /// </remarks>
     private static XElement? ShapeProperties(XElement placed) => Descendant(placed, "spPr");
+
+    /// <summary>
+    /// Whether a shape's outline is its box's diagonal rather than its four sides, and which
+    /// diagonal.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>a:prstGeom prst="line"</c> and <c>prst="straightConnector1"</c> are the two presets
+    /// LibreOffice turns into a straight connector — <c>Shape::createAndInsert</c> maps
+    /// <c>XML_line</c> and <c>XML_straightConnector1</c> to <c>ConnectorType_LINE</c>
+    /// (<c>oox/source/drawingml/shape.cxx</c>:2124-2127) — which is drawn corner to opposite
+    /// corner of the shape's own rectangle. Word writes a flowchart's arrows exactly this way, as
+    /// a <c>wps:wsp</c> whose non-visual properties are a <c>wps:cNvCnPr</c> and whose extent is
+    /// often zero in one dimension.
+    /// </para>
+    /// <para>
+    /// Drawing the box instead puts three sides on the page that are not in the file, which is
+    /// what this path did: measured on an authored one-line document, LibreOffice drew a red
+    /// diagonal and Paperless a red rectangle. The VML and Escher front ends already model it —
+    /// see <see cref="Layout.PageFrame.IsLine"/> — so only the DrawingML reading was missing.
+    /// </para>
+    /// <para>
+    /// The flips choose the diagonal, and the pair of them cancels: a shape flipped in both
+    /// directions is the same line it started as, rotated by half a turn.
+    /// </para>
+    /// </remarks>
+    private static (bool IsLine, bool IsMirrored) LineGeometry(XElement? properties)
+    {
+        if (properties is null) return (false, false);
+
+        string? preset = Child(properties, "prstGeom")?.Attribute("prst")?.Value;
+        if (preset is not ("line" or "straightConnector1")) return (false, false);
+
+        XElement? transform = Child(properties, "xfrm");
+        bool flipH = IsTrue(transform?.Attribute("flipH")?.Value);
+        bool flipV = IsTrue(transform?.Attribute("flipV")?.Value);
+
+        return (true, flipH ^ flipV);
+
+        // DrawingML's booleans, which are "1"/"true" and their negatives rather than w:val's.
+        static bool IsTrue(string? value) => value is "1" or "true" or "on";
+    }
 }
 
 /// <summary>

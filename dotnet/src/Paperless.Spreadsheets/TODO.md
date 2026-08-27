@@ -2404,7 +2404,10 @@ Not yet, and why:
 - **The paper size default is locale-dependent and A4 is assumed.** Calc's is
   `SvxPaperInfo::GetDefaultPaperSize()`, which is Letter in an American locale; the same missing
   locale infrastructure that keeps the two built-in number-format tables apart is what keeps this
-  from being answered properly.
+  from being answered properly. Note that the *Word-family* filters are a different question with a
+  different answer, now implemented: `SectionPropertyMap`'s constructor inserts `PAPER_LETTER`
+  unconditionally, so a DOCX or RTF stating no page size is Letter on a machine whose Writer default
+  is A4 — see `PageGeometry.Letter`. Only Calc's own default goes through the locale.
 - ~~**`SkipEmpty` is not implemented.**~~ **This was wrong twice over and is now done.** The claim
   was that the option is off unless a caller passes it "and its PDF export does not". Both halves
   are false: `ScPrintOptions::SetDefaults` sets `bSkipEmpty = true`

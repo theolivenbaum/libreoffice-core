@@ -246,7 +246,22 @@ internal static class XlsxDrawings
         // already the one place the element's three wrappers — `a:`, `p:` and `xdr:blipFill` — are
         // known to carry identical content. See `SheetDrawing.Opacity`.
         DrawingBlipFill? fill = DrawingFill.ReadBlip(blipFill);
-        drawing = drawing with { Opacity = fill?.Opacity ?? 1 };
+
+        // `a:srcRect`: the fraction of each edge of the source the picture throws away, which is
+        // what BIFF states as Escher properties 256-259 and this side did not read. LibreOffice
+        // turns both into the same `text::GraphicCrop` against the graphic's original size and
+        // leaves the anchor where it is (`oox/source/drawingml/fillproperties.cxx`:844-873), so the
+        // surviving part fills the anchored box. `SheetPageGraphics` already does that arithmetic
+        // for the BIFF path.
+        drawing = drawing with
+        {
+            Opacity = fill?.Opacity ?? 1,
+            Crop = fill is null || fill.SourceRect.IsWhole
+                ? PictureCropFractions.None
+                : new PictureCropFractions(
+                    fill.SourceRect.Left, fill.SourceRect.Top,
+                    fill.SourceRect.Right, fill.SourceRect.Bottom),
+        };
 
         (RasterImage? raster, Lazy<VectorImage>? vector) =
             LoadImage(package, images, choice.RelationshipId);

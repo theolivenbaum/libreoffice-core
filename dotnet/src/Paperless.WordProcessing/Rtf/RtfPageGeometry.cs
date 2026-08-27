@@ -219,7 +219,10 @@ internal sealed class RtfPageGeometry
 
         internal WritingSection ToSection()
         {
-            PageMargins fallback = PageMargins.Default;
+            // RTF and DOCX share `SectionPropertyMap`, so they share its defaults: Letter with
+            // one-inch margins, whatever the machine's own default paper is. See
+            // `PageGeometry.Letter`.
+            PageMargins fallback = PageGeometry.Letter.Margins;
 
             Core.Units.Length top = Top is { } t ? Length.FromTwips(t) : fallback.Top;
             Core.Units.Length bottom = Bottom is { } b ? Length.FromTwips(b) : fallback.Bottom;
@@ -242,10 +245,10 @@ internal sealed class RtfPageGeometry
                     Size = new DocSize(
                         Width is { } w
                             ? Model.PaperSizes.SloppyFit(Length.FromTwips(w))
-                            : PageGeometry.Default.Size.Width,
+                            : PageGeometry.Letter.Size.Width,
                         Height is { } h
                             ? Model.PaperSizes.SloppyFit(Length.FromTwips(h))
-                            : PageGeometry.Default.Size.Height),
+                            : PageGeometry.Letter.Size.Height),
                     Margins = new PageMargins(
                         Left is { } l ? Length.FromTwips(l) : fallback.Left,
                         Right is { } r ? Length.FromTwips(r) : fallback.Right,

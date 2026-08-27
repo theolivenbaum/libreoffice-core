@@ -3,6 +3,7 @@ using Paperless.Containers;
 using Paperless.Containers.Ooxml;
 using Paperless.Core.Charts;
 using Paperless.Core.Diagnostics;
+using Paperless.Core.Geometry;
 using Paperless.Core.Graphics;
 using Paperless.Ooxml;
 using Paperless.Ooxml.DrawingML;
@@ -105,13 +106,29 @@ public sealed class DocxPictures
         // transform only to a GraphicType::Bitmap — see ColourKnockout.
         DrawingBlipFill? fill = DrawingFill.ReadBlip(blip.Parent);
 
+        // `a:srcRect`: the fraction of each edge of the source image the frame throws away. It is
+        // a property of the fill, not of the frame — LibreOffice turns it into a `text::GraphicCrop`
+        // measured against the graphic's own original size and leaves the frame where it is
+        // (`oox/source/drawingml/fillproperties.cxx`:844-873), so the surviving part is stretched
+        // to fill the frame. That is what `PictureCropFractions` states, and what the `.doc` path
+        // already produces from Escher properties 256-259.
+        PictureCropFractions crop = fill is null || fill.SourceRect.IsWhole
+            ? PictureCropFractions.None
+            : new PictureCropFractions(
+                fill.SourceRect.Left, fill.SourceRect.Top,
+                fill.SourceRect.Right, fill.SourceRect.Bottom);
+
         FramePicture KnockedOut(FramePicture picture)
-            => picture.Vector is null
-               && picture.Raster is { } raster
-               && DrawingPictureEffects.Knockout(fill, theme: null, raster.EncodedBytes.Span)
-                      is { } knockout
-                ? picture with { Raster = raster with { Knockout = knockout } }
-                : picture;
+        {
+            FramePicture cropped = crop.IsNone ? picture : picture with { Crop = crop };
+
+            return cropped.Vector is null
+                   && cropped.Raster is { } raster
+                   && DrawingPictureEffects.Knockout(fill, theme: null, raster.EncodedBytes.Span)
+                          is { } knockout
+                ? cropped with { Raster = raster with { Knockout = knockout } }
+                : cropped;
+        }
 
         if (choice.RelationshipId is { } chosen)
         {

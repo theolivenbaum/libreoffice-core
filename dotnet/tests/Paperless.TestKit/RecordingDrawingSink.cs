@@ -119,6 +119,20 @@ public sealed class RecordingDrawingSink : IDrawingSink
             : default;
     }
 
+    /// <summary>Every point a path visits, in order, with a close contributing none.</summary>
+    private static List<DocPoint> PointList(GraphicsPath path)
+    {
+        List<DocPoint> points = [];
+        foreach (PathCommand command in path.Commands)
+        {
+            if (command.Verb == PathVerb.Close) continue;
+
+            points.AddRange(Points(command));
+        }
+
+        return points;
+    }
+
     private static IEnumerable<DocPoint> Points(PathCommand command)
     {
         yield return command.Point;
@@ -135,7 +149,7 @@ public sealed class RecordingDrawingSink : IDrawingSink
         ArgumentNullException.ThrowIfNull(path);
 
         _current?.Strokes.Add(stroke);
-        _current?.StrokedPaths.Add(new DrawnStroke(Bounds(path), stroke));
+        _current?.StrokedPaths.Add(new DrawnStroke(Bounds(path), stroke, PointList(path)));
     }
 
     /// <inheritdoc/>
@@ -231,10 +245,20 @@ public sealed record DrawnPage(DocSize Size)
 /// <param name="Paint">What it was filled with.</param>
 public readonly record struct DrawnFill(DocRect Bounds, Paint Paint);
 
-/// <summary>One recorded stroked path, as its bounding box and the pen it was stroked with.</summary>
+/// <summary>One recorded stroked path, as its geometry and the pen it was stroked with.</summary>
 /// <param name="Bounds">The path's extent; for a straight line, the line.</param>
 /// <param name="Stroke">The pen it was stroked with.</param>
-public readonly record struct DrawnStroke(DocRect Bounds, Stroke Stroke);
+/// <param name="Points">
+/// The path's points in order, which is what tells two shapes with the same extent apart: a
+/// rectangle and either of its diagonals share a bounding box, and only the point list says which
+/// was drawn.
+/// </param>
+public readonly record struct DrawnStroke(
+    DocRect Bounds, Stroke Stroke, IReadOnlyList<DocPoint> Points)
+{
+    /// <summary>A stroke recorded before its points were kept.</summary>
+    public DrawnStroke(DocRect bounds, Stroke stroke) : this(bounds, stroke, []) { }
+}
 
 /// <summary>One recorded glyph run and the paint it was drawn with.</summary>
 /// <param name="Run">The run.</param>

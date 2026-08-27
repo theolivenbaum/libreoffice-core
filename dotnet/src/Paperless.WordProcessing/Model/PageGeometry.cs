@@ -127,7 +127,28 @@ public sealed record PageGeometry
     /// <summary>A4 portrait with 2 cm margins, which is what a blank Writer document is.</summary>
     public static PageGeometry Default { get; } = new();
 
-    /// <summary>US Letter portrait with one-inch margins, Word's default in an American locale.</summary>
+    /// <summary>
+    /// US Letter portrait with one-inch margins: what a Word-family filter starts a section from
+    /// before the document has stated anything.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// This is <em>not</em> the locale's paper. <c>SectionPropertyMap</c>'s constructor
+    /// (<c>sw/source/writerfilter/dmapper/PropertyMap.cxx</c>:459-467) builds a
+    /// <c>PaperInfo aLetter( PAPER_LETTER )</c> and inserts its width and height unconditionally,
+    /// with all four margins at one inch (<c>:429-434</c>) — so every DOCX and RTF that states no
+    /// page size gets Letter on a machine whose own default is A4. The locale-dependent
+    /// <c>SvxPaperInfo::GetDefaultPaperSize()</c> governs a *new* Writer document
+    /// (<c>lcl_DefaultPageFormat</c>, <c>sw/source/core/doc/docdesc.cxx</c>:80), which is a
+    /// different question and a different answer.
+    /// </para>
+    /// <para>
+    /// Measured on 24.2.7.2 in a container whose own default is A4, which is what separates the two:
+    /// a <c>.txt</c> converted through Writer comes out A4, while an RTF with no <c>\paperw</c> and a
+    /// DOCX with no <c>w:sectPr</c> both come out 612×792 pt with text starting at 72.1 pt. Reaching
+    /// for A4 here put 13 corpus RTFs on the wrong paper and reflowed every line in them.
+    /// </para>
+    /// </remarks>
     public static PageGeometry Letter { get; } = new()
     {
         Size = new DocSize(Length.FromTwips(12240), Length.FromTwips(15840)),
