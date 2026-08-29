@@ -38,6 +38,25 @@ using IDocument doc = PaperlessDocument.Open("deck.pptx");
 IPageSequence pages = ((IPaginatedDocument)doc).Layout();
 new RasterRenderer(new RasterRenderOptions { Dpi = 150 })
     .RenderToPng(pages[0], File.Create("slide1.png"));
+
+// Or, for a workbook, write it as HTML instead of drawing it: one table per sheet, in the
+// shape Calc's own HTML filter writes. The document paints its own ground and follows the
+// reader's colour scheme, while the sheet keeps the white paper its colours were chosen
+// against - so it stays legible dropped into a page of any colour.
+using IDocument book = PaperlessDocument.Open("report.xlsx");
+SpreadsheetPages sheets = (SpreadsheetPages)((IPaginatedDocument)book).Layout();
+
+SheetHtmlWriter.Write(sheets, File.Create("report.html"));
+
+// Or as the workbook's own shape - a strip of tabs, one sheet at a time. Still one
+// self-contained file, and no script: the switching is a radio group and two CSS rules,
+// so it survives a sandboxed frame and a policy that admits no inline script. It prints
+// as every sheet.
+SheetHtmlWriter.Write(sheets, File.Create("tabbed.html"), new SheetHtmlOptions
+{
+    Navigation = SheetHtmlNavigation.Tabs,
+    IdPrefix   = "report",   // names the radio group, so two workbooks can share a page
+});
 ```
 
 Format is always determined from **content**, not the file extension.
@@ -56,7 +75,7 @@ Format is always determined from **content**, not the file extension.
 | `Paperless.OpenDocument` | Shared ODF: styles, common attributes, flat XML |
 | `Paperless.MsBinary` | Shared legacy binary: Escher, OLE property sets, codepages |
 | `Paperless.WordProcessing` | Writer-equivalent formats |
-| `Paperless.Spreadsheets` | Calc-equivalent formats, including the formula engine |
+| `Paperless.Spreadsheets` | Calc-equivalent formats, the formula engine, and the HTML export |
 | `Paperless.Presentations` | Impress-equivalent formats |
 
 Reference only what you need: a service that indexes spreadsheets pulls in neither the

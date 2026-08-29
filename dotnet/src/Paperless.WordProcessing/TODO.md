@@ -2015,6 +2015,33 @@ is read and verified, so what remains is the filling of pages rather than the me
     right-to-left paragraph has to state its alignment physically — `fo:text-align="right"`, `\qr`,
     `w:jc w:val="start"` — or it is comparing two versions rather than two engines. The corpus
     document says so in its own comment.
+- **The Word-family font fallback is environment-specific, and the rule here encodes one
+  environment.** `WordFallbackClass` states that DOCX, DOC and RTF answer DejaVu Serif for a family
+  nobody has, because `SvxFontItem`'s family defaults to `FAMILY_ROMAN` and
+  `FontConfigManager::Substitute` appends `"serif"` to the pre-match. Measured on a **second**
+  container — LibreOffice 24.2.7.2, a 67-font set with the metric-alias configuration installed —
+  every one of those answers is different: an RTF naming `Helvetica` renders in **Liberation Sans**,
+  one naming `Courier` in **Liberation Mono**, and an unknown family in **DejaVu Sans**. The
+  mechanism is visible in `fc-match` itself: there `fc-match "Helvetica:serif"` answers Liberation
+  Sans, so fontconfig's own metric alias beats the appended generic and the chain is what the binary
+  ends up using. On the reference environment it evidently does not.
+  So the two measurements are both right about their own machines and the rule cannot be a constant.
+  Deciding it needs the pre-match modelled as a *query* — the name plus the generic, asked of the
+  installed configuration, which is what `FontconfigPreferences` already reads — rather than a
+  recorded answer. Left alone deliberately: the recorded answer is the one the reference corpus was
+  scored against, and changing it on the strength of a different container would move 29 `.doc`
+  documents that round 55 measured. It is the whole of the residual on `lorem-ipsum.rtf`-shaped
+  files: with the font forced to one both engines resolve identically, Paperless reproduces
+  LibreOffice's page **exactly** — 504 words, first baseline 72.4 pt, last 687.6 pt, one page.
+
+- **An anchored shape's *paragraph* can be in the wrong place even when the shape is not.**
+  On a flowchart document of 27 `wp:anchor` shapes positioned `relativeFrom="paragraph"`, every
+  shape's `x` and `width` match the reference exactly and every `y` is 20-33 pt low, growing down
+  the page. The offsets are read correctly, so what differs is where the anchoring paragraphs sit —
+  a cascade from line heights, not a frame-positioning bug. Worth attacking from the paragraph side
+  (the document is CJK, so its empty paragraphs' line heights are the suspect) rather than from the
+  anchor side.
+
 - [ ] A rasteriser and a PDF writer. `Paperless.Rendering`'s two backends are still stubs; the display
       list they consume is now real, which is the half that had to come first.
 

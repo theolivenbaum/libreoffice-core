@@ -33,10 +33,12 @@ namespace Paperless.Spreadsheets.Tests;
 /// image brings a 10% crop back as 0.0990.
 /// </para>
 /// <para>
-/// The <c>.xlsx</c> half of the pair is <b>not</b> cropped by this round — the SpreadsheetML
-/// reader still drops <c>a:srcRect</c> — and the test below says so rather than leaving it
-/// untested, because the pair existing is what will catch the two paths disagreeing when it is
-/// wired.
+/// <b>Both halves of the pair are cropped, and each is the other's check.</b> The SpreadsheetML
+/// reader dropped <c>a:srcRect</c> when this file was written and the test below pinned it in
+/// that state; <c>XlsxDrawings</c> now reads it into the same <see cref="SheetDrawing.Crop"/> the
+/// Escher path fills. LibreOffice reaches one answer from both spellings too — <c>oox</c> turns
+/// <c>a:srcRect</c> into a <c>text::GraphicCrop</c> against the graphic's original size
+/// (<c>fillproperties.cxx</c>:844-873) — so what the pair is for is the two paths agreeing.
 /// </para>
 /// </remarks>
 public sealed class SheetPictureCropTests
@@ -60,12 +62,24 @@ public sealed class SheetPictureCropTests
     }
 
     /// <summary>
-    /// The SpreadsheetML half states the same crop as <c>a:srcRect</c> and it is not read. Pinned
-    /// as the state it is in, so the fix shows up as a move off this answer.
+    /// The SpreadsheetML half states the same crop as <c>a:srcRect</c>, and reads it.
     /// </summary>
+    /// <remarks>
+    /// Exact where the BIFF half is not: <c>a:srcRect</c> is stated in thousandths of a percent
+    /// of the source, where BIFF export restates the crop in the bitmap's own pixels and brings
+    /// it back a little off.
+    /// </remarks>
     [Fact]
-    public void TheSameCropOnTheXlsxPathIsNotReadYet()
-        => Only("picture-crop.xlsx").Crop.IsNone.ShouldBeTrue();
+    public void TheSrcRectReachesTheModelOnTheXlsxPath()
+    {
+        SheetDrawing drawing = Only("picture-crop.xlsx");
+
+        drawing.Crop.IsNone.ShouldBeFalse("a crop was read");
+        drawing.Crop.Left.ShouldBe(0.10, 0.0001);
+        drawing.Crop.Top.ShouldBe(0.20, 0.0001);
+        drawing.Crop.Right.ShouldBe(0.30, 0.0001);
+        drawing.Crop.Bottom.ShouldBe(0.40, 0.0001);
+    }
 
     // ------------------------------------------------------------------ the rectangle drawn
 
@@ -83,30 +97,45 @@ public sealed class SheetPictureCropTests
     }
 
     /// <summary>
-    /// The offset follows the crop rather than the size: the whole picture starts 10% of its own
-    /// width to the left of the anchor and 20% of its own height above it.
+    /// The visible part lands at the anchor: the whole picture starts 10% of its own width to the
+    /// left of it and 20% of its own height above it, in both formats.
     /// </summary>
-    [Fact]
-    public void TheWholePictureStartsAboveAndLeftOfTheAnchor()
+    /// <remarks>
+    /// This is what distinguishes a crop from a resize — the anchor's box is where the surviving
+    /// part goes, and the picture grows outside it — so it is asserted against the anchor's own
+    /// 288 × 216 pt rather than against the other fixture.
+    /// </remarks>
+    [Theory]
+    [InlineData("picture-crop.xls")]
+    [InlineData("picture-crop.xlsx")]
+    public void TheVisiblePartOfThePictureLandsAtTheAnchor(string name)
     {
-        DocRect anchor = OnlyImageOf("picture-crop.xlsx");
-        DocRect destination = OnlyImageOf("picture-crop.xls");
+        DocRect destination = OnlyImageOf(name);
 
-        (anchor.Left - destination.Left).Points.ShouldBe(48, 1.5);
-        (anchor.Top - destination.Top).Points.ShouldBe(108, 1.5);
+        (0.6 * destination.Width.Points).ShouldBe(FrameWidthPoints, 1.0, name);
+        (0.4 * destination.Height.Points).ShouldBe(FrameHeightPoints, 1.0, name);
     }
 
     /// <summary>
-    /// The uncropped half is drawn at exactly its anchor, which is what makes the figures above
-    /// differences rather than absolutes and is why the pair is read on both paths.
+    /// The two formats crop to the same rectangle, which is the pair's reason for existing.
     /// </summary>
+    /// <remarks>
+    /// A point and a half of tolerance rather than a fiftieth, and the two halves are genuinely
+    /// that far apart: the OOXML crop is exact where the BIFF one is the bitmap's pixels rounded
+    /// — 479.57 × 539.41 pt against a nominal 480 × 540, which is LibreOffice's own figure for
+    /// the same file and is asserted as such above. Tightening this would be asserting that a
+    /// round trip through <c>.xls</c> is lossless, which it is not.
+    /// </remarks>
     [Fact]
-    public void TheUncroppedHalfIsDrawnAtItsAnchor()
+    public void TheTwoFormatsCropToTheSameRectangle()
     {
-        DocRect anchor = OnlyImageOf("picture-crop.xlsx");
+        DocRect biff = OnlyImageOf("picture-crop.xls");
+        DocRect ooxml = OnlyImageOf("picture-crop.xlsx");
 
-        anchor.Width.Points.ShouldBe(FrameWidthPoints, 1.0);
-        anchor.Height.Points.ShouldBe(FrameHeightPoints, 1.0);
+        ooxml.X.Points.ShouldBe(biff.X.Points, 1.5);
+        ooxml.Y.Points.ShouldBe(biff.Y.Points, 1.5);
+        ooxml.Width.Points.ShouldBe(biff.Width.Points, 1.5);
+        ooxml.Height.Points.ShouldBe(biff.Height.Points, 1.5);
     }
 
     // ------------------------------------------------------------------ the clip
@@ -116,18 +145,25 @@ public sealed class SheetPictureCropTests
     /// strictly worse than doing nothing: the picture would be drawn 480 × 540 pt over whatever
     /// the sheet has on all four sides of it.
     /// </summary>
-    [Fact]
-    public void ACroppedPictureIsClipped()
-        => ClipsOf("picture-crop.xls").ShouldBeGreaterThan(0);
+    [Theory]
+    [InlineData("picture-crop.xls")]
+    [InlineData("picture-crop.xlsx")]
+    public void ACroppedPictureIsClipped(string name)
+        => ClipsOf(name).ShouldBeGreaterThan(0);
 
     /// <summary>
     /// And an uncropped one is not, which is the half that keeps this round's reach honest: an
     /// unconditional clip would put a <c>q</c>/<c>W n</c>/<c>Q</c> into every rendering carrying a
     /// picture and change all of them for nothing.
     /// </summary>
+    /// <remarks>
+    /// <c>picture-crop.xlsx</c> was this control by not reading its own <c>a:srcRect</c>;
+    /// <c>picture-watermark.xlsx</c> is one on purpose — a picture over cells, stating an
+    /// <c>a:alphaModFix</c> and no crop.
+    /// </remarks>
     [Fact]
     public void AnUncroppedPictureIsNotClipped()
-        => ClipsOf("picture-crop.xlsx").ShouldBe(0);
+        => ClipsOf("picture-watermark.xlsx").ShouldBe(0);
 
     // ------------------------------------------------------------------ helpers
 

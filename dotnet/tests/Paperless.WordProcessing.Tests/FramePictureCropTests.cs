@@ -36,9 +36,15 @@ namespace Paperless.WordProcessing.Tests;
 /// below for why the third is not redundant.
 /// </para>
 /// <para>
-/// The <c>.docx</c> half is <b>not</b> cropped by this round — <c>DocxFrames</c> still drops
-/// <c>a:srcRect</c> — and is asserted in that state, so it reads as the uncropped control the
-/// other three tests measure against and so the fix shows up as a move off this answer.
+/// <b>The <c>.docx</c> half reads <c>a:srcRect</c> too, and the three fixtures are the check on
+/// each other.</b> It did not when this file was written, and the assertions here pinned it in
+/// that state so the fix would show up as a move off them; it now goes through
+/// <c>DocxPictures</c> into <see cref="FramePicture.Crop"/> and out through <c>DocxFrames</c> and
+/// <c>DocxVmlFrames</c> onto the <see cref="PageFrame"/>, which is the same pair of hops the
+/// <c>.doc</c> path takes. LibreOffice reaches one answer from both spellings as well — <c>oox</c>
+/// turns <c>a:srcRect</c> into a <c>text::GraphicCrop</c> against the graphic's original size
+/// (<c>fillproperties.cxx</c>:844-873) and the Escher reader produces the same property — so the
+/// three fixtures agreeing to a fiftieth of a point is the assertion worth making.
 /// </para>
 /// </remarks>
 public sealed class FramePictureCropTests
@@ -64,9 +70,10 @@ public sealed class FramePictureCropTests
     /// </para>
     /// </remarks>
     [Theory]
+    [InlineData("picture-crop.docx")]
     [InlineData("picture-crop.doc")]
     [InlineData("picture-crop-goal.doc")]
-    public void ACroppedPictureInADocIsDrawnLargerThanItsFrame(string name)
+    public void ACroppedPictureIsDrawnLargerThanItsFrame(string name)
     {
         DocRect destination = OnlyImageOf(name);
 
@@ -76,35 +83,59 @@ public sealed class FramePictureCropTests
     }
 
     /// <summary>
-    /// The offset follows the crop and not the size: 10% of the picture's own width to the left
-    /// of the frame and 20% of its own height above it.
+    /// The visible part lands where the frame is: the whole picture starts 10% of its own width
+    /// to the left of it and 20% of its own height above it.
     /// </summary>
+    /// <remarks>
+    /// The frame is the inline picture's <c>wp:extent</c>, 288 × 216 pt, at the one-inch margin —
+    /// so this is the assertion that the crop moved the <em>picture</em> and left the
+    /// <em>frame</em> alone, which is what distinguishes a crop from a resize and what the
+    /// reference PDFs show.
+    /// </remarks>
     [Theory]
+    [InlineData("picture-crop.docx")]
     [InlineData("picture-crop.doc")]
     [InlineData("picture-crop-goal.doc")]
-    public void TheWholePictureStartsAboveAndLeftOfTheFrame(string name)
+    public void TheVisiblePartOfThePictureLandsAtTheFrame(string name)
     {
-        DocRect frame = OnlyImageOf("picture-crop.docx");
         DocRect destination = OnlyImageOf(name);
 
-        (frame.X - destination.X).Points.ShouldBe(48, 1.5, name);
-        (frame.Y - destination.Y).Points.ShouldBe(108, 1.5, name);
+        (destination.X.Points + (0.1 * destination.Width.Points)).ShouldBe(72, 1.5, name);
+        (destination.Y.Points + (0.2 * destination.Height.Points)).ShouldBe(72, 1.5, name);
+        (0.6 * destination.Width.Points).ShouldBe(288, 1.0, name);
+        (0.4 * destination.Height.Points).ShouldBe(216, 1.0, name);
     }
 
     /// <summary>
-    /// The uncropped half of the pair is drawn at exactly its frame, which is what makes the
-    /// offsets above differences rather than absolutes.
+    /// The same document in three formats crops to the same rectangle.
     /// </summary>
+    /// <remarks>
+    /// The cross-format check the fixtures exist for, and the one that would have caught the
+    /// <c>.docx</c> arm dropping <c>a:srcRect</c> while both <c>.doc</c> arms read Escher's
+    /// 256-259: the three agree to a fiftieth of a point in all four coordinates.
+    /// </remarks>
     [Fact]
-    public void TheUncroppedHalfIsDrawnAtItsFrame()
+    public void TheThreeFormatsCropToTheSameRectangle()
     {
-        DocRect frame = OnlyImageOf("picture-crop.docx");
+        DocRect docx = OnlyImageOf("picture-crop.docx");
 
-        frame.Width.Points.ShouldBe(288, 1.0);
-        frame.Height.Points.ShouldBe(216, 1.0);
+        foreach (string name in new[] { "picture-crop.doc", "picture-crop-goal.doc" })
+        {
+            DocRect other = OnlyImageOf(name);
+
+            other.X.Points.ShouldBe(docx.X.Points, 0.02, name);
+            other.Y.Points.ShouldBe(docx.Y.Points, 0.02, name);
+            other.Width.Points.ShouldBe(docx.Width.Points, 0.02, name);
+            other.Height.Points.ShouldBe(docx.Height.Points, 0.02, name);
+        }
     }
 
+    /// <summary>
+    /// A cropped picture is clipped, in every format — drawing into a larger rectangle without a
+    /// clip does not crop a picture, it puts the whole of it over the text on every side.
+    /// </summary>
     [Theory]
+    [InlineData("picture-crop.docx")]
     [InlineData("picture-crop.doc")]
     [InlineData("picture-crop-goal.doc")]
     public void ACroppedPictureIsClipped(string name) => ClipsOf(name).ShouldBeGreaterThan(0);
@@ -114,8 +145,12 @@ public sealed class FramePictureCropTests
     /// would change the bytes of every rendering in the corpus that carries a picture, which is
     /// exactly the kind of reach a round cannot then attribute to anything.
     /// </summary>
+    /// <remarks>
+    /// <c>picture-crop.docx</c> used to be this control, by not reading its own <c>a:srcRect</c>.
+    /// <c>picture-anchor.docx</c> is one on purpose: it carries a picture and states no crop.
+    /// </remarks>
     [Fact]
-    public void AnUncroppedPictureIsNotClipped() => ClipsOf("picture-crop.docx").ShouldBe(0);
+    public void AnUncroppedPictureIsNotClipped() => ClipsOf("picture-anchor.docx").ShouldBe(0);
 
     // ------------------------------------------------------------------ helpers
 

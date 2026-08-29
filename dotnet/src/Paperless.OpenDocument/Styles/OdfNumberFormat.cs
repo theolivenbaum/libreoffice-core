@@ -45,10 +45,14 @@ public static class OdfNumberFormat
 
         StringBuilder code = new();
 
+        // Which literals need quoting is decided per format type, and the type is what the style's
+        // own element name states.
+        string kind = style.Name.LocalName;
+
         foreach (XElement piece in style.Elements())
         {
             if (piece.Name.NamespaceName != OdfNamespaces.Number) continue;
-            Append(code, piece);
+            Append(code, piece, kind);
         }
 
         string built = code.ToString();
@@ -65,7 +69,7 @@ public static class OdfNumberFormat
         return parsed.IsGeneral ? null : parsed;
     }
 
-    private static void Append(StringBuilder code, XElement piece)
+    private static void Append(StringBuilder code, XElement piece, string kind)
     {
         switch (piece.Name.LocalName)
         {
@@ -76,7 +80,7 @@ public static class OdfNumberFormat
             // A literal. ODF writes the per cent sign, the currency symbol and every separator as
             // one of these, so quoting is what keeps a stray "d" or "m" in a suffix out of the
             // date vocabulary.
-            case "text" or "currency-symbol": Literal(code, piece.Value); break;
+            case "text" or "currency-symbol": Literal(code, piece.Value, kind); break;
             case "text-content": code.Append('@'); break;
 
             case "year": code.Append(Long(piece) ? "YYYY" : "YY"); break;
@@ -158,30 +162,118 @@ public static class OdfNumberFormat
     }
 
     /// <summary>
-    /// A literal, quoted so that its letters are not read as directives.
+    /// A literal, quoted so that its letters are not read as directives — but only where the
+    /// reference quotes it.
     /// </summary>
     /// <remarks>
-    /// <strong>The per cent sign is the exception, and quoting it costs a factor of a hundred.</strong>
-    /// ODF has no per cent directive: a <c>number:percentage-style</c> is a <c>number:number</c>
-    /// followed by a <c>number:text</c> holding <c>%</c>, and it is that sign in the compiled code
-    /// that tells the engine to multiply by a hundred. Quoted, it is decoration — <c>0.05</c>
-    /// renders as <c>0.1%</c> instead of <c>5.0%</c>, which reads as a rounding bug and is not one.
+    /// <para>
+    /// <c>lcl_EnquoteIfNecessary</c> (<c>xmloff/source/style/xmlnumfi.cxx</c>:533-560) leaves a
+    /// literal bare when it is one character the format type can carry unquoted, or two of which
+    /// the second is a space, or the pair <c>" -"</c>. Everything longer is quoted, which is what
+    /// keeps a stray <c>d</c> or <c>m</c> in a suffix out of the date vocabulary.
+    /// </para>
+    /// <para>
+    /// <strong>Quoting too eagerly is not cosmetic: on a percentage it costs a factor of a
+    /// hundred.</strong> ODF has no per cent directive — a <c>number:percentage-style</c> is a
+    /// <c>number:number</c> followed by a <c>number:text</c> holding the sign, and it is that sign
+    /// in the compiled code that tells the engine to multiply. The common <c>0.00 %</c> is written
+    /// as the two-character literal <c>" %"</c>, which quoting whole renders <c>0.05</c> as
+    /// <c>0.05 %</c> instead of <c>5.00 %</c>. Hence the percentage arm below, which quotes around
+    /// the sign rather than over it (<c>:552-587</c>).
+    /// </para>
     /// </remarks>
-    private static void Literal(StringBuilder code, string? text)
+    private static void Literal(StringBuilder code, string? text, string kind)
     {
-        if (text is not { Length: > 0 }) return;
+        if (text is not { Length: > 0 } literal) return;
 
-        if (text == "%") { code.Append('%'); return; }
+        if (!NeedsQuotes(literal, kind))
+        {
+            code.Append(literal);
+            return;
+        }
 
+        int sign = kind == PercentageStyle && literal.Length > 1 ? literal.IndexOf('%') : -1;
+
+        if (sign < 0)
+        {
+            Quote(code, literal);
+            return;
+        }
+
+        // Each side of the sign is quoted on its own, leaving the sign bare so the engine still
+        // reads it as the directive. A single character either side that needs no quotes stays
+        // bare, so that " %" compiles to " %" rather than to "\" \"%".
+        if (sign > 0)
+        {
+            if (sign == 1 && Bare(literal[0], kind)) code.Append(literal[0]);
+            else Quote(code, literal[..sign]);
+        }
+
+        code.Append('%');
+
+        if (sign + 1 >= literal.Length) return;
+
+        if (sign + 2 == literal.Length && Bare(literal[sign + 1], kind)) code.Append(literal[sign + 1]);
+        else Quote(code, literal[(sign + 1)..]);
+    }
+
+    /// <summary>Whether a literal has to be quoted at all.</summary>
+    private static bool NeedsQuotes(string text, string kind)
+    {
+        if (kind == BooleanStyle) return true;
+
+        return text.Length switch
+        {
+            1 => !Bare(text[0], kind),
+            2 => !(text is " -" || (text[1] == ' ' && Bare(text[0], kind))),
+            _ => true,
+        };
+    }
+
+    /// <summary>
+    /// Whether one character can stand in the code unquoted, which depends on the format type.
+    /// </summary>
+    /// <remarks>
+    /// <c>lcl_ValidChar</c> (<c>xmlnumfi.cxx</c>:480-531). A separator is bare only where the type
+    /// can carry one: <c>/</c> is a date separator in a date style and a fraction bar in a number
+    /// style, so it is quoted in the latter. The thousands separator is quoted wherever a number
+    /// can appear so that an extra one is not read as a display factor — the separator is the
+    /// reader's locale's, and this compiles as en-US throughout, matching the 1033 the HTML export
+    /// writes.
+    /// </remarks>
+    private static bool Bare(char character, string kind)
+    {
+        if (character == ',' && kind is NumberStyle or CurrencyStyle or PercentageStyle) return false;
+
+        return character switch
+        {
+            '-' => kind != BooleanStyle,
+            ' ' or '/' or '.' or ',' or ':' or '\'' => kind is CurrencyStyle or DateStyle or TimeStyle,
+            '%' => kind == PercentageStyle,
+            '(' or ')' => kind is NumberStyle or CurrencyStyle or PercentageStyle,
+            _ => false,
+        };
+    }
+
+    private static void Quote(StringBuilder code, string text)
+    {
         code.Append('"');
         foreach (char character in text)
         {
-            if (character == '"') code.Append('\'');
+            // A quote inside quoted text closes it, escapes itself and reopens (`:592-606`).
+            if (character == '"') code.Append("\"\\\"\"");
             else code.Append(character);
         }
 
         code.Append('"');
     }
+
+    private const string NumberStyle     = "number-style";
+    private const string CurrencyStyle   = "currency-style";
+    private const string PercentageStyle = "percentage-style";
+    private const string DateStyle       = "date-style";
+    private const string TimeStyle       = "time-style";
+    private const string BooleanStyle    = "boolean-style";
 
     private static bool Long(XElement piece)
         => piece.Attribute(XName.Get("style", OdfNamespaces.Number))?.Value == "long";

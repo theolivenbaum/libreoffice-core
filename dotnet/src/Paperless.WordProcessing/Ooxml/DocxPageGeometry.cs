@@ -92,11 +92,17 @@ internal static class DocxPageGeometry
         bool landscape = string.Equals(
             Word.Attribute(size, "orient"), "landscape", StringComparison.OrdinalIgnoreCase);
 
-        Length width = Dimension(size, "w") ?? PageGeometry.Default.Size.Width;
-        Length height = Dimension(size, "h") ?? PageGeometry.Default.Size.Height;
+        // What a section that states nothing is: Letter with one-inch margins, from
+        // `SectionPropertyMap`'s constructor. See `PageGeometry.Letter` for why this is not the
+        // locale's paper — a DOCX with no `w:sectPr` renders 612x792 on a machine whose own default
+        // page is A4.
+        PageGeometry fallback = PageGeometry.Letter;
 
-        Length top = Twips(margins, "top") ?? PageMargins.Default.Top;
-        Length bottom = Twips(margins, "bottom") ?? PageMargins.Default.Bottom;
+        Length width = Dimension(size, "w") ?? fallback.Size.Width;
+        Length height = Dimension(size, "h") ?? fallback.Size.Height;
+
+        Length top = Twips(margins, "top") ?? fallback.Margins.Top;
+        Length bottom = Twips(margins, "bottom") ?? fallback.Margins.Bottom;
         Length headerDistance = Twips(margins, "header") ?? Length.Zero;
         Length footerDistance = Twips(margins, "footer") ?? Length.Zero;
 
@@ -104,8 +110,8 @@ internal static class DocxPageGeometry
         {
             Size = new DocSize(width, height),
             Margins = new PageMargins(
-                Twips(margins, "left") ?? PageMargins.Default.Left,
-                Twips(margins, "right") ?? PageMargins.Default.Right,
+                Twips(margins, "left") ?? fallback.Margins.Left,
+                Twips(margins, "right") ?? fallback.Margins.Right,
                 top,
                 bottom),
             Gutter = Twips(margins, "gutter") ?? Length.Zero,

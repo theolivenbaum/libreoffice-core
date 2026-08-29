@@ -57,11 +57,44 @@ internal static class OdsCellFormats
         private readonly Dictionary<int, int> _columnDefaults = [];
         private int _rowDefault;
 
+        /// <summary>The last column carrying a default cell style, or -1 when none does.</summary>
+        /// <remarks>
+        /// A repeated run starting past it cannot meet a column default, which is what lets the run
+        /// be skipped whole rather than column by column. See <see cref="ReadCells"/>.
+        /// </remarks>
+        private int _lastColumnDefault = -1;
+
+        /// <summary>The pool index of the document's own default cell style.</summary>
+        private int _sheetDefault;
+
         public (SheetCellFormats Formats, SheetRichText RichText) Read(XElement table)
         {
+            // The document's default cell style, resolved once and recorded once. In Calc it is the
+            // sheet's base attribute set — `ScDocument::GetDefPattern`, which every cell has by
+            // being in the sheet — and not something each cell carries. Reading it per cell instead
+            // made every padding cell in a Calc-written file state a format: a 10 kB `.ods` whose
+            // sheet is padded to 16382 columns by 1048571 rows took 2.25 GB and 20 seconds to open,
+            // because the padding names `table:style-name="Default"` and that resolved to a format
+            // unequal to `SheetCellFormat.Default`.
+            _sheetDefault = Intern(DefaultCellStyleName);
+            _builder.SetSheetDefault(_sheetDefault);
+
             ReadColumns(table);
             ReadRows(table);
             return (_builder.Build(), _rich.Build());
+        }
+
+        /// <summary>
+        /// The index a cell inherits where it states no format of its own, in <see cref="SheetCellFormats.At"/>'s
+        /// own order: the row's default, then the column's, then the sheet's.
+        /// </summary>
+        private int InheritedIndex(int column)
+        {
+            if (_rowDefault != 0) return _rowDefault;
+            if (_columnDefaults.TryGetValue(column, out int columnDefault) && columnDefault != 0)
+                return columnDefault;
+
+            return _sheetDefault;
         }
 
         private void ReadColumns(XElement table)
@@ -70,12 +103,24 @@ internal static class OdsCellFormats
             foreach (XElement element in Descend(table, "table-column"))
             {
                 int repeat = Repeat(element, "number-columns-repeated");
-                int index = Intern(Attribute(element, "default-cell-style-name"));
+
+                // A column naming none names Default, which is Calc's own reading of the absence
+                // (`xmlcoli.cxx`:135-137) rather than a licence taken here.
+                int index = Intern(Attribute(element, "default-cell-style-name") ?? DefaultCellStyleName);
+
+                // A column default that only restates the sheet's is not one: recording it would
+                // make every column in a padded file an entry, and resolve to the same format.
+                if (index == 0 || index == _sheetDefault)
+                {
+                    column += repeat;
+                    continue;
+                }
 
                 for (int at = 0; at < repeat && column < SheetAddress.MaxColumn; at++, column++)
                 {
                     _builder.SetColumn(column, index);
-                    if (index != 0) _columnDefaults[column] = index;
+                    _columnDefaults[column] = index;
+                    _lastColumnDefault = Math.Max(_lastColumnDefault, column);
                 }
             }
         }
@@ -117,10 +162,26 @@ internal static class OdsCellFormats
                 int repeat = Repeat(cell, "number-columns-repeated");
                 int index = Intern(styleName);
 
+                // Padding, skipped whole. A row is written out to the sheet's full width with one
+                // repeated empty cell naming the default style, and expanding that run records
+                // nothing that resolving the cell would not have answered anyway — Calc's own
+                // attribute array merges an equal pattern into the surrounding run rather than
+                // starting a new one (`ScAttrArray::SetPatternArea`). The run has to be past the
+                // last column default for the inherited index to be the same across all of it, and
+                // an element with children can carry text whose spans still need reading.
+                if (!cell.HasElements
+                    && column > _lastColumnDefault
+                    && index == (_rowDefault != 0 ? _rowDefault : _sheetDefault))
+                {
+                    column += repeat;
+                    continue;
+                }
+
                 int span = Math.Min(repeat, MaxRepeat);
                 for (int at = 0; at < span && column < SheetAddress.MaxColumn; at++, column++)
                 {
-                    _builder.SetCell(row, column, index);
+                    // Only where it says something the cell would not inherit; see InheritedIndex.
+                    if (index != InheritedIndex(column)) _builder.SetCell(row, column, index);
                     ReadSpans(cell, row, column, Effective(index, column));
                 }
 
@@ -339,6 +400,28 @@ internal static class OdsCellFormats
         /// </remarks>
         private const int MaxRepeat = 4096;
 
+        /// <summary>The cell style everything in a sheet is in until it says otherwise.</summary>
+        /// <remarks>
+        /// <para>
+        /// Not a guess at a convention: <c>Default</c> is the programmatic API name of Calc's
+        /// default cell style, and its own ODF import says so — <c>ScXMLTableColContext</c>
+        /// (<c>sc/source/filter/xml/xmlcoli.cxx</c>:135-137) substitutes it for a
+        /// <c>table:table-column</c> that names no <c>table:default-cell-style-name</c>, and the
+        /// export (<c>xmlexprt.cxx</c>:897, :2156) writes the name out for everything that is in it.
+        /// A file naming no such style still resolves, because <c>OdfStyles</c> falls back to the
+        /// anonymous <c>style:default-style</c> for a name it cannot find.
+        /// </para>
+        /// <para>
+        /// It is the sheet's base pattern in Calc (<c>ScDocument::GetDefPattern</c>), which is what
+        /// makes the padding free there: a run of cells whose pattern equals the surrounding one
+        /// merges into it rather than each becoming an attribute of its own. Resolving it per cell
+        /// instead is what cost a 10 kB two-sheet <c>.ods</c> 2.25 GB and 20 seconds to open, since
+        /// Calc pads every row to 16382 columns and every sheet to 1048571 rows with cells naming
+        /// exactly this style.
+        /// </para>
+        /// </remarks>
+        private const string DefaultCellStyleName = "Default";
+
         private int Intern(string? styleName)
         {
             if (string.IsNullOrEmpty(styleName)) return 0;
@@ -365,9 +448,7 @@ internal static class OdsCellFormats
         /// </remarks>
         private SheetCellFormat Effective(int cellIndex, int column)
         {
-            int index = cellIndex != 0
-                ? cellIndex
-                : _rowDefault != 0 ? _rowDefault : _columnDefaults.GetValueOrDefault(column);
+            int index = cellIndex != 0 ? cellIndex : InheritedIndex(column);
 
             return _pool.GetValueOrDefault(index, SheetCellFormat.Default);
         }
@@ -399,6 +480,13 @@ internal static class OdsCellFormats
                 RotationDegrees = Rotation(Cell(styleName, "rotation-angle", OdfNamespaces.Style)),
                 IsStacked = Cell(styleName, "direction", OdfNamespaces.Style) == "ttb",
                 NumberFormatKind = FormatKind(styleName),
+
+                // The format's own code, compiled from the `number:*-style` element tree the way
+                // `xmloff` does. The kind above is what the drawn cell needs — it decides the
+                // `###` rule — and the code is what states the format to a caller: the HTML
+                // export's `sdnum`, and the `*` fill directive, which could not fire on this path
+                // while the code was null.
+                NumberFormat = OdfNumberFormat.Parse(DataStyleElement(styleName)),
             };
         }
 
@@ -429,7 +517,11 @@ internal static class OdsCellFormats
             };
         }
 
-        /// <summary>The data style a cell style names, following its parent chain.</summary>
+            /// <summary>The element of the data style a cell style names, or null when it names none.</summary>
+        private XElement? DataStyleElement(string styleName)
+            => styles.FindDataStyle(DataStyleName(styleName))?.Element;
+
+    /// <summary>The data style a cell style names, following its parent chain.</summary>
         /// <remarks>
         /// Walked here rather than through <c>ResolveProperty</c> because
         /// <c>style:data-style-name</c> is an attribute of the style element rather than one of

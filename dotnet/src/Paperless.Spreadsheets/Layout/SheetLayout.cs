@@ -1,4 +1,5 @@
 using Paperless.Core.Extraction;
+using Paperless.Core.Numbers;
 
 namespace Paperless.Spreadsheets.Layout;
 
@@ -37,6 +38,18 @@ public sealed class SheetLayout
 
     /// <summary>The sheet's print setup, which is its page geometry.</summary>
     public SheetPrintSetup Setup { get; init; } = SheetPrintSetup.Default;
+
+    /// <summary>Which epoch this workbook's date serials are counted from.</summary>
+    /// <remarks>
+    /// A date cell's <see cref="Core.Extraction.ContentTableCell.Value"/> is a
+    /// <see cref="DateTime"/> — the readers resolve the serial as they read it — so anything that
+    /// needs the serial back has to know which epoch produced it, and the two are 1462 days apart.
+    /// Carried on the sheet because that is where a consumer can reach it; the workbook object
+    /// that knows it does not outlive the read. ODF states its own epoch in
+    /// <c>table:null-date</c>, whose default is the same 30 December 1899 as
+    /// <see cref="SpreadsheetDateSystem.Date1900"/>.
+    /// </remarks>
+    public SpreadsheetDateSystem DateSystem { get; init; } = SpreadsheetDateSystem.Date1900;
 
     /// <summary>
     /// Its column widths and row heights, exactly as the file states them.

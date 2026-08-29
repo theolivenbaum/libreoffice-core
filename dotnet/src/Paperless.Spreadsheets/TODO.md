@@ -2404,7 +2404,10 @@ Not yet, and why:
 - **The paper size default is locale-dependent and A4 is assumed.** Calc's is
   `SvxPaperInfo::GetDefaultPaperSize()`, which is Letter in an American locale; the same missing
   locale infrastructure that keeps the two built-in number-format tables apart is what keeps this
-  from being answered properly.
+  from being answered properly. Note that the *Word-family* filters are a different question with a
+  different answer, now implemented: `SectionPropertyMap`'s constructor inserts `PAPER_LETTER`
+  unconditionally, so a DOCX or RTF stating no page size is Letter on a machine whose Writer default
+  is A4 — see `PageGeometry.Letter`. Only Calc's own default goes through the locale.
 - ~~**`SkipEmpty` is not implemented.**~~ **This was wrong twice over and is now done.** The claim
   was that the option is off unless a caller passes it "and its PDF export does not". Both halves
   are false: `ScPrintOptions::SetDefaults` sets `bSkipEmpty = true`
@@ -3636,3 +3639,166 @@ Not yet, and why:
   layout and `XlsxCharts` walks it again for content, because extraction must not pay for the
   anchor arithmetic and a caller that never asks for content never opens a chart part. The parts
   are cached by the package, so the cost is a second parse of one small XML document per chart.
+
+## HTML export
+
+`Html/SheetHtmlWriter.cs` writes a workbook as HTML in Calc's own dialect — one table per sheet,
+`<colgroup>` runs, the styling on the cells, and both families of round-trip attributes
+(`sdval`/`sdnum`, which Calc's HTML *import* reads back, and the `data-sheets-*` ones Google Sheets
+reads). Reached from the CLI as `paperless render --format html`.
+
+Measured against `soffice --convert-to html` over all 77 spreadsheets of the benchmark corpus,
+comparing cell by **grid position** rather than by document order — a sequence comparison
+misaligns the moment the two used ranges differ and then reports every later cell as wrong:
+
+| | |
+|---|---:|
+| cell positions in both exports | 10,731 |
+| cell text identical (ignoring `<font>` wrappers) | **99.0%** |
+| positions LibreOffice writes and this does not | 3,478 |
+| positions this writes and LibreOffice does not | 76 |
+
+What the remaining differences are, all understood and none of them silent:
+
+- **`valign` on 42% of cells, with no visual consequence.** The two engines disagree in *opposite*
+  directions by format: through XLSX LibreOffice writes `valign=bottom` where this writes nothing,
+  and through XLS it writes nothing where this writes `bottom`. Neither side is wrong about its
+  file — BIFF's XF states a concrete vertical alignment in every cell and OOXML usually omits it,
+  its schema default being bottom — and the model draws `Standard` and `Bottom` identically
+  (`SheetTextLayout`:1785). So this is LibreOffice's own two importers normalising differently, and
+  the writer reports what the file said. Not worth reconciling in the readers; worth knowing before
+  reading a diff.
+- **A `<font>` wrapper on 2,007 cells**, because the two disagree about what the document's default
+  font *is*. LibreOffice compares each cell against its Default style sheet's font; this compares
+  against the workbook's own default cell format. On one XLSX the two are `MS Sans Serif` and
+  `Times New Roman` — LibreOffice's is its built-in default rather than anything the file says. Each
+  export is internally consistent, which is what matters: a cell gets a `face` exactly when it
+  differs from the head's rule.
+- **3,478 positions LibreOffice writes and this does not.** Calc's data area covers what a *drawing*
+  spans (`PrepareGraphics`) and counts a formatted-but-empty cell, both already recorded above as
+  used-range differences. Since pictures are not written either, the narrower table is consistent.
+- **`data-sheets-formula`, images, hyperlink anchors and notes** are deliberate omissions, each
+  stated in the writer's own remarks with what it would take to close it.
+
+### Three defects this surfaced, all three fixed
+
+Found by exporting a three-sheet workbook both ways and comparing cell by grid position, which is
+the first thing that ever made the *compiled format code* visible — it renders identically whatever
+its spelling, so nothing before this could see it.
+
+- **The two `data-sheets-*` attributes are JSON inside an HTML attribute and were escaped only
+  once.** A `\£#,##0.00` format was written `"\£#,##0.00"`, which is not a JSON string a parser
+  accepts, and a format or a text cell holding a `"` broke the object outright. `SheetHtmlWriter`
+  now has a `Json` escape under its `Escape` one, matching
+  `tools::JsonWriter::writeEscapedOUString`.
+- **A boolean cell stated neither its type nor its format.** Calc keys the Google Sheets type off
+  the format string being the literal `BOOLEAN`, which no file states — a boolean is a cell type in
+  OOXML and ODF — so the writer now supplies it, and drops the number-format attribute on that arm
+  as Calc does.
+- **`OdfNumberFormat` quoted every literal.** `MM/DD/YYYY` came out `MM"/"DD"/"YYYY`, which renders
+  the same and says something different. The live half: ODF writes the common `0.00 %` as the
+  single two-character literal `" %"`, and quoting it whole loses the per-cent directive — 0.05
+  rendered `0.05 %` instead of `5.00 %`. The compiler now follows `lcl_ValidChar` /
+  `lcl_EnquoteIfNecessary`. `sheet-json-escaping.fods` is the fixture and every expectation on it is
+  the reference's own output, cell for cell.
+
+### Two defects this surfaced, neither fixed here
+
+- **An icon-set conditional format with `showValue="false"` hides the value in *extraction*, where
+  it should hide it only in the drawing.** Calc clears `bDoCell` in `ScOutputData` — a rendering
+  decision — and its CSV and HTML exports both still write the number. Measured on
+  `sheet-hidden-values-xlsx.xlsx`: `soffice --convert-to csv` gives `CUSTOMROW,11,22,33,44` and
+  `paperless extract` gives `CUSTOMROW 11 22` with two empty cells. `SheetHiddenValueTests` pins the
+  drawn behaviour, which is right; the content tree should not be paying for it.
+- **A cell holding an empty *string* counts as content in `UsedRange`.** The guard reads
+  `cell.Value is null && cell.GetText().Length == 0`, so a cell whose value is `""` passes it and
+  extends the used range. It shows up as a leading empty row and column on
+  `t_xlsx_05_table_with_title.xlsx`, where LibreOffice's table starts at the title and this one
+  starts a row above it. The fix is one condition, and it moves the used range — which pagination
+  is computed from — so it wants a corpus sweep rather than a quick edit.
+
+### The document paints its own ground, and the sheet keeps white paper
+
+The reference sets no background at all, which is fine for a file opened on its own and wrong the
+moment it is embedded: a document in an `iframe` on a dark page shows that page's ground through
+every cell stating no fill, under text that is still black. Measured on the three-sheet demo over a
+`#1c1d1f` host, **90 of 121 text elements sat below a 4.5:1 contrast ratio, the worst at 1.24:1**.
+With the theme rules, 7 — and those 7 are the same 7 the light scheme has, being the workbook's own
+grey note text on white.
+
+**The sheet keeps white paper in both schemes, and that is the decision to defend.** A workbook's
+fills, borders and font colours are one set chosen against white: the demo's banded rows alternate a
+stated `#EDF2F9` with a cell that states nothing, so darkening only the unstated half inverts every
+other stripe and leaves the header fill floating over it — which is precisely what the reference's
+own output does on a dark page. A cell whose font colour is stated dark and whose fill is not fares
+worse still, and nothing in the file says which way round it was meant. So `table` paints
+`--paper` unconditionally, and what follows the reader's scheme is the furniture around it: the
+page, the headings, the rules, the links, the note tooltip and the tab strip. `--paper` is declared
+once and never redefined; `TheSheetKeepsItsPaperInTheDarkScheme` asserts its absence from the dark
+block, because a redefinition there would be silent and would look like an improvement.
+
+The live tab takes `--paper` rather than `--page`, since it is the edge of the sheet below it — the
+dropped border is what joins the two.
+
+A fragment gets the tokens but not the rules, scoped to its own container: `SkipHeaderFooter` says
+the embedding page states the styling, and the tokens travel only because the tab rules name them.
+
+### Two ways out, and the option that picks between them
+
+`SheetHtmlNavigation.Overview` is the reference's: an index of links and every sheet under it in
+one scrolling page. It is the default because that is what LibreOffice writes and what the tests
+compare against.
+
+`SheetHtmlNavigation.Tabs` is the workbook's own shape, for a caller showing a workbook to a reader
+rather than archiving it — a fifty-sheet workbook as one page is not navigable. Three things about
+it were decided deliberately and are each pinned by a test:
+
+- **One file and no script.** The switching is a radio group and two generated selector lists, so
+  the document works with scripting off, inside a sandboxed frame, and under a policy admitting no
+  inline script. A per-sheet file plus a script that swaps iframes — the shape Aspose's export
+  forces, because it can only write the active sheet — buys nothing here, since every sheet is
+  already in hand.
+- **Printing shows every sheet.** A tabbed document printed as it appears would silently be one
+  sheet of a workbook. The panels all open for print, the strip goes away, and the per-sheet
+  headings — hidden by a rule on screen rather than left out — come back, so the printed document
+  is the `Overview` one.
+- **The identifiers are prefixed.** The radio group is named after `IdPrefix`, so two workbooks
+  exported into one page do not switch each other's sheets. The value is folded to a usable
+  identifier, because the expected caller passes a file name.
+
+The keyboard follows from the choice rather than being added to it: a radio group is arrow-key
+navigable, and a `:focus-visible` rule moves the focus ring from the off-screen input onto its
+label.
+
+Not done, and deliberately: **a tab does not deep-link.** A `:target`-driven strip would give each
+sheet a URL, but has no checked state on first load, so the document would open showing nothing.
+Closing it means a second mechanism layered over the first, and no caller has asked.
+
+### Not yet, and why
+
+- **Pictures, charts and OLE objects are not written.** Calc writes each as a file beside the HTML
+  and an `<img>` at the cell, or as a base64 data URI in a single-file export; both need an image
+  encoder on this path and a policy for where the files go. Its own `SkipImages` filter option
+  produces exactly what this writes today, so the shape is a supported one rather than an omission.
+- **`data-sheets-formula` is not written.** Calc states it in R1C1 grammar
+  (`GRAM_ENGLISH_XL_R1C1`); the model carries the formula in whatever grammar its file used, and
+  writing an A1 formula under an attribute defined as R1C1 would be a quiet lie. Needs an A1 to
+  R1C1 conversion, which is a parser rather than a formatter.
+- **A hyperlink cell is written as its text.** Calc writes an `<a href>` for a cell whose formula is
+  a `HYPERLINK()` call; `SheetLayout.HyperlinkRanges` records which ranges hold one but not where
+  they point.
+- **A note reaches the HTML only from XLSX, and only when the sheet prints its notes.**
+  `SheetNotes` models Calc's "comments at end of sheet" printing rather than the comments
+  themselves, so the ODF path reads `office:annotation` into nothing. The writer's comment
+  indicator and its CSS are already there and correct for the notes it does get.
+- **An OOXML format code is not re-spelled the way LibreOffice re-spells it.** The file's own
+  `dd\ mmm\ yyyy` is written as it is stored, where LibreOffice writes `DD MMM YYYY` — its
+  formatter parses a code and re-emits it canonically, upper-casing the date directives and
+  dropping an escape that guards nothing. The two format identically, so this reaches only `sdnum`
+  and `data-sheets-numberformat`. Closing it means a canonicalising round trip through
+  `NumberFormatCode`, which every OOXML file's `sdnum` would move on, so it wants its own sweep.
+- **The ODF currency format code is spelled differently.** `OdfNumberFormat` compiles a
+  `number:currency-symbol` into a quoted literal — `"£"#,##0.00` — where LibreOffice writes
+  `[$£-809]#,##0.00`. The two format identically; only the `sdnum` and `data-sheets-numberformat`
+  strings differ, and the compiler is shared with chart axes, so changing it is a wider question
+  than this export.

@@ -1057,6 +1057,7 @@ internal sealed class XlsWorkbookReader
             Name = sheet.Name,
             Index = index,
             IsHidden = sheet.IsHidden,
+            DateSystem = DateSystem,
             Setup = setup,
             Grid = _page.ToGrid(),
             Cells = new ContentTable(),
@@ -1295,6 +1296,7 @@ internal sealed class XlsWorkbookReader
             Name = sheet.Name,
             Index = index,
             IsHidden = sheet.IsHidden,
+            DateSystem = DateSystem,
             Setup = _page.ToSetup(),
             Grid = grid,
             Cells = table,
@@ -1437,6 +1439,7 @@ internal sealed class XlsWorkbookReader
         {
             Name = cache.Name,
             Index = index,
+            DateSystem = DateSystem,
             Setup = _page.ToSetup(),
             Grid = grid,
             Cells = table,
