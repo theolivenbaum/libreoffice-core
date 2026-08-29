@@ -284,6 +284,76 @@ public sealed class SheetHtmlWriterTests
         boolean.ShouldNotContain("data-sheets-numberformat");
     }
 
+    // ------------------------------------------------------------------- the two schemes
+
+    /// <summary>
+    /// The document paints its own ground rather than borrowing whatever is behind it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// An addition to the reference, and the fix for a measured failure: LibreOffice's output sets
+    /// no background at all, so a document dropped into a page with a dark one shows that ground
+    /// through every cell stating no fill, under text that is still black. Measured on a
+    /// three-sheet workbook in an <c>iframe</c> on a <c>#1c1d1f</c> page: <strong>90 of 121 text
+    /// elements below a 4.5:1 contrast ratio, the worst at 1.24:1</strong>. With these rules, 7 —
+    /// and those 7 are the same 7 as in the light scheme, being the workbook's own grey note text
+    /// on white.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void TheDocumentPaintsItsOwnGroundInBothSchemes()
+    {
+        string html = Html("sheet-xlsx.xlsx");
+
+        html.ShouldContain("color-scheme:light dark");
+        html.ShouldContain("body { background:var(--page); color:var(--ink); }");
+        html.ShouldContain("@media (prefers-color-scheme:dark) { :root { --page:#1c1d1f;");
+    }
+
+    /// <summary>
+    /// The sheet itself keeps white paper in the dark scheme, and the token is what says so.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The decision this pins, because it is the one a later change is most likely to undo: a
+    /// workbook's fills, borders and font colours are one set chosen against white. The demo's
+    /// banded rows alternate a stated <c>#EDF2F9</c> against a cell stating nothing, so darkening
+    /// the unstated half inverts every other stripe — which is exactly what the reference's own
+    /// output does on a dark page, and what this stops. A cell whose font colour is stated dark
+    /// and whose fill is not would fare worse, and nothing in the file says which way round it was
+    /// meant.
+    /// </para>
+    /// <para>
+    /// So <c>--paper</c> is declared once and never redefined. Asserting its absence from the dark
+    /// block is the whole test: a redefinition there would be silent, and would look like an
+    /// improvement.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void TheSheetKeepsItsPaperInTheDarkScheme()
+    {
+        string html = Html("sheet-xlsx.xlsx");
+
+        html.ShouldContain("--paper:#ffffff; --paper-ink:#000000;");
+        html.ShouldContain("table { background:var(--paper); color:var(--paper-ink); }");
+
+        string dark = Regex.Match(html, @"@media \(prefers-color-scheme:dark\) \{[^}]*\}").Value;
+        dark.ShouldNotBeEmpty();
+        dark.ShouldNotContain("--paper");
+    }
+
+    /// <summary>
+    /// The note tooltip states its text colour, because it states its own pale ground.
+    /// </summary>
+    /// <remarks>
+    /// Calc's rule gives the tooltip <c>background:#ffd</c> and no colour, so it inherits the
+    /// page's — which on a dark page is light text on a near-white ground. It is paper, so it
+    /// takes paper's ink.
+    /// </remarks>
+    [Fact]
+    public void TheNoteTooltipStatesItsOwnTextColour()
+        => Html("sheet-xlsx.xlsx").ShouldContain("comment { color:var(--paper-ink); }");
+
     // ------------------------------------------------------------ the tabbed navigation
 
     /// <summary>
@@ -391,6 +461,11 @@ public sealed class SheetHtmlWriterTests
         html.ShouldNotContain("<head>");
         html.ShouldStartWith("<div class=\"sheet-tabs\" id=\"book\">");
         html.ShouldContain("#book .sheet-panel { display:none; }");
+
+        // The rules name the theme tokens, and a fragment has no `:root` block declaring them —
+        // so they come along, scoped to the container rather than to the embedding page's root.
+        html.ShouldContain("#book { --paper:#ffffff;");
+        html.ShouldContain("@media (prefers-color-scheme:dark) { #book { --ink:#e4e4e6;");
 
         // Inside the container, so it travels with the markup it applies to.
         html.IndexOf("<style", StringComparison.Ordinal)

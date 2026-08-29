@@ -203,6 +203,8 @@ public static class SheetHtmlWriter
             + "width:0.5em; height:0.5em;  } ");
         writer.WriteLine("\t\tcomment { display:none;  } ");
 
+        WriteThemeStyle(writer, "\t\t");
+
         if (tabs is { } strip) WriteTabStyle(writer, strip.Prefix, strip.Count, "\t\t");
 
         writer.WriteLine("\t</style>");
@@ -239,6 +241,58 @@ public static class SheetHtmlWriter
         }
 
         return 1;
+    }
+
+    /// <summary>
+    /// What the document is drawn on, in both of the reader's colour schemes.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// An addition to the reference, and the fix for a real failure rather than a preference:
+    /// LibreOffice's output paints no ground at all, so a document dropped into a page with a dark
+    /// one — an <c>iframe</c> in a dark application shell, which is the expected embedding — shows
+    /// that ground through every cell that states no fill of its own, under text that is still
+    /// black. Measured on a three-sheet workbook: the banded rows stayed legible and the rows
+    /// between them, the totals row and every heading did not.
+    /// </para>
+    /// <para>
+    /// <strong>The sheet keeps white paper in both schemes, and that is the decision worth
+    /// stating.</strong> A workbook's fills, borders and font colours are one set chosen against
+    /// white — the demo's banded rows alternate a stated <c>#EDF2F9</c> with a cell that states
+    /// nothing — so darkening the unstated half inverts every other stripe and leaves a header
+    /// fill floating over it. Worse, a cell whose font colour is stated dark and whose fill is not
+    /// would become unreadable, and nothing in the file says which way round it was meant. So the
+    /// table paints its own paper unconditionally, which both fixes the embedding and keeps every
+    /// authored colour on the ground it was authored for; what follows the reader's scheme is the
+    /// document furniture around it — the page, the headings, the rules, the links, the note
+    /// tooltip and the tab strip.
+    /// </para>
+    /// <para>
+    /// The tokens are declared here and consumed below, so the dark scheme redefines values rather
+    /// than repeating selectors — and <c>--paper</c> is deliberately absent from that block.
+    /// </para>
+    /// <para>
+    /// A fragment gets none of this, as it gets no default font: <see cref="
+    /// SheetHtmlOptions.SkipHeaderFooter"/> says the embedding page states the styling, and a
+    /// caller embedding into a dark page is exactly the caller who has already chosen one.
+    /// </para>
+    /// </remarks>
+    private static void WriteThemeStyle(TextWriter writer, string indent)
+    {
+        writer.WriteLine($"{indent}:root {{ color-scheme:light dark; --page:#ffffff; --ink:#000000; "
+            + "--rule:#808080; --link:#0000ee; --paper:#ffffff; --paper-ink:#000000; "
+            + "--tab-face:#ededed; --tab-line:#808080; }");
+        writer.WriteLine($"{indent}@media (prefers-color-scheme:dark) {{ :root {{ --page:#1c1d1f; "
+            + "--ink:#e4e4e6; --rule:#5a5d63; --link:#8ab4f8; --tab-face:#2a2c30; "
+            + "--tab-line:#5a5d63; } }");
+        writer.WriteLine($"{indent}body {{ background:var(--page); color:var(--ink); }}");
+        writer.WriteLine($"{indent}table {{ background:var(--paper); color:var(--paper-ink); }}");
+        writer.WriteLine($"{indent}hr {{ border-color:var(--rule); }}");
+        writer.WriteLine($"{indent}a {{ color:var(--link); }}");
+
+        // The note tooltip states its own pale ground and no text colour, so on a dark page it
+        // would be light on light. It is paper too.
+        writer.WriteLine($"{indent}comment {{ color:var(--paper-ink); }}");
     }
 
     // ------------------------------------------------------------------------- the overview
@@ -282,10 +336,16 @@ public static class SheetHtmlWriter
         writer.WriteLine($"<div class=\"sheet-tabs\" id=\"{prefix}\">");
 
         // A fragment has no head to put the rules in, and the embedding page cannot be asked to
-        // supply them — the tabs do not work without them.
+        // supply them — the tabs do not work without them. The theme tokens come along because the
+        // rules below name them, and a fragment has no `:root` block of its own; they are scoped to
+        // the container so an embedding page's own tokens are untouched.
         if (fragment)
         {
             writer.WriteLine("<style type=\"text/css\">");
+            writer.WriteLine($"\t#{prefix} {{ --paper:#ffffff; --paper-ink:#000000; --ink:#000000; "
+                + "--link:#0000ee; --tab-face:#ededed; --tab-line:#808080; }");
+            writer.WriteLine($"\t@media (prefers-color-scheme:dark) {{ #{prefix} {{ --ink:#e4e4e6; "
+                + "--link:#8ab4f8; --tab-face:#2a2c30; --tab-line:#5a5d63; } }");
             WriteTabStyle(writer, prefix, sheets.Count, "\t");
             writer.WriteLine("</style>");
         }
@@ -339,16 +399,19 @@ public static class SheetHtmlWriter
         writer.WriteLine($"{indent}#{prefix} .sheet-tab-state {{ position:absolute; width:1px; height:1px; "
             + "margin:0; opacity:0; }");
         writer.WriteLine($"{indent}#{prefix} .sheet-tab-strip {{ display:flex; flex-wrap:wrap; gap:2px; "
-            + "border-bottom:1px solid #808080; margin:0 0 12px; }");
+            + "border-bottom:1px solid var(--tab-line); margin:0 0 12px; }");
         writer.WriteLine($"{indent}#{prefix} .sheet-tab-strip label {{ padding:4px 14px; cursor:pointer; "
-            + "margin-bottom:-1px; background:#ededed; border:1px solid #808080; border-bottom:none; "
-            + "border-radius:4px 4px 0 0; }");
+            + "margin-bottom:-1px; background:var(--tab-face); color:var(--ink); "
+            + "border:1px solid var(--tab-line); border-bottom:none; border-radius:4px 4px 0 0; }");
         writer.WriteLine($"{indent}#{prefix} .sheet-panel {{ display:none; }}");
         writer.WriteLine($"{indent}#{prefix} .sheet-panel h1 {{ display:none; }}");
         writer.WriteLine($"{indent}{panels} {{ display:block; }}");
-        writer.WriteLine($"{indent}{labels} {{ background:#ffffff; border-bottom:1px solid #ffffff; "
-            + "font-weight:bold; }");
-        writer.WriteLine($"{indent}{focus} {{ outline:2px solid #0000ff; outline-offset:-2px; }}");
+
+        // The live tab takes the paper's colours, not the page's, because it is the edge of the
+        // sheet below it — the border it drops is what joins the two.
+        writer.WriteLine($"{indent}{labels} {{ background:var(--paper); color:var(--paper-ink); "
+            + "border-bottom:1px solid var(--paper); font-weight:bold; }");
+        writer.WriteLine($"{indent}{focus} {{ outline:2px solid var(--link); outline-offset:-2px; }}");
         writer.WriteLine($"{indent}@media print {{ #{prefix} .sheet-tab-strip {{ display:none; }} "
             + $"#{prefix} .sheet-panel, #{prefix} .sheet-panel h1 {{ display:block; }} }}");
     }

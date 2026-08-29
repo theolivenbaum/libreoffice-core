@@ -3717,6 +3717,32 @@ its spelling, so nothing before this could see it.
   starts a row above it. The fix is one condition, and it moves the used range — which pagination
   is computed from — so it wants a corpus sweep rather than a quick edit.
 
+### The document paints its own ground, and the sheet keeps white paper
+
+The reference sets no background at all, which is fine for a file opened on its own and wrong the
+moment it is embedded: a document in an `iframe` on a dark page shows that page's ground through
+every cell stating no fill, under text that is still black. Measured on the three-sheet demo over a
+`#1c1d1f` host, **90 of 121 text elements sat below a 4.5:1 contrast ratio, the worst at 1.24:1**.
+With the theme rules, 7 — and those 7 are the same 7 the light scheme has, being the workbook's own
+grey note text on white.
+
+**The sheet keeps white paper in both schemes, and that is the decision to defend.** A workbook's
+fills, borders and font colours are one set chosen against white: the demo's banded rows alternate a
+stated `#EDF2F9` with a cell that states nothing, so darkening only the unstated half inverts every
+other stripe and leaves the header fill floating over it — which is precisely what the reference's
+own output does on a dark page. A cell whose font colour is stated dark and whose fill is not fares
+worse still, and nothing in the file says which way round it was meant. So `table` paints
+`--paper` unconditionally, and what follows the reader's scheme is the furniture around it: the
+page, the headings, the rules, the links, the note tooltip and the tab strip. `--paper` is declared
+once and never redefined; `TheSheetKeepsItsPaperInTheDarkScheme` asserts its absence from the dark
+block, because a redefinition there would be silent and would look like an improvement.
+
+The live tab takes `--paper` rather than `--page`, since it is the edge of the sheet below it — the
+dropped border is what joins the two.
+
+A fragment gets the tokens but not the rules, scoped to its own container: `SkipHeaderFooter` says
+the embedding page states the styling, and the tokens travel only because the tab rules name them.
+
 ### Two ways out, and the option that picks between them
 
 `SheetHtmlNavigation.Overview` is the reference's: an index of links and every sheet under it in

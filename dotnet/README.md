@@ -40,7 +40,9 @@ new RasterRenderer(new RasterRenderOptions { Dpi = 150 })
     .RenderToPng(pages[0], File.Create("slide1.png"));
 
 // Or, for a workbook, write it as HTML instead of drawing it: one table per sheet, in the
-// shape Calc's own HTML filter writes.
+// shape Calc's own HTML filter writes. The document paints its own ground and follows the
+// reader's colour scheme, while the sheet keeps the white paper its colours were chosen
+// against - so it stays legible dropped into a page of any colour.
 using IDocument book = PaperlessDocument.Open("report.xlsx");
 SpreadsheetPages sheets = (SpreadsheetPages)((IPaginatedDocument)book).Layout();
 
