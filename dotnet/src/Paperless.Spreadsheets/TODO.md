@@ -3717,6 +3717,37 @@ its spelling, so nothing before this could see it.
   starts a row above it. The fix is one condition, and it moves the used range — which pagination
   is computed from — so it wants a corpus sweep rather than a quick edit.
 
+### Two ways out, and the option that picks between them
+
+`SheetHtmlNavigation.Overview` is the reference's: an index of links and every sheet under it in
+one scrolling page. It is the default because that is what LibreOffice writes and what the tests
+compare against.
+
+`SheetHtmlNavigation.Tabs` is the workbook's own shape, for a caller showing a workbook to a reader
+rather than archiving it — a fifty-sheet workbook as one page is not navigable. Three things about
+it were decided deliberately and are each pinned by a test:
+
+- **One file and no script.** The switching is a radio group and two generated selector lists, so
+  the document works with scripting off, inside a sandboxed frame, and under a policy admitting no
+  inline script. A per-sheet file plus a script that swaps iframes — the shape Aspose's export
+  forces, because it can only write the active sheet — buys nothing here, since every sheet is
+  already in hand.
+- **Printing shows every sheet.** A tabbed document printed as it appears would silently be one
+  sheet of a workbook. The panels all open for print, the strip goes away, and the per-sheet
+  headings — hidden by a rule on screen rather than left out — come back, so the printed document
+  is the `Overview` one.
+- **The identifiers are prefixed.** The radio group is named after `IdPrefix`, so two workbooks
+  exported into one page do not switch each other's sheets. The value is folded to a usable
+  identifier, because the expected caller passes a file name.
+
+The keyboard follows from the choice rather than being added to it: a radio group is arrow-key
+navigable, and a `:focus-visible` rule moves the focus ring from the off-screen input onto its
+label.
+
+Not done, and deliberately: **a tab does not deep-link.** A `:target`-driven strip would give each
+sheet a URL, but has no checked state on first load, so the document would open showing nothing.
+Closing it means a second mechanism layered over the first, and no caller has asked.
+
 ### Not yet, and why
 
 - **Pictures, charts and OLE objects are not written.** Calc writes each as a file beside the HTML

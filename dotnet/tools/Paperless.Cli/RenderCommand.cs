@@ -86,7 +86,12 @@ internal static class RenderCommand
         string file = Path.Combine(directory, stem + ".html");
         using (FileStream output = File.Create(file))
         {
-            SheetHtmlWriter.Write(sheets, output, new SheetHtmlOptions { Title = stem });
+            SheetHtmlWriter.Write(sheets, output, new SheetHtmlOptions
+            {
+                Title      = stem,
+                Navigation = options.Tabs ? SheetHtmlNavigation.Tabs : SheetHtmlNavigation.Overview,
+                IdPrefix   = stem,
+            });
         }
 
         if (!options.Quiet) Console.WriteLine($"{file}: {sheets.Sheets.Count} sheet(s)");
@@ -242,6 +247,7 @@ internal static class RenderCommand
               --outdir DIR   Where to write. Defaults to the current directory
               --pages RANGE  Which pages, as 1-based numbers: "2", "1-3", "1-3,7", "5-"
               --dpi N        Resolution for png and jpeg. Default 150
+              --tabs         For html: a tab per sheet instead of one long page
               --quiet        Say nothing on success
 
             Output:
@@ -255,6 +261,11 @@ internal static class RenderCommand
 
             HTML is not paginated: it writes the sheets themselves, the way Calc's own HTML
             export does, and ignores --pages and --dpi.
+
+            --tabs replaces the overview index with a strip of tabs and shows one sheet at a
+            time. It stays a single file and runs no script - the switching is a radio group
+            and two generated CSS rules - and it prints as every sheet, so a printed tabbed
+            document is the same as an untabbed one. A one-sheet workbook is unaffected.
 
             Exit codes:
               0   every file rendered
@@ -278,6 +289,8 @@ internal static class RenderCommand
         public double Dpi { get; private set; } = 150;
 
         public bool Quiet { get; private set; }
+
+        public bool Tabs { get; private set; }
 
         public bool WantsHelp { get; private set; }
 
@@ -310,6 +323,10 @@ internal static class RenderCommand
                         }
 
                         options.Format = format == "jpg" ? "jpeg" : format;
+                        break;
+
+                    case "--tabs":
+                        options.Tabs = true;
                         break;
 
                     case "--outdir":

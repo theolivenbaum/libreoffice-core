@@ -42,8 +42,19 @@ new RasterRenderer(new RasterRenderOptions { Dpi = 150 })
 // Or, for a workbook, write it as HTML instead of drawing it: one table per sheet, in the
 // shape Calc's own HTML filter writes.
 using IDocument book = PaperlessDocument.Open("report.xlsx");
-SheetHtmlWriter.Write(
-    (SpreadsheetPages)((IPaginatedDocument)book).Layout(), File.Create("report.html"));
+SpreadsheetPages sheets = (SpreadsheetPages)((IPaginatedDocument)book).Layout();
+
+SheetHtmlWriter.Write(sheets, File.Create("report.html"));
+
+// Or as the workbook's own shape - a strip of tabs, one sheet at a time. Still one
+// self-contained file, and no script: the switching is a radio group and two CSS rules,
+// so it survives a sandboxed frame and a policy that admits no inline script. It prints
+// as every sheet.
+SheetHtmlWriter.Write(sheets, File.Create("tabbed.html"), new SheetHtmlOptions
+{
+    Navigation = SheetHtmlNavigation.Tabs,
+    IdPrefix   = "report",   // names the radio group, so two workbooks can share a page
+});
 ```
 
 Format is always determined from **content**, not the file extension.

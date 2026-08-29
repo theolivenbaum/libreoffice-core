@@ -34,6 +34,22 @@ public sealed record SheetHtmlOptions
     /// <summary>What to name in the generator meta element.</summary>
     public string Generator { get; init; } = "Paperless";
 
+    /// <summary>How a reader moves between the sheets. Defaults to the reference's index.</summary>
+    public SheetHtmlNavigation Navigation { get; init; } = SheetHtmlNavigation.Overview;
+
+    /// <summary>
+    /// What to prefix the identifiers <see cref="SheetHtmlNavigation.Tabs"/> generates with.
+    /// </summary>
+    /// <remarks>
+    /// The tab strip is a radio group, so it needs an element identifier per sheet and a name for
+    /// the group itself; two workbooks exported into one page with the same prefix would share
+    /// that group and switch each other's sheets. Give each its own prefix and they coexist. The
+    /// value is folded to letters, digits, <c>-</c> and <c>_</c> and made to start with a letter,
+    /// so a caller may pass a file name straight in. Ignored under
+    /// <see cref="SheetHtmlNavigation.Overview"/>.
+    /// </remarks>
+    public string IdPrefix { get; init; } = "sheets";
+
     /// <summary>
     /// The language identifier written into <c>sdnum</c>, which is the reader's locale rather
     /// than the document's.

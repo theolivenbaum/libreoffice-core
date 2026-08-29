@@ -103,6 +103,11 @@ public static class SheetHtmlWriter
         // whether the per-sheet headings appear at all.
         List<SheetLayout> written = [.. sheets.Where(sheet => !sheet.IsHidden && sheet.UsedRange.IsValid)];
 
+        // Tabs are navigation, and one sheet has nothing to navigate — so a single-sheet workbook
+        // is the same document either way, as it already is for the overview and the headings.
+        bool tabbed = settings.Navigation == SheetHtmlNavigation.Tabs && written.Count > 1;
+        string prefix = Identifier(settings.IdPrefix);
+
         // The head's default font comes from a sheet, so it is the written set that decides it: a
         // workbook whose first sheet is hidden takes the first one a reader will actually see.
         if (!settings.SkipHeaderFooter)
@@ -110,14 +115,24 @@ public static class SheetHtmlWriter
             writer.WriteLine("<!DOCTYPE html>");
             writer.WriteLine();
             writer.WriteLine("<html>");
-            WriteHead(writer, written, settings);
+            WriteHead(writer, written, settings, tabbed ? (prefix, written.Count) : null);
             writer.WriteLine();
             writer.WriteLine("<body>");
         }
 
-        WriteOverview(writer, written);
+        if (tabbed) WriteTabStrip(writer, written, prefix, settings.SkipHeaderFooter);
+        else WriteOverview(writer, written);
 
-        for (int at = 0; at < written.Count; at++) WriteTable(writer, written[at], at, written.Count, settings);
+        for (int at = 0; at < written.Count; at++)
+        {
+            if (tabbed) writer.WriteLine($"<div class=\"sheet-panel\" id=\"{prefix}-panel-{Number(at + 1)}\">");
+
+            WriteTable(writer, written[at], at, written.Count, settings, tabbed);
+
+            if (tabbed) writer.WriteLine("</div>");
+        }
+
+        if (tabbed) writer.WriteLine("</div>");
 
         if (!settings.SkipHeaderFooter)
         {
@@ -127,10 +142,39 @@ public static class SheetHtmlWriter
         }
     }
 
+    /// <summary>
+    /// Folds a caller's prefix into something usable as an element identifier and inside a CSS
+    /// selector.
+    /// </summary>
+    /// <remarks>
+    /// A caller passing a file name is the expected case, and a file name holds spaces, dots and
+    /// worse. Anything outside the safe set becomes a hyphen, and a value that would not start
+    /// with a letter gains one, because a CSS identifier may not begin with a digit.
+    /// </remarks>
+    private static string Identifier(string? prefix)
+    {
+        if (string.IsNullOrWhiteSpace(prefix)) return "sheets";
+
+        StringBuilder folded = new(prefix.Length + 1);
+        foreach (char character in prefix)
+        {
+            folded.Append(char.IsAsciiLetterOrDigit(character) || character is '-' or '_'
+                ? character
+                : '-');
+        }
+
+        if (!char.IsAsciiLetter(folded[0])) folded.Insert(0, 's');
+
+        return folded.ToString();
+    }
+
     // ----------------------------------------------------------------------------- the head
 
     private static void WriteHead(
-        TextWriter writer, List<SheetLayout> sheets, SheetHtmlOptions options)
+        TextWriter writer,
+        List<SheetLayout>      sheets,
+        SheetHtmlOptions       options,
+        (string Prefix, int Count)? tabs)
     {
         SheetCellFormat defaults = sheets.Count > 0
             ? sheets[0].Formats.SheetDefault
@@ -158,6 +202,9 @@ public static class SheetHtmlWriter
             "\t\ta.comment-indicator { background:red; display:inline-block; border:1px solid black; "
             + "width:0.5em; height:0.5em;  } ");
         writer.WriteLine("\t\tcomment { display:none;  } ");
+
+        if (tabs is { } strip) WriteTabStyle(writer, strip.Prefix, strip.Count, "\t\t");
+
         writer.WriteLine("\t</style>");
         writer.WriteLine("</head>");
     }
@@ -214,16 +261,120 @@ public static class SheetHtmlWriter
         writer.WriteLine("\t</center></p>");
     }
 
+    // ------------------------------------------------------------------------------ the tabs
+
+    /// <summary>
+    /// The tab strip, and the container everything after it lives in.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A radio group, one input per sheet, with the labels drawn as tabs and the panels shown by
+    /// two generated rules. The inputs come first because the rules reach the strip and the panels
+    /// with the sibling combinator, which only looks forward.
+    /// </para>
+    /// <para>
+    /// The container is closed by the caller, after the last panel.
+    /// </para>
+    /// </remarks>
+    private static void WriteTabStrip(
+        TextWriter writer, List<SheetLayout> sheets, string prefix, bool fragment)
+    {
+        writer.WriteLine($"<div class=\"sheet-tabs\" id=\"{prefix}\">");
+
+        // A fragment has no head to put the rules in, and the embedding page cannot be asked to
+        // supply them — the tabs do not work without them.
+        if (fragment)
+        {
+            writer.WriteLine("<style type=\"text/css\">");
+            WriteTabStyle(writer, prefix, sheets.Count, "\t");
+            writer.WriteLine("</style>");
+        }
+
+        for (int at = 0; at < sheets.Count; at++)
+        {
+            writer.WriteLine(
+                $"\t<input type=\"radio\" class=\"sheet-tab-state\" name=\"{prefix}-choice\" "
+                + $"id=\"{prefix}-tab-{Number(at + 1)}\"{(at == 0 ? " checked" : string.Empty)}>");
+        }
+
+        writer.WriteLine("\t<div class=\"sheet-tab-strip\">");
+
+        for (int at = 0; at < sheets.Count; at++)
+        {
+            writer.WriteLine(
+                $"\t\t<label for=\"{prefix}-tab-{Number(at + 1)}\">{Escape(sheets[at].Name)}</label>");
+        }
+
+        writer.WriteLine("\t</div>");
+    }
+
+    /// <summary>The rules the tab strip needs, keyed on the container so two exports coexist.</summary>
+    /// <remarks>
+    /// <para>
+    /// Two of them are generated per sheet and joined into one selector list: the checked input
+    /// shows its panel, and marks its label. Everything else is fixed.
+    /// </para>
+    /// <para>
+    /// The inputs are moved out of sight rather than hidden, because <c>display:none</c> takes
+    /// them out of the focus order and the keyboard is the only way a reader without a mouse
+    /// changes sheet. The <c>:focus-visible</c> rule is what then shows where the focus is, since
+    /// the outline would otherwise land on the invisible input.
+    /// </para>
+    /// <para>
+    /// <strong>Print shows every sheet.</strong> A tabbed document printed as it appears would be
+    /// one sheet of a workbook, silently — so the panels all open, the strip goes away, and the
+    /// per-sheet headings that are hidden on screen come back. The printed document is the
+    /// <see cref="SheetHtmlNavigation.Overview"/> one.
+    /// </para>
+    /// </remarks>
+    private static void WriteTabStyle(TextWriter writer, string prefix, int count, string indent)
+    {
+        string panels = Selectors(count, indent, at =>
+            $"#{prefix}-tab-{Number(at)}:checked ~ #{prefix}-panel-{Number(at)}");
+        string labels = Selectors(count, indent, at =>
+            $"#{prefix}-tab-{Number(at)}:checked ~ .sheet-tab-strip label[for=\"{prefix}-tab-{Number(at)}\"]");
+        string focus = Selectors(count, indent, at =>
+            $"#{prefix}-tab-{Number(at)}:focus-visible ~ .sheet-tab-strip label[for=\"{prefix}-tab-{Number(at)}\"]");
+
+        writer.WriteLine($"{indent}#{prefix} .sheet-tab-state {{ position:absolute; width:1px; height:1px; "
+            + "margin:0; opacity:0; }");
+        writer.WriteLine($"{indent}#{prefix} .sheet-tab-strip {{ display:flex; flex-wrap:wrap; gap:2px; "
+            + "border-bottom:1px solid #808080; margin:0 0 12px; }");
+        writer.WriteLine($"{indent}#{prefix} .sheet-tab-strip label {{ padding:4px 14px; cursor:pointer; "
+            + "margin-bottom:-1px; background:#ededed; border:1px solid #808080; border-bottom:none; "
+            + "border-radius:4px 4px 0 0; }");
+        writer.WriteLine($"{indent}#{prefix} .sheet-panel {{ display:none; }}");
+        writer.WriteLine($"{indent}#{prefix} .sheet-panel h1 {{ display:none; }}");
+        writer.WriteLine($"{indent}{panels} {{ display:block; }}");
+        writer.WriteLine($"{indent}{labels} {{ background:#ffffff; border-bottom:1px solid #ffffff; "
+            + "font-weight:bold; }");
+        writer.WriteLine($"{indent}{focus} {{ outline:2px solid #0000ff; outline-offset:-2px; }}");
+        writer.WriteLine($"{indent}@media print {{ #{prefix} .sheet-tab-strip {{ display:none; }} "
+            + $"#{prefix} .sheet-panel, #{prefix} .sheet-panel h1 {{ display:block; }} }}");
+    }
+
+    /// <summary>One selector per sheet, joined as a list and kept under the rule's own indent.</summary>
+    private static string Selectors(int count, string indent, Func<int, string> selector)
+        => string.Join(",\n" + indent, Enumerable.Range(1, count).Select(selector));
+
     // --------------------------------------------------------------------------- the tables
 
     private static void WriteTable(
-        TextWriter writer, SheetLayout sheet, int position, int count, SheetHtmlOptions options)
+        TextWriter       writer,
+        SheetLayout      sheet,
+        int              position,
+        int              count,
+        SheetHtmlOptions options,
+        bool             tabbed)
     {
         SheetRange used = sheet.UsedRange;
 
         if (count > 1)
         {
-            writer.WriteLine("<hr>");
+            // Under tabs the rule goes: the strip already separates the sheets, and the heading is
+            // hidden by the stylesheet rather than dropped, so printing brings it back.
+            if (!tabbed) writer.WriteLine("<hr>");
+
             writer.WriteLine(
                 $"<A NAME=\"table{Number(sheet.Index)}\"><h1>Sheet {Number(position + 1)}: "
                 + $"<em>{Escape(sheet.Name)}</em></h1></A>");

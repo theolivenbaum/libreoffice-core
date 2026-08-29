@@ -284,7 +284,166 @@ public sealed class SheetHtmlWriterTests
         boolean.ShouldNotContain("data-sheets-numberformat");
     }
 
+    // ------------------------------------------------------------ the tabbed navigation
+
+    /// <summary>
+    /// Tabs replace the overview index with one label per sheet, and the first sheet is the one
+    /// showing.
+    /// </summary>
+    [Fact]
+    public void TabsReplaceTheOverviewWithALabelPerSheet()
+    {
+        string html = Tabs("sheet-print-xlsx.xlsx");
+
+        html.ShouldNotContain("<h1>Overview</h1>");
+        html.ShouldNotContain("<A HREF=\"#table");
+
+        Regex.Count(html, "<label for=").ShouldBe(5);
+        html.ShouldContain("<label for=\"book-tab-1\">Wide</label>");
+        html.ShouldContain("<label for=\"book-tab-5\">Across</label>");
+
+        // Exactly one input starts checked, and it is the first.
+        Regex.Count(html, " checked>").ShouldBe(1);
+        html.ShouldContain("id=\"book-tab-1\" checked>");
+    }
+
+    /// <summary>
+    /// Each sheet is a panel, hidden by default, and shown by the rule its own tab checks.
+    /// </summary>
+    /// <remarks>
+    /// The two together are the whole switching mechanism: the panels are <c>display:none</c>, and
+    /// one generated selector list turns the checked tab's panel back on. Nothing else in the
+    /// document decides which sheet is visible, which is why both halves are asserted.
+    /// </remarks>
+    [Fact]
+    public void ASheetIsAPanelShownByItsOwnTab()
+    {
+        string html = Tabs("sheet-print-xlsx.xlsx");
+
+        Regex.Count(html, "class=\"sheet-panel\"").ShouldBe(5);
+        html.ShouldContain("#book .sheet-panel { display:none; }");
+        html.ShouldContain("#book-tab-1:checked ~ #book-panel-1,");
+        html.ShouldContain("#book-tab-5:checked ~ #book-panel-5 { display:block; }");
+    }
+
+    /// <summary>
+    /// The per-sheet headings are still written, hidden on screen, and brought back for print.
+    /// </summary>
+    /// <remarks>
+    /// A tabbed document printed as it appears would be one sheet of a workbook with nothing
+    /// saying so. Opening every panel for print makes the printed document the
+    /// <see cref="SheetHtmlNavigation.Overview"/> one, and the headings are what name the sheets
+    /// once the strip is gone — so they are hidden by a rule rather than left out.
+    /// </remarks>
+    [Fact]
+    public void PrintingATabbedDocumentShowsEverySheet()
+    {
+        string html = Tabs("sheet-print-xlsx.xlsx");
+
+        html.ShouldContain("<h1>Sheet 1: <em>Wide</em></h1>");
+        html.ShouldContain("#book .sheet-panel h1 { display:none; }");
+        html.ShouldContain(
+            "@media print { #book .sheet-tab-strip { display:none; } "
+            + "#book .sheet-panel, #book .sheet-panel h1 { display:block; } }");
+    }
+
+    /// <summary>
+    /// The tabs are a radio group and no script at all, so the document works wherever a script
+    /// would not.
+    /// </summary>
+    /// <remarks>
+    /// The point of the choice, and the thing a later change could quietly cost: this is what lets
+    /// the export stay one self-contained file that survives a sandboxed frame and a policy
+    /// admitting no inline script.
+    /// </remarks>
+    [Fact]
+    public void TheTabsRunNoScript()
+    {
+        string html = Tabs("sheet-print-xlsx.xlsx");
+
+        html.ShouldNotContain("<script");
+        html.ShouldNotContain("onclick");
+        Regex.Count(html, "type=\"radio\"").ShouldBe(5);
+    }
+
+    /// <summary>A one-sheet workbook has nothing to navigate, so the option changes nothing.</summary>
+    [Fact]
+    public void ASingleSheetWorkbookIsTheSameDocumentEitherWay()
+        => Tabs("sheet-xlsx.xlsx").ShouldBe(Html("sheet-xlsx.xlsx"));
+
+    /// <summary>
+    /// A fragment carries the rules the tabs need, because there is no head to put them in.
+    /// </summary>
+    /// <remarks>
+    /// The embedding page cannot be asked to supply them — a caller pasting the fragment would get
+    /// every sheet stacked and a row of inert labels, with nothing to say why.
+    /// </remarks>
+    [Fact]
+    public void ATabbedFragmentCarriesItsOwnRules()
+    {
+        string html = Html("sheet-print-xlsx.xlsx", new SheetHtmlOptions
+        {
+            SkipHeaderFooter = true,
+            Navigation       = SheetHtmlNavigation.Tabs,
+            IdPrefix         = "book",
+        });
+
+        html.ShouldNotContain("<head>");
+        html.ShouldStartWith("<div class=\"sheet-tabs\" id=\"book\">");
+        html.ShouldContain("#book .sheet-panel { display:none; }");
+
+        // Inside the container, so it travels with the markup it applies to.
+        html.IndexOf("<style", StringComparison.Ordinal)
+            .ShouldBeLessThan(html.IndexOf("<label for=", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// Two workbooks on one page do not switch each other's sheets, because the prefix names the
+    /// radio group.
+    /// </summary>
+    [Fact]
+    public void TwoExportsOnOnePageDoNotShareARadioGroup()
+    {
+        string one = Tabs("sheet-print-xlsx.xlsx");
+        string two = Html("sheet-print-xlsx.xlsx", new SheetHtmlOptions
+        {
+            Navigation = SheetHtmlNavigation.Tabs,
+            IdPrefix   = "other",
+        });
+
+        one.ShouldContain("name=\"book-choice\"");
+        two.ShouldContain("name=\"other-choice\"");
+        two.ShouldNotContain("book-choice");
+    }
+
+    /// <summary>
+    /// A prefix is folded into something an identifier and a CSS selector can both hold.
+    /// </summary>
+    /// <remarks>
+    /// The expected caller passes a file name, so spaces and dots arrive routinely and a leading
+    /// digit is entirely possible — and a CSS identifier may not begin with one.
+    /// </remarks>
+    [Fact]
+    public void APrefixIsFoldedIntoAUsableIdentifier()
+    {
+        string html = Html("sheet-print-xlsx.xlsx", new SheetHtmlOptions
+        {
+            Navigation = SheetHtmlNavigation.Tabs,
+            IdPrefix   = "2026 Q1 report.final",
+        });
+
+        html.ShouldContain("id=\"s2026-Q1-report-final\"");
+        html.ShouldContain("#s2026-Q1-report-final .sheet-panel { display:none; }");
+    }
+
     // ------------------------------------------------------------------ helpers
+
+    private static string Tabs(string fixture)
+        => Html(fixture, new SheetHtmlOptions
+        {
+            Navigation = SheetHtmlNavigation.Tabs,
+            IdPrefix   = "book",
+        });
 
     private static string Html(string fixture, SheetHtmlOptions? options = null)
     {
