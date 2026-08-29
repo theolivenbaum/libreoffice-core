@@ -108,7 +108,11 @@ public class OdfNumberFormatTests
             """,
             "date-style");
 
-        OdfNumberFormat.Code(style).ShouldBe("""DD"/"MM"/"YYYY""");
+        // The separators are bare, not quoted: this asserted `DD"/"MM"/"YYYY` until the HTML
+        // export made the code itself visible and the reference was measured writing
+        // `sdnum="1033;0;MM/DD/YYYY"` for the same shape. Both codes render the line below
+        // identically, which is why the quoting was wrong for as long as it was.
+        OdfNumberFormat.Code(style).ShouldBe("DD/MM/YYYY");
         NumberFormatter.Format(OdfNumberFormat.Parse(style)!, 45000).ShouldBe("15/03/2023");
     }
 
@@ -127,7 +131,85 @@ public class OdfNumberFormatTests
         NumberFormatter.Format(OdfNumberFormat.Parse(style)!, 0.5730).ShouldBe("13:45");
     }
 
-    /// <summary>A style with nothing this compiles yields null rather than an empty code.</summary>
+    /// <summary>
+    /// A per cent sign with a space in front of it is one literal, and the space alone is quoted.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>0.00 %</c> is the commonest percentage format there is, and ODF writes its suffix as the
+    /// single two-character <c>number:text</c> <c>" %"</c> rather than as a space and a sign. A
+    /// compiler that quotes a literal whole therefore produces <c>0.00" %"</c>, in which nothing
+    /// says "multiply by a hundred" any more: 0.05 renders <c>0.05 %</c>.
+    /// </para>
+    /// <para>
+    /// The reference quotes around the sign instead (<c>lcl_EnquoteIfNecessary</c>,
+    /// <c>xmlnumfi.cxx</c>:552-587). Its own HTML export of this style, measured, states
+    /// <c>sdnum="1033;0;0.00&amp;quot; &amp;quot;%"</c> and renders the cell <c>5.00 %</c>.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void APercentageSignBehindASpaceStillMultiplies()
+    {
+        XElement style = Style(
+            """
+            <number:number number:decimal-places="2" number:min-decimal-places="2"
+                           number:min-integer-digits="1"/>
+            <number:text> %</number:text>
+            """,
+            "percentage-style");
+
+        OdfNumberFormat.Code(style).ShouldBe("0.00\" \"%");
+
+        NumberFormatCode code = OdfNumberFormat.Parse(style)!;
+        NumberFormatter.Format(code, 0.05).ShouldBe("5.00 %");
+    }
+
+    /// <summary>
+    /// A lone separator stays bare where its format type can carry one, and is quoted where it
+    /// cannot.
+    /// </summary>
+    /// <remarks>
+    /// <c>lcl_ValidChar</c> (<c>xmlnumfi.cxx</c>:480-531) admits <c>/</c> unquoted in a date, time
+    /// or currency style only, because in a number style the same character is the fraction bar.
+    /// Both codes render the same text, so this is invisible until something states the code
+    /// itself — which the HTML export's <c>sdnum</c> does.
+    /// </remarks>
+    [Fact]
+    public void ASeparatorIsBareInADateStyleAndQuotedInANumberOne()
+    {
+        OdfNumberFormat.Code(Style(
+                """
+                <number:month number:style="long"/>
+                <number:text>/</number:text>
+                <number:day number:style="long"/>
+                """,
+                "date-style"))
+            .ShouldBe("MM/DD");
+
+        OdfNumberFormat.Code(Style(
+                """
+                <number:number number:min-integer-digits="1"/>
+                <number:text>/</number:text>
+                """))
+            .ShouldBe("0\"/\"");
+    }
+
+    /// <summary>Two or more characters are quoted whatever they are.</summary>
+    /// <remarks>
+    /// The bare cases are one character, or two of which the second is a space — enough for the
+    /// separators a date or currency format is built from, and no more. <c>" kg"</c> is a suffix,
+    /// and unquoted its <c>k</c> would be read as the thousands directive.
+    /// </remarks>
+    [Fact]
+    public void ALongerLiteralIsQuoted()
+        => OdfNumberFormat.Code(Style(
+                """
+                <number:number number:min-integer-digits="1"/>
+                <number:text> kg</number:text>
+                """))
+            .ShouldBe("0\" kg\"");
+
+        /// <summary>A style with nothing this compiles yields null rather than an empty code.</summary>
     [Fact]
     public void AnEmptyStyleIsNotAFormat()
     {

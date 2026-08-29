@@ -355,7 +355,15 @@ public static class SheetHtmlWriter
         // own HTML import reads back (`HTMLOutFuncs::CreateTableDataOptionsValNum`,
         // `svtools/source/svhtml/htmlout.cxx`:914-955). A cell with neither a value nor a stated
         // format gets neither attribute.
-        string? code = format.HasGeneralFormat ? null : format.NumberFormat?.Code;
+        //
+        // A boolean carries Calc's own BOOLEAN format, whose format string is what its HTML export
+        // keys the Google Sheets type off (`htmlexp.cxx`:1156). No file states such a format — a
+        // boolean is a cell type in OOXML and ODF, not a format — so it is supplied here, which is
+        // where the two models meet.
+        bool boolean = cell?.Value is bool;
+        string? code = boolean
+            ? "BOOLEAN"
+            : format.HasGeneralFormat ? null : format.NumberFormat?.Code;
 
         if (value is { } number)
             attributes.Append(" sdval=\"").Append(Invariant(number)).Append('"');
@@ -371,7 +379,7 @@ public static class SheetHtmlWriter
             attributes.Append('"');
         }
 
-        AppendDataSheets(attributes, text, value, code, cell?.Value is bool);
+        AppendDataSheets(attributes, text, value, code, boolean);
 
         writer.Write("\t\t<td");
         writer.Write(attributes.ToString());
@@ -412,23 +420,28 @@ public static class SheetHtmlWriter
         {
             if (code is null) return;
 
-            // Type 4 is a boolean and 3 a number. Calc decides between them by the format's name
-            // being the literal "BOOLEAN" (`htmlexp.cxx`:1155-1160), which is how its formatter
-            // records a boolean; this model records the value's own type instead and reaches the
-            // same answer from the other end.
+            // Type 4 is a boolean and 3 a number, decided by the format string being the literal
+            // "BOOLEAN" (`htmlexp.cxx`:1155-1160).
             attributes.Append(" data-sheets-value=\"")
                 .Append(Escape(isBoolean
                     ? $"{{ \"1\": 4, \"4\": {Number((int)number)}}}"
                     : $"{{ \"1\": 3, \"3\": {Number((int)number)}}}"))
                 .Append('"');
-            attributes.Append(" data-sheets-numberformat=\"")
-                .Append(Escape($"{{ \"1\": 2, \"2\": \"{code}\", \"3\": 1}}"))
-                .Append('"');
+
+            // Only a number states its format: Calc leaves `pNumberFormat` null on the boolean arm
+            // (`htmlexp.cxx`:1157-1170), so a boolean carries its type and nothing else.
+            if (!isBoolean)
+            {
+                attributes.Append(" data-sheets-numberformat=\"")
+                    .Append(Escape($"{{ \"1\": 2, \"2\": \"{Json(code)}\", \"3\": 1}}"))
+                    .Append('"');
+            }
+
             return;
         }
 
         attributes.Append(" data-sheets-value=\"")
-            .Append(Escape($"{{ \"1\": 2, \"2\": \"{text}\"}}"))
+            .Append(Escape($"{{ \"1\": 2, \"2\": \"{Json(text)}\"}}"))
             .Append('"');
     }
 
@@ -665,6 +678,66 @@ public static class SheetHtmlWriter
     /// </remarks>
     private static string Invariant(double value) =>
         value.ToString("G15", CultureInfo.InvariantCulture);
+
+    /// <summary>
+    /// Escapes text for the inside of a JSON string literal, the way the reference's own writer
+    /// does.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The two <c>data-sheets-*</c> attributes are JSON inside an HTML attribute, so their values
+    /// carry two layers of escaping; this is the inner one and <see cref="Escape"/> is the outer.
+    /// <c>tools::JsonWriter::writeEscapedOUString</c>
+    /// (<c>tools/source/misc/json_writer.cxx</c>:116-141) escapes the eight characters below —
+    /// <c>/</c> among them, which JSON permits but does not require — and writes anything at or
+    /// below U+001F, plus U+2028 and U+2029, in <c>\uXXXX</c> form.
+    /// </para>
+    /// <para>
+    /// Measured on a probe sheet converted by 24.2.7.2: a <c>\£#,##0.00</c> format is written
+    /// <c>\\£#,##0.00</c>, an <c>MM/DD/YYYY</c> one <c>MM\/DD\/YYYY</c>, and a cell holding
+    /// <c>he said "hi"</c> comes out <c>he said \"hi\"</c>. Note that <c>sdnum</c> beside them is
+    /// <em>not</em> JSON and takes the raw code — the same probe writes
+    /// <c>sdnum="1033;0;MM/DD/YYYY"</c> against that escaped format attribute.
+    /// </para>
+    /// </remarks>
+    private static string Json(string text)
+    {
+        if (!text.Any(NeedsJsonEscape)) return text;
+
+        StringBuilder escaped = new(text.Length + 16);
+        foreach (char character in text)
+        {
+            switch (character)
+            {
+                case '\b': escaped.Append("\\b"); break;
+                case '\t': escaped.Append("\\t"); break;
+                case '\n': escaped.Append("\\n"); break;
+                case '\f': escaped.Append("\\f"); break;
+                case '\r': escaped.Append("\\r"); break;
+                case '"':  escaped.Append("\\\""); break;
+                case '/':  escaped.Append("\\/"); break;
+                case '\\': escaped.Append("\\\\"); break;
+
+                default:
+                    if (NeedsJsonEscape(character))
+                    {
+                        escaped.Append("\\u")
+                            .Append(((int)character).ToString("x4", CultureInfo.InvariantCulture));
+                    }
+                    else
+                    {
+                        escaped.Append(character);
+                    }
+
+                    break;
+            }
+        }
+
+        return escaped.ToString();
+    }
+
+    private static bool NeedsJsonEscape(char character)
+        => character is '"' or '/' or '\\' or '\u2028' or '\u2029' || character <= '\u001f';
 
     /// <summary>
     /// HTML-escapes text, quotes included, because everything written here goes either into an

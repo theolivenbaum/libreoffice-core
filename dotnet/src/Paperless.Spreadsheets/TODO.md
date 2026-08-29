@@ -3680,6 +3680,28 @@ What the remaining differences are, all understood and none of them silent:
 - **`data-sheets-formula`, images, hyperlink anchors and notes** are deliberate omissions, each
   stated in the writer's own remarks with what it would take to close it.
 
+### Three defects this surfaced, all three fixed
+
+Found by exporting a three-sheet workbook both ways and comparing cell by grid position, which is
+the first thing that ever made the *compiled format code* visible — it renders identically whatever
+its spelling, so nothing before this could see it.
+
+- **The two `data-sheets-*` attributes are JSON inside an HTML attribute and were escaped only
+  once.** A `\£#,##0.00` format was written `"\£#,##0.00"`, which is not a JSON string a parser
+  accepts, and a format or a text cell holding a `"` broke the object outright. `SheetHtmlWriter`
+  now has a `Json` escape under its `Escape` one, matching
+  `tools::JsonWriter::writeEscapedOUString`.
+- **A boolean cell stated neither its type nor its format.** Calc keys the Google Sheets type off
+  the format string being the literal `BOOLEAN`, which no file states — a boolean is a cell type in
+  OOXML and ODF — so the writer now supplies it, and drops the number-format attribute on that arm
+  as Calc does.
+- **`OdfNumberFormat` quoted every literal.** `MM/DD/YYYY` came out `MM"/"DD"/"YYYY`, which renders
+  the same and says something different. The live half: ODF writes the common `0.00 %` as the
+  single two-character literal `" %"`, and quoting it whole loses the per-cent directive — 0.05
+  rendered `0.05 %` instead of `5.00 %`. The compiler now follows `lcl_ValidChar` /
+  `lcl_EnquoteIfNecessary`. `sheet-json-escaping.fods` is the fixture and every expectation on it is
+  the reference's own output, cell for cell.
+
 ### Two defects this surfaced, neither fixed here
 
 - **An icon-set conditional format with `showValue="false"` hides the value in *extraction*, where
@@ -3712,6 +3734,12 @@ What the remaining differences are, all understood and none of them silent:
   `SheetNotes` models Calc's "comments at end of sheet" printing rather than the comments
   themselves, so the ODF path reads `office:annotation` into nothing. The writer's comment
   indicator and its CSS are already there and correct for the notes it does get.
+- **An OOXML format code is not re-spelled the way LibreOffice re-spells it.** The file's own
+  `dd\ mmm\ yyyy` is written as it is stored, where LibreOffice writes `DD MMM YYYY` — its
+  formatter parses a code and re-emits it canonically, upper-casing the date directives and
+  dropping an escape that guards nothing. The two format identically, so this reaches only `sdnum`
+  and `data-sheets-numberformat`. Closing it means a canonicalising round trip through
+  `NumberFormatCode`, which every OOXML file's `sdnum` would move on, so it wants its own sweep.
 - **The ODF currency format code is spelled differently.** `OdfNumberFormat` compiles a
   `number:currency-symbol` into a quoted literal — `"£"#,##0.00` — where LibreOffice writes
   `[$£-809]#,##0.00`. The two format identically; only the `sdnum` and `data-sheets-numberformat`

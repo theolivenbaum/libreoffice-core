@@ -209,6 +209,81 @@ public sealed class SheetHtmlWriterTests
     public void APictureIsNotWritten()
         => Html("picture-crop.xlsx").ShouldNotContain("<img");
 
+    // ------------------------------------------------------- the two layers of escaping
+
+    /// <summary>
+    /// The <c>data-sheets-*</c> attributes are JSON inside an HTML attribute, so a quote, a
+    /// backslash or a slash in their content is escaped twice.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>tools::JsonWriter</c> escapes the value before <c>ConvertStringToHTML</c> escapes the
+    /// finished JSON (<c>htmlexp.cxx</c>:1190-1208), and the inner layer is the one easy to miss:
+    /// interpolating a format code straight into the object emits <c>"\£#,##0.00"</c>, which is
+    /// not a JSON string a parser will accept.
+    /// </para>
+    /// <para>
+    /// Every expectation here is the reference's own output for this fixture, cell for cell.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void TheGoogleSheetsAttributesAreJsonEscapedUnderTheirHtmlEscaping()
+    {
+        string html = Html("sheet-json-escaping.fods");
+
+        // A quote, a backslash and a slash, in one text cell.
+        html.ShouldContain(
+            "data-sheets-value=\"{ &quot;1&quot;: 2, &quot;2&quot;: "
+            + "&quot;he said \\&quot;hi\\&quot; a\\\\b and a\\/b&quot;}\"");
+
+        // A format code holding quotes, and one holding slashes.
+        html.ShouldContain(
+            "data-sheets-numberformat=\"{ &quot;1&quot;: 2, &quot;2&quot;: "
+            + "&quot;\\&quot;USD \\&quot;#,##0.00&quot;, &quot;3&quot;: 1}\"");
+        html.ShouldContain(
+            "data-sheets-numberformat=\"{ &quot;1&quot;: 2, &quot;2&quot;: "
+            + "&quot;MM\\/DD\\/YYYY&quot;, &quot;3&quot;: 1}\"");
+    }
+
+    /// <summary>
+    /// <c>sdnum</c> beside them is not JSON and carries the code raw.
+    /// </summary>
+    /// <remarks>
+    /// The pair is the discriminator between the two layers: the same date format is
+    /// <c>MM/DD/YYYY</c> here and <c>MM\/DD\/YYYY</c> in the attribute above. Asserting only one
+    /// of them would let a fix for either escape the other.
+    /// </remarks>
+    [Fact]
+    public void TheCalcAttributeBesideThemIsNotJsonAndTakesTheCodeRaw()
+    {
+        string html = Html("sheet-json-escaping.fods");
+
+        html.ShouldContain("sdnum=\"1033;0;MM/DD/YYYY\"");
+        html.ShouldContain("sdnum=\"1033;0;&quot;USD &quot;#,##0.00\"");
+    }
+
+    /// <summary>
+    /// A boolean names its format <c>BOOLEAN</c>, states type 4, and states no number format.
+    /// </summary>
+    /// <remarks>
+    /// Calc keys the type off the format string being that literal
+    /// (<c>htmlexp.cxx</c>:1155-1160) and leaves <c>pNumberFormat</c> null on that arm, so the
+    /// third attribute its siblings carry is absent. No file states such a format — a boolean is
+    /// a cell type in OOXML and ODF — so the writer supplies it, which is the one place the two
+    /// models have to be made to meet.
+    /// </remarks>
+    [Fact]
+    public void ABooleanNamesItsFormatAndStatesNoNumberFormat()
+    {
+        string html = Html("sheet-json-escaping.fods");
+
+        html.ShouldContain("sdnum=\"1033;0;BOOLEAN\"");
+        html.ShouldContain("data-sheets-value=\"{ &quot;1&quot;: 4, &quot;4&quot;: 1}\"");
+
+        string boolean = Rows(html).Single(row => row.Contains("BOOLEAN", StringComparison.Ordinal));
+        boolean.ShouldNotContain("data-sheets-numberformat");
+    }
+
     // ------------------------------------------------------------------ helpers
 
     private static string Html(string fixture, SheetHtmlOptions? options = null)
