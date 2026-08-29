@@ -87,6 +87,7 @@ public static class XlsbReader
                     Name = entry.Name,
                     Index = entry.Index,
                     IsHidden = entry.IsHidden,
+                    DateSystem = file.DateSystem,
                     Setup = setup,
                     Grid = grid,
                     Cells = (ContentTable)section.Children[0],

@@ -480,6 +480,13 @@ internal static class OdsCellFormats
                 RotationDegrees = Rotation(Cell(styleName, "rotation-angle", OdfNamespaces.Style)),
                 IsStacked = Cell(styleName, "direction", OdfNamespaces.Style) == "ttb",
                 NumberFormatKind = FormatKind(styleName),
+
+                // The format's own code, compiled from the `number:*-style` element tree the way
+                // `xmloff` does. The kind above is what the drawn cell needs — it decides the
+                // `###` rule — and the code is what states the format to a caller: the HTML
+                // export's `sdnum`, and the `*` fill directive, which could not fire on this path
+                // while the code was null.
+                NumberFormat = OdfNumberFormat.Parse(DataStyleElement(styleName)),
             };
         }
 
@@ -510,7 +517,11 @@ internal static class OdsCellFormats
             };
         }
 
-        /// <summary>The data style a cell style names, following its parent chain.</summary>
+            /// <summary>The element of the data style a cell style names, or null when it names none.</summary>
+        private XElement? DataStyleElement(string styleName)
+            => styles.FindDataStyle(DataStyleName(styleName))?.Element;
+
+    /// <summary>The data style a cell style names, following its parent chain.</summary>
         /// <remarks>
         /// Walked here rather than through <c>ResolveProperty</c> because
         /// <c>style:data-style-name</c> is an attribute of the style element rather than one of

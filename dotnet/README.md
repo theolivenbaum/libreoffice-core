@@ -38,6 +38,12 @@ using IDocument doc = PaperlessDocument.Open("deck.pptx");
 IPageSequence pages = ((IPaginatedDocument)doc).Layout();
 new RasterRenderer(new RasterRenderOptions { Dpi = 150 })
     .RenderToPng(pages[0], File.Create("slide1.png"));
+
+// Or, for a workbook, write it as HTML instead of drawing it: one table per sheet, in the
+// shape Calc's own HTML filter writes.
+using IDocument book = PaperlessDocument.Open("report.xlsx");
+SheetHtmlWriter.Write(
+    (SpreadsheetPages)((IPaginatedDocument)book).Layout(), File.Create("report.html"));
 ```
 
 Format is always determined from **content**, not the file extension.
@@ -56,7 +62,7 @@ Format is always determined from **content**, not the file extension.
 | `Paperless.OpenDocument` | Shared ODF: styles, common attributes, flat XML |
 | `Paperless.MsBinary` | Shared legacy binary: Escher, OLE property sets, codepages |
 | `Paperless.WordProcessing` | Writer-equivalent formats |
-| `Paperless.Spreadsheets` | Calc-equivalent formats, including the formula engine |
+| `Paperless.Spreadsheets` | Calc-equivalent formats, the formula engine, and the HTML export |
 | `Paperless.Presentations` | Impress-equivalent formats |
 
 Reference only what you need: a service that indexes spreadsheets pulls in neither the

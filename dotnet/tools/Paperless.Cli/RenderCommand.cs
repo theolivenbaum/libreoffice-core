@@ -2,6 +2,8 @@ using System.Globalization;
 using Paperless.Core;
 using Paperless.Core.Documents;
 using Paperless.Rendering.Pdf;
+using Paperless.Spreadsheets.Html;
+using Paperless.Spreadsheets.Layout;
 using Paperless.Rendering.Raster;
 
 namespace Paperless.Cli;
@@ -59,6 +61,38 @@ internal static class RenderCommand
         return exitCode;
     }
 
+    /// <summary>Writes a workbook as HTML, which only a spreadsheet can be.</summary>
+    /// <remarks>
+    /// The other three targets draw a page; this one walks the sheets. A document that is not a
+    /// spreadsheet says so rather than producing an empty page, because "html" on a .docx is a
+    /// mistake worth reporting rather than a request to do nothing.
+    /// </remarks>
+    private static int WriteHtml(string path, IPageSequence pages, Options options)
+    {
+        if (pages is not SpreadsheetPages sheets)
+        {
+            Console.Error.WriteLine(
+                $"paperless render: {path}: --format html is for spreadsheets; this is not one.");
+            return Program.ExitUnsupportedFormat;
+        }
+
+        string stem = Path.GetFileNameWithoutExtension(path);
+        string directory = options.Several
+            ? Path.Combine(options.OutputDirectory, Path.GetFileName(path))
+            : options.OutputDirectory;
+
+        Directory.CreateDirectory(directory);
+
+        string file = Path.Combine(directory, stem + ".html");
+        using (FileStream output = File.Create(file))
+        {
+            SheetHtmlWriter.Write(sheets, output, new SheetHtmlOptions { Title = stem });
+        }
+
+        if (!options.Quiet) Console.WriteLine($"{file}: {sheets.Sheets.Count} sheet(s)");
+        return Program.ExitSuccess;
+    }
+
     private static int RenderOne(string path, Options options)
     {
         using IDocument document = PaperlessDocument.Open(path);
@@ -71,6 +105,12 @@ internal static class RenderCommand
         }
 
         IPageSequence pages = paginated.Layout();
+
+        // HTML is written from the sheet model rather than from the pages, so it neither has nor
+        // honours a page range — see `SheetHtmlWriter`. Handled before the range is applied so a
+        // workbook whose sheets all fit on one page is not silently narrowed by a stale --pages.
+        if (options.Format == "html") return WriteHtml(path, pages, options);
+
         List<IPage> chosen = Select(pages, options.Pages);
 
         if (chosen.Count == 0)
@@ -198,7 +238,7 @@ internal static class RenderCommand
             Lays a document out and writes its pages.
 
             Options:
-              --format FMT   pdf (default), png or jpeg
+              --format FMT   pdf (default), png, jpeg or html
               --outdir DIR   Where to write. Defaults to the current directory
               --pages RANGE  Which pages, as 1-based numbers: "2", "1-3", "1-3,7", "5-"
               --dpi N        Resolution for png and jpeg. Default 150
@@ -206,11 +246,15 @@ internal static class RenderCommand
 
             Output:
               pdf            DIR/<stem>.pdf
+              html           DIR/<stem>.html, one table per sheet (spreadsheets only)
               png, jpeg      DIR/page-1.png, page-2.png ... for one input;
                              DIR/<file>/page-1.png ... when several files are given
 
             PNG is lossless and deterministic, so a page image can be checksummed and
             compared. JPEG is for thumbnails; do not compare one against anything.
+
+            HTML is not paginated: it writes the sheets themselves, the way Calc's own HTML
+            export does, and ignores --pages and --dpi.
 
             Exit codes:
               0   every file rendered
@@ -259,7 +303,7 @@ internal static class RenderCommand
 
                     case "--format":
                         if (!Next(args, ref i, arg, out string? format)) return false;
-                        if (format is not ("pdf" or "png" or "jpeg" or "jpg"))
+                        if (format is not ("pdf" or "png" or "jpeg" or "jpg" or "html"))
                         {
                             Console.Error.WriteLine($"paperless render: unknown format '{format}'.");
                             return false;

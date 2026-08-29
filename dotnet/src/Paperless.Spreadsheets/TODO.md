@@ -3639,3 +3639,81 @@ Not yet, and why:
   layout and `XlsxCharts` walks it again for content, because extraction must not pay for the
   anchor arithmetic and a caller that never asks for content never opens a chart part. The parts
   are cached by the package, so the cost is a second parse of one small XML document per chart.
+
+## HTML export
+
+`Html/SheetHtmlWriter.cs` writes a workbook as HTML in Calc's own dialect — one table per sheet,
+`<colgroup>` runs, the styling on the cells, and both families of round-trip attributes
+(`sdval`/`sdnum`, which Calc's HTML *import* reads back, and the `data-sheets-*` ones Google Sheets
+reads). Reached from the CLI as `paperless render --format html`.
+
+Measured against `soffice --convert-to html` over all 77 spreadsheets of the benchmark corpus,
+comparing cell by **grid position** rather than by document order — a sequence comparison
+misaligns the moment the two used ranges differ and then reports every later cell as wrong:
+
+| | |
+|---|---:|
+| cell positions in both exports | 10,731 |
+| cell text identical (ignoring `<font>` wrappers) | **99.0%** |
+| positions LibreOffice writes and this does not | 3,478 |
+| positions this writes and LibreOffice does not | 76 |
+
+What the remaining differences are, all understood and none of them silent:
+
+- **`valign` on 42% of cells, with no visual consequence.** The two engines disagree in *opposite*
+  directions by format: through XLSX LibreOffice writes `valign=bottom` where this writes nothing,
+  and through XLS it writes nothing where this writes `bottom`. Neither side is wrong about its
+  file — BIFF's XF states a concrete vertical alignment in every cell and OOXML usually omits it,
+  its schema default being bottom — and the model draws `Standard` and `Bottom` identically
+  (`SheetTextLayout`:1785). So this is LibreOffice's own two importers normalising differently, and
+  the writer reports what the file said. Not worth reconciling in the readers; worth knowing before
+  reading a diff.
+- **A `<font>` wrapper on 2,007 cells**, because the two disagree about what the document's default
+  font *is*. LibreOffice compares each cell against its Default style sheet's font; this compares
+  against the workbook's own default cell format. On one XLSX the two are `MS Sans Serif` and
+  `Times New Roman` — LibreOffice's is its built-in default rather than anything the file says. Each
+  export is internally consistent, which is what matters: a cell gets a `face` exactly when it
+  differs from the head's rule.
+- **3,478 positions LibreOffice writes and this does not.** Calc's data area covers what a *drawing*
+  spans (`PrepareGraphics`) and counts a formatted-but-empty cell, both already recorded above as
+  used-range differences. Since pictures are not written either, the narrower table is consistent.
+- **`data-sheets-formula`, images, hyperlink anchors and notes** are deliberate omissions, each
+  stated in the writer's own remarks with what it would take to close it.
+
+### Two defects this surfaced, neither fixed here
+
+- **An icon-set conditional format with `showValue="false"` hides the value in *extraction*, where
+  it should hide it only in the drawing.** Calc clears `bDoCell` in `ScOutputData` — a rendering
+  decision — and its CSV and HTML exports both still write the number. Measured on
+  `sheet-hidden-values-xlsx.xlsx`: `soffice --convert-to csv` gives `CUSTOMROW,11,22,33,44` and
+  `paperless extract` gives `CUSTOMROW 11 22` with two empty cells. `SheetHiddenValueTests` pins the
+  drawn behaviour, which is right; the content tree should not be paying for it.
+- **A cell holding an empty *string* counts as content in `UsedRange`.** The guard reads
+  `cell.Value is null && cell.GetText().Length == 0`, so a cell whose value is `""` passes it and
+  extends the used range. It shows up as a leading empty row and column on
+  `t_xlsx_05_table_with_title.xlsx`, where LibreOffice's table starts at the title and this one
+  starts a row above it. The fix is one condition, and it moves the used range — which pagination
+  is computed from — so it wants a corpus sweep rather than a quick edit.
+
+### Not yet, and why
+
+- **Pictures, charts and OLE objects are not written.** Calc writes each as a file beside the HTML
+  and an `<img>` at the cell, or as a base64 data URI in a single-file export; both need an image
+  encoder on this path and a policy for where the files go. Its own `SkipImages` filter option
+  produces exactly what this writes today, so the shape is a supported one rather than an omission.
+- **`data-sheets-formula` is not written.** Calc states it in R1C1 grammar
+  (`GRAM_ENGLISH_XL_R1C1`); the model carries the formula in whatever grammar its file used, and
+  writing an A1 formula under an attribute defined as R1C1 would be a quiet lie. Needs an A1 to
+  R1C1 conversion, which is a parser rather than a formatter.
+- **A hyperlink cell is written as its text.** Calc writes an `<a href>` for a cell whose formula is
+  a `HYPERLINK()` call; `SheetLayout.HyperlinkRanges` records which ranges hold one but not where
+  they point.
+- **A note reaches the HTML only from XLSX, and only when the sheet prints its notes.**
+  `SheetNotes` models Calc's "comments at end of sheet" printing rather than the comments
+  themselves, so the ODF path reads `office:annotation` into nothing. The writer's comment
+  indicator and its CSS are already there and correct for the notes it does get.
+- **The ODF currency format code is spelled differently.** `OdfNumberFormat` compiles a
+  `number:currency-symbol` into a quoted literal — `"£"#,##0.00` — where LibreOffice writes
+  `[$£-809]#,##0.00`. The two format identically; only the `sdnum` and `data-sheets-numberformat`
+  strings differ, and the compiler is shared with chart axes, so changing it is a wider question
+  than this export.
