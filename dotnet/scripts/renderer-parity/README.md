@@ -30,6 +30,21 @@ python3 build_page.py            # -> a single self-contained HTML report
 `triptych.py <id> <page> <out.png>` builds a three-engine image for one page when
 you want to look at something the metrics flagged.
 
+To produce the single-engine catalogue -- every document that does not match, worst
+first, each with the divergent page side by side:
+
+```bash
+python3 pl_cases.py     # the non-matching set -> pairs-view/*.jpg to read from,
+                        # plus an embeddable WebP per case, in pl-cases.json
+# read pairs-view/NNN.jpg and write one reading per case into analysis/NNN.json
+python3 tag.py          # tag each reading with the defect classes it describes
+python3 build_pl_page.py
+```
+
+`pl_cases.py` writes two images per document on purpose: a high-resolution JPEG to
+read the defect from, and a small WebP to embed. Diagnosing from the embed size
+means diagnosing from an image the defect may not survive.
+
 ## What the numbers mean, and what they do not
 
 `metrics.py` reports several figures per page rather than one, for the reason the
