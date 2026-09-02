@@ -172,6 +172,8 @@ section { margin-top: 44px; }
 .verdict-note { padding: 11px 18px; font-size: 13.5px; border-top: 1px solid var(--line-soft); }
 .verdict-note.vd { background: var(--ok-bg); color: var(--ok); }
 .verdict-note.lo { background: var(--pl-soft); color: var(--pl); }
+.verdict-note.cz { background: var(--sev-2-bg); color: var(--sev-2); }
+.verdict-note.vf { background: var(--surface-2); color: var(--ink-2); font-size: 12.5px; }
 .wasnote { display: block; margin-top: 8px; padding-top: 8px;
            border-top: 1px dashed var(--line); color: var(--ink-3); font-size: 12.5px; }
 
@@ -227,13 +229,17 @@ footer { margin-top: 56px; padding-top: 20px; border-top: var(--rule); font-size
       reading of what actually went wrong.
     </p>
     <div class="revision">
-      <b>Revised after an eight-lane source investigation.</b> Every case below was taken back
-      to the source and the document's own markup. That moved <b>29</b> of them out of the
-      defect list entirely &mdash; they are reference-version divergences, where Paperless is
-      correct for the LibreOffice the project develops against and this sweep's reference is a
-      release behind &mdash; re-tagged <b>3</b> more as the reference's fault, and <b>corrected
-      11 readings</b> that the measurements disproved. Each carries its original text beneath
-      the correction.
+      <b>Revised twice, and the second pass needed no reference at all.</b> An eight-lane
+      source investigation moved <b>29</b> cases out of the defect list entirely &mdash; they
+      are reference-version divergences, where Paperless is correct for the LibreOffice the
+      project develops against and this sweep's reference is a release behind &mdash; re-tagged
+      <b>3</b> as the reference's fault and <b>corrected 11 readings</b> the measurements
+      disproved. A second pass then re-checked the catalogue against evidence that is a
+      statement about <em>our own output</em> &mdash; what our PDF's content stream holds, in
+      what order it paints, at what size &mdash; which is as true of 26.2 as of 24.2. That
+      found <b>one cause behind five separate readings</b> (content drawn, then painted over),
+      corrected <b>3</b> more, and <b>upheld 7</b>. Every correction carries its original text
+      beneath it.
     </div>
     <div class="facts" id="facts"></div>
   </div>
@@ -306,6 +312,7 @@ const CASES = /*__CASES__*/;
 const FAM = { docs: "Documents", sheets: "Spreadsheets", slides: "Presentations" };
 const TAGLABEL = {
   "version-divergence": "version divergence",
+  "paint-order": "paint order",
   "reflow": "reflow / geometry",
   "content-missing": "content missing",
   "field-values": "field values",
@@ -440,6 +447,17 @@ function buildCard(c) {
     box.append(el("div", "verdict-note lo",
       "<b>Reference at fault.</b> " + c.retag + "."));
   }
+  if (c.paint_order) {
+    box.append(el("div", "verdict-note cz",
+      "<b>Cause: paint order.</b> The pixels read as missing content, but "
+      + c.paint_order
+      + " Confirmed three ways \u2014 stream order, a uniformly flat patch where the text "
+      + "should be, and the crop beside the reference's."));
+  }
+  if (c.verified) {
+    box.append(el("div", "verdict-note vf",
+      "<b>Reading verified.</b> " + c.verified + "."));
+  }
   box.append(el("div", "read", c.analysis));
   return box;
 }
@@ -452,7 +470,8 @@ function render() {
     && (!q || c.name.toLowerCase().includes(q) || c.dir.toLowerCase().includes(q)
         || c.analysis.toLowerCase().includes(q)
         || (c.version_divergence ?? "").toLowerCase().includes(q)
-        || (c.retag ?? "").toLowerCase().includes(q)));
+        || (c.retag ?? "").toLowerCase().includes(q)
+        || (c.paint_order ?? "").toLowerCase().includes(q)));
   host.replaceChildren(...shown.map(buildCard));
   countEl.textContent = `${shown.length} of ${CASES.length}`;
   emptyEl.style.display = shown.length ? "none" : "block";

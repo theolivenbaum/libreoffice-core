@@ -107,9 +107,45 @@ second look at the same image:
 - **#113** — the file uses thirteen spaces, not a tab.
 - **#175** — recommend re-tagging `lo-broken`: a bar-of-pie that 24.2 cannot draw and we can.
 
+## A second pass, with the reference's version held out
+
+The findings above are entangled with the reference binary: 29 of the 43 corrections
+they produced are version divergences, true of 24.2.7.2 and not of the 26.2.4.2 the
+tree is built against. A second pass therefore re-checked the catalogue using only
+evidence that is a statement about **our own output** -- what our PDF's content stream
+holds, in what order it paints, and at what size. None of it can be invalidated by a
+reference move, because the reference is not party to it. The instruments are
+`audit.py`, `claims.py` and `zorder.py` beside the harness.
+
+**One cause behind five separate readings: paint order.** In `060_Human_Body_Concept_Map`,
+`019_` and `013_Project_Timeline`, `050_Visual_Product_Roadmap` and `045_Visual_Product_Roadmap`,
+content the metrics report as *missing* is drawn and then painted over. `045`'s
+`2021` is shown at stream offset 2473 and the black year box is filled at 4180, on top
+of it. Each was established three ways -- an opaque fill covering the text block's
+anchor at a later offset, a uniformly flat patch where the glyphs should be, and the
+crop beside the reference's -- and the reference hides nothing on any of the same pages.
+57 text blocks in all. It is a different fix, in a different place, from missing content.
+
+**A degenerate header scale, not a missing title.** `Hazard Analysis Template.xls`
+emits its header at **0.120 pt** where the reference sets **7.887 pt**, in the same
+face and colour, correctly centred. The page carries exactly two spans under 1 pt --
+the header and the footer -- and every other span is 10 pt, so one scale fault accounts
+for both of the losses that reading named.
+
+**Two readings overstated a reflow as a loss.** `RobertQ_Service.doc`'s numbered line
+is on our page 3 and `087_Printable_Graph_Paper`'s `Title:`/`Date:` line on our page 2.
+Neither is missing; in the second the oversized grid pushing that line onto a page the
+reference does not have *is* the page-count divergence.
+
+**Seven readings were upheld** by an independent check, and one class of 25 candidate
+refutations dissolved entirely on inspection -- every one was a quote the reading used
+as context rather than as the thing it called missing. Both outcomes are recorded in
+`pl-readings.json`, which carries the 192 readings without their images.
+
 ## Layout
 
 ```
+paperless-differences.html   the published catalogue, self-contained (11.6 MB)
 BRIEF.md              the shared contract every lane worked to
 L<n>-<lane>/
   summary.md          root causes, seats, document counts, confidence

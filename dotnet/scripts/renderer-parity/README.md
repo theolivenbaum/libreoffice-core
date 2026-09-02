@@ -38,7 +38,11 @@ python3 pl_cases.py     # the non-matching set -> pairs-view/*.jpg to read from,
                         # plus an embeddable WebP per case, in pl-cases.json
 # read pairs-view/NNN.jpg and write one reading per case into analysis/NNN.json
 python3 tag.py          # tag each reading with the defect classes it describes
-python3 corrections.py  # fold measured corrections back over the readings
+python3 corrections.py  # fold the source investigation's corrections over the readings
+python3 audit.py        # page alignment, word presence and resource counts, per case
+python3 claims.py       # each reading's own <em> quotes, sought in both PDFs
+python3 zorder.py       # text we draw and then paint over
+python3 corrections2.py # fold the version-independent findings over the readings
 python3 build_pl_page.py
 ```
 
@@ -118,3 +122,37 @@ LibreOffice version alongside any result — it is part of the measurement.
 
 Python needs `numpy`, `Pillow` and `PyMuPDF`. Only the first `MAX_PAGES` (5)
 pages of each document are compared; page counts are compared in full.
+
+## Checking a reading without the reference's version
+
+`corrections.py` folds in findings that are true of *this* reference binary. Many
+of them are not true of another one -- 29 of its 43 changes were version
+divergences. The three scripts beside it were written to ask only questions whose
+answers are statements about **our own output**, which no reference-version move
+can invalidate:
+
+| script | asks |
+|---|---|
+| `audit.py` | is the page pair even the same page? are the reference's words anywhere in ours? do both sides draw the same number of images and shape the same faces? |
+| `claims.py` | a reading that calls a phrase missing names it, in `<em>`. Is it in our text layer -- and if so, is it *visible*? |
+| `zorder.py` | is text drawn and then covered by a fill emitted later in the same content stream? |
+
+Two things this pass taught, both worth keeping:
+
+**A hit is not a finding.** Of 25 quotes that `claims.py` reported present-and-visible
+in text a reading called defective, **all 25** were false positives: the phrase was
+context (*"the rule beneath SIGL / SCHAFFLER"*), not the thing said to be missing. An
+absence verb anywhere in a reading does not attach to every quote in it. Nothing from
+that class was published.
+
+**Measure visibility in both directions.** `claims.py`'s first cut scored a patch by
+ground colour minus its *darkest* pixel, which reports white text on navy as invisible
+-- the exact opposite of the truth. It now takes the pixel farthest from the ground in
+either direction. Three "invisible" findings dissolved when that was fixed.
+
+`zorder.py` carries a live limitation, stated in its own docstring: it reads text-block
+anchors straight out of the content stream and **does not apply the `cm` transforms
+above them**, so a block inside a transformed chart resolves to the wrong patch of
+paper. That produced one plausible false positive, caught only by cropping the page and
+looking at it. Every finding it reports was confirmed against the reference by eye
+before being written down, and two candidates were withdrawn.
