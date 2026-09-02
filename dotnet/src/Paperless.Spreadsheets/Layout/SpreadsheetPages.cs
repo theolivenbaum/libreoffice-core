@@ -367,10 +367,10 @@ internal readonly record struct RowBand(Length Top, int FirstVisible);
 /// </remarks>
 internal sealed class SheetPageDrawing(SheetLayout sheet, SheetPagePlacement placement)
 {
-    private readonly double _scale = Math.Max(1, placement.ZoomPercentage) / 100.0;
+    private readonly double _scale = placement.Scale;
     private readonly SheetPageDecoration _decoration = new(sheet, placement);
     private readonly SheetPageGraphics _graphics =
-        new(sheet, Math.Max(1, placement.ZoomPercentage) / 100.0);
+        new(sheet, placement.Scale);
 
     /// <summary>
     /// Draws the page: what is painted behind the cells, their text, and the page's furniture.

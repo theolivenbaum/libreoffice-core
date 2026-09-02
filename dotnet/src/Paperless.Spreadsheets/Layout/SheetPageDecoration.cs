@@ -86,7 +86,7 @@ internal sealed class SheetPageDecoration(SheetLayout sheet, SheetPagePlacement 
     /// </remarks>
     private static readonly Length HairlineWidth = Length.FromPoints(0.1);
 
-    private readonly double _scale = Math.Max(1, placement.ZoomPercentage) / 100.0;
+    private readonly double _scale = placement.Scale;
 
     /// <summary>Paints the cells' fills.</summary>
     /// <remarks>
@@ -538,7 +538,7 @@ internal sealed class SheetPageDecoration(SheetLayout sheet, SheetPagePlacement 
         // `aTwipMode`, which carries the zoom as its scale fraction
         // (`InitModes`, sc/source/ui/view/printfun.cxx:2645), so a header on a sheet printed at
         // 33% is drawn at a third of its stated size along with everything else.
-        double zoom = Math.Max(1, placement.ZoomPercentage) / 100.0;
+        double zoom = placement.Scale;
 
         // The three parts share one band and are each centred in it, which is why the band's own
         // height is the tallest of the three rather than each part's own: `PrintHF` gives the
