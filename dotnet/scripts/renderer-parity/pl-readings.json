@@ -27,7 +27,9 @@
    "ink_ratio": 1.343,
    "diagnosis": "extra-content",
    "shifted": 0.0
-  }
+  },
+  "outcome": "open",
+  "outcome_why": "page count only"
  },
  {
   "rank": 2,
@@ -58,7 +60,9 @@
    "diagnosis": "extra-content",
    "shifted": 0.0005
   },
-  "corrected": true
+  "corrected": true,
+  "outcome": "open",
+  "outcome_why": "charts -- data labels, legend keys, axis wrapping, series z order"
  },
  {
   "rank": 3,
@@ -88,7 +92,9 @@
    "ink_ratio": 1.0071,
    "diagnosis": "reflow-cascade",
    "shifted": 0.0005
-  }
+  },
+  "outcome": "open",
+  "outcome_why": "page count only"
  },
  {
   "rank": 4,
@@ -107,6 +113,7 @@
   "compared": 5,
   "kind": "pixel",
   "tags": [
+   "fixed",
    "field-values",
    "table-rules"
   ],
@@ -118,7 +125,9 @@
    "ink_ratio": 0.9883,
    "diagnosis": "reflow-cascade",
    "shifted": 0.0197
-  }
+  },
+  "outcome": "fixed",
+  "outcome_why": "SSIM 0.396 -> 0.513 against the same reference"
  },
  {
   "rank": 5,
@@ -149,7 +158,9 @@
    "ink_ratio": 1.0842,
    "diagnosis": "extra-content",
    "shifted": 0.0298
-  }
+  },
+  "outcome": "open",
+  "outcome_why": "table rules and shading"
  },
  {
   "rank": 6,
@@ -178,7 +189,9 @@
    "ink_ratio": 1.1728,
    "diagnosis": "extra-content",
    "shifted": 0.0005
-  }
+  },
+  "outcome": "open",
+  "outcome_why": "field values: a field read but not recalculated, or resolved differently"
  },
  {
   "rank": 7,
@@ -208,7 +221,9 @@
    "ink_ratio": 1.0068,
    "diagnosis": "reflow-cascade",
    "shifted": 0.0207
-  }
+  },
+  "outcome": "open",
+  "outcome_why": "page count only"
  },
  {
   "rank": 8,
@@ -238,7 +253,9 @@
    "ink_ratio": 1.0007,
    "diagnosis": "reflow-cascade",
    "shifted": 0.028
-  }
+  },
+  "outcome": "open",
+  "outcome_why": "table rules and shading"
  },
  {
   "rank": 9,
@@ -267,7 +284,9 @@
    "ink_ratio": 1.2651,
    "diagnosis": "extra-content",
    "shifted": 0.0
-  }
+  },
+  "outcome": "open",
+  "outcome_why": "content we do not draw"
  },
  {
   "rank": 10,
@@ -300,7 +319,9 @@
    "ink_ratio": 0.7694,
    "diagnosis": "content-missing",
    "shifted": 0.0718
-  }
+  },
+  "outcome": "open",
+  "outcome_why": "field values: a field read but not recalculated, or resolved differently"
  },
  {
   "rank": 11,
@@ -330,7 +351,9 @@
    "ink_ratio": 1.0037,
    "diagnosis": "reflow-cascade",
    "shifted": 0.0413
-  }
+  },
+  "outcome": "open",
+  "outcome_why": "page count only"
  },
  {
   "rank": 12,
@@ -361,7 +384,9 @@
    "ink_ratio": 0.9784,
    "diagnosis": "reflow-cascade",
    "shifted": 0.0048
-  }
+  },
+  "outcome": "open",
+  "outcome_why": "field values: a field read but not recalculated, or resolved differently"
  },
  {
   "rank": 13,
@@ -391,7 +416,9 @@
    "ink_ratio": 0.9347,
    "diagnosis": "reflow-cascade",
    "shifted": 0.0894
-  }
+  },
+  "outcome": "open",
+  "outcome_why": "table rules and shading"
  },
  {
   "rank": 14,
@@ -422,7 +449,9 @@
    "ink_ratio": 0.2093,
    "diagnosis": "content-missing",
    "shifted": 0.0111
-  }
+  },
+  "outcome": "open",
+  "outcome_why": "charts -- data labels, legend keys, axis wrapping, series z order"
  },
  {
   "rank": 15,
@@ -452,7 +481,9 @@
    "ink_ratio": 0.8506,
    "diagnosis": "content-missing",
    "shifted": 0.0591
-  }
+  },
+  "outcome": "open",
+  "outcome_why": "page count only"
  },
  {
   "rank": 16,
@@ -481,7 +512,9 @@
    "ink_ratio": 0.8734,
    "diagnosis": "content-missing",
    "shifted": 0.0067
-  }
+  },
+  "outcome": "open",
+  "outcome_why": "reflow: the advance-width divergence (architectural -- see dotnet/CLAUDE.md)"
  },
  {
   "rank": 17,
@@ -511,7 +544,9 @@
    "ink_ratio": 1.0402,
    "diagnosis": "reflow-cascade",
    "shifted": 0.0058
-  }
+  },
+  "outcome": "open",
+  "outcome_why": "page count only"
  },
  {
   "rank": 18,
@@ -540,7 +575,9 @@
    "ink_ratio": 0.8473,
    "diagnosis": "content-missing",
    "shifted": 0.0678
-  }
+  },
+  "outcome": "open",
+  "outcome_why": "page count only"
  },
  {
   "rank": 19,
@@ -570,7 +607,9 @@
    "ink_ratio": 0.9287,
    "diagnosis": "reflow-cascade",
    "shifted": 0.0197
-  }
+  },
+  "outcome": "open",
+  "outcome_why": "character styling"
  },
  {
   "rank": 20,
@@ -599,7 +638,9 @@
    "ink_ratio": 1.0121,
    "diagnosis": "reflow-cascade",
    "shifted": 0.0653
-  }
+  },
+  "outcome": "open",
+  "outcome_why": "overlap and clipping"
  },
  {
   "rank": 21,
@@ -629,7 +670,9 @@
    "ink_ratio": 0.9679,
    "diagnosis": "reflow-cascade",
    "shifted": 0.0048
-  }
+  },
+  "outcome": "open",
+  "outcome_why": "character styling"
  },
  {
   "rank": 22,
@@ -659,7 +702,9 @@
    "ink_ratio": 1.0344,
    "diagnosis": "reflow-cascade",
    "shifted": 0.0499
-  }
+  },
+  "outcome": "open",
+  "outcome_why": "charts -- data labels, legend keys, axis wrapping, series z order"
  },
  {
   "rank": 23,
@@ -690,7 +735,9 @@
    "ink_ratio": 0.9757,
    "diagnosis": "reflow-cascade",
    "shifted": 0.0404
-  }
+  },
+  "outcome": "open",
+  "outcome_why": "table rules and shading"
  },
  {
   "rank": 24,
@@ -709,6 +756,7 @@
   "compared": 1,
   "kind": "pixel",
   "tags": [
+   "fixed",
    "paint-order",
    "reflow"
   ],
@@ -721,7 +769,9 @@
    "diagnosis": "extra-content",
    "shifted": 0.0177
   },
-  "paint_order": "the whole slide &mdash; the white rounded card, the <em>human body</em> title, the three organ panels and the silhouette &mdash; is drawn, and then the dark grey page background is painted over all of it. 16 text blocks on this page sit under a later opaque fill; the reference has none."
+  "paint_order": "the whole slide &mdash; the white rounded card, the <em>human body</em> title, the three organ panels and the silhouette &mdash; is drawn, and then the dark grey page background is painted over all of it. 16 text blocks on this page sit under a later opaque fill; the reference has none.",
+  "outcome": "fixed",
+  "outcome_why": "text drawn and then painted over: 16 blocks -> 0; SSIM 0.510 -> 0.942"
  },
  {
   "rank": 25,
@@ -752,7 +802,9 @@
    "ink_ratio": 1.0023,
    "diagnosis": "reflow-cascade",
    "shifted": 0.0399
-  }
+  },
+  "outcome": "open",
+  "outcome_why": "list markers -- custom bullets and numbering the reader does not reach"
  },
  {
   "rank": 26,
@@ -781,7 +833,9 @@
    "ink_ratio": 1.2374,
    "diagnosis": "extra-content",
    "shifted": 0.02
-  }
+  },
+  "outcome": "open",
+  "outcome_why": "reflow: the advance-width divergence (architectural -- see dotnet/CLAUDE.md)"
  },
  {
   "rank": 27,
@@ -810,7 +864,9 @@
    "ink_ratio": 1.0335,
    "diagnosis": "reflow-cascade",
    "shifted": 0.1333
-  }
+  },
+  "outcome": "open",
+  "outcome_why": "reflow: the advance-width divergence (architectural -- see dotnet/CLAUDE.md)"
  },
  {
   "rank": 28,
@@ -842,7 +898,9 @@
    "ink_ratio": 1.0168,
    "diagnosis": "reflow-cascade",
    "shifted": 0.0481
-  }
+  },
+  "outcome": "open",
+  "outcome_why": "table rules and shading"
  },
  {
   "rank": 29,
@@ -875,7 +933,9 @@
    "shifted": 0.1422
   },
   "retag": "our output is correct; the reference prints a frozen cached page field",
-  "corrected": true
+  "corrected": true,
+  "outcome": "LibreOffice bug",
+  "outcome_why": "our output is correct; the reference prints a frozen cached page field"
  },
  {
   "rank": 30,
@@ -908,7 +968,9 @@
    "diagnosis": "reflow-cascade",
    "shifted": 0.0137
   },
-  "version_divergence": "slide autofit: the ladder is a correct port of 26.2.4.2; 24.2.7.2 answers a 2.5% font grid this table cannot produce"
+  "version_divergence": "slide autofit: the ladder is a correct port of 26.2.4.2; 24.2.7.2 answers a 2.5% font grid this table cannot produce",
+  "outcome": "version mismatch",
+  "outcome_why": "slide autofit: the ladder is a correct port of 26.2.4.2; 24.2.7.2 answers a 2.5% font grid this table cannot produce"
  },
  {
   "rank": 31,
@@ -938,7 +1000,9 @@
    "ink_ratio": 1.1789,
    "diagnosis": "extra-content",
    "shifted": 0.024
-  }
+  },
+  "outcome": "open",
+  "outcome_why": "page count only"
  },
  {
   "rank": 32,
@@ -967,7 +1031,9 @@
    "ink_ratio": 0.9874,
    "diagnosis": "reflow-cascade",
    "shifted": 0.1058
-  }
+  },
+  "outcome": "open",
+  "outcome_why": "reflow: the advance-width divergence (architectural -- see dotnet/CLAUDE.md)"
  },
  {
   "rank": 33,
@@ -999,7 +1065,9 @@
    "diagnosis": "content-missing",
    "shifted": 0.0392
   },
-  "corrected": true
+  "corrected": true,
+  "outcome": "open",
+  "outcome_why": "list markers -- custom bullets and numbering the reader does not reach"
  },
  {
   "rank": 34,
@@ -1029,7 +1097,9 @@
    "ink_ratio": 0.9924,
    "diagnosis": "reflow-cascade",
    "shifted": 0.0536
-  }
+  },
+  "outcome": "open",
+  "outcome_why": "field values: a field read but not recalculated, or resolved differently"
  },
  {
   "rank": 35,
@@ -1058,7 +1128,9 @@
    "ink_ratio": 0.9886,
    "diagnosis": "reflow-cascade",
    "shifted": 0.1557
-  }
+  },
+  "outcome": "open",
+  "outcome_why": "field values: a field read but not recalculated, or resolved differently"
  },
  {
   "rank": 36,
@@ -1089,7 +1161,9 @@
    "ink_ratio": 1.2276,
    "diagnosis": "extra-content",
    "shifted": 0.0389
-  }
+  },
+  "outcome": "open",
+  "outcome_why": "field values: a field read but not recalculated, or resolved differently"
  },
  {
   "rank": 37,
@@ -1118,7 +1192,9 @@
    "ink_ratio": 1.0012,
    "diagnosis": "reflow-cascade",
    "shifted": 0.0298
-  }
+  },
+  "outcome": "open",
+  "outcome_why": "reflow: the advance-width divergence (architectural -- see dotnet/CLAUDE.md)"
  },
  {
   "rank": 38,
@@ -1149,7 +1225,9 @@
    "ink_ratio": 1.0227,
    "diagnosis": "reflow-cascade",
    "shifted": 0.0183
-  }
+  },
+  "outcome": "open",
+  "outcome_why": "field values: a field read but not recalculated, or resolved differently"
  },
  {
   "rank": 39,
@@ -1180,7 +1258,9 @@
    "diagnosis": "content-missing",
    "shifted": 0.0019
   },
-  "verified": "page alignment checked from both text layers: our page 5 is the reference's page 6, exactly as the reading says"
+  "verified": "page alignment checked from both text layers: our page 5 is the reference's page 6, exactly as the reading says",
+  "outcome": "open",
+  "outcome_why": "character styling"
  },
  {
   "rank": 40,
@@ -1211,7 +1291,9 @@
    "ink_ratio": 0.969,
    "diagnosis": "reflow-cascade",
    "shifted": 0.0769
-  }
+  },
+  "outcome": "open",
+  "outcome_why": "field values: a field read but not recalculated, or resolved differently"
  },
  {
   "rank": 41,
@@ -1240,7 +1322,9 @@
    "ink_ratio": 0.9312,
    "diagnosis": "reflow-cascade",
    "shifted": 0.0713
-  }
+  },
+  "outcome": "open",
+  "outcome_why": "reflow: the advance-width divergence (architectural -- see dotnet/CLAUDE.md)"
  },
  {
   "rank": 42,
@@ -1269,7 +1353,9 @@
    "ink_ratio": 1.1245,
    "diagnosis": "extra-content",
    "shifted": 0.0096
-  }
+  },
+  "outcome": "open",
+  "outcome_why": "field values: a field read but not recalculated, or resolved differently"
  },
  {
   "rank": 43,
@@ -1300,7 +1386,9 @@
    "ink_ratio": 0.9819,
    "diagnosis": "reflow-cascade",
    "shifted": 0.1476
-  }
+  },
+  "outcome": "open",
+  "outcome_why": "table rules and shading"
  },
  {
   "rank": 44,
@@ -1330,7 +1418,9 @@
    "ink_ratio": 1.011,
    "diagnosis": "reflow-cascade",
    "shifted": 0.0385
-  }
+  },
+  "outcome": "open",
+  "outcome_why": "overlap and clipping"
  },
  {
   "rank": 45,
@@ -1359,7 +1449,9 @@
    "ink_ratio": 0.9571,
    "diagnosis": "reflow-cascade",
    "shifted": 0.0443
-  }
+  },
+  "outcome": "open",
+  "outcome_why": "reflow: the advance-width divergence (architectural -- see dotnet/CLAUDE.md)"
  },
  {
   "rank": 46,
@@ -1390,7 +1482,9 @@
    "ink_ratio": 0.9846,
    "diagnosis": "reflow-cascade",
    "shifted": 0.0649
-  }
+  },
+  "outcome": "open",
+  "outcome_why": "overlap and clipping"
  },
  {
   "rank": 47,
@@ -1421,7 +1515,9 @@
    "diagnosis": "extra-content",
    "shifted": 0.0355
   },
-  "version_divergence": "slide autofit: the ladder is a correct port of 26.2.4.2; 24.2.7.2 answers a 2.5% font grid this table cannot produce"
+  "version_divergence": "slide autofit: the ladder is a correct port of 26.2.4.2; 24.2.7.2 answers a 2.5% font grid this table cannot produce",
+  "outcome": "version mismatch",
+  "outcome_why": "slide autofit: the ladder is a correct port of 26.2.4.2; 24.2.7.2 answers a 2.5% font grid this table cannot produce"
  },
  {
   "rank": 48,
@@ -1450,7 +1546,9 @@
    "ink_ratio": 1.1885,
    "diagnosis": "extra-content",
    "shifted": 0.0606
-  }
+  },
+  "outcome": "open",
+  "outcome_why": "field values: a field read but not recalculated, or resolved differently"
  },
  {
   "rank": 49,
@@ -1483,7 +1581,9 @@
    "diagnosis": "reflow-cascade",
    "shifted": 0.1556
   },
-  "corrected": true
+  "corrected": true,
+  "outcome": "open",
+  "outcome_why": "a drawing we do not draw: watermarks, anchored artwork, picture bullets"
  },
  {
   "rank": 50,
@@ -1512,7 +1612,9 @@
    "ink_ratio": 0.9902,
    "diagnosis": "reflow-cascade",
    "shifted": 0.0182
-  }
+  },
+  "outcome": "open",
+  "outcome_why": "character styling"
  },
  {
   "rank": 51,
@@ -1544,7 +1646,9 @@
    "ink_ratio": 0.7913,
    "diagnosis": "content-missing",
    "shifted": 0.0531
-  }
+  },
+  "outcome": "open",
+  "outcome_why": "a drawing we do not draw: watermarks, anchored artwork, picture bullets"
  },
  {
   "rank": 52,
@@ -1574,7 +1678,9 @@
    "diagnosis": "reflow-cascade",
    "shifted": 0.0168
   },
-  "verified": "page alignment checked: our page 4 is the reference's page 5, as described"
+  "verified": "page alignment checked: our page 4 is the reference's page 5, as described",
+  "outcome": "open",
+  "outcome_why": "page count only"
  },
  {
   "rank": 53,
@@ -1606,7 +1712,9 @@
    "ink_ratio": 1.0002,
    "diagnosis": "reflow-cascade",
    "shifted": 0.0112
-  }
+  },
+  "outcome": "open",
+  "outcome_why": "list markers -- custom bullets and numbering the reader does not reach"
  },
  {
   "rank": 54,
@@ -1635,7 +1743,9 @@
    "ink_ratio": 0.9983,
    "diagnosis": "reflow-cascade",
    "shifted": 0.2727
-  }
+  },
+  "outcome": "open",
+  "outcome_why": "content we do not draw"
  },
  {
   "rank": 55,
@@ -1666,7 +1776,9 @@
    "diagnosis": "content-missing",
    "shifted": 0.1365
   },
-  "corrected": true
+  "corrected": true,
+  "outcome": "open",
+  "outcome_why": "charts -- data labels, legend keys, axis wrapping, series z order"
  },
  {
   "rank": 56,
@@ -1697,7 +1809,9 @@
    "diagnosis": "extra-content",
    "shifted": 0.0455
   },
-  "version_divergence": "slide autofit: the ladder is a correct port of 26.2.4.2; 24.2.7.2 answers a 2.5% font grid this table cannot produce"
+  "version_divergence": "slide autofit: the ladder is a correct port of 26.2.4.2; 24.2.7.2 answers a 2.5% font grid this table cannot produce",
+  "outcome": "version mismatch",
+  "outcome_why": "slide autofit: the ladder is a correct port of 26.2.4.2; 24.2.7.2 answers a 2.5% font grid this table cannot produce"
  },
  {
   "rank": 57,
@@ -1726,7 +1840,9 @@
    "ink_ratio": 1.0281,
    "diagnosis": "reflow-cascade",
    "shifted": 0.1688
-  }
+  },
+  "outcome": "open",
+  "outcome_why": "reflow: the advance-width divergence (architectural -- see dotnet/CLAUDE.md)"
  },
  {
   "rank": 58,
@@ -1755,7 +1871,9 @@
    "ink_ratio": 1.0206,
    "diagnosis": "reflow-cascade",
    "shifted": 0.1431
-  }
+  },
+  "outcome": "open",
+  "outcome_why": "reflow: the advance-width divergence (architectural -- see dotnet/CLAUDE.md)"
  },
  {
   "rank": 59,
@@ -1784,7 +1902,9 @@
    "ink_ratio": 0.9812,
    "diagnosis": "reflow-cascade",
    "shifted": 0.0346
-  }
+  },
+  "outcome": "open",
+  "outcome_why": "table rules and shading"
  },
  {
   "rank": 60,
@@ -1803,6 +1923,7 @@
   "compared": 5,
   "kind": "pixel",
   "tags": [
+   "fixed",
    "text-style",
    "content-missing"
   ],
@@ -1815,7 +1936,9 @@
    "diagnosis": "reflow-cascade",
    "shifted": 0.0716
   },
-  "verified": "the phrase is on our page 6, which is the offset the reading already describes"
+  "verified": "the phrase is on our page 6, which is the offset the reading already describes",
+  "outcome": "fixed",
+  "outcome_why": "SSIM 0.595 -> 0.650 against the same reference"
  },
  {
   "rank": 61,
@@ -1844,7 +1967,9 @@
    "ink_ratio": 1.0257,
    "diagnosis": "reflow-cascade",
    "shifted": 0.1142
-  }
+  },
+  "outcome": "open",
+  "outcome_why": "reflow: the advance-width divergence (architectural -- see dotnet/CLAUDE.md)"
  },
  {
   "rank": 62,
@@ -1863,6 +1988,7 @@
   "compared": 1,
   "kind": "pixel",
   "tags": [
+   "fixed",
    "paint-order",
    "missing-graphics",
    "shape-fallback",
@@ -1877,7 +2003,9 @@
    "diagnosis": "content-missing",
    "shifted": 0.0135
   },
-  "paint_order": "the numerals <em>01</em>&ndash;<em>05</em> are not missing. They are drawn, and the coloured milestone shapes are then painted over them: the crop shows the reference's orange circle carrying <em>01</em> and ours a bare orange square. The unpainted page gradient is a separate defect and stands."
+  "paint_order": "the numerals <em>01</em>&ndash;<em>05</em> are not missing. They are drawn, and the coloured milestone shapes are then painted over them: the crop shows the reference's orange circle carrying <em>01</em> and ours a bare orange square. The unpainted page gradient is a separate defect and stands.",
+  "outcome": "fixed",
+  "outcome_why": "text drawn and then painted over: 5 blocks -> 0; SSIM 0.597 -> 0.596"
  },
  {
   "rank": 63,
@@ -1906,7 +2034,9 @@
    "ink_ratio": 0.9841,
    "diagnosis": "reflow-cascade",
    "shifted": 0.1576
-  }
+  },
+  "outcome": "open",
+  "outcome_why": "content we do not draw"
  },
  {
   "rank": 64,
@@ -1935,7 +2065,9 @@
    "ink_ratio": 0.9999,
    "diagnosis": "reflow-cascade",
    "shifted": 0.0144
-  }
+  },
+  "outcome": "open",
+  "outcome_why": "reflow: the advance-width divergence (architectural -- see dotnet/CLAUDE.md)"
  },
  {
   "rank": 65,
@@ -1964,7 +2096,9 @@
    "ink_ratio": 0.9645,
    "diagnosis": "reflow-cascade",
    "shifted": 0.0177
-  }
+  },
+  "outcome": "open",
+  "outcome_why": "character styling"
  },
  {
   "rank": 66,
@@ -1996,7 +2130,9 @@
    "diagnosis": "content-missing",
    "shifted": 0.0606
   },
-  "corrected": true
+  "corrected": true,
+  "outcome": "open",
+  "outcome_why": "table rules and shading"
  },
  {
   "rank": 67,
@@ -2026,7 +2162,9 @@
    "ink_ratio": 1.0371,
    "diagnosis": "reflow-cascade",
    "shifted": 0.0303
-  }
+  },
+  "outcome": "open",
+  "outcome_why": "field values: a field read but not recalculated, or resolved differently"
  },
  {
   "rank": 68,
@@ -2057,7 +2195,9 @@
    "ink_ratio": 1.1656,
    "diagnosis": "extra-content",
    "shifted": 0.0573
-  }
+  },
+  "outcome": "open",
+  "outcome_why": "field values: a field read but not recalculated, or resolved differently"
  },
  {
   "rank": 69,
@@ -2086,7 +2226,9 @@
    "ink_ratio": 1.0591,
    "diagnosis": "reflow-cascade",
    "shifted": 0.2191
-  }
+  },
+  "outcome": "open",
+  "outcome_why": "reflow: the advance-width divergence (architectural -- see dotnet/CLAUDE.md)"
  },
  {
   "rank": 70,
@@ -2115,7 +2257,9 @@
    "ink_ratio": 1.0231,
    "diagnosis": "reflow-cascade",
    "shifted": 0.0106
-  }
+  },
+  "outcome": "open",
+  "outcome_why": "reflow: the advance-width divergence (architectural -- see dotnet/CLAUDE.md)"
  },
  {
   "rank": 71,
@@ -2147,7 +2291,9 @@
    "diagnosis": "content-missing",
    "shifted": 0.0372
   },
-  "version_divergence": "slide autofit: the ladder is a correct port of 26.2.4.2; 24.2.7.2 answers a 2.5% font grid this table cannot produce"
+  "version_divergence": "slide autofit: the ladder is a correct port of 26.2.4.2; 24.2.7.2 answers a 2.5% font grid this table cannot produce",
+  "outcome": "version mismatch",
+  "outcome_why": "slide autofit: the ladder is a correct port of 26.2.4.2; 24.2.7.2 answers a 2.5% font grid this table cannot produce"
  },
  {
   "rank": 72,
@@ -2177,7 +2323,9 @@
    "ink_ratio": 0.9757,
    "diagnosis": "reflow-cascade",
    "shifted": 0.0247
-  }
+  },
+  "outcome": "open",
+  "outcome_why": "list markers -- custom bullets and numbering the reader does not reach"
  },
  {
   "rank": 73,
@@ -2207,7 +2355,9 @@
    "ink_ratio": 1.0012,
    "diagnosis": "reflow-cascade",
    "shifted": 0.0139
-  }
+  },
+  "outcome": "open",
+  "outcome_why": "field values: a field read but not recalculated, or resolved differently"
  },
  {
   "rank": 74,
@@ -2236,7 +2386,9 @@
    "ink_ratio": 0.9622,
    "diagnosis": "reflow-cascade",
    "shifted": 0.0368
-  }
+  },
+  "outcome": "open",
+  "outcome_why": "character styling"
  },
  {
   "rank": 75,
@@ -2266,7 +2418,9 @@
    "ink_ratio": 0.9963,
    "diagnosis": "reflow-cascade",
    "shifted": 0.0242
-  }
+  },
+  "outcome": "open",
+  "outcome_why": "field values: a field read but not recalculated, or resolved differently"
  },
  {
   "rank": 76,
@@ -2296,7 +2450,9 @@
    "ink_ratio": 0.4883,
    "diagnosis": "content-missing",
    "shifted": 0.039
-  }
+  },
+  "outcome": "open",
+  "outcome_why": "a drawing we do not draw: watermarks, anchored artwork, picture bullets"
  },
  {
   "rank": 77,
@@ -2325,7 +2481,9 @@
    "ink_ratio": 1.0794,
    "diagnosis": "reflow-cascade",
    "shifted": 0.0527
-  }
+  },
+  "outcome": "open",
+  "outcome_why": "reflow: the advance-width divergence (architectural -- see dotnet/CLAUDE.md)"
  },
  {
   "rank": 78,
@@ -2354,7 +2512,9 @@
    "ink_ratio": 0.9995,
    "diagnosis": "reflow-cascade",
    "shifted": 0.0252
-  }
+  },
+  "outcome": "open",
+  "outcome_why": "reflow: the advance-width divergence (architectural -- see dotnet/CLAUDE.md)"
  },
  {
   "rank": 79,
@@ -2386,7 +2546,9 @@
    "diagnosis": "extra-content",
    "shifted": 0.0165
   },
-  "version_divergence": "slide autofit: the ladder is a correct port of 26.2.4.2; 24.2.7.2 answers a 2.5% font grid this table cannot produce"
+  "version_divergence": "slide autofit: the ladder is a correct port of 26.2.4.2; 24.2.7.2 answers a 2.5% font grid this table cannot produce",
+  "outcome": "version mismatch",
+  "outcome_why": "slide autofit: the ladder is a correct port of 26.2.4.2; 24.2.7.2 answers a 2.5% font grid this table cannot produce"
  },
  {
   "rank": 80,
@@ -2416,7 +2578,9 @@
    "diagnosis": "content-missing",
    "shifted": 0.0207
   },
-  "corrected": true
+  "corrected": true,
+  "outcome": "open",
+  "outcome_why": "content we do not draw"
  },
  {
   "rank": 81,
@@ -2448,7 +2612,9 @@
    "ink_ratio": 1.0047,
    "diagnosis": "reflow-cascade",
    "shifted": 0.3855
-  }
+  },
+  "outcome": "open",
+  "outcome_why": "a drawing we do not draw: watermarks, anchored artwork, picture bullets"
  },
  {
   "rank": 82,
@@ -2478,7 +2644,9 @@
    "ink_ratio": 0.9989,
    "diagnosis": "reflow-cascade",
    "shifted": 0.0103
-  }
+  },
+  "outcome": "open",
+  "outcome_why": "overlap and clipping"
  },
  {
   "rank": 83,
@@ -2509,7 +2677,9 @@
    "diagnosis": "reflow-cascade",
    "shifted": 0.0265
   },
-  "version_divergence": "slide autofit: the ladder is a correct port of 26.2.4.2; 24.2.7.2 answers a 2.5% font grid this table cannot produce"
+  "version_divergence": "slide autofit: the ladder is a correct port of 26.2.4.2; 24.2.7.2 answers a 2.5% font grid this table cannot produce",
+  "outcome": "version mismatch",
+  "outcome_why": "slide autofit: the ladder is a correct port of 26.2.4.2; 24.2.7.2 answers a 2.5% font grid this table cannot produce"
  },
  {
   "rank": 84,
@@ -2539,7 +2709,9 @@
    "ink_ratio": 0.9741,
    "diagnosis": "reflow-cascade",
    "shifted": 0.0381
-  }
+  },
+  "outcome": "LibreOffice bug",
+  "outcome_why": "the reference is the one at fault; our output is correct"
  },
  {
   "rank": 85,
@@ -2569,7 +2741,9 @@
    "ink_ratio": 1.6458,
    "diagnosis": "extra-content",
    "shifted": 0.0681
-  }
+  },
+  "outcome": "open",
+  "outcome_why": "table rules and shading"
  },
  {
   "rank": 86,
@@ -2601,7 +2775,9 @@
    "diagnosis": "reflow-cascade",
    "shifted": 0.0141
   },
-  "version_divergence": "slide autofit: the ladder is a correct port of 26.2.4.2; 24.2.7.2 answers a 2.5% font grid this table cannot produce"
+  "version_divergence": "slide autofit: the ladder is a correct port of 26.2.4.2; 24.2.7.2 answers a 2.5% font grid this table cannot produce",
+  "outcome": "version mismatch",
+  "outcome_why": "slide autofit: the ladder is a correct port of 26.2.4.2; 24.2.7.2 answers a 2.5% font grid this table cannot produce"
  },
  {
   "rank": 87,
@@ -2631,7 +2807,9 @@
    "ink_ratio": 1.0001,
    "diagnosis": "reflow-cascade",
    "shifted": 0.165
-  }
+  },
+  "outcome": "open",
+  "outcome_why": "character styling"
  },
  {
   "rank": 88,
@@ -2660,7 +2838,9 @@
    "ink_ratio": 1.08,
    "diagnosis": "reflow-cascade",
    "shifted": 0.0434
-  }
+  },
+  "outcome": "open",
+  "outcome_why": "page count only"
  },
  {
   "rank": 89,
@@ -2691,7 +2871,9 @@
    "ink_ratio": 0.9871,
    "diagnosis": "reflow-cascade",
    "shifted": 0.0356
-  }
+  },
+  "outcome": "open",
+  "outcome_why": "character styling"
  },
  {
   "rank": 90,
@@ -2720,7 +2902,9 @@
    "ink_ratio": 1.0165,
    "diagnosis": "reflow-cascade",
    "shifted": 0.0247
-  }
+  },
+  "outcome": "open",
+  "outcome_why": "character styling"
  },
  {
   "rank": 91,
@@ -2749,7 +2933,9 @@
    "ink_ratio": 0.9959,
    "diagnosis": "reflow-cascade",
    "shifted": 0.0495
-  }
+  },
+  "outcome": "open",
+  "outcome_why": "reflow: the advance-width divergence (architectural -- see dotnet/CLAUDE.md)"
  },
  {
   "rank": 92,
@@ -2778,7 +2964,9 @@
    "ink_ratio": 0.9979,
    "diagnosis": "reflow-cascade",
    "shifted": 0.0634
-  }
+  },
+  "outcome": "open",
+  "outcome_why": "field values: a field read but not recalculated, or resolved differently"
  },
  {
   "rank": 93,
@@ -2807,7 +2995,9 @@
    "ink_ratio": 1.0048,
    "diagnosis": "reflow-cascade",
    "shifted": 0.1375
-  }
+  },
+  "outcome": "open",
+  "outcome_why": "reflow: the advance-width divergence (architectural -- see dotnet/CLAUDE.md)"
  },
  {
   "rank": 94,
@@ -2837,7 +3027,9 @@
    "ink_ratio": 1.3452,
    "diagnosis": "extra-content",
    "shifted": 0.1562
-  }
+  },
+  "outcome": "LibreOffice bug",
+  "outcome_why": "the reference is the one at fault; our output is correct"
  },
  {
   "rank": 95,
@@ -2867,7 +3059,9 @@
    "ink_ratio": 1.5572,
    "diagnosis": "extra-content",
    "shifted": 0.1014
-  }
+  },
+  "outcome": "LibreOffice bug",
+  "outcome_why": "the reference is the one at fault; our output is correct"
  },
  {
   "rank": 96,
@@ -2899,7 +3093,9 @@
    "ink_ratio": 0.9964,
    "diagnosis": "reflow-cascade",
    "shifted": 0.0479
-  }
+  },
+  "outcome": "open",
+  "outcome_why": "a drawing we do not draw: watermarks, anchored artwork, picture bullets"
  },
  {
   "rank": 97,
@@ -2928,7 +3124,9 @@
    "ink_ratio": 0.9974,
    "diagnosis": "reflow-cascade",
    "shifted": 0.0067
-  }
+  },
+  "outcome": "open",
+  "outcome_why": "reflow: the advance-width divergence (architectural -- see dotnet/CLAUDE.md)"
  },
  {
   "rank": 98,
@@ -2957,7 +3155,9 @@
    "ink_ratio": 0.3409,
    "diagnosis": "content-missing",
    "shifted": 0.0009
-  }
+  },
+  "outcome": "open",
+  "outcome_why": "table rules and shading"
  },
  {
   "rank": 99,
@@ -2990,7 +3190,9 @@
    "diagnosis": "reflow-cascade",
    "shifted": 0.0106
   },
-  "version_divergence": "slide autofit: the ladder is a correct port of 26.2.4.2; 24.2.7.2 answers a 2.5% font grid this table cannot produce"
+  "version_divergence": "slide autofit: the ladder is a correct port of 26.2.4.2; 24.2.7.2 answers a 2.5% font grid this table cannot produce",
+  "outcome": "version mismatch",
+  "outcome_why": "slide autofit: the ladder is a correct port of 26.2.4.2; 24.2.7.2 answers a 2.5% font grid this table cannot produce"
  },
  {
   "rank": 100,
@@ -3021,7 +3223,9 @@
    "diagnosis": "reflow-cascade",
    "shifted": 0.0142
   },
-  "version_divergence": "the corner-to-linear gradient branch was removed in round 59 on 26.2 evidence; six arms on the installed 24.2.7.2 reproduce its condition exactly"
+  "version_divergence": "the corner-to-linear gradient branch was removed in round 59 on 26.2 evidence; six arms on the installed 24.2.7.2 reproduce its condition exactly",
+  "outcome": "version mismatch",
+  "outcome_why": "the corner-to-linear gradient branch was removed in round 59 on 26.2 evidence; six arms on the installed 24.2.7.2 reproduce its condition exactly"
  },
  {
   "rank": 101,
@@ -3053,7 +3257,9 @@
    "diagnosis": "extra-content",
    "shifted": 0.0103
   },
-  "version_divergence": "<code>SystemFontResolver</code>'s family ordering was measured on 26.2.4.2; 24.2 draws Liberation Sans for a swiss-classed Helvetica where we draw DejaVu"
+  "version_divergence": "<code>SystemFontResolver</code>'s family ordering was measured on 26.2.4.2; 24.2 draws Liberation Sans for a swiss-classed Helvetica where we draw DejaVu",
+  "outcome": "version mismatch",
+  "outcome_why": "<code>SystemFontResolver</code>'s family ordering was measured on 26.2.4.2; 24.2 draws Liberation Sans for a swiss-classed Helvetica where we draw DejaVu"
  },
  {
   "rank": 102,
@@ -3083,7 +3289,9 @@
    "ink_ratio": 0.99,
    "diagnosis": "reflow-cascade",
    "shifted": 0.3287
-  }
+  },
+  "outcome": "open",
+  "outcome_why": "character styling"
  },
  {
   "rank": 103,
@@ -3115,7 +3323,9 @@
    "diagnosis": "reflow-cascade",
    "shifted": 0.0053
   },
-  "version_divergence": "slide autofit: the ladder is a correct port of 26.2.4.2; 24.2.7.2 answers a 2.5% font grid this table cannot produce"
+  "version_divergence": "slide autofit: the ladder is a correct port of 26.2.4.2; 24.2.7.2 answers a 2.5% font grid this table cannot produce",
+  "outcome": "version mismatch",
+  "outcome_why": "slide autofit: the ladder is a correct port of 26.2.4.2; 24.2.7.2 answers a 2.5% font grid this table cannot produce"
  },
  {
   "rank": 104,
@@ -3146,7 +3356,9 @@
    "diagnosis": "reflow-cascade",
    "shifted": 0.011
   },
-  "version_divergence": "slide autofit: the ladder is a correct port of 26.2.4.2; 24.2.7.2 answers a 2.5% font grid this table cannot produce"
+  "version_divergence": "slide autofit: the ladder is a correct port of 26.2.4.2; 24.2.7.2 answers a 2.5% font grid this table cannot produce",
+  "outcome": "version mismatch",
+  "outcome_why": "slide autofit: the ladder is a correct port of 26.2.4.2; 24.2.7.2 answers a 2.5% font grid this table cannot produce"
  },
  {
   "rank": 105,
@@ -3175,7 +3387,9 @@
    "ink_ratio": 0.6995,
    "diagnosis": "content-missing",
    "shifted": 0.0702
-  }
+  },
+  "outcome": "open",
+  "outcome_why": "reflow: the advance-width divergence (architectural -- see dotnet/CLAUDE.md)"
  },
  {
   "rank": 106,
@@ -3204,7 +3418,9 @@
    "ink_ratio": 1.0196,
    "diagnosis": "reflow-cascade",
    "shifted": 0.0043
-  }
+  },
+  "outcome": "open",
+  "outcome_why": "reflow: the advance-width divergence (architectural -- see dotnet/CLAUDE.md)"
  },
  {
   "rank": 107,
@@ -3235,7 +3451,9 @@
    "ink_ratio": 0.991,
    "diagnosis": "reflow-cascade",
    "shifted": 0.0261
-  }
+  },
+  "outcome": "open",
+  "outcome_why": "table rules and shading"
  },
  {
   "rank": 108,
@@ -3266,7 +3484,9 @@
    "ink_ratio": 0.9997,
    "diagnosis": "reflow-cascade",
    "shifted": 0.0406
-  }
+  },
+  "outcome": "open",
+  "outcome_why": "field values: a field read but not recalculated, or resolved differently"
  },
  {
   "rank": 109,
@@ -3295,7 +3515,9 @@
    "ink_ratio": 1.0343,
    "diagnosis": "differs",
    "shifted": 0.0
-  }
+  },
+  "outcome": "open",
+  "outcome_why": "reflow: the advance-width divergence (architectural -- see dotnet/CLAUDE.md)"
  },
  {
   "rank": 110,
@@ -3328,7 +3550,9 @@
    "diagnosis": "reflow-cascade",
    "shifted": 0.0388
   },
-  "version_divergence": "slide autofit: the ladder is a correct port of 26.2.4.2; 24.2.7.2 answers a 2.5% font grid this table cannot produce"
+  "version_divergence": "slide autofit: the ladder is a correct port of 26.2.4.2; 24.2.7.2 answers a 2.5% font grid this table cannot produce",
+  "outcome": "version mismatch",
+  "outcome_why": "slide autofit: the ladder is a correct port of 26.2.4.2; 24.2.7.2 answers a 2.5% font grid this table cannot produce"
  },
  {
   "rank": 111,
@@ -3359,7 +3583,9 @@
    "diagnosis": "extra-content",
    "shifted": 0.0192
   },
-  "verified": "page alignment checked: our page 5 is the reference's page 6, as described"
+  "verified": "page alignment checked: our page 5 is the reference's page 6, as described",
+  "outcome": "open",
+  "outcome_why": "list markers -- custom bullets and numbering the reader does not reach"
  },
  {
   "rank": 112,
@@ -3388,7 +3614,9 @@
    "ink_ratio": 1.0002,
    "diagnosis": "reflow-cascade",
    "shifted": 0.1562
-  }
+  },
+  "outcome": "open",
+  "outcome_why": "character styling"
  },
  {
   "rank": 113,
@@ -3420,7 +3648,9 @@
    "shifted": 0.0443
   },
   "version_divergence": "slide autofit: the ladder is a correct port of 26.2.4.2; 24.2.7.2 answers a 2.5% font grid this table cannot produce",
-  "corrected": true
+  "corrected": true,
+  "outcome": "version mismatch",
+  "outcome_why": "slide autofit: the ladder is a correct port of 26.2.4.2; 24.2.7.2 answers a 2.5% font grid this table cannot produce"
  },
  {
   "rank": 114,
@@ -3439,6 +3669,7 @@
   "compared": 1,
   "kind": "pixel",
   "tags": [
+   "fixed",
    "paint-order",
    "missing-graphics",
    "shape-fallback",
@@ -3454,7 +3685,9 @@
    "diagnosis": "content-missing",
    "shifted": 0.0125
   },
-  "paint_order": "the <em>Delivery</em> label is drawn and the green legend box is then painted over it, so the box reads as empty. Same for five more blocks on this page."
+  "paint_order": "the <em>Delivery</em> label is drawn and the green legend box is then painted over it, so the box reads as empty. Same for five more blocks on this page.",
+  "outcome": "fixed",
+  "outcome_why": "text drawn and then painted over: 6 blocks -> 5; SSIM 0.663 -> 0.657"
  },
  {
   "rank": 115,
@@ -3484,7 +3717,9 @@
    "ink_ratio": 1.0051,
    "diagnosis": "reflow-cascade",
    "shifted": 0.1413
-  }
+  },
+  "outcome": "open",
+  "outcome_why": "list markers -- custom bullets and numbering the reader does not reach"
  },
  {
   "rank": 116,
@@ -3514,7 +3749,9 @@
    "ink_ratio": 1.3201,
    "diagnosis": "extra-content",
    "shifted": 0.0932
-  }
+  },
+  "outcome": "open",
+  "outcome_why": "table rules and shading"
  },
  {
   "rank": 117,
@@ -3543,7 +3780,9 @@
    "ink_ratio": 1.0004,
    "diagnosis": "reflow-cascade",
    "shifted": 0.117
-  }
+  },
+  "outcome": "open",
+  "outcome_why": "reflow: the advance-width divergence (architectural -- see dotnet/CLAUDE.md)"
  },
  {
   "rank": 118,
@@ -3574,7 +3813,9 @@
    "diagnosis": "reflow-cascade",
    "shifted": 0.0467
   },
-  "version_divergence": "slide autofit: the ladder is a correct port of 26.2.4.2; 24.2.7.2 answers a 2.5% font grid this table cannot produce"
+  "version_divergence": "slide autofit: the ladder is a correct port of 26.2.4.2; 24.2.7.2 answers a 2.5% font grid this table cannot produce",
+  "outcome": "version mismatch",
+  "outcome_why": "slide autofit: the ladder is a correct port of 26.2.4.2; 24.2.7.2 answers a 2.5% font grid this table cannot produce"
  },
  {
   "rank": 119,
@@ -3605,7 +3846,9 @@
    "diagnosis": "reflow-cascade",
    "shifted": 0.0414
   },
-  "version_divergence": "slide autofit: the ladder is a correct port of 26.2.4.2; 24.2.7.2 answers a 2.5% font grid this table cannot produce"
+  "version_divergence": "slide autofit: the ladder is a correct port of 26.2.4.2; 24.2.7.2 answers a 2.5% font grid this table cannot produce",
+  "outcome": "version mismatch",
+  "outcome_why": "slide autofit: the ladder is a correct port of 26.2.4.2; 24.2.7.2 answers a 2.5% font grid this table cannot produce"
  },
  {
   "rank": 120,
@@ -3634,7 +3877,9 @@
    "ink_ratio": 0.9342,
    "diagnosis": "reflow-cascade",
    "shifted": 0.0278
-  }
+  },
+  "outcome": "open",
+  "outcome_why": "overlap and clipping"
  },
  {
   "rank": 121,
@@ -3663,7 +3908,9 @@
    "ink_ratio": 1.0075,
    "diagnosis": "reflow-cascade",
    "shifted": 0.2832
-  }
+  },
+  "outcome": "open",
+  "outcome_why": "reflow: the advance-width divergence (architectural -- see dotnet/CLAUDE.md)"
  },
  {
   "rank": 122,
@@ -3694,7 +3941,9 @@
    "diagnosis": "reflow-cascade",
    "shifted": 0.0496
   },
-  "version_divergence": "slide autofit: the ladder is a correct port of 26.2.4.2; 24.2.7.2 answers a 2.5% font grid this table cannot produce"
+  "version_divergence": "slide autofit: the ladder is a correct port of 26.2.4.2; 24.2.7.2 answers a 2.5% font grid this table cannot produce",
+  "outcome": "version mismatch",
+  "outcome_why": "slide autofit: the ladder is a correct port of 26.2.4.2; 24.2.7.2 answers a 2.5% font grid this table cannot produce"
  },
  {
   "rank": 123,
@@ -3725,7 +3974,9 @@
    "ink_ratio": 0.9987,
    "diagnosis": "reflow-cascade",
    "shifted": 0.1422
-  }
+  },
+  "outcome": "open",
+  "outcome_why": "field values: a field read but not recalculated, or resolved differently"
  },
  {
   "rank": 124,
@@ -3756,7 +4007,9 @@
    "diagnosis": "extra-content",
    "shifted": 0.041
   },
-  "version_divergence": "slide autofit: the ladder is a correct port of 26.2.4.2; 24.2.7.2 answers a 2.5% font grid this table cannot produce"
+  "version_divergence": "slide autofit: the ladder is a correct port of 26.2.4.2; 24.2.7.2 answers a 2.5% font grid this table cannot produce",
+  "outcome": "version mismatch",
+  "outcome_why": "slide autofit: the ladder is a correct port of 26.2.4.2; 24.2.7.2 answers a 2.5% font grid this table cannot produce"
  },
  {
   "rank": 125,
@@ -3788,7 +4041,9 @@
    "diagnosis": "reflow-cascade",
    "shifted": 0.026
   },
-  "version_divergence": "slide autofit: the ladder is a correct port of 26.2.4.2; 24.2.7.2 answers a 2.5% font grid this table cannot produce"
+  "version_divergence": "slide autofit: the ladder is a correct port of 26.2.4.2; 24.2.7.2 answers a 2.5% font grid this table cannot produce",
+  "outcome": "version mismatch",
+  "outcome_why": "slide autofit: the ladder is a correct port of 26.2.4.2; 24.2.7.2 answers a 2.5% font grid this table cannot produce"
  },
  {
   "rank": 126,
@@ -3807,6 +4062,7 @@
   "compared": 5,
   "kind": "pixel",
   "tags": [
+   "fixed",
    "missing-graphics",
    "list-markers",
    "reflow"
@@ -3819,7 +4075,9 @@
    "ink_ratio": 0.9969,
    "diagnosis": "reflow-cascade",
    "shifted": 0.0405
-  }
+  },
+  "outcome": "fixed",
+  "outcome_why": "SSIM 0.682 -> 0.900 against the same reference"
  },
  {
   "rank": 127,
@@ -3848,7 +4106,9 @@
    "ink_ratio": 1.003,
    "diagnosis": "reflow-cascade",
    "shifted": 0.3769
-  }
+  },
+  "outcome": "open",
+  "outcome_why": "reflow: the advance-width divergence (architectural -- see dotnet/CLAUDE.md)"
  },
  {
   "rank": 128,
@@ -3880,7 +4140,9 @@
    "diagnosis": "reflow-cascade",
    "shifted": 0.0319
   },
-  "version_divergence": "slide autofit: the ladder is a correct port of 26.2.4.2; 24.2.7.2 answers a 2.5% font grid this table cannot produce"
+  "version_divergence": "slide autofit: the ladder is a correct port of 26.2.4.2; 24.2.7.2 answers a 2.5% font grid this table cannot produce",
+  "outcome": "version mismatch",
+  "outcome_why": "slide autofit: the ladder is a correct port of 26.2.4.2; 24.2.7.2 answers a 2.5% font grid this table cannot produce"
  },
  {
   "rank": 129,
@@ -3899,6 +4161,7 @@
   "compared": 5,
   "kind": "pixel",
   "tags": [
+   "fixed",
    "overlap-clip",
    "reflow"
   ],
@@ -3910,7 +4173,9 @@
    "ink_ratio": 0.9934,
    "diagnosis": "reflow-cascade",
    "shifted": 0.0071
-  }
+  },
+  "outcome": "fixed",
+  "outcome_why": "SSIM 0.690 -> 0.851 against the same reference"
  },
  {
   "rank": 130,
@@ -3940,7 +4205,9 @@
    "ink_ratio": 1.0114,
    "diagnosis": "reflow-cascade",
    "shifted": 0.0171
-  }
+  },
+  "outcome": "LibreOffice bug",
+  "outcome_why": "the reference is the one at fault; our output is correct"
  },
  {
   "rank": 131,
@@ -3969,7 +4236,9 @@
    "ink_ratio": 1.0187,
    "diagnosis": "differs",
    "shifted": 0.0
-  }
+  },
+  "outcome": "open",
+  "outcome_why": "overlap and clipping"
  },
  {
   "rank": 132,
@@ -4001,7 +4270,9 @@
    "diagnosis": "extra-content",
    "shifted": 0.0355
   },
-  "version_divergence": "slide autofit: the ladder is a correct port of 26.2.4.2; 24.2.7.2 answers a 2.5% font grid this table cannot produce"
+  "version_divergence": "slide autofit: the ladder is a correct port of 26.2.4.2; 24.2.7.2 answers a 2.5% font grid this table cannot produce",
+  "outcome": "version mismatch",
+  "outcome_why": "slide autofit: the ladder is a correct port of 26.2.4.2; 24.2.7.2 answers a 2.5% font grid this table cannot produce"
  },
  {
   "rank": 133,
@@ -4034,7 +4305,9 @@
    "shifted": 0.2545
   },
   "retag": "our output is correct; the reference prints a frozen cached page field",
-  "corrected": true
+  "corrected": true,
+  "outcome": "LibreOffice bug",
+  "outcome_why": "our output is correct; the reference prints a frozen cached page field"
  },
  {
   "rank": 134,
@@ -4063,7 +4336,9 @@
    "ink_ratio": 1.001,
    "diagnosis": "reflow-cascade",
    "shifted": 0.0053
-  }
+  },
+  "outcome": "open",
+  "outcome_why": "reflow: the advance-width divergence (architectural -- see dotnet/CLAUDE.md)"
  },
  {
   "rank": 135,
@@ -4093,7 +4368,9 @@
    "ink_ratio": 1.0311,
    "diagnosis": "differs",
    "shifted": 0.0
-  }
+  },
+  "outcome": "open",
+  "outcome_why": "overlap and clipping"
  },
  {
   "rank": 136,
@@ -4112,6 +4389,7 @@
   "compared": 5,
   "kind": "pixel",
   "tags": [
+   "fixed",
    "missing-graphics"
   ],
   "analysis": "Paperless prints three things the reference leaves off a printed sheet: the column letters <code>A B C D&hellip;</code>, the row numbers down the left edge, and the cell comments as yellow sticky notes over the content. It also omits the <em>DRAFT</em> watermark the reference tiles across the page. The regulation text, the blue and orange banding and the footers are correct.",
@@ -4122,7 +4400,9 @@
    "ink_ratio": 1.0334,
    "diagnosis": "differs",
    "shifted": 0.001
-  }
+  },
+  "outcome": "fixed",
+  "outcome_why": "SSIM 0.701 -> 0.722 against the same reference"
  },
  {
   "rank": 137,
@@ -4151,7 +4431,9 @@
    "ink_ratio": 1.0184,
    "diagnosis": "reflow-cascade",
    "shifted": 0.064
-  }
+  },
+  "outcome": "open",
+  "outcome_why": "list markers -- custom bullets and numbering the reader does not reach"
  },
  {
   "rank": 138,
@@ -4182,7 +4464,9 @@
    "diagnosis": "extra-content",
    "shifted": 0.0337
   },
-  "version_divergence": "slide autofit: the ladder is a correct port of 26.2.4.2; 24.2.7.2 answers a 2.5% font grid this table cannot produce"
+  "version_divergence": "slide autofit: the ladder is a correct port of 26.2.4.2; 24.2.7.2 answers a 2.5% font grid this table cannot produce",
+  "outcome": "version mismatch",
+  "outcome_why": "slide autofit: the ladder is a correct port of 26.2.4.2; 24.2.7.2 answers a 2.5% font grid this table cannot produce"
  },
  {
   "rank": 139,
@@ -4211,7 +4495,9 @@
    "ink_ratio": 1.0007,
    "diagnosis": "reflow-cascade",
    "shifted": 0.1828
-  }
+  },
+  "outcome": "open",
+  "outcome_why": "field values: a field read but not recalculated, or resolved differently"
  },
  {
   "rank": 140,
@@ -4240,7 +4526,9 @@
    "ink_ratio": 0.9957,
    "diagnosis": "reflow-cascade",
    "shifted": 0.024
-  }
+  },
+  "outcome": "open",
+  "outcome_why": "reflow: the advance-width divergence (architectural -- see dotnet/CLAUDE.md)"
  },
  {
   "rank": 141,
@@ -4269,7 +4557,9 @@
    "ink_ratio": 1.009,
    "diagnosis": "reflow-cascade",
    "shifted": 0.1198
-  }
+  },
+  "outcome": "open",
+  "outcome_why": "reflow: the advance-width divergence (architectural -- see dotnet/CLAUDE.md)"
  },
  {
   "rank": 142,
@@ -4300,7 +4590,9 @@
    "ink_ratio": 0.8514,
    "diagnosis": "content-missing",
    "shifted": 0.2485
-  }
+  },
+  "outcome": "open",
+  "outcome_why": "a drawing we do not draw: watermarks, anchored artwork, picture bullets"
  },
  {
   "rank": 143,
@@ -4330,7 +4622,9 @@
    "ink_ratio": 1.0214,
    "diagnosis": "reflow-cascade",
    "shifted": 0.0538
-  }
+  },
+  "outcome": "open",
+  "outcome_why": "table rules and shading"
  },
  {
   "rank": 144,
@@ -4359,7 +4653,9 @@
    "ink_ratio": 1.0157,
    "diagnosis": "reflow-cascade",
    "shifted": 0.337
-  }
+  },
+  "outcome": "open",
+  "outcome_why": "reflow: the advance-width divergence (architectural -- see dotnet/CLAUDE.md)"
  },
  {
   "rank": 145,
@@ -4391,7 +4687,9 @@
    "ink_ratio": 0.9939,
    "diagnosis": "reflow-cascade",
    "shifted": 0.2079
-  }
+  },
+  "outcome": "open",
+  "outcome_why": "table rules and shading"
  },
  {
   "rank": 146,
@@ -4420,7 +4718,9 @@
    "ink_ratio": 0.3852,
    "diagnosis": "content-missing",
    "shifted": 0.0029
-  }
+  },
+  "outcome": "open",
+  "outcome_why": "character styling"
  },
  {
   "rank": 147,
@@ -4449,7 +4749,9 @@
    "ink_ratio": 0.9954,
    "diagnosis": "reflow-cascade",
    "shifted": 0.1653
-  }
+  },
+  "outcome": "open",
+  "outcome_why": "reflow: the advance-width divergence (architectural -- see dotnet/CLAUDE.md)"
  },
  {
   "rank": 148,
@@ -4468,6 +4770,7 @@
   "compared": 1,
   "kind": "pixel",
   "tags": [
+   "fixed",
    "paint-order",
    "shape-fallback",
    "content-missing"
@@ -4481,7 +4784,9 @@
    "diagnosis": "extra-content",
    "shifted": 0.0202
   },
-  "paint_order": "the captions are not hidden by the triangle being drawn as a rectangle &mdash; they are hidden because the shape is painted after them. 17 text blocks on this page are overpainted; correcting the chevron geometry alone would still leave them covered."
+  "paint_order": "the captions are not hidden by the triangle being drawn as a rectangle &mdash; they are hidden because the shape is painted after them. 17 text blocks on this page are overpainted; correcting the chevron geometry alone would still leave them covered.",
+  "outcome": "fixed",
+  "outcome_why": "text drawn and then painted over: 17 blocks -> 1; SSIM 0.732 -> 0.733"
  },
  {
   "rank": 149,
@@ -4512,7 +4817,9 @@
    "diagnosis": "reflow-cascade",
    "shifted": 0.0141
   },
-  "version_divergence": "slide autofit: the ladder is a correct port of 26.2.4.2; 24.2.7.2 answers a 2.5% font grid this table cannot produce"
+  "version_divergence": "slide autofit: the ladder is a correct port of 26.2.4.2; 24.2.7.2 answers a 2.5% font grid this table cannot produce",
+  "outcome": "version mismatch",
+  "outcome_why": "slide autofit: the ladder is a correct port of 26.2.4.2; 24.2.7.2 answers a 2.5% font grid this table cannot produce"
  },
  {
   "rank": 150,
@@ -4543,7 +4850,9 @@
    "diagnosis": "reflow-cascade",
    "shifted": 0.1021
   },
-  "verified": "the <em>AVIOSTART</em> entry is on our page 4, which is the offset the reading describes"
+  "verified": "the <em>AVIOSTART</em> entry is on our page 4, which is the offset the reading describes",
+  "outcome": "open",
+  "outcome_why": "table rules and shading"
  },
  {
   "rank": 151,
@@ -4572,7 +4881,9 @@
    "ink_ratio": 1.013,
    "diagnosis": "reflow-cascade",
    "shifted": 0.2808
-  }
+  },
+  "outcome": "open",
+  "outcome_why": "reflow: the advance-width divergence (architectural -- see dotnet/CLAUDE.md)"
  },
  {
   "rank": 152,
@@ -4602,7 +4913,9 @@
    "ink_ratio": 1.1036,
    "diagnosis": "extra-content",
    "shifted": 0.2385
-  }
+  },
+  "outcome": "open",
+  "outcome_why": "preset shape geometry: a sub-path's own fill/stroke, chevrons and ellipses"
  },
  {
   "rank": 153,
@@ -4633,7 +4946,9 @@
    "ink_ratio": 0.6188,
    "diagnosis": "content-missing",
    "shifted": 0.0639
-  }
+  },
+  "outcome": "open",
+  "outcome_why": "a drawing we do not draw: watermarks, anchored artwork, picture bullets"
  },
  {
   "rank": 154,
@@ -4663,7 +4978,9 @@
    "ink_ratio": 1.0345,
    "diagnosis": "reflow-cascade",
    "shifted": 0.1193
-  }
+  },
+  "outcome": "LibreOffice bug",
+  "outcome_why": "the reference is the one at fault; our output is correct"
  },
  {
   "rank": 155,
@@ -4694,7 +5011,9 @@
    "ink_ratio": 0.2528,
    "diagnosis": "content-missing",
    "shifted": 0.0331
-  }
+  },
+  "outcome": "open",
+  "outcome_why": "table rules and shading"
  },
  {
   "rank": 156,
@@ -4726,7 +5045,9 @@
    "diagnosis": "reflow-cascade",
    "shifted": 0.0479
   },
-  "version_divergence": "slide autofit: the ladder is a correct port of 26.2.4.2; 24.2.7.2 answers a 2.5% font grid this table cannot produce"
+  "version_divergence": "slide autofit: the ladder is a correct port of 26.2.4.2; 24.2.7.2 answers a 2.5% font grid this table cannot produce",
+  "outcome": "version mismatch",
+  "outcome_why": "slide autofit: the ladder is a correct port of 26.2.4.2; 24.2.7.2 answers a 2.5% font grid this table cannot produce"
  },
  {
   "rank": 157,
@@ -4756,7 +5077,9 @@
    "ink_ratio": 0.9954,
    "diagnosis": "reflow-cascade",
    "shifted": 0.0112
-  }
+  },
+  "outcome": "open",
+  "outcome_why": "preset shape geometry: a sub-path's own fill/stroke, chevrons and ellipses"
  },
  {
   "rank": 158,
@@ -4786,7 +5109,9 @@
    "ink_ratio": 1.1325,
    "diagnosis": "extra-content",
    "shifted": 0.0115
-  }
+  },
+  "outcome": "open",
+  "outcome_why": "charts -- data labels, legend keys, axis wrapping, series z order"
  },
  {
   "rank": 159,
@@ -4816,7 +5141,9 @@
    "ink_ratio": 1.0005,
    "diagnosis": "reflow-cascade",
    "shifted": 0.1464
-  }
+  },
+  "outcome": "open",
+  "outcome_why": "list markers -- custom bullets and numbering the reader does not reach"
  },
  {
   "rank": 160,
@@ -4845,7 +5172,9 @@
    "ink_ratio": 1.0081,
    "diagnosis": "reflow-cascade",
    "shifted": 0.1296
-  }
+  },
+  "outcome": "open",
+  "outcome_why": "reflow: the advance-width divergence (architectural -- see dotnet/CLAUDE.md)"
  },
  {
   "rank": 161,
@@ -4877,7 +5206,9 @@
    "ink_ratio": 0.8494,
    "diagnosis": "content-missing",
    "shifted": 0.038
-  }
+  },
+  "outcome": "open",
+  "outcome_why": "charts -- data labels, legend keys, axis wrapping, series z order"
  },
  {
   "rank": 162,
@@ -4906,7 +5237,9 @@
    "ink_ratio": 11.7815,
    "diagnosis": "extra-content",
    "shifted": 0.0
-  }
+  },
+  "outcome": "LibreOffice bug",
+  "outcome_why": "the reference is the one at fault; our output is correct"
  },
  {
   "rank": 163,
@@ -4938,7 +5271,9 @@
    "diagnosis": "content-missing",
    "shifted": 0.0503
   },
-  "version_divergence": "column digit width: <code>DigitWidthCarry</code> is 0.57 for 26.2.4.2 and 0.67 for 24.2.7.2; our 449 pages is the 26.2 answer exactly"
+  "version_divergence": "column digit width: <code>DigitWidthCarry</code> is 0.57 for 26.2.4.2 and 0.67 for 24.2.7.2; our 449 pages is the 26.2 answer exactly",
+  "outcome": "version mismatch",
+  "outcome_why": "column digit width: <code>DigitWidthCarry</code> is 0.57 for 26.2.4.2 and 0.67 for 24.2.7.2; our 449 pages is the 26.2 answer exactly"
  },
  {
   "rank": 164,
@@ -4970,7 +5305,9 @@
    "diagnosis": "content-missing",
    "shifted": 0.0365
   },
-  "corrected": true
+  "corrected": true,
+  "outcome": "open",
+  "outcome_why": "table rules and shading"
  },
  {
   "rank": 165,
@@ -5000,7 +5337,9 @@
    "ink_ratio": 1.0488,
    "diagnosis": "reflow-cascade",
    "shifted": 0.0236
-  }
+  },
+  "outcome": "open",
+  "outcome_why": "charts -- data labels, legend keys, axis wrapping, series z order"
  },
  {
   "rank": 166,
@@ -5019,6 +5358,7 @@
   "compared": 5,
   "kind": "pixel",
   "tags": [
+   "fixed",
    "chart",
    "content-missing"
   ],
@@ -5030,7 +5370,9 @@
    "ink_ratio": 1.5022,
    "diagnosis": "extra-content",
    "shifted": 0.0807
-  }
+  },
+  "outcome": "fixed",
+  "outcome_why": "SSIM 0.771 -> 0.800 against the same reference"
  },
  {
   "rank": 167,
@@ -5060,7 +5402,9 @@
    "ink_ratio": 0.1574,
    "diagnosis": "content-missing",
    "shifted": 0.001
-  }
+  },
+  "outcome": "open",
+  "outcome_why": "preset shape geometry: a sub-path's own fill/stroke, chevrons and ellipses"
  },
  {
   "rank": 168,
@@ -5092,7 +5436,9 @@
    "diagnosis": "reflow-cascade",
    "shifted": 0.1087
   },
-  "version_divergence": "slide autofit: the ladder is a correct port of 26.2.4.2; 24.2.7.2 answers a 2.5% font grid this table cannot produce"
+  "version_divergence": "slide autofit: the ladder is a correct port of 26.2.4.2; 24.2.7.2 answers a 2.5% font grid this table cannot produce",
+  "outcome": "version mismatch",
+  "outcome_why": "slide autofit: the ladder is a correct port of 26.2.4.2; 24.2.7.2 answers a 2.5% font grid this table cannot produce"
  },
  {
   "rank": 169,
@@ -5123,7 +5469,9 @@
    "ink_ratio": 0.3504,
    "diagnosis": "content-missing",
    "shifted": 0.014
-  }
+  },
+  "outcome": "open",
+  "outcome_why": "preset shape geometry: a sub-path's own fill/stroke, chevrons and ellipses"
  },
  {
   "rank": 170,
@@ -5152,7 +5500,9 @@
    "ink_ratio": 1.4163,
    "diagnosis": "extra-content",
    "shifted": 0.0
-  }
+  },
+  "outcome": "open",
+  "outcome_why": "reflow: the advance-width divergence (architectural -- see dotnet/CLAUDE.md)"
  },
  {
   "rank": 171,
@@ -5183,7 +5533,9 @@
    "diagnosis": "extra-content",
    "shifted": 0.0273
   },
-  "version_divergence": "slide autofit: the ladder is a correct port of 26.2.4.2; 24.2.7.2 answers a 2.5% font grid this table cannot produce"
+  "version_divergence": "slide autofit: the ladder is a correct port of 26.2.4.2; 24.2.7.2 answers a 2.5% font grid this table cannot produce",
+  "outcome": "version mismatch",
+  "outcome_why": "slide autofit: the ladder is a correct port of 26.2.4.2; 24.2.7.2 answers a 2.5% font grid this table cannot produce"
  },
  {
   "rank": 172,
@@ -5213,7 +5565,9 @@
    "ink_ratio": 0.9997,
    "diagnosis": "reflow-cascade",
    "shifted": 0.0035
-  }
+  },
+  "outcome": "open",
+  "outcome_why": "list markers -- custom bullets and numbering the reader does not reach"
  },
  {
   "rank": 173,
@@ -5232,6 +5586,7 @@
   "compared": 1,
   "kind": "pixel",
   "tags": [
+   "fixed",
    "paint-order",
    "missing-graphics",
    "shape-fallback",
@@ -5247,7 +5602,9 @@
    "diagnosis": "content-missing",
    "shifted": 0.0312
   },
-  "paint_order": "<em>2021</em> is drawn at stream offset 2473 and the black year box is filled at offset 4180, over it. The box is not empty; its contents are underneath it."
+  "paint_order": "<em>2021</em> is drawn at stream offset 2473 and the black year box is filled at offset 4180, over it. The box is not empty; its contents are underneath it.",
+  "outcome": "fixed",
+  "outcome_why": "text drawn and then painted over: 1 blocks -> 0; SSIM 0.779 -> 0.781"
  },
  {
   "rank": 174,
@@ -5277,7 +5634,9 @@
    "ink_ratio": 0.0,
    "diagnosis": "content-missing",
    "shifted": 0.0312
-  }
+  },
+  "outcome": "open",
+  "outcome_why": "overlap and clipping"
  },
  {
   "rank": 175,
@@ -5309,7 +5668,9 @@
    "diagnosis": "content-missing",
    "shifted": 0.0051
   },
-  "retag": "a bar-of-pie chart: we draw the secondary bar and all sixteen legend entries; LibreOffice 24.2 predates of-pie support"
+  "retag": "a bar-of-pie chart: we draw the secondary bar and all sixteen legend entries; LibreOffice 24.2 predates of-pie support",
+  "outcome": "LibreOffice bug",
+  "outcome_why": "a bar-of-pie chart: we draw the secondary bar and all sixteen legend entries; LibreOffice 24.2 predates of-pie support"
  },
  {
   "rank": 176,
@@ -5340,7 +5701,9 @@
    "diagnosis": "content-missing",
    "shifted": 0.0495
   },
-  "corrected": true
+  "corrected": true,
+  "outcome": "open",
+  "outcome_why": "a drawing we do not draw: watermarks, anchored artwork, picture bullets"
  },
  {
   "rank": 177,
@@ -5372,7 +5735,9 @@
    "diagnosis": "content-missing",
    "shifted": 0.0615
   },
-  "corrected": true
+  "corrected": true,
+  "outcome": "open",
+  "outcome_why": "character styling"
  },
  {
   "rank": 178,
@@ -5402,7 +5767,9 @@
    "ink_ratio": 1.0057,
    "diagnosis": "reflow-cascade",
    "shifted": 0.1135
-  }
+  },
+  "outcome": "open",
+  "outcome_why": "a drawing we do not draw: watermarks, anchored artwork, picture bullets"
  },
  {
   "rank": 179,
@@ -5432,7 +5799,9 @@
    "ink_ratio": 0.9914,
    "diagnosis": "reflow-cascade",
    "shifted": 0.3611
-  }
+  },
+  "outcome": "open",
+  "outcome_why": "table rules and shading"
  },
  {
   "rank": 180,
@@ -5462,7 +5831,9 @@
    "diagnosis": "extra-content",
    "shifted": 0.0
   },
-  "corrected": true
+  "corrected": true,
+  "outcome": "open",
+  "outcome_why": "overlap and clipping"
  },
  {
   "rank": 181,
@@ -5492,7 +5863,9 @@
    "ink_ratio": 1.1614,
    "diagnosis": "extra-content",
    "shifted": 0.0
-  }
+  },
+  "outcome": "open",
+  "outcome_why": "field values: a field read but not recalculated, or resolved differently"
  },
  {
   "rank": 182,
@@ -5518,7 +5891,9 @@
   ],
   "analysis": "A pagination offset: Paperless fits more onto each page, so the page that is <em>List of Effective Pages</em> in the reference is already <em>(cont'd)</em> here, and the header's page field follows it &mdash; <code>Page: II</code> against <code>Page: I</code>. The tab-aligned columns, the rule under the heading and the revision entries are correct.",
   "worst": null,
-  "verified": "page alignment checked: our page 4 is the reference's page 5, as described"
+  "verified": "page alignment checked: our page 4 is the reference's page 5, as described",
+  "outcome": "open",
+  "outcome_why": "field values: a field read but not recalculated, or resolved differently"
  },
  {
   "rank": 183,
@@ -5542,7 +5917,9 @@
   ],
   "analysis": "Marginal. The licence text block is set fractionally narrower than the reference's and shifted, so the right-hand clipping at the page edge falls at a different character. Every paragraph and the blue <em>License</em> header band match.",
   "worst": null,
-  "version_divergence": "our 88 pages is the 26.2.4.2 reference's own count; 24.2 gives 109"
+  "version_divergence": "our 88 pages is the 26.2.4.2 reference's own count; 24.2 gives 109",
+  "outcome": "version mismatch",
+  "outcome_why": "our 88 pages is the 26.2.4.2 reference's own count; 24.2 gives 109"
  },
  {
   "rank": 184,
@@ -5566,7 +5943,9 @@
   ],
   "analysis": "Marginal. The table is drawn slightly wider and shifted right of the reference's, and the alternating yellow banding drifts a row out of phase part-way down. All row values, the header rules and the fill colour match.",
   "worst": null,
-  "version_divergence": "our 201 pages is the 26.2.4.2 reference's own count; 24.2 gives 220"
+  "version_divergence": "our 201 pages is the 26.2.4.2 reference's own count; 24.2 gives 220",
+  "outcome": "version mismatch",
+  "outcome_why": "our 201 pages is the 26.2.4.2 reference's own count; 24.2 gives 220"
  },
  {
   "rank": 185,
@@ -5589,7 +5968,9 @@
    "pagination"
   ],
   "analysis": "The compared pages are visually identical &mdash; every numbered item, indent and line break matches. The divergence is length: 727 pages against the reference's 721, so the two drift apart beyond the five pages sampled here.",
-  "worst": null
+  "worst": null,
+  "outcome": "open",
+  "outcome_why": "page count only"
  },
  {
   "rank": 186,
@@ -5613,7 +5994,9 @@
    "pagination"
   ],
   "analysis": "The chart includes a <em>Grand Total</em> category the reference leaves out, which rescales the value axis from $300,000 to $400,000 and shifts every bar. The workbook also paginates to four pages against the reference's two. The line-art house, the teal palette and the asset values are correct &mdash; and Paperless prints the full word <em>inventory</em> where the reference clips its first letter.",
-  "worst": null
+  "worst": null,
+  "outcome": "open",
+  "outcome_why": "charts -- data labels, legend keys, axis wrapping, series z order"
  },
  {
   "rank": 187,
@@ -5636,7 +6019,9 @@
    "text-style"
   ],
   "analysis": "The date columns are printed from stored values &mdash; 1/24/2023 onward, and a report date of 2/23/2023 &mdash; where the reference recalculates them to the current period. The title is also set in grey rather than the template's teal. The banded table, the header block and the sample values match exactly.",
-  "worst": null
+  "worst": null,
+  "outcome": "open",
+  "outcome_why": "field values: a field read but not recalculated, or resolved differently"
  },
  {
   "rank": 188,
@@ -5661,7 +6046,9 @@
   ],
   "analysis": "Three chart defects. The bars are filled with white horizontal stripes instead of solid colour, the legend (<em>Column C</em> / <em>Column D</em>) is not drawn, and the rotated category labels overlap each other &mdash; <em>Goodwill</em> collides with <em>Less accumulated depreciation</em>. Axis scale, gridlines, the cream plot ground and the bar heights are correct.",
   "worst": null,
-  "verified": "page alignment checked and the pages DO correspond &mdash; an alignment flag here was an artefact of scoring pages on words while this page is almost all numerals"
+  "verified": "page alignment checked and the pages DO correspond &mdash; an alignment flag here was an artefact of scoring pages on words while this page is almost all numerals",
+  "outcome": "open",
+  "outcome_why": "charts -- data labels, legend keys, axis wrapping, series z order"
  },
  {
   "rank": 189,
@@ -5684,7 +6071,9 @@
    "pagination"
   ],
   "analysis": "The compared pages match entry for entry, including the blue underlined cross-reference links and the French accents. The workbook comes out at 190 printed pages against the reference's 191.",
-  "worst": null
+  "worst": null,
+  "outcome": "open",
+  "outcome_why": "field values: a field read but not recalculated, or resolved differently"
  },
  {
   "rank": 190,
@@ -5709,7 +6098,9 @@
    "pagination"
   ],
   "analysis": "Two defects the page-level thresholds did not flag. Every contents entry is drawn as a blue underlined hyperlink where the reference prints plain black &mdash; the recurring TOC field-styling problem &mdash; and the diagonal <em>EASA Example Documents</em> watermark is not drawn. The subscripted speed symbols, the leader dots and the footer table are correct; the document runs one page longer than the reference.",
-  "worst": null
+  "worst": null,
+  "outcome": "open",
+  "outcome_why": "a drawing we do not draw: watermarks, anchored artwork, picture bullets"
  },
  {
   "rank": 191,
@@ -5733,7 +6124,9 @@
   ],
   "analysis": "<b>Corrected.</b> <em>Title:</em> and <em>Date:</em> are <b>not missing</b> &mdash; they are on our page 2. The grid is drawn wider and taller than the reference's, which pushes the caption line onto a second page the reference does not have, and that is also the whole of the page-count divergence. One oversized grid, not three losses. <span class='wasnote'>Original reading: The grid is drawn wider and taller than the reference's, and both the <em>Title:</em> / <em>Date:</em> rule line above the caption and the TemplateHub logo below it are missing. The green major/minor rules and the row numbering down the left edge are correct. The document also comes out at two pages against the reference's one.</span>",
   "worst": null,
-  "corrected": true
+  "corrected": true,
+  "outcome": "open",
+  "outcome_why": "content we do not draw"
  },
  {
   "rank": 192,
@@ -5756,6 +6149,8 @@
    "pagination"
   ],
   "analysis": "The page itself is exact &mdash; title block, signature table, dates and rules all match. Only the header's page field differs, <code>Page 3/58</code> against <code>Page 3/59</code>, because the document paginates one page shorter than the reference.",
-  "worst": null
+  "worst": null,
+  "outcome": "open",
+  "outcome_why": "field values: a field read but not recalculated, or resolved differently"
  }
 ]

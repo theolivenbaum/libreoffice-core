@@ -152,3 +152,56 @@ L<n>-<lane>/
   findings.md         evidence, markup quotes, file:line, refuting probes
   patches/*.diff      one per root cause
 ```
+
+## Outcome: where the 192 stand now
+
+26 of the 30 lane patches landed, plus two root causes that had no patch, across
+eight commits. Every document is in exactly one bucket, and `classify.py` puts it
+there by measurement rather than by which patch claims to cover it:
+
+| | | |
+|---|---:|---|
+| **fixed** | 11 | the rendering moved toward the reference between the sweep's binary and this one |
+| **version mismatch** | 29 | correct for 26.2.4.2; the sweep's reference is 24.2.7.2 |
+| **LibreOffice bug** | 9 | the reference is at fault and our output is the better one |
+| **open** | 143 | a named cause, listed below |
+
+Open, by cause: reflow / advance divergence 32, field values 23, table rules 18,
+character styling 13, page count only 11, graphics we do not draw 10, charts 9,
+overlap and clipping 9, list markers 9, content we do not draw 5, preset shape
+geometry 4.
+
+**Counting fixes by SSIM alone under-counts them, and this round has the clean
+demonstration.** `Hazard Analysis Template.xls` went from **0.791 to 0.780** while
+its header went from an invisible 0.120 pt to 7.920 against the reference's 7.887:
+drawing content that was previously missing adds ink that does not land
+pixel-perfect, so the score falls while the page gets better. Four of the five
+paint-order documents move by less than 0.01 SSIM while their hidden-text counts go
+16→0, 5→0, 17→1 and 1→0. The classifier therefore accepts a defect-specific
+measurement as evidence of a fix, which is the same corroboration rule
+`aggregate.py` uses in the other direction.
+
+### Two root causes that no lane had a patch for
+
+**Anchored frames were painted in document order.** A `wp:anchor` declares its own
+`relativeHeight` and we never read it. Measured over the five documents where it
+showed: all five declare it on every anchor -- 20 to 44 each -- and **not one is in
+document order**. It does not present as a z-order fault but as missing content, so
+five separate catalogue readings were this one cause. `060_Human_Body_Concept_Map`
+rendered as a single blank grey sheet because we drew the whole page and then the
+background over it.
+
+**An unset page zoom was read as 1%.** `Math.Max(1, ZoomPercentage) / 100.0` stood
+in four places and clamps to one *per cent*, so a placement that never had a zoom
+set drew its bands at a hundredth of the stated size. `Hazard Analysis Template.xls`
+states `&C&"Arial,Bold"&12` and we drew 0.120 pt.
+
+### Held deliberately
+
+`autofit-version-divergence` and `DO-NOT-APPLY-digit-width-carry-24.2` retune the
+tree to 24.2.7.2 and say so. The two L2 patches are the same class without saying
+so: `row-height-floor` fixes three fidelity comparisons here and breaks six unit
+tests whose stored values `PROVENANCE.tsv` dates to **26.2.4.2**, and the lane's own
+summary reads "a `w:trHeight` floor is raised by the row's border and cell margins;
+24.2 raises it by neither". Landing them would make this container's numbers better
+and the project's reference worse.
