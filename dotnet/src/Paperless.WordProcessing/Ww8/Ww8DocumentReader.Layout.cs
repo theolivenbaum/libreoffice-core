@@ -135,6 +135,17 @@ public sealed partial class Ww8DocumentReader
         public bool HasAutoSpaceAfter { get; init; }
 
         /// <summary>
+        /// The legacy <c>FORMCHECKBOX</c> squares in the paragraph, by the offset each stands at.
+        /// </summary>
+        /// <remarks>
+        /// Not a frame, because nothing in the file says how big the square is: Writer sizes it from
+        /// the line's own text height, which only a resolved face can give. So the walk records where
+        /// each one is and the layout source builds the frame — the same division the DOCX reader
+        /// makes in <c>DocxLayoutSource.CheckBoxFrame</c>.
+        /// </remarks>
+        public IReadOnlyList<Ww8LayoutCheckBox>? CheckBoxes { get; init; }
+
+        /// <summary>
         /// Where a <c>PAGE</c> or <c>NUMPAGES</c> field's cached result sits in <see cref="Text"/>.
         /// </summary>
         /// <remarks>
@@ -625,14 +636,33 @@ public sealed partial class Ww8DocumentReader
         List<int> positions = [];
         int start = 0;
 
-        // How many fields deep the walk is inside an *instruction*. A field's text holds both halves —
-        // the instruction and the cached result — separated by a U+0014, and only the second is shown.
-        int instruction = 0;
+        // One entry per open field, innermost last: true while that field is still in its own
+        // *instruction*. A field's text holds both halves — the instruction and the cached result —
+        // separated by a U+0014, and only the second is shown.
+        //
+        // A counter was wrong here and the corpus says how. `150_5300_13_chg8.doc` writes each numbered
+        // heading as a TC field with no separator of its own, holding five SEQ fields inside its
+        // instruction that each *have* one:
+        //
+        //     U+0013 tc  \l 2 " U+0013 seq level0 \r307 \*arabic U+0014 307 U+0015 . … U+0015
+        //
+        // A counter decremented at both a U+0014 and a U+0015 is decremented twice for a nested field
+        // it was only incremented once for, so the inner field's end declared the walk out of the
+        // *outer* field's instruction: `. RUNWAY OBJECT FREE AREA"` was drawn on every heading, and the
+        // inner SEQ's own result was suppressed instead. Measured against the reference's
+        // `307. OBJECT FREE AREA307.` on page 4 of that document, and on `chg10` and `chg12` with it.
+        //
+        // The innermost field decides, not "any enclosing field is in an instruction": a nested field's
+        // cached result *is* drawn inside an outer instruction, because LibreOffice inserts it through
+        // the field machinery rather than through the character reader `m_bIgnoreText` gates
+        // (`SwWW8ImplReader::ReadChars`, `ww8par.cxx`:3395). That is what puts the second `307` in the
+        // reference's heading.
+        Stack<bool> fieldInstructions = new();
 
-        // The fields the walk is inside, innermost last, by type. Separate from `instruction`, which
-        // counts only the hidden half: a shape sits in the *result*, where `instruction` is already
-        // back to nought and the field is still open. Nested fields are why it is a stack and not a
-        // single value — `IsInlineEscherHack` asks about the innermost one alone.
+        // The fields the walk is inside, innermost last, by type. Separate from `fieldInstructions`,
+        // which describes only the hidden half: a shape sits in the *result*, where the field is still
+        // open. Nested fields are why it is a stack and not a single value — `IsInlineEscherHack` asks
+        // about the innermost one alone.
         (Ww8FieldTypes fieldTypes, int fieldBase) = FieldTypesOf(body);
         Stack<int> openFields = new();
 
@@ -644,8 +674,12 @@ public sealed partial class Ww8DocumentReader
         Stack<int> fieldResults = new();
         List<Layout.PageFieldSpan> pageFields = [];
 
+        // The FORMCHECKBOX squares in the paragraph being built. Beside `pageFields` because they are
+        // the same kind of thing — something the walk found at an offset that only the layout can size.
+        List<Ww8LayoutCheckBox> checkBoxes = [];
+
         // How many enclosing fields had their result replaced by a computed one, and which they were.
-        // A count for the same reason `instruction` is one — fields nest, and the result of an outer
+        // A count for the same reason the field stack is one — fields nest, and the result of an outer
         // field can contain a whole inner field whose characters are equally not to be drawn — with the
         // stack beside it so that the right field's end is the one that stops the suppression.
         int computed = 0;
@@ -676,7 +710,18 @@ public sealed partial class Ww8DocumentReader
             // keeping the instruction puts the literal word "SHAPE" into the sentence — measured on
             // `picture-flow.doc`, where it made our word count 191 against the reference's 190. The
             // markers themselves are handled below and carry no width either way.
-            if (instruction > 0 && character is not (Special.FieldBegin or Special.FieldSeparator
+            // The one placeholder that has to survive an instruction. A FORMCHECKBOX is written
+            // `U+0013 " FORMCHECKBOX " U+0001 U+0015` — no separator, so its square is the last
+            // character of the field's *code*, and LibreOffice reads it at exactly that offset
+            // (`rStr[pF->nLCode-1] == 0x01`, ww8par3.cxx:191). Dropping it with the rest of the
+            // instruction is what left 37 squares off `1528364855.doc` and 58 off `f111.doc`.
+            bool isCheckBoxPlaceholder = character == Special.Picture
+                && openFields.Count > 0
+                && openFields.Peek() == Ww8FieldTypes.FormCheckBox;
+
+            if (!isCheckBoxPlaceholder
+                && fieldInstructions.Count > 0 && fieldInstructions.Peek()
+                && character is not (Special.FieldBegin or Special.FieldSeparator
                 or Special.FieldEnd or ParagraphMark or Special.SectionMark or CellMark))
             {
                 continue;
@@ -754,7 +799,7 @@ public sealed partial class Ww8DocumentReader
                 case Special.FieldBegin:
                     // Nested fields are legal and Word writes them — a hyperlink around a cross
                     // reference is two — so this counts rather than toggling.
-                    instruction++;
+                    fieldInstructions.Push(true);
                     openFields.Push(fieldTypes.At(position - fieldBase) ?? 0);
                     replacedFields.Push(false);
                     fieldResults.Push(-1);
@@ -762,9 +807,11 @@ public sealed partial class Ww8DocumentReader
 
                 case Special.FieldSeparator:
                 {
-                    // The instruction ends and the cached result begins. A field with no separator has
-                    // no result, and its instruction stays hidden until its end.
-                    if (instruction > 0) instruction--;
+                    // The instruction ends and the cached result begins — for *this* field. A field
+                    // with no separator has no result, and its instruction stays hidden until its end,
+                    // which is why the entry is replaced rather than popped.
+                    if (fieldInstructions.Count > 0) fieldInstructions.Pop();
+                    fieldInstructions.Push(false);
 
                     if (fieldResults.Count > 0)
                     {
@@ -774,7 +821,7 @@ public sealed partial class Ww8DocumentReader
 
                     // The one point at which a computed field can be written: the instruction has been
                     // read, so the field's type is known, and the result it is replacing starts here.
-                    if (instruction == 0
+                    if (fieldInstructions.Count == 1
                         && computed == 0
                         && openFields.Count > 0
                         && openFields.Peek() == Ww8FieldTypes.FileName
@@ -792,7 +839,7 @@ public sealed partial class Ww8DocumentReader
 
                 case Special.FieldEnd:
                 {
-                    if (instruction > 0) instruction--;
+                    if (fieldInstructions.Count > 0) fieldInstructions.Pop();
                     int closed = openFields.Count > 0 ? openFields.Pop() : 0;
                     int resultAt = fieldResults.Count > 0 ? fieldResults.Pop() : -1;
 
@@ -873,6 +920,16 @@ public sealed partial class Ww8DocumentReader
                 }
 
                 case Special.Picture or Special.DrawnObject or Special.AnnotationReference:
+                    // A checkbox takes room on its line as well as putting a square on the page — the
+                    // portion is as wide as it is tall — so it gets an anchor character like any other
+                    // as-character frame. Recorded before the emit, so the offset is the anchor's own.
+                    if (isCheckBoxPlaceholder)
+                    {
+                        checkBoxes.Add(new Ww8LayoutCheckBox(current.Length, IsCheckedBox(position)));
+                        Emit(current, positions, AnchorCharacter, position);
+                        continue;
+                    }
+
                     // Collected before the character is considered, so that the frame's offset is where
                     // the anchor sits rather than one past it — which is what an as-character frame
                     // needs and what a character origin measures from.
@@ -941,6 +998,7 @@ public sealed partial class Ww8DocumentReader
                     Notes = _pendingNotes.Count == 0 ? null : [.. _pendingNotes],
                     Frames = _pendingFrames.Count == 0 ? null : [.. _pendingFrames],
                     Fields = pageFields.Count == 0 ? null : [.. pageFields],
+                    CheckBoxes = checkBoxes.Count == 0 ? null : [.. checkBoxes],
                 };
 
             // The U+000C above this paragraph was a hard page break rather than a section boundary, so
@@ -964,6 +1022,7 @@ public sealed partial class Ww8DocumentReader
             current.Clear();
             positions.Clear();
             pageFields.Clear();
+            checkBoxes.Clear();
 
             // A field still open across the paragraph mark loses its result start with the builder it
             // pointed into; its cached result stays, which is what it was before this existed.
