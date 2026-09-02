@@ -24,6 +24,8 @@
   --sev-2-bg:  #fbeee0;
   --sev-3-bg:  #f7f2dd;
   --sev-4-bg:  #eef0f3;
+  --ok:        #14804a;
+  --ok-bg:     #e3f3ea;
   --shadow:    0 1px 2px rgba(20,23,28,.05), 0 8px 24px -16px rgba(20,23,28,.35);
   --rule:      1px solid var(--line);
 }
@@ -49,6 +51,8 @@
     --sev-2-bg:  #33240f;
     --sev-3-bg:  #2c280f;
     --sev-4-bg:  #232932;
+    --ok:        #3fbb7d;
+    --ok-bg:     #12291d;
     --shadow:    0 1px 2px rgba(0,0,0,.4), 0 10px 28px -18px rgba(0,0,0,.9);
   }
 }
@@ -73,6 +77,8 @@
   --sev-2-bg:  #33240f;
   --sev-3-bg:  #2c280f;
   --sev-4-bg:  #232932;
+  --ok:        #3fbb7d;
+  --ok-bg:     #12291d;
   --shadow:    0 1px 2px rgba(0,0,0,.4), 0 10px 28px -18px rgba(0,0,0,.9);
 }
 
@@ -103,6 +109,13 @@ header.top .wrap { padding-top: 44px; padding-bottom: 32px; display: grid; gap: 
 .fact b { font-family: "IBM Plex Mono", monospace; font-size: 15px; font-weight: 600;
           font-variant-numeric: tabular-nums; }
 .fact span { font-size: 12.5px; color: var(--ink-3); }
+
+
+.revision {
+  border-left: 3px solid var(--ok); background: var(--ok-bg); color: var(--ink-2);
+  padding: 13px 16px; font-size: 14px; border-radius: 0 3px 3px 0; max-width: 76ch;
+}
+.revision b { color: var(--ink); }
 
 section { margin-top: 44px; }
 .sechead { display: grid; gap: 8px; margin-bottom: 18px; max-width: 76ch; }
@@ -154,6 +167,14 @@ section { margin-top: 44px; }
 #count { font-family: "IBM Plex Mono", monospace; font-size: 12px; color: var(--ink-3);
          margin-left: auto; font-variant-numeric: tabular-nums; }
 
+
+.chip.sev0 { background: var(--ok-bg); color: var(--ok); }
+.verdict-note { padding: 11px 18px; font-size: 13.5px; border-top: 1px solid var(--line-soft); }
+.verdict-note.vd { background: var(--ok-bg); color: var(--ok); }
+.verdict-note.lo { background: var(--pl-soft); color: var(--pl); }
+.wasnote { display: block; margin-top: 8px; padding-top: 8px;
+           border-top: 1px dashed var(--line); color: var(--ink-3); font-size: 12.5px; }
+
 /* ---------- case cards ---------- */
 .case { background: var(--surface); border: var(--rule); border-radius: 4px;
         box-shadow: var(--shadow); overflow: hidden; margin-bottom: 18px; }
@@ -196,7 +217,7 @@ footer { margin-top: 56px; padding-top: 20px; border-top: var(--rule); font-size
 
 <header class="top">
   <div class="wrap">
-    <div class="eyebrow">Paperless vs. headless LibreOffice &middot; every document that does not match</div>
+    <div class="eyebrow">Paperless vs. headless LibreOffice &middot; every document that does not match &middot; revised</div>
     <h1>Where Paperless Differs</h1>
     <p class="lede">
       All 946 documents in the sample corpus were rendered twice &mdash; once by headless
@@ -205,6 +226,15 @@ footer { margin-top: 56px; padding-top: 20px; border-top: var(--rule); font-size
       or paginates differently, worst first, each with the divergent page side by side and a
       reading of what actually went wrong.
     </p>
+    <div class="revision">
+      <b>Revised after an eight-lane source investigation.</b> Every case below was taken back
+      to the source and the document's own markup. That moved <b>29</b> of them out of the
+      defect list entirely &mdash; they are reference-version divergences, where Paperless is
+      correct for the LibreOffice the project develops against and this sweep's reference is a
+      release behind &mdash; re-tagged <b>3</b> more as the reference's fault, and <b>corrected
+      11 readings</b> that the measurements disproved. Each carries its original text beneath
+      the correction.
+    </div>
     <div class="facts" id="facts"></div>
   </div>
 </header>
@@ -275,6 +305,7 @@ footer { margin-top: 56px; padding-top: 20px; border-top: var(--rule); font-size
 const CASES = /*__CASES__*/;
 const FAM = { docs: "Documents", sheets: "Spreadsheets", slides: "Presentations" };
 const TAGLABEL = {
+  "version-divergence": "version divergence",
   "reflow": "reflow / geometry",
   "content-missing": "content missing",
   "field-values": "field values",
@@ -292,6 +323,8 @@ const el = (t, c, h) => { const n = document.createElement(t); if (c) n.classNam
                           if (h !== undefined) n.innerHTML = h; return n; };
 
 function severity(c) {
+  if (c.version_divergence) return { rank: 6, cls: "sev0", label: "not a defect" };
+  if (c.tags.includes("lo-broken")) return { rank: 6, cls: "sev0", label: "reference at fault" };
   if (c.kind === "pagination") return { rank: 5, cls: "sev4", label: "page count only" };
   const s = c.worst.ssim;
   if (s < 0.50) return { rank: 1, cls: "sev1", label: "severe" };
@@ -349,7 +382,8 @@ CASES.forEach((c) => { c.sev = severity(c); });
   const sev = {};
   for (const c of CASES) sev[c.sev.label] = (sev[c.sev.label] ?? 0) + 1;
   const shost = document.getElementById("sevgrid");
-  for (const k of ["severe", "major", "moderate", "minor", "page count only"]) {
+  for (const k of ["not a defect", "reference at fault", "severe", "major", "moderate",
+                   "minor", "page count only"]) {
     if (!sev[k]) continue;
     shost.append(el("div", "famrow", `<span>${k}</span><b>${sev[k]}</b>`));
   }
@@ -396,6 +430,16 @@ function buildCard(c) {
   img.decoding = "async";
   img.alt = `${c.name}, page ${c.page}: LibreOffice on the left, Paperless on the right`;
   box.append(img);
+  if (c.version_divergence) {
+    box.append(el("div", "verdict-note vd",
+      "<b>Not a defect &mdash; a reference-version divergence.</b> " + c.version_divergence
+      + " Paperless is calibrated against LibreOffice 26.2.4.2; this sweep's reference is "
+      + "24.2.7.2."));
+  }
+  if (c.retag) {
+    box.append(el("div", "verdict-note lo",
+      "<b>Reference at fault.</b> " + c.retag + "."));
+  }
   box.append(el("div", "read", c.analysis));
   return box;
 }
@@ -406,7 +450,9 @@ function render() {
     (state.fam === "all" || c.family === state.fam)
     && (state.tag === "all" || c.tags.includes(state.tag))
     && (!q || c.name.toLowerCase().includes(q) || c.dir.toLowerCase().includes(q)
-        || c.analysis.toLowerCase().includes(q)));
+        || c.analysis.toLowerCase().includes(q)
+        || (c.version_divergence ?? "").toLowerCase().includes(q)
+        || (c.retag ?? "").toLowerCase().includes(q)));
   host.replaceChildren(...shown.map(buildCard));
   countEl.textContent = `${shown.length} of ${CASES.length}`;
   emptyEl.style.display = shown.length ? "none" : "block";
@@ -449,6 +495,16 @@ render();
 /* ---------------- caveats ---------------- */
 {
   const notes = [
+    ["The reference is a release behind the code under test &mdash; and that explains 29 of these",
+     "This sweep's ground truth is <b>LibreOffice 24.2.7.2</b>; Paperless is developed against "
+     + "<b>26.2.4.2</b>, and 63 of 534 documents change reference page count across that gap. "
+     + "So a rule the tree implements <em>correctly</em> for 26.2 shows up here as a defect. "
+     + "The proof is cleanest on slides, where the autofit table records a 20.013/20.409&nbsp;pt "
+     + "pair measured on 26.2.4.2, Paperless draws exactly that pair, and this reference draws "
+     + "21.005/21.005; and on spreadsheets, where our page counts for the three documents known "
+     + "to have moved are 449, 88 and 201 &mdash; the 26.2 answers, exactly. A 26.2 binary is not "
+     + "installable on this image, so the sweep keeps 24.2 and marks the divergences rather than "
+     + "quietly re-baselining onto a third version."],
     ["It is not a bug list",
      "Several documents appear here more than once over: one wrong measurement early in a page shifts everything after it, so a single defect can mark five pages divergent and three documents from the same template can share one cause. Read it as a list of <em>documents that differ</em>, not of distinct defects."],
     ["Six of these are LibreOffice's failures, not Paperless's",

@@ -38,12 +38,29 @@ python3 pl_cases.py     # the non-matching set -> pairs-view/*.jpg to read from,
                         # plus an embeddable WebP per case, in pl-cases.json
 # read pairs-view/NNN.jpg and write one reading per case into analysis/NNN.json
 python3 tag.py          # tag each reading with the defect classes it describes
+python3 corrections.py  # fold measured corrections back over the readings
 python3 build_pl_page.py
 ```
+
+`lanes.py` splits the non-matching set for parallel investigation, partitioned by
+**source-file ownership** rather than by document count -- two agents editing one
+`.cs` file is what produces a merge conflict, so each lane owns a disjoint set of
+directories. `note.py` records one reading per rank as its own file, so the
+reading pass is resumable.
 
 `pl_cases.py` writes two images per document on purpose: a high-resolution JPEG to
 read the defect from, and a small WebP to embed. Diagnosing from the embed size
 means diagnosing from an image the defect may not survive.
+
+`corrections.py` exists because **a reading is a hypothesis and some of them are
+wrong.** Of the first 192 readings, eleven were refuted by measurement, three
+documents turned out to be the reference at fault, and twenty-nine were neither
+engine's error -- the tree is calibrated to LibreOffice 26.2.4.2 and this sweep's
+reference is 24.2.7.2. It keeps those three kinds apart, preserves the original
+reading beneath each correction rather than overwriting it, and gives the
+catalogue a `not a defect` band so a version divergence cannot be counted as a
+defect. A catalogue that silently rewrote itself would lose the record of what it
+had claimed.
 
 ## What the numbers mean, and what they do not
 
