@@ -14,11 +14,66 @@ namespace Paperless.Presentations.MsBinary;
 /// <param name="Text">The characters, with the terminator and any trailing NULs removed.</param>
 /// <param name="Paragraphs">The paragraph property runs, in order.</param>
 /// <param name="Characters">The character property runs, in order.</param>
+/// <param name="Ruler">
+/// The shape's own per-level indents, when it carries a <c>TextRulerAtom</c>.
+/// </param>
 public sealed record PptTextRun(
     PptTextKind Kind,
     string Text,
     IReadOnlyList<PptParagraphRun> Paragraphs,
-    IReadOnlyList<PptCharacterRun> Characters);
+    IReadOnlyList<PptCharacterRun> Characters,
+    PptTextRuler? Ruler = null);
+
+/// <summary>
+/// One shape's <c>TextRulerAtom</c>: per-outline-level indents that override the master's.
+/// </summary>
+/// <remarks>
+/// <para>
+/// <strong>A shape may state its own indents, and they are not in its paragraph properties.</strong>
+/// PowerPoint writes them into a separate record beside the text — <c>PPT_PST_TextRulerAtom</c>,
+/// 4006 — holding a flags word and then, for each of the five outline levels that the flags name,
+/// where that level's text starts and where its bullet starts. The paragraph property runs say
+/// nothing about them, so a reader that only reads those falls through to the master's levels and
+/// puts every indent and every bullet in the wrong place.
+/// </para>
+/// <para>
+/// <c>PPTTextRulerInterpreter</c>, <c>filter/source/msfilter/svdfppt.cxx:3021-3084</c>. The flags
+/// are: bit 0 a default tab, bit 1 a level count that nothing reads, bit 2 a tab-stop list, then
+/// <c>8 &lt;&lt; level</c> for that level's text offset and <c>256 &lt;&lt; level</c> for its
+/// bullet offset — and the fields appear in exactly that interleaved order, so a flag missed is a
+/// misread of everything after it rather than one absent value.
+/// </para>
+/// <para>
+/// Measured on <c>slides/done-014/ppt/Aerospace_Journey_of_Flight_Chapter_*.ppt</c> page 5, whose
+/// body shape carries a 24-byte ruler with flags <c>0x1EF9</c>: it states
+/// <c>textOfs[0] = 152</c>, <c>textOfs[1] = 419</c> and <c>bulletOfs[1] = 304</c> master units
+/// where the master's Body levels say 228, 495 and 304. The reference draws that page's
+/// level-zero text 18.99 pt from the text area's left edge (152 units), its level-one text
+/// 52.38 pt (419) and its level-one bullet 38.01 pt (304) — the ruler's three numbers to a
+/// hundredth of a point, and none of the master's.
+/// </para>
+/// </remarks>
+/// <param name="DefaultTab">The tab interval in master units, or null when the ruler states none.</param>
+/// <param name="TextOffsets">Where each level's text starts, null for a level the flags omit.</param>
+/// <param name="BulletOffsets">Where each level's bullet starts, on the same terms.</param>
+public sealed record PptTextRuler(
+    ushort? DefaultTab,
+    IReadOnlyList<ushort?> TextOffsets,
+    IReadOnlyList<ushort?> BulletOffsets)
+{
+    /// <summary>How many outline levels a ruler can speak for.</summary>
+    public const int Levels = 5;
+
+    /// <summary>The text offset the ruler states for a level, or null when it states none.</summary>
+    /// <param name="level">The outline level, zero for the first.</param>
+    public ushort? TextOffset(int level)
+        => level >= 0 && level < TextOffsets.Count ? TextOffsets[level] : null;
+
+    /// <summary>The bullet offset the ruler states for a level, or null when it states none.</summary>
+    /// <param name="level">The outline level, zero for the first.</param>
+    public ushort? BulletOffset(int level)
+        => level >= 0 && level < BulletOffsets.Count ? BulletOffsets[level] : null;
+}
 
 /// <summary>One paragraph's properties, covering <paramref name="Length"/> characters.</summary>
 /// <remarks>
@@ -178,6 +233,7 @@ public static class PptTextReader
         PptTextKind kind = PptTextKind.Other;
         string? text = null;
         DffRecordHeader? style = null;
+        PptTextRuler? ruler = null;
         List<(int Position, string Value)>? markers = null;
 
         foreach (DffRecordHeader record in stream.Range(start, end))
@@ -203,6 +259,10 @@ public static class PptTextReader
 
                 case PptRecordTypes.StyleTextPropAtom:
                     style ??= record;
+                    break;
+
+                case PptRecordTypes.TextRulerAtom:
+                    ruler ??= ReadRuler(content);
                     break;
 
                 case PptRecordTypes.SlideNumberMCAtom:
@@ -235,7 +295,51 @@ public static class PptTextReader
 
         if (markers is not null) text = Substitute(text, markers, paragraphs, characters);
 
-        return new PptTextRun(kind, text, paragraphs, characters);
+        return new PptTextRun(kind, text, paragraphs, characters, ruler);
+    }
+
+    /// <summary>
+    /// Reads a <c>TextRulerAtom</c>, or returns null when it states nothing this consumes.
+    /// </summary>
+    /// <remarks>
+    /// The field order is the interleaved one <see cref="PptTextRuler"/> describes, and it is the
+    /// whole content of the record: a flag skipped is not one value lost but every value after it
+    /// read from the wrong offset. The tab-stop list is stepped over rather than kept, because
+    /// nothing on the slide path consumes an explicit tab stop yet; its size is two words per
+    /// stop, which the count preceding it gives.
+    /// </remarks>
+    private static PptTextRuler? ReadRuler(ReadOnlySpan<byte> content)
+    {
+        if (content.Length < 4) return null;
+
+        int position = 0;
+        uint flags = Take32(content, ref position);
+
+        ushort? defaultTab = null;
+        ushort?[] textOffsets = new ushort?[PptTextRuler.Levels];
+        ushort?[] bulletOffsets = new ushort?[PptTextRuler.Levels];
+
+        // Bit 1 is a level count that LibreOffice reads and discards; it still occupies a word.
+        if ((flags & 0x0002) != 0) Skip(ref position, 2);
+        if ((flags & 0x0001) != 0) defaultTab = Take16(content, ref position);
+
+        if ((flags & 0x0004) != 0)
+        {
+            int stops = Take16(content, ref position);
+            Skip(ref position, 4 * stops);
+        }
+
+        for (int level = 0; level < PptTextRuler.Levels; level++)
+        {
+            if ((flags & (8u << level)) != 0) textOffsets[level] = Take16(content, ref position);
+            if ((flags & (256u << level)) != 0) bulletOffsets[level] = Take16(content, ref position);
+        }
+
+        bool states = defaultTab is not null;
+        foreach (ushort? value in textOffsets) states |= value is not null;
+        foreach (ushort? value in bulletOffsets) states |= value is not null;
+
+        return states ? new PptTextRuler(defaultTab, textOffsets, bulletOffsets) : null;
     }
 
     /// <summary>The character a field occupies in the text until something resolves it.</summary>
