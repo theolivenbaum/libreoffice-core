@@ -83,6 +83,19 @@ public static class PptRecordTypes
     /// <summary>A text run's ruler: tab stops and per-level indents.</summary>
     public const ushort TextRulerAtom = 4006;
 
+    /// <summary>
+    /// A shape's PowerPoint 97+ paragraph extensions: picture bullets and automatic numbering.
+    /// </summary>
+    /// <remarks>
+    /// <c>PPT_PST_ExtendedParagraphAtom</c>, <c>include/filter/msfilter/svdfppt.hxx:1339</c>. It
+    /// never sits beside the text records: it is buried in the shape's <c>ClientData</c> under
+    /// <see cref="ProgTags"/> → <see cref="ProgBinaryTag"/> named <c>___PPT9</c> →
+    /// <see cref="BinaryTagData"/>, which is why a reader that walks the client text box alone
+    /// cannot see it. <c>SdrPowerPointImport::SeekToContentOfProgTag(9, …)</c>,
+    /// <c>svdfppt.cxx:6547-6551</c>.
+    /// </remarks>
+    public const ushort ExtendedParagraphAtom = 4012;
+
     /// <summary>A text run's characters, one byte each.</summary>
     public const ushort TextBytesAtom = 4008;
 
@@ -131,6 +144,18 @@ public static class PptRecordTypes
 
     /// <summary>Application-private tagged data hanging off a container.</summary>
     public const ushort ProgTags = 5000;
+
+    /// <summary>One tagged block, named by the <see cref="CString"/> that opens it.</summary>
+    public const ushort ProgBinaryTag = 5002;
+
+    /// <summary>
+    /// A tagged block's payload, which holds further records despite being an atom.
+    /// </summary>
+    /// <remarks>
+    /// Its header's version is not <c>0xF</c>, so a walker that recurses only into containers
+    /// steps straight over the records inside it.
+    /// </remarks>
+    public const ushort BinaryTagData = 5003;
 
     /// <summary>A block of the persist directory: persist ids to stream offsets.</summary>
     public const ushort PersistPtrIncrementalBlock = 6002;

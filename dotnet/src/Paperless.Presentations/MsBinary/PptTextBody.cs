@@ -107,12 +107,21 @@ internal static class PptTextBody
         List<SlideParagraph> paragraphs = [];
         int start = 0;
 
+        // One counter and one "inside a numbered run" flag per outline level, owned by the body
+        // rather than by a paragraph -- an automatic number runs across the paragraphs of one
+        // text body and restarts wherever the run is broken, which is the same contract
+        // `DrawingTextBody.AutoNumber` takes for the OOXML side and the reason both readers can
+        // share its arithmetic instead of numbering a nested list two different ways.
+        int[] counters = new int[PptNumbering.Levels];
+        bool[] counting = new bool[PptNumbering.Levels];
+
         while (start <= run.Text.Length)
         {
             int stop = run.Text.IndexOf(PptTextReader.ParagraphSeparator, start);
             int length = (stop < 0 ? run.Text.Length : stop) - start;
 
-            paragraphs.Add(Paragraph(run, styles, scheme, fonts, start, length));
+            paragraphs.Add(
+                Paragraph(run, styles, scheme, fonts, start, length, counters, counting));
 
             if (stop < 0) break;
             start = stop + 1;
@@ -155,7 +164,9 @@ internal static class PptTextBody
         PptColourScheme scheme,
         PptFontTable fonts,
         int start,
-        int length)
+        int length,
+        int[] counters,
+        bool[] counting)
     {
         PptParagraphRun properties = PropertiesAt(run.Paragraphs, start);
         int depth = properties.Depth;
@@ -204,7 +215,18 @@ internal static class PptTextBody
             MasterUnits(textOffset),
             MasterUnits(bulletOffset) - MasterUnits(textOffset),
             Language: null,
-            Marker: Marker(properties, level, scheme, fonts, runs, TextFontAt(run, characters, start)))
+            Marker: Marker(
+                properties,
+                level,
+                scheme,
+                fonts,
+                runs,
+                TextFontAt(run, characters, start),
+                run.ExtensionAt(ExtendedIndexAt(run, start)),
+                depth,
+                text.Length > 0,
+                counters,
+                counting))
         {
             // Every binary paragraph, unconditionally -- and that is a measurement rather than a
             // reading. `PPTParagraphObj::ApplyTo` puts the SvxLineSpacingItem (and with it
@@ -284,9 +306,38 @@ internal static class PptTextBody
         PptColourScheme scheme,
         PptFontTable fonts,
         List<SlideTextRun> runs,
-        ushort textFont)
+        ushort textFont,
+        PptExtendedParagraph? extended,
+        int depth,
+        bool hasText,
+        int[] counters,
+        bool[] counting)
     {
         bool bulleted = properties.HasBullet ?? level.HasBullet;
+
+        // The number outranks the bullet the paragraph states, and the paragraph goes on stating
+        // one: a numbered PowerPoint list still carries its master's round dot in its property
+        // run, so reading the two in the other order draws a bullet on every numbered item.
+        // `ImplGetExtNumberFormat` reaches the same place by overwriting the SVX_NUM_CHAR_SPECIAL
+        // the bullet put there (`svdfppt.cxx:3466-3630`).
+        if (bulleted
+            && runs.Count > 0
+            && extended is { HasAutoNumber: true } numbering
+            && PptNumbering.Next(numbering, depth, hasText, counters, counting) is { } number)
+        {
+            return new SlideMarker(
+                number,
+                runs[0].Typeface,
+                MarkerScale(properties, level),
+                MarkerColour(properties, level, scheme),
+
+                // A generated number sits on the text's own baseline rather than centred on it,
+                // and is drawn in the paragraph's own face -- see `SlideMarker.IsSymbol`.
+                IsSymbol: false);
+        }
+
+        PptNumbering.Break(depth, counting);
+
         if (!bulleted || runs.Count == 0) return null;
 
         char character = properties.BulletCharacter
@@ -345,10 +396,59 @@ internal static class PptTextBody
         string? typeface = recodeable ? face : fonts.IsSymbol(font) ? null : face;
 
         return new SlideMarker(
-            text,
-            typeface,
-            height is > 0 and <= 400 ? height / 100.0 : 1.0,
-            hardColour ? PptColour.ResolveText(colour, scheme) : null);
+            text, typeface, MarkerScale(properties, level), MarkerColour(properties, level, scheme));
+    }
+
+    /// <summary>The marker's size as a fraction of its text's.</summary>
+    private static double MarkerScale(PptParagraphRun properties, PptParagraphLevel level)
+    {
+        ushort height = properties.States(StatesBulletHeight)
+            ? properties.BulletHeight
+            : level.BulletHeight;
+
+        return height is > 0 and <= 400 ? height / 100.0 : 1.0;
+    }
+
+    /// <summary>The marker's own colour, or null for the first run's.</summary>
+    /// <remarks>
+    /// The paragraph states <c>PPT_ParaAttr_BuHardColor</c> only when its mask names it; otherwise
+    /// the master's level holds it, exactly as the character and the face do.
+    /// </remarks>
+    private static Colour? MarkerColour(
+        PptParagraphRun properties, PptParagraphLevel level, PptColourScheme scheme)
+    {
+        uint colour = properties.States(StatesBulletColour)
+            ? properties.BulletColour
+            : level.BulletColour;
+
+        bool hardColour = properties.States(StatesBulletHardColour)
+            ? (properties.BulletFlags & BulletHardColourFlag) != 0
+            : (level.BulletFlags & BulletHardColourFlag) != 0;
+
+        return hardColour ? PptColour.ResolveText(colour, scheme) : null;
+    }
+
+    /// <summary>
+    /// Which <c>ExtendedParagraphAtom</c> entry is in force at a paragraph's first character.
+    /// </summary>
+    /// <remarks>
+    /// The selection is made by the <em>character</em> run rather than by the paragraph, which is
+    /// how one atom entry covers three paragraphs and a second covers the fourth
+    /// (<c>PPTStyleTextPropReader::ReadCharProps</c>, <c>svdfppt.cxx:5171-5182</c>).
+    /// </remarks>
+    private static int ExtendedIndexAt(PptTextRun run, int start)
+    {
+        int position = 0;
+
+        foreach (PptCharacterRun character in run.Characters)
+        {
+            int runEnd = position + character.Length;
+            if (start >= position && start < runEnd) return character.ExtendedIndex;
+
+            position = runEnd;
+        }
+
+        return 0;
     }
 
     /// <summary>

@@ -1527,15 +1527,26 @@ internal sealed class PptSlideLayout
         int start = textbox.ContentStart;
         int end = _stream.EndOf(textbox);
 
+        // Picture bullets and automatic numbering are not in the text box at all -- they are in
+        // the shape's own private data, three records down and behind an atom that holds records.
+        // See `PptTextReader.ReadExtendedParagraphs`.
+        IReadOnlyList<PptExtendedParagraph>? extended =
+            PptTextReader.ReadExtendedParagraphs(_stream, shape.ClientData);
+
         foreach (DffRecordHeader record in _stream.Range(start, end))
         {
             if (record.Type != PptRecordTypes.OutlineTextRefAtom) continue;
 
             uint reference = DffRecordBuffer.ReadUInt32(_stream.Content(record));
-            return OutlineText(context.Entry, reference, context.Fields);
+
+            // A shape that refers to the slide list still carries its own extensions, and they
+            // still apply to the text it points at.
+            return OutlineText(context.Entry, reference, context.Fields) is { } outline
+                ? outline with { Extended = extended ?? outline.Extended }
+                : null;
         }
 
-        return PptTextReader.Read(_stream, start, end, context.Fields);
+        return PptTextReader.Read(_stream, start, end, context.Fields, extended);
     }
 
     /// <summary>
