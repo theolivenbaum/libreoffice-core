@@ -524,7 +524,14 @@ public sealed partial class DocxContentReader
                     ReadAnchoredContent(child, paragraph);
                     break;
 
-                case "separator" or "continuationSeparator" or "lastRenderedPageBreak" or "ptab":
+                // A positional tab is a tab: LibreOffice's tokenizer emits one character for it
+                // (`writerfilter/ooxml/model.xml`:18204-18208, `CT_PTab` → `action="tab"`), so
+                // dropping it here runs a three-part running head into one word.
+                case "ptab":
+                    Emit(paragraph, "\t", format, characterStyleName, hyperlink);
+                    break;
+
+                case "separator" or "continuationSeparator" or "lastRenderedPageBreak":
                     break;
 
                 default:

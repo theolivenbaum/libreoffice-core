@@ -942,6 +942,23 @@ public sealed partial class DocxLayoutSource
     /// <param name="name">The style the field named.</param>
     private string? StyleReferenceText(string name)
     {
+        // Not in a running head, where this map cannot answer. A header is read once per section, after
+        // the body walk has finished (`OoxmlWordDocument.Layout` calls `source.Read(body)` before
+        // `Paginated`), so `_styleText` holds the *last* paragraph in each style in the whole document
+        // — an answer that is right on at most one page and wrong on all the others. Writer resolves a
+        // STYLEREF from the field's own position instead, scanning backwards from it
+        // (`SwGetRefFieldType::FindAnchorRefStyleOther`), which for a running head means "the heading
+        // in force on this page" and is a different answer on every page.
+        //
+        // Measured on `231164_SystemDesignDocument.docx`: the reference's running head reads
+        // "List of Figures", "Introduction", "General Overview and Design Guidelines/Approach" on
+        // pages 3, 4 and 5; this map answers "List of Tables" and "External Interfaces" — the last
+        // front-matter heading and the last `Heading 2` — on all of them. Declining leaves the
+        // producer's cached result, which is the stated policy of this method ("a wrong substitution is
+        // worse than a stale one") and is what Word wrote for the page the field was last laid out on.
+        // Closing this properly needs a per-page substitution like `PageFields`; see findings.md.
+        if (InHeaderFooter) return null;
+
         if (_styleText.Count == 0) return null;
         if (_styleText.TryGetValue(name, out string? byId)) return byId;
 
@@ -1100,7 +1117,7 @@ public sealed partial class DocxLayoutSource
                 ? paragraph
                 : WordParagraphFormats.ResolveRun(
                     _styles, paragraphProperties, range.RunProperties, _theme, _tableStyleRun,
-                    _fontTable);
+                    _fontTable, ignoreCharacterStyle: range.InIndexField);
 
             if (range.IsCitation) style = AsCitation(style);
 
@@ -1191,12 +1208,17 @@ public sealed partial class DocxLayoutSource
     /// the same decision picks the character: a slot recoded into OpenSymbol is a different code point
     /// from the one the file states, so the face cannot be chosen after the text is built.
     /// </param>
+    /// <param name="InIndexField">
+    /// True when the range sits in the *result* of a <c>TOC</c>, <c>INDEX</c> or <c>BIBLIOGRAPHY</c>
+    /// field, where the character style a run names is not applied. See <see cref="RunWalker"/>.
+    /// </param>
     private readonly record struct StyledRange(
         int Start,
         int Length,
         XElement? RunProperties,
         bool IsCitation = false,
-        (OpenTypeFace Face, FontReference? Font)? Symbol = null);
+        (OpenTypeFace Face, FontReference? Font)? Symbol = null,
+        bool InIndexField = false);
 
     /// <summary>A note found while walking a paragraph, before its body has been read.</summary>
     /// <param name="Offset">Where its citation sits in the paragraph's text.</param>
@@ -1586,7 +1608,54 @@ public sealed partial class DocxLayoutSource
             /// <c>w:rPr</c>, which is what makes this the right guess rather than merely a guess.
             /// </remarks>
             internal XElement? InstructionProperties { get; set; }
+
+            /// <summary>
+            /// True when this field is a <c>TOC</c>, <c>INDEX</c> or <c>BIBLIOGRAPHY</c> whose result
+            /// is being read, so the runs inside it do not take the character style they name.
+            /// </summary>
+            internal bool IsIndexResult { get; set; }
         }
+
+        /// <summary>
+        /// How many index fields' results the walk is inside, so a run's <c>w:rStyle</c> is ignored.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// A table of contents is written by Word as a field whose cached result is a run of paragraphs,
+        /// each entry a <c>w:hyperlink</c> around a run naming the <c>Hyperlink</c> character style — so
+        /// taken at its word every entry is blue and underlined. LibreOffice does not take it at its
+        /// word: <c>DomainMapper.cxx</c>:3037-3047 looks the style up and then declines to apply it,
+        /// <em>"do not add it elements in TOC: they will receive later another style references from
+        /// TOC"</em>, so the entries come out in the <c>TOC N</c> paragraph style alone — plain, black,
+        /// not underlined. That is what the reference draws, on every document in the corpus that has a
+        /// contents list.
+        /// </para>
+        /// <para>
+        /// A counter rather than a flag, and scoped to the field's <em>result</em> rather than to the
+        /// whole field, because that is the extent LibreOffice gives it: <c>m_bStartTOC</c> is set when
+        /// the field command closes (<c>DomainMapper_Impl.cxx</c>:7643, reached from
+        /// <c>CloseFieldCommand</c> at the <c>w:fldChar w:fldCharType="separate"</c>) and cleared only
+        /// when that same field's context is popped (<c>DomainMapper_Impl.cxx</c>:9269, guarded by
+        /// <c>pContext-&gt;GetTOC().is()</c>), so the <c>PAGEREF</c> fields nested inside each entry do
+        /// not end it.
+        /// </para>
+        /// </remarks>
+        private int _indexResults;
+
+        /// <summary>True while the walk is inside an index field's result.</summary>
+        private bool InIndexField => _indexResults > 0;
+
+        /// <summary>
+        /// Whether an instruction names a field whose result LibreOffice regenerates, and whose runs
+        /// therefore lose the character style they name.
+        /// </summary>
+        /// <remarks>
+        /// The three <c>DomainMapper_Impl::IsInTOC</c> covers: <c>handleToc</c>, <c>handleIndex</c> and
+        /// <c>handleBibliography</c> all set <c>m_bStartTOC</c>.
+        /// </remarks>
+        private static bool IsIndexField(string instruction)
+            => FieldInstructions.Name(instruction)?.ToUpperInvariant()
+                is "TOC" or "INDEX" or "BIBLIOGRAPHY";
 
         /// <summary>The value a constant field evaluates to, or null when nothing can be computed.</summary>
         private string? ValueOf(string instruction)
@@ -1739,6 +1808,16 @@ public sealed partial class DocxLayoutSource
                                     OpenField open = _fields.Peek();
                                     open.ResultAt = _builder.Length;
 
+                                    // The instruction has been read in full, which is the earliest the
+                                    // field's name is known — and it is exactly where LibreOffice
+                                    // decides the same thing, in `CloseFieldCommand`.
+                                    if (!open.IsIndexResult
+                                        && IsIndexField(open.Instruction.ToString()))
+                                    {
+                                        open.IsIndexResult = true;
+                                        _indexResults++;
+                                    }
+
                                     // The one point at which a field this walk computes can be written:
                                     // the instruction has been read in full, so the field's name is
                                     // known, and the cached result it replaces starts here.
@@ -1752,6 +1831,8 @@ public sealed partial class DocxLayoutSource
                                 if (_fields.Count > 0)
                                 {
                                     OpenField closing = _fields.Pop();
+
+                                    if (closing.IsIndexResult) _indexResults--;
 
                                     // A field with no separator has no cached result at all, and
                                     // LibreOffice still draws its value — measured on the second
@@ -1796,7 +1877,18 @@ public sealed partial class DocxLayoutSource
                         }
                         else
                         {
-                            Append(child, depth + 1);
+                            // The compact form of an index carries its result the same way and loses
+                            // its runs' character styles for the same reason.
+                            bool index = IsIndexField(simple.Instruction.ToString());
+                            if (index) _indexResults++;
+                            try
+                            {
+                                Append(child, depth + 1);
+                            }
+                            finally
+                            {
+                                if (index) _indexResults--;
+                            }
                         }
 
                         CloseField(simple);
@@ -1809,6 +1901,30 @@ public sealed partial class DocxLayoutSource
 
                     case "tab" when !Suppressed:
                         Emit("\t");
+                        break;
+
+                    // A *positional* tab: an absolute stop stated on the element rather than in the
+                    // paragraph's `w:tabs`, which is how Word writes a three-part running head with no
+                    // tab stops of its own. LibreOffice emits an ordinary tab character for every one
+                    // of them — the tokenizer's `CT_PTab` resource is
+                    // `<action name="end" action="tab"/>` (`writerfilter/ooxml/model.xml`:18204-18208)
+                    // — and only then, for a *left*-aligned one that follows text on the line,
+                    // replaces that tab with a line break (`DomainMapper_Impl::HandlePTab`,
+                    // `DomainMapper_Impl.cxx`:5550-5604, which returns immediately for every other
+                    // alignment). Dropping the element instead runs the parts together: measured on
+                    // `PI-doc.-no.-2E-Technical-Review-Report.docx`, whose footer draws
+                    // `Page 5 of 12Version 1Last saved …` where the reference spaces the three across
+                    // the page.
+                    case "ptab" when !Suppressed:
+                        if (Word.Attribute(child, "alignment") == "left" && _builder.Length > 0)
+                        {
+                            Emit(LineSeparator.ToString());
+                        }
+                        else
+                        {
+                            Emit("\t");
+                        }
+
                         break;
 
                     // A character named by slot in a face of its own, and the only run-level element
@@ -1977,6 +2093,7 @@ public sealed partial class DocxLayoutSource
                 && _symbolFace is null
                 && _ranges[^1].Symbol is null
                 && _ranges[^1].IsCitation == _inCitation
+                && _ranges[^1].InIndexField == InIndexField
                 && _ranges[^1].RunProperties == _runProperties)
             {
                 _ranges[^1] = _ranges[^1] with { Length = _ranges[^1].Length + text.Length };
@@ -1984,7 +2101,8 @@ public sealed partial class DocxLayoutSource
             }
 
             _ranges.Add(new StyledRange(
-                _builder.Length - text.Length, text.Length, _runProperties, _inCitation, _symbolFace));
+                _builder.Length - text.Length, text.Length, _runProperties, _inCitation, _symbolFace,
+                InIndexField));
         }
 
         /// <summary>True while a note's citation is being emitted.</summary>

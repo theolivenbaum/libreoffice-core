@@ -447,19 +447,31 @@ internal static class WordParagraphFormats
     /// <em>layer</em> named a classified font, and the layers are gone by then — see
     /// <see cref="StatedClass"/>.
     /// </param>
+    /// <param name="ignoreCharacterStyle">
+    /// True to drop the run's <c>w:rStyle</c> layer while keeping its own <c>w:rPr</c>, which is what a
+    /// run inside a table of contents gets: <c>DomainMapper.cxx</c>:3037-3047 resolves the style name,
+    /// finds it, and then declines to insert <c>PROP_CHAR_STYLE_NAME</c> when
+    /// <c>DomainMapper_Impl::IsInTOC</c> — "do not add it elements in TOC: they will receive later
+    /// another style references from TOC". Word writes every contents entry as a run naming the
+    /// <c>Hyperlink</c> character style, so honouring it draws the whole list blue and underlined where
+    /// the reference draws it in the <c>TOC N</c> paragraph style alone.
+    /// </param>
     internal static WordTextStyle ResolveRun(
         WordStyles styles,
         XElement? paragraphProperties,
         XElement? runProperties,
         DrawingTheme? theme = null,
         IReadOnlyList<XElement>? tableStyleRunProperties = null,
-        WordFontTable? fontTable = null)
+        WordFontTable? fontTable = null,
+        bool ignoreCharacterStyle = false)
     {
         ArgumentNullException.ThrowIfNull(styles);
 
         string? styleId = Word.Attribute(Word.Child(paragraphProperties, "pStyle"), "val")
                           ?? styles.DefaultStyleId(WordStyleType.Paragraph);
-        string? characterStyleId = Word.Attribute(Word.Child(runProperties, "rStyle"), "val");
+        string? characterStyleId = ignoreCharacterStyle
+            ? null
+            : Word.Attribute(Word.Child(runProperties, "rStyle"), "val");
 
         List<XElement> fonts =
             styles.RunPropertyLayers(
