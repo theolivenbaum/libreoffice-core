@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text.RegularExpressions;
 using System.Text;
 using System.Xml.Linq;
 using Paperless.Core.Charts;
@@ -232,8 +233,9 @@ public static class DrawingChartPlot
             // title hangs off that element — so reading only c:catAx loses it entirely. The same
             // fallback CategoryAxisVisible already takes, and tdf127720.pptx is what shows it:
             // "Dissolved Oxygen (%)" is three words the reference draws and this did not.
-            CategoryAxisTitle = TitleText(Child(axes.Domain ?? axes.Category, "title")),
-            ValueAxisTitle = TitleText(Child(axes.Value, "title")),
+            CategoryAxisTitle = AxisTitleText(
+                Child(axes.Domain ?? axes.Category, "title"), kind),
+            ValueAxisTitle = AxisTitleText(Child(axes.Value, "title"), kind),
             Categories = orderedCategories,
             Series = orderedSeries,
             Kind = kind,
@@ -262,7 +264,7 @@ public static class DrawingChartPlot
             DataTable = DataTableOf(Child(plotArea, "dTable"), theme),
             SecondaryValueScale = axes.Secondary is null ? null : ScaleOf(axes.Secondary),
             SecondaryValueFormat = FormatOf(axes.Secondary),
-            SecondaryValueAxisTitle = TitleText(Child(axes.Secondary, "title")),
+            SecondaryValueAxisTitle = AxisTitleText(Child(axes.Secondary, "title"), kind),
             DomainScale = ScaleOf(axes.Domain),
             DomainFormat = FormatOf(axes.Domain),
             ValueAxisVisible = Shown(axes.Value),
@@ -1163,7 +1165,8 @@ public static class DrawingChartPlot
                 theme, automatic.Styles);
 
             series.Add(new ChartSeries(
-                DrawingChartText.Label(Child(element, "tx")),
+                SeriesName(Child(element, "tx"), ranges)
+                ?? GeneratedSeriesName(valueSource, ranges),
                 numbers,
                 SuppressesFill(properties) ? null : FillOf(properties, theme) ?? autoFill,
                 SuppressesLine(properties) ? null : LineOf(properties, theme) ?? autoLine,
@@ -1189,7 +1192,8 @@ public static class DrawingChartPlot
                 LineCap = CapOf(properties),
                 Label = WithSource(LabelOf(seriesLabels, groupLabel, kind, office2007), sourceFormat),
                 PointLabels = PointLabelsOf(
-                    seriesLabels, numbers.Length, groupLabel, kind, sourceFormat, office2007),
+                    seriesLabels, numbers.Length, groupLabel, kind, sourceFormat, office2007,
+                    DataLabelsRangeOf(element)),
                 AxisIndex = axisIndex,
                 Trendlines = TrendlinesOf(element, theme, office2007),
                 SizeValues = sizes,
@@ -1498,7 +1502,8 @@ public static class DrawingChartPlot
         ChartDataLabel? inherited,
         ChartPlotKind kind,
         NumberFormatCode? source,
-        bool office2007)
+        bool office2007,
+        IReadOnlyList<string?>? dataLabelsRange = null)
     {
         if (labels is null) return null;
 
@@ -1513,10 +1518,125 @@ public static class DrawingChartPlot
             points ??= new ChartDataLabel?[Math.Max(count, index + 1)];
             if (index >= points.Length) continue;
 
-            points[index] = WithSource(LabelOf(point, seriesLevel, kind, office2007), source);
+            ChartDataLabel? read =
+                WithSource(LabelOf(point, seriesLevel, kind, office2007), source);
+
+            points[index] = WithCellRange(read, point, index, dataLabelsRange);
         }
 
         return points;
+    }
+
+    /// <summary>The Office extension a <c>CELLRANGE</c> field's text actually comes from.</summary>
+    /// <remarks><c>{02D57815-91ED-43cb-92C2-25804820EDAC}</c>'s namespace.</remarks>
+    private const string Chart2012 = "http://schemas.microsoft.com/office/drawing/2012/chart";
+
+    /// <summary>
+    /// A series' data-label range — the strings a <c>CELLRANGE</c> field stands for, by point.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>A <c>CELLRANGE</c> field's own <c>a:t</c> is the placeholder and never the
+    /// answer.</strong> Excel writes the literal <c>[CELLRANGE]</c> there and puts the text in
+    /// <c>c:ser/c:extLst/c:ext/c15:datalabelsRange/c15:dlblRangeCache</c>, keyed by point index.
+    /// <c>SeriesConverter::createDataSeries</c> reads exactly that —
+    /// <c>mrModel.mrParent.mpLabelsSource-&gt;mxDataSeq-&gt;maData.find(mrModel.mnIndex)</c>, then
+    /// <c>xCustomLabel-&gt;setString(oaLabelText)</c>
+    /// (<c>oox/source/drawingml/chart/seriesconverter.cxx:366-410</c>), with
+    /// <c>mpLabelsSource</c> bound at <c>seriescontext.cxx:461</c>.
+    /// </para>
+    /// <para>
+    /// Measured on <c>047_Date_tracker_Gantt_chart_bf34f3a8.xlsx</c>: nine data labels reading
+    /// <c>[CELLRANGE]</c> against a reference that reads <c>Activity 1</c> … <c>Activity 7</c>,
+    /// <c>Today</c> and <c>Milestone 1</c> — the cache is in the file and was never opened.
+    /// </para>
+    /// <para>
+    /// The cache and not the resolver, deliberately: the converter reads the parsed
+    /// <c>DataSequenceModel::maData</c> map, which is the <c>c15:dlblRangeCache</c> the file
+    /// carries, and never asks the data provider for those cells.
+    /// </para>
+    /// </remarks>
+    private static string?[]? DataLabelsRangeOf(XElement series)
+    {
+        XName cache = XName.Get("dlblRangeCache", Chart2012);
+        XElement? found = null;
+
+        foreach (XElement extension in Children(Child(series, "extLst"), "ext"))
+        {
+            found = extension
+                .Descendants(cache)
+                .FirstOrDefault();
+
+            if (found is not null) break;
+        }
+
+        if (found is null) return null;
+
+        int declared = Drawing.Number(Child(found, "ptCount"), "val") ?? -1;
+
+        foreach (XElement point in found.Descendants(Name("pt")))
+            declared = Math.Max(declared, (Drawing.Number(point, "idx") ?? -1) + 1);
+
+        int count = Math.Clamp(declared, 0, MaxPointCount);
+        if (count == 0) return null;
+
+        string?[] text = new string?[count];
+
+        foreach (XElement point in found.Descendants(Name("pt")))
+        {
+            int index = Drawing.Number(point, "idx") ?? -1;
+            if (index < 0 || index >= count) continue;
+
+            text[index] = Child(point, "v")?.Value;
+        }
+
+        return text;
+    }
+
+    /// <summary>
+    /// One point's label with its <c>CELLRANGE</c> fields resolved against the series' range.
+    /// </summary>
+    /// <remarks>
+    /// Gated on <c>c15:showDataLabelsRange</c>, which is what <c>DataLabelContext</c> parses into
+    /// <c>mobShowDataLabelsRange</c> (<c>seriescontext.cxx:134-139</c>) and what
+    /// <c>seriesconverter.cxx:368</c> tests before it looks the text up at all. Without a value
+    /// for this point the placeholder stands, exactly as the source leaves
+    /// <c>oaLabelText.value_or("")</c> unset when the map has no entry.
+    /// </remarks>
+    private static ChartDataLabel? WithCellRange(
+        ChartDataLabel? label,
+        XElement point,
+        int index,
+        IReadOnlyList<string?>? dataLabelsRange)
+    {
+        if (label?.Parts is not { Count: > 0 } parts) return label;
+        if (dataLabelsRange is null || index >= dataLabelsRange.Count) return label;
+        if (dataLabelsRange[index] is not { } resolved) return label;
+
+        bool shown = Child(Child(point, "extLst"), "ext")
+                         ?.Descendants(XName.Get("showDataLabelsRange", Chart2012))
+                         .Any(flag => flag.Attribute("val")?.Value is not ("0" or "false"))
+                     ?? false;
+
+        if (!shown) return label;
+
+        List<ChartLabelPart> rewritten = new(parts.Count);
+        bool changed = false;
+
+        foreach (ChartLabelPart part in parts)
+        {
+            if (part.Field == ChartLabelField.CellRange)
+            {
+                rewritten.Add(part with { Text = resolved });
+                changed = true;
+            }
+            else
+            {
+                rewritten.Add(part);
+            }
+        }
+
+        return changed ? label with { Parts = rewritten } : label;
     }
 
     /// <summary>
@@ -2425,6 +2545,38 @@ public static class DrawingChartPlot
         return null;
     }
 
+    /// <summary>
+    /// An axis title's text, with LibreOffice's own caption where the element states none.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>A <c>c:title</c> with no text in it is still a title, and the reference draws
+    /// <c>Axis Title</c> in it.</strong> <c>AxisConverter::convertFromModel</c> passes
+    /// <c>OoxResId(STR_DIAGRAM_AXISTITLE)</c> as the default string to
+    /// <c>TitleConverter::convertFromModel</c> whenever the model holds a title element and the
+    /// type group is not a radar (<c>oox/source/drawingml/chart/axisconverter.cxx:461-470</c>),
+    /// and <c>TextConverter::createStringSequence</c> falls back to that default once the rich
+    /// body, the <c>c:txPr</c> paragraphs and the <c>c:tx</c> cache have all come back empty
+    /// (<c>titleconverter.cxx:141-160</c>). Unlike the chart title's, this arm has no
+    /// tdf#146487 escape and no <c>autoTitleDeleted</c>: the element being present is the whole
+    /// condition.
+    /// </para>
+    /// <para>
+    /// Measured on <c>040_Blood_pressure_tracker_872b6833.xlsx</c>, whose category axis carries
+    /// <c>&lt;c:title&gt;</c> with a <c>c:overlay</c>, a <c>c:spPr</c> and a <c>c:txPr</c> and no
+    /// <c>c:tx</c> at all: the reference prints <c>Axis Title</c> under the axis and we printed
+    /// nothing.
+    /// </para>
+    /// </remarks>
+    private static string? AxisTitleText(XElement? title, ChartPlotKind kind)
+    {
+        if (title is null) return null;
+        if (TitleText(title) is { Length: > 0 } stated) return stated;
+
+        // "in radar charts, title objects may exist, but are not shown".
+        return kind is ChartPlotKind.Radar ? null : DrawingChartTitle.AxisTitle;
+    }
+
     private static string? TitleText(XElement? title)
     {
         if (title is null) return null;
@@ -2438,6 +2590,189 @@ public static class DrawingChartPlot
             && DrawingTextBody.Text(properties) is { Length: > 0 } fallback)
         {
             return fallback;
+        }
+
+        return DrawingChartText.Label(tx);
+    }
+
+    /// <summary>
+    /// The name a Calc-hosted series with no <c>c:tx</c> at all is given — <c>Column C</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>An unnamed series is not a series without a legend entry.</strong>
+    /// <c>DataSeries::getLabelForRole</c> falls through to
+    /// <c>xValueSeq-&gt;generateLabel(LabelOrigin_SHORT_SIDE)</c> when the label sequence is
+    /// absent or empty (<c>chart2/source/model/main/DataSeries.cxx:641-672</c>), and Calc answers
+    /// it: <c>ScChart2DataSequence::generateLabel</c> sums the columns and rows of every range
+    /// token, labels along the short side, and <c>GenerateLabelStrings</c> writes
+    /// <c>ScResId(STR_COLUMN) + " " + &lt;column letter&gt;</c> or
+    /// <c>ScResId(STR_ROW) + " " + &lt;1-based row&gt;</c>
+    /// (<c>sc/source/ui/unoobj/chart2uno.cxx:3147-3243</c>). Equal counts return an empty
+    /// sequence and therefore no name.
+    /// </para>
+    /// <para>
+    /// Measured on <c>057_Simple_balance_sheet_Use_this_template_e2d4cbb2.xlsx</c>, whose two
+    /// <c>c:ser</c> state a <c>c:spPr</c>, a <c>c:cat</c> and a <c>c:val</c> and no <c>c:tx</c>:
+    /// the reference draws a two-entry legend reading <c>Column C</c> and <c>Column D</c> — its
+    /// value ranges are unions of six column-C and column-D fragments, twenty rows against six
+    /// columns — and we drew no legend at all.
+    /// </para>
+    /// <para>
+    /// <strong>Gated on there being a resolver, which is the Calc host and only Calc.</strong>
+    /// A deck's or a document's sequences are <c>CachedDataSequence</c>s, whose
+    /// <c>generateLabel</c> returns an empty sequence, so the reference names those series by
+    /// another route entirely (<c>lcl_getDataSequenceLabel</c> over the values) and never by this
+    /// one. Firing it without a resolver would invent legends on every unnamed pptx series.
+    /// </para>
+    /// <para>
+    /// The strings are LibreOffice's localized <c>STR_COLUMN</c>/<c>STR_ROW</c>, in the en-US
+    /// resource this project's reference binary runs under — the same standing caveat
+    /// <see cref="DrawingChartTitle.DiagramTitle"/> carries.
+    /// </para>
+    /// </remarks>
+    private static string? GeneratedSeriesName(XElement? values, ChartRangeResolver? ranges)
+    {
+        if (ranges is null || values is null) return null;
+        if (FormulaOf(values) is not { } formula) return null;
+
+        int columns = 0;
+        int rows = 0;
+        string? firstColumn = null;
+        int firstRow = -1;
+
+        foreach ((string Column, int Row, string EndColumn, int EndRow) area in Areas(formula))
+        {
+            columns += ColumnNumber(area.EndColumn) - ColumnNumber(area.Column) + 1;
+            rows += area.EndRow - area.Row + 1;
+
+            firstColumn ??= area.Column;
+            if (firstRow < 0) firstRow = area.Row;
+        }
+
+        if (firstColumn is null || firstRow < 0) return null;
+
+        // LabelOrigin_SHORT_SIDE: label along whichever side is shorter, and nothing at all when
+        // the two are equal.
+        if (rows > columns) return "Column " + firstColumn;
+        if (columns > rows) return "Row " + firstRow.ToString(CultureInfo.InvariantCulture);
+
+        return null;
+    }
+
+    /// <summary>Every A1 area in a <c>c:f</c>, sheet qualifiers and unions included.</summary>
+    /// <remarks>
+    /// <para>
+    /// <c>AccumulateRangeSize</c> walks the token list a formula parsed into; this reads the same
+    /// areas straight out of the text, which is all the two figures it feeds need. A reference
+    /// this cannot read contributes nothing, exactly as an unresolvable token does.
+    /// </para>
+    /// <para>
+    /// The sheet qualifier is cut off before the pattern runs, because a name such as
+    /// <c>Q1Data</c> reads as the cell <c>Q1</c> otherwise. A union's members are separated at the
+    /// commas the file writes them with.
+    /// </para>
+    /// </remarks>
+    private static IEnumerable<(string Column, int Row, string EndColumn, int EndRow)> Areas(
+        string formula)
+    {
+        foreach (string member in formula.Trim('(', ')').Split(','))
+        {
+            int qualifier = member.LastIndexOf('!');
+            string area = qualifier >= 0 ? member[(qualifier + 1)..] : member;
+
+            foreach ((string, int, string, int) found in AreasIn(area)) yield return found;
+        }
+    }
+
+    /// <summary>The areas in one member of a union, its sheet qualifier already cut off.</summary>
+    private static IEnumerable<(string Column, int Row, string EndColumn, int EndRow)> AreasIn(
+        string area)
+    {
+        foreach (Match match in AreaPattern.Matches(area))
+        {
+            string column = match.Groups[1].Value.ToUpperInvariant();
+            string endColumn = match.Groups[3].Success
+                ? match.Groups[3].Value.ToUpperInvariant()
+                : column;
+
+            if (!int.TryParse(
+                    match.Groups[2].Value, NumberStyles.None, CultureInfo.InvariantCulture,
+                    out int row))
+            {
+                continue;
+            }
+
+            int endRow = row;
+            if (match.Groups[4].Success
+                && !int.TryParse(
+                    match.Groups[4].Value, NumberStyles.None, CultureInfo.InvariantCulture,
+                    out endRow))
+            {
+                continue;
+            }
+
+            yield return (column, row, endColumn, endRow);
+        }
+    }
+
+    /// <summary>One A1 area: <c>$B$6</c> or <c>$B$6:$C$11</c>, dollars optional.</summary>
+    private static readonly Regex AreaPattern = new(
+        @"\$?([A-Za-z]{1,3})\$?([0-9]{1,7})(?::\$?([A-Za-z]{1,3})\$?([0-9]{1,7}))?",
+        RegexOptions.CultureInvariant);
+
+    /// <summary>A column letter's 1-based number.</summary>
+    private static int ColumnNumber(string letters)
+    {
+        int number = 0;
+
+        foreach (char letter in letters)
+            number = (number * 26) + (letter - 'A' + 1);
+
+        return number;
+    }
+
+    /// <summary>
+    /// A series' name: its live cells where the caller can reach them, else its cached points.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>A <c>c:tx/c:strRef</c> need not carry a <c>c:strCache</c> at all</strong>, and a
+    /// reader that only looks at the cache then leaves the series unnamed — which drops the
+    /// <em>whole legend</em>, because a legend is built from the entries that have a name.
+    /// Measured on <c>microsoft_learn_multi_chart_examples.xlsx</c>, whose five charts state
+    /// <c>&lt;tx&gt;&lt;strRef&gt;&lt;f&gt;'Examples'!B4&lt;/f&gt;&lt;/strRef&gt;&lt;/tx&gt;</c>
+    /// and no cache anywhere in the part: the reference draws <c>Product A/B/C</c> beside its
+    /// line, column and area charts and we drew no legend on any of the three.
+    /// </para>
+    /// <para>
+    /// The order is <see cref="ReadSequence"/>'s and for the same reason — the <c>c:f</c> wins and
+    /// the cache is the fallback, because <c>ExcelChartConverter::createDataSequence</c> resolves
+    /// the formula and falls back to the cached data only when there is no formula
+    /// (<c>sc/source/filter/oox/excelchartconverter.cxx:76-105</c>). With no resolver, which is
+    /// every host but Calc, this is exactly the cache-only reader it was.
+    /// </para>
+    /// <para>
+    /// Several cells join with one space, which is <see cref="DrawingChartText.Label"/>'s rule and
+    /// <c>datasourceconverter.cxx:50-73</c>'s.
+    /// </para>
+    /// </remarks>
+    private static string? SeriesName(XElement? tx, ChartRangeResolver? ranges)
+    {
+        if (tx is null) return null;
+
+        if (ranges is not null && FormulaOf(tx) is { } formula && ranges(formula) is { } live)
+        {
+            System.Text.StringBuilder joined = new();
+
+            foreach (string? cell in live.Text)
+            {
+                if (cell is not { Length: > 0 }) continue;
+                if (joined.Length > 0) joined.Append(' ');
+                joined.Append(cell);
+            }
+
+            if (joined.Length > 0) return joined.ToString();
         }
 
         return DrawingChartText.Label(tx);
@@ -2467,6 +2802,25 @@ public static class DrawingChartPlot
     {
         if (source is null) return ([], []);
 
+        // A multi-level cache before *everything*, the resolver included, and that ordering is
+        // the whole of this branch.
+        //
+        // <strong>A c:multiLvlStrRef's c:f names a rectangle, and the resolver hands back its
+        // cells as one flat run.</strong> The reference does not read them that way:
+        // ExplicitCategoriesProvider builds one category per *row* and stacks the columns as the
+        // levels of its label, so a two-column, eight-row range is eight categories with a
+        // two-line name each — not sixteen categories. ChartRangeValues carries no shape, so the
+        // rectangle cannot be recovered from it, and the c15-free c:multiLvlStrCache Excel wrote
+        // is the only source in the file that states the level structure at all.
+        //
+        // Measured on 040_Blood_pressure_tracker_872b6833.xlsx, whose c:cat is
+        // 'BLOOD PRESSURE DATA'!$C$12:$D$19 with an eight-point, two-level cache: resolving the
+        // range gave sixteen categories — AM, 11/6/2022, PM, 11/6/2022, … — so the axis drew
+        // sixteen slots of which eight were empty and every label was a level rather than a
+        // category. The reference draws eight, each reading AM (or PM) over its date.
+        if (Child(Child(source, "multiLvlStrRef"), "multiLvlStrCache") is { } levelled)
+            return ReadMultiLevel(levelled);
+
         // An *empty* resolved sequence is a real answer — a range every cell of which is an
         // Excel table's totals row — and must not fall through to the cache. See
         // ChartRangeResolver for the two states a resolver distinguishes.
@@ -2475,13 +2829,6 @@ public static class DrawingChartPlot
         {
             return ([.. live.Text], [.. live.Numbers]);
         }
-
-        // A multi-level cache before the flat ones, because it must not be walked as one: its
-        // c:lvl elements each restart at idx 0 and the flat walk below lets every level overwrite
-        // the one before it, so the last level written wins and a three-level category comes out
-        // as its outermost level alone.
-        if (Child(Child(source, "multiLvlStrRef"), "multiLvlStrCache") is { } levelled)
-            return ReadMultiLevel(levelled);
 
         XElement? cache =
             Child(Child(source, "strRef"), "strCache")

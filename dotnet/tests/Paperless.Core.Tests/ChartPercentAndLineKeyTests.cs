@@ -95,21 +95,22 @@ public class ChartPercentAndLineKeyTests
 
         // The four bars, in the order AddBars emits them: series 1 over both categories, then
         // series 2 over both.
-        List<ChartBox> bars =
-            [.. drawing.Boxes.Where(b => b.Fill is not null && b.Bounds.Width > Length.Zero)];
+        List<DocRect> bars =
+            [.. drawing.Shapes.Where(b => b.Fill is not null && b.Bounds().Width > Length.Zero)
+                              .Select(b => b.Bounds())];
 
         bars.Count.ShouldBe(4);
 
         // Both columns reach the top of the plot area.
-        double firstColumn = (bars[0].Bounds.Height + bars[2].Bounds.Height).Emu;
-        double secondColumn = (bars[1].Bounds.Height + bars[3].Bounds.Height).Emu;
+        double firstColumn = (bars[0].Height + bars[2].Height).Emu;
+        double secondColumn = (bars[1].Height + bars[3].Height).Emu;
 
         firstColumn.ShouldBe(area.Height.Emu, tolerance: 2.0);
         secondColumn.ShouldBe(area.Height.Emu, tolerance: 2.0);
 
         // And the lower segment is its own share of it.
-        (bars[0].Bounds.Height.Emu / (double)area.Height.Emu).ShouldBe(548.0 / 621.0, 1e-3);
-        (bars[1].Bounds.Height.Emu / (double)area.Height.Emu).ShouldBe(317.0 / 439.0, 1e-3);
+        (bars[0].Height.Emu / (double)area.Height.Emu).ShouldBe(548.0 / 621.0, 1e-3);
+        (bars[1].Height.Emu / (double)area.Height.Emu).ShouldBe(317.0 / 439.0, 1e-3);
     }
 
     // ------------------------------------------------------------- legend keys

@@ -77,7 +77,14 @@ public enum ChartLabelField
 /// <param name="Field">What it stands for.</param>
 /// <param name="Text">
 /// Its literal text, which for a field is the placeholder and is used only when the field cannot
-/// be resolved — a <see cref="ChartLabelField.CellRange"/>, whose cached string is all there is.
+/// be resolved.
+/// <para>
+/// <strong>A <see cref="ChartLabelField.CellRange"/> is not such a field, and reading it as one
+/// draws the placeholder.</strong> Its <c>a:t</c> is the literal <c>[CELLRANGE]</c>; the text it
+/// stands for is in the series' <c>c15:datalabelsRange/c15:dlblRangeCache</c>, by point index, and
+/// the reader substitutes it there before the label is composed. See
+/// <c>DrawingChartPlot.DataLabelsRangeOf</c>.
+/// </para>
 /// </param>
 public readonly record struct ChartLabelPart(ChartLabelField Field, string Text);
 

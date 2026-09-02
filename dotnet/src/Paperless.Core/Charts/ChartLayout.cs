@@ -172,12 +172,30 @@ public readonly record struct ChartShape(
 /// A chart laid out: every mark it draws, in paint order, in the frame's coordinates.
 /// </summary>
 /// <param name="PlotArea">The inner plot rectangle — the axes' extent, labels excluded.</param>
-/// <param name="Boxes">The filled and outlined rectangles, back to front.</param>
+/// <param name="Boxes">
+/// The chart's furniture: its own background, the plot area's wall and the legend's keys, back to
+/// front. Every consumer paints these <em>before</em> <paramref name="Lines"/>, so nothing a
+/// series draws may go here — see <paramref name="Shapes"/>.
+/// </param>
 /// <param name="Lines">The axes, ticks and gridlines.</param>
 /// <param name="Labels">The text.</param>
 /// <param name="Shapes">
-/// The paths — wedges, polylines and areas — drawn after <paramref name="Boxes"/> and before
-/// <paramref name="Labels"/>, which is where the reference draws them.
+/// <strong>Every mark a series draws</strong> — a bar, a candle, a wedge, a polyline, an area —
+/// drawn after <paramref name="Lines"/> and before <paramref name="Labels"/>, which is where the
+/// reference draws them.
+/// <para>
+/// <strong>A bar belongs here and not in <paramref name="Boxes"/>, and the reason is Z order.</strong>
+/// <c>VCoordinateSystem::initPlottingTargets</c> creates the grid group, then the series-behind-axis
+/// group, then the axis group, all as children of the diagram's coordinate region
+/// (<c>chart2/source/view/axes/VCoordinateSystem.cxx:91-115</c>); the series plotters then add their
+/// shapes to the coordinate region <em>itself</em>, after all three
+/// (<c>ChartView.cxx:638-680</c>), unless <c>ChartType::isSeriesInFrontOfAxisLine</c> says otherwise —
+/// and it says otherwise only for a filled net (<c>ChartType.cxx:609-615</c>). So the grid and the
+/// axes are under the data on every chart type in the corpus. A rectangle emitted into
+/// <paramref name="Boxes"/> is painted before <paramref name="Lines"/> and therefore ends up
+/// <em>under</em> the gridlines, which draws a light-grey rule across every bar at every major tick —
+/// the "bars filled with horizontal stripes" seen on three unrelated workbooks.
+/// </para>
 /// </param>
 /// <param name="DiagramArea">
 /// The <em>outer</em> rectangle the diagram was laid out in — what is left of the frame once the
@@ -939,14 +957,14 @@ public static partial class ChartLayout
                         AddBubbles(part, area, against, domain, shapes, labels);
                         break;
                     case ChartPlotKind.Stock:
-                        AddCandles(part, area, against, categories, boxes, lines, labels);
+                        AddCandles(part, area, against, categories, shapes, lines, labels);
                         break;
                     case ChartPlotKind.OfPie:
                         AddOfPie(part, area, DiagramAreaOf(plot, frame, measurer),
                                  measurer, shapes, lines, labels);
                         break;
                     default:
-                        AddBars(part, area, against, categories, columns, boxes, labels);
+                        AddBars(part, area, against, categories, columns, shapes, labels);
                         break;
                 }
             }
@@ -973,7 +991,7 @@ public static partial class ChartLayout
         }
 
         AddTitles(plot, frame, area, DiagramAreaOf(plot, frame, measurer), measurer, labels);
-        AddLegend(plot, frame, area, measurer, boxes, lines, labels);
+        AddLegend(plot, frame, area, measurer, boxes, lines, labels, shapes);
 
         return new ChartDrawing(
             area, boxes, lines, labels, shapes, DiagramAreaOf(plot, frame, measurer));
@@ -1961,6 +1979,15 @@ public static partial class ChartLayout
 
                 label = ChartDataLabel.WriteCategory(plot.Categories[at], plot.CategoryFormat);
                 centre = CategoryAt(plot, at, categories);
+
+                // The arrangement may have broken this label onto two lines to make it fit its
+                // slot. Drawing the unwrapped string in a rectangle reserved for the wrapped one
+                // puts it back over its neighbours; see ChartAxisLabelLayout.Texts.
+                if (layout.Texts is { } arrangedTexts && at < arrangedTexts.Count
+                    && arrangedTexts[at] is { Length: > 0 } broken)
+                {
+                    label = broken;
+                }
             }
 
             if (label is not { Length: > 0 } text) continue;
@@ -3007,7 +3034,7 @@ public static partial class ChartLayout
         ChartScaleResult scale,
         int categories,
         bool columns,
-        List<ChartBox> boxes,
+        List<ChartShape> shapes,
         List<ChartLabel> labels)
     {
         if (categories <= 0 || plot.Series.Count == 0) return;
@@ -3074,7 +3101,10 @@ public static partial class ChartLayout
                         area.Width * Math.Abs(to - from),
                         area.Height * slotFraction);
 
-                boxes.Add(new ChartBox(bounds, one.Fill, one.Line, one.LineWidth));
+                // A path rather than a ChartBox: a bar is a series mark and must paint over the
+                // grid. See ChartDrawing.Shapes.
+                shapes.Add(new ChartShape(
+                    GraphicsPath.Rectangle(bounds), one.Fill, one.Line, one.LineWidth));
 
                 if (one.LabelAt(at) is { Draws: true } label)
                     AddBarLabel(plot, one, label, at, value, bounds, to >= from, columns, labels);
@@ -3346,7 +3376,8 @@ public static partial class ChartLayout
         ChartText measurer,
         List<ChartBox> boxes,
         List<ChartLine> lines,
-        List<ChartLabel> labels)
+        List<ChartLabel> labels,
+        List<ChartShape> shapes)
     {
         if (plot.Legend == ChartLegendPosition.None) return;
 
@@ -3417,6 +3448,28 @@ public static partial class ChartLayout
                         entry.Width,
                         entry.Dash,
                         entry.Cap));
+
+                    // And the series' own symbol on top of it, centred in the key.
+                    // VLegendSymbolFactory::createSymbol's Line arm draws the rule and *then*
+                    // createSymbol2D at the key's centre, at min(keyWidth, keyHeight), whenever
+                    // the series carries a symbol — and it paints it in the series' colour for
+                    // both fill and border: "take series color as fill color … border of symbols
+                    // always same as fill color"
+                    // (chart2/source/view/main/VLegendSymbolFactory.cxx:115-155). Drawing only the
+                    // rule loses the secondary encoding the reference gives every marked line
+                    // series; measured on Demick_JetBlue.pptx page 4, whose three keys carry a
+                    // square, a diamond and a down-arrow.
+                    if (entry.Marker is not ChartMarker.None)
+                    {
+                        Length symbol = Smaller(box.Key.Width, box.Key.Height);
+
+                        shapes.Add(Marker(
+                            entry.Marker,
+                            new DocPoint(columnX + (box.Key.Width / 2), middle),
+                            entry.MarkerSize ?? symbol,
+                            sample,
+                            sample));
+                    }
                 }
                 else
                 {
@@ -3517,7 +3570,8 @@ public static partial class ChartLayout
 
             entries.Add(new LegendEntry(
                 name, series.Fill, series.Line, series.LineWidth,
-                DrawsLineKey(plot, series), series.DashPattern, series.LineCap));
+                DrawsLineKey(plot, series), series.DashPattern, series.LineCap,
+                series.Marker, series.MarkerSize));
         }
 
         // A horizontal bar chart, and a chart stacked in Y beside a side legend, list their
@@ -3537,6 +3591,15 @@ public static partial class ChartLayout
     /// <param name="IsLine">Whether the sample is a line rather than a filled box.</param>
     /// <param name="Dash">The sample line's dash array, or null for solid.</param>
     /// <param name="Cap">The sample line's cap, which is what makes a dotted key dotted.</param>
+    /// <param name="Marker">
+    /// The symbol drawn over a line sample, or <see cref="ChartMarker.None"/>. Only a line key
+    /// carries one: <c>VLegendSymbolFactory::createSymbol</c> reads the explicit symbol on its
+    /// <c>LegendSymbolStyle::Line</c> arm alone.
+    /// </param>
+    /// <param name="MarkerSize">
+    /// The symbol's stated size, or null to take the key's own square extent — which is what the
+    /// source does, <c>min(rEntryKeyAspectRatio.Width, rEntryKeyAspectRatio.Height)</c>.
+    /// </param>
     private readonly record struct LegendEntry(
         string Name,
         Colour? Fill,
@@ -3544,7 +3607,9 @@ public static partial class ChartLayout
         Length Width,
         bool IsLine,
         IReadOnlyList<Length>? Dash,
-        LineCap Cap = LineCap.Butt);
+        LineCap Cap = LineCap.Butt,
+        ChartMarker Marker = ChartMarker.None,
+        Length? MarkerSize = null);
 
     /// <summary>
     /// Whether a series' legend key is a line sample rather than a filled box.
@@ -3796,6 +3861,8 @@ public static partial class ChartLayout
 
     /// <summary>The larger of two lengths.</summary>
     private static Length Larger(Length one, Length other) => one > other ? one : other;
+
+    private static Length Smaller(Length one, Length other) => one < other ? one : other;
 
     /// <summary>The width of the widest value-axis label.</summary>
     private static Length WidestValueLabel(
