@@ -188,6 +188,21 @@ internal static class DocxFrames
         return !opaque;
     }
 
+    /// <summary>The anchor's declared place in the z order, or zero when it declares none.</summary>
+    /// <remarks>
+    /// <c>relativeHeight</c> is a <c>ST_RelativeHeight</c>, an unsigned 32-bit value, and real files
+    /// use the top of that range — the corpus templates sit around 251 660 000, which overflows a
+    /// signed <c>int</c> only above 2^31 but is parsed as <c>uint</c> here so that the whole declared
+    /// range round-trips rather than most of it. An unparseable or absent value is zero, which sorts
+    /// below every anchor that declares one and leaves document order untouched.
+    /// </remarks>
+    private static uint ZOrder(XElement? anchor) =>
+        anchor?.Attribute("relativeHeight")?.Value is { } text
+        && uint.TryParse(text, System.Globalization.NumberStyles.Integer,
+                         System.Globalization.CultureInfo.InvariantCulture, out uint z)
+            ? z
+            : 0u;
+
     /// <summary>Whether the anchor asks for one of the four wraps that leave a hole in the text.</summary>
     private static bool WrapsAside(XElement anchor)
     {
@@ -237,6 +252,7 @@ internal static class DocxFrames
             BorderColour = line,
             BorderWidth = lineWidth,
             BehindText = BehindText(anchor, context),
+            ZOrder = ZOrder(anchor),
             IsLine = isLine,
             IsLineMirrored = isLineMirrored,
             Anchor = anchor is null ? FrameAnchor.AsCharacter : FrameAnchor.Paragraph,
@@ -315,6 +331,7 @@ internal static class DocxFrames
         {
             Size = size,
             BehindText = BehindText(anchor, context),
+            ZOrder = ZOrder(anchor),
             Anchor = anchor is null ? FrameAnchor.AsCharacter : FrameAnchor.Paragraph,
             AnchorOffset = anchorOffset,
             Wrap = anchor is null ? TextWrap.Through : WrapOf(anchor),

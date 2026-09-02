@@ -70,9 +70,9 @@ public static class PageDrawing
         sink.BeginPage(page.Size);
         try
         {
-            foreach (PlacedFrame frame in page.Frames)
+            foreach (PlacedFrame frame in Stacked(page.Frames, behind: true))
             {
-                if (frame.Frame.BehindText) DrawFrame(frame, sink);
+                DrawFrame(frame, sink);
             }
 
             DrawFlow(page.Header, sink);
@@ -82,9 +82,9 @@ public static class PageDrawing
             DrawSeparator(page.NoteSeparator, sink);
             DrawFlow(page.Notes, sink);
 
-            foreach (PlacedFrame frame in page.Frames)
+            foreach (PlacedFrame frame in Stacked(page.Frames, behind: false))
             {
-                if (!frame.Frame.BehindText) DrawFrame(frame, sink);
+                DrawFrame(frame, sink);
             }
 
             DrawFlow(page.Footer, sink);
@@ -96,6 +96,35 @@ public static class PageDrawing
             sink.EndPage();
         }
     }
+
+    /// <summary>
+    /// One side of the page's frames, back to front by the z order their anchors declare.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Document order is not paint order. A <c>wp:anchor</c> carries its own <c>relativeHeight</c>,
+    /// and a file is free to declare a background last and a caption first — which is exactly what
+    /// the corpus's templates do: of the five documents where this was measured, all five declare
+    /// <c>relativeHeight</c> on every anchor and not one of them is in document order.
+    /// </para>
+    /// <para>
+    /// Painting in document order there does not look like a z-order fault. It looks like missing
+    /// content: the text is drawn, correctly positioned, and a shape declared later covers it, so
+    /// every pixel metric reports the page as having lost it. Five separate readings in this
+    /// repository's parity catalogue were one instance of this.
+    /// </para>
+    /// <para>
+    /// <see cref="Enumerable.OrderBy{TSource, TKey}(IEnumerable{TSource}, Func{TSource, TKey})"/> is
+    /// a stable sort, which is the property that matters as much as the ordering itself: frames whose
+    /// anchors declare no <c>relativeHeight</c> all compare equal at zero and therefore keep document
+    /// order among themselves, which is both Word's own tie-break and exactly what this code did
+    /// before the z order was read at all.
+    /// </para>
+    /// </remarks>
+    private static IEnumerable<PlacedFrame> Stacked(
+        IReadOnlyList<PlacedFrame> frames, bool behind) =>
+        frames.Where(frame => frame.Frame.BehindText == behind)
+              .OrderBy(frame => frame.Frame.ZOrder);
 
     /// <summary>
     /// Draws the body's lines, each relative to the rectangle of the column it landed in.

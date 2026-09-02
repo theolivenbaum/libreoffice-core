@@ -329,6 +329,31 @@ public sealed record PageFrame
     /// </remarks>
     public bool BehindText { get; init; }
 
+    /// <summary>
+    /// The anchor's <c>relativeHeight</c> — where this frame sits in the stack, low to high.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A <c>wp:anchor</c> declares its own place in the z order, and it is <em>not</em> the order the
+    /// anchors appear in the document. Painting in document order is therefore wrong whenever a file
+    /// declares them out of order, which real templates do constantly: measured over the five corpus
+    /// documents where the fault showed, all five declare <c>relativeHeight</c> on every anchor and
+    /// <em>none</em> of the five is in document order.
+    /// </para>
+    /// <para>
+    /// The symptom is not subtle and does not look like a z-order fault. A background shape declared
+    /// late paints over content declared early, so the page loses text the renderer did in fact draw:
+    /// <c>045_Visual_Product_Roadmap</c> shows <c>2021</c> at content-stream offset 2473 and fills the
+    /// black box over it at 4180; <c>060_Human_Body_Concept_Map</c> draws the whole slide and then the
+    /// grey ground across all of it. Every pixel metric reports that as missing content.
+    /// </para>
+    /// <para>
+    /// Zero when the anchor does not declare one, which sorts it below anything that does — and since
+    /// the sort is stable, equal values keep document order, which is Word's own tie-break.
+    /// </para>
+    /// </remarks>
+    public uint ZOrder { get; init; }
+
     /// <summary>The frame's background, or null when it has none.</summary>
     public Colour? Fill { get; init; }
 
