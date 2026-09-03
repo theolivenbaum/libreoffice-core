@@ -959,13 +959,13 @@ public sealed partial class RtfDocumentReader
                 DefinitionTarget(CurrentFlow).PendingCellShading = token.Parameter;
                 return;
             case "clvertalt":
-                DefinitionTarget(CurrentFlow).PendingCellAlignment = Layout.CellVerticalAlignment.Top;
+                DefinitionTarget(CurrentFlow).PendingCellAlignment = Layout.VerticalTextAlignment.Top;
                 return;
             case "clvertalc":
-                DefinitionTarget(CurrentFlow).PendingCellAlignment = Layout.CellVerticalAlignment.Middle;
+                DefinitionTarget(CurrentFlow).PendingCellAlignment = Layout.VerticalTextAlignment.Middle;
                 return;
             case "clvertalb":
-                DefinitionTarget(CurrentFlow).PendingCellAlignment = Layout.CellVerticalAlignment.Bottom;
+                DefinitionTarget(CurrentFlow).PendingCellAlignment = Layout.VerticalTextAlignment.Bottom;
                 return;
             case "clmgf":
                 DefinitionTarget(CurrentFlow).PendingCellMergesFirst = true;

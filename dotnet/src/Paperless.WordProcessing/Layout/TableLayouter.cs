@@ -1178,8 +1178,8 @@ public static class TableLayouter
             ? Length.Zero
             : cell.Cell.VerticalAlignment switch
             {
-                CellVerticalAlignment.Middle => spare / 2,
-                CellVerticalAlignment.Bottom => spare,
+                VerticalTextAlignment.Middle => spare / 2,
+                VerticalTextAlignment.Bottom => spare,
                 _ => Length.Zero,
             };
 
@@ -1295,8 +1295,8 @@ public static class TableLayouter
             ? Length.Zero
             : cell.VerticalAlignment switch
             {
-                CellVerticalAlignment.Middle => spare / 2,
-                CellVerticalAlignment.Bottom => spare,
+                VerticalTextAlignment.Middle => spare / 2,
+                VerticalTextAlignment.Bottom => spare,
                 _ => Length.Zero,
             };
 

@@ -314,7 +314,7 @@ public sealed record RtfLayoutCell(
     int ColumnSpan,
     int RowSpan,
     Layout.CellPadding Padding,
-    Layout.CellVerticalAlignment VerticalAlignment,
+    Layout.VerticalTextAlignment VerticalAlignment,
     IReadOnlyList<RtfLayoutBlock> Blocks,
     Colour? Shading = null,
     Layout.CellBorders Borders = default);

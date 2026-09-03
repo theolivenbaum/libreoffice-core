@@ -743,12 +743,12 @@ public sealed partial class DocxLayoutSource
             _ => CellTextDirection.LeftToRight,
         };
 
-    private static CellVerticalAlignment VerticalAlignment(XElement? properties)
+    private static VerticalTextAlignment VerticalAlignment(XElement? properties)
         => Word.Attribute(Word.Child(properties, "vAlign"), "val") switch
         {
-            "center" => CellVerticalAlignment.Middle,
-            "bottom" => CellVerticalAlignment.Bottom,
-            _ => CellVerticalAlignment.Top,
+            "center" => VerticalTextAlignment.Middle,
+            "bottom" => VerticalTextAlignment.Bottom,
+            _ => VerticalTextAlignment.Top,
         };
 
     /// <summary>

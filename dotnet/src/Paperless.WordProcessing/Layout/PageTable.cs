@@ -111,10 +111,17 @@ public enum CellTextDirection
     TopToBottomRightToLeft,
 }
 
-/// <summary>Where a cell's text sits when its content is shorter than its row.</summary>
-public enum CellVerticalAlignment
+/// <summary>
+/// Where text sits in a container taller than itself.
+/// </summary>
+/// <remarks>
+/// A table cell's <c>w:vAlign</c> and a shape's <c>wps:bodyPr/@anchor</c> are the same question with
+/// the same three answers, so they share an enum rather than each having one — which is why this is
+/// no longer named for the cell that first needed it.
+/// </remarks>
+public enum VerticalTextAlignment
 {
-    /// <summary>Against the top of the cell, which is every format's default.</summary>
+    /// <summary>Against the top, which is every format's default.</summary>
     Top,
 
     /// <summary>Centred in the spare height.</summary>
@@ -588,7 +595,7 @@ public sealed record PageTableCell
     /// horizontal rather than vertical — the property keeps its name because it is what every format
     /// spells <c>vAlign</c>, and because it is the same axis in the cell's own frame.
     /// </remarks>
-    public CellVerticalAlignment VerticalAlignment { get; init; }
+    public VerticalTextAlignment VerticalAlignment { get; init; }
 
     /// <summary>
     /// Which way the cell's text runs; <see cref="CellTextDirection.LeftToRight"/> for almost every cell.
