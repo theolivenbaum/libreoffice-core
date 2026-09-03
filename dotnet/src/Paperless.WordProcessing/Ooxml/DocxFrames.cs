@@ -432,10 +432,20 @@ internal static class DocxFrames
         (Colour? fill, GradientDescription? gradient, Colour? line, Length lineWidth) =
             Appearance(properties, context);
         (bool isLine, bool isLineMirrored) = LineGeometry(properties);
+        (string? preset, IReadOnlyDictionary<string, double>? adjustments) =
+            PresetGeometry(properties);
 
         return envelope with
         {
             Size = new DocSize(within.Width, within.Height),
+
+            // A member states its own geometry exactly as a shape standing alone does, and this
+            // read it for the one and not the other -- so every preset shape inside a group was
+            // painted as its bounding rectangle. Censused over the 271 corpus docx: 247 such shapes
+            // across 25 documents, of which 142 are `ellipse`. That is the genogram templates,
+            // whose people are circles and squares and which came out as squares and squares.
+            Preset = preset,
+            Adjustments = adjustments,
 
             // The member's own, not the envelope's: a group states one rotation per shape and none
             // of its own beyond the child transform, which is a scale and a translation.

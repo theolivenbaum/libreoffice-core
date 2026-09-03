@@ -83,6 +83,57 @@ public sealed class FramePresetGeometryTests
     public void AComputedOrEmptyGuideIsNotAnAdjustment(string values) =>
         Frame("roundRect", values).Adjustments.ShouldBeNull();
 
+    /// <summary>A shape inside a group states its geometry the same way, and it is read.</summary>
+    /// <remarks>
+    /// It was not, and the asymmetry is the kind that survives a synthetic test: the standalone
+    /// reader carried the preset and the group member — built as <c>envelope with { … }</c> — simply
+    /// never set it, so every preset shape inside a group was still painted as its bounding
+    /// rectangle after the standalone case was fixed. Censused over the 271 corpus <c>docx</c>: 247
+    /// such shapes across 25 documents, <b>142 of them <c>ellipse</c></b>. That is the genogram
+    /// templates, whose people are circles and squares and which drew as squares and squares.
+    /// </remarks>
+    [Theory]
+    [InlineData("ellipse")]
+    [InlineData("roundRect")]
+    [InlineData("downArrow")]
+    public void AGroupMembersPresetIsReadToo(string preset) =>
+        // The group's envelope first, then the member.
+        Grouped(preset)[1].Preset.ShouldBe(preset);
+
+    /// <summary>And its stated adjustment with it.</summary>
+    [Fact]
+    public void AGroupMembersAdjustmentIsReadToo() =>
+        Grouped("roundRect", """<a:avLst><a:gd name="adj" fmla="val 12500"/></a:avLst>""")[1]
+            .Adjustments.ShouldNotBeNull()["adj"].ShouldBe(12500);
+
+    private static IReadOnlyList<PageFrame> Grouped(string preset, string values = "") =>
+        DocxFrames.ReadAll(
+            XElement.Parse(
+                $"""
+                <w:drawing xmlns:w="{W}" xmlns:wp="{Wp}" xmlns:a="{A}" xmlns:wps="{Wps}"
+                           xmlns:wpg="{Wpg}">
+                  <wp:anchor>
+                    <wp:extent cx="914400" cy="914400"/>
+                    <wp:wrapNone/>
+                    <a:graphic><a:graphicData><wpg:wgp>
+                      <wpg:grpSpPr>
+                        <a:xfrm>
+                          <a:off x="0" y="0"/><a:ext cx="914400" cy="914400"/>
+                          <a:chOff x="0" y="0"/><a:chExt cx="914400" cy="914400"/>
+                        </a:xfrm>
+                      </wpg:grpSpPr>
+                      <wps:wsp>
+                        <wps:spPr>
+                          <a:xfrm><a:off x="0" y="0"/><a:ext cx="457200" cy="457200"/></a:xfrm>
+                          <a:prstGeom prst="{preset}">{values}</a:prstGeom>
+                        </wps:spPr>
+                      </wps:wsp>
+                    </wpg:wgp></a:graphicData></a:graphic>
+                  </wp:anchor>
+                </w:drawing>
+                """),
+            null, anchorOffset: 0, pictures: null);
+
     private static PageFrame Frame(string? preset, string values = "")
     {
         string geometry = preset is null
@@ -115,4 +166,5 @@ public sealed class FramePresetGeometryTests
     private const string Wp = "http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing";
     private const string A = "http://schemas.openxmlformats.org/drawingml/2006/main";
     private const string Wps = "http://schemas.microsoft.com/office/word/2010/wordprocessingShape";
+    private const string Wpg = "http://schemas.microsoft.com/office/word/2010/wordprocessingGroup";
 }
