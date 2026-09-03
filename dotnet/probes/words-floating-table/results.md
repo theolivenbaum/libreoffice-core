@@ -121,9 +121,13 @@ cost of a fixed proxy for a rule that is really about the width of one word.
 
 087 is still two pages against the reference's one, because our grid is **2.5 pt taller** than the
 reference's over its 69 rows and its trailing `Title: ___ Date: ___` no longer fits under it. That
-is a different defect, and a version-dependent one — see below.
+is not a defect at all — see below.
 
-## A finding this round did not act on: `w:trHeight` and the row's borders
+## Not a defect: `w:trHeight` and the row's borders, on 24.2.7.2
+
+087 is still two pages against the reference's one because our grid is 2.5 pt taller than the
+reference's, and chasing that is what turned this up. It is worth writing down because it looks
+exactly like a defect and is not.
 
 `probes/words-pagination-01/row-min-height-border.py` exists to answer whether a row's `w:trHeight`
 floor sits under its borders or includes them. Re-run here against **24.2.7.2**:
@@ -138,18 +142,22 @@ floor sits under its borders or includes them. Re-run here against **24.2.7.2**:
     16       2.00     exact        24.00    24.00   +0.00
 ```
 
-The same probe against **26.2.4.2** — which is what `TableLayouter`'s current behaviour was built
-from, and whose figures are quoted in its own remarks — read **24.00 / 24.50 / 25.00 / 26.00 /
-27.00**, the floor plus one border. The two reference versions genuinely disagree, and this tree is
-calibrated to the one this container does not have.
+The same probe against **26.2.4.2** — which is what `TableLayouter`'s behaviour was built from, and
+whose figures its own remarks quote — read **24.00 / 24.50 / 25.00 / 26.00 / 27.00**, the floor plus
+one border. Independently, six rows of `w:trHeight="274"` holding an empty 2 pt paragraph come to
+82.20 pt with no borders in both renderers — exact — and to 83.70 in this container's reference
+against 92.70 here once a 1.5 pt grid is added, which is one border against seven.
 
-Independently measured the same way: six rows of `w:trHeight="274"` holding an empty 2 pt
-paragraph come to 82.20 pt with no borders in **both** renderers — exact — and to 83.70 in the
-reference against 92.70 here once a 1.5 pt grid is added, which is one border against seven.
+**The C++ in this checkout settles which of the two is the target.** `lcl_CalcMinRowHeight`
+(`sw/source/core/layout/tabfrm.cxx`:5085-5097) adds `lcl_GetTopSpace` to the floor under
+`MIN_ROW_HEIGHT_INCL_BORDER`, and `lcl_GetTopSpace` is `SvxBoxItem::CalcLineSpace(TOP, true)` — the
+border's **line width and its distance**, not the distance alone. So the tree's own reference source
+adds the border, 26.2.4.2 does, and 24.2.7.2 — which predates it — does not.
 
-It is worth a great deal on this corpus — it is most of what is left of the graph-paper family, and
-those are the top of the ink table — but flipping it is a decision about **which LibreOffice the
-tree targets**, not a defect fix, so it is recorded rather than taken.
+So this reader is right and the container's reference is old. It is the largest single thing left on
+the graph-paper family, and it must not be "fixed": doing so would calibrate the tree to a
+LibreOffice older than the one it targets. If a later round sees a graph-paper grid running long,
+this is why.
 
 ## Reproducing
 
