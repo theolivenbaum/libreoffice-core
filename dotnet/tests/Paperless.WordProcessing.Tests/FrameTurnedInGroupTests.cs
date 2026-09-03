@@ -123,13 +123,20 @@ public sealed class FrameTurnedInGroupTests
     {
         string attribute = rot is null ? string.Empty : $""" rot="{rot}" """;
 
+        // The anchor states exactly what the member covers, so the group's fit to `wp:extent` —
+        // see `FrameGroupExtentFitTests` — is the identity and the child transform is what these
+        // assertions read. A turned member covers its rotated box, which is the other way round.
+        bool turned = rot is "5400000" or "16200000" or "-5400000";
+        long extentWidth = turned ? childHeight : 914400;
+        long extentHeight = turned ? 914400 * groupHeight / childHeight : groupHeight;
+
         return DocxFrames.ReadAll(
             XElement.Parse(
                 $"""
                 <w:drawing xmlns:w="{W}" xmlns:wp="{Wp}" xmlns:a="{A}" xmlns:wps="{Wps}"
                            xmlns:wpg="{Wpg}">
                   <wp:anchor>
-                    <wp:extent cx="914400" cy="{groupHeight}"/>
+                    <wp:extent cx="{extentWidth}" cy="{extentHeight}"/>
                     <wp:wrapNone/>
                     <a:graphic><a:graphicData><wpg:wgp>
                       <wpg:grpSpPr>
