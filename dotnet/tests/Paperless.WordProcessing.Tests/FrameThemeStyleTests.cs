@@ -71,8 +71,10 @@ public sealed class FrameThemeStyleTests
     /// <remarks>
     /// "Stated none" and "said nothing" have always differed here and must keep differing. The
     /// gradient case is the one that would otherwise regress quietly: a shape carrying a real
-    /// <c>a:gradFill</c> is a fill we cannot draw, and answering it with the theme's flat colour
-    /// would be a confident wrong answer rather than an absent one.
+    /// <c>a:gradFill</c> is painted with <em>that</em>, so answering the theme's flat colour as
+    /// well would be a second fill under the first. It is asserted on <c>Fill</c> alone for that
+    /// reason — the gradient is carried on <c>PageFrame.Gradient</c>, which
+    /// <c>FrameGradientTests</c> covers.
     /// </remarks>
     [Theory]
     [InlineData("<a:noFill/>")]
@@ -81,18 +83,23 @@ public sealed class FrameThemeStyleTests
     public void AnyStatedFillKindStopsTheThemesBeingTaken(string fill) =>
         Frame(fill, Style(fillRef: 1, lineRef: 0)).Fill.ShouldBeNull();
 
-    /// <summary>Only the first fill style is flat, and the other two stay undrawn.</summary>
+    /// <summary>Only the first fill style is flat; the other two are gradients and arrive as such.</summary>
     /// <remarks>
     /// Every theme Office ships writes <c>a:fillStyleLst</c> as one <c>a:solidFill</c> followed by
-    /// two <c>a:gradFill</c>s. Reading only the solid one is the same limit the reader has always
-    /// had for a stated gradient, arriving by the same route, and it is asserted so that a later
-    /// round adding gradients sees this test rather than discovering the gap.
+    /// two <c>a:gradFill</c>s, so an index of 2 or 3 has no flat colour to give and must not be
+    /// made to look as though it does. It reaches <c>PageFrame.Gradient</c> instead, by the same
+    /// <c>DrawingGradient</c> a stated gradient reaches it by — see <c>FrameGradientTests</c>.
     /// </remarks>
     [Theory]
     [InlineData(2)]
     [InlineData(3)]
-    public void AThemedGradientIsNoMoreDrawnThanAStatedOne(int index) =>
-        Frame(fill: null, style: Style(fillRef: index, lineRef: 0)).Fill.ShouldBeNull();
+    public void AThemedGradientIsAGradientRatherThanAFlatColour(int index)
+    {
+        PageFrame frame = Frame(fill: null, style: Style(fillRef: index, lineRef: 0));
+
+        frame.Fill.ShouldBeNull();
+        frame.Gradient.ShouldNotBeNull();
+    }
 
     /// <summary>An index of nothing, or past the end of the list, names no fill.</summary>
     /// <remarks>

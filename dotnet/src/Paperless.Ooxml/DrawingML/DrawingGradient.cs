@@ -56,6 +56,20 @@ public static class DrawingGradient
     /// <param name="theme">The theme its <c>a:schemeClr</c> stops resolve against, or null.</param>
     /// <param name="box">The box being filled, in the space the paint will be used in.</param>
     public static GradientPaint? Paint(XElement? element, DrawingTheme? theme, DocRect box)
+        => Read(element, theme)?.Paint(box);
+
+    /// <summary>
+    /// An <c>a:gradFill</c> resolved as far as it can be without knowing the box, or null when
+    /// the element is not one or resolves to no colour at all.
+    /// </summary>
+    /// <remarks>
+    /// The half of <see cref="Paint(XElement?, DrawingTheme?, DocRect)"/> that a reader can do
+    /// before layout has placed anything, which is what a word-processing frame needs: its fill
+    /// is read when the drawing is, and where on the page it lands is settled much later.
+    /// </remarks>
+    /// <param name="element">The candidate <c>a:gradFill</c>.</param>
+    /// <param name="theme">The theme its <c>a:schemeClr</c> stops resolve against, or null.</param>
+    public static GradientDescription? Read(XElement? element, DrawingTheme? theme)
     {
         if (DrawingFill.ReadGradient(element) is not { Stops.Count: > 0 } gradient) return null;
 
@@ -70,8 +84,10 @@ public static class DrawingGradient
 
         if (gradient.Path is null)
         {
-            double radians = (gradient.Angle ?? 0) * Math.PI / 180.0;
-            return GradientGeometry.Linear(box, Math.Cos(radians), Math.Sin(radians), stops);
+            return new GradientDescription(GradientKind.Linear, stops)
+            {
+                AngleDegrees = gradient.Angle ?? 0,
+            };
         }
 
         // a:fillToRect states the inner rectangle the gradient converges on; its centre is what
@@ -80,15 +96,15 @@ public static class DrawingGradient
         int cx = FocusPerCent(gradient.FillToRect.Left, gradient.FillToRect.Right);
         int cy = FocusPerCent(gradient.FillToRect.Top, gradient.FillToRect.Bottom);
 
-        DocPoint centre = new(
-            box.Left + (box.Width * (cx / 100.0)),
-            box.Top + (box.Height * (cy / 100.0)));
-
         GradientKind kind = gradient.Path == "circle"
             ? GradientKind.Radial
             : GradientKind.Rectangular;
 
-        return GradientGeometry.Centred(kind, box, centre, stops);
+        return new GradientDescription(kind, stops)
+        {
+            CentreX = cx / 100.0,
+            CentreY = cy / 100.0,
+        };
     }
 
     /// <summary>

@@ -242,7 +242,8 @@ internal static class DocxFrames
         (Length x, FrameHorizontalOrigin horigin, FrameHorizontalAlignment halign) = Horizontal(anchor);
         (Length y, FrameVerticalOrigin vorigin, FrameVerticalAlignment valign) = Vertical(anchor);
         XElement? shapeProperties = ShapeProperties(placed);
-        (Colour? fill, Colour? line, Length lineWidth) = Appearance(shapeProperties, context);
+        (Colour? fill, GradientDescription? gradient, Colour? line, Length lineWidth) =
+            Appearance(shapeProperties, context);
         (bool isLine, bool isLineMirrored) = LineGeometry(shapeProperties);
         (string? preset, IReadOnlyDictionary<string, double>? adjustments) =
             PresetGeometry(shapeProperties);
@@ -251,6 +252,7 @@ internal static class DocxFrames
         {
             Size = new DocSize(width, height),
             Fill = fill,
+            Gradient = gradient,
             BorderColour = line,
             BorderWidth = lineWidth,
             BehindText = BehindText(anchor, context),
@@ -425,13 +427,15 @@ internal static class DocxFrames
             ? pictures.Read(shape)
             : FramePicture.None;
 
-        (Colour? fill, Colour? line, Length lineWidth) = Appearance(properties, context);
+        (Colour? fill, GradientDescription? gradient, Colour? line, Length lineWidth) =
+            Appearance(properties, context);
         (bool isLine, bool isLineMirrored) = LineGeometry(properties);
 
         return envelope with
         {
             Size = new DocSize(within.Width, within.Height),
             Fill = fill,
+            Gradient = gradient,
             BorderColour = line,
             BorderWidth = lineWidth,
             GroupSize = size,
@@ -836,20 +840,27 @@ internal static class DocxFrames
     /// an <c>a:lnRef</c> has none.
     /// </para>
     /// <para>
-    /// Still only <c>a:solidFill</c> is read, on the area and the line and on what the theme
-    /// supplies for either. A gradient, a pattern or a picture fill is a real fill this cannot yet
-    /// draw, and painting its first stop as a flat colour would be a confident wrong answer rather
-    /// than an absent one; each leaves the frame as it was. That reaches the theme's second and
-    /// third fill styles, which every Office theme writes as gradients — <c>a:fillRef idx="2"</c>
-    /// therefore still draws nothing, and does so for the same stated reason as before.
+    /// <c>a:gradFill</c> is read too, on the area, and by the same
+    /// <see cref="DrawingGradient"/> the slide side reads a stated one with — so a themed gradient
+    /// is read by the code that reads a stated one rather than by a second copy of it, and
+    /// <c>a:fillRef idx="2"</c> and <c>idx="3"</c>, which every Office theme writes as gradients,
+    /// resolve as well as <c>idx="1"</c> does. It is carried unplaced, because a
+    /// <c>GradientPaint</c> holds absolute points and a frame does not know where it lands until
+    /// the layout engine has placed it; <c>PageDrawing</c> supplies the rectangle.
+    /// </para>
+    /// <para>
+    /// A pattern or a picture fill is still a real fill this cannot yet draw, and painting its
+    /// first stop as a flat colour would be a confident wrong answer rather than an absent one;
+    /// each leaves the frame as it was. So does a gradient on the <em>line</em>, which LibreOffice
+    /// reduces to one colour through <c>getBestSolidColor</c> and this does not.
     /// </para>
     /// </remarks>
     /// <param name="properties">The shape's own <c>spPr</c>, or null.</param>
     /// <param name="context">The theme and format matrix its style reference resolves against.</param>
-    private static (Colour? Fill, Colour? Line, Length Width) Appearance(
+    private static (Colour? Fill, GradientDescription? Gradient, Colour? Line, Length Width) Appearance(
         XElement? properties, DocxFrameContext context)
     {
-        if (properties is null) return (null, null, Length.Zero);
+        if (properties is null) return (null, null, null, Length.Zero);
 
         DrawingTheme? theme = context.Theme;
 
@@ -860,10 +871,13 @@ internal static class DocxFrames
             .FirstOrDefault(child => child.Name.LocalName == "style");
 
         Colour? fill = Solid(Child(properties, "solidFill"), theme);
-        if (fill is null && !StatesFill(properties)
+        GradientDescription? gradient = DrawingGradient.Read(Child(properties, "gradFill"), theme);
+
+        if (fill is null && gradient is null && !StatesFill(properties)
             && context.Styles?.Fill(style, theme) is { } themedFill)
         {
             fill = Solid(Child(themedFill, "solidFill"), theme);
+            gradient = DrawingGradient.Read(Child(themedFill, "gradFill"), theme);
         }
 
         XElement? themedLine = context.Styles?.Line(style, theme);
@@ -873,12 +887,12 @@ internal static class DocxFrames
         else if (themedLine is not null && Child(line, "noFill") is null)
             line = DrawingStyleMatrix.Overlay(themedLine, line);
 
-        if (line is null) return (fill, null, Length.Zero);
+        if (line is null) return (fill, gradient, null, Length.Zero);
 
         Colour? stroke = Solid(Child(line, "solidFill"), theme);
         return stroke is null
-            ? (fill, null, Length.Zero)
-            : (fill, stroke, Emu(line.Attribute("w")?.Value));
+            ? (fill, gradient, null, Length.Zero)
+            : (fill, gradient, stroke, Emu(line.Attribute("w")?.Value));
 
         static Colour? Solid(XElement? solidFill, DrawingTheme? palette)
             => solidFill is null

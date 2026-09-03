@@ -386,6 +386,27 @@ public sealed record PageFrame
     /// <summary>The frame's background, or null when it has none.</summary>
     public Colour? Fill { get; init; }
 
+    /// <summary>
+    /// The frame's background when it is a gradient rather than a flat colour, or null.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Beside <see cref="Fill"/> rather than replacing it, and the two are never both set. A
+    /// gradient cannot be built here because a <see cref="GradientPaint"/> holds absolute points
+    /// and this frame does not yet know where on the page it lands — so what is carried is the
+    /// shape's own description of the ramp, and <c>PageDrawing</c> turns it into a paint against
+    /// the area the frame was placed in.
+    /// </para>
+    /// <para>
+    /// Keeping <see cref="Fill"/> a colour is not a compromise for the sake of the callers. It is
+    /// what the automatic font colour resolves against — a frame's fill decides whether the text
+    /// on it comes out black or white — and that question wants one colour whatever the shape is
+    /// painted with. A gradient-filled frame therefore answers it the way an unfilled one does,
+    /// which is what it did before this existed.
+    /// </para>
+    /// </remarks>
+    public GradientDescription? Gradient { get; init; }
+
     /// <summary>The frame's border colour, or null when it has no border.</summary>
     public Colour? BorderColour { get; init; }
 

@@ -261,7 +261,16 @@ public static class PageDrawing
     {
         GraphicsPath? outline = PresetOutline(frame);
 
-        if (frame.Frame.Fill is { } fill)
+        // A gradient before a colour, because the two are never both set and a gradient is the
+        // one that needs the placed rectangle: it is carried unplaced on the frame and becomes a
+        // paint here, against the area the layout engine settled on.
+        if (frame.Frame.Gradient is { } ramp)
+        {
+            GradientPaint paint = ramp.Paint(frame.Area);
+            if (outline is null) Fill(frame.Area, paint, sink);
+            else sink.FillPath(outline, paint);
+        }
+        else if (frame.Frame.Fill is { } fill)
         {
             if (outline is null) Fill(frame.Area, fill, sink);
             else sink.FillPath(outline, Paint.Solid(fill));
@@ -731,6 +740,12 @@ public static class PageDrawing
 
     /// <summary>Fills a rectangle, which is what a shade and a rule both are.</summary>
     private static void Fill(DocRect area, Colour colour, IDrawingSink sink)
+        => Fill(area, Paint.Solid(colour), sink);
+
+    /// <summary>
+    /// The same, with any paint: the sink has no rectangle of its own, so both go through a path.
+    /// </summary>
+    private static void Fill(DocRect area, Paint paint, IDrawingSink sink)
     {
         if (area.Width <= Length.Zero || area.Height <= Length.Zero) return;
 
@@ -741,7 +756,7 @@ public static class PageDrawing
             .LineTo(new DocPoint(area.X, area.Bottom))
             .Close();
 
-        sink.FillPath(path, Paint.Solid(colour));
+        sink.FillPath(path, paint);
     }
 
     /// <summary>
