@@ -482,8 +482,13 @@ internal static class DocxFrames
         XElement? extent = Child(transformation, "ext");
         if (offset is null || extent is null) return null;
 
-        DocRect within = transform.Map(
-            Raw(offset, "x"), Raw(offset, "y"), Raw(extent, "cx"), Raw(extent, "cy"));
+        double rotation = Rotation(properties);
+
+        DocRect within = IsQuarterTurn(rotation)
+            ? transform.MapQuarterTurned(
+                Raw(offset, "x"), Raw(offset, "y"), Raw(extent, "cx"), Raw(extent, "cy"))
+            : transform.Map(
+                Raw(offset, "x"), Raw(offset, "y"), Raw(extent, "cx"), Raw(extent, "cy"));
 
         if (IsEmpty(within.Width, within.Height)) return null;
 
@@ -515,8 +520,8 @@ internal static class DocxFrames
 
             // The member's own, not the envelope's: a group states one rotation per shape and none
             // of its own beyond the child transform, which is a scale and a translation.
-            RotationDegrees = Rotation(properties),
-            TextRotationDegrees = TextRotation(shape, Rotation(properties)),
+            RotationDegrees = rotation,
+            TextRotationDegrees = TextRotation(shape, rotation),
             Fill = paint.Fill,
             Gradient = paint.Gradient,
             BorderColour = paint.Line,
@@ -617,6 +622,52 @@ internal static class DocxFrames
                 Round(ShiftY + ((y - OriginY) * ScaleY)),
                 Round(cx * ScaleX),
                 Round(cy * ScaleY));
+
+        /// <summary>
+        /// The same, for a child the file turns through a quarter: the group's two scales apply to
+        /// the axes the shape ends up on, not the ones it was written on.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// A group child's rectangle is stated in the group's child space and its <c>rot</c> turns it
+        /// <em>there</em>, so a non-uniform group scale meets the shape after the turn. Scaling first
+        /// and turning afterwards — which is what <see cref="Map"/> alone does — stretches the wrong
+        /// axis, and the two answers differ by the ratio of the scales.
+        /// </para>
+        /// <para>
+        /// Measured on <c>071_Storyboard_Template_Cartoon_Theme</c>, whose picture frames are
+        /// quarter-turned rectangles inside groups scaled 1.000 across and 0.945 down. The frame is
+        /// 156.9 × 265.0 pt as written; scaled then turned it is 250.3 × 156.9, and turned then scaled
+        /// it is 265.0 × 148.2 — against pictures 261 × 145, which the reference borders evenly. The
+        /// error was invisible while the shapes drew unfilled and became six black bands the moment
+        /// <c>a:grpFill</c> gave them their group's black.
+        /// </para>
+        /// <para>
+        /// The size returned is still the shape's <em>unturned</em> rectangle, because the drawing
+        /// applies the rotation itself: the two scales are swapped so that turning it about its centre
+        /// afterwards lands on the right one. Only quarter turns are handled — anything else maps a
+        /// rectangle onto a parallelogram, which an axis-aligned frame cannot hold, and the corpus's
+        /// rotations are 213 quarter turns out of 298.
+        /// </para>
+        /// </remarks>
+        public DocRect MapQuarterTurned(double x, double y, double cx, double cy)
+        {
+            // The centre is what the turn leaves alone, so it is what is mapped: taking the
+            // top-left instead and giving it the swapped extent moves the shape by half the
+            // difference between the two scales, which on the witness is 4.3 pt across and 7.3 pt
+            // down — enough to put a picture's frame off its picture.
+            double centreX = ShiftX + ((x + (cx / 2) - OriginX) * ScaleX);
+            double centreY = ShiftY + ((y + (cy / 2) - OriginY) * ScaleY);
+
+            double width = cx * ScaleY;
+            double height = cy * ScaleX;
+
+            return new DocRect(
+                Round(centreX - (width / 2)),
+                Round(centreY - (height / 2)),
+                Round(width),
+                Round(height));
+        }
 
         private static Length Round(double emu)
             => Length.FromTwips(Length.FromEmu((long)Math.Round(emu)).Twips);
@@ -993,6 +1044,14 @@ internal static class DocxFrames
     /// LibreOffice draws every one horizontal.
     /// </para>
     /// </remarks>
+    /// <summary>Whether an angle is a quarter turn either way, to within rounding.</summary>
+    /// <remarks>
+    /// The tolerance is a hundredth of a degree rather than exact equality because the angle comes
+    /// from an integer count of sixtieths and a file may state 5399999 as readily as 5400000.
+    /// </remarks>
+    private static bool IsQuarterTurn(double degrees)
+        => Math.Abs((((degrees % 180) + 180) % 180) - 90) < 0.01;
+
     private static double TextRotation(XElement shape, double shapeRotation)
         => Angle(BodyProperties(shape)?.Attribute("rot")?.Value) ?? shapeRotation;
 
