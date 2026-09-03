@@ -242,9 +242,8 @@ internal static class DocxFrames
         (Length x, FrameHorizontalOrigin horigin, FrameHorizontalAlignment halign) = Horizontal(anchor);
         (Length y, FrameVerticalOrigin vorigin, FrameVerticalAlignment valign) = Vertical(anchor);
         XElement? shapeProperties = ShapeProperties(placed);
-        (Colour? fill, GradientDescription? gradient, Colour? line, Length lineWidth) =
-            Appearance(shapeProperties, context);
-        (bool isLine, bool isLineMirrored) = LineGeometry(shapeProperties);
+        FrameAppearance paint = Appearance(shapeProperties, context);
+        (bool isLine, bool isLineMirrored, bool isLineReversed) = LineGeometry(shapeProperties);
         (string? preset, IReadOnlyDictionary<string, double>? adjustments) =
             PresetGeometry(shapeProperties);
 
@@ -253,16 +252,19 @@ internal static class DocxFrames
             Size = new DocSize(width, height),
             RotationDegrees = Rotation(shapeProperties),
             TextRotationDegrees = TextRotation(placed, Rotation(shapeProperties)),
-            Fill = fill,
-            Gradient = gradient,
-            BorderColour = line,
-            BorderWidth = lineWidth,
+            Fill = paint.Fill,
+            Gradient = paint.Gradient,
+            BorderColour = paint.Line,
+            BorderWidth = paint.Width,
+            HeadEnd = paint.HeadEnd,
+            TailEnd = paint.TailEnd,
             BehindText = BehindText(anchor, context),
             ZOrder = ZOrder(anchor),
             Preset = preset,
             Adjustments = adjustments,
             IsLine = isLine,
             IsLineMirrored = isLineMirrored,
+            IsLineReversed = isLineReversed,
             Anchor = anchor is null ? FrameAnchor.AsCharacter : FrameAnchor.Paragraph,
             AnchorOffset = anchorOffset,
             Wrap = anchor is null ? TextWrap.Through : WrapOf(anchor),
@@ -449,9 +451,8 @@ internal static class DocxFrames
             ? pictures.Read(shape)
             : FramePicture.None;
 
-        (Colour? fill, GradientDescription? gradient, Colour? line, Length lineWidth) =
-            Appearance(properties, context);
-        (bool isLine, bool isLineMirrored) = LineGeometry(properties);
+        FrameAppearance paint = Appearance(properties, context);
+        (bool isLine, bool isLineMirrored, bool isLineReversed) = LineGeometry(properties);
         (string? preset, IReadOnlyDictionary<string, double>? adjustments) =
             PresetGeometry(properties);
 
@@ -471,14 +472,17 @@ internal static class DocxFrames
             // of its own beyond the child transform, which is a scale and a translation.
             RotationDegrees = Rotation(properties),
             TextRotationDegrees = TextRotation(shape, Rotation(properties)),
-            Fill = fill,
-            Gradient = gradient,
-            BorderColour = line,
-            BorderWidth = lineWidth,
+            Fill = paint.Fill,
+            Gradient = paint.Gradient,
+            BorderColour = paint.Line,
+            BorderWidth = paint.Width,
+            HeadEnd = paint.HeadEnd,
+            TailEnd = paint.TailEnd,
             GroupSize = size,
             GroupOffset = new DocPoint(within.X, within.Y),
             IsLine = isLine,
             IsLineMirrored = isLineMirrored,
+            IsLineReversed = isLineReversed,
 
             // The envelope keeps the anchor's wrap; a member must not punch a hole of its own, or a
             // nineteen-shape letterhead would narrow the text nineteen times over.
@@ -864,6 +868,19 @@ internal static class DocxFrames
     /// <c>rect</c>, 122 <c>line</c> or <c>straightConnector1</c>, and 17 <c>downArrow</c>.
     /// </para>
     /// </remarks>
+    /// <summary>The marker one end of an <c>a:ln</c> carries, or none.</summary>
+    /// <remarks>
+    /// <c>none</c> is written out as often as the attribute is omitted and means the same thing, so
+    /// both come back as the default rather than as a marker whose type nothing can draw.
+    /// </remarks>
+    private static LineEnd Marker(XElement line, string which)
+    {
+        if (Child(line, which) is not { } end) return default;
+        if (end.Attribute("type")?.Value is not { Length: > 0 } type || type == "none") return default;
+
+        return new LineEnd(type, end.Attribute("w")?.Value, end.Attribute("len")?.Value);
+    }
+
     private static double Rotation(XElement? properties)
         => Angle((properties is null ? null : Child(properties, "xfrm"))?.Attribute("rot")?.Value) ?? 0;
 
@@ -973,10 +990,9 @@ internal static class DocxFrames
     /// </remarks>
     /// <param name="properties">The shape's own <c>spPr</c>, or null.</param>
     /// <param name="context">The theme and format matrix its style reference resolves against.</param>
-    private static (Colour? Fill, GradientDescription? Gradient, Colour? Line, Length Width) Appearance(
-        XElement? properties, DocxFrameContext context)
+    private static FrameAppearance Appearance(XElement? properties, DocxFrameContext context)
     {
-        if (properties is null) return (null, null, null, Length.Zero);
+        if (properties is null) return default;
 
         DrawingTheme? theme = context.Theme;
 
@@ -1003,12 +1019,20 @@ internal static class DocxFrames
         else if (themedLine is not null && Child(line, "noFill") is null)
             line = DrawingStyleMatrix.Overlay(themedLine, line);
 
-        if (line is null) return (fill, gradient, null, Length.Zero);
+        if (line is null) return new FrameAppearance { Fill = fill, Gradient = gradient };
 
         Colour? stroke = Solid(Child(line, "solidFill"), theme);
-        return stroke is null
-            ? (fill, gradient, null, Length.Zero)
-            : (fill, gradient, stroke, Emu(line.Attribute("w")?.Value));
+        if (stroke is null) return new FrameAppearance { Fill = fill, Gradient = gradient };
+
+        return new FrameAppearance
+        {
+            Fill = fill,
+            Gradient = gradient,
+            Line = stroke,
+            Width = Emu(line.Attribute("w")?.Value),
+            HeadEnd = Marker(line, "headEnd"),
+            TailEnd = Marker(line, "tailEnd"),
+        };
 
         static Colour? Solid(XElement? solidFill, DrawingTheme? palette)
             => solidFill is null
@@ -1105,22 +1129,55 @@ internal static class DocxFrames
     /// directions is the same line it started as, rotated by half a turn.
     /// </para>
     /// </remarks>
-    private static (bool IsLine, bool IsMirrored) LineGeometry(XElement? properties)
+    private static (bool IsLine, bool IsMirrored, bool IsReversed) LineGeometry(XElement? properties)
     {
-        if (properties is null) return (false, false);
+        if (properties is null) return (false, false, false);
 
         string? preset = Child(properties, "prstGeom")?.Attribute("prst")?.Value;
-        if (preset is not ("line" or "straightConnector1")) return (false, false);
+        if (preset is not ("line" or "straightConnector1")) return (false, false, false);
 
         XElement? transform = Child(properties, "xfrm");
         bool flipH = IsTrue(transform?.Attribute("flipH")?.Value);
         bool flipV = IsTrue(transform?.Attribute("flipV")?.Value);
 
-        return (true, flipH ^ flipV);
+        // The diagonal is the exclusive-or; the direction along it is flipH alone. Writing the two
+        // endpoints out settles it: the start is (flipH ? right : left, flipV ? bottom : top) and
+        // the end is the opposite corner, so the x ordering — and only the x ordering — is what
+        // flipH decides.
+        return (true, flipH ^ flipV, flipH);
 
         // DrawingML's booleans, which are "1"/"true" and their negatives rather than w:val's.
         static bool IsTrue(string? value) => value is "1" or "true" or "on";
     }
+}
+
+/// <summary>
+/// How a shape is painted: its area, its outline, and the markers its outline's ends carry.
+/// </summary>
+/// <remarks>
+/// A record rather than the four-tuple this was, because the tuple had reached the width where the
+/// call site said <c>(fill, gradient, line, lineWidth)</c> and a reader had to count commas to see
+/// which was which — and the line ends made it six.
+/// </remarks>
+internal readonly record struct FrameAppearance
+{
+    /// <summary>The flat background colour, or null for none or for a gradient.</summary>
+    public Colour? Fill { get; init; }
+
+    /// <summary>The gradient background, or null. Never set together with <see cref="Fill"/>.</summary>
+    public GradientDescription? Gradient { get; init; }
+
+    /// <summary>The outline colour, or null when the shape is not stroked.</summary>
+    public Colour? Line { get; init; }
+
+    /// <summary>How thick that outline is.</summary>
+    public Length Width { get; init; }
+
+    /// <summary>The marker at the start of the line, if any.</summary>
+    public LineEnd HeadEnd { get; init; }
+
+    /// <summary>The marker at its end, if any.</summary>
+    public LineEnd TailEnd { get; init; }
 }
 
 /// <summary>

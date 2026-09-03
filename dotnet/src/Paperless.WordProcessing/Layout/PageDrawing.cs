@@ -396,17 +396,21 @@ public static class PageDrawing
         // preset never reaches here -- `line` and `straightConnector1` are excluded at the reader.
         if (outline is not null)
         {
-            sink.StrokePath(outline, stroke);
+            Arrowed(outline, frame, stroke, sink);
             return;
         }
 
         if (frame.Frame.IsLine)
         {
-            sink.StrokePath(
-                new GraphicsPath()
-                    .MoveTo(new DocPoint(area.X, frame.Frame.IsLineMirrored ? area.Bottom : area.Y))
-                    .LineTo(new DocPoint(area.Right, frame.Frame.IsLineMirrored ? area.Y : area.Bottom)),
-                stroke);
+            DocPoint near = new(area.X, frame.Frame.IsLineMirrored ? area.Bottom : area.Y);
+            DocPoint far = new(area.Right, frame.Frame.IsLineMirrored ? area.Y : area.Bottom);
+
+            // Which end the line starts at, which is invisible until it carries an arrowhead —
+            // see PageFrame.IsLineReversed.
+            (DocPoint from, DocPoint to) =
+                frame.Frame.IsLineReversed ? (far, near) : (near, far);
+
+            Arrowed(new GraphicsPath().MoveTo(from).LineTo(to), frame, stroke, sink);
             return;
         }
 
@@ -432,6 +436,46 @@ public static class PageDrawing
                 .MoveTo(new DocPoint(area.Right, area.Y))
                 .LineTo(new DocPoint(area.X, area.Bottom)),
             stroke);
+    }
+
+    /// <summary>
+    /// Strokes a path with whichever arrowheads its shape declares, shortened to make room.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// An arrowhead is a filled polygon beside the shaft rather than a property of the pen, so
+    /// there is nothing for a backend to know about: <see cref="LineEnds.Apply"/> returns the
+    /// shortened line and one closed path per end, filled with the line's own paint. It is
+    /// LibreOffice's own decomposition, at the same layer —
+    /// <c>PolygonStrokeArrowPrimitive2D</c> becomes a stroke and up to two filled polygons.
+    /// </para>
+    /// <para>
+    /// Called for every stroked shaft, including ones that carry no marker, because
+    /// <see cref="LineEnds.Apply"/> hands a path straight back when neither end names a shape and
+    /// when the path is not an open polyline. The rectangle border below therefore needs no test
+    /// of its own — a closed path is left exactly as it was.
+    /// </para>
+    /// <para>
+    /// The corpus has <b>608 line ends across 38 <c>docx</c></b> — 353 tails and 255 heads, with
+    /// 208 of them in one integrated-management-system manual. Every one drew as a plain line,
+    /// which on a flowchart is the difference between a diagram and a set of boxes joined by
+    /// sticks.
+    /// </para>
+    /// </remarks>
+    private static void Arrowed(
+        GraphicsPath path, PlacedFrame frame, Stroke stroke, IDrawingSink sink)
+    {
+        if (frame.Frame.HeadEnd.Type is null && frame.Frame.TailEnd.Type is null)
+        {
+            sink.StrokePath(path, stroke);
+            return;
+        }
+
+        (GraphicsPath shaft, List<GraphicsPath> markers) =
+            LineEnds.Apply(path, stroke, frame.Frame.HeadEnd, frame.Frame.TailEnd);
+
+        sink.StrokePath(shaft, stroke);
+        foreach (GraphicsPath marker in markers) sink.FillPath(marker, stroke.Paint);
     }
 
     /// <summary>

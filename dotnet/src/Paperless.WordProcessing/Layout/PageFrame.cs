@@ -429,6 +429,17 @@ public sealed record PageFrame
     /// </remarks>
     public double TextRotationDegrees { get; init; }
 
+    /// <summary>The marker at the start of a line, if it carries one.</summary>
+    /// <remarks>
+    /// <c>a:headEnd</c>. An arrowhead is a filled polygon beside the shaft rather than a property
+    /// of the pen, so it is carried here as what the file said and built at drawing time by
+    /// <see cref="LineEnds"/> — which needs the placed line to know where the point goes.
+    /// </remarks>
+    public LineEnd HeadEnd { get; init; }
+
+    /// <summary>The marker at the end of a line. <c>a:tailEnd</c>, and much the commoner of the two.</summary>
+    public LineEnd TailEnd { get; init; }
+
     /// <summary>The frame's background, or null when it has none.</summary>
     public Colour? Fill { get; init; }
 
@@ -517,6 +528,25 @@ public sealed record PageFrame
     /// two of these shapes over one rectangle, distinguished by nothing else.
     /// </remarks>
     public bool IsLineMirrored { get; init; }
+
+    /// <summary>
+    /// Whether the line runs from its far end to its near one — which only an arrowhead can see.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>a:xfrm/@flipH</c> mirrors a shape about its own centre, and for a line that means the
+    /// same segment traversed the other way. <see cref="IsLineMirrored"/> — the exclusive-or of the
+    /// two flips — already picks the right <em>diagonal</em>, so nothing about the ink depended on
+    /// the direction and it was never carried.
+    /// </para>
+    /// <para>
+    /// An arrowhead depends on it entirely. The organogram templates join their boxes with
+    /// horizontal connectors that carry a tail arrow, are flipped horizontally, and are then turned
+    /// through 270° — so the arrow the reference draws pointing <em>down</em> came out pointing up,
+    /// on every one of them. The rotation was right and the flip was the missing half.
+    /// </para>
+    /// </remarks>
+    public bool IsLineReversed { get; init; }
 
     /// <summary>True when the frame holds a picture rather than text.</summary>
     /// <remarks>

@@ -108,10 +108,10 @@ public sealed record PlacedShape
     /// — and a reader that wants the model rather than the drawing should be able to see which
     /// end of which line the file put a marker on.
     /// </remarks>
-    public SlideLineEnd HeadEnd { get; init; }
+    public LineEnd HeadEnd { get; init; }
 
     /// <summary>The marker at the end of its outline.</summary>
-    public SlideLineEnd TailEnd { get; init; }
+    public LineEnd TailEnd { get; init; }
 
     /// <summary>The picture it draws, or null when it is not a picture frame.</summary>
     /// <remarks>

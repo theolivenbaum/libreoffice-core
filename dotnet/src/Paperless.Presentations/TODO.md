@@ -1467,7 +1467,7 @@ against the reference PDF's own `rg` operators. The colour map comes from the sl
       (`lineproperties.cxx:91-140`) — so a faithful port has to reproduce the guessing as well as
       the folding, and nothing in the corpus carries one.
 - [x] **Arrowheads.** `a:headEnd`/`a:tailEnd`, all five marker types, in
-      `Layout/SlideLineEnds.cs`. A marker is a *filled polygon* beside the shaft rather than a
+      `Paperless.Core`'s `Graphics/LineEnds.cs`. A marker is a *filled polygon* beside the shaft rather than a
       property of the stroke, which is why the display list needed no new record.
 - [ ] **Compound lines.** `cmpd="dbl"`, `"thickThin"`, `"tri"`. A double line is two strokes with
       a gap, and the widths are fractions of the stated one; nothing in the corpus carries one.

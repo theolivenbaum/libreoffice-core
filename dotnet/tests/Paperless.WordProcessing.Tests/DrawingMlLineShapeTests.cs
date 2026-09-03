@@ -65,6 +65,13 @@ public sealed class DrawingMlLineShapeTests
     /// <summary>
     /// Which diagonal follows the flips, and a shape flipped both ways is the line it started as.
     /// </summary>
+    /// <remarks>
+    /// Asserted on the <em>segment</em> — which corners the ends sit on — rather than on the order
+    /// the two points are written in, because the order is a separate question that
+    /// <see cref="TheHorizontalFlipReversesTheDirection"/> asks. This test read the order until
+    /// arrowheads landed and the two came apart: it said <c>points[0].Y > points[1].Y</c>, which is
+    /// true of the same diagonal traversed one way and false of it traversed the other.
+    /// </remarks>
     [Theory]
     [InlineData("", false)]
     [InlineData(" flipH=\"1\"", true)]
@@ -74,8 +81,33 @@ public sealed class DrawingMlLineShapeTests
     {
         IReadOnlyList<DocPoint> points = OnlyStroke("line", flips).Points;
 
-        // Mirrored runs bottom-left to top-right, so its first point is the lower one.
-        (points[0].Y > points[1].Y).ShouldBe(mirrored, flips);
+        // Mirrored is the bottom-left/top-right diagonal, on which the leftmost end is the lower.
+        DocPoint left = points[0].X <= points[1].X ? points[0] : points[1];
+        DocPoint right = points[0].X <= points[1].X ? points[1] : points[0];
+
+        (left.Y > right.Y).ShouldBe(mirrored, flips);
+    }
+
+    /// <summary>
+    /// <c>flipH</c> reverses the direction the line is drawn in, whichever diagonal it is on.
+    /// </summary>
+    /// <remarks>
+    /// Invisible until the line carries an arrowhead, and then decisive: the organogram templates
+    /// join their boxes with horizontal connectors that are flipped horizontally, carry a tail
+    /// arrow, and are turned through 270°, so the arrow the reference draws pointing down came out
+    /// pointing up on every one of them.
+    /// </remarks>
+    [Theory]
+    [InlineData("", false)]
+    [InlineData(" flipH=\"1\"", true)]
+    [InlineData(" flipV=\"1\"", false)]
+    [InlineData(" flipH=\"1\" flipV=\"1\"", true)]
+    public void TheHorizontalFlipReversesTheDirection(string flips, bool reversed)
+    {
+        IReadOnlyList<DocPoint> points = OnlyStroke("line", flips).Points;
+
+        // Reversed starts at the right-hand end, which is where a tail arrow would not be.
+        (points[0].X > points[1].X).ShouldBe(reversed, flips);
     }
 
     // ------------------------------------------------------------------ helpers

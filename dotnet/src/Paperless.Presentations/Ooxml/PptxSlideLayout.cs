@@ -634,11 +634,23 @@ internal sealed partial class PptxSlideLayout
             return;
         }
 
-        (GraphicsPath shaft, List<PlacedShape> markers) = SlideLineEnds.Apply(
-            shape.Outline, stroke, shape.HeadEnd, shape.TailEnd, shape.Name);
+        (GraphicsPath shaft, List<GraphicsPath> markers) =
+            LineEnds.Apply(shape.Outline, stroke, shape.HeadEnd, shape.TailEnd);
 
         shapes.Add(shape with { Outline = shaft });
-        shapes.AddRange(markers);
+
+        // A marker is a filled polygon beside the shaft, so it becomes a shape of its own — with
+        // the line's name, the line's paint, and no line of its own.
+        foreach (GraphicsPath marker in markers)
+        {
+            shapes.Add(new PlacedShape
+            {
+                Name = shape.Name,
+                Outline = marker,
+                Bounds = DocRect.Empty,
+                Fill = stroke.Paint,
+            });
+        }
     }
 
     /// <summary>
@@ -1835,7 +1847,7 @@ internal sealed partial class PptxSlideLayout
     }
 
     /// <summary>The marker one end of a line carries, from its own <c>a:ln</c> or its placeholder's.</summary>
-    private static SlideLineEnd LineEnd(XElement? properties, XElement?[] inherited, string which)
+    private static LineEnd LineEnd(XElement? properties, XElement?[] inherited, string which)
     {
         foreach (XElement? source in (XElement?[])[properties, .. inherited])
         {
@@ -1846,7 +1858,7 @@ internal sealed partial class PptxSlideLayout
             string? type = Drawing.Attribute(end, "type");
             if (type is null or "none") return default;
 
-            return new SlideLineEnd(
+            return new LineEnd(
                 type, Drawing.Attribute(end, "w"), Drawing.Attribute(end, "len"));
         }
 

@@ -1,8 +1,7 @@
 using Paperless.Core.Geometry;
-using Paperless.Core.Graphics;
 using Paperless.Core.Units;
 
-namespace Paperless.Presentations.Layout;
+namespace Paperless.Core.Graphics;
 
 /// <summary>One end of a line: what marker it carries and how big.</summary>
 /// <param name="Type">
@@ -11,7 +10,7 @@ namespace Paperless.Presentations.Layout;
 /// </param>
 /// <param name="Width">The <c>w</c> attribute: <c>sm</c>, <c>med</c> or <c>lg</c>.</param>
 /// <param name="Length">The <c>len</c> attribute, the same three values.</param>
-public readonly record struct SlideLineEnd(string? Type, string? Width, string? Length);
+public readonly record struct LineEnd(string? Type, string? Width, string? Length);
 
 /// <summary>
 /// Draws the arrowheads at the ends of a line, and shortens the line to make room for them.
@@ -19,11 +18,16 @@ public readonly record struct SlideLineEnd(string? Type, string? Width, string? 
 /// <remarks>
 /// <para>
 /// An arrowhead is a <em>filled polygon</em>, not a property of a stroke, which is why nothing in
-/// the display list has to know about it: what comes out of here is one more
-/// <see cref="PlacedShape"/> per end, filled with the line's own colour, plus a shortened shaft.
-/// LibreOffice does the same thing at the same layer — <c>PolygonStrokeArrowPrimitive2D</c>
-/// decomposes into a stroke and up to two filled polygons
-/// (<c>drawinglayer/source/primitive2d/polygonprimitive2d.cxx:704-760</c>).
+/// the display list has to know about it: what comes out of here is one closed path per end, to be
+/// filled with the line's own colour, plus a shortened shaft. LibreOffice does the same thing at
+/// the same layer — <c>PolygonStrokeArrowPrimitive2D</c> decomposes into a stroke and up to two
+/// filled polygons (<c>drawinglayer/source/primitive2d/polygonprimitive2d.cxx:704-760</c>).
+/// </para>
+/// <para>
+/// In Core, and returning paths rather than any one family's shape record, because a line with an
+/// arrow on it is a line with an arrow on it: <c>a:headEnd</c> and <c>a:tailEnd</c> mean the same
+/// in a slide and in a Word document, and the corpus has <b>608 of them across 38 docx</b> that
+/// were drawn as plain lines because this lived in <c>Paperless.Presentations</c>.
 /// </para>
 /// <para>
 /// <strong>The size is a multiple of the line width, floored at 0.7 mm.</strong>
@@ -42,7 +46,7 @@ public readonly record struct SlideLineEnd(string? Type, string? Width, string? 
 /// 15.024 − 15.024/15 to within six thousandths of a point.
 /// </para>
 /// </remarks>
-public static class SlideLineEnds
+public static class LineEnds
 {
     /// <summary>
     /// The smallest marker base, in hundredths of a millimetre: 0.7 mm.
@@ -57,26 +61,24 @@ public static class SlideLineEnds
     /// <summary>
     /// Draws the markers a line's two ends carry and returns the shaft to draw instead of it.
     /// </summary>
-    /// <param name="outline">The line, in slide coordinates. Must be an open polyline.</param>
-    /// <param name="stroke">The pen, whose paint the markers are filled with.</param>
+    /// <param name="outline">The line, in the space it will be drawn in. Must be an open polyline.</param>
+    /// <param name="stroke">The pen the shaft is drawn with; the markers take its paint.</param>
     /// <param name="head">The marker at the start, if any.</param>
     /// <param name="tail">The marker at the end, if any.</param>
-    /// <param name="name">The shape's name, carried onto each marker.</param>
-    public static (GraphicsPath Shaft, List<PlacedShape> Markers) Apply(
-        GraphicsPath outline, Stroke stroke, SlideLineEnd head, SlideLineEnd tail, string? name)
+    public static (GraphicsPath Shaft, List<GraphicsPath> Markers) Apply(
+        GraphicsPath outline, Stroke stroke, LineEnd head, LineEnd tail)
     {
         ArgumentNullException.ThrowIfNull(outline);
         ArgumentNullException.ThrowIfNull(stroke);
 
-        List<PlacedShape> markers = [];
+        List<GraphicsPath> markers = [];
         if (Polyline(outline) is not { Count: >= 2 } points) return (outline, markers);
 
         long baseWidth = Math.Max(
             stroke.Width.Emu, Length.FromMm100(MinimumBaseMm100).Emu);
 
-        double trimStart = End(head, points[0], points[1], baseWidth, stroke, name, markers);
-        double trimEnd = End(
-            tail, points[^1], points[^2], baseWidth, stroke, name, markers);
+        double trimStart = End(head, points[0], points[1], baseWidth, stroke, markers);
+        double trimEnd = End(tail, points[^1], points[^2], baseWidth, stroke, markers);
 
         return (Trimmed(points, trimStart, trimEnd), markers);
     }
@@ -88,17 +90,15 @@ public static class SlideLineEnds
     /// <param name="tip">The line's own end point, where the marker's point goes.</param>
     /// <param name="towards">The next point along the line, which gives the direction.</param>
     /// <param name="baseWidth">The size the marker is a multiple of, in EMUs.</param>
-    /// <param name="stroke">The pen, for the fill colour and for the open arrow's own width.</param>
-    /// <param name="name">The shape's name.</param>
-    /// <param name="markers">Receives the marker, when there is one.</param>
+    /// <param name="stroke">The pen, for the open arrow's own width.</param>
+    /// <param name="markers">Receives the marker path, when there is one.</param>
     private static double End(
-        SlideLineEnd end,
+        LineEnd end,
         DocPoint tip,
         DocPoint towards,
         long baseWidth,
         Stroke stroke,
-        string? name,
-        List<PlacedShape> markers)
+        List<GraphicsPath> markers)
     {
         if (Outline(end.Type) is not { } shape) return 0;
 
@@ -155,13 +155,7 @@ public static class SlideLineEnds
 
         path.Close();
 
-        markers.Add(new PlacedShape
-        {
-            Name = name,
-            Outline = path,
-            Bounds = DocRect.Empty,
-            Fill = stroke.Paint,
-        });
+        markers.Add(path);
 
         // What the shaft gives up: the marker's length beyond the docking point, less the
         // fifteenth of its width that makes the two overlap.
