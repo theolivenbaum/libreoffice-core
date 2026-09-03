@@ -361,8 +361,6 @@ internal static class DocxFrames
 
         void Walk(XElement container, GroupTransform transform, int depth)
         {
-            // Real files nest a group inside a group and stop; the bound is against a file that says
-            // otherwise, since the walk is the only thing keeping it finite.
             if (depth > MaxGroupNesting) return;
 
             foreach (XElement child in container.Elements())
@@ -393,7 +391,29 @@ internal static class DocxFrames
     }
 
     /// <summary>How deep a group may nest before the walk gives up.</summary>
-    private const int MaxGroupNesting = 8;
+    /// <remarks>
+    /// <para>
+    /// This was 8, on the stated grounds that "real files nest a group inside a group and stop".
+    /// They do not. Censused over the corpus, the deepest grouped shape in
+    /// <c>055_Organogram_Template_Horizontal_Structure</c> sits <b>twelve</b> groups down, and
+    /// <b>291 shapes across 10 documents</b> are deeper than eight — which is to say they were
+    /// dropped, without a diagnostic, by a bound that was a guess.
+    /// </para>
+    /// <para>
+    /// It shows as content simply absent. <c>002_Free_Genogram_Diagram_Template_Customizable_Format</c>
+    /// loses 46 shapes that way, among them exactly the 9 <c>ellipse</c> and 9 <c>rect</c> that are
+    /// the people in the top two generations of its family tree: the reference fills its
+    /// <c>#D9D9D9</c> 15 times and its <c>#F8CBAD</c> 14, and we filled them 6 and 5.
+    /// </para>
+    /// <para>
+    /// 64 rather than a larger number or none at all. An <c>XElement</c> tree from a parse cannot
+    /// cycle, so the walk is finite whatever this says and the bound guards the stack rather than
+    /// the loop; a document nested past 64 would have exhausted the stack in <c>XDocument.Parse</c>
+    /// before reaching here. Five times the deepest file anyone has produced is enough margin to
+    /// stop this being the thing that quietly loses a diagram again.
+    /// </para>
+    /// </remarks>
+    private const int MaxGroupNesting = 64;
 
     /// <summary>One leaf shape of a group, placed inside the group's rectangle.</summary>
     /// <remarks>
