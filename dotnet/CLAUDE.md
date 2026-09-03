@@ -859,6 +859,67 @@ Recorded because the diagnosis cost a round and the shape of it recurs:
 `github.com` and `archive.ubuntu.com` are reachable; the LibreOffice download hosts are not,
 which is why the reference binary cannot be pinned back to 24.2.7.2.
 
+### Installing a specific LibreOffice, and why the tarball is not the distro package
+
+**One host has to be allowed and it must be a wildcard: `*.documentfoundation.org`.** The apex
+alone is not enough — `download.documentfoundation.org` is a redirector, and the file server that
+actually carries every release including superseded ones is
+`downloadarchive.documentfoundation.org`. `www.libreoffice.org`,
+`ppa.launchpadcontent.net`, `api.launchpad.net`, `api.snapcraft.io`, `dl.flathub.org`,
+`flathub.org`, `dev-www.libreoffice.org` and `git.libreoffice.org` are each separately denied;
+`launchpad.net` and `keyserver.ubuntu.com` happen to be allowed and are not sufficient on their
+own. The archive route needs none of them.
+
+```sh
+V=26.2.4.2
+curl -sSL -o /tmp/lo.tar.gz \
+  "https://downloadarchive.documentfoundation.org/libreoffice/old/$V/deb/x86_64/LibreOffice_${V}_Linux_x86-64_deb.tar.gz"
+mkdir -p /tmp/lo && tar xzf /tmp/lo.tar.gz -C /tmp/lo
+dpkg -i /tmp/lo/LibreOffice_${V}_Linux_x86-64_deb/DEBS/*.deb     # ~220 MB, 42 packages
+/opt/libreoffice26.2/program/soffice --version                    # does NOT take over `soffice`
+```
+
+It installs beside the distro's under `/opt/libreoffice<major>.<minor>` and leaves
+`/usr/bin/soffice` alone, so switching is a symlink and reverting is the same symlink back.
+**Record the old target before repointing** — `readlink -f /usr/bin/soffice` — because every
+stored figure in this repository was measured against whichever one was live.
+
+**And now the part that matters: a TDF tarball 26.2.4.2 is NOT the distro-packaged 26.2.4.2 this
+tree is calibrated against.** Measured 2026-09-03, `Paperless.Fidelity.Tests`, same commit, same
+corpus, only the reference binary swapped:
+
+| reference | failed of 552 |
+|---|---:|
+| distro 24.2.7.2 (this container's own) | **18** |
+| TDF tarball 26.2.4.2, as shipped | **36** |
+| TDF tarball 26.2.4.2, bundled font duplicates removed | **31** |
+
+The version move fixes six test classes outright — `TableComparisonTests`,
+`SlideTableComparisonTests` (both), `PdfOutputComparisonTests`,
+`FootnoteComparisonTests.TheRuleAboveTheNotes…` and
+`SheetSpilledTextComparisonTests.EveryPageShowsAsManyWords…` — so those really were the version
+gap and nothing else. But it *breaks* thirteen more, and they cluster: `TabStopComparisonTests`,
+`LineHeightComparisonTests`, `JustificationShrinkComparisonTests`, `MixedRunComparisonTests`,
+`TableAutoLayoutComparisonTests`, `SheetTextComparisonTests`. Every one of those is a text-metric
+comparison.
+
+**Half the cause is that the tarball bundles its own fonts, including the metric-compatible
+families.** `/opt/libreoffice26.2/share/fonts/truetype` ships 136 faces, among them Carlito,
+Caladea, Liberation and DejaVu — *different builds* from the system's: Caladea-Regular is 58 964
+bytes bundled against 81 600 installed, Carlito-Regular 635 996 against 628 032, and all differ by
+md5. LibreOffice reads its own; Paperless reads the system's through its own OpenType reader; so
+the two stacks measure different files and every advance width diverges. Moving the 45 duplicates
+aside takes 36 failures to 31, which confirms the mechanism and also shows it is **not the whole
+story** — the remaining gap is the tarball's other bundled libraries (its own HarfBuzz, ICU and
+FreeType) against the distro's.
+
+So: **do not treat "install 26.2.4.2 from TDF" as reproducing the environment the stored figures
+came from.** It is a fourth reference, not the third one. If a round needs the tree's real target,
+it needs the distro package on the distro the project develops on, which is Ubuntu 26.04 — and
+this container is 24.04, whose archives stop at 24.2 with a 25.8.7 backport. `fc-match` will not
+warn you about any of this: it answers for the system font set and knows nothing about what a
+bundled application resolves. Read the face out of a PDF the binary itself produced.
+
 **`git status` shows 56 files modified that are not modified.** This mount reports a
 symlink's size as 0, so git reads every symlink in the tree as having been emptied — the
 `sysui` and `android` icon PNGs, `.vsconfig`, 56 in all. They are all mode `120000` in HEAD
