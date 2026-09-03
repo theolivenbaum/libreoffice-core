@@ -1471,6 +1471,9 @@ public sealed class Paginator
             }
 
             allowed = WholeLines(layout.Lines, lineIndex, allowed);
+            allowed = GivingUpALineToKeepItsNote(
+                paragraph, layout, lineIndex, allowed, notes,
+                used + spaceAbove, columnBottom, columnIsEmpty);
 
             Length top = used + spaceAbove;
             bool firstLineHere = columnIsEmpty;
@@ -2652,6 +2655,70 @@ public sealed class Paginator
                 }
             }
         }
+    }
+
+    /// <summary>
+    /// Shortens a paragraph's stay on this page when doing so is what keeps a note it cites here.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The room offered to a paragraph is <c>columnBottom - NoteHeight(notes)</c>, and
+    /// <paramref name="notes"/> is what is cited <em>before</em> it. So a citation inside the very
+    /// lines being fitted is charged nothing: the lines go down, the note is added afterwards, and
+    /// there is no room left for it. Writer instead lets the note container grow into the body, so
+    /// the citing page carries one line less and the note it cites.
+    /// </para>
+    /// <para>
+    /// <strong>An earlier round did this unconditionally and it was reverted with a document to
+    /// show for it.</strong> On <c>template---tpr-technical-progress-report-with-guidance.docx</c>
+    /// a footnote cited from the third line of a bullet left no room for the bullet at all, so the
+    /// bullet went to the next page and the <c>keepNext</c> heading above it followed, at 8 pages
+    /// against 7. The guard is what that case needed and did not have: shortening is taken only
+    /// when it leaves the paragraph <em>something</em> here, and only when it actually buys the
+    /// note. Reduce to nothing and the paragraph moves, which is the regression; reduce past the
+    /// citation and the note is no longer cited on this page, which buys nothing.
+    /// </para>
+    /// <para>
+    /// One attempt rather than a loop, and it re-runs <see cref="Fit"/> against the larger
+    /// reservation rather than predicting where the lines would land. Predicting means restating
+    /// <see cref="ParagraphLeading"/>'s first-line rules and the shared-baseline case somewhere
+    /// else, and a second copy of that arithmetic is a second thing to get wrong.
+    /// </para>
+    /// </remarks>
+    private int GivingUpALineToKeepItsNote(
+        PageParagraph paragraph,
+        LaidOutParagraph layout,
+        int lineIndex,
+        int allowed,
+        List<PageNote> notes,
+        Length from,
+        Length columnBottom,
+        bool columnIsEmpty)
+    {
+        if (allowed <= 1 || paragraph.Notes.Count == 0) return allowed;
+
+        List<PageNote> cited = [.. NotesIn(paragraph, layout, lineIndex, allowed)];
+        if (cited.Count == 0) return allowed;
+
+        Length reserved = NoteHeight(notes, cited);
+        if (reserved <= NoteHeight(notes)) return allowed;
+
+        int refitted = Fit(
+            layout, paragraph.Format.LineSpacing, lineIndex, from, columnBottom - reserved,
+            atTopOfPage: columnIsEmpty, borderBelow: paragraph.BorderBelow);
+
+        int shortened = WholeLines(
+            layout.Lines, lineIndex,
+            Allowed(paragraph.Format, layout.Lines.Count, lineIndex, refitted, columnIsEmpty));
+
+        // Nothing left here, or nothing gained: leave it alone and let the note flow onward.
+        if (shortened <= 0 || shortened >= allowed) return allowed;
+
+        // And the citation has to survive the cut, or the room was reserved for a note this page
+        // no longer holds.
+        return NotesIn(paragraph, layout, lineIndex, shortened).Count() == cited.Count
+            ? shortened
+            : allowed;
     }
 
     private static IEnumerable<PageNote> NotesIn(
