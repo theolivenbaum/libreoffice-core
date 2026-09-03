@@ -1,6 +1,7 @@
 using System.IO.Compression;
 using System.Text;
 using Paperless.Core.Documents;
+using Paperless.Core.Geometry;
 using Paperless.Core.Units;
 using Paperless.WordProcessing.Layout;
 using Shouldly;
@@ -40,6 +41,12 @@ public sealed class PositionedBodyTableTests
 {
     /// <summary>A4 top margin, in points: <c>w:top="1440"</c>.</summary>
     private static readonly Length TopMargin = Length.FromPoints(72);
+
+    /// <summary>A table half the column's width, so that a fly of it leaves room beside itself.</summary>
+    private const int NarrowGrid = 5000;
+
+    /// <summary>And one as wide as the column, so that it does not: 11906 − 1440 − 1440.</summary>
+    private const int WideGrid = 9026;
 
     /// <summary>
     /// A page-anchored table is drawn <c>w:tblpY</c> below the sheet's top edge, not at the margin.
@@ -116,6 +123,66 @@ public sealed class PositionedBodyTableTests
         line.Top.ShouldBeGreaterThan(Length.FromPoints(300));
     }
 
+    /// <summary>
+    /// A fly that fills the column pushes the flow under itself rather than staying in the flow.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The other side of <see cref="AFlyOverTheFlowDoesNotSwallowATextBearingLine"/>. Writer's body
+    /// flies take the parallel surround, so the flow is pushed clear of one — <em>beside</em> it where
+    /// there is room and <em>below</em> it where there is not. Nothing here can wrap into a strip beside
+    /// a fly, which is why the narrow case refuses to float at all; the full-width case needs no
+    /// wrapping, only a position.
+    /// </para>
+    /// <para>
+    /// Measured against 24.2.7.2 on two authored probes differing only in the table's width. A 200 pt
+    /// table in a 451.3 pt column puts the following <c>AFTER</c> at <b>x = 266.25 pt</b>, level with
+    /// the table's first row and hard against its right edge; a table as wide as the column puts it at
+    /// <b>y = 133.03 pt</b>, under the table's last row and at the column's own left edge. Both are in
+    /// <c>dotnet/probes/words-floating-table/</c>.
+    /// </para>
+    /// <para>
+    /// Here the table is anchored 36 pt above the top margin and is 400 pt tall, so the line after it
+    /// would have landed inside it. Floated, the line goes to the table's bottom edge — 36 + 400 = 436
+    /// pt down the page, which is 364 pt below the margin the narrow case leaves it at.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void AFlyFillingTheColumnPushesTheFlowUnderItself()
+    {
+        WordProcessingPages pages = Lay(
+            vertAnchor: "page", tblpY: 720, after: "<w:r><w:t>After</w:t></w:r>", grid: WideGrid);
+
+        PlacedTable table = pages.Pages[0].Tables.ShouldHaveSingleItem();
+        table.Area.Y.ShouldBe(Length.FromTwips(720));
+
+        PlacedLine line = pages.Pages[0].Lines.ShouldHaveSingleItem();
+        line.Top.ShouldBe(Length.FromTwips(720) + Length.FromTwips(8000) - TopMargin);
+    }
+
+    /// <summary>
+    /// <c>w:tblpX</c> moves a positioned table across, by exactly what it says.
+    /// </summary>
+    /// <remarks>
+    /// It was not read at all: a positioned table took <c>w:tblInd</c>, which these files do not state,
+    /// and sat at the margin. <c>087_Printable_Graph_Paper_Template_Green_Theme</c> states
+    /// <c>w:tblpX="-594"</c> and the reference draws its grid from x = 35.3 pt where we drew it from
+    /// 70.6 — a dense grid a whole page across, so every line of it landed between two of the
+    /// reference's. The two corrections that go with it are in
+    /// <c>DocxLayoutSource.PositionedLeftEdge</c>; asserted here as a difference so that this test says
+    /// only that the offset itself arrives, whole.
+    /// </remarks>
+    [Fact]
+    public void AStatedHorizontalOffsetMovesAPositionedTable()
+    {
+        DocRect at(int? tblpX) => Lay(
+            vertAnchor: "page", tblpY: 2880, after: "", tblpX: tblpX)
+            .Pages[0].Tables.ShouldHaveSingleItem().Area;
+
+        (at(0).X - at(-594).X).ShouldBe(Length.FromTwips(594));
+        (at(720).X - at(0).X).ShouldBe(Length.FromTwips(720));
+    }
+
     /// <summary>An ordinary table is unaffected: it stacks and the flow follows it down.</summary>
     [Fact]
     public void AnUnpositionedTableStillStacks()
@@ -131,26 +198,30 @@ public sealed class PositionedBodyTableTests
         line.Top.ShouldBeGreaterThan(Length.FromPoints(300));
     }
 
-    private static WordProcessingPages Lay(string? vertAnchor, int tblpY, string after)
+    private static WordProcessingPages Lay(
+        string? vertAnchor, int tblpY, string after, int? tblpX = null, int grid = NarrowGrid)
     {
         string anchor = vertAnchor is null ? "" : $""" w:vertAnchor="{vertAnchor}" """.Trim() + " ";
-        return LayRaw($"""<w:tblpPr {anchor}w:horzAnchor="margin" w:tblpY="{tblpY}"/>""", after);
+        string across = tblpX is null ? "" : $""" w:tblpX="{tblpX}" """.Trim() + " ";
+        return LayRaw(
+            $"""<w:tblpPr {anchor}{across}w:horzAnchor="margin" w:tblpY="{tblpY}"/>""", after, grid);
     }
 
-    private static WordProcessingPages LayRaw(string tablePosition, string after)
+    private static WordProcessingPages LayRaw(
+        string tablePosition, string after, int grid = NarrowGrid)
     {
-        using IDocument document = Open(tablePosition, after);
+        using IDocument document = Open(tablePosition, after, grid);
         return (WordProcessingPages)((IPaginatedDocument)document).Layout();
     }
 
-    private static IDocument Open(string tablePosition, string after)
+    private static IDocument Open(string tablePosition, string after, int grid)
     {
-        MemoryStream package = BuildPackage(tablePosition, after);
+        MemoryStream package = BuildPackage(tablePosition, after, grid);
         using DocumentSource source = DocumentSource.FromStream(package, "positioned-table.docx");
         return new WordProcessingReader().Read(source);
     }
 
-    private static MemoryStream BuildPackage(string tablePosition, string after)
+    private static MemoryStream BuildPackage(string tablePosition, string after, int grid)
     {
         const string ContentTypes = """
             <?xml version="1.0" encoding="UTF-8"?>
@@ -205,11 +276,11 @@ public sealed class PositionedBodyTableTests
             <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
               <w:body>
                 <w:tbl>
-                  <w:tblPr>{tablePosition}<w:tblW w:w="5000" w:type="dxa"/></w:tblPr>
-                  <w:tblGrid><w:gridCol w:w="5000"/></w:tblGrid>
+                  <w:tblPr>{tablePosition}<w:tblW w:w="{grid}" w:type="dxa"/></w:tblPr>
+                  <w:tblGrid><w:gridCol w:w="{grid}"/></w:tblGrid>
                   <w:tr>
                     <w:trPr><w:trHeight w:val="8000" w:hRule="exact"/></w:trPr>
-                    <w:tc><w:tcPr><w:tcW w:w="5000" w:type="dxa"/></w:tcPr>
+                    <w:tc><w:tcPr><w:tcW w:w="{grid}" w:type="dxa"/></w:tcPr>
                       <w:p><w:pPr><w:rPr><w:sz w:val="4"/></w:rPr></w:pPr></w:p>
                     </w:tc>
                   </w:tr>

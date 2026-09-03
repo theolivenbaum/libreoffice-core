@@ -1199,11 +1199,14 @@ public sealed class Paginator
                     && rowDrawn == Length.Zero
                     && PlaceFloatedTable(
                         table, paragraphIndex, blocks, Laid, body, page, column, used, tables, notes,
-                        out FloatedTablePart? carried))
+                        out FloatedTablePart? carried, out Length? resumesAt))
                 {
                     // What did not fit below `w:tblpY` goes at the top of the next page — see
                     // `PlaceFloatedTable`, and `ContinueFloatedTables` for where it lands.
                     if (carried is { } rest) pendingFloats.Add(rest);
+
+                    // A fly filling the column pushes the flow under itself — see `FillsTheColumn`.
+                    if (resumesAt is { } below) used = Length.Max(used, below);
 
                     paragraphIndex++;
                     lineIndex = 0;
@@ -3132,6 +3135,11 @@ public sealed class Paginator
     /// The rows this page could not take, for the caller to place at the top of the next one, or null
     /// when the whole table went here.
     /// </param>
+    /// <param name="resumesAt">
+    /// Where the flow must carry on, when the fly fills the column and the flow would have run into it
+    /// — see <see cref="FillsTheColumn"/>. Null when the flow is clear of the fly and stays where it is,
+    /// which is the ordinary case.
+    /// </param>
     /// <returns>True when the table was floated and the caller should move on without advancing.</returns>
     private bool PlaceFloatedTable(
         PageTable table,
@@ -3144,9 +3152,11 @@ public sealed class Paginator
         Length used,
         List<PlacedTable> tables,
         List<PageNote> notes,
-        out FloatedTablePart? carried)
+        out FloatedTablePart? carried,
+        out Length? resumesAt)
     {
         carried = null;
+        resumesAt = null;
 
         if (!table.IsPositioned) return false;
 
@@ -3172,7 +3182,28 @@ public sealed class Paginator
         // The fly's own extent, not the part of it this page takes: the test asks whether the flow after
         // the table would put ink where the table goes, and the table goes where `w:tblpY` says whether
         // or not the sheet is long enough to hold all of it.
-        if (RunsIntoTheFly(blocks, laidAt, index + 1, used, top, top + height)) return false;
+        bool displaces = false;
+        if (RunsIntoTheFly(blocks, laidAt, index + 1, used, top, top + height))
+        {
+            // A fly with room beside it is one this cannot place: Writer wraps the flow into that room
+            // and nothing here can. A fly that fills the column has no such room, and Writer puts the
+            // flow *under* it — which is a position rather than a wrap, and is reproducible.
+            //
+            // Only for a fly the file has actually moved off the flow. A `w:vertAnchor="text"` fly sits
+            // where the flow already is, so leaving it there reproduces it exactly — while floating it
+            // drops the table's own space above and below, which the flow still owes. Measured:
+            // `slcc-architecture-uu-architecture.docx` states `vertAnchor="text" tblpY="1"` on a fly
+            // filling its column, matches the reference at 4 pages with the table in the flow, and comes
+            // to 3 pages and 24 words short with it floated.
+            if (table.VerticalOrigin is not (FrameVerticalOrigin.Page or FrameVerticalOrigin.PageMargin))
+            {
+                return false;
+            }
+
+            if (!FillsTheColumn(table, area)) return false;
+
+            displaces = true;
+        }
 
         // How much of the fly this sheet can hold, which is Writer's `GetFlyAnchorBottom` deadline
         // measured from the fly's own top. A fly that starts below the body has no first part at all,
@@ -3198,7 +3229,55 @@ public sealed class Paginator
         // Where the table's own zero landed, for the pass after this one — the same record an in-flow
         // table leaves, and a cell's anchored frame is measured against it either way.
         _nextTableOrigins[index] = new DocPoint(area.X, area.Y + top);
+
+        if (displaces) resumesAt = top + height + table.LowerSpacing;
+
         return true;
+    }
+
+    /// <summary>
+    /// Whether a floated table leaves no room beside itself, so that the flow must go under it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Writer's body flies take the parallel surround, so the flow is pushed clear of one rather than
+    /// drawn through it — and <em>clear</em> means beside where there is room and below where there is
+    /// not. Nothing here can wrap into a margin beside a fly, which is why
+    /// <see cref="RunsIntoTheFly"/> refuses to float a table the flow would meet; but the second case
+    /// needs no wrapping at all, only a position, and it is the one the corpus is full of.
+    /// </para>
+    /// <para>
+    /// Measured against 24.2.7.2 on two authored probes differing only in the table's width — the same
+    /// <c>w:tblpPr</c>, the same following paragraph. A 200 pt table in a 451.3 pt column puts
+    /// <c>AFTER</c> at <b>x = 266.25</b>, level with the table's first row and hard against its right
+    /// edge; a table as wide as the column puts it at <b>y = 133.03</b>, under the table's last row,
+    /// at the column's own left edge.
+    /// </para>
+    /// <para>
+    /// <b>Writer's own test is whether the first word fits the strip</b>, which the same probe
+    /// establishes: sweeping the fly's width, a following <c>AFTER</c> goes beside it down to a strip
+    /// of 28.9 pt and under it at 22.6 pt, and replacing that word with one five times as long moves
+    /// the switch from 95 per cent of the column to somewhere below 80. That is line breaking, and
+    /// nothing here can do it — so what is used instead is the case where <em>no</em> word could fit.
+    /// </para>
+    /// <para>
+    /// A twentieth of the column, which on A4 is 22.6 pt. The corpus makes that safe rather than
+    /// arbitrary: censused over its <b>46 positioned tables that state a grid</b>, the fly's width
+    /// against its column is bimodal with nothing at all between <b>0.911</b> and <b>0.960</b> — six
+    /// narrow flies, forty that fill their column and forty of which overflow it. A fly leaving a
+    /// wider strip than that keeps the behaviour it had, which is to stay in the flow.
+    /// </para>
+    /// </remarks>
+    private static bool FillsTheColumn(PageTable table, DocRect area)
+    {
+        if (area.Width <= Length.Zero) return false;
+
+        Length left = table.LeftWithin(area.Width);
+        Length right = left + table.WidthWithin(area.Width);
+
+        Length beside = Length.Max(Length.Zero, left) + Length.Max(Length.Zero, area.Width - right);
+
+        return beside.Emu * 20 < area.Width.Emu;
     }
 
     /// <summary>

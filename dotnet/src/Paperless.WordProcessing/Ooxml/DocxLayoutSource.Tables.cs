@@ -270,6 +270,15 @@ public sealed partial class DocxLayoutSource
             rows.Count > 0 && rows[0].Cells.Count > 0 ? rows[0].Cells[0].Definition : null;
         Length border = first?.Borders.Left.Width ?? Length.Zero;
 
+        // A positioned table is placed by `w:tblpX` and not by `w:tblInd`, and it is corrected twice
+        // over rather than once — see `PositionedLeftEdge`.
+        if (Word.Child(properties, "tblpPr") is { } floated
+            && !isNested
+            && Word.Attribute(floated, "horzAnchor") is not "page")
+        {
+            return PositionedLeftEdge(floated, first, border);
+        }
+
         if (isNested || _compatibilityMode >= 15)
         {
             // A nested table's indent is relative to the enclosing cell's text area, which cannot be to the
@@ -286,6 +295,56 @@ public sealed partial class DocxLayoutSource
             : Length.Max(border / 2, first?.Padding.Left ?? Length.Zero);
 
         return stated - distance;
+    }
+
+    /// <summary>
+    /// Where a positioned table's left edge sits, from <c>w:tblpX</c> rather than <c>w:tblInd</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A floated table becomes a frame, and <c>DomainMapperTableHandler::endTableGetTableStyle</c>
+    /// moves that frame left twice: by the first cell's left margin when the file's
+    /// <c>compatibilityMode</c> is below 15
+    /// (<c>sw/source/writerfilter/dmapper/DomainMapperTableHandler.cxx</c>:543), and by half the first
+    /// cell's left border always (:612). Both are <c>lcl_DecrementHoriOrientPosition</c>, and they are
+    /// a <em>sum</em> — unlike the <c>w:tblInd</c> rule beside this, which takes the larger of the two.
+    /// </para>
+    /// <para>
+    /// Measured against 24.2.7.2 on an authored probe: a two-cell table floated with
+    /// <c>w:horzAnchor="margin"</c> and no <c>w:tblpX</c> draws its first cell's text at
+    /// <b>x = 71.65 pt</b> against the same table in the flow at <b>78.00</b> — 6.35 pt left, which is
+    /// the 108-twip cell margin plus half a one-point border. Adding <c>w:tblpX="-594"</c> moves it to
+    /// <b>41.95</b>, exactly 29.7 pt further, so the offset itself is applied unchanged.
+    /// </para>
+    /// <para>
+    /// It is worth 35 pt on <c>087_Printable_Graph_Paper_Template_Green_Theme</c>, whose grid the
+    /// reference draws from x = 35.3 and which we drew from 70.6 — a dense grid a whole page across,
+    /// so every line of it landed between two of the reference's.
+    /// </para>
+    /// <para>
+    /// Only the offset form. A table stating <c>w:tblpXSpec</c> is aligned rather than placed, and
+    /// <c>lcl_DecrementHoriOrientPosition</c> writes a position that a non-<c>NONE</c> orientation then
+    /// ignores — which is why <see cref="HorizontalPositionOf"/> answering non-null takes this out of
+    /// the picture.
+    /// </para>
+    /// <para>
+    /// And only the two anchors that resolve against the text area. <c>w:horzAnchor="page"</c> measures
+    /// from the sheet's own left edge, which nothing on the way to <see cref="PageTable"/> carries, so
+    /// applying the offset against the text area instead would move the table by a whole margin: the
+    /// probe's page-anchored <c>w:tblpX="1440"</c> is drawn by the reference at the margin and would be
+    /// drawn a second inch in. Seven of the corpus's fifty positioned tables say <c>page</c>, and they
+    /// keep the placement they had — which is <see cref="HorizontalPositionOf"/>'s decision too.
+    /// </para>
+    /// </remarks>
+    private Length PositionedLeftEdge(XElement position, PageTableCell? first, Length border)
+    {
+        Length stated = Twips(position, "tblpX") ?? Length.Zero;
+
+        Length margin = _compatibilityMode >= 15
+            ? Length.Zero
+            : first?.Padding.Left ?? Length.Zero;
+
+        return stated - margin - (border / 2);
     }
 
     /// <summary>The grid's column widths, in order.</summary>
