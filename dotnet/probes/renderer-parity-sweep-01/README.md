@@ -205,3 +205,58 @@ tests whose stored values `PROVENANCE.tsv` dates to **26.2.4.2**, and the lane's
 summary reads "a `w:trHeight` floor is raised by the row's border and cell margins;
 24.2 raises it by neither". Landing them would make this container's numbers better
 and the project's reference worse.
+
+## The fidelity suite, after the fixes
+
+Three more rounds landed since the table above, and the suite reached a state worth
+recording: **every remaining failure is either the reference-version gap or the
+advance-width divergence.** Nothing tractable is left in it.
+
+| reference | failed of 552 |
+|---|---:|
+| distro 24.2.7.2 (this container) | **15**, from 18 |
+| TDF tarball 26.2.4.2 | 30 |
+
+Exactly **one** fails against both — `NoteRestartComparisonTests` on `note-restart.docx`
+— and it is down to one 11 pt body line breaking elsewhere. Its note spans are
+identical to the reference's, four each at 5.8, 6.4 and 10.0 pt, so the numbering and
+the placement are right and what is left is the divergence `dotnet/CLAUDE.md` records
+as architectural.
+
+### Two of the four "ours" turned out to be stale literals
+
+Both were tests carrying hard-coded numbers from a reference version, which is why each
+failed against *both* binaries — once because ours no longer matches the old version,
+once because the literal does not match the new one.
+
+**`SlideAutofitParagraphSpaceComparisonTests`** asserted three font sizes that were all
+24.2.7.2's. Measured on its fixture with nothing changed but the binary:
+
+| box | 24.2.7.2 | 26.2.4.2 | ours |
+|---|---:|---:|---:|
+| 150 pt | 11.991 | 14.003 | **14.0031** |
+| 200 pt | 17.008 | 18.992 | **18.9921** |
+| 210 pt | 18.000 | 20.013 | **20.0126** |
+
+Ours is 26.2.4.2's to the hundredth on all three, the control included. The autofit
+ladder moved between the releases — `SlideAutofit.FitLevels` ports 26.2's
+`constScaleLevels` where 24.2 bisected — so nothing in the renderer was wrong.
+
+**`SheetSpilledTextComparisonTests`** demanded Calc's lead-in that `SpreadsheetPages`
+deliberately dropped. Worth more than the fix: the mechanism `SpreadsheetPages` cites
+for the difference — the `!bTaggedPDF` guard — **does not explain it**. Both binaries
+write a tagged PDF for that document, `/MarkInfo /Marked true` read out of each, and
+they differ anyway.
+
+### One real fix
+
+A note now keeps the page that cites it. The room offered to a paragraph was
+`columnBottom - NoteHeight(notes)` where `notes` is what was cited *before* it, so a
+citation inside the very lines being fitted was charged nothing and the note flowed away
+from its anchor. On `footnote-pages.docx` page one that was 54 lines against the
+reference's 57 with Note 12 pushed off; it is now 56 with both notes in place.
+
+An earlier round did this unconditionally and reverted it, naming the document it broke.
+The guard is what that case needed: shorten only when it leaves the paragraph something
+here, and only when it actually buys the note. `template---tpr…docx` renders 7 pages
+before and after.
