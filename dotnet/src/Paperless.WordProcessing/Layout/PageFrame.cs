@@ -429,6 +429,28 @@ public sealed record PageFrame
     /// </remarks>
     public double TextRotationDegrees { get; init; }
 
+    /// <summary>
+    /// Where the frame's own text sits when the frame is taller than the text is.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>wps:bodyPr/@anchor</c>. Top for the great majority, which is why it is the default and why
+    /// this went unnoticed: a text box sized to its text shows nothing either way.
+    /// </para>
+    /// <para>
+    /// It shows on a shape sized to be a shape. Censused over the 271 corpus <c>docx</c>, <b>132
+    /// text-bearing shapes across 20 documents</b> ask for <c>ctr</c> — the Venn diagram templates
+    /// are eight of the twenty, and their labels sit in circles two or three times the height of a
+    /// line, so a label drawn against the top of its circle lands outside the ink it names.
+    /// </para>
+    /// <para>
+    /// <c>just</c> and <c>dist</c> are read as top. They ask for the <em>lines</em> to be spread
+    /// through the box rather than for the block to be moved, which is a different mechanism, and
+    /// LibreOffice's own importer takes neither: no corpus document states either.
+    /// </para>
+    /// </remarks>
+    public VerticalTextAlignment TextAlignment { get; init; }
+
     /// <summary>The marker at the start of a line, if it carries one.</summary>
     /// <remarks>
     /// <c>a:headEnd</c>. An arrowhead is a filled polygon beside the shaft rather than a property

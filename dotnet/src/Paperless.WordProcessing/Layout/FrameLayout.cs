@@ -571,9 +571,48 @@ internal sealed class FrameResolution
             collapsesSpacing: collapsesSpacing,
             addsCellLineSpacing: addsCellLineSpacing);
 
-        return flow is not null && frame.HasFixedHeight
-            ? FlowLayouter.Truncated(flow, inside.Height)
-            : flow;
+        if (flow is not null && frame.HasFixedHeight) flow = FlowLayouter.Truncated(flow, inside.Height);
+
+        return Anchored(flow, frame.TextAlignment, inside.Height);
+    }
+
+    /// <summary>
+    /// The flow moved down to sit where the shape's <c>wps:bodyPr/@anchor</c> asks.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The same arithmetic a table cell's <c>w:vAlign</c> gets — spare height, then none, half or all
+    /// of it — and it was missing here entirely, so every shape's text sat against the top of its box
+    /// whatever the file said. It is invisible on a text box sized to its text and unmissable on a
+    /// shape sized to be a shape: the Venn diagram templates put their labels in circles two or three
+    /// times a line tall, and a label against the top of its circle lands outside the ink it names.
+    /// </para>
+    /// <para>
+    /// Measured against the ink rather than the advance — <see cref="FlowLayouter.Extent"/> rather
+    /// than <see cref="PlacedFlow.Advance"/> — because centring is about where the text looks
+    /// centred, and the advance carries the last paragraph's space-after, which would push the block
+    /// up by half of a gap nothing draws.
+    /// </para>
+    /// <para>
+    /// Only the flow's rectangle moves; its lines are positioned relative to that rectangle and come
+    /// along. A nested table inside the frame carries page coordinates and would not, which is what
+    /// <c>TableLayouter.ShiftFlow</c> exists for — a frame holding a table and asking for centred
+    /// text would need it, and no corpus document does both.
+    /// </para>
+    /// </remarks>
+    private static PlacedFlow? Anchored(PlacedFlow? flow, VerticalTextAlignment alignment, Length height)
+    {
+        if (flow is null || alignment == VerticalTextAlignment.Top) return flow;
+
+        Length spare = height - FlowLayouter.Extent(flow);
+        if (spare <= Length.Zero) return flow;
+
+        Length offset = alignment == VerticalTextAlignment.Middle ? spare / 2 : spare;
+
+        return flow with
+        {
+            Area = new DocRect(flow.Area.X, flow.Area.Y + offset, flow.Area.Width, flow.Area.Height),
+        };
     }
 
     /// <param name="Index">Which page the block starts on.</param>

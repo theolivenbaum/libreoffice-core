@@ -284,6 +284,7 @@ internal static class DocxFrames
             Name = Child(placed, "docPr")?.Attribute("name")?.Value,
             Blocks = box is not null && content is not null ? content(box) : [],
             Padding = box is null ? default : Insets(placed),
+            TextAlignment = box is null ? default : TextAlignment(placed),
             HasFixedHeight = box is not null && !GrowsWithText(placed),
         };
     }
@@ -498,6 +499,7 @@ internal static class DocxFrames
             Name = Descendant(shape, "cNvPr")?.Attribute("name")?.Value,
             Blocks = box is not null && content is not null ? content(box) : [],
             Padding = box is null ? default : Insets(shape),
+            TextAlignment = box is null ? default : TextAlignment(shape),
             HasFixedHeight = box is not null && !GrowsWithText(shape),
         };
     }
@@ -816,6 +818,22 @@ internal static class DocxFrames
     /// <c>normAutofit</c> box exactly as it truncates a <c>noAutofit</c> one rather than shrinking the
     /// text to fit. See <see cref="Layout.PageFrame.HasFixedHeight"/>.
     /// </remarks>
+    /// <summary>
+    /// Where a shape's text sits in a box taller than itself — <c>wps:bodyPr/@anchor</c>.
+    /// </summary>
+    /// <remarks>
+    /// <c>just</c> and <c>dist</c> come back as top. Both ask for the lines to be spread through the
+    /// box rather than for the block to be moved, which is a different mechanism from an anchor, and
+    /// no corpus document states either.
+    /// </remarks>
+    private static VerticalTextAlignment TextAlignment(XElement shape)
+        => BodyProperties(shape)?.Attribute("anchor")?.Value switch
+        {
+            "ctr" => VerticalTextAlignment.Middle,
+            "b" => VerticalTextAlignment.Bottom,
+            _ => VerticalTextAlignment.Top,
+        };
+
     private static bool GrowsWithText(XElement shape)
         => BodyProperties(shape) is { } body && Child(body, "spAutoFit") is not null;
 
