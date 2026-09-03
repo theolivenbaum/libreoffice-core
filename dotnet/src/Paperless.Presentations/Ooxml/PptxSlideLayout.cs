@@ -1521,108 +1521,26 @@ internal sealed partial class PptxSlideLayout
     /// </summary>
     /// <remarks>
     /// <para>
-    /// <b>A path gradient's stop 0 is at the centre, and a linear one's is at the start of its
-    /// ramp.</b> That is not obvious from the file and is the mapping most easily got backwards:
-    /// LibreOffice <em>reverses</em> the stop list for a path gradient
-    /// (<c>fillproperties.cxx:544</c>) before handing it to a model whose first stop paints the
-    /// outer edge, so the two reversals cancel and DrawingML's own order is already
-    /// centre-outwards. ODF says the opposite and needs the swap; see
-    /// <see cref="OpenDocument.OdpSlideLayout"/>.
+    /// Everything DrawingML decides about a gradient — that a path gradient's stop 0 is at the
+    /// centre while a linear one's is at the start of its ramp, that <c>path="shape"</c> is drawn
+    /// as a rectangle, how <c>a:fillToRect</c> becomes a focus — is in
+    /// <see cref="DrawingGradient.Paint"/>, because it means the same thing wherever the element
+    /// appears. It sat here until a Word document needed it and could not reach it; see the
+    /// remarks there for what that cost.
     /// </para>
     /// <para>
-    /// <c>a:path path="shape"</c> — a gradient following a custom outline — is drawn as a
-    /// rectangular one, which is what LibreOffice does with it too: its comment says
-    /// "XML_rect or XML_shape, but the latter is not implemented".
-    /// </para>
-    /// <para>
-    /// <strong>A <c>path="circle"</c> whose focus lands on a corner is a radial gradient and not
-    /// a diagonal linear one.</strong>
-    /// [24.2.7-audit: FIXED 2026-08-21, slides-r59 — round 39 measured the corner case as
-    /// <c>draw:style="linear"</c> with a 45° angle on the superseded binary and this reader was
-    /// built on that. Re-running that round's own four-arm fixture through 26.2.4.2's flat-ODF
-    /// export gives <c>radial</c> on all four, the two corner arms included:
-    /// <c>l="100000" t="100000"</c> exports <c>draw:style="radial" draw:cx="100%"
-    /// draw:cy="100%"</c> and <c>r="99000" b="99000"</c> exports <c>radial</c> at
-    /// <c>0%/0%</c>. The corner branch is removed. Corpus reach, counted on what the parts
-    /// state: 67 corner-focus circle paths in 7 documents — 6 slides decks and one words
-    /// document, with 42 of the 67 in two infographic funnel decks.]
+    /// What is left here is the one thing that is the slide's own: the space the paint is drawn
+    /// into. A rotated shape fills its <em>local</em> box and carries the rotation in the paint's
+    /// transform, so the gradient turns with the shape rather than staying square to the page.
     /// </para>
     /// </remarks>
     private static Paint? Gradient(XElement? element, in FillContext context)
     {
-        if (DrawingFill.ReadGradient(element) is not { Stops.Count: > 0 } gradient) return null;
-
-        List<GradientStop> stops = [];
-        foreach (DrawingGradientStop stop in gradient.Stops)
-        {
-            if (stop.Colour.Resolve(context.Theme, placeholder: null) is not { } colour) continue;
-            stops.Add(new GradientStop(stop.Position, colour));
-        }
-
-        if (stops.Count == 0) return null;
-
         (DocRect box, AffineTransform space) = GradientSpace(context);
 
-        if (gradient.Path is null)
-        {
-            double radians = (gradient.Angle ?? 0) * Math.PI / 180.0;
-            return SlideGradients.Linear(box, Math.Cos(radians), Math.Sin(radians), stops)
-                with { Transform = space };
-        }
-
-        // a:fillToRect states the inner rectangle the gradient converges on; its centre is what
-        // LibreOffice keeps, as (MAX_PERCENT + l - r) / 2, truncated to whole per cent and
-        // clamped into the box (fillproperties.cxx:531-537).
-        int cx = FocusPerCent(gradient.FillToRect.Left, gradient.FillToRect.Right);
-        int cy = FocusPerCent(gradient.FillToRect.Top, gradient.FillToRect.Bottom);
-
-        DocPoint centre = new(
-            box.Left + (box.Width * (cx / 100.0)),
-            box.Top + (box.Height * (cy / 100.0)));
-
-        GradientKind kind = gradient.Path == "circle"
-            ? GradientKind.Radial
-            : GradientKind.Rectangular;
-
-        return SlideGradients.Centred(kind, box, centre, stops) with { Transform = space };
-    }
-
-    /// <summary>
-    /// One axis of an <c>a:fillToRect</c>'s centre, as the whole number of per cent inside the
-    /// filled box that LibreOffice keeps.
-    /// </summary>
-    /// <remarks>
-    /// Both halves matter and both are observable. The <b>clamp</b> is what makes the stock
-    /// Office theme's gradient a gradient at all: its <c>fillToRect</c> is
-    /// <c>t="-80000" b="180000"</c>, a centre 80% of the box above its own top edge, and
-    /// unclamped every point of the box sits past the ramp's last stop and the fill comes out
-    /// flat. On the probe deck that is 56.94% of the page's pixels against 0.15%.
-    /// <b>Its measured corpus reach is nought</b>, and the distinction is worth keeping: 79 of the
-    /// 114 zip-container decks state that exact <c>fillToRect</c>, all of them in a theme's
-    /// <c>a:fillStyleLst</c>, and not one of them changed a pixel when this landed — a theme's
-    /// third fill style is almost never what a drawn shape resolves to. Correct, tested, and
-    /// waiting for a document. The <b>truncation</b> to whole per cent decides the corner test in
-    /// <see cref="Gradient"/>. Measured against the superseded binary, a stated centre of 0.5%
-    /// was treated as 0 and took a *linear* branch there, and 1% did not
-    /// (<c>probes/slides-r39/gradient-path.md</c>).
-    ///
-    /// [24.2.7-audit: VERIFIED 2026-08-21, slides-r59 — the truncation and the clamp both still
-    /// hold on 26.2.4.2, and the branch they fed does not. Re-run of round 39's own four-arm
-    /// fixture through the reference's flat-ODF export: <c>l="0" r="99000"</c> (0.5%) exports
-    /// <c>draw:cx="0%"</c> and <c>l="0" r="98000"</c> (1%) exports <c>draw:cx="1%"</c>, so the
-    /// truncation is intact; <c>t="-80000" b="180000"</c> exports <c>draw:cy="0%"</c>, so the
-    /// clamp is intact. What changed is <see cref="Gradient"/>'s corner test — see the marker
-    /// there.]
-    /// </remarks>
-    private static int FocusPerCent(double nearInset, double farInset)
-    {
-        // Back to the file's own thousandths of a per cent before truncating: a stated 98000
-        // must not arrive as 0.9999999 and fall on the wrong side of the corner test.
-        long near = (long)Math.Round(nearInset * 100000);
-        long far = (long)Math.Round(farInset * 100000);
-
-        // Both divisions truncate towards zero, as the C++ integer arithmetic does.
-        return (int)Math.Clamp((100000 + near - far) / 2 / 1000, 0, 100);
+        return DrawingGradient.Paint(element, context.Theme, box) is { } paint
+            ? paint with { Transform = space }
+            : null;
     }
 
     /// <summary>

@@ -749,7 +749,7 @@ internal sealed partial class OdpSlideLayout
     /// <para>
     /// An <c>axial</c> gradient is a linear one measured from the middle outwards, so it becomes
     /// three stops on an ordinary ramp — exactly, not approximately; see
-    /// <see cref="SlideGradients.Axial"/>.
+    /// <see cref="GradientGeometry.Axial"/>.
     /// </para>
     /// </remarks>
     private static GradientPaint? Gradient(OdpGradient? definition, DocRect box)
@@ -765,9 +765,9 @@ internal sealed partial class OdpSlideLayout
         switch (gradient.Style)
         {
             case "axial":
-                return SlideGradients.Linear(
+                return GradientGeometry.Linear(
                     box, dx, dy,
-                    SlideGradients.Axial(gradient.StartColour, gradient.EndColour, gradient.Border));
+                    GradientGeometry.Axial(gradient.StartColour, gradient.EndColour, gradient.Border));
 
             case "radial":
             case "ellipsoid":
@@ -781,7 +781,7 @@ internal sealed partial class OdpSlideLayout
                     _ => GradientKind.Rectangular,
                 };
 
-                IReadOnlyList<GradientStop> stops = SlideGradients.WithBorder(
+                IReadOnlyList<GradientStop> stops = GradientGeometry.WithBorder(
                     [
                         new GradientStop(0, gradient.EndColour),
                         new GradientStop(1, gradient.StartColour),
@@ -793,13 +793,13 @@ internal sealed partial class OdpSlideLayout
                     box.Left + (box.Width * gradient.CentreX),
                     box.Top + (box.Height * gradient.CentreY));
 
-                return SlideGradients.Centred(kind, box, centre, stops);
+                return GradientGeometry.Centred(kind, box, centre, stops);
             }
 
             default:
-                return SlideGradients.Linear(
+                return GradientGeometry.Linear(
                     box, dx, dy,
-                    SlideGradients.WithBorder(
+                    GradientGeometry.WithBorder(
                         [
                             new GradientStop(0, gradient.StartColour),
                             new GradientStop(1, gradient.EndColour),

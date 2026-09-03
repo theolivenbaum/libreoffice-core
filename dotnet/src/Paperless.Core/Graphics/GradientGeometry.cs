@@ -1,19 +1,25 @@
 using Paperless.Core.Geometry;
-using Paperless.Core.Graphics;
 using Paperless.Core.Units;
 
-namespace Paperless.Presentations.Layout;
+namespace Paperless.Core.Graphics;
 
 /// <summary>
 /// Turns a gradient's stated parameters into the geometry a <see cref="GradientPaint"/> carries.
 /// </summary>
 /// <remarks>
 /// <para>
-/// Shared by the PPTX and ODP readers because the arithmetic is LibreOffice's rather than either
-/// format's: both importers converge on <c>basegfx::BGradient</c>, and everything that decides
-/// where a gradient's ends land happens after that, in
-/// <c>basegfx/source/tools/gradienttools.cxx</c>. Porting it once means a deck and its ODF
-/// export draw the same picture, which is the only way the two can be compared at all.
+/// In Core because it depends on nothing above Core — geometry, colour and units — and because
+/// the arithmetic is LibreOffice's rather than any one format's: the PPTX, ODP and DOCX
+/// importers all converge on <c>basegfx::BGradient</c>, and everything that decides where a
+/// gradient's ends land happens after that, in <c>basegfx/source/tools/gradienttools.cxx</c>.
+/// Porting it once means a deck, its ODF export and a Word document holding the same shape draw
+/// the same picture, which is the only way any of them can be compared at all.
+/// </para>
+/// <para>
+/// It began as <c>Gradients</c> in <c>Paperless.Presentations</c>, where a Word document
+/// could not reach it — the same shape of mistake <c>dotnet/CLAUDE.md</c> records for
+/// <c>Core/Charts</c> and <c>Core/Numbers</c>, and settled by the same test: the question is not
+/// who uses it but what it depends on.
 /// </para>
 /// <para>
 /// <b>The convention this produces is the backends'</b>, and it is not either format's:
@@ -22,7 +28,7 @@ namespace Paperless.Presentations.Layout;
 /// so the ODF reader swaps its ends before calling in here. See the TODO.
 /// </para>
 /// </remarks>
-internal static class SlideGradients
+public static class GradientGeometry
 {
     /// <summary>
     /// A linear ramp across a box, along a direction.

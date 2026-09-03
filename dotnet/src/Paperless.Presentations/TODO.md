@@ -802,10 +802,10 @@ Two reference artefacts worth knowing before chasing them:
 - [x] Solid fills, including themed ones, and lines with width, cap and join. Drop shadows too,
       as a hard-edged offset copy — see the shadow note below for what blur costs.
 - [x] **Gradient fills**, for both formats: `a:gradFill` and `draw:gradient`, linear, axial,
-      radial, elliptical and rectangular. `Layout/SlideGradients.cs` holds the geometry, which is
-      LibreOffice's rather than either format's — both importers converge on `basegfx::BGradient`
-      and everything that decides where the ends land happens after that. See **Two gradient
-      conventions that are invisible except in colour** below.
+      radial, elliptical and rectangular. `Paperless.Core`'s `Graphics/GradientGeometry.cs` holds
+      the geometry, which is LibreOffice's rather than either format's — both importers
+      converge on `basegfx::BGradient` and everything that decides where the ends land happens
+      after that. See **Two gradient conventions that are invisible except in colour** below.
 - [x] **Bitmap fills**, tiled or stretched: `a:blipFill` and `draw:fill="bitmap"`. A tile's size
       is the picture's *natural* size scaled by `a:tile/@sx`, so the reader has to know how large
       a picture is without decoding it — twenty bytes of header, in `Layout/SlideImages.cs`.
@@ -1555,7 +1555,7 @@ Two more, smaller, both from `initEllipticalGradientInfo` and `init1DGradientInf
   gradient's corners flat.
 - `draw:border` shortens the ramp rather than shifting it, and which end it holds depends on which
   end the format put first — so after the ODF swap a centred gradient's border is at the far end
-  of the stop list. `SlideGradients.WithBorder` takes that as a parameter for exactly that reason.
+  of the stop list. `GradientGeometry.WithBorder` takes that as a parameter for exactly that reason.
 
 ### A tile's size needs the picture's size, and the picture must not be decoded
 
