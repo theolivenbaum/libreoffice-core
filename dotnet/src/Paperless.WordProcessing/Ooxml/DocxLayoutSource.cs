@@ -85,6 +85,7 @@ public sealed partial class DocxLayoutSource
     private readonly ConstantFields _constants;
 
     private readonly DrawingTheme? _theme;
+    private readonly DrawingStyleMatrix? _shapeStyles;
     private readonly Dictionary<(string? Family, int Weight, bool Italic, FontFamilyClass Class),
         OpenTypeFace?> _faces = [];
     private readonly Dictionary<(string? Family, int Weight, bool Italic, FontFamilyClass Class),
@@ -97,6 +98,11 @@ public sealed partial class DocxLayoutSource
     /// <param name="footnotes">The footnote bodies by <c>w:id</c>, or null for a document with none.</param>
     /// <param name="endnotes">The endnote bodies by <c>w:id</c>.</param>
     /// <param name="theme">The document's theme, for themed run colours, or null.</param>
+    /// <param name="shapeStyles">
+    /// The theme's <c>a:fmtScheme</c>, or null. An anchored shape stating no fill and no line
+    /// width takes both from it — see <c>DocxFrames.Appearance</c> — so a caller that omits it
+    /// gets the flowchart boxes and Gantt bars of a themed template drawn as empty outlines.
+    /// </param>
     /// <param name="pictures">
     /// How to reach the bytes an <c>a:blip</c> names, or null to lay the document out with its picture
     /// frames empty — which is what a caller who wants only measurements should pay for.
@@ -122,6 +128,7 @@ public sealed partial class DocxLayoutSource
         IReadOnlyDictionary<string, XElement>? footnotes = null,
         IReadOnlyDictionary<string, XElement>? endnotes = null,
         DrawingTheme? theme = null,
+        DrawingStyleMatrix? shapeStyles = null,
         DocxPictures? pictures = null,
         WordNumbering? numbering = null,
         WordFontTable? fontTable = null,
@@ -134,6 +141,7 @@ public sealed partial class DocxLayoutSource
         _numbering = numbering ?? new WordNumbering();
         Pictures = pictures;
         _theme = theme;
+        _shapeStyles = shapeStyles;
         _fonts = fonts ?? new SystemFontResolver(SystemFontIndex.Build());
         _defaultTabInterval = TabInterval(settings);
         _compatibilityMode = CompatibilityMode(settings);
@@ -1415,7 +1423,10 @@ public sealed partial class DocxLayoutSource
 
             frames.AddRange(DocxFrames.ReadAll(
                 anchor.Element, content, anchor.Offset, Pictures,
-                new DocxFrameContext(_theme, InHeaderFooter, _compatibilityMode)));
+                new DocxFrameContext(_theme, InHeaderFooter, _compatibilityMode)
+                {
+                    Styles = _shapeStyles,
+                }));
         }
 
         return frames;

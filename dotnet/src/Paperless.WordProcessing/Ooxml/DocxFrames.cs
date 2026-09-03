@@ -242,7 +242,7 @@ internal static class DocxFrames
         (Length x, FrameHorizontalOrigin horigin, FrameHorizontalAlignment halign) = Horizontal(anchor);
         (Length y, FrameVerticalOrigin vorigin, FrameVerticalAlignment valign) = Vertical(anchor);
         XElement? shapeProperties = ShapeProperties(placed);
-        (Colour? fill, Colour? line, Length lineWidth) = Appearance(shapeProperties, context.Theme);
+        (Colour? fill, Colour? line, Length lineWidth) = Appearance(shapeProperties, context);
         (bool isLine, bool isLineMirrored) = LineGeometry(shapeProperties);
         (string? preset, IReadOnlyDictionary<string, double>? adjustments) =
             PresetGeometry(shapeProperties);
@@ -425,7 +425,7 @@ internal static class DocxFrames
             ? pictures.Read(shape)
             : FramePicture.None;
 
-        (Colour? fill, Colour? line, Length lineWidth) = Appearance(properties, context.Theme);
+        (Colour? fill, Colour? line, Length lineWidth) = Appearance(properties, context);
         (bool isLine, bool isLineMirrored) = LineGeometry(properties);
 
         return envelope with
@@ -807,24 +807,72 @@ internal static class DocxFrames
     /// would be a confident wrong answer rather than an absent one; each leaves the frame as it was.
     /// </para>
     /// <para>
-    /// A shape stating no fill element at all is left unfilled rather than given the theme's default.
-    /// DrawingML says a shape with no <c>a:*Fill</c> takes the fill its <c>wps:style/a:fillRef</c>
-    /// names out of the theme's format scheme, which is a whole style matrix and is what
-    /// <c>oox/source/drawingml/shape.cxx</c> implements; reading only what the shape itself states is
-    /// the conservative half of that and never invents ink. <c>a:noFill</c> is honoured explicitly, so
-    /// "stated none" and "said nothing" already differ here for the case the corpus exercises.
+    /// <strong>A shape that states no fill and no width still paints, because its
+    /// <c>wps:style</c> names both out of the theme's format matrix.</strong> This paragraph used
+    /// to say the opposite — that reading only what the shape itself states "is the conservative
+    /// half of that and never invents ink" — and the corpus says the conservative half is not a
+    /// half of anything. Censused over the 271 <c>docx</c> in the corpus, <b>511 shapes across 49
+    /// documents</b> state an <c>a:fillRef</c> and no <c>a:*Fill</c> of their own, and every one
+    /// of them was drawn as an empty outline: the organogram and genogram templates are nothing
+    /// but such boxes, so the whole diagram came out blank.
+    /// </para>
+    /// <para>
+    /// <c>020_Project_Timeline_Template_Modern_Theme</c> is the case that pins both halves to the
+    /// reference's own operators. Its thirteen Gantt bars are <c>homePlate</c> shapes whose
+    /// <c>wps:spPr</c> carries an <c>a:xfrm</c>, an <c>a:prstGeom</c> and an <c>a:ln</c> naming a
+    /// colour — and no fill and no <c>w</c> at all. The theme's first fill style is
+    /// <c>phClr</c>, so <c>a:fillRef idx="1"</c> over <c>accent1</c> is <c>#5B9BD5</c>, which is
+    /// the blue the reference paints them; its second line style is <c>w="12700"</c>, so
+    /// <c>a:lnRef idx="2"</c> is one point, which is the <c>1 w</c> the reference's content stream
+    /// sets fourteen times. Neither number is anywhere in the document part.
+    /// </para>
+    /// <para>
+    /// The width is why the shape's own <c>a:ln</c> is laid <em>over</em> the theme's rather than
+    /// replacing it. Taking the shape's element alone gives a stroke of zero, and
+    /// <c>PageDrawing.DrawFrame</c> drops a zero-width border — so a bar that states its outline
+    /// colour explicitly lost that outline to the absence of an attribute it never had to state.
+    /// <see cref="DrawingStyleMatrix.Overlay"/> is the same merge the slide side does, and
+    /// <c>a:noFill</c> still beats the matrix on both sides: a shape suppressing its outline under
+    /// an <c>a:lnRef</c> has none.
+    /// </para>
+    /// <para>
+    /// Still only <c>a:solidFill</c> is read, on the area and the line and on what the theme
+    /// supplies for either. A gradient, a pattern or a picture fill is a real fill this cannot yet
+    /// draw, and painting its first stop as a flat colour would be a confident wrong answer rather
+    /// than an absent one; each leaves the frame as it was. That reaches the theme's second and
+    /// third fill styles, which every Office theme writes as gradients — <c>a:fillRef idx="2"</c>
+    /// therefore still draws nothing, and does so for the same stated reason as before.
     /// </para>
     /// </remarks>
     /// <param name="properties">The shape's own <c>spPr</c>, or null.</param>
-    /// <param name="theme">The theme its colours resolve against, or null.</param>
+    /// <param name="context">The theme and format matrix its style reference resolves against.</param>
     private static (Colour? Fill, Colour? Line, Length Width) Appearance(
-        XElement? properties, DrawingTheme? theme)
+        XElement? properties, DocxFrameContext context)
     {
         if (properties is null) return (null, null, Length.Zero);
 
-        Colour? fill = Solid(Child(properties, "solidFill"), theme);
+        DrawingTheme? theme = context.Theme;
 
+        // The style sits beside the spPr under the same wps:wsp, so it is reached through the
+        // parent rather than by descending: a shape's own style must not be taken from a drawing
+        // nested inside its text box.
+        XElement? style = properties.Parent?.Elements()
+            .FirstOrDefault(child => child.Name.LocalName == "style");
+
+        Colour? fill = Solid(Child(properties, "solidFill"), theme);
+        if (fill is null && !StatesFill(properties)
+            && context.Styles?.Fill(style, theme) is { } themedFill)
+        {
+            fill = Solid(Child(themedFill, "solidFill"), theme);
+        }
+
+        XElement? themedLine = context.Styles?.Line(style, theme);
         XElement? line = Child(properties, "ln");
+
+        if (line is null) line = themedLine;
+        else if (themedLine is not null && Child(line, "noFill") is null)
+            line = DrawingStyleMatrix.Overlay(themedLine, line);
+
         if (line is null) return (fill, null, Length.Zero);
 
         Colour? stroke = Solid(Child(line, "solidFill"), theme);
@@ -836,6 +884,12 @@ internal static class DocxFrames
             => solidFill is null
                 ? null
                 : DrawingColour.Read(solidFill.Elements().FirstOrDefault())?.Resolve(palette);
+
+        // Any of the six, not just a:solidFill: a shape stating a:noFill means it, and one
+        // stating a gradient or a picture means that rather than the theme's flat colour.
+        static bool StatesFill(XElement shapeProperties)
+            => shapeProperties.Elements().Any(child => child.Name.LocalName
+                is "noFill" or "solidFill" or "gradFill" or "blipFill" or "pattFill" or "grpFill");
     }
 
     /// <summary>
@@ -960,4 +1014,17 @@ internal static class DocxFrames
 internal readonly record struct DocxFrameContext(
     DrawingTheme? Theme = null,
     bool InHeaderFooter = false,
-    int CompatibilityMode = 0);
+    int CompatibilityMode = 0)
+{
+    /// <summary>
+    /// The theme's <c>a:fmtScheme</c>, which a shape's <c>wps:style</c> indexes into, or null when
+    /// the part declared none.
+    /// </summary>
+    /// <remarks>
+    /// Not a positional member, for the reason <see cref="DrawingTheme.Fonts"/> is not: every
+    /// caller that predates the format matrix — the whole of this type's test surface among them —
+    /// keeps compiling and keeps its old behaviour, which is a shape painted from what it states
+    /// and nothing else.
+    /// </remarks>
+    public DrawingStyleMatrix? Styles { get; init; }
+}

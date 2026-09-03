@@ -316,7 +316,8 @@ public sealed class OoxmlWordDocument : IWordProcessingDocument, IPaginatedDocum
 
         DocxLayoutSource source = new(
             _file.Styles, _file.Settings, footnotes: _file.Footnotes, endnotes: _file.Endnotes,
-            theme: _file.Theme, pictures: new DocxPictures(_file, _laidOut),
+            theme: _file.Theme, shapeStyles: _file.ShapeStyles,
+            pictures: new DocxPictures(_file, _laidOut),
             numbering: _file.Numbering, fontTable: _file.FontTable,
             constants: new ConstantFields(_fileName, Content.Metadata.Title))
         {
