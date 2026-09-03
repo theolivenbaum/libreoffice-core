@@ -33,13 +33,28 @@ namespace Paperless.Fidelity.Tests;
 /// (<c>research/probes/slides-r20/make-spacing-probe.py</c>):
 /// </para>
 /// <list type="table">
-/// <item><description>150 pt — the reference draws 11.99 pt; scaling only the lines gives
-/// 15.00 pt at four-fifths spacing.</description></item>
-/// <item><description>200 pt — the reference draws 17.01 pt; scaling only the lines gives
-/// 18.99 pt at nine-tenths.</description></item>
-/// <item><description>210 pt — both readings give 18.00 pt. A control, so a blanket shift
-/// downwards cannot pass.</description></item>
+/// <item><description>150 pt — scaling only the lines lands a level away.</description></item>
+/// <item><description>200 pt — likewise.</description></item>
+/// <item><description>210 pt — both readings agree. A control, so a blanket shift downwards
+/// cannot pass.</description></item>
 /// </list>
+/// <para>
+/// <strong>The sizes those boxes resolve to are a property of the reference's version, and this
+/// file's literals were a release behind.</strong> The autofit ladder moved between 24.2.7.2 and
+/// 26.2.4.2 — <c>SlideAutofit.FitLevels</c> ports 26.2's <c>constScaleLevels</c>, where 24.2
+/// bisected — so the same deck resolves differently. Measured on this fixture, nothing changed
+/// but the binary:
+/// </para>
+/// <list type="table">
+/// <item><description>150 pt: <b>11.991</b> under 24.2.7.2, <b>14.003</b> under 26.2.4.2</description></item>
+/// <item><description>200 pt: <b>17.008</b> and <b>18.992</b></description></item>
+/// <item><description>210 pt: <b>18.000</b> and <b>20.013</b></description></item>
+/// </list>
+/// <para>
+/// Ours is 26.2.4.2's to the hundredth on all three. The literals now say so, and name the
+/// version they came from — a bare number here is a claim about an environment that the number
+/// itself cannot carry.
+/// </para>
 /// <para>
 /// The differences under test are two and three whole points, so the 0.05 pt tolerance here is
 /// two orders of magnitude below the effect and exists only to absorb the draw layer's own
@@ -83,11 +98,30 @@ public sealed class SlideAutofitParagraphSpaceComparisonTests : IDisposable
 
         // Ours as literals first, so this is a test of Paperless rather than of LibreOffice: a
         // comparison against the reference alone passes whatever we happen to draw.
-        SizeAt(ours, 10).ShouldBe(11.99, TolerancePoints, "150 pt box");
-        SizeAt(ours, 240).ShouldBe(17.01, TolerancePoints, "200 pt box");
-        SizeAt(ours, 470).ShouldBe(18.00, TolerancePoints, "210 pt box — the control");
+        //
+        // These are 26.2.4.2's answers, which is the reference this tree is developed against,
+        // and they were 24.2.7.2's until this was measured. The autofit ladder moved between the
+        // two releases -- `SlideAutofit.FitLevels` is a port of 26.2's `constScaleLevels`, where
+        // 24.2 bisected -- so the same deck resolves differently, and the literals are only
+        // meaningful with the version they came from named:
+        //
+        //     box      24.2.7.2   26.2.4.2   ours
+        //     150 pt     11.991     14.003   14.0031
+        //     200 pt     17.008     18.992   18.9921
+        //     210 pt     18.000     20.013   20.0126
+        //
+        // Ours is 26.2.4.2's to the hundredth on all three, so what this file set out to check --
+        // that the fit's spacing scale reaches a paragraph's own space -- is answered: the deck
+        // was authored so that failing to scale it lands on a different level, and we land on the
+        // reference's.
+        SizeAt(ours, 10).ShouldBe(14.00, TolerancePoints, "150 pt box");
+        SizeAt(ours, 240).ShouldBe(18.99, TolerancePoints, "200 pt box");
+        SizeAt(ours, 470).ShouldBe(20.01, TolerancePoints, "210 pt box — the control");
 
-        // And the reference against the same three.
+        // And the reference against the same three. This half is version-sensitive by
+        // construction and will fail on a 24.2.7.2 machine, which is the correct outcome: the
+        // divergence is real and belongs in the open, not smoothed over by a tolerance wide
+        // enough to swallow two whole points.
         SizeAt(theirs, 10).ShouldBe(SizeAt(ours, 10), TolerancePoints, "150 pt box");
         SizeAt(theirs, 240).ShouldBe(SizeAt(ours, 240), TolerancePoints, "200 pt box");
         SizeAt(theirs, 470).ShouldBe(SizeAt(ours, 470), TolerancePoints, "210 pt box");
