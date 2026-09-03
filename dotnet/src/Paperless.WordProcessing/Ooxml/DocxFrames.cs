@@ -246,6 +246,8 @@ internal static class DocxFrames
         (bool isLine, bool isLineMirrored, bool isLineReversed) = LineGeometry(shapeProperties);
         (string? preset, IReadOnlyDictionary<string, double>? adjustments) =
             PresetGeometry(shapeProperties);
+        (GraphicsPath? fillOutline, GraphicsPath? strokeOutline) =
+            CustomOutline(shapeProperties, new DocSize(width, height));
 
         return new PageFrame
         {
@@ -262,6 +264,8 @@ internal static class DocxFrames
             ZOrder = ZOrder(anchor),
             Preset = preset,
             Adjustments = adjustments,
+            FillOutline = fillOutline,
+            StrokeOutline = strokeOutline,
             IsLine = isLine,
             IsLineMirrored = isLineMirrored,
             IsLineReversed = isLineReversed,
@@ -456,6 +460,8 @@ internal static class DocxFrames
         (bool isLine, bool isLineMirrored, bool isLineReversed) = LineGeometry(properties);
         (string? preset, IReadOnlyDictionary<string, double>? adjustments) =
             PresetGeometry(properties);
+        (GraphicsPath? fillOutline, GraphicsPath? strokeOutline) =
+            CustomOutline(properties, new DocSize(within.Width, within.Height));
 
         return envelope with
         {
@@ -468,6 +474,8 @@ internal static class DocxFrames
             // whose people are circles and squares and which came out as squares and squares.
             Preset = preset,
             Adjustments = adjustments,
+            FillOutline = fillOutline,
+            StrokeOutline = strokeOutline,
 
             // The member's own, not the envelope's: a group states one rotation per shape and none
             // of its own beyond the child transform, which is a scale and a translation.
@@ -897,6 +905,35 @@ internal static class DocxFrames
         if (end.Attribute("type")?.Value is not { Length: > 0 } type || type == "none") return default;
 
         return new LineEnd(type, end.Attribute("w")?.Value, end.Attribute("len")?.Value);
+    }
+
+    /// <summary>
+    /// The path an <c>a:custGeom</c> states, evaluated at the shape's own size, or nulls.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A custom geometry writes out its guides and paths instead of naming a preset, so it needs no
+    /// catalogue — and <see cref="CustomShapeGeometry.Custom"/> has evaluated them for the slide
+    /// side all along. This side asked only for <c>a:prstGeom</c>, so all <b>124 custom shapes
+    /// across 21 corpus documents</b> were painted as their bounding rectangles: the storyboard
+    /// templates' rings came out as squares, and their arrows — which are rotated — as diamonds.
+    /// </para>
+    /// <para>
+    /// Evaluated here rather than at drawing time because the formulae need a size and the shape's
+    /// is known here, where a preset is a name that costs nothing to carry. The two paths are kept
+    /// apart because a subpath states whether it is filled and whether it is stroked, and every
+    /// connector is one open subpath saying <c>fill="none"</c>.
+    /// </para>
+    /// </remarks>
+    private static (GraphicsPath? Fill, GraphicsPath? Stroke) CustomOutline(
+        XElement? properties, DocSize size)
+    {
+        if (properties is null) return (null, null);
+        if (Child(properties, "custGeom") is not { } geometry) return (null, null);
+        if (size.Width <= Length.Zero || size.Height <= Length.Zero) return (null, null);
+        if (CustomShapeGeometry.Custom(geometry, size) is not { } shape) return (null, null);
+
+        return (shape.FillOutline, shape.StrokeOutline);
     }
 
     private static double Rotation(XElement? properties)

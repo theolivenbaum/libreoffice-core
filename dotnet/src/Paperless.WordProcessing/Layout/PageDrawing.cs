@@ -271,7 +271,7 @@ public static class PageDrawing
         AffineTransform? shape = Turn(frame, frame.Frame.RotationDegrees);
         AffineTransform? text = Turn(frame, frame.Frame.TextRotationDegrees);
 
-        GraphicsPath? outline = PresetOutline(frame);
+        (GraphicsPath? filled, GraphicsPath? stroked) = Outlines(frame);
 
         Turned(sink, shape);
 
@@ -281,13 +281,13 @@ public static class PageDrawing
         if (frame.Frame.Gradient is { } ramp)
         {
             GradientPaint paint = ramp.Paint(frame.Area);
-            if (outline is null) Fill(frame.Area, paint, sink);
-            else sink.FillPath(outline, paint);
+            if (filled is null) Fill(frame.Area, paint, sink);
+            else sink.FillPath(filled, paint);
         }
         else if (frame.Frame.Fill is { } fill)
         {
-            if (outline is null) Fill(frame.Area, fill, sink);
-            else sink.FillPath(outline, Paint.Solid(fill));
+            if (filled is null) Fill(frame.Area, fill, sink);
+            else sink.FillPath(filled, Paint.Solid(fill));
         }
 
         if (frame.Frame.Chart is { } chart)
@@ -325,7 +325,7 @@ public static class PageDrawing
         Turned(sink, shape);
         try
         {
-            DrawBorder(frame, outline, colour, sink);
+            DrawBorder(frame, stroked, colour, sink);
         }
         finally
         {
@@ -795,45 +795,65 @@ public static class PageDrawing
     }
 
     /// <summary>
-    /// A frame's preset outline, placed in the page, or null when it has none to draw.
+    /// The two paths a frame's own geometry draws, placed in the page: what is filled and what is
+    /// stroked. Nulls when the shape states no geometry and the caller should paint its rectangle.
     /// </summary>
     /// <remarks>
     /// <para>
     /// <strong>Word documents declare shape geometry and this side used to ignore it.</strong> The
     /// same <c>spPr</c> was already being read for fill and outline, so every anchored shape was
-    /// painted as its bounding rectangle whatever <c>a:prstGeom</c> asked for: a timeline's
-    /// milestone circles came out as squares, a roadmap's chevrons as bars. The preset catalogue
-    /// was never the gap -- all 187 are in <c>PresetShapeGeometry.txt</c> and the slide side has
-    /// resolved them all along.
+    /// painted as its bounding rectangle whatever it asked for: a timeline's milestone circles came
+    /// out as squares, a roadmap's chevrons as bars. The catalogue was never the gap — all 187
+    /// presets are in <c>PresetShapeGeometry.txt</c> and the slide side has resolved them all along.
     /// </para>
     /// <para>
-    /// Translated rather than transformed. The geometry arrives in the shape's own coordinates
-    /// with its origin at the top left, and a frame is placed by its rectangle alone -- there is
-    /// no rotation to apply here, which is why this does not need the slide side's
-    /// <c>ShapeTransform</c> (and could not reach it: it lives in <c>Paperless.Presentations</c>,
-    /// which sits beside this library rather than below it).
+    /// <strong>Two paths and not one, because a subpath states whether it is filled and whether it
+    /// is stroked.</strong> Every connector — <c>bentConnector1</c> to <c>5</c>, the curved ones —
+    /// is a single open subpath declaring <c>fill="none"</c>, and a shape carrying one still takes
+    /// a fill from its <c>a:fillRef</c>. Filling the whole outline of one draws a solid blob where
+    /// the file states a line, which is what this did while it returned a single path.
     /// </para>
     /// <para>
-    /// A preset the catalogue does not know returns null and the caller paints the rectangle,
+    /// An <c>a:custGeom</c> arrives already resolved, on the frame, because its guide formulae need
+    /// the shape's extent and the reader has it; a preset is a name, so it is cheapest evaluated
+    /// once here with the placed rectangle in hand. Either way the result is translated rather than
+    /// transformed — the geometry is in the shape's own coordinates with its origin at the top left,
+    /// and any rotation is applied by the caller around the whole drawing.
+    /// </para>
+    /// <para>
+    /// A preset the catalogue does not know returns nulls and the caller paints the rectangle,
     /// which is what LibreOffice falls back to as well.
     /// </para>
     /// </remarks>
-    private static GraphicsPath? PresetOutline(PlacedFrame frame)
+    private static (GraphicsPath? Fill, GraphicsPath? Stroke) Outlines(PlacedFrame frame)
     {
-        if (frame.Frame.Preset is not { Length: > 0 } preset) return null;
-
         DocRect area = frame.Area;
-        if (area.Width <= Length.Zero || area.Height <= Length.Zero) return null;
+        if (area.Width <= Length.Zero || area.Height <= Length.Zero) return (null, null);
+
+        if (frame.Frame.FillOutline is { } custom)
+        {
+            return (Placed(custom, area), Placed(frame.Frame.StrokeOutline, area));
+        }
+
+        if (frame.Frame.Preset is not { Length: > 0 } preset) return (null, null);
 
         if (CustomShapeGeometry.Preset(
                 preset, new DocSize(area.Width, area.Height), frame.Frame.Adjustments)
             is not { } geometry)
         {
-            return null;
+            return (null, null);
         }
 
+        return (Placed(geometry.FillOutline, area), Placed(geometry.StrokeOutline, area));
+    }
+
+    /// <summary>A path in shape coordinates, moved to where the frame was placed.</summary>
+    private static GraphicsPath? Placed(GraphicsPath? path, DocRect area)
+    {
+        if (path is null) return null;
+
         GraphicsPath placed = new();
-        foreach (PathCommand command in geometry.Outline.Commands)
+        foreach (PathCommand command in path.Commands)
         {
             switch (command.Verb)
             {

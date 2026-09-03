@@ -376,6 +376,38 @@ public sealed record PageFrame
     /// </remarks>
     public string? Preset { get; init; }
 
+    /// <summary>
+    /// The path the shape states outright, in its own coordinates with the origin at its top left,
+    /// or null when it states a preset or nothing.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>a:custGeom</c> — a shape whose guides and paths the file writes out rather than naming.
+    /// It was not read at all on this side, so all <b>124 of them across 21 corpus documents</b>
+    /// were painted as their bounding rectangles. The storyboard templates are where it shows:
+    /// their rings came out as squares and their arrows, being rotated squares, as diamonds.
+    /// </para>
+    /// <para>
+    /// Resolved when the drawing is read rather than when it is drawn, unlike
+    /// <see cref="Preset"/>, because a custom geometry is evaluated from the shape's own guide
+    /// formulae and the shape's extent is known at that point — where a preset is a name that
+    /// costs nothing to carry and is cheapest evaluated once the placed rectangle is in hand.
+    /// </para>
+    /// <para>
+    /// Two paths and not one, because a subpath states whether it is filled and whether it is
+    /// stroked, and every connector is one open subpath saying <c>fill="none"</c>. Filling the
+    /// whole outline of one draws a solid blob where the file states a line.
+    /// </para>
+    /// </remarks>
+    public GraphicsPath? FillOutline { get; init; }
+
+    /// <summary>The part of <see cref="FillOutline"/>'s geometry that is stroked, or null.</summary>
+    /// <remarks>
+    /// Set together with <see cref="FillOutline"/> and never on its own; the two differ only where
+    /// the shape's subpaths state <c>fill="none"</c> or <c>stroke="false"</c>.
+    /// </remarks>
+    public GraphicsPath? StrokeOutline { get; init; }
+
     /// <summary>The <c>a:avLst</c> values the shape states, by name.</summary>
     /// <remarks>
     /// Null when it states none, which is not the same as an empty set: the preset's own defaults
