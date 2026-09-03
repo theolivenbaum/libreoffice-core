@@ -290,6 +290,42 @@ The three highest-risk areas, in order:
    Caladea installed (`fc-match Calibri` → `Carlito`) or every OOXML comparison is
    meaningless. Line height derivation from hhea vs OS/2 metrics has specific precedence
    rules — see `research/06-rendering.md` section B.
+
+   **`Paperless.Text` now ships those faces itself, as a floor rather than an override.**
+   28 files under `Fonts/Bundled/`, copied to a `fonts` folder beside the assembly and
+   searched **last**, so an installed face always wins and a machine missing one renders
+   correctly instead of substituting silently. `BundledFonts` is the switch:
+   `PAPERLESS_BUNDLED_FONTS=0` turns them off, `=prefer` puts them first.
+
+   **The default direction is measured, not chosen, and the obvious choice is the wrong
+   one.** Against LibreOffice 26.2.4.2 from the TDF tarball — the build these very files
+   came from — `Paperless.Fidelity.Tests` over 552 comparisons:
+
+   | | failed |
+   |---|---:|
+   | bundle as a fallback (installed wins) | **36** |
+   | bundle preferred over installed | **68** |
+
+   Preferring them is twice as bad, because **LibreOffice does not read its own bundled
+   fonts either** — it resolves through fontconfig, which sees `/usr/share/fonts`. Its
+   copies are its own floor for systems without them, exactly as ours are.
+
+   Two things fell out of establishing that, and both are worth keeping:
+
+   - **It comes down to one family.** Comparing the shipped files against Ubuntu 24.04's by
+     their own `hmtx`, Carlito and Liberation Sans are *metrically identical* — bundling
+     them changes no advance at all — while **Caladea genuinely differs**: `A` is 599 units
+     installed against 623 shipped, `o` 480 against 531, `M` 888 against 815.
+   - **Ship only the faces the distro packages ship.** The first cut bundled TDF's fuller
+     DejaVu, and `fonts-dejavu-core` carries **no Sans or Serif italic at all**. LibreOffice
+     therefore synthesises a lean for those, and a bundled real italic makes us draw
+     something the reference does not — it broke ten synthetic-oblique tests across three
+     projects and emptied three more into green skips. Trimming to the 28 faces the packages
+     actually carry returned the suite to its baseline exactly.
+
+   A test whose premise is "this face is not installed" is one that a later change to what
+   ships can silently empty. `SyntheticObliqueResolutionTests.ARomanOnlyFamilyHasItsSlantDrawn`
+   builds its own directory for that reason.
 2. **DrawingML theme colour resolution.** Get the `lumMod`/`shade`/`tint` chain wrong and
    every themed shape on every slide is the wrong colour at once.
 3. **Vector import (WMF/EMF/EMF+).** Full support is committed and there is no C# prior

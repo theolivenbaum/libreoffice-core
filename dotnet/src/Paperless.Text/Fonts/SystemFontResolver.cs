@@ -57,18 +57,50 @@ public sealed class SystemFontIndex
     /// The user's own fonts come first, because a font a user installed for themselves is the one
     /// they expect a document to render in.
     /// </remarks>
-    public static IReadOnlyList<string> DefaultDirectories { get; } =
-    [
-        Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".local", "share", "fonts"),
-        Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".fonts"),
-        "/usr/local/share/fonts",
-        "/usr/share/fonts",
-        "/Library/Fonts",
-        "/System/Library/Fonts",
-        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "Fonts"),
-    ];
+    public static IReadOnlyList<string> DefaultDirectories { get; } = Defaults();
+
+    /// <summary>Builds the search order: the faces we ship, then the platform's own.</summary>
+    /// <remarks>
+    /// <para>
+    /// The platform list is a local rather than a second static field, and that is not a style
+    /// choice. Static field and property initialisers run in <em>declaration order</em>, so a
+    /// <c>DefaultDirectories</c> declared above a <c>PlatformDirectories</c> it reads gets null
+    /// and the type initialiser throws — which surfaces as
+    /// <c>TypeInitializationException</c> from every call site at once, not as anything that
+    /// points at the ordering. Keeping the list here means there is no order to get wrong.
+    /// </para>
+    /// <para>
+    /// The faces we ship go <em>last</em>, so an installed one always wins. They are a floor
+    /// under the font set, not an override of it: their job is that a machine missing Carlito or
+    /// DejaVu renders correctly instead of silently substituting, which is the failure
+    /// <c>dotnet/CLAUDE.md</c> records as moving 53 of 534 page counts with LibreOffice held
+    /// constant. See <see cref="BundledFonts"/> for the measurement that settled the direction,
+    /// and for the opt-in that reverses it.
+    /// </para>
+    /// </remarks>
+    private static List<string> Defaults()
+    {
+        List<string> directories = [];
+
+        if (BundledFonts.Preferred && BundledFonts.Directory is { } first) directories.Add(first);
+
+        string home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        directories.AddRange([
+            Path.Combine(home, ".local", "share", "fonts"),
+            Path.Combine(home, ".fonts"),
+            "/usr/local/share/fonts",
+            "/usr/share/fonts",
+            "/Library/Fonts",
+            "/System/Library/Fonts",
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "Fonts"),
+        ]);
+
+        // Last, so an installed face always wins. That is the safe direction and it was measured
+        // rather than assumed -- see BundledFonts.Preferred.
+        if (!BundledFonts.Preferred && BundledFonts.Directory is { } last) directories.Add(last);
+
+        return directories;
+    }
 
     /// <summary>The extensions a font file may have.</summary>
     private static readonly string[] Extensions = [".ttf", ".otf", ".ttc", ".otc"];
