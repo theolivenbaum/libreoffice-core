@@ -354,6 +354,35 @@ public sealed record PageFrame
     /// </remarks>
     public uint ZOrder { get; init; }
 
+    /// <summary>
+    /// The shape's <c>a:prstGeom/@prst</c>, or null when it states none and is a plain box.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>A Word document's anchored shapes declare geometry and it was never read.</strong>
+    /// <c>a:prstGeom</c> is resolved on the slide side — <c>PptxSlideLayout</c> feeds it to
+    /// <see cref="Paperless.Ooxml.DrawingML.CustomShapeGeometry"/> — and the DOCX reader consulted
+    /// the same <c>spPr</c> for fill and outline while ignoring the preset, so every shape in a
+    /// Word file was drawn as its bounding rectangle whatever it asked for.
+    /// </para>
+    /// <para>
+    /// The catalogue was never the problem: all 187 presets are in
+    /// <c>PresetShapeGeometry.txt</c>, this side simply did not ask. Six corpus templates showed it
+    /// at once, and they are ordinary business documents rather than exotica: a timeline's
+    /// milestone circles came out as squares (<c>ellipse</c>, 32 uses across the six), a roadmap's
+    /// chevrons as bars (<c>homePlate</c>, 33), plus <c>diamond</c>, <c>rightArrow</c>,
+    /// <c>roundRect</c> and <c>bentConnector3</c>.
+    /// </para>
+    /// </remarks>
+    public string? Preset { get; init; }
+
+    /// <summary>The <c>a:avLst</c> values the shape states, by name.</summary>
+    /// <remarks>
+    /// Null when it states none, which is not the same as an empty set: the preset's own defaults
+    /// apply, and they are what make an unadjusted <c>roundRect</c> round rather than square.
+    /// </remarks>
+    public IReadOnlyDictionary<string, double>? Adjustments { get; init; }
+
     /// <summary>The frame's background, or null when it has none.</summary>
     public Colour? Fill { get; init; }
 

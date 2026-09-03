@@ -244,6 +244,8 @@ internal static class DocxFrames
         XElement? shapeProperties = ShapeProperties(placed);
         (Colour? fill, Colour? line, Length lineWidth) = Appearance(shapeProperties, context.Theme);
         (bool isLine, bool isLineMirrored) = LineGeometry(shapeProperties);
+        (string? preset, IReadOnlyDictionary<string, double>? adjustments) =
+            PresetGeometry(shapeProperties);
 
         return new PageFrame
         {
@@ -253,6 +255,8 @@ internal static class DocxFrames
             BorderWidth = lineWidth,
             BehindText = BehindText(anchor, context),
             ZOrder = ZOrder(anchor),
+            Preset = preset,
+            Adjustments = adjustments,
             IsLine = isLine,
             IsLineMirrored = isLineMirrored,
             Anchor = anchor is null ? FrameAnchor.AsCharacter : FrameAnchor.Paragraph,
@@ -844,6 +848,53 @@ internal static class DocxFrames
     /// nested drawing of its own — so this reads the shape asked about and not one inside its text.
     /// </remarks>
     private static XElement? ShapeProperties(XElement placed) => Descendant(placed, "spPr");
+
+    /// <summary>The shape's preset name and stated adjustments, or nulls when it declares none.</summary>
+    /// <remarks>
+    /// <para>
+    /// <c>rect</c> is returned as null on purpose. It is the bounding box the drawing code already
+    /// paints, so resolving it through the preset catalogue would build a four-point path to
+    /// arrive exactly where not asking arrives — and it is by far the commonest preset in the
+    /// corpus, 64 of the 148 uses across the six templates that showed this.
+    /// </para>
+    /// <para>
+    /// <c>line</c> and <c>straightConnector1</c> are left to <see cref="LineGeometry"/>, which
+    /// already draws the diagonal they mean: their preset outline is the box, so taking it here
+    /// would put three sides on the page that are not in the file.
+    /// </para>
+    /// </remarks>
+    private static (string? Preset, IReadOnlyDictionary<string, double>? Adjustments)
+        PresetGeometry(XElement? properties)
+    {
+        if (properties is null) return (null, null);
+
+        XElement? geometry = Child(properties, "prstGeom");
+        if (geometry?.Attribute("prst")?.Value is not { Length: > 0 } preset) return (null, null);
+        if (preset is "rect" or "line" or "straightConnector1") return (null, null);
+
+        Dictionary<string, double>? adjustments = null;
+        XElement? values = Child(geometry, "avLst");
+        foreach (XElement guide in
+                 values?.Elements().Where(e => e.Name.LocalName == "gd") ?? [])
+        {
+            if (guide.Attribute("name")?.Value is not { Length: > 0 } name) continue;
+
+            // `a:avLst` states a formula, and for an adjustment it is `val <n>` -- a literal. The
+            // other forms are computed guides and belong to the preset rather than to the shape,
+            // so anything that is not a plain value is left for the catalogue's own default.
+            string? formula = guide.Attribute("fmla")?.Value;
+            if (formula is null || !formula.StartsWith("val ", StringComparison.Ordinal)) continue;
+
+            if (double.TryParse(
+                    formula.AsSpan(4), System.Globalization.NumberStyles.Float,
+                    System.Globalization.CultureInfo.InvariantCulture, out double value))
+            {
+                (adjustments ??= [])[name] = value;
+            }
+        }
+
+        return (preset, adjustments);
+    }
 
     /// <summary>
     /// Whether a shape's outline is its box's diagonal rather than its four sides, and which

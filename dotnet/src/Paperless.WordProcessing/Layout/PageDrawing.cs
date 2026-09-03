@@ -1,3 +1,4 @@
+using Paperless.Ooxml.DrawingML;
 using Paperless.Core.Geometry;
 using Paperless.Core.Graphics;
 using Paperless.Core.Units;
@@ -258,7 +259,13 @@ public static class PageDrawing
     /// </remarks>
     private static void DrawFrame(PlacedFrame frame, IDrawingSink sink)
     {
-        if (frame.Frame.Fill is { } fill) Fill(frame.Area, fill, sink);
+        GraphicsPath? outline = PresetOutline(frame);
+
+        if (frame.Frame.Fill is { } fill)
+        {
+            if (outline is null) Fill(frame.Area, fill, sink);
+            else sink.FillPath(outline, Paint.Solid(fill));
+        }
 
         if (frame.Frame.Chart is { } chart)
             FrameChart.Draw(sink, chart, frame.Area, frame.Frame.ChartFontFamily);
@@ -305,6 +312,14 @@ public static class PageDrawing
         // A line shape's outline is its diagonal rather than its rectangle: corner to opposite corner,
         // which is the two-point path `ImportShape` builds for it, with the mirror flags choosing which
         // pair of corners. Drawing the box instead puts three sides on the page that are not in the file.
+        // The shape's own geometry, when it declares one. Before the line shape below, because a
+        // preset never reaches here -- `line` and `straightConnector1` are excluded at the reader.
+        if (outline is not null)
+        {
+            sink.StrokePath(outline, stroke);
+            return;
+        }
+
         if (frame.Frame.IsLine)
         {
             sink.StrokePath(
@@ -653,6 +668,65 @@ public static class PageDrawing
         }
 
         return runs;
+    }
+
+    /// <summary>
+    /// A frame's preset outline, placed in the page, or null when it has none to draw.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>Word documents declare shape geometry and this side used to ignore it.</strong> The
+    /// same <c>spPr</c> was already being read for fill and outline, so every anchored shape was
+    /// painted as its bounding rectangle whatever <c>a:prstGeom</c> asked for: a timeline's
+    /// milestone circles came out as squares, a roadmap's chevrons as bars. The preset catalogue
+    /// was never the gap -- all 187 are in <c>PresetShapeGeometry.txt</c> and the slide side has
+    /// resolved them all along.
+    /// </para>
+    /// <para>
+    /// Translated rather than transformed. The geometry arrives in the shape's own coordinates
+    /// with its origin at the top left, and a frame is placed by its rectangle alone -- there is
+    /// no rotation to apply here, which is why this does not need the slide side's
+    /// <c>ShapeTransform</c> (and could not reach it: it lives in <c>Paperless.Presentations</c>,
+    /// which sits beside this library rather than below it).
+    /// </para>
+    /// <para>
+    /// A preset the catalogue does not know returns null and the caller paints the rectangle,
+    /// which is what LibreOffice falls back to as well.
+    /// </para>
+    /// </remarks>
+    private static GraphicsPath? PresetOutline(PlacedFrame frame)
+    {
+        if (frame.Frame.Preset is not { Length: > 0 } preset) return null;
+
+        DocRect area = frame.Area;
+        if (area.Width <= Length.Zero || area.Height <= Length.Zero) return null;
+
+        if (CustomShapeGeometry.Preset(
+                preset, new DocSize(area.Width, area.Height), frame.Frame.Adjustments)
+            is not { } geometry)
+        {
+            return null;
+        }
+
+        GraphicsPath placed = new();
+        foreach (PathCommand command in geometry.Outline.Commands)
+        {
+            switch (command.Verb)
+            {
+                case PathVerb.MoveTo: placed.MoveTo(Shift(command.Point)); break;
+                case PathVerb.LineTo: placed.LineTo(Shift(command.Point)); break;
+                case PathVerb.CubicTo:
+                    placed.CubicTo(
+                        Shift(command.Control1), Shift(command.Control2), Shift(command.Point));
+                    break;
+                case PathVerb.Close: placed.Close(); break;
+                default: break;
+            }
+        }
+
+        return placed;
+
+        DocPoint Shift(DocPoint point) => new(area.X + point.X, area.Y + point.Y);
     }
 
     /// <summary>Fills a rectangle, which is what a shade and a rule both are.</summary>
