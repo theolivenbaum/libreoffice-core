@@ -363,10 +363,16 @@ internal static class DocxFrames
 
         List<PageFrame> frames = [envelope];
 
-        Walk(group, TransformOf(group, size), 0);
+        // The outermost group's own fill counts too: `wpg:wgp` carries a `wpg:grpSpPr` exactly
+        // as a nested `wpg:grpSp` does, and a member of it asking for `a:grpFill` means that one.
+        Walk(group, TransformOf(group, size), 0, GroupFill(group, context, default));
         return frames;
 
-        void Walk(XElement container, GroupTransform transform, int depth)
+        // `inherited` is the fill the enclosing group offers a child that asks for it with
+        // `a:grpFill` -- see `Appearance`. Resolved on the way down because a group has no
+        // geometry of its own: its `wpg:grpSpPr` fill exists only to be inherited.
+        void Walk(
+            XElement container, GroupTransform transform, int depth, FrameAppearance inherited)
         {
             if (depth > MaxGroupNesting) return;
 
@@ -375,13 +381,17 @@ internal static class DocxFrames
                 switch (child.Name.LocalName)
                 {
                     case "grpSp" or "wgp" or "wpc":
-                        Walk(child, transform.Around(child, TransformOf(child, size)), depth + 1);
+                        Walk(
+                            child,
+                            transform.Around(child, TransformOf(child, size)),
+                            depth + 1,
+                            GroupFill(child, context, inherited));
                         break;
 
                     case "wsp" or "pic" or "sp":
                     {
                         if (Leaf(child, transform, envelope, size, content, anchorOffset, pictures,
-                                 context)
+                                 context, inherited)
                             is { } leaf)
                         {
                             frames.Add(leaf);
@@ -395,6 +405,31 @@ internal static class DocxFrames
                 }
             }
         }
+    }
+
+    /// <summary>
+    /// The fill a group offers the children that ask for it with <c>a:grpFill</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Never painted. A group has no geometry of its own, so the fill on its <c>wpg:grpSpPr</c>
+    /// exists only to be inherited — which is why it is resolved on the way down the tree rather
+    /// than turned into a frame. A group may itself say <c>a:grpFill</c>, so what the group above
+    /// offered is passed in and the chain resolves as far up as it is written.
+    /// </para>
+    /// <para>
+    /// Censused over the corpus, <b>661 shapes across 14 <c>docx</c></b> state <c>a:grpFill</c>, and
+    /// they are concentrated: eight genogram templates carry 573 of them between them. Every one
+    /// drew unfilled, which on those documents is most of the ink.
+    /// </para>
+    /// </remarks>
+    private static FrameAppearance GroupFill(
+        XElement group, DocxFrameContext context, FrameAppearance inherited)
+    {
+        XElement? properties = group.Elements()
+            .FirstOrDefault(child => child.Name.LocalName is "grpSpPr" or "spPr");
+
+        return properties is null ? inherited : Appearance(properties, context, inherited);
     }
 
     /// <summary>How deep a group may nest before the walk gives up.</summary>
@@ -435,7 +470,8 @@ internal static class DocxFrames
         Func<XElement, IReadOnlyList<PageBlock>>? content,
         int anchorOffset,
         DocxPictures? pictures,
-        DocxFrameContext context)
+        DocxFrameContext context,
+        FrameAppearance inherited)
     {
         XElement? properties = shape.Elements()
             .FirstOrDefault(child => child.Name.LocalName is "spPr");
@@ -456,7 +492,7 @@ internal static class DocxFrames
             ? pictures.Read(shape)
             : FramePicture.None;
 
-        FrameAppearance paint = Appearance(properties, context);
+        FrameAppearance paint = Appearance(properties, context, inherited);
         (bool isLine, bool isLineMirrored, bool isLineReversed) = LineGeometry(properties);
         (string? preset, IReadOnlyDictionary<string, double>? adjustments) =
             PresetGeometry(properties);
@@ -1045,7 +1081,12 @@ internal static class DocxFrames
     /// </remarks>
     /// <param name="properties">The shape's own <c>spPr</c>, or null.</param>
     /// <param name="context">The theme and format matrix its style reference resolves against.</param>
-    private static FrameAppearance Appearance(XElement? properties, DocxFrameContext context)
+    /// <param name="inherited">
+    /// What the enclosing group offers a shape saying <c>a:grpFill</c>, which is the group's own
+    /// fill resolved on the way down. Default for a shape that is not in one.
+    /// </param>
+    private static FrameAppearance Appearance(
+        XElement? properties, DocxFrameContext context, FrameAppearance inherited = default)
     {
         if (properties is null) return default;
 
@@ -1059,6 +1100,15 @@ internal static class DocxFrames
 
         Colour? fill = Solid(Child(properties, "solidFill"), theme);
         GradientDescription? gradient = DrawingGradient.Read(Child(properties, "gradFill"), theme);
+
+        // `a:grpFill` is not a fill but a reference to the enclosing group's, so it takes what the
+        // group offered and ends the search: a shape asking for one that has none is unfilled
+        // rather than falling through to its style's.
+        if (Child(properties, "grpFill") is not null)
+        {
+            fill = inherited.Fill;
+            gradient = inherited.Gradient;
+        }
 
         if (fill is null && gradient is null && !StatesFill(properties)
             && context.Styles?.Fill(style, theme) is { } themedFill)
