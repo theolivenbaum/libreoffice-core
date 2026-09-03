@@ -345,6 +345,7 @@ dotnet/probes/words-f-01/gate-after.tsv	2026-08-13	current	26.2.4.2	present	curr
 dotnet/probes/words-f-01/gate-base.tsv	2026-08-13	current	26.2.4.2	present	current	-
 dotnet/probes/words-f-01/prediction.md	2026-08-13	current	26.2.4.2	present	current	-
 dotnet/probes/words-f-01/results.md	2026-08-13	current	26.2.4.2	present	current	-
+dotnet/probes/words-frame-origins/results.md	2026-09-03	current	24.2.7.2	present	current	-
 dotnet/probes/words-metrics-01/baseline.tsv	2026-08-15	current	26.2.4.2	present	current	-
 dotnet/probes/words-metrics-01/final.tsv	2026-08-15	current	26.2.4.2	present	current	-
 dotnet/probes/words-metrics-01/prediction.md	2026-08-15	current	26.2.4.2	present	current	-
