@@ -259,7 +259,21 @@ public static class PageDrawing
     /// </remarks>
     private static void DrawFrame(PlacedFrame frame, IDrawingSink sink)
     {
+        // A turned shape is the same drawing in a turned space, so the fill, the outline and a
+        // picture all go through one transform rather than each being rotated in its own terms.
+        // `a:xfrm/@rot` turns the shape about the centre of its stated rectangle, which is what the
+        // translate-rotate-translate composition below says.
+        //
+        // The text goes through its own, because `wps:bodyPr/@rot` states the text's angle rather
+        // than an addition to the shape's — see `PageFrame.TextRotationDegrees` for the census that
+        // establishes it and the reference rendering that confirms it. The two are usually equal and
+        // are usually both zero.
+        AffineTransform? shape = Turn(frame, frame.Frame.RotationDegrees);
+        AffineTransform? text = Turn(frame, frame.Frame.TextRotationDegrees);
+
         GraphicsPath? outline = PresetOutline(frame);
+
+        Turned(sink, shape);
 
         // A gradient before a colour, because the two are never both set and a gradient is the
         // one that needs the placed rectangle: it is carried unplaced on the frame and becomes a
@@ -282,6 +296,8 @@ public static class PageDrawing
             DrawPicture(sink, frame, vector, null);
         else if (frame.Frame.Image is { } image) DrawPicture(sink, frame, null, image);
 
+        Upright(sink, shape);
+
         // The frame's own fill *is* the background an automatic font colour resolves against, and the
         // reason it was not, for four rounds, is that the two witnesses against it were misread.
         //
@@ -299,11 +315,66 @@ public static class PageDrawing
         // *anchor's* background, which is the other limb of round 62's rule and the one `012`'s white
         // title needs. The anchor is not reachable from here — frames are drawn from a per-page list —
         // so that limb is still open.
+        Turned(sink, text);
         DrawFlow(frame.Content, sink, frame.Frame.Fill ?? default);
+        Upright(sink, text);
 
         if (frame.Frame.BorderColour is not { } colour) return;
         if (frame.Frame.BorderWidth <= Length.Zero) return;
 
+        Turned(sink, shape);
+        try
+        {
+            DrawBorder(frame, outline, colour, sink);
+        }
+        finally
+        {
+            Upright(sink, shape);
+        }
+    }
+
+    /// <summary>
+    /// The rotation a frame is drawn through at a given angle, or null when it is square to the page.
+    /// </summary>
+    /// <remarks>
+    /// Null rather than the identity so that the overwhelming majority of frames pay neither a
+    /// <c>Save</c>/<c>Restore</c> pair nor a transform in the output: a PDF content stream gains
+    /// three operators per turned shape and none per upright one.
+    /// </remarks>
+    private static AffineTransform? Turn(PlacedFrame frame, double degrees)
+    {
+        if (degrees == 0) return null;
+
+        DocRect area = frame.Area;
+        double cx = area.X.Emu + (area.Width.Emu / 2.0);
+        double cy = area.Y.Emu + (area.Height.Emu / 2.0);
+
+        return AffineTransform.Concat(
+            AffineTransform.Concat(
+                AffineTransform.Translation(-cx, -cy),
+                AffineTransform.Rotation(degrees * Math.PI / 180.0)),
+            AffineTransform.Translation(cx, cy));
+    }
+
+    /// <summary>Enters a turned space, or does nothing when there is no turn.</summary>
+    private static void Turned(IDrawingSink sink, AffineTransform? turn)
+    {
+        if (turn is not { } transform) return;
+
+        sink.Save();
+        sink.Transform(transform);
+    }
+
+    /// <summary>Leaves it again.</summary>
+    private static void Upright(IDrawingSink sink, AffineTransform? turn)
+    {
+        if (turn is not null) sink.Restore();
+    }
+
+    /// <summary>The frame's outline, stroked where the shape's own geometry says.</summary>
+    private static void DrawBorder(
+        PlacedFrame frame, GraphicsPath? outline, Colour colour, IDrawingSink sink)
+    {
         Stroke stroke = new(Paint.Solid(colour), frame.Frame.BorderWidth);
         DocRect area = frame.Area;
 

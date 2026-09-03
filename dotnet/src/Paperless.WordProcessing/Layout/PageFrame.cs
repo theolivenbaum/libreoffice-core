@@ -383,6 +383,52 @@ public sealed record PageFrame
     /// </remarks>
     public IReadOnlyDictionary<string, double>? Adjustments { get; init; }
 
+    /// <summary>
+    /// How far the shape is turned about its own centre, clockwise, in degrees.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>a:xfrm/@rot</c>, in degrees rather than the file's sixtieths of one. Zero for the great
+    /// majority of frames, which is why it is a plain <c>double</c> rather than something nullable:
+    /// no rotation and a rotation of nothing are the same drawing.
+    /// </para>
+    /// <para>
+    /// The extent is stated <em>unrotated</em> and the rotation is applied about the centre of that
+    /// rectangle, so <see cref="Size"/> is the shape's own width and height whatever this says. It
+    /// is the drawing that turns, not the box: a connector 22 pt wide and nothing tall at 270° is
+    /// still 22 pt long, drawn down the page instead of across it.
+    /// </para>
+    /// <para>
+    /// <b>The wrap is not turned with it.</b> LibreOffice wraps text round a rotated shape's
+    /// enclosing rectangle, which is larger; this still wraps round the stated one. That is visible
+    /// only for a rotated shape that text flows beside, and the corpus's rotated shapes are
+    /// overwhelmingly connectors and arrows inside groups, which wrap through.
+    /// </para>
+    /// </remarks>
+    public double RotationDegrees { get; init; }
+
+    /// <summary>
+    /// How far the frame's own text is turned, clockwise, in degrees — which is not always the
+    /// same as <see cref="RotationDegrees"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>wps:bodyPr/@rot</c> is the angle of the text itself, and it is stated absolutely rather
+    /// than as an addition to the shape's: a shape turned 345° whose body states <c>rot="0"</c>
+    /// carries upright text across a slanting box. Where the body states nothing, the text takes
+    /// the shape's angle, which is the ordinary case of a label turning with the thing it labels.
+    /// </para>
+    /// <para>
+    /// It is not a corner of the schema. <b>Every one of the 112 rotated text-bearing shapes in the
+    /// 271-document corpus states <c>rot="0"</c></b> — 107 plainly and 5 with <c>upright="1"</c>
+    /// beside it — so treating the shape's angle as the text's would have been wrong on all 112.
+    /// The reference settles it too: <c>025_Unit_Circle_Chart_Cos_and_Sin_Model</c> arranges 32
+    /// labels round a circle at 32 different angles and LibreOffice draws every one of them
+    /// horizontal.
+    /// </para>
+    /// </remarks>
+    public double TextRotationDegrees { get; init; }
+
     /// <summary>The frame's background, or null when it has none.</summary>
     public Colour? Fill { get; init; }
 
