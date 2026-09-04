@@ -176,7 +176,110 @@ public sealed class FrameEffectExtentTests
         frame.InlineExtent.Height.ShouldBe(frame.Size.Height);
     }
 
-    private static PageFrame Inline(string effectExtent, string dist = "")
+    /// <summary>A plain picture takes none of it, because LibreOffice stops treating it as a shape.</summary>
+    /// <remarks>
+    /// <para>
+    /// <c>GraphicImport.cxx</c>:879 gates the whole margin block on <c>if (m_xShape.is())</c>, and
+    /// <c>bUseShape = !m_xGraphicObject.is()</c> at :844 — an unrotated, effect-free picture is turned
+    /// into a Writer graphic object and its shape disposed, so nothing below it runs.
+    /// </para>
+    /// <para>
+    /// Measured on both references: a <c>pic:pic</c> at <c>137160</c> on all four edges moves the line
+    /// below it by <b>0.00 pt</b>, where the same fixture built from a <c>wps:wsp</c> moves it by
+    /// 21.60. This is the case that cost <c>gpp-pr-top-7-office-markets-4q-2023.docx</c> 3.35 pt on
+    /// everything below its chart, and <c>TE.CAO.00125 … OJT Logbook.docx</c> a whole page off a
+    /// 0.75 pt header logo.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void APlainPictureTakesNoEffectExtent()
+    {
+        PageFrame frame = Picture("""<wp:effectExtent l="137160" t="137160" r="137160" b="137160"/>""");
+
+        frame.EffectExtent.ShouldBe(Margins.Zero);
+        frame.InlineExtent.Height.ShouldBe(frame.Size.Height);
+        frame.InlineExtent.Width.ShouldBe(frame.Size.Width);
+    }
+
+    /// <summary>
+    /// A picture carrying DrawingML effects keeps it, because that refuses the conversion.
+    /// </summary>
+    /// <remarks>
+    /// <c>bContainsEffects</c> (<c>GraphicImport.cxx</c>:820-825) is any of <c>EffectProperties</c>,
+    /// <c>3DEffectProperties</c> or <c>ArtisticEffectProperties</c> in the grab bag — written by
+    /// <c>oox</c> from <c>a:effectLst</c>, <c>a:scene3d</c>/<c>a:sp3d</c> and the <c>a14</c> artistic
+    /// effects. Measured: the same picture with an <c>a:outerShdw</c> moves its line by
+    /// <b>+21.65 pt</b>, exactly as a shape does; with the shadow and no extent, by 0.00.
+    /// </remarks>
+    [Theory]
+    [InlineData("""<a:effectLst><a:outerShdw blurRad="50800"><a:srgbClr val="000000"/></a:outerShdw></a:effectLst>""")]
+    [InlineData("""<a:scene3d><a:camera prst="orthographicFront"/></a:scene3d>""")]
+    [InlineData("""<a:sp3d extrusionH="57150"/>""")]
+    public void APictureCarryingEffectsKeepsTheExtent(string effects)
+    {
+        PageFrame frame = Picture(
+            """<wp:effectExtent l="137160" t="137160" r="137160" b="137160"/>""", effects);
+
+        frame.InlineExtent.Height.ShouldBe(frame.Size.Height + Length.FromPoints(21.6));
+    }
+
+    /// <summary>
+    /// A rotated drawing takes none of it, and the growth it does get is not the extent.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A rotation sends the import down the other branch of <c>nOOXAngle == 0</c>, which derives the
+    /// margins from the rotated snap rectangle. Worked through for a 20 degree, 144 x 50.4 pt drawing
+    /// those margins come out negative on both edges and clamp to zero at
+    /// <c>GraphicImport.cxx</c>:1248-1252.
+    /// </para>
+    /// <para>
+    /// The measurement settles it rather than the arithmetic: that fixture grows its line by
+    /// <b>+46.25 pt</b> with a <c>137160</c> extent, and by <b>+46.25 pt</b> with no extent at all.
+    /// The growth is the rotated bounding box — which we do not yet size a rotated inline drawing by,
+    /// and which is a separate open defect — and none of it is the effect extent.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void ARotatedDrawingTakesNoEffectExtent()
+    {
+        PageFrame frame = Inline(
+            """<wp:effectExtent l="137160" t="137160" r="137160" b="137160"/>""", rotation: 1200000);
+
+        frame.EffectExtent.ShouldBe(Margins.Zero);
+        frame.InlineExtent.Height.ShouldBe(frame.Size.Height);
+    }
+
+    private static PageFrame Picture(string effectExtent, string effects = "")
+    {
+        XElement drawing = XElement.Parse(
+            $"""
+            <w:drawing xmlns:w="{W}" xmlns:wp="{Wp}" xmlns:a="{A}" xmlns:pic="{Pic}"
+                       xmlns:r="{R}">
+              <wp:inline distT="0" distB="0" distL="0" distR="0">
+                <wp:extent cx="1828800" cy="640080"/>
+                {effectExtent}
+                <a:graphic><a:graphicData uri="{Pic}">
+                  <pic:pic>
+                    <pic:nvPicPr><pic:cNvPr id="1" name="p"/><pic:cNvPicPr/></pic:nvPicPr>
+                    <pic:blipFill><a:blip r:embed="rId1"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill>
+                    <pic:spPr>
+                      <a:xfrm><a:off x="0" y="0"/><a:ext cx="1828800" cy="640080"/></a:xfrm>
+                      <a:prstGeom prst="rect"><a:avLst/></a:prstGeom>
+                      {effects}
+                    </pic:spPr>
+                  </pic:pic>
+                </a:graphicData></a:graphic>
+              </wp:inline>
+            </w:drawing>
+            """);
+
+        return DocxFrames
+            .ReadAll(drawing, null, anchorOffset: 0, pictures: null)
+            .ShouldHaveSingleItem();
+    }
+
+    private static PageFrame Inline(string effectExtent, string dist = "", int rotation = 0)
     {
         XElement drawing = XElement.Parse(
             $"""
@@ -186,7 +289,7 @@ public sealed class FrameEffectExtentTests
                 {effectExtent}
                 <a:graphic><a:graphicData><wps:wsp>
                   <wps:spPr>
-                    <a:xfrm><a:off x="0" y="0"/><a:ext cx="1828800" cy="640080"/></a:xfrm>
+                    <a:xfrm{(rotation == 0 ? "" : $" rot=\"{rotation}\"")}><a:off x="0" y="0"/><a:ext cx="1828800" cy="640080"/></a:xfrm>
                     <a:prstGeom prst="rect"><a:avLst/></a:prstGeom>
                   </wps:spPr>
                 </wps:wsp></a:graphicData></a:graphic>
@@ -203,4 +306,6 @@ public sealed class FrameEffectExtentTests
     private const string Wp = "http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing";
     private const string A = "http://schemas.openxmlformats.org/drawingml/2006/main";
     private const string Wps = "http://schemas.microsoft.com/office/word/2010/wordprocessingShape";
+    private const string Pic = "http://schemas.openxmlformats.org/drawingml/2006/picture";
+    private const string R = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
 }

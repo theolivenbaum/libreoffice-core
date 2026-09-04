@@ -122,58 +122,162 @@ Recorded here so the next round does not read the un-offset placement as an over
 | pages whose shape span differs from the reference's | 51 of 52 | **0 of 52** | — |
 | words (`pdftotext`) | — | 2492 | 2468 |
 
+All 340 of its drawings are `wps:wsp` shapes, so the picture rule below leaves the document exactly
+where this put it.
+
 Word count is inside the gate's `max(2%, 3)` band, which is 49.4 here against a delta of 24.
 
-## The header case, and the one corpus row this moves the wrong way
+## Only for a drawing that stays a shape — a plain picture takes none of it
 
-A words sweep either side of the change moved **three** of 338 documents and no others:
+**The first cut of this change applied the extent to every unrotated inline drawing, and that was
+wrong for pictures.** It is recorded here rather than quietly corrected, because the fixtures that
+missed it were all built from `wps:wsp` shapes and the gate could not see the result.
 
-| document | before | after |
-|---|---|---|
-| `drawingset-001/.../WordArt_Shapes_Arrows_Catalog1.docx` | `pages` 45/52 | **`match` 52/52** |
-| `pagination-002/.../docs-quality-MA.IMS.00001-...manual.docx` | `match`, 12188 words | `match`, 12189 words |
-| `done-016/.../TE.CAO.00125 ... OJT Logbook.docx` | `match` 15/15 | **`pages,words` 16/15** |
+The whole block that folds the extent into the margins sits inside `if (m_xShape.is())`
+(`GraphicImport.cxx`:879-883), and twenty lines above it:
 
-The third is the one to explain. Its `word/document.xml` holds no drawing at all; its only effect
-extent is in `header2.xml` and `header3.xml`, on a 42.75 pt inline logo, and it is
-`l="0" t="0" r="9525" b="9525"` — **0.75 pt** on the bottom edge.
+```cpp
+if ( nRotation == 0 && !bContainsEffects )
+    m_xGraphicObject = createGraphicObject( xGraphic, xShapeProps );
+bUseShape = !m_xGraphicObject.is( );
+```
 
-`make-header-fixture.py` puts one inline shape in a header and measures where the body's first line
-lands. Both references, again identical:
+A picture with no rotation and no DrawingML effects becomes a Writer graphic object, its shape is
+disposed, and **none of the margin code runs at all**. The conversion is refused — so the drawing
+stays a shape and does get the extent — when the picture is rotated (fdo#70457) or when
+`EffectProperties`, `3DEffectProperties` or `ArtisticEffectProperties` reach its grab bag.
 
-| header fixture | 24.2.7.2 | 26.2.4.2 | Δ | ours, before | ours, after |
-|---|---:|---:|---:|---:|---:|
-| `hdr-ee0` — control | 78.71 | 78.71 | — | 78.66 | 78.66 |
-| `hdr-ee9525-rb` — the logbook's own | 79.46 | 79.46 | **+0.75** | 78.66 | 79.41 |
-| `hdr-ee137160-b` | 89.51 | 89.51 | **+10.80** | 78.66 | 89.46 |
-| `hdr-ee137160-all` | 100.31 | 100.31 | **+21.60** | 78.66 | 100.26 |
+`make-picture-fixture.py` is the shape fixture with the `wps:wsp` replaced by a `pic:pic`. Both
+references identical on every row:
 
-**A header grows by the extent exactly as the body does**, ours grew by nothing before and matches
-after — to the same 0.05 pt the zero-extent control already carried, on all four.
+| picture fixture | 24.2.7.2 | 26.2.4.2 | Δ vs control |
+|---|---:|---:|---:|
+| `pic-ee0` — control | 64.20 | 64.20 | — |
+| `pic-ee137160` — all four edges | 64.20 | 64.20 | **+0.00** |
+| `pic-gpp` — `gpp-pr`'s own `l=19050 t=19050 r=21590 b=23495` | 64.20 | 64.20 | **+0.00** |
+| `pic-ln-ee137160` — plus a 2.25 pt `a:ln` border | 64.20 | 64.20 | **+0.00** |
+| `pic-ee137160-shadow` — plus an `a:outerShdw` | 85.85 | 85.85 | **+21.65** |
+| `pic-shadow-ee0` — the shadow alone | 64.25 | 64.25 | +0.00 |
+| `pic-scene3d` — plus `a:scene3d` and `a:sp3d` | 85.85 | 85.85 | **+21.60** |
+| `pic-ee137160-rot` — rotated 20 degrees | 110.45 | 110.45 | +46.25 |
+| `pic-rot-ee0` — rotated, **no extent at all** | 110.45 | 110.45 | **+46.25** |
 
-So the logbook's row moving is **the change being right, not wrong**: the document sat within 0.75 pt
-of a page boundary and two errors were cancelling. And the gate's verdict is the wrong instrument for
-deciding it, because this document is itself a version-gap case:
+Three things it settles:
 
-| | pages |
-|---|---:|
-| 24.2.7.2 — what `batch-check.sh` scores against | 15 |
-| **26.2.4.2 — what the tree is calibrated to** | **18** |
-| ours, before | 15 |
-| ours, after | 16 |
+1. **A plain picture takes nothing**, at any extent, symmetric or not.
+2. **A picture carrying effects takes the full amount**, and the effect itself contributes nothing —
+   `pic-shadow-ee0` is the control. So it really is the extent, gated on the conversion being refused.
+3. **A border is not an effect.** `bContainsEffects` is only the three grab-bag entries; a picture
+   carrying a 2.25 pt `a:ln` still converts and still takes nothing. That matters because the corpus
+   pictures that carry an extent nearly all carry a border too, and "the extent is there to cover the
+   fat stroke" is a tempting reason to expect otherwise.
+4. **The rotated rows are not about the extent.** They are identical with and without one, so the
+   +46.25 is the *rotated bounding box* — LibreOffice sizes a rotated inline drawing by its snap
+   rectangle, and the rotated branch's margins clamp to zero at this angle. That is a separate open
+   defect: we size a rotated inline drawing by its unrotated extent and are 46.25 pt short on this
+   fixture, before and after this change alike. Applying the plain extent there would have been
+   curve-fitting towards a number produced by something else, so a rotation now skips it.
 
-Against the version that decides, **16 is closer than 15**. The remaining three pages are a separate
-and larger defect that this change neither caused nor addressed; `words-version-screen/results.md`'s
-rule applies — where the two references disagree with each other, the document needs reading rather
-than scoring, and it should not be worked from its gate row.
+### What that cost, and the correction it forces
+
+| document | page-1 one-sided ink vs 26.2, before | with the extent on pictures | with the rule |
+|---|---:|---:|---:|
+| `done-013/.../gpp-pr-top-7-office-markets-4q-2023.docx` | 8.30 | **9.86** | **8.30** |
+| `done-015/.../PI-doc.-no.-2E-Technical-Review-Report.docx` | 0.15 | — | 0.15 |
+
+`gpp-pr`'s chart is one unrotated `pic:pic` with `l=1.5 t=1.5 r=1.7 b=1.85` pt. Its picture is drawn
+at **identical x and y before and after** — measured off the PDF's own image placement, `(65.20,
+476.80)-(369.50, 654.95)` in both — so the horizontal growth moved nothing. What moved was everything
+*below* it: `02 January 2024, Hamburg.` sat at 385.74 pt, went to 389.09 with the extent applied, and
+is back at 385.74 with the rule. The reference puts it at 383.64, and that 2.10 pt residual is
+pre-existing and untouched by any of this.
+
+**And this overturns what the previous section of this file used to say about
+`TE.CAO.00125 … OJT Logbook.docx`.** That document went `match` 15/15 to `pages` 16/15, and it was
+recorded here as the change being right — a header logo whose 0.75 pt bottom extent legitimately
+grew the header, on the strength of a header fixture that showed both references growing by exactly
+that. **The header fixture was a `wps:wsp`; the logbook's logo is a `pic:pic`**, unrotated and
+effect-free, so it takes nothing. The document is back to 15 pages and back to `match`.
+
+The header measurement itself stands and is worth keeping, because it establishes the other half:
+
+| header fixture (a `wps:wsp`) | 24.2.7.2 | 26.2.4.2 | Δ | ours |
+|---|---:|---:|---:|---:|
+| `hdr-ee0` — control | 78.71 | 78.71 | — | 78.66 |
+| `hdr-ee9525-rb` | 79.46 | 79.46 | **+0.75** | 79.41 |
+| `hdr-ee137160-b` | 89.51 | 89.51 | **+10.80** | 89.46 |
+| `hdr-ee137160-all` | 100.31 | 100.31 | **+21.60** | 100.26 |
+
+**A header grows exactly as the body does — for a shape.** Both halves of the rule are needed, and
+having only one of them is what produced the wrong conclusion.
+
+### The whole track, measured by displacement rather than by ink
+
+A words sweep either side of the picture rule, with `/CreationDate` masked so a byte comparison means
+something: **38 of 338 of our renderings change and 300 are identical.** Gate verdicts go
+`MATCH 310 MISMATCH 28` to **`MATCH 311 MISMATCH 27`** — the catalogue matches, and
+`TE.CAO.00125 … OJT Logbook.docx` returns to `match` at 15/15.
+
+Scoring those 38 needs care, and the first instrument used on them was the wrong one. Page-1
+**one-sided ink** — the share of the page where exactly one side has ink — reported 9 improved, 22
+unchanged and **6 worse**. It is displacement-sensitive by construction: a glyph that moves an eighth
+of a point can cross a pixel boundary and flip every pixel of its own outline. `FO.FCTOA.00010` is the
+worked example — its ink went **+0.76 "worse"** while its first body line moved from 47.16 pt to
+47.08 against the reference's 45.76, which is 0.08 pt **closer**, with the page count unchanged at 16.
+
+Mean |Δy| over page-1 words paired by text and order does not have that failure mode, and it is the
+column to read:
+
+| | documents | worst |
+|---|---:|---|
+| closer to 26.2 | 5 | `gpp-pr` **12.175 → 8.970 pt** (−3.205), `PI-doc` 0.749 → **0.049** (−0.700) |
+| unchanged | 25 | — |
+| further from 26.2 | 7 | `b050-19` 23.188 → 23.938 (+0.750) |
+| unmeasurable | 1 | `xx_SETIS_PWS_template` (too few paired words on page 1) |
+
+Net over the 38: **−2.47 pt** of mean displacement.
+
+**The seven that go further are worth naming rather than burying.** Four of them —
+`b050-19` (23.2 pt), `UG.CAO.00006` (12.0), `UG.CAO.00133` (10.8) and `May 25 bulletin` (4.5) — have
+page-1 deviations an order of magnitude larger than the movement, so a fraction of a point either way
+is riding on a different and much bigger defect. The other three move by 0.04 to 0.14 pt. In every
+case the direction is "we no longer add something the reference does not add", and the fixtures above
+measure that directly on an authored file where nothing else varies — plain, bordered, shadowed,
+3-D and rotated pictures, on both binaries. **Where a mechanism is measured in isolation and a corpus
+row disagrees, the corpus row is confounded**; these are documents where being wrong happened to
+cancel part of an unrelated error.
+
+The general lesson, which is the reason this section is written out rather than folded away: **a
+fixture set built from one element type measures that element type.** Eleven fixtures agreed with
+both references and all eleven were `wps:wsp`; the corpus documents that broke were pictures, and the
+gate scored one of them `match` while it moved 1.5 points of first-page ink. Vary the *kind* of thing
+under test, not only its numbers.
 
 ## Reproducing
 
+Three fixture generators, all read by the same `measure.py`:
+
 ```sh
 export PAPERLESS_CLI=.../tools/Paperless.Cli/bin/Debug/net10.0/linux-x64/Paperless.Cli
-python3 make-fixture.py /abs/scratch/fx
+python3 make-fixture.py         /abs/scratch/fx   # a wps:wsp shape in the body
+python3 make-picture-fixture.py /abs/scratch/px   # a pic:pic, plain / with effects / rotated
+python3 make-header-fixture.py  /abs/scratch/hx   # a shape in a header
 python3 measure.py /abs/scratch/fx /abs/scratch/out
 ```
+
+`make-picture-fixture.py` writes its own 8x8 PNG with `struct` and `zlib` rather than depending on an
+image library, so the fixture half runs in a bare container.
+
+`score.py` is the scorer the corpus table above uses, and it carries both metrics on purpose:
+
+```sh
+python3 score.py before.pdf after.pdf reference.pdf
+# ink  before 10.014  after 8.418  delta -1.596
+# dev  before 12.175  after 8.970  delta -3.205
+```
+
+Read `dev`. `ink` is there so that a later round comparing against a stored first-page-ink figure can
+reproduce it, and so that the two can be seen disagreeing.
 
 `measure.py` needs Pillow for the box band and `pdftotext` for the text lines. It renders each fixture
 through `/usr/bin/soffice`, `/opt/libreoffice26.2/program/soffice` and `$PAPERLESS_CLI`, so it re-checks

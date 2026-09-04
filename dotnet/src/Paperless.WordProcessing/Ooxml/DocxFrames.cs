@@ -281,7 +281,7 @@ internal static class DocxFrames
             VerticalAlignment = valign,
             VerticalOffset = y,
             Spacing = Spacing(placed),
-            EffectExtent = EffectExtent(placed, anchor),
+            EffectExtent = EffectExtent(placed, anchor, shapeProperties),
             IsImage = box is null && chart.Plot is null,
             Image = picture.Raster,
             Crop = picture.Crop,
@@ -360,7 +360,7 @@ internal static class DocxFrames
             VerticalAlignment = valign,
             VerticalOffset = y,
             Spacing = Spacing(placed),
-            EffectExtent = EffectExtent(placed, anchor),
+            EffectExtent = EffectExtent(placed, anchor, ShapeProperties(placed)),
             IsImage = false,
             Name = Child(placed, "docPr")?.Attribute("name")?.Value,
         };
@@ -1126,24 +1126,82 @@ internal static class DocxFrames
     /// <strong>0.00 pt</strong> against the control, on both installed references.
     /// </para>
     /// <para>
-    /// A rotated inline drawing takes the other branch of that <c>if</c> and is not covered here; the
-    /// catalogue that motivated this holds none, and the branch needs the shape's own bound rectangle
-    /// rather than the four numbers.
+    /// <strong>Only for a drawing that stays a <em>shape</em>, which a plain picture does not.</strong>
+    /// The whole block that folds the extent in sits inside <c>if (m_xShape.is())</c>
+    /// (<c>GraphicImport.cxx</c>:879-883), and <c>bUseShape = !m_xGraphicObject.is()</c> two dozen
+    /// lines above it: a picture with no rotation and no DrawingML effects is turned into a Writer
+    /// graphic object by <c>createGraphicObject</c>, its shape is disposed, and the margins are never
+    /// touched. The conversion is refused — so the drawing stays a shape and does get the extent —
+    /// when the picture is rotated (fdo#70457) or carries <c>EffectProperties</c>,
+    /// <c>3DEffectProperties</c> or <c>ArtisticEffectProperties</c> in its grab bag.
+    /// </para>
+    /// <para>
+    /// Measured, because reading that from the source alone would not have been enough to act on.
+    /// Same fixture as above with the shape replaced by a <c>pic:pic</c>, both references identical:
+    /// a plain picture at <c>137160</c> on all four edges moves its line by <b>+0.00 pt</b>, and so
+    /// does one carrying <c>gpp-pr</c>'s own asymmetric <c>l=19050 t=19050 r=21590 b=23495</c>; add an
+    /// <c>a:effectLst</c> outer shadow and the same picture moves it by <b>+21.65</b>, exactly as the
+    /// shape does. Applying it to plain pictures cost <c>gpp-pr-top-7-office-markets-4q-2023.docx</c>
+    /// 3.35 pt on everything below its chart.
+    /// </para>
+    /// <para>
+    /// A <strong>rotated</strong> drawing is skipped too, and that is a separate finding rather than
+    /// the same one. It takes the other branch of the <c>nOOXAngle == 0</c> test, which derives the
+    /// margins from the rotated snap rectangle; worked through for a 20 degree, 144 x 50.4 pt picture
+    /// those margins come out <em>negative</em> on both edges and clamp to zero. The measurement
+    /// agrees and settles it: that fixture grows its line by <b>+46.25 pt</b> with a
+    /// <c>137160</c> extent and by <b>+46.25 pt</b> with <em>no extent at all</em>. So the growth
+    /// there is the rotated bounding box, which we do not yet size a rotated inline drawing by, and
+    /// none of it is the effect extent.
     /// </para>
     /// </remarks>
     /// <param name="placed">The <c>wp:inline</c> or <c>wp:anchor</c>.</param>
     /// <param name="anchor">The <c>wp:anchor</c>, or null when the drawing is inline.</param>
-    /// <returns>The four edges, or zero for an anchored drawing or one stating no extent.</returns>
-    private static Margins EffectExtent(XElement placed, XElement? anchor)
+    /// <param name="shapeProperties">The drawing's <c>spPr</c>, for its rotation and its effects.</param>
+    /// <returns>
+    /// The four edges, or zero for an anchored drawing, a rotated one, a plain picture, or one
+    /// stating no extent.
+    /// </returns>
+    private static Margins EffectExtent(XElement placed, XElement? anchor, XElement? shapeProperties)
     {
         if (anchor is not null) return Margins.Zero;
         if (Child(placed, "effectExtent") is not { } extent) return Margins.Zero;
+        if (Rotation(shapeProperties) != 0) return Margins.Zero;
+        if (IsPlainPicture(placed, shapeProperties)) return Margins.Zero;
 
         return new Margins(
             Emu(extent.Attribute("l")?.Value),
             Emu(extent.Attribute("t")?.Value),
             Emu(extent.Attribute("r")?.Value),
             Emu(extent.Attribute("b")?.Value));
+    }
+
+    /// <summary>
+    /// Whether a drawing is a picture LibreOffice would turn into a Writer graphic object rather than
+    /// keep as a shape.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The two refusals in <c>GraphicImport.cxx</c>:820-841, in the order that file applies them: a
+    /// non-zero rotation, and anything that puts <c>EffectProperties</c>, <c>3DEffectProperties</c>
+    /// or <c>ArtisticEffectProperties</c> into the shape's grab bag. Rotation is checked by the
+    /// caller, since it disqualifies a shape from this reading as well.
+    /// </para>
+    /// <para>
+    /// The grab bag entries are written by <c>oox</c> from <c>a:effectLst</c> / <c>a:effectDag</c>,
+    /// from <c>a:scene3d</c> / <c>a:sp3d</c>, and from the <c>a14:imgProps</c> artistic effects, so
+    /// those are what is looked for here rather than the grab-bag names themselves.
+    /// </para>
+    /// </remarks>
+    private static bool IsPlainPicture(XElement placed, XElement? shapeProperties)
+    {
+        if (Descendant(placed, "graphicData")?.Attribute("uri")?.Value is not { } uri) return false;
+        if (!uri.EndsWith("/picture", StringComparison.Ordinal)) return false;
+
+        bool statesEffects = shapeProperties is not null && shapeProperties.Descendants().Any(
+            child => child.Name.LocalName is "effectLst" or "effectDag" or "scene3d" or "sp3d");
+
+        return !statesEffects && Descendant(placed, "imgProps") is null;
     }
 
     /// <summary>
