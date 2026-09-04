@@ -75,3 +75,46 @@ cannot fit the page it starts on. The machinery for that is already there —
 next page and place them at the frame top — so what the guard is really protecting against is a fly
 whose *first* part does not fit either. The measurement says the reference splits it regardless, and
 the row above showing `R033` at `p2 35.1, 72.5` is what a correct implementation has to reproduce.
+
+---
+
+## Both exclusions removed, and what the guard was really protecting
+
+Landed in two commits: the `page` arm in `PositionedLeftEdge` first, then the height guard in
+`PlaceFloatedTable`. All ten probe rows now match both references in page assignment and in
+coordinates, within 0.4 pt — including the 90-row cases, whose thirty-third row lands at the top of
+page two at the body's own top with the same x.
+
+`Case-Study-Heathrow-Airport.docx`, first cell of its first page and first-page ink against 26.2.4.2:
+
+| | first cell | ink |
+|---|---|---:|
+| reference 26.2.4.2 | (40.50, 108.03) | — |
+| at the session's start | (77.65, 74.70) | 40.42 |
+| with the horizontal arm | (40.40, 74.70) | 39.30 |
+| with the split as well | **(40.40, 107.80)** | **14.19** |
+
+### The guard was protecting a gate row, not a rendering
+
+Round 62 kept the height guard because the two corpus documents in its class both passed the gate.
+They still do — and one of them was being drawn wrongly the whole time:
+
+| document | ink vs 26.2 before | after |
+|---|---:|---:|
+| `part-147_approval list_20230119.docx` | **38.50** | **2.61** |
+| `ESPN-R - MCF - RA - Ed1.docx` | unchanged, 58 pages | unchanged |
+
+`part-147` stays `match` either way, and its word count moves 735 → 732 against the reference's 735
+— three glyphs of a symbol font, inside the band. A gate that scores page count and word count could
+not see 36 points of ink move, which is the same lesson the version screen taught from the other end:
+**the row a document occupies is not the same question as whether it is drawn correctly.**
+
+### What it cost
+
+Words gate 338 documents, **311 match, 27 mismatch** — no verdict and no page count moved. Mean
+first-page ink over the track 7.665 → 7.511, though that figure spans another commit as well.
+
+Attributable to this change alone, by positioned-table content: `part-147` as above, and
+`AFS-050-004-F2_0i.docx` — four positioned tables — going 10.15 → 11.37 ink and 0.743 → 0.886 mean
+|Δy| against 26.2. That is the one document this made worse, by a seventh of a point of displacement,
+and it is left rather than tuned away.

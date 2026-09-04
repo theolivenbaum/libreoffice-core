@@ -3159,16 +3159,21 @@ public sealed class Paginator
     /// a top edge at <b>72.00</b>, the top margin exactly, with no <c>w:tblpY</c> applied a second time.
     /// </para>
     /// <para>
-    /// <b>A table taller than a whole column is still left in the flow, and that is a guard rather than
-    /// the rule.</b> Writer floats and splits that one too. Two corpus documents are in that class and
-    /// both pass the gate today — <c>ESPN-R - MCF - RA - Ed1.docx</c>, 123 rows against a 481.90 pt body,
-    /// and <c>part-147_approval list_20230119.docx</c>, 782 pt against 714.30 — so the guard is kept
-    /// this round rather than traded blind. See <c>probes/words-r62/floattable-census.py</c>.
+    /// <b>A table taller than a whole column splits like any other fly</b>, and the guard that used to
+    /// leave one in the flow is gone. It was kept for a round as the honest conservative choice — the
+    /// two corpus documents then in its class both passed the gate, so trading it blind would have risked
+    /// them for nothing. <c>Case-Study-Heathrow-Airport.docx</c> is the third and does not pass: its
+    /// whole first page is a three-page fly, and dropping the fly treatment drops <c>w:tblpY</c> with it,
+    /// which is 33 pt of the page. Measured on ten authored fixtures against both installed references,
+    /// which agree to a tenth of a point: a 90-row table anchored at <c>w:tblpY="662"</c> puts its first
+    /// row at 105.6 and its thirty-third at the <em>top of page two</em>, 72.5, with the same x. See
+    /// <c>probes/words-page-anchored-table/</c>.
     /// </para>
     /// <para>
-    /// <b>A fly whose stated top is already past the bottom of the body</b> is also left as it was:
-    /// there is no first part to place, and every row of it would be carried onto pages of its own. No
-    /// corpus document does it and no measurement covers it, so it keeps the behaviour it had.
+    /// <b>A fly whose stated top leaves no room on the page</b> is the one case still left in the flow,
+    /// and it is now guarded explicitly rather than as a side effect of the height test: there is no
+    /// first part to place, so floating it would draw every row off the sheet. No corpus document
+    /// reaches it.
     /// </para>
     /// <para>
     /// Nothing about page breaking is decided here: the caller has already honoured
@@ -3226,8 +3231,6 @@ public sealed class Paginator
         Length height = Length.Zero;
         foreach (Length row in laid.RowHeights) height += row;
 
-        // The guard above: too tall to float, so it stays in the flow and paginates as it always did.
-        if (height > area.Height) return false;
 
         // `w:vertAnchor`, resolved onto an offset from the top of the column the flow is in. `area.Y` is
         // the body's own top, which a running head may already have pushed down, so the page-relative
@@ -3270,7 +3273,14 @@ public sealed class Paginator
         // and one that fits entirely is placed exactly as before — `room` is then at least the whole
         // height and no cut can happen.
         Length room = DeadlineFor(table, area, sheet, top, height) - top;
-        bool splits = room > Length.Zero && room < height;
+
+        // A fly whose stated top leaves no room at all on this page is the one case still left in the
+        // flow. There is no first part to place, so floating it would draw every row off the sheet —
+        // which is what the height guard removed above used to prevent by accident, for the whole class
+        // rather than for this corner of it. Nothing in the corpus reaches it either way.
+        if (room <= Length.Zero) return false;
+
+        bool splits = room < height;
 
         TablePart part = PlaceTablePart(
             table, laid, 0, Length.Zero, area, top, column, splits ? room : height,

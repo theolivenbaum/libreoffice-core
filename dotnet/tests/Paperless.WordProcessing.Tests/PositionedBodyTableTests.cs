@@ -258,6 +258,47 @@ public sealed class PositionedBodyTableTests
         (at("margin").X - at("page").X).ShouldBe(LeftMargin);
     }
 
+    /// <summary>
+    /// A positioned table taller than the page splits like any other fly, and its continuation starts
+    /// at the top of the next page's body rather than at <c>w:tblpY</c> a second time.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Writer marks every DOCX floating table's frame splittable without exception
+    /// (<c>DomainMapperTableHandler.cxx</c>:1765) and <c>SwFrame::GetNextFlyLeaf</c> gives the fly a
+    /// follow. A guard used to leave such a table in the flow instead, which dropped <c>w:tblpY</c>
+    /// along with the fly treatment — worth 33 pt on <c>Case-Study-Heathrow-Airport.docx</c>, whose
+    /// whole first page is a three-page fly.
+    /// </para>
+    /// <para>
+    /// Measured on authored fixtures against <em>both</em> installed references, which agree to a tenth
+    /// of a point: a 90-row table at <c>w:tblpY="662"</c> puts its first row at y = 105.6 and its
+    /// thirty-third at <b>72.5 on page two</b> — the body's own top, with the same x. See
+    /// <c>probes/words-page-anchored-table/</c>. Two 400 pt rows do the same thing here: one goes below
+    /// the offset and the other starts the next page. A third would make it three pages, not two — an
+    /// exact row does not split, so each page takes one and no more.
+    /// </para>
+    /// <para>
+    /// The offset is 144 pt rather than the 72 pt top margin on purpose. A table left in the flow also
+    /// splits across two pages and also resumes at the margin, so page counts and the follow's position
+    /// cannot tell the two apart; only the <em>first</em> part's own y can, and it is the thing the
+    /// guard used to throw away.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void APositionedTableTallerThanThePageSplitsAndResumesAtTheTop()
+    {
+        WordProcessingPages pages = Lay(
+            vertAnchor: "page", tblpY: 2880, after: "", grid: WideGrid, rows: 2);
+
+        pages.Pages.Count.ShouldBe(2);
+
+        // The first part goes where `w:tblpY` says — 144 pt, deliberately not the 72 pt top margin, so
+        // that a table left in the flow instead cannot satisfy this — and the follow at the body's top.
+        pages.Pages[0].Tables.ShouldHaveSingleItem().Area.Y.ShouldBe(Length.FromTwips(2880));
+        pages.Pages[1].Tables.ShouldHaveSingleItem().Area.Y.ShouldBe(TopMargin);
+    }
+
     /// <summary>An ordinary table is unaffected: it stacks and the flow follows it down.</summary>
     [Fact]
     public void AnUnpositionedTableStillStacks()
@@ -280,31 +321,32 @@ public sealed class PositionedBodyTableTests
         int? tblpX = null,
         int grid = NarrowGrid,
         int empties = 0,
-        string horzAnchor = "margin")
+        string horzAnchor = "margin",
+        int rows = 1)
     {
         string anchor = vertAnchor is null ? "" : $""" w:vertAnchor="{vertAnchor}" """.Trim() + " ";
         string across = tblpX is null ? "" : $""" w:tblpX="{tblpX}" """.Trim() + " ";
         return LayRaw(
             $"""<w:tblpPr {anchor}{across}w:horzAnchor="{horzAnchor}" w:tblpY="{tblpY}"/>""",
-            after, grid, empties);
+            after, grid, empties, rows);
     }
 
     private static WordProcessingPages LayRaw(
-        string tablePosition, string after, int grid = NarrowGrid, int empties = 0)
+        string tablePosition, string after, int grid = NarrowGrid, int empties = 0, int rows = 1)
     {
-        using IDocument document = Open(tablePosition, after, grid, empties);
+        using IDocument document = Open(tablePosition, after, grid, empties, rows);
         return (WordProcessingPages)((IPaginatedDocument)document).Layout();
     }
 
-    private static IDocument Open(string tablePosition, string after, int grid, int empties)
+    private static IDocument Open(string tablePosition, string after, int grid, int empties, int rows)
     {
-        MemoryStream package = BuildPackage(tablePosition, after, grid, empties);
+        MemoryStream package = BuildPackage(tablePosition, after, grid, empties, rows);
         using DocumentSource source = DocumentSource.FromStream(package, "positioned-table.docx");
         return new WordProcessingReader().Read(source);
     }
 
     private static MemoryStream BuildPackage(
-        string tablePosition, string after, int grid, int empties)
+        string tablePosition, string after, int grid, int empties, int rows)
     {
         const string ContentTypes = """
             <?xml version="1.0" encoding="UTF-8"?>
@@ -361,12 +403,14 @@ public sealed class PositionedBodyTableTests
                 <w:tbl>
                   <w:tblPr>{tablePosition}<w:tblW w:w="{grid}" w:type="dxa"/></w:tblPr>
                   <w:tblGrid><w:gridCol w:w="{grid}"/></w:tblGrid>
-                  <w:tr>
-                    <w:trPr><w:trHeight w:val="8000" w:hRule="exact"/></w:trPr>
-                    <w:tc><w:tcPr><w:tcW w:w="{grid}" w:type="dxa"/></w:tcPr>
-                      <w:p><w:pPr><w:rPr><w:sz w:val="4"/></w:rPr></w:pPr></w:p>
-                    </w:tc>
-                  </w:tr>
+                  {string.Concat(Enumerable.Repeat($"""
+                    <w:tr>
+                      <w:trPr><w:trHeight w:val="8000" w:hRule="exact"/></w:trPr>
+                      <w:tc><w:tcPr><w:tcW w:w="{grid}" w:type="dxa"/></w:tcPr>
+                        <w:p><w:pPr><w:rPr><w:sz w:val="4"/></w:rPr></w:pPr></w:p>
+                      </w:tc>
+                    </w:tr>
+                    """, rows))}
                 </w:tbl>
                 {string.Concat(Enumerable.Repeat("<w:p/>", empties))}
                 <w:p>{after}</w:p>
