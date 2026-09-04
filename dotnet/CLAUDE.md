@@ -604,7 +604,21 @@ strings /opt/libreoffice26.2/program/libswlo.so | grep -c MinRowHeightInclBorder
 
 Read `Installing a specific LibreOffice` below before treating the tarball as the target: it is a
 fourth reference rather than the distro-packaged 26.2 the tree is really calibrated to, because it
-bundles its own fonts.
+bundles its own fonts. Move the 33 duplicates aside first and it is close enough to screen with:
+
+```sh
+D=/opt/libreoffice26.2/share/fonts/truetype
+mkdir -p $D/.duplicates-aside && mv $D/{Carlito,Caladea,Liberation,DejaVu}*.ttf $D/.duplicates-aside/
+```
+
+**Screen a document against 26.2 before working it.** `probes/words-version-screen/screen.py` does
+the whole queue and `bucket.py` one catalogued cause. Rescoring the worst thirty words documents
+that way put **eleven of them** — the whole top of the table — in the version gap rather than in the
+tree, three of them under 3.5 ink against the target; and it cleared two of the nine documents
+catalogued under *overlap and clipping*, including the one carried as rendering blank, which matches
+26.2 at **0.00**. It cuts the other way too: two of those nine paginate differently under 26.2 than
+under both 24.2 and us, so where the references disagree with each other the document needs reading
+rather than scoring.
 
 ---
 

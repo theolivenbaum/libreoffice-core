@@ -329,6 +329,8 @@ dotnet/probes/words-border-style/dashlen.py	2026-09-04	current	24.2.7.2	present	
 dotnet/probes/words-border-style/results.md	2026-09-04	current	24.2.7.2	present	current	-
 dotnet/probes/words-border-style/rules.py	2026-09-04	current	24.2.7.2	present	current	-
 dotnet/probes/words-border-style/tables.py	2026-09-04	current	24.2.7.2	present	current	-
+dotnet/probes/words-cell-anchor/results.md	2026-09-04	current	24.2.7.2+26.2.4.2	present	current	-
+dotnet/probes/words-cell-anchor/valign.py	2026-09-04	current	24.2.7.2+26.2.4.2	present	current	-
 dotnet/probes/words-character-scale/results.md	2026-09-03	current	24.2.7.2	present	current	-
 dotnet/probes/words-character-scale/scale.py	2026-09-03	current	24.2.7.2	present	current	-
 dotnet/probes/words-d-01/div.tsv	2026-08-13	current	26.2.4.2	present	current	-
@@ -480,6 +482,9 @@ dotnet/probes/words-table-01/prediction.md	2026-08-15	current	26.2.4.2	present	c
 dotnet/probes/words-table-01/results.md	2026-08-15	current	26.2.4.2	present	current	-
 dotnet/probes/words-vision-01/prediction.md	2026-08-13	current	26.2.4.2	present	current	-
 dotnet/probes/words-vision-01/results.md	2026-08-14	current	26.2.4.2	present	current	-
+dotnet/probes/words-version-screen/bucket.py	2026-09-04	current	24.2.7.2+26.2.4.2	present	current	-
+dotnet/probes/words-version-screen/results.md	2026-09-04	current	24.2.7.2+26.2.4.2	present	current	-
+dotnet/probes/words-version-screen/screen.py	2026-09-04	current	24.2.7.2+26.2.4.2	present	current	-
 dotnet/probes/words-w-pitch/results.md	2026-08-15	current	26.2.4.2	present	current	-
 dotnet/research/probes/sheets-r17/README.md	2026-08-07	pre-container	24.2.7.2	unverified	archival	-
 dotnet/research/probes/sheets-r17/lo-faces.tsv	2026-08-07	pre-container	24.2.7.2	unverified	CITED-STALE	dotnet/TODO.batches.md
