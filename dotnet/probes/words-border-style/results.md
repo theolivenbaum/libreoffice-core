@@ -181,3 +181,23 @@ Seven documents improved and none got worse:
 (197.76, 1.44), we drew a single (210.0, 1.44), and we now draw (210.0, 0.72) and (211.44, 1.68).
 The 13.7 pt of vertical offset is a separate defect — the document has a `January 1, 2008` line in
 its head that LibreOffice's DOC importer drops and we do not.
+
+## The ODF reader is deliberately *not* changed, and here is why
+
+`OdtLayoutSource.Border` parses `fo:border`'s shorthand and throws the style word away, so the
+obvious fourth step is to keep it. It was written, measured and reverted, for two reasons that
+belong together:
+
+1. **The corpus has no such document.** Censused over every `.odt .ods .odp .ott .fodt .sxw` in
+   `sample-files`, counting `double dotted dashed groove ridge inset outset` in every `fo:border*`
+   of `content.xml` and `styles.xml`: **zero documents, zero occurrences.** The words sweep with the
+   change in agrees — 337 documents, not one row and not one hundredth of a point of ink moved.
+2. **The obvious reading would be wrong for the commonest real shape.** ODF's shorthand states the
+   *whole* border's width, so a `double` would have to be split into its three bands here rather
+   than scaled — and LibreOffice does not split it evenly. Converting `07-04.doc` to `.fodt` gives
+   `fo:border-top="3pt double"` beside `style:border-line-width-top="0.0209in 0.0102in 0.0102in"`,
+   which is **1.505 pt, 0.734, 0.734** — not 1/3, 1/3, 1/3. Honouring that needs `TableBorder` to
+   carry explicit bands rather than derive them, which is a model change and not this round's.
+
+So the reader stays as it is until a document asks for it. The census script is the thing to re-run
+first if one appears.
