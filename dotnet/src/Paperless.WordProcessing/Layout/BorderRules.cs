@@ -176,7 +176,13 @@ public static class BorderRules
             _ => width,
         };
 
-        return (style, Length.FromTwips(total));
+        // The width handed back is what the border actually covers, which for `outset` and `inset` is
+        // three quarters of a point less than the figure `ConvertBorderWidthFromWord` produces: their
+        // scaling component is halved and then has the fixed rule taken off it, twice, so a twip of the
+        // total goes nowhere. Writer charges the page the parts rather than the figure — a 3 pt `outset`
+        // costs 6.05 pt in the probe, not 6.75 — and a caller that stored the figure would over-charge
+        // every one of the 388 `outset` borders in `PAT-047` by 0.75 pt.
+        return (style, Divide(style, total).Total);
     }
 
     /// <summary>
@@ -224,9 +230,19 @@ public static class BorderRules
     /// How a border of this line and total width divides into its rules and the gap between them.
     /// </summary>
     public static BorderBands Bands(BorderLine line, Length width)
+        // `width` is what the border covers; `BorderWidthImpl` divides the figure it was made from, and
+        // for `outset` and `inset` the two differ by the fixed rule. Adding it back is a fixed point:
+        // 121 twips becomes 136, whose bands are 15, 53 and 53 — 121 again.
+        => Divide(line, width.Twips + (line is BorderLine.Outset or BorderLine.Inset ? ThinRule : 0));
+
+    /// <summary>The three components of a border whose <em>stated</em> total is <paramref name="total"/>.</summary>
+    /// <remarks>
+    /// <c>BorderWidthImpl::GetLine1</c>, <c>GetLine2</c> and <c>GetGap</c>,
+    /// <c>svtools/source/control/ctrlbox.cxx</c>:105-150.
+    /// </remarks>
+    private static BorderBands Divide(BorderLine line, long total)
     {
         (Ratio one, Ratio two, Ratio gap) = Shape(line);
-        long total = width.Twips;
 
         long outer = one.Of(total, Constant(two) + Constant(gap));
         long inner = two.Of(total, Constant(one) + Constant(gap));

@@ -115,7 +115,7 @@ public sealed class BorderRuleTests
         Length thin = Length.FromPoints(0.75);
 
         (BorderLine outset, Length width) = BorderRules.FromWord(26, ThreePoints)!.Value;
-        width.ShouldBe(Length.FromPoints(6.75));
+        width.ShouldBe(Length.FromTwips(121));
 
         BorderBands out_ = BorderRules.Bands(outset, width);
         out_.Outer.ShouldBe(thin);

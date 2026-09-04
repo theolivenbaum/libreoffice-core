@@ -97,3 +97,55 @@ reference draws 4.5. Stroke for stroke on page one at 300 dpi:
 and the body's first line moves from 70.290 to **71.790** against the reference's 71.790764. The
 missing 1.5 pt had been cancelling an accumulating row-height excess further down the page; with
 the head right, the excess is no longer hidden. The ink is worse and the page is correct.
+
+---
+
+## The same question for a table's own borders
+
+`tables.py` is `rules.py`'s companion: one two-row table whose `w:tblBorders` state the style on
+every side, `ABOVE` before it and `BELOW` after. The observables are the horizontal rules on page
+one and `BELOW`'s y, which is the table's whole height and therefore what each of the three
+horizontal borders cost a row.
+
+Every style's *increment* over `single` now matches the reference exactly. At `w:sz="24"`, with
+three horizontal borders in the table:
+
+| style | reference `BELOW` | ours | increment |
+|---|---:|---:|---:|
+| `single` | 121.38 | 116.09 | — |
+| `double` | 139.38 | 134.09 | **+18** both |
+| `thick` | 130.38 | 125.09 | **+9** both |
+| `thinThickSmallGap` | 125.88 | 120.59 | **+4.5** both |
+| `outset` | 130.53 | 125.24 | **+9.15** both |
+
+The constant 5.29 pt between the columns is the standing row-height divergence and predates this.
+
+**`outset` is the style that pays for reading `editeng` rather than fitting the probe.** Its total
+from `ConvertBorderWidthFromWord` is `2w + 0.75`, but the two components it divides that into are
+each `(2w + 0.75)/2 − 0.75`, so three quarters of a point of the total goes nowhere and the border
+covers `2w` — 6.05 pt for a 3 pt rule, not 6.75. The reference charges the parts, which the
+increment above shows to a hundredth of a point, and `PAT-047` states **388 `outset` borders**, so
+storing the figure instead of the sum would have over-charged that one document by nearly 300 pt.
+`BorderRules.FromWord` therefore hands back the sum, and `Bands` adds the slack back when it
+divides — a fixed point, since 121 twips becomes 136 and divides into 15, 53 and 53.
+
+### Result
+
+Words gate 337 documents, **310 match**, one verdict-preserving word moved on
+`AFS-050-004-F2_0i`; mean first-page ink 7.834 → 7.848. Four documents improve by more than a
+point, two get visibly worse by the metric, and both of those are the same compensating error the
+paragraph half turned up — read the *structure*, not the ink:
+
+| | rules on page 1 | first pair |
+|---|---:|---|
+| `PAT-047` reference | 37 | 273.8, 275.0 |
+| before | 25 | 279.4 |
+| after | **35** | **279.4, 280.6** |
+| `JEMIT_Template` reference | 14 | 285.8, 286.8 |
+| before | 11 | 296.2 |
+| after | **14** | **296.2, 297.1** |
+
+Both drew half their rules before. The row *pitch* also comes right — `PAT-047`'s reference steps
+38.0 pt and 32.1 pt where we stepped 37.2 and 31.4 before and step 38.1 and 31.9 now — and what is
+left is a constant 5.6 pt inherited from the page's first thirteen rows, which are text-driven and
+belong to the line-height divergence rather than to this.

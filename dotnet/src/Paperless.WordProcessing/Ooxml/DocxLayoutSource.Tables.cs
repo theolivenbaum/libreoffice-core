@@ -1009,18 +1009,26 @@ public sealed partial class DocxLayoutSource
 
         if (stated is null) return null;
 
-        if (Word.Attribute(stated, "val") is null or "none" or "nil") return default(TableBorder);
+        string? val = Word.Attribute(stated, "val");
 
-        Length width =
+        Length stateWidth =
             Word.Integer(Word.Attribute(stated, "sz"), out int eighths) && eighths > 0
                 ? Length.FromPoints(eighths / 8.0)
                 : HairlineBorder;
+
+        // An art border draws nothing at all, the same answer `none` and `nil` give — see
+        // `BorderRules.WordStyleOf`, and `BorderRules` for why the width comes back changed.
+        if (val is null or "none" or "nil"
+            || BorderRules.FromWord(BorderRules.WordStyleOf(val), stateWidth) is not { } rule)
+        {
+            return default(TableBorder);
+        }
 
         Colour colour =
             WordThemeColour.Read(stated, _theme, "color", "themeColor", "themeTint", "themeShade")
             ?? Colour.Black;
 
-        return new TableBorder(width, colour);
+        return new TableBorder(rule.Width, colour, rule.Line);
     }
 
     /// <summary>

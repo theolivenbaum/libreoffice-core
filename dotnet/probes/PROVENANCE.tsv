@@ -328,6 +328,7 @@ dotnet/probes/words-b010-01/results.md	2026-08-14	current	26.2.4.2	present	curre
 dotnet/probes/words-border-style/dashlen.py	2026-09-04	current	24.2.7.2	present	current	-
 dotnet/probes/words-border-style/results.md	2026-09-04	current	24.2.7.2	present	current	-
 dotnet/probes/words-border-style/rules.py	2026-09-04	current	24.2.7.2	present	current	-
+dotnet/probes/words-border-style/tables.py	2026-09-04	current	24.2.7.2	present	current	-
 dotnet/probes/words-character-scale/results.md	2026-09-03	current	24.2.7.2	present	current	-
 dotnet/probes/words-character-scale/scale.py	2026-09-03	current	24.2.7.2	present	current	-
 dotnet/probes/words-d-01/div.tsv	2026-08-13	current	26.2.4.2	present	current	-

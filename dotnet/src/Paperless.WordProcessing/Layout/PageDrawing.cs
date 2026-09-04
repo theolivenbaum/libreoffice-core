@@ -631,20 +631,37 @@ public static class PageDrawing
 
         foreach (Edge edge in edges)
         {
-            Stroke stroke = new(Paint.Solid(edge.Border.Colour), edge.Border.Width);
+            // The stated width is the whole rule's, so a double's two strokes are drawn inside it — one
+            // against each edge of the band the grid line is the middle of. See `BorderRules`.
+            BorderBands bands = edge.Border.Bands;
+            IReadOnlyList<Length>? dashes = BorderRules.Dashes(edge.Border.Line);
             Length half = edge.Border.Width / 2;
             Length from = edge.From - half;
             Length to = edge.To + half;
 
-            GraphicsPath path = edge.IsHorizontal
-                ? new GraphicsPath()
-                    .MoveTo(new DocPoint(from, edge.At))
-                    .LineTo(new DocPoint(to, edge.At))
-                : new GraphicsPath()
-                    .MoveTo(new DocPoint(edge.At, from))
-                    .LineTo(new DocPoint(edge.At, to));
+            Rule((bands.Outer / 2) - half, bands.Outer);
+            if (bands.HasTwoRules) Rule(half - (bands.Inner / 2), bands.Inner);
 
-            sink.StrokePath(path, stroke);
+            // `offset` is where the stroke's own centre sits relative to the grid line: nought for a
+            // single rule, since its width is the band's, and against each edge of the band for a double.
+            void Rule(Length offset, Length thick)
+            {
+                if (thick <= Length.Zero) return;
+
+                Length at = edge.At + offset;
+                Stroke stroke = new(
+                    Paint.Solid(edge.Border.Colour), thick, DashPattern: dashes);
+
+                GraphicsPath path = edge.IsHorizontal
+                    ? new GraphicsPath()
+                        .MoveTo(new DocPoint(from, at))
+                        .LineTo(new DocPoint(to, at))
+                    : new GraphicsPath()
+                        .MoveTo(new DocPoint(at, from))
+                        .LineTo(new DocPoint(at, to));
+
+                sink.StrokePath(path, stroke);
+            }
         }
     }
 
