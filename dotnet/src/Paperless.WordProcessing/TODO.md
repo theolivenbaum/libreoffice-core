@@ -2042,6 +2042,34 @@ is read and verified, so what remains is the filling of pages rather than the me
   (the document is CJK, so its empty paragraphs' line heights are the suspect) rather than from the
   anchor side.
 
+- **WordArt text warp (`a:prstTxWarp`) is not drawn on the words side, and it is the last open cause on
+  `WordArt_Shapes_Arrows_Catalog1.docx`.** A body whose `wps:bodyPr` carries a `prstTxWarp` other than
+  `textNoShape` becomes a Fontwork custom shape in LibreOffice — `putCustomShapeIntoTextPathMode`, then
+  `svx/source/customshapes/EnhancedCustomShapeFontWork.cxx` converting the characters to
+  `tools::PolyPolygon` outlines — so the reference draws large filled curves carrying no glyph and no
+  `ToUnicode`, scaled to the shape's box and taking the shape's gradient and outline. Paperless draws the
+  run as ordinary text at its stated size in its stated `w:color`, which is small, flat and pale where the
+  reference is large, warped and gradient-filled.
+
+  Reach on that document: **24 shapes of 340**, one per preset — `textArchUp`, `textArchDown`,
+  `textCircle`, `textButton`, `textWave1`, `textWave2`, `textDoubleWave1`, `textInflate`, `textDeflate`,
+  `textInflateBottom`, `textDeflateBottom`, `textTriangle`, `textTriangleInverted`, `textChevron`,
+  `textChevronInverted`, `textCascadeUp`, `textCascadeDown`, `textCurveUp`, `textSlantDown`, `textCanUp`,
+  `textCanDown`, `textFadeRight`, `textFadeLeft`, `textStop` — against 75 `textNoShape` bodies that need
+  nothing. Those 24 are the whole of the document's remaining divergence: **pages 17-21 of 52, at 2.11 to
+  6.43 unaccounted ink against 26.2.4.2, and every other page at or below 0.28.**
+
+  The slides side already carries this as a documented partial and draws *nothing* for such a body —
+  `SlideText.IsTextPath`. So the two families disagree about what to do with an unimplemented warp, which
+  is worth settling in the same round that implements the geometry rather than before it.
+
+- **`w14:textFill`, `w14:textOutline` and `w14:shadow` on a run are correctly ignored, and that is a
+  measurement rather than an omission.** The same catalogue states 104 `w14:textFill` (102 of them
+  gradients), 348 `w14:textOutline` and 96 `w14:shadow` on ordinary unwarped runs. LibreOffice's DOCX
+  import draws none of them: its pages 3-6 hold seven gradient-text shapes each and score **0.00**
+  unaccounted ink against ours, which draws the run's plain `w:color`. A round tempted to wire these up
+  by reading the markup would move 63 shapes away from the reference, not towards it.
+
 - [ ] A rasteriser and a PDF writer. `Paperless.Rendering`'s two backends are still stubs; the display
       list they consume is now real, which is the half that had to come first.
 

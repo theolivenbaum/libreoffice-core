@@ -438,7 +438,10 @@ public sealed record PageParagraph : PageBlock
             ? [.. Frames
                 .Where(frame => frame.Anchor == FrameAnchor.AsCharacter)
                 .Select(frame => new InlineObject(
-                    frame.AnchorOffset, frame.Size.Width, frame.Size.Height, frame.InlineAscent))]
+                    frame.AnchorOffset,
+                    frame.InlineExtent.Width,
+                    frame.InlineExtent.Height,
+                    frame.InlineAscent))]
             : [];
 
     /// <summary>True when an as-character frame is set in the paragraph's text.</summary>

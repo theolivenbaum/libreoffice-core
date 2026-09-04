@@ -375,7 +375,18 @@ public static class PageDrawing
     private static void DrawBorder(
         PlacedFrame frame, GraphicsPath? outline, Colour colour, IDrawingSink sink)
     {
-        Stroke stroke = new(Paint.Solid(colour), frame.Frame.BorderWidth);
+        // The dash pattern is expanded here rather than at the reader because it is a function of the
+        // pen width and the cap as well as of the preset's name, and only the width is settled by the
+        // time the frame is built. `capExtendsDash` is the round/square case, where MSO measures the
+        // cap inside the ink and LibreOffice shortens the ink to compensate.
+        Stroke stroke = new(
+            Paint.Solid(colour),
+            frame.Frame.BorderWidth,
+            Cap: frame.Frame.BorderCap,
+            DashPattern: DashPresets.Pattern(
+                frame.Frame.BorderDash,
+                frame.Frame.BorderWidth,
+                frame.Frame.BorderCap is not LineCap.Butt));
         DocRect area = frame.Area;
 
         // The border is stroked inside the room the frame took, where it says so. See

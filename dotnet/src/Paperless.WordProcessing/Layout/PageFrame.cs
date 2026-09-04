@@ -221,6 +221,49 @@ public sealed record PageFrame
     /// </remarks>
     public Margins Spacing { get; init; }
 
+    /// <summary>
+    /// The room an as-character drawing's effects need beyond its extent, from <c>wp:effectExtent</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A shadow, a glow or a fat stroke paints outside the <c>wp:extent</c> the file states, and
+    /// <c>wp:effectExtent</c> is how much on each side. For a <c>wp:inline</c> LibreOffice folds it
+    /// straight into the object's own margins — <c>GraphicImport.cxx</c>:1036-1055, guarded by
+    /// <c>IMPORT_AS_DETECTED_INLINE</c> and a zero rotation, and commented there
+    /// <em>"EffectExtent contains all needed additional space, including fat stroke and shadow. Simple
+    /// add it to the margins."</em> Those margins are then part of the portion Writer hangs on the line:
+    /// <c>SwFlyCntPortion::SetBase</c> sizes itself from
+    /// <c>SwAsCharAnchoredObjectPosition::GetObjBoundRectInclSpacing()</c>, which is the object's
+    /// rectangle enlarged by its spacing.
+    /// </para>
+    /// <para>
+    /// So it grows the line rather than the drawing, which is why it is a margin here and not folded
+    /// into <see cref="Size"/> — the shape is still painted at the size the file gives it.
+    /// </para>
+    /// <para>
+    /// Measured against both installed references, which agree to the twip on every fixture, in
+    /// <c>dotnet/probes/words-inline-effectextent/</c>. One 50.4 pt shape between two text lines, the
+    /// gap between those lines against a zero-extent control: <c>27432</c> EMU adds <strong>4.30 pt</strong>
+    /// (2 x 2.16 rounded to the twip), <c>91440</c> adds <strong>14.40 pt</strong> (2 x 7.2) and
+    /// <c>137160</c> adds <strong>21.60 pt</strong> (2 x 10.8). A top-only extent and a bottom-only
+    /// extent each add half of that, so the two edges are independent and additive.
+    /// </para>
+    /// <para>
+    /// Empty for a <c>wp:anchor</c>. LibreOffice does fold the extent into a floating drawing's wrap
+    /// margins as well, by a different and much longer route; the note on <see cref="Spacing"/> records
+    /// why that one is deliberately not read yet.
+    /// </para>
+    /// </remarks>
+    public Margins EffectExtent { get; init; }
+
+    /// <summary>
+    /// How much room the drawing takes on its line, which is <see cref="Size"/> grown by
+    /// <see cref="EffectExtent"/>.
+    /// </summary>
+    public DocSize InlineExtent => new(
+        Size.Width + EffectExtent.Left + EffectExtent.Right,
+        Size.Height + EffectExtent.Top + EffectExtent.Bottom);
+
     /// <summary>Where the anchoring character sits in the paragraph's text, for a character anchor.</summary>
     public int AnchorOffset { get; init; }
 
@@ -523,6 +566,32 @@ public sealed record PageFrame
 
     /// <summary>How thick that border is.</summary>
     public Length BorderWidth { get; init; }
+
+    /// <summary>
+    /// The preset naming the border's dash pattern — <c>a:prstDash/@val</c> — or null for a solid line.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Kept as the preset's name rather than as an expanded array because the array depends on the pen
+    /// width and the cap as well as on the name, and <see cref="Core.Graphics.DashPresets"/> already
+    /// holds that arithmetic — ported from <c>lclConvertPresetDash</c>
+    /// (<c>oox/source/drawingml/lineproperties.cxx</c>:60-83) and <c>XDash::CreateDotDashArray</c>
+    /// (<c>svx/source/xoutdev/xattr.cxx</c>:503-640) — for the chart, table and slide paths. Storing
+    /// the name keeps one expansion rather than four.
+    /// </para>
+    /// <para>
+    /// Null covers <c>solid</c> and an unrecognised token alike, which is deliberate and is
+    /// <see cref="Core.Graphics.DashPresets"/>'s own rule rather than this one's.
+    /// </para>
+    /// </remarks>
+    public string? BorderDash { get; init; }
+
+    /// <summary>How the border's ends, and each of its dashes, are capped.</summary>
+    /// <remarks>
+    /// <c>a:ln/@cap</c>, default <c>flat</c>. It is carried beside the dash because it changes the
+    /// pattern's arithmetic as well as the line's ends — see <see cref="BorderDash"/>.
+    /// </remarks>
+    public LineCap BorderCap { get; init; }
 
     /// <summary>
     /// How far inside its own rectangle the frame's border is stroked, zero for on the edge.

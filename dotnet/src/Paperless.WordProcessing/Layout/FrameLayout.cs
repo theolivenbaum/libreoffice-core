@@ -296,10 +296,24 @@ internal sealed class FrameResolution
                 if (frame.AnchorOffset > line.Box.Line.End) continue;
 
                 // Its top is the baseline less however much of it stands above one: the whole height for an
-                // ordinary inline picture, and nought for a shape that hangs below the line instead.
+                // ordinary inline picture, and nought for a shape that hangs below the line instead. The
+                // height in question is the *outer* one, grown by `wp:effectExtent`, because that is the
+                // rectangle Writer rests on the baseline —
+                // `SwAsCharAnchoredObjectPosition::GetObjBoundRectInclSpacing`, the object's rectangle
+                // enlarged by its spacing. The drawing itself keeps the size the file states and sits
+                // inside that rectangle, so it is *not* offset by the extent's left and top edges here.
+                //
+                // Both installed references agree on where the shape lands and it is not where either
+                // half of that sentence alone would put it: measured in
+                // `dotnet/probes/words-inline-effectextent/`, LibreOffice paints a shape's fill and
+                // outline at the outer top plus the top extent — 96.75 pt against 85.75 for a 10.8 pt
+                // extent — while laying the *text* of a shape carrying a `wps:txbx` out at the outer top
+                // regardless, its "INSIDE" run staying at 104.66 pt in both. That is its draw-shape and
+                // TextBox halves disagreeing rather than a rule; a frame here is one object and cannot be
+                // in two places, so it is placed where the reference puts the text and the ink it holds.
                 DocRect placedAt = new(
                     area.X + line.Box.Left + PageDrawing.OffsetOnLine(paragraph, line, frame.AnchorOffset),
-                    area.Y + line.Baseline - (frame.InlineAscent ?? frame.Size.Height),
+                    area.Y + line.Baseline - (frame.InlineAscent ?? frame.InlineExtent.Height),
                     frame.Size.Width,
                     frame.Size.Height);
 

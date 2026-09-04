@@ -258,6 +258,8 @@ internal static class DocxFrames
             Gradient = paint.Gradient,
             BorderColour = paint.Line,
             BorderWidth = paint.Width,
+            BorderDash = paint.Dash,
+            BorderCap = paint.Cap,
             HeadEnd = paint.HeadEnd,
             TailEnd = paint.TailEnd,
             BehindText = BehindText(anchor, context),
@@ -279,6 +281,7 @@ internal static class DocxFrames
             VerticalAlignment = valign,
             VerticalOffset = y,
             Spacing = Spacing(placed),
+            EffectExtent = EffectExtent(placed, anchor),
             IsImage = box is null && chart.Plot is null,
             Image = picture.Raster,
             Crop = picture.Crop,
@@ -357,6 +360,7 @@ internal static class DocxFrames
             VerticalAlignment = valign,
             VerticalOffset = y,
             Spacing = Spacing(placed),
+            EffectExtent = EffectExtent(placed, anchor),
             IsImage = false,
             Name = Child(placed, "docPr")?.Attribute("name")?.Value,
         };
@@ -752,6 +756,8 @@ internal static class DocxFrames
             Gradient = paint.Gradient,
             BorderColour = paint.Line,
             BorderWidth = paint.Width,
+            BorderDash = paint.Dash,
+            BorderCap = paint.Cap,
             HeadEnd = paint.HeadEnd,
             TailEnd = paint.TailEnd,
             GroupSize = size,
@@ -1098,6 +1104,47 @@ internal static class DocxFrames
             Emu(anchor.Attribute("distT")?.Value),
             Emu(anchor.Attribute("distR")?.Value),
             Emu(anchor.Attribute("distB")?.Value));
+
+    /// <summary>
+    /// The <c>wp:effectExtent</c> of an inline drawing — the room its effects need beyond its extent.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Read for a <c>wp:inline</c> and not for a <c>wp:anchor</c>, which is the split LibreOffice makes:
+    /// <c>GraphicImport.cxx</c>:1036-1055 handles <c>IMPORT_AS_DETECTED_INLINE</c> with a zero rotation by
+    /// adding all four edges straight to the object's margins, where every other anchoring reaches the
+    /// extent by a longer route through the wrap area. Those margins are what
+    /// <c>SwAsCharAnchoredObjectPosition</c> enlarges the object rectangle by, so on an inline drawing the
+    /// extent is simply part of how much room the drawing takes on its line.
+    /// </para>
+    /// <para>
+    /// The four <c>dist*</c> attributes beside it are <strong>not</strong> added, and that is not an
+    /// omission: on a <c>wp:inline</c> LibreOffice discards them, setting the matching margin to zero
+    /// merely because the attribute is present (<c>GraphicImport.cxx</c>:1387-1398,
+    /// <c>case LN_CT_Inline_distT: m_nTopMargin = 0;</c>). Measured — a fixture stating
+    /// <c>distT="137160" distB="137160"</c> and no effect extent moves the line below it by
+    /// <strong>0.00 pt</strong> against the control, on both installed references.
+    /// </para>
+    /// <para>
+    /// A rotated inline drawing takes the other branch of that <c>if</c> and is not covered here; the
+    /// catalogue that motivated this holds none, and the branch needs the shape's own bound rectangle
+    /// rather than the four numbers.
+    /// </para>
+    /// </remarks>
+    /// <param name="placed">The <c>wp:inline</c> or <c>wp:anchor</c>.</param>
+    /// <param name="anchor">The <c>wp:anchor</c>, or null when the drawing is inline.</param>
+    /// <returns>The four edges, or zero for an anchored drawing or one stating no extent.</returns>
+    private static Margins EffectExtent(XElement placed, XElement? anchor)
+    {
+        if (anchor is not null) return Margins.Zero;
+        if (Child(placed, "effectExtent") is not { } extent) return Margins.Zero;
+
+        return new Margins(
+            Emu(extent.Attribute("l")?.Value),
+            Emu(extent.Attribute("t")?.Value),
+            Emu(extent.Attribute("r")?.Value),
+            Emu(extent.Attribute("b")?.Value));
+    }
 
     /// <summary>
     /// The wrap, which is which of five sibling elements is present.
@@ -1577,12 +1624,25 @@ internal static class DocxFrames
             Width = Emu(line.Attribute("w")?.Value),
             HeadEnd = Marker(line, "headEnd"),
             TailEnd = Marker(line, "tailEnd"),
+            Dash = Child(line, "prstDash")?.Attribute("val")?.Value,
+            Cap = Cap(line.Attribute("cap")?.Value),
         };
 
         static Colour? Solid(XElement? solidFill, DrawingTheme? palette)
             => solidFill is null
                 ? null
                 : DrawingColour.Read(solidFill.Elements().FirstOrDefault())?.Resolve(palette);
+
+        // `a:ln/@cap`, whose default is `flat`. It decides the ends of the line and also, through
+        // `DashPresets`, how long each dash is: MSO measures a round or square cap inside the ink
+        // and LibreOffice compensates by moving 99% of it into the gap
+        // (`oox/source/drawingml/lineproperties.cxx`:470-479).
+        static LineCap Cap(string? value) => value switch
+        {
+            "rnd" => LineCap.Round,
+            "sq" => LineCap.Square,
+            _ => LineCap.Butt,
+        };
 
         // Any of the six, not just a:solidFill: a shape stating a:noFill means it, and one
         // stating a gradient or a picture means that rather than the theme's flat colour.
@@ -1723,6 +1783,12 @@ internal readonly record struct FrameAppearance
 
     /// <summary>The marker at its end, if any.</summary>
     public LineEnd TailEnd { get; init; }
+
+    /// <summary>The <c>a:prstDash/@val</c> naming the outline's pattern, or null for a solid line.</summary>
+    public string? Dash { get; init; }
+
+    /// <summary>How the outline's ends and its dashes are capped.</summary>
+    public LineCap Cap { get; init; }
 }
 
 /// <summary>
