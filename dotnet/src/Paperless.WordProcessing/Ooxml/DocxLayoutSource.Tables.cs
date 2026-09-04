@@ -272,9 +272,7 @@ public sealed partial class DocxLayoutSource
 
         // A positioned table is placed by `w:tblpX` and not by `w:tblInd`, and it is corrected twice
         // over rather than once — see `PositionedLeftEdge`.
-        if (Word.Child(properties, "tblpPr") is { } floated
-            && !isNested
-            && Word.Attribute(floated, "horzAnchor") is not "page")
+        if (Word.Child(properties, "tblpPr") is { } floated && !isNested)
         {
             return PositionedLeftEdge(floated, first, border);
         }
@@ -328,12 +326,20 @@ public sealed partial class DocxLayoutSource
     /// the picture.
     /// </para>
     /// <para>
-    /// And only the two anchors that resolve against the text area. <c>w:horzAnchor="page"</c> measures
-    /// from the sheet's own left edge, which nothing on the way to <see cref="PageTable"/> carries, so
-    /// applying the offset against the text area instead would move the table by a whole margin: the
-    /// probe's page-anchored <c>w:tblpX="1440"</c> is drawn by the reference at the margin and would be
-    /// drawn a second inch in. Seven of the corpus's fifty positioned tables say <c>page</c>, and they
-    /// keep the placement they had — which is <see cref="HorizontalPositionOf"/>'s decision too.
+    /// <b><c>w:horzAnchor="page"</c> measures from the sheet's own left edge</b>, so the section's left
+    /// margin comes off before the offset joins the text area's coordinates —
+    /// <see cref="SectionLeftMargin"/>, which is the one piece of page geometry this reader carries. An
+    /// earlier round excluded the page anchor outright on the grounds that nothing here knew the margin,
+    /// and that left the offset unapplied rather than misapplied: measured on authored fixtures against
+    /// <em>both</em> installed references, which agree to a tenth of a point, <c>w:tblpX="705"</c> draws
+    /// its first cell's text at <b>x = 35.1</b> anchored to the page and at <b>107.1</b> anchored to the
+    /// margin — 72 pt apart, which is the margin exactly. The two decrements above apply either way.
+    /// </para>
+    /// <para>
+    /// It is worth 37 pt on <c>Case-Study-Heathrow-Airport.docx</c>, whose whole first page is one such
+    /// table: the reference draws its first cell at x = 40.50, which is 705 twips from the sheet plus
+    /// the cell's own 108-twip margin, and we drew it at 77.65 — at the page margin, as though the
+    /// offset were not there. See <c>probes/words-page-anchored-table/</c>.
     /// </para>
     /// </remarks>
     private Length PositionedLeftEdge(XElement position, PageTableCell? first, Length border)
@@ -344,7 +350,13 @@ public sealed partial class DocxLayoutSource
             ? Length.Zero
             : first?.Padding.Left ?? Length.Zero;
 
-        return stated - margin - (border / 2);
+        // The sheet's edge is `SectionLeftMargin` to the left of the text area every other length here
+        // is measured from.
+        Length origin = Word.Attribute(position, "horzAnchor") is "page"
+            ? SectionLeftMargin
+            : Length.Zero;
+
+        return stated - origin - margin - (border / 2);
     }
 
     /// <summary>The grid's column widths, in order.</summary>

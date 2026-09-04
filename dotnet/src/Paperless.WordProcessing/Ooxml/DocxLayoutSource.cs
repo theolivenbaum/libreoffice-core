@@ -349,6 +349,7 @@ public sealed partial class DocxLayoutSource
         _sectionIndex = 0;
         _blocksInSection = 0;
         _pendingBelowTarget = -1;
+        _sectionLeftMargins = LeftMargins(body);
 
         // The body is where the document's lists start counting. Reset rather than assumed clean,
         // because the numbering may be the same instance the extraction pass already walked.
@@ -505,6 +506,41 @@ public sealed partial class DocxLayoutSource
     /// call rather than being restored with it.
     /// </remarks>
     private int _sectionIndex;
+
+    /// <summary>
+    /// Each section's left margin, in the order the body states them — for a table anchored to the page.
+    /// </summary>
+    /// <remarks>
+    /// The one place this reader needs page geometry. <c>w:horzAnchor="page"</c> measures
+    /// <c>w:tblpX</c> from the sheet's own left edge, and everything downstream of here works in the
+    /// text area's coordinates, so the margin has to come off before the offset leaves this class. See
+    /// <see cref="PositionedLeftEdge"/>.
+    /// </remarks>
+    private List<Length> _sectionLeftMargins = [];
+
+    /// <summary>The left margin of each <c>w:sectPr</c> in the body, in order.</summary>
+    /// <remarks>
+    /// Read here rather than taken from the geometry the paginator builds, because a table is read long
+    /// before a page exists. A section stating no <c>w:pgMar</c> gets Letter's inch, which is what
+    /// <c>SectionPropertyMap</c>'s constructor gives it — see <see cref="PageGeometry.Letter"/>.
+    /// </remarks>
+    private static List<Length> LeftMargins(XElement body)
+        => [.. body
+            .Descendants(Word.Name("sectPr"))
+            .Select(section => Twips(Word.Child(section, "pgMar"), "left")
+                               ?? PageGeometry.Letter.Margins.Left)];
+
+    /// <summary>
+    /// The left margin of the section the walk is in, for a page-anchored table's offset.
+    /// </summary>
+    /// <remarks>
+    /// Clamped rather than indexed, because a body's last blocks belong to the section its final
+    /// <c>w:sectPr</c> states and <see cref="_sectionIndex"/> has counted past the marks by then.
+    /// </remarks>
+    private Length SectionLeftMargin
+        => _sectionLeftMargins.Count == 0
+            ? PageGeometry.Letter.Margins.Left
+            : _sectionLeftMargins[Math.Clamp(_sectionIndex, 0, _sectionLeftMargins.Count - 1)];
 
     /// <summary>
     /// How many blocks the current section has already contributed, reset when a section closes.

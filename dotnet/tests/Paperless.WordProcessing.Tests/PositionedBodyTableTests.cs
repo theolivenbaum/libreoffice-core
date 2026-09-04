@@ -42,6 +42,9 @@ public sealed class PositionedBodyTableTests
     /// <summary>A4 top margin, in points: <c>w:top="1440"</c>.</summary>
     private static readonly Length TopMargin = Length.FromPoints(72);
 
+    /// <summary>And its left margin, which is the same inch: <c>w:left="1440"</c>.</summary>
+    private static readonly Length LeftMargin = Length.FromPoints(72);
+
     /// <summary>A table half the column's width, so that a fly of it leaves room beside itself.</summary>
     private const int NarrowGrid = 5000;
 
@@ -227,6 +230,34 @@ public sealed class PositionedBodyTableTests
         (at(720).X - at(0).X).ShouldBe(Length.FromTwips(720));
     }
 
+    /// <summary>
+    /// <c>w:horzAnchor="page"</c> measures <c>w:tblpX</c> from the sheet's edge, not from the margin,
+    /// so the same offset lands a whole left margin further left.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Asserted as the difference between the two anchors rather than against an absolute x, so that
+    /// the cell margin and half-border the two share — <c>DocxLayoutSource.PositionedLeftEdge</c> — cannot
+    /// make it pass for the wrong reason.
+    /// </para>
+    /// <para>
+    /// Measured on authored fixtures against <em>both</em> installed references, which agree to a tenth
+    /// of a point: <c>w:tblpX="705"</c> draws its first cell's text at x = 35.1 anchored to the page and
+    /// at 107.1 anchored to the margin, 72 pt apart on a 72 pt margin. It is worth 37 pt on
+    /// <c>Case-Study-Heathrow-Airport.docx</c>, whose whole first page is one such table. See
+    /// <c>probes/words-page-anchored-table/</c>.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void APageAnchoredOffsetIsMeasuredFromTheSheetRatherThanTheMargin()
+    {
+        DocRect at(string horzAnchor) => Lay(
+            vertAnchor: "page", tblpY: 2880, after: "", tblpX: 1440, horzAnchor: horzAnchor)
+            .Pages[0].Tables.ShouldHaveSingleItem().Area;
+
+        (at("margin").X - at("page").X).ShouldBe(LeftMargin);
+    }
+
     /// <summary>An ordinary table is unaffected: it stacks and the flow follows it down.</summary>
     [Fact]
     public void AnUnpositionedTableStillStacks()
@@ -248,12 +279,13 @@ public sealed class PositionedBodyTableTests
         string after,
         int? tblpX = null,
         int grid = NarrowGrid,
-        int empties = 0)
+        int empties = 0,
+        string horzAnchor = "margin")
     {
         string anchor = vertAnchor is null ? "" : $""" w:vertAnchor="{vertAnchor}" """.Trim() + " ";
         string across = tblpX is null ? "" : $""" w:tblpX="{tblpX}" """.Trim() + " ";
         return LayRaw(
-            $"""<w:tblpPr {anchor}{across}w:horzAnchor="margin" w:tblpY="{tblpY}"/>""",
+            $"""<w:tblpPr {anchor}{across}w:horzAnchor="{horzAnchor}" w:tblpY="{tblpY}"/>""",
             after, grid, empties);
     }
 
