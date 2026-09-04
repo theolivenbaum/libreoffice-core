@@ -386,6 +386,8 @@ dotnet/probes/words-pages-01/track-after.tsv	2026-08-14	current	26.2.4.2	present
 dotnet/probes/words-pages-01/track-baseline.tsv	2026-08-14	current	26.2.4.2	present	current	-
 dotnet/probes/words-pagination-01/prediction.md	2026-08-15	current	26.2.4.2	present	current	-
 dotnet/probes/words-pagination-01/results.md	2026-08-15	current	26.2.4.2	present	current	-
+dotnet/probes/words-row-height/pitch.py	2026-09-04	current	24.2.7.2+26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/words-row-height/results.md	2026-09-04	current	24.2.7.2+26.2.4.2	present	current	dotnet/CLAUDE.md
 dotnet/probes/words-r11/after-collapse-upper-001-004-010-014.tsv	2026-08-07	pre-container	24.2.7.2	unverified	archival	-
 dotnet/probes/words-r11/after-collapse-upper-005-009.tsv	2026-08-07	pre-container	24.2.7.2	unverified	archival	-
 dotnet/probes/words-r11/after-table-borders-001-004-010-014.tsv	2026-08-07	pre-container	24.2.7.2	unverified	archival	-

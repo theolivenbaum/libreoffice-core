@@ -694,10 +694,22 @@ public sealed partial class DocxLayoutSource
     /// A row's declared height, as a floor.
     /// </summary>
     /// <remarks>
-    /// <c>w:hRule</c> distinguishes three cases and only two are honoured here: <c>atLeast</c> and the
-    /// absent-rule default are floors, and <c>auto</c> states no height at all. <c>exact</c> is a real
-    /// height that clips its content, which is not modelled — such a row gets the taller of the two
-    /// instead, which is wrong in the direction of showing the text rather than hiding it.
+    /// <para>
+    /// <c>w:hRule</c> names three cases and Writer honours two: <c>exact</c> is a fixed height, and
+    /// <em>everything else is a floor</em> — <c>atLeast</c>, an absent rule, and <c>auto</c> alike.
+    /// <c>MeasureHandler</c> opens at <c>SizeType::MIN</c> and its <c>LN_CT_Height_hRule</c> case tests
+    /// only for <c>exact</c> (<c>sw/source/writerfilter/dmapper/MeasureHandler.cxx</c>:35, 70-76), so
+    /// the word <c>auto</c> never reaches the layout at all and the stated <c>w:val</c> stands.
+    /// </para>
+    /// <para>
+    /// Reading <c>auto</c> as "no height at all" was this reader's own invention and is refuted by both
+    /// reference versions at once. Six rows stating <c>w:trHeight w:val="480" w:hRule="auto"</c>
+    /// (<c>probes/words-row-height/pitch.py</c>): 24.2.7.2 draws them 480 twips apart and 26.2.4.2 draws
+    /// them 489.6 to 740.4 apart depending on the border and the margins — its own <c>atLeast</c>
+    /// figures exactly — while we drew them 241.2, which is the empty paragraph and nothing else.
+    /// <b>No corpus document does it</b>: 11 230 <c>w:trHeight</c> elements across the DOCX corpus, and
+    /// not one states <c>auto</c>.
+    /// </para>
     /// </remarks>
     private static (Length Height, bool IsExact) RowHeight(XElement? properties)
     {
@@ -705,7 +717,6 @@ public sealed partial class DocxLayoutSource
         if (height is null) return (Length.Zero, false);
 
         string? rule = Word.Attribute(height, "hRule");
-        if (rule == "auto") return (Length.Zero, false);
 
         // `w:val`, not `w:w`. A row height is a bare measurement rather than a `w:tblWidth`, so it carries
         // neither a type nor a `w:w` — and reading it with the width helper returns nothing at all, which for

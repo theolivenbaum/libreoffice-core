@@ -579,8 +579,38 @@ these. The archival probe scripts under `dotnet/probes/` and `dotnet/research/pr
 rewriting them would falsify it. A `/workspace/sample-files` symlink points at the corpus so
 they remain runnable as written.
 
+**That is no longer this container, and the direction has reversed — check before you measure.**
+As of 2026-09-04, `/usr/bin/soffice` is **24.2.7.2** and 26.2.4.2 is present only as the TDF tarball
+under `/opt/libreoffice26.2`. So `batch-check.sh`, `ref-baseline.sh` and every ink figure taken here
+are measured against **24.2**, while the tree is calibrated to **26.2** — the paragraph below, and
+several stored figures, assume the opposite. One line settles which you have:
+
+```sh
+soffice --version                       # LibreOffice 24.2.7.2 420(Build:2)
+/opt/libreoffice26.2/program/soffice --version
+```
+
+**A divergence from the gate is therefore not automatically a defect**, and one round has already
+been spent finding that out. The seven `Printable_Graph_Paper_Template` documents sat at 32-to-51
+first-page ink on a row pitch a fraction of a point out; we match 26.2.4.2's pitch **to the twip**
+and 24.2.7.2 has no `MinRowHeightInclBorder` at all. Before working a difference, render the
+document through both binaries — `probes/words-row-height/results.md` is the worked example, and
+this is checkable without rendering anything:
+
+```sh
+strings /usr/lib/libreoffice/program/libswlo.so | grep -c MinRowHeightInclBorder   # 0
+strings /opt/libreoffice26.2/program/libswlo.so | grep -c MinRowHeightInclBorder   # 1
+```
+
+Read `Installing a specific LibreOffice` below before treating the tarball as the target: it is a
+fourth reference rather than the distro-packaged 26.2 the tree is really calibrated to, because it
+bundles its own fonts.
+
+---
+
 **The reference binary is `26.2.4.2`, not the `24.2.7.2` every stored figure was measured
-against.** The base image is Ubuntu 26.04 and its archives offer no earlier LibreOffice.
+against.** *(Written of an earlier container; see the correction directly above.)* The base image is
+Ubuntu 26.04 and its archives offer no earlier LibreOffice.
 This is not a nuance to note and move past — ground truth genuinely moved, measured over the
 whole corpus by re-rendering the reference half of the gate at both versions:
 
