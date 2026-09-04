@@ -149,3 +149,35 @@ Both drew half their rules before. The row *pitch* also comes right — `PAT-047
 38.0 pt and 32.1 pt where we stepped 37.2 and 31.4 before and step 38.1 and 31.9 now — and what is
 left is a constant 5.6 pt inherited from the page's first thirteen rows, which are text-driven and
 belong to the line-height divergence rather than to this.
+
+---
+
+## And the DOC reader, which is where this started
+
+`07-04.doc` is a binary Word file, so none of the above reached it until its `BRC`s went through the
+same map. The chain is two steps rather than one, and both were already half-ported:
+`WW8_BRCVer9::DetermineBorderProperties` (`sw/source/filter/ww8/ww8scan.cxx`) gives the thickness
+Word reserves — with its own adjustments for a triple line and the two waves — and `GetLineIndex`
+(`ww8par6.cxx`:1444-1478) then hands that and the `brcType` to the *same* pair of editeng functions
+the DOCX reader uses. `Ww8Border.Width` was the first step; `FromWord` is the second.
+
+One substitution belongs to the filter rather than to editeng and is reproduced with it: **Word 9's
+`outset` and `inset` become a thick-thin and a thin-thick large gap, drawn in silver**, with the
+comment *"LO cannot handle outset/inset (new in WW9 BRC) so fall back same as WW8"*. A DOCX stating
+the same two is not substituted. That is Writer's inconsistency, not ours.
+
+Words gate 337 documents, 310 match, **not one row changed**; mean first-page ink 7.848 → 7.754.
+Seven documents improved and none got worse:
+
+| document | ink |
+|---|---|
+| `2013_11.doc` | 20.10 → **9.37** |
+| `SFSP_2013-02_Bulletin.doc` | 18.24 → **8.25** |
+| `FlightLaws.doc` | 12.66 → **5.07** |
+| `07-04.doc` | 22.05 → **19.14** |
+| the three `150_5300_13_chg*.doc` | −0.17 to −0.27 each |
+
+`07-04`'s own rule, the one that started this, at 300 dpi: the reference draws (196.32, 0.72) and
+(197.76, 1.44), we drew a single (210.0, 1.44), and we now draw (210.0, 0.72) and (211.44, 1.68).
+The 13.7 pt of vertical offset is a separate defect — the document has a `January 1, 2008` line in
+its head that LibreOffice's DOC importer drops and we do not.
