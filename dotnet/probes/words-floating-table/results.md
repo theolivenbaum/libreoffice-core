@@ -119,14 +119,21 @@ cost of a fixed proxy for a rule that is really about the width of one word.
 
 ## What is left, and why 087 still fails its page count
 
-087 is still two pages against the reference's one, because our grid is **2.5 pt taller** than the
-reference's over its 69 rows and its trailing `Title: ___ Date: ___` no longer fits under it. That
-is not a defect at all — see below.
+087 is still two pages against the reference's one. Its grid is now placed exactly —
+**35.52 .. 557.76 pt across in both renderings** — and what is left is vertical: 670.08 pt of grid
+in the reference against 672.48 here, over 48 rows, which is **one twip per row**. That is enough
+to push its trailing `Title: ___ Date: ___` off the page the reference keeps it on.
+
+One twip a row is row-height rounding and nothing more. It is emphatically *not* the
+`w:trHeight`-and-borders divergence below, and the arithmetic says so: 087's rows are
+content-driven rather than resting on their floors — they state 12217 twips between them and are
+drawn 670 pt tall by both engines — so the floor rule cannot reach them, and its 0.25 pt border
+would be 12 pt over the table rather than 2.4.
 
 ## Not a defect: `w:trHeight` and the row's borders, on 24.2.7.2
 
-087 is still two pages against the reference's one because our grid is 2.5 pt taller than the
-reference's, and chasing that is what turned this up. It is worth writing down because it looks
+Chasing 087's residual height turned this up. It does not explain 087 — see above — but it is a
+real divergence on other documents in the family, and it is worth writing down because it looks
 exactly like a defect and is not.
 
 `probes/words-pagination-01/row-min-height-border.py` exists to answer whether a row's `w:trHeight`
@@ -154,10 +161,12 @@ against 92.70 here once a 1.5 pt grid is added, which is one border against seve
 border's **line width and its distance**, not the distance alone. So the tree's own reference source
 adds the border, 26.2.4.2 does, and 24.2.7.2 — which predates it — does not.
 
-So this reader is right and the container's reference is old. It is the largest single thing left on
-the graph-paper family, and it must not be "fixed": doing so would calibrate the tree to a
-LibreOffice older than the one it targets. If a later round sees a graph-paper grid running long,
-this is why.
+So this reader is right and the container's reference is old, and it must not be "fixed": doing so
+would calibrate the tree to a LibreOffice older than the one it targets. `080_..._Black_Theme` is
+where it shows on this family — its rows come out 0.85 pt tall against the reference's stated
+floors, under a `w:sz="12"` grid — and it is the same thing `renderer-parity-sweep-01`'s L2 lane
+proposed as `row-height-floor.diff` and that round held back for the same reason. If a later round
+sees a bordered table running long against this container, this is why.
 
 ## Reproducing
 
