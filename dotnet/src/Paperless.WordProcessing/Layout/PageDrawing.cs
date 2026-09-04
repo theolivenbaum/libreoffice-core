@@ -1092,27 +1092,30 @@ public static class PageDrawing
 
             if (borders.Top is { Draws: true } rule)
             {
-                Fill(
+                DrawRule(
                     new DocRect(left, text.Y - rule.Space - rule.Width, right - left, rule.Width),
-                    rule.Colour, sink);
+                    rule, across: true, outerLast: false, sink);
             }
 
             if (borders.Bottom is { Draws: true } under)
             {
-                Fill(
+                DrawRule(
                     new DocRect(left, text.Bottom + under.Space, right - left, under.Width),
-                    under.Colour, sink);
+                    under, across: true, outerLast: true, sink);
             }
 
             if (borders.Left is { Draws: true } start)
             {
-                Fill(new DocRect(left, above, start.Width, below - above), start.Colour, sink);
+                DrawRule(
+                    new DocRect(left, above, start.Width, below - above),
+                    start, across: false, outerLast: false, sink);
             }
 
             if (borders.Right is { Draws: true } end)
             {
-                Fill(
-                    new DocRect(right - end.Width, above, end.Width, below - above), end.Colour, sink);
+                DrawRule(
+                    new DocRect(right - end.Width, above, end.Width, below - above),
+                    end, across: false, outerLast: true, sink);
             }
         }
 
@@ -1131,6 +1134,76 @@ public static class PageDrawing
         }
 
         Flush();
+    }
+
+    /// <summary>
+    /// Fills one paragraph border's band with the strokes its line style actually draws.
+    /// </summary>
+    /// <param name="band">The whole band the border covers, the second rule and the gap included.</param>
+    /// <param name="rule">The border.</param>
+    /// <param name="across">True for a top or bottom rule, false for a side one.</param>
+    /// <param name="outerLast">
+    /// True when the band's <em>far</em> edge is the one away from the text — a bottom or a right rule.
+    /// It decides which end of the band the outer stroke sits at, which is visible the moment the two
+    /// strokes differ in width: an <c>outset</c> puts its thin rule outside on all four sides.
+    /// </param>
+    /// <param name="sink">Where to draw.</param>
+    /// <remarks>
+    /// The strokes are <em>filled</em> rather than stroked, as the single rule always was, and a dashed
+    /// one is filled a dash at a time. A stroked path would put the pen's centre on the band's edge and
+    /// need every rectangle here recomputed round it; the dash lengths are the pen's own multiples
+    /// either way. See <see cref="BorderRules"/>.
+    /// </remarks>
+    private static void DrawRule(
+        DocRect band, ParagraphBorder rule, bool across, bool outerLast, IDrawingSink sink)
+    {
+        BorderBands bands = rule.Bands;
+        IReadOnlyList<Length>? dashes = BorderRules.Dashes(rule.Line);
+        Length span = across ? band.Height : band.Width;
+
+        Piece(outerLast ? span - bands.Outer : Length.Zero, bands.Outer);
+
+        if (bands.HasTwoRules)
+        {
+            Piece(outerLast ? Length.Zero : bands.Outer + bands.Gap, bands.Inner);
+        }
+
+        void Piece(Length at, Length thick)
+        {
+            if (thick <= Length.Zero) return;
+
+            DocRect stroke = across
+                ? new DocRect(band.X, band.Y + at, band.Width, thick)
+                : new DocRect(band.X + at, band.Y, thick, band.Height);
+
+            if (dashes is null || dashes.Count == 0)
+            {
+                Fill(stroke, rule.Colour, sink);
+                return;
+            }
+
+            Length along = across ? stroke.Width : stroke.Height;
+            Length drawn = Length.Zero;
+
+            for (int i = 0; drawn < along; i += 2)
+            {
+                Length ink = dashes[i % dashes.Count];
+                Length gap = dashes[(i + 1) % dashes.Count];
+                if (ink + gap <= Length.Zero) return;
+
+                Length here = Length.Min(ink, along - drawn);
+                if (here > Length.Zero)
+                {
+                    Fill(
+                        across
+                            ? new DocRect(stroke.X + drawn, stroke.Y, here, stroke.Height)
+                            : new DocRect(stroke.X, stroke.Y + drawn, stroke.Width, here),
+                        rule.Colour, sink);
+                }
+
+                drawn += ink + gap;
+            }
+        }
     }
 
     /// <summary>The rectangle a paragraph's shading fills, in the coordinates of the area holding it.</summary>
