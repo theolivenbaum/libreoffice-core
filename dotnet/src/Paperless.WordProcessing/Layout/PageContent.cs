@@ -1018,6 +1018,11 @@ public readonly record struct PageRun(
 /// The stated widths of those columns, already fitted to the body's measure, for a section that does not
 /// space them evenly; null for the ordinary case.
 /// </param>
+/// <param name="FlyDisplacement">
+/// How much of <paramref name="Top"/> is a floated table having pushed this paragraph clear of itself.
+/// Zero on every line of every paragraph but the first one a fly displaced — see
+/// <see cref="ParagraphTop"/> for why it has to come back off again.
+/// </param>
 /// <remarks>
 /// <see cref="UpperSpace"/> is carried because a frame anchored to the paragraph is positioned from a
 /// point above the line: Writer's <c>SwAnchoredObjectPosition::GetTopForObjPos</c>
@@ -1044,15 +1049,29 @@ public readonly record struct PlacedLine(
     Length UpperSpace = default,
     int Columns = 1,
     Length ColumnGap = default,
-    ColumnRuler? ColumnRuler = null)
+    ColumnRuler? ColumnRuler = null,
+    Length FlyDisplacement = default)
 {
     /// <summary>Where a frame anchored to this line's paragraph measures its offset from.</summary>
     /// <remarks>
     /// The paragraph's top for object positioning — see <see cref="UpperSpace"/>. Equal to
     /// <see cref="Top"/> for every line that is not a paragraph's first, and for a paragraph whose space
     /// above was collapsed away or dropped at the top of a page.
+    ///
+    /// <para>
+    /// <see cref="FlyDisplacement"/> comes off for a reason the field's own summary cannot give: Writer
+    /// positions a paragraph's anchored objects when the paragraph is <em>first</em> formatted, which is
+    /// before a floated table above it has pushed the paragraph clear of itself, and it does not position
+    /// them again afterwards. So the object stays where the flow was and the text moves out from under
+    /// it. Measured on 21 authored documents in <c>probes/words-fly-clearance/</c>: with a fly filling
+    /// the column and a text box anchored to the paragraph directly after it, 24.2.7.2 draws the box at
+    /// the top of the body at every fly height, and draws the paragraph's own text a line below the fly's
+    /// bottom. Put an empty paragraph between the two and the box moves down with its paragraph — that
+    /// paragraph is no longer the one being displaced, which is exactly what makes this a property of the
+    /// displacement rather than of the anchor.
+    /// </para>
     /// </remarks>
-    public Length ParagraphTop => Top - UpperSpace;
+    public Length ParagraphTop => Top - UpperSpace - FlyDisplacement;
 
     /// <summary>The baseline's distance from the top of the body area.</summary>
     public Length Baseline => Top + Box.Baseline;

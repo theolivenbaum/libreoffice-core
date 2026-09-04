@@ -161,6 +161,50 @@ public sealed class PositionedBodyTableTests
     }
 
     /// <summary>
+    /// Every paragraph after the fly is pushed under it, an empty one included — but the displacement
+    /// is recorded on the paragraph it lands on, because a frame anchored there does not move with it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Writer positions a paragraph's anchored objects when the paragraph is <em>first</em> formatted,
+    /// which is before a fly above it has pushed the paragraph clear of itself, and it does not position
+    /// them again afterwards. So the flow moves and the object stays. Only the paragraph the
+    /// displacement actually lands on is affected: the one after it is formatted below an already-moved
+    /// predecessor, so its own objects are placed where it really is.
+    /// </para>
+    /// <para>
+    /// Measured on 21 authored documents in <c>probes/words-fly-clearance/</c> and confirmed on
+    /// <c>HC-Bulletin-template.docx</c>, whose masthead logo and photograph hang off the paragraph
+    /// directly after a full-width fly: moving them with the flow put both at the bottom of page one
+    /// where the reference has them at the top. First-page ink, <b>38.41 before and 10.96 after</b>.
+    /// </para>
+    /// <para>
+    /// The two halves are asserted together because either alone is satisfied by a wrong rule: leaving
+    /// the flow where it was would also leave the frame, and moving both would also move neither.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void AFlyMovesTheFlowUnderItselfAndLeavesTheAnchoredFrameBehind()
+    {
+        WordProcessingPages pages = Lay(
+            vertAnchor: "page", tblpY: 720, after: "<w:r><w:t>After</w:t></w:r>",
+            grid: WideGrid, empties: 1);
+
+        Length under = Length.FromTwips(720) + Length.FromTwips(8000) - TopMargin;
+        List<PlacedLine> lines = [.. pages.Pages[0].Lines];
+
+        lines.Count.ShouldBe(2);
+
+        // The empty paragraph takes the displacement, and the inked one follows it a line lower.
+        lines[0].Top.ShouldBe(under);
+        lines[1].Top.ShouldBe(under + lines[0].Box.Height);
+
+        // But a frame anchored to the displaced paragraph measures from where the flow was.
+        lines[0].ParagraphTop.ShouldBe(Length.Zero);
+        lines[1].ParagraphTop.ShouldBe(lines[1].Top);
+    }
+
+    /// <summary>
     /// <c>w:tblpX</c> moves a positioned table across, by exactly what it says.
     /// </summary>
     /// <remarks>
@@ -199,29 +243,36 @@ public sealed class PositionedBodyTableTests
     }
 
     private static WordProcessingPages Lay(
-        string? vertAnchor, int tblpY, string after, int? tblpX = null, int grid = NarrowGrid)
+        string? vertAnchor,
+        int tblpY,
+        string after,
+        int? tblpX = null,
+        int grid = NarrowGrid,
+        int empties = 0)
     {
         string anchor = vertAnchor is null ? "" : $""" w:vertAnchor="{vertAnchor}" """.Trim() + " ";
         string across = tblpX is null ? "" : $""" w:tblpX="{tblpX}" """.Trim() + " ";
         return LayRaw(
-            $"""<w:tblpPr {anchor}{across}w:horzAnchor="margin" w:tblpY="{tblpY}"/>""", after, grid);
+            $"""<w:tblpPr {anchor}{across}w:horzAnchor="margin" w:tblpY="{tblpY}"/>""",
+            after, grid, empties);
     }
 
     private static WordProcessingPages LayRaw(
-        string tablePosition, string after, int grid = NarrowGrid)
+        string tablePosition, string after, int grid = NarrowGrid, int empties = 0)
     {
-        using IDocument document = Open(tablePosition, after, grid);
+        using IDocument document = Open(tablePosition, after, grid, empties);
         return (WordProcessingPages)((IPaginatedDocument)document).Layout();
     }
 
-    private static IDocument Open(string tablePosition, string after, int grid)
+    private static IDocument Open(string tablePosition, string after, int grid, int empties)
     {
-        MemoryStream package = BuildPackage(tablePosition, after, grid);
+        MemoryStream package = BuildPackage(tablePosition, after, grid, empties);
         using DocumentSource source = DocumentSource.FromStream(package, "positioned-table.docx");
         return new WordProcessingReader().Read(source);
     }
 
-    private static MemoryStream BuildPackage(string tablePosition, string after, int grid)
+    private static MemoryStream BuildPackage(
+        string tablePosition, string after, int grid, int empties)
     {
         const string ContentTypes = """
             <?xml version="1.0" encoding="UTF-8"?>
@@ -285,6 +336,7 @@ public sealed class PositionedBodyTableTests
                     </w:tc>
                   </w:tr>
                 </w:tbl>
+                {string.Concat(Enumerable.Repeat("<w:p/>", empties))}
                 <w:p>{after}</w:p>
                 <w:sectPr>
                   <w:pgSz w:w="11906" w:h="16838"/>

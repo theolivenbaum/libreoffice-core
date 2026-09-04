@@ -349,6 +349,10 @@ dotnet/probes/words-f-01/prediction.md	2026-08-13	current	26.2.4.2	present	curre
 dotnet/probes/words-f-01/results.md	2026-08-13	current	26.2.4.2	present	current	-
 dotnet/probes/words-floating-table/position.py	2026-09-03	current	24.2.7.2	present	current	-
 dotnet/probes/words-floating-table/results.md	2026-09-03	current	24.2.7.2	present	current	-
+dotnet/probes/words-fly-clearance/anchored.py	2026-09-04	current	24.2.7.2	present	current	-
+dotnet/probes/words-fly-clearance/clearance.py	2026-09-04	current	24.2.7.2	present	current	-
+dotnet/probes/words-fly-clearance/law.py	2026-09-04	current	24.2.7.2	present	current	-
+dotnet/probes/words-fly-clearance/results.md	2026-09-04	current	24.2.7.2	present	current	-
 dotnet/probes/words-frame-origins/results.md	2026-09-03	current	24.2.7.2	present	current	-
 dotnet/probes/words-group-transform/census.py	2026-09-03	current	24.2.7.2	present	current	-
 dotnet/probes/words-group-transform/ink.py	2026-09-03	current	24.2.7.2	present	current	-

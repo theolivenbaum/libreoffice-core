@@ -905,6 +905,18 @@ public sealed class Paginator
         // names — see `PlaceFloatedTable`.
         List<FloatedTablePart> pendingFloats = [];
 
+        // The bottom a fly filling its column has left the flow to carry on below, or null when nothing
+        // is waiting to be cleared. Held rather than added to `used` at once because the block it lands
+        // on has to know *how far* it was moved: an anchored frame stays where the flow was — see
+        // `PlacedLine.FlyDisplacement`. Consumed by the first block of the flow that follows the fly,
+        // and forgotten at the end of a page or a column, neither of which the fly reaches into.
+        Length? clearsFly = null;
+
+        // Which block that was, and by how much, for the anchored frames hanging off it. `-1` when the
+        // block in flight was not displaced, which is every block of nearly every document.
+        int displacedBlock = -1;
+        Length displacedBy = Length.Zero;
+
         // Blocks laid out a second time because they landed in a column narrower or wider than the one the
         // pass above assumed. Empty for every document whose columns are even, which is nearly all of them.
         Dictionary<(int Index, long Width), LaidBlock> reLaid = [];
@@ -1164,6 +1176,11 @@ public sealed class Paginator
                 continue;
             }
 
+            // A fly filling the column pushes the flow under itself — see `clearsFly`. A table asks
+            // later, from inside its own arm, because a table that turns out to float is not in the flow
+            // and must not take the displacement with it.
+            if (blocks[paragraphIndex] is not PageTable) ClearTheFly();
+
             if (blocks[paragraphIndex] is PageTable table)
             {
                 // The same test the paragraph arm below makes, and it has to be made here too because a
@@ -1205,14 +1222,22 @@ public sealed class Paginator
                     // `PlaceFloatedTable`, and `ContinueFloatedTables` for where it lands.
                     if (carried is { } rest) pendingFloats.Add(rest);
 
-                    // A fly filling the column pushes the flow under itself — see `FillsTheColumn`.
-                    if (resumesAt is { } below) used = Length.Max(used, below);
+                    // A fly filling the column pushes the flow under itself — see `FillsTheColumn` for
+                    // when, and `clearsFly` for why the flow is not moved down here and now.
+                    if (resumesAt is { } below)
+                    {
+                        clearsFly = clearsFly is { } already ? Length.Max(already, below) : below;
+                    }
 
                     paragraphIndex++;
                     lineIndex = 0;
                     rowDrawn = Length.Zero;
                     continue;
                 }
+
+                // Not floated after all, so this table is in the flow like any other block and takes the
+                // displacement a fly above it left waiting.
+                ClearTheFly();
 
                 // The paragraph above's leading, which a table takes exactly as a paragraph does.
                 // `SwFlowFrame::CalcUpperSpace` adds `nPrevLineSpacing` to `nUpper` in all four of its
@@ -1514,7 +1539,13 @@ public sealed class Paginator
                     // again below it, and the page is written with whatever is current when it is emitted.
                     Math.Max(1, page.Columns),
                     page.ColumnGap,
-                    page.Ruler));
+                    page.Ruler,
+
+                    // And how much of `top` is a fly having pushed this paragraph clear of itself, which
+                    // an anchored frame takes back off again. See `PlacedLine.FlyDisplacement`.
+                    lineIndex + i == 0 && paragraphIndex == displacedBlock
+                        ? displacedBy
+                        : Length.Zero));
 
                 // A stretch that shares its line with the next one leaves the pen where it is: the box
                 // after it is more of the same line, at the same top.
@@ -1713,6 +1744,19 @@ public sealed class Paginator
                        is not (SectionBreak.Continuous or SectionBreak.NewColumn);
         }
 
+        // Takes the displacement a fly filling the column left waiting and applies it to the block about
+        // to be placed, remembering how far that block moved. See `clearsFly`.
+        void ClearTheFly()
+        {
+            if (clearsFly is not { } under) return;
+
+            Length wasAt = used;
+            used = Length.Max(used, under);
+            clearsFly = null;
+            displacedBlock = paragraphIndex;
+            displacedBy = used - wasAt;
+        }
+
         void EmitPage()
         {
             if (column + 1 < Math.Max(1, page.Columns))
@@ -1730,6 +1774,11 @@ public sealed class Paginator
                 column++;
                 used = columnTop;
                 lineUsed = columnTop;
+
+                // A fly is placed in the column it was floated in, so the next column has nothing to
+                // clear — the same reason a new page has none. See `clearsFly`.
+                clearsFly = null;
+                displacedBlock = -1;
                 return;
             }
 
@@ -1781,6 +1830,10 @@ public sealed class Paginator
             notes = carriedNotes;
             used = Length.Zero;
             lineUsed = Length.Zero;
+
+            // A fly is on the page it was placed on, so the flow on the *next* page has nothing to clear.
+            clearsFly = null;
+            displacedBlock = -1;
             MeasureBody();
             columnTop = Length.Zero;
             columnBottom = bodyHeight;
@@ -3025,6 +3078,12 @@ public sealed class Paginator
     {
         for (int i = from; i < blocks.Count; i++)
         {
+            // A second fly is not the flow. It is placed where it says and takes no room on the way
+            // there, so it can neither be displaced by the first nor push the scan past it — and a
+            // table is the one block `HasInk` answers for without looking, so without this a document
+            // holding two positioned tables displaces its whole flow on account of the second.
+            if (blocks[i] is PageTable { IsPositioned: true }) continue;
+
             LaidBlock laid = laidAt(i);
 
             Length height = Length.Zero;
@@ -3052,7 +3111,8 @@ public sealed class Paginator
     /// Whether a block would draw anything a fly could displace.
     /// </summary>
     /// <remarks>
-    /// A table always would. A paragraph counts only when it holds a character that is neither
+    /// A table always would — except a positioned one, which the caller skips before asking, because it
+    /// is not in the flow at all. A paragraph counts only when it holds a character that is neither
     /// whitespace nor a control — the anchor character a frame, a field or a note citation occupies is
     /// <c>U+0001</c>, and a paragraph holding nothing else is the empty spacer this has to let past.
     /// </remarks>
