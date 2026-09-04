@@ -874,6 +874,13 @@ public sealed record PageNote
 /// shortcut or the paragraph is measured without it. See <see cref="FormattedRun.Tracking"/> for how the
 /// distance is charged.
 /// </param>
+/// <param name="WidthPerCent">
+/// How wide the run's glyphs are drawn against their own design, 100 for none — <c>w:rPr/w:w</c> and
+/// <c>\charscalex</c>. It changes a measurement like <paramref name="Tracking"/> does and so has the same
+/// duty to survive the uniform-paragraph shortcut, and it changes the glyphs' shape as well, which
+/// tracking does not. See <see cref="FormattedRun.WidthPerCent"/> for why the factor is not the
+/// percentage.
+/// </param>
 public readonly record struct PageRun(
     int Start,
     int Length,
@@ -888,10 +895,16 @@ public readonly record struct PageRun(
     Colour Highlight = default,
     bool IsUnderlined = false,
     bool IsStruckThrough = false,
-    Length Tracking = default)
+    Length Tracking = default,
+    int WidthPerCent = 100)
 {
     /// <summary>One past the run's last character.</summary>
     public int End => Start + Length;
+
+    /// <summary>
+    /// <see cref="WidthPerCent"/> as the factor this run's advances and glyphs are drawn at.
+    /// </summary>
+    public double WidthScale => TextWidthScale.Of(EmSize, WidthPerCent);
 
     /// <summary>
     /// The shaping this run is drawn with, once its tracking has had its say.
@@ -936,7 +949,7 @@ public readonly record struct PageRun(
 
     /// <summary>The measurement half of this run.</summary>
     public FormattedRun ToFormattedRun()
-        => new(Start, Length, Face, EmSize, Shaping, MetricEmSize, Tracking);
+        => new(Start, Length, Face, EmSize, Shaping, MetricEmSize, Tracking, WidthPerCent);
 
     /// <summary>
     /// True when two resolved fonts disagree about whether their glyphs are drawn leaning.

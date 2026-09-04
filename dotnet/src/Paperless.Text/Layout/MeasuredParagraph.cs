@@ -60,6 +60,24 @@ namespace Paperless.Text.Layout;
 /// and one tracking unit generous for a line that starts part-way in.
 /// </para>
 /// </param>
+/// <param name="WidthPerCent">
+/// How wide the glyphs are drawn against their own design, 100 for a face drawn as it is drawn.
+/// <para>
+/// <c>w:rPr/w:w</c> and RTF's <c>\charscalex</c>, which VCL applies by setting the font's width away
+/// from its height (<c>Font::SetAverageFontWidth</c>). It is not tracking — that puts a gap between
+/// glyphs and leaves them their own shape — and it is not a size, which would change the line's height.
+/// </para>
+/// <para>
+/// <strong>The width it lands on is an integer number of twips, and that is measurable rather than
+/// pedantic.</strong> VCL's font width is a <c>tools::Long</c> in the map mode's own unit, which for
+/// Writer is twips, so a 12 pt run at 99 per cent is set at <c>trunc(240 × 99 / 100) = 237</c> twips and
+/// scales by 237/240 = <b>0.9875</b>, not 0.99. Measured against 24.2.7.2 on
+/// <c>dotnet/probes/words-character-scale/</c>: <c>Hamburgefonstiv 12345</c> at 12 pt comes to 83.928 pt
+/// unscaled and 82.879 at <c>w:w="99"</c>, and 82.879/83.928 is 0.98750 to five places. Every other
+/// value in the corpus divides 240 exactly, so this shows on the commonest one alone — which is
+/// 1226 of the corpus's 1440 scaled runs.
+/// </para>
+/// </param>
 public readonly record struct FormattedRun(
     int Start,
     int Length,
@@ -67,10 +85,20 @@ public readonly record struct FormattedRun(
     Length EmSize,
     ShapingOptions Shaping = default,
     Length MetricEmSize = default,
-    Length Tracking = default)
+    Length Tracking = default,
+    int WidthPerCent = 100)
 {
     /// <summary>One past the run's last character.</summary>
     public int End => Start + Length;
+
+    /// <summary>
+    /// <see cref="WidthPerCent"/> as the factor the run's advances are actually multiplied by.
+    /// </summary>
+    /// <remarks>
+    /// One for an unscaled run, so the ordinary path multiplies by nothing. See the parameter for why
+    /// this is not simply the percentage.
+    /// </remarks>
+    public double WidthScale => TextWidthScale.Of(EmSize, WidthPerCent);
 
     /// <summary>
     /// The shaping this run is actually shaped with, once its tracking has had its say.
@@ -339,9 +367,12 @@ public sealed class MeasuredParagraph
                 // the running total. Summing in design units instead would add numbers from two
                 // different grids; reading the running total off the table instead would break the
                 // moment a control character left a gap between two sub-runs.
+                double squeeze = part.WidthScale;
+
                 for (int i = 1; i <= part.Length; i++)
                 {
-                    prefix[part.Start + i] = running + Advance(shaped, shaped.AdvanceUpTo(i), part.EmSize, grid);
+                    prefix[part.Start + i] = running
+                        + Scaled(Advance(shaped, shaped.AdvanceUpTo(i), part.EmSize, grid), squeeze);
                 }
 
                 if (part.Tracking != Length.Zero)
@@ -350,7 +381,7 @@ public sealed class MeasuredParagraph
                     for (int i = 0; i < part.Length; i++) tracking[part.Start + i] = part.Tracking.Emu;
                 }
 
-                running += Advance(shaped, shaped.AdvanceInDesignUnits, part.EmSize, grid);
+                running += Scaled(Advance(shaped, shaped.AdvanceInDesignUnits, part.EmSize, grid), squeeze);
             }
         }
 
@@ -587,6 +618,15 @@ public sealed class MeasuredParagraph
     /// The truncation is monotonic, so the prefix table stays monotonic, which every reader of it
     /// depends on.
     /// </remarks>
+    /// <summary>An advance squeezed by the run's character width, or left alone when it states none.</summary>
+    /// <remarks>
+    /// The multiply is guarded on the ordinary case rather than applied always, because every run in
+    /// the corpus but 1440 of them is unscaled and a double round trip on each of their advances would
+    /// move the last twip of some of them for nothing. See <see cref="TextWidthScale"/>.
+    /// </remarks>
+    private static long Scaled(long advance, double squeeze)
+        => squeeze == 1.0 ? advance : (long)Math.Round(advance * squeeze);
+
     private static long Advance(ShapedText shaped, long designUnits, Length emSize, MetricGrid? grid)
         => grid is { QuantisesAdvances: true } device
             ? device.ToAdvance(designUnits, shaped.UnitsPerEm, emSize).Emu

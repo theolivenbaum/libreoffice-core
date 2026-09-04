@@ -231,6 +231,10 @@ internal sealed class SkiaDrawingSink : IDrawingSink, IDisposable
             font.SkewX = -(float)FontReference.SyntheticObliqueShear;
         }
 
+        // `w:rPr/w:w`, which VCL draws by setting the font's width away from its height — see
+        // GlyphRun.WidthScale. The positions below are already scaled; this is the glyph's own shape.
+        if (run.WidthScale != 1.0) font.ScaleX = (float)run.WidthScale;
+
         ushort[] ids = new ushort[run.Glyphs.Count];
         SKPoint[] positions = new SKPoint[run.Glyphs.Count];
 

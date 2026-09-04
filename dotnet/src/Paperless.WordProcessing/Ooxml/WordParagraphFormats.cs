@@ -38,6 +38,11 @@ namespace Paperless.WordProcessing.Ooxml;
 /// lives in <c>w:rPr</c>, is stated in twips, and is commonly negative. See
 /// <see cref="Paperless.Text.Layout.FormattedRun.Tracking"/> for what a reader owes it.
 /// </param>
+/// <param name="WidthPerCent">
+/// How wide <c>w:w</c> draws the run's glyphs against their own design, 100 for none. See
+/// <see cref="Paperless.Text.Layout.TextWidthScale"/> for why the factor it produces is not the
+/// percentage.
+/// </param>
 /// <param name="DeclaredClass">
 /// The generic class the document has in force at this run — <see cref="FontFamilyClass.Unknown"/>
 /// when nothing states one — for a family the font matcher cannot find.
@@ -58,6 +63,7 @@ public readonly record struct WordTextStyle(
     bool IsStruckThrough = false,
     bool AutoKerning = false,
     Length Tracking = default,
+    int WidthPerCent = 100,
     FontFamilyClass DeclaredClass = FontFamilyClass.Unknown)
 {
     /// <summary>The key a face cache is keyed on: what actually decides which font file is loaded.</summary>
@@ -504,6 +510,11 @@ internal static class WordParagraphFormats
         WordProperty tracking =
             styles.ResolveRunProperty("spacing", runProperties, styleId, characterStyleId, tableStyleRunProperties);
 
+        // `w:w`, whose one-letter name is why it is easy to miss and impossible to grep for: it shares
+        // its spelling with the width attribute of half the format.
+        WordProperty scale =
+            styles.ResolveRunProperty("w", runProperties, styleId, characterStyleId, tableStyleRunProperties);
+
         Length resolvedSize = HalfPoints(size.Element) ?? DefaultSize;
 
         return new WordTextStyle(
@@ -530,6 +541,7 @@ internal static class WordParagraphFormats
             strike.IsOn || doubleStrike.IsOn,
             AutoKerningOf(kerning),
             TrackingOf(tracking),
+            WidthOf(scale),
             StatedClass(fonts, fontTable));
     }
 
@@ -552,6 +564,36 @@ internal static class WordParagraphFormats
     /// </remarks>
     private static Length TrackingOf(WordProperty spacing)
         => spacing.IntegerValue is { } twips and not 0 ? Length.FromTwips(twips) : Length.Zero;
+
+    /// <summary>
+    /// The percentage a <c>w:w</c> draws the run's glyphs at, 100 when it states none.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>ST_TextScale</c>, whose range is 1 to 600, and <c>DomainMapper</c> hands it to
+    /// <c>PROP_CHAR_SCALE_WIDTH</c> unchanged
+    /// (<c>sw/source/writerfilter/dmapper/DomainMapper.cxx</c>, <c>NS_ooxml::LN_EG_RPrBase_w</c>) — which
+    /// is <c>SvxCharScaleWidthItem</c>, and which VCL then applies as the font's width. It is <em>not</em>
+    /// a font size: the line stays as tall as it was and only the glyphs narrow.
+    /// </para>
+    /// <para>
+    /// It was read by nothing at all, and the corpus is full of it: <b>1677 <c>w:w</c> across 20 DOCX</b>,
+    /// of which 237 say 100 and so mean nothing. Of the 1440 that do, <b>1226 say 99</b> — a Word habit,
+    /// and one that costs a line's width one and a quarter per cent rather than one, for the reason in
+    /// <see cref="Paperless.Text.Layout.TextWidthScale"/>. The documents that carry it are the ones the
+    /// project's own notes reach for when they discuss reflow: <c>AWR OPS-AOC 044</c> states 25,
+    /// <c>ESPN-R - MCF - RA - Ed1</c> 112, and <c>Annex-10-to-the-Aircraft-Maintenance-Specialist</c>
+    /// 1100.
+    /// </para>
+    /// <para>
+    /// Out-of-range and unparseable values fall back to 100 rather than to the stated number, which is
+    /// what an unread property already did: a scale of zero would collapse the run to nothing.
+    /// </para>
+    /// </remarks>
+    private static int WidthOf(WordProperty scale)
+        => scale.IntegerValue is { } percent and >= 1 and <= 600
+            ? percent
+            : TextWidthScale.Natural;
 
     /// <summary>
     /// Whether a <c>w:kern</c> switches pair kerning on.

@@ -1171,6 +1171,10 @@ public sealed partial class DocxLayoutSource
                 // And tracking, for the same reason and more sharply: it is a distance per character,
                 // so a run that disagrees with its paragraph mark is wrong by its own length.
                 || style.Tracking != paragraph.Tracking
+                // And a character width, which is tracking's twin in this respect and worse in one:
+                // it multiplies the run's whole advance rather than adding to it, so a 99 per cent run
+                // measured at the paragraph's 100 is out by its own length and a quarter.
+                || style.WidthPerCent != paragraph.WidthPerCent
                 // And a synthetic oblique, which is drawing-only in the same way and was the one
                 // missing from this list: an italic run whose family has no italic installed resolves to
                 // the *same* face as its upright neighbour, so nothing above can see it and the fold
@@ -1193,7 +1197,8 @@ public sealed partial class DocxLayoutSource
                 Highlight: style.Highlight ?? default,
                 IsUnderlined: style.IsUnderlined,
                 IsStruckThrough: style.IsStruckThrough,
-                Tracking: style.Tracking));
+                Tracking: style.Tracking,
+                WidthPerCent: style.WidthPerCent));
         }
 
         return varies ? runs : [];

@@ -1301,7 +1301,8 @@ public static class PageDrawing
                     run.Font ?? Reference(paragraph, run.Face),
                     new DocPoint(pen, baseline - run.Rise),
                     spaceAdd,
-                    run.Tracking);
+                    run.Tracking,
+                    run.WidthScale);
 
                 runs.Add((glyphRun, run.ColourOn(background)));
 
@@ -2028,7 +2029,8 @@ public static class PageDrawing
         FontReference font,
         DocPoint origin,
         Length spaceAdd,
-        Length tracking = default)
+        Length tracking = default,
+        double widthScale = 1.0)
     {
         List<PositionedGlyph> glyphs = new(shaped.Glyphs.Count);
         List<int> clusters = new(shaped.Glyphs.Count);
@@ -2037,7 +2039,12 @@ public static class PageDrawing
 
         foreach (ShapedGlyph glyph in shaped.Glyphs)
         {
-            Length advance = shaped.Scale(glyph.Advance, emSize);
+            // `w:rPr/w:w` multiplies the face's own advance and nothing else. The two distances added
+            // below it are page-space distances that the character width does not reach: tracking is a
+            // gap between glyphs — measured unscaled on the probe, where a run at 50 per cent with a
+            // 40-twip spacing comes to 41.958 + 14 x 2 pt — and a justification share is decided after
+            // the line's width is known.
+            Length advance = Squeezed(shaped.Scale(glyph.Advance, emSize), widthScale);
 
             // Every glyph carries its tracking, the run's last included, so the text after a tracked
             // run starts one tracking unit further on.
@@ -2086,7 +2093,7 @@ public static class PageDrawing
             glyphs.Add(new PositionedGlyph(
                 glyph.GlyphId,
                 new DocPoint(
-                    pen + shaped.Scale(glyph.OffsetX, emSize),
+                    pen + Squeezed(shaped.Scale(glyph.OffsetX, emSize), widthScale),
                     -shaped.Scale(glyph.OffsetY, emSize)),
                 advance));
 
@@ -2102,8 +2109,16 @@ public static class PageDrawing
             Glyphs = glyphs,
             Text = text,
             ClusterMap = clusters,
+
+            // The positions above are already squeezed; this is what tells a backend to squeeze the
+            // glyphs themselves. See GlyphRun.WidthScale.
+            WidthScale = widthScale,
         };
     }
+
+    /// <summary>One advance under the run's character width, or as it is when the run states none.</summary>
+    private static Length Squeezed(Length advance, double widthScale)
+        => widthScale == 1.0 ? advance : Length.FromEmu((long)Math.Round(advance.Emu * widthScale));
 
     /// <summary>How far a run's pen travels: the sum of its advances, justification included.</summary>
     private static Length Extent(GlyphRun run)
