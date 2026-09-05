@@ -45,11 +45,12 @@ namespace Paperless.Fidelity.Tests;
 /// moves a pen, so this measures the thing under test at a tenth of a point.
 /// </para>
 /// </remarks>
-// [reference moved 24.2.7.2 -> 26.2.4.2] EveryCellStartsWhereLibreOfficeStartsIt fails on all
-// three `.fodt` rows and none of the other formats, on "line 3 run count" — so 26.2 splits or
-// joins that line's runs differently rather than placing them differently. Flat ODF only, which
-// is the lead: the same content through the packaged `.odt` passes. Unclassified between ours and
-// a 26.2 change; a run-count difference is substantive and is not a tolerance question.
+// [reference moved 24.2.7.2 -> 26.2.4.2, closed] `EveryCellStartsWhereLibreOfficeStartsIt` failed on
+// all three `.fodt` rows on "line 3 run count", 4 against our 3, and the fourth run is a **single
+// space**: 26.2.4.2's PDF export writes the wrapped line's trailing blank as a portion of its own where
+// 24.2.7.2 did not. Read out of the reference's own ToUnicode CMap — the run at x=509.4 on that line
+// shows glyph `<08>`, which the CMap maps to `<0020>`. Every word is in the same place in both, and
+// `pdftotext` extracts the same text from both. See `DrawingWords`.
 public sealed class TableAutoLayoutComparisonTests : IDisposable
 {
     /// <summary>How far a drawn pen may differ from LibreOffice's, in points.</summary>
@@ -100,7 +101,8 @@ public sealed class TableAutoLayoutComparisonTests : IDisposable
 
         string path = Corpus.Require(fileName);
         RecordingDrawingSink sink = Record(path);
-        List<PdfTextRun> reference = PdfTextRuns.Read(_libreOffice.ConvertToPdf(path, _workDirectory));
+        string referencePdf = _libreOffice.ConvertToPdf(path, _workDirectory);
+        List<PdfTextRun> reference = DrawingWords(PdfTextRuns.Read(referencePdf), referencePdf);
 
         reference.Count.ShouldBeGreaterThan(0, $"{fileName}: LibreOffice drew nothing");
 
@@ -133,6 +135,40 @@ public sealed class TableAutoLayoutComparisonTests : IDisposable
                     $"{fileName}: line {line + 1}, run {i + 1} pen x");
             }
         }
+    }
+
+    /// <summary>
+    /// The reference's runs that put a word on the page, which is not all of them.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// LibreOffice's PDF export draws a line's <em>trailing blank</em> as a portion of its own, one
+    /// glyph wide, out past the last word — <see cref="FrameComparisonTests"/> ran into the same thing
+    /// from the other end and copes with it by comparing pens by membership. 26.2.4.2 does it for a line
+    /// wrapped inside a table cell where 24.2.7.2 did not, which added a fourth run to line 3 of every
+    /// <c>table-autofit*.fodt</c> and to nothing else.
+    /// </para>
+    /// <para>
+    /// It is a blank and not a lost cell, established rather than assumed: the run shows the single
+    /// glyph <c>&lt;08&gt;</c>, and the reference PDF's own <c>ToUnicode</c> CMap maps <c>&lt;08&gt;</c>
+    /// to <c>&lt;0020&gt;</c>. A blank draws no ink, so <c>pdftotext</c> reports no word beginning at
+    /// its pen — which is the discriminator used here, because it needs no font parsing and states the
+    /// right thing. Measured on <c>table-autofit.fodt</c> under 26.2.4.2: 15 runs, of which exactly one
+    /// begins no word, and the other 14 begin exactly one each.
+    /// </para>
+    /// </remarks>
+    /// <param name="runs">Every positioned run the reference drew.</param>
+    /// <param name="pdf">The reference PDF, for the word boxes.</param>
+    private static List<PdfTextRun> DrawingWords(List<PdfTextRun> runs, string pdf)
+    {
+        List<PdfWord> words = PdfWords.Read(pdf);
+        if (words.Count == 0) return runs;
+
+        return [.. runs.Where(run => words.Any(word =>
+            word.PageIndex == run.PageIndex
+            && Math.Abs(word.Left - run.X) <= TolerancePoints * 3
+            && word.Top <= run.Y
+            && run.Y - word.Top <= run.FontSize * 2))];
     }
 
     /// <summary>

@@ -47,10 +47,26 @@ namespace Paperless.Fidelity.Tests;
 /// positional and glyph-count assertions cover the two formats that agree about the geometry.
 /// </para>
 /// </remarks>
-// [reference moved 24.2.7.2 -> 26.2.4.2] EveryCellIsDrawnWhereLibreOfficeDrawsIt fails on
-// `sheet-cell-text.xlsx`, run 12 on page 1, on the across-pen. Consistent with the same sub-point
-// advance drift the words tests show, but on one run of one sheet rather than a whole line, so it
-// is not established as the same thing.
+// [reference moved 24.2.7.2 -> 26.2.4.2, classified, not closed] EveryCellIsDrawnWhereLibreOfficeDrawsIt
+// fails on `sheet-cell-text.xlsx`, run 12 on page 1, on the across-pen — and it is an *indent*, not an
+// advance along a line. The run is the cell reading "Ind", whose ink is 13.898 pt wide in both
+// references; only where it starts differs. Its column begins at 244.885 pt in all three renderings, so
+// the indent is 16.498 pt under 24.2.7.2, 16.781 under 26.2.4.2, and 16.4977 in ours.
+//
+// The seat is `sc/source/filter/oox/stylesbuffer.cxx`:1262, which converts OOXML's indent as
+// `3 * indent` in `Unit::Space`, and `sc/source/filter/oox/unitconverter.cxx`:139-142, where one Space
+// is `xFont->getCharWidth(' ')` in **twips** on the reference device. This document's default font is
+// Arial 10, resolved to Liberation Sans, whose design space is 0.27783 em = 55.566 twips: 24.2.7.2's
+// indent is exactly 6 x 55 twips and ours is 6 x 54.99, while 26.2.4.2's is 6 x 55.94. So the reference
+// measures the same glyph in the same face at the same size differently from the version before it,
+// which is the divergence `CLAUDE.md`'s rule 3 records and the same one behind
+// `SlideChartFaceComparisonTests` (Liberation Mono's digit, 6.010 pt against 5.839) and
+// `SheetDrawingComparisonTests`. Every other pen in this document — 17 of the 24 runs — is identical
+// across all three to a thousandth of a point.
+//
+// Ours to follow and not a tolerance question: closing it means reproducing the reference's own
+// device-measured advance rather than the design metric, which is the open architectural defect rule 3
+// names. Do not widen the band; the figure sitting just over it is the record that this moved.
 public sealed class SheetTextComparisonTests : IDisposable
 {
     /// <summary>A tenth of a point, two twips, as everywhere else in this project.</summary>

@@ -28,7 +28,8 @@ namespace Paperless.Fidelity.Tests;
 // four formats, identically: word 4 ("than") starts at 117.571 pt in the reference against our
 // 117.442 pt, 0.129 pt. Same shape and same conclusion as PageDrawingComparisonTests — ours is
 // unmoved, the reference is not, and the shaper and rasteriser are shared. A real sub-point 26.2
-// layout change, ours to follow, mechanism not established.
+// layout change, ours to follow, mechanism not established. See `PageDrawingComparisonTests` for the
+// three further instruments this was measured in on 2026-09-05 and for what they say about the seat.
 public sealed class TabStopComparisonTests : IDisposable
 {
     /// <summary>How far a drawn word may differ from LibreOffice's, in points.</summary>

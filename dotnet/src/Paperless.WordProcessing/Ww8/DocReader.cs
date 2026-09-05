@@ -224,6 +224,13 @@ public sealed class Ww8Document : IWordProcessingDocument, IPaginatedDocument
             // (`ww8par.cxx`:2050), as `WriterFilter` does for every DOCX — and as neither the RTF
             // filter nor either ODF one does. See PaginationOptions.UsesWordNoteSeparator.
             UsesWordNoteSeparator = true,
+
+            // The other half of that same setting, and the half it is named for: endnotes collecting at
+            // the end of the document follow the last body content instead of taking pages of their own.
+            // It changes nothing for a DOC whose `epc` is zero, whose endnotes collect at the end of the
+            // section instead. See PaginationOptions.EndnotesFollowTheBody.
+            EndnotesFollowTheBody = true,
+
             NoteSeparatorHeight = NoteReservation(fonts) is { } reservation
                 ? reservation
                 : PaginationOptions.Word.NoteSeparatorHeight,

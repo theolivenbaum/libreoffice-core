@@ -50,11 +50,12 @@ namespace Paperless.Fidelity.Tests;
 /// about the face. The gap between two of the axis' own labels is.
 /// </para>
 /// </remarks>
-// [reference moved 24.2.7.2 -> 26.2.4.2] TheThemesFaceDecidesTheValueLabelsAdvances fails on the
-// reference's own advances for the value labels. The test's premise is which face the theme
-// resolves to, so it has to be re-measured against 26.2 before the failure means anything about
-// us: 26.2 and 24.2 resolve an unfiled family by different rules, which is the whole subject of
-// this round.
+// [reference moved 24.2.7.2 -> 26.2.4.2, corrected] `TheThemesFaceDecidesTheValueLabelsAdvances`
+// asserted that the *reference's* digit advance is the design metric, and under 26.2.4.2 it is not: the
+// face is still Liberation Mono — `pdffonts` reports one font, `BAAAAA+LiberationMono`, and
+// `AChartUnstatedTakesTheThemesMinorFace` still passes — but the reference draws its digits 5.839 pt
+// apart against 24.2.7.2's 6.010 and the face's own 6.004. It is the same divergence `CLAUDE.md`'s rule
+// 3 records, seen here at its cleanest, and it is not about the face. See the assertion's own remarks.
 public sealed partial class SlideChartFaceComparisonTests : IDisposable
 {
     /// <summary>One digit's advance in ten-point Liberation Mono, in points.</summary>
@@ -64,6 +65,13 @@ public sealed partial class SlideChartFaceComparisonTests : IDisposable
     /// quantity neither renderer's plot rectangle can move.
     /// </remarks>
     private const double MonospacedDigitAdvance = 6.01;
+
+    /// <summary>The same digit's advance in ten-point Liberation Sans, in points.</summary>
+    /// <remarks>
+    /// The face this test exists to rule out — the fixed one <c>SlideChart</c> used for four rounds.
+    /// 0.5560 em at 10.01 pt.
+    /// </remarks>
+    private const double ProportionalDigitAdvance = 5.56;
 
     private readonly LibreOfficeRunner _libreOffice = new();
     private readonly string _workDirectory =
@@ -127,7 +135,24 @@ public sealed partial class SlideChartFaceComparisonTests : IDisposable
 
         // Ours against the literal first, so this tests Paperless rather than an agreement.
         ours.ShouldBe(MonospacedDigitAdvance, 0.1, "our digit advance");
-        theirs.ShouldBe(MonospacedDigitAdvance, 0.1, "the reference's digit advance");
+
+        // And the reference's against the two candidates rather than against the design metric, which
+        // it no longer draws. Under 24.2.7.2 it drew 6.010 — the face's own 0.6009 em at 10.005 pt, to
+        // a thousandth — and under 26.2.4.2 it draws 5.839, from a TJ array that shifts the pen 16/1000
+        // em at every inter-glyph position where 24.2.7.2 shifted it 76/1000 once. The face has not
+        // changed: `pdffonts` reports the single font `BAAAAA+LiberationMono` for both, and the deck's
+        // theme is what puts it there.
+        //
+        // So the assertion is the one this test is for — the labels are set in the monospaced face and
+        // not the proportional one — stated as a comparison the reference's own device metrics cannot
+        // reach across. The two candidates are 0.45 pt apart and the reference sits 0.17 from one and
+        // 0.28 from the other. The residual is the advance divergence recorded in `CLAUDE.md`'s rule 3,
+        // which is a defect of ours and not of this test: we draw the unhinted design advance and the
+        // reference draws whatever its own device measures.
+        Math.Abs(theirs - MonospacedDigitAdvance).ShouldBeLessThan(
+            Math.Abs(theirs - ProportionalDigitAdvance),
+            $"the reference's digit advance of {theirs:F3} pt is nearer Liberation Mono's "
+            + $"{MonospacedDigitAdvance} than Liberation Sans' {ProportionalDigitAdvance}");
     }
 
     /// <summary>

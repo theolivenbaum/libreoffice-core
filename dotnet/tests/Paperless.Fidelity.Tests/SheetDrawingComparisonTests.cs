@@ -25,9 +25,19 @@ namespace Paperless.Fidelity.Tests;
 /// <c>Paperless.Rendering</c>'s business and is tested there.
 /// </para>
 /// </remarks>
-// [reference moved 24.2.7.2 -> 26.2.4.2] APictureIsDrawnWhereLibreOfficeDrawsIt fails on
-// `sheet-rich-text.xlsx`, picture 1 on page 3, on width. A picture's width does not depend on text
-// metrics, so this is unlikely to be the sub-point drift the words tests show; unclassified.
+// [reference moved 24.2.7.2 -> 26.2.4.2, classified, not closed] APictureIsDrawnWhereLibreOfficeDrawsIt
+// fails on `sheet-rich-text.xlsx`, picture 1 on page 3, on width. "A picture's width does not depend on
+// text metrics" stood here and is false for a two-cell anchor in an XLSX, where the span is a sum of
+// grid extents and the grid's own units are character widths and font-derived row heights. The measured
+// rectangles say so: **the FODS spelling of the same picture is 95.046 x 46.800 pt under both binaries**
+// and ours is 95.074 x 46.800, while the XLSX is 95.017 x 46.772 under 24.2.7.2 and 94.904 x 46.658
+// under 26.2.4.2 — its top-left identical in both, and both far edges drawn in by 0.113 pt. So the ODF
+// path, which states the extents outright, is version-stable and the OOXML path, which derives them, is
+// not.
+//
+// Same family as `SheetTextComparisonTests` and `SlideChartFaceComparisonTests`, and ours to follow for
+// the same reason: we compute the span from the design metrics, which is what 24.2.7.2 drew and what the
+// ODF spelling still draws. See `CLAUDE.md`'s rule 3.
 public sealed class SheetDrawingComparisonTests : IDisposable
 {
     /// <summary>A tenth of a point, two twips, as everywhere else in this project.</summary>

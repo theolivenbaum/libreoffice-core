@@ -95,6 +95,29 @@ format (Paperless reads), macro execution (never — Paperless only reports that
    Treat it as a real open defect with a known seat, not as a rounding artefact — and do not
    re-derive "our pen is off", because the declared-margin probe already refuted that.
 
+   **It moved again with the reference, and 26.2.4.2 is further from the design metric than
+   24.2.7.2 was.** Measured 2026-09-05 in three instruments that are each cleaner than a justified
+   line, and in every one of them ours equals the design metric *and* 24.2.7.2's rendering while
+   26.2.4.2's does not:
+
+   | instrument | design | 24.2.7.2 | 26.2.4.2 | ours |
+   |---|---:|---:|---:|---:|
+   | Liberation Mono digit, 10.005 pt, chart value labels | 6.004 | 6.010 | **5.839** | 6.009 |
+   | Liberation Sans space, 10 pt, behind a Calc indent | 55.57 tw | 55 tw | **55.94 tw** | 54.99 tw |
+   | an XLSX two-cell picture span, in points | — | 95.017 | **94.904** | 95.074 |
+
+   The chart one is the instrument to reach for: the labels are right-aligned digits in a
+   *monospaced* face, so the gap between the `100` and `80` labels is one advance and nothing else,
+   and the reference's own `TJ` array states its internal pen positions outright — 26.2.4.2 shifts
+   16/1000 em at every inter-glyph position where 24.2.7.2 shifted 76/1000 once. The picture row is
+   the control that says it is not a text-layout rule: the **ODF spelling of the same picture is
+   95.046 × 46.800 pt under both binaries** and only the OOXML one, whose extents are derived from
+   font-dependent grid units, moves.
+
+   Its reach is now five fidelity test methods — `PageDrawingComparisonTests` (×4),
+   `TabStopComparisonTests` (×4), `SheetTextComparisonTests`, `SheetDrawingComparisonTests` and
+   `SlideChartFaceComparisonTests`' residual — and each of those files carries its own measurement.
+
    **Section breaks amplify it from a fraction of a line into whole pages, and that is why some
    documents are wildly out.** Worked through on `AWR OPS-AOC 044` (metrics-001, ours 12 pages
    against 15). A narrow table cell whose text wraps one line short makes its row shorter; a
