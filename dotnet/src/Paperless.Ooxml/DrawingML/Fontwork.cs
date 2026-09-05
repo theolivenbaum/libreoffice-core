@@ -36,10 +36,9 @@ public static class Fontwork
     /// The LibreOffice Fontwork type each OOXML <c>prst</c> maps to.
     /// </summary>
     /// <remarks>
-    /// <c>oox/source/drawingml/presetgeometrynames.cxx</c>, transcribed whole. Names mapping to a
-    /// preset <see cref="FontworkPresets"/> does not carry are kept: knowing that a warp is a
-    /// <c>*Pour</c> rather than an unknown string is worth having, and the difference decides
-    /// whether a fallback is a gap or a malformed file.
+    /// <c>oox/source/drawingml/presetgeometrynames.cxx</c>, transcribed whole. All forty warps map
+    /// to a preset <see cref="FontworkPresets"/> carries, so a name that is not in this table is a
+    /// malformed file rather than a gap.
     /// </remarks>
     private static readonly FrozenDictionary<string, string> FontworkTypes =
         new Dictionary<string, string>(StringComparer.Ordinal)
@@ -88,6 +87,66 @@ public static class Fontwork
         }.ToFrozenDictionary(StringComparer.Ordinal);
 
     /// <summary>
+    /// The LibreOffice Fontwork type of each MS-ODRAW WordArt shape type, <c>mso_sptTextPlainText</c>
+    /// onwards.
+    /// </summary>
+    /// <remarks>
+    /// <c>svx/source/customshapes/EnhancedCustomShapeTypeNames.cxx:171-211</c>, in the order
+    /// <c>include/svx/msdffdef.hxx:412-451</c> numbers them, which is contiguous from 136 to 175 and is
+    /// why this is an array and not a dictionary. VML and Escher both name a WordArt shape by that
+    /// number rather than by a DrawingML <c>prst</c>: a <c>v:shapetype</c> writes it as
+    /// <c>o:spt="136"</c> and reuses it as <c>type="#_x0000_t136"</c>, and
+    /// <c>oox/source/vml/vmlshape.cxx:1329</c> hands it straight to
+    /// <c>SdrObjCustomShape::MergeDefaultAttributes</c>, which resolves it through the same table.
+    /// </remarks>
+    private static readonly string[] ShapeTypes =
+    [
+        "fontwork-plain-text",          // 136 mso_sptTextPlainText
+        "fontwork-stop",                // 137 mso_sptTextStop
+        "fontwork-triangle-up",         // 138 mso_sptTextTriangle
+        "fontwork-triangle-down",       // 139 mso_sptTextTriangleInverted
+        "fontwork-chevron-up",          // 140 mso_sptTextChevron
+        "fontwork-chevron-down",        // 141 mso_sptTextChevronInverted
+        "mso-spt142",                   // 142 mso_sptTextRingInside
+        "mso-spt143",                   // 143 mso_sptTextRingOutside
+        "fontwork-arch-up-curve",       // 144 mso_sptTextArchUpCurve
+        "fontwork-arch-down-curve",     // 145 mso_sptTextArchDownCurve
+        "fontwork-circle-curve",        // 146 mso_sptTextCircleCurve
+        "fontwork-open-circle-curve",   // 147 mso_sptTextButtonCurve
+        "fontwork-arch-up-pour",        // 148 mso_sptTextArchUpPour
+        "fontwork-arch-down-pour",      // 149 mso_sptTextArchDownPour
+        "fontwork-circle-pour",         // 150 mso_sptTextCirclePour
+        "fontwork-open-circle-pour",    // 151 mso_sptTextButtonPour
+        "fontwork-curve-up",            // 152 mso_sptTextCurveUp
+        "fontwork-curve-down",          // 153 mso_sptTextCurveDown
+        "fontwork-fade-up-and-right",   // 154 mso_sptTextCascadeUp
+        "fontwork-fade-up-and-left",    // 155 mso_sptTextCascadeDown
+        "fontwork-wave",                // 156 mso_sptTextWave1
+        "mso-spt157",                   // 157 mso_sptTextWave2
+        "mso-spt158",                   // 158 mso_sptTextWave3
+        "mso-spt159",                   // 159 mso_sptTextWave4
+        "fontwork-inflate",             // 160 mso_sptTextInflate
+        "mso-spt161",                   // 161 mso_sptTextDeflate
+        "mso-spt162",                   // 162 mso_sptTextInflateBottom
+        "mso-spt163",                   // 163 mso_sptTextDeflateBottom
+        "mso-spt164",                   // 164 mso_sptTextInflateTop
+        "mso-spt165",                   // 165 mso_sptTextDeflateTop
+        "mso-spt166",                   // 166 mso_sptTextDeflateInflate
+        "mso-spt167",                   // 167 mso_sptTextDeflateInflateDeflate
+        "fontwork-fade-right",          // 168 mso_sptTextFadeRight
+        "fontwork-fade-left",           // 169 mso_sptTextFadeLeft
+        "fontwork-fade-up",             // 170 mso_sptTextFadeUp
+        "fontwork-fade-down",           // 171 mso_sptTextFadeDown
+        "fontwork-slant-up",            // 172 mso_sptTextSlantUp
+        "fontwork-slant-down",          // 173 mso_sptTextSlantDown
+        "mso-spt174",                   // 174 mso_sptTextCanUp
+        "mso-spt175",                   // 175 mso_sptTextCanDown
+    ];
+
+    /// <summary>The lowest MS-ODRAW shape type that is a WordArt shape.</summary>
+    public const int FirstShapeType = 136;
+
+    /// <summary>
     /// The four warps whose text keeps its stated size instead of filling the shape.
     /// </summary>
     /// <remarks>
@@ -117,15 +176,28 @@ public static class Fontwork
             : null;
 
     /// <summary>
+    /// The LibreOffice Fontwork type an MS-ODRAW shape type number names, or null when it is not one.
+    /// </summary>
+    /// <param name="shapeType">
+    /// A <c>v:shapetype/@o:spt</c>, or the number in a <c>#_x0000_t136</c> reference, which is the
+    /// same thing written twice.
+    /// </param>
+    public static string? FontworkTypeOfShapeType(int shapeType)
+        => shapeType >= FirstShapeType && shapeType < FirstShapeType + ShapeTypes.Length
+            ? ShapeTypes[shapeType - FirstShapeType]
+            : null;
+
+    /// <summary>
     /// The warped outlines of a body's text, in the shape's own coordinates, or null.
     /// </summary>
     /// <remarks>
     /// <para>
-    /// Null has four causes: the body states no warp; the warp is one of the eight
-    /// <see cref="FontworkPresets"/> does not carry; the face has no <c>glyf</c> outlines
-    /// (see <see cref="GlyphOutlines"/>); or the text is empty. The first means "draw it the
-    /// ordinary way"; the other three mean "the reference drew curves and this cannot", and both
-    /// families answer that by drawing nothing rather than by drawing unwarped text.
+    /// Null has four causes: the body states no warp; it states a <c>prst</c> that is not one of
+    /// the forty (a malformed file, since <see cref="FontworkPresets"/> carries them all); the face
+    /// has no <c>glyf</c> outlines (see <see cref="GlyphOutlines"/>); or the text is empty. The
+    /// first means "draw it the ordinary way"; the other three mean "the reference drew curves and
+    /// this cannot", and both families answer that by drawing nothing rather than by drawing
+    /// unwarped text.
     /// </para>
     /// <para>
     /// The result's origin is the shape's top-left corner and its coordinates are EMUs, so a caller
@@ -138,8 +210,8 @@ public static class Fontwork
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        if (!IsWarp(request.Preset)) return null;
-        if (FontworkTypeOf(request.Preset) is not { } type) return null;
+        if (request.FontworkType is null && !IsWarp(request.Preset)) return null;
+        if ((request.FontworkType ?? FontworkTypeOf(request.Preset)) is not { } type) return null;
         if (FontworkPresets.Find(type) is not { } preset) return null;
         if (!GlyphOutlines.CanOutline(request.Face)) return null;
 
@@ -157,23 +229,28 @@ public static class Fontwork
         if (lines.Count == 0) return null;
         if (request.Box.IsEmpty) return null;
 
-        bool scalesX = !request.FromWordArt && KeepsFontSize.Contains(request.Preset);
+        bool scalesX = request.KeepsFontSize
+            ?? (!request.FromWordArt && request.Preset is not null && KeepsFontSize.Contains(request.Preset));
 
         return FontworkFitting.Fit(
             preset,
-            Adjustments(type, request.Adjustments),
+            request.AdjustmentValues ?? Adjustments(type, request.Adjustments),
             request.Box,
             lines,
             request.Face,
             request.FontSize,
             request.Alignment,
-            VerticalAdjustOf(request.Preset),
+            VerticalAdjustOfType(type),
             scalesX);
     }
 
     /// <summary>Where a multi-line warp's lines gather, which the preset alone decides.</summary>
     /// <remarks><c>oox/source/drawingml/shape.cxx:863-874</c>.</remarks>
-    public static FontworkVerticalAdjust VerticalAdjustOf(string? preset) => FontworkTypeOf(preset) switch
+    public static FontworkVerticalAdjust VerticalAdjustOf(string? preset)
+        => VerticalAdjustOfType(FontworkTypeOf(preset));
+
+    /// <summary>The same, keyed on the LibreOffice Fontwork type rather than on a <c>prst</c>.</summary>
+    private static FontworkVerticalAdjust VerticalAdjustOfType(string? type) => type switch
     {
         "fontwork-arch-up-curve" or "fontwork-circle-curve" => FontworkVerticalAdjust.Bottom,
         "fontwork-arch-down-curve" => FontworkVerticalAdjust.Top,
@@ -280,11 +357,51 @@ public enum FontworkAlignment
 /// <summary>Everything a warp needs to be laid out.</summary>
 public sealed record FontworkRequest
 {
-    /// <summary>The <c>a:prstTxWarp/@prst</c> value.</summary>
-    public required string Preset { get; init; }
+    /// <summary>The <c>a:prstTxWarp/@prst</c> value, or null when the shape states no DrawingML warp.</summary>
+    /// <remarks>
+    /// VML and Escher name a WordArt shape by an MS-ODRAW shape type number instead, so a caller on
+    /// either of those paths leaves this null and sets <see cref="FontworkType"/>.
+    /// </remarks>
+    public string? Preset { get; init; }
+
+    /// <summary>
+    /// The LibreOffice Fontwork type, when the caller already has one, or null to derive it from
+    /// <see cref="Preset"/>.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="Fontwork.FontworkTypeOfShapeType"/> is where a VML or Escher caller gets it. Setting
+    /// it also bypasses the <c>textNoShape</c> gate, which is a DrawingML spelling: a shape type
+    /// number in the WordArt range is a warp by construction.
+    /// </remarks>
+    public string? FontworkType { get; init; }
 
     /// <summary>Its <c>a:avLst</c> guides, in the order the file states them.</summary>
     public IReadOnlyList<FontworkAdjustment> Adjustments { get; init; } = [];
+
+    /// <summary>
+    /// The adjustment values already in MS-ODRAW's units, or null to convert
+    /// <see cref="Adjustments"/> from DrawingML's.
+    /// </summary>
+    /// <remarks>
+    /// A <c>v:shape/@adj</c> is a comma-separated list of values in the shape's own 21600 viewbox —
+    /// the units the preset tables are written in — so the VML path has nothing to convert and the
+    /// conversion <see cref="Fontwork"/> applies to a DrawingML <c>a:gd</c> would be wrong twice over.
+    /// </remarks>
+    public IReadOnlyList<double>? AdjustmentValues { get; init; }
+
+    /// <summary>
+    /// Whether the text keeps its stated size, or null to derive it from the preset.
+    /// </summary>
+    /// <remarks>
+    /// The <c>TextPath/ScaleX</c> property, which <c>EnhancedCustomShapeFontWork.cxx:107-111</c> reads
+    /// as <c>FWData::bScaleX</c>. DrawingML derives it from the preset and from
+    /// <see cref="FromWordArt"/>; VML does not derive it at all —
+    /// <c>oox/source/vml/vmlformatting.cxx:966-975</c> writes <c>ScaleX</c> and
+    /// <c>SameLetterHeights</c> as literal <c>false</c> for every <c>v:textpath</c>, whatever the
+    /// shape type — so the VML adapter states it here rather than letting the arch family derive
+    /// a <c>true</c> the reference never sets.
+    /// </remarks>
+    public bool? KeepsFontSize { get; init; }
 
     /// <summary>
     /// Whether the shape came from a binary WordArt object rather than from a text box.

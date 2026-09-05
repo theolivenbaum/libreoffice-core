@@ -2079,6 +2079,102 @@ is read and verified, so what remains is the filling of pages rather than the me
   - **`wp:effectExtent` moves a warped shape and not an unwarped one's text**, which is the one
     open thread. See the entry two below.
 
+- **Binary DOC/PPT Escher WordArt reaches 5 shapes across 4 documents, and is not worth writing.**
+  Censused by scanning every `.doc .dot .ppt .pot .pps .xls .xlt .rtf` for an `msofbtSp` record
+  whose instance is in the WordArt shape-type range 136-175: `135.doc` 1, `644730BRI…public0.doc`
+  2, `8.16_AOD_FINAL_Provider_Training_Presentation_9_2009.ppt` 1 (type 144), `pres_ioc_phuket.ppt`
+  1. DOCX VML holds 15 and DrawingML 29 on the words side, so this is the smallest of the three
+  paths — and all four documents sit at 8.25, 23.29, 3.75 and 4.58 mean ink for reasons that have
+  nothing to do with WordArt, so one shape each would be invisible even implemented.
+
+  **It also settles the two knobs this round was briefed to expect from the VML side.**
+  `oox/source/vml/vmlformatting.cxx:966-975` writes `ScaleX` and `SameLetterHeights` as literal
+  `false` for every `v:textpath`, so they are unreachable from OOXML VML by construction; and the
+  binary path, which does read them (`msdffimp.cxx:2516-2600`, bits 0x40 and 0x80 of
+  `DFF_Prop_gtextFStrikethrough`), finds them **clear on all five shapes**, none of which hard-sets
+  `DFF_Prop_gtextFStretch` either. There is no document in this corpus, in any format, that would
+  render differently if `SameLetterHeights` were implemented.
+
+- **CFF/OTTO faces reach nothing WordArt resolves to, so no Type 2 interpreter is written.**
+  Installed set: **45 TrueType `glyf`, 11 CFF, 8 Type 1**, and every CFF face is Loma or a Unifont
+  variant. Every family named in a part carrying a real warp — Arial, Perpetua Titling MT, Kristen
+  ITC, Times New Roman, Calibri, Arial Black, Corpid E1s SCd Regular, Papyrus, Informal Roman —
+  resolves to a `glyf` face. `GlyphOutlines` answering null for a CFF face therefore costs this
+  corpus nothing. Both censuses are reproducible with
+  `dotnet/probes/fontwork-reach/census.py`; the second depends on the installed font set and
+  should be re-run before it is relied on in another container.
+
+- **[DONE] All forty `ST_TextShapeType` warps are implemented.** The previous round left eight,
+  on a rule worth keeping — *a table transcribed for a preset no document states is a transcription
+  nothing checks* — and the corpus still states none of them. What changed is that a fixture now
+  checks them: `fontwork-presets-{default,adjusted}.docx`, one shape per value authored into the
+  WordArt catalogue's own container, with reference PDFs from both binaries. Nine-page mean
+  absolute grey difference **2.584 → 0.603**, no page above 0.93, extracted words 228/228 and
+  10/10 `WORDART` tokens throughout.
+
+  **Five of the eight needed nothing but their tables, which is not what the standing note said.**
+  A `*Pour` shape is two concentric arcs with the text fitted into the ring between them, drawn
+  with the same `0xA304`/`0xA504` the arch family already used; `mso-spt142` is `0xa604 0xa504`.
+  Only `mso-spt143` needed a path builder — `ANGLEELLIPSE`, `0xA2` with a count in thirds
+  (`svx/source/svdraw/svdoashp.cxx:124-133`), taking the `bIsFromBinaryImport` arm of
+  `EnhancedCustomShape2d.cxx:2178-2286` where the second angle is a swing rather than an end, and
+  which the reference special-cases by that very name at line 2255 because its angles are plain
+  degrees where every other binary user of the opcode states 1/65536ths.
+
+  The catalogue renders **byte-identically** to the build before it, 0.0000 maximum per-page
+  difference over all 52 pages, which is the check that the shared evaluator was not disturbed.
+  Write-up in `dotnet/probes/words-fontwork-presets/results.md`.
+
+- **[DONE] VML WordArt (`v:textpath` on a `#_x0000_t136`) is drawn as warped outlines too.**
+  A `v:shape` naming a WordArt shape type becomes a Fontwork custom shape with no conversion step:
+  `oox/source/vml/vmlshape.cxx:1329` hands the number straight to
+  `SdrObjCustomShape::MergeDefaultAttributes`, which resolves it through
+  `EnhancedCustomShapeTypeNames` into the same LibreOffice type names `FontworkPresets` is keyed by,
+  and `TextpathModel::pushToPropMap` (`oox/source/vml/vmlformatting.cxx:962-1057`) puts it into
+  text-path mode. `DocxVmlFontwork` reproduces it.
+
+  The corpus holds **15 of them across 5 documents**, every one a diagonal `EASA Example Documents`
+  or `DRAFT` watermark in a `word/headerN.xml`, and none inside an `mc:Fallback`. 100 dpi mean
+  absolute grey difference over the whole document, before → after:
+
+  | document | against 24.2.7.2 | against 26.2.4.2 |
+  |---|---|---|
+  | `ABCD-FE-01-00 Flight Envelope` | 11.698 → **11.341** | 15.210 → **14.855** |
+  | `ABCD-SDE-23-00 Avionic System Description` | 5.364 → **5.003** | 6.050 → **5.694** |
+  | `ABCD-WB-08-00 Weight and Balance` | 7.081 → **6.738** | 8.515 → **8.197** |
+  | `DOA_Template_Form_Type_Certification_Programme` | 11.322 → *11.602* | 10.960 → *11.239* |
+  | `technical-architecture` | 4.976 → **4.590** | 5.884 → **5.499** |
+
+  Words and pages are unchanged everywhere: the whole `words/*` track sweeps 311/338 before and
+  after with **not one row of `parity.tsv` different**. Full write-up in
+  `dotnet/probes/words-vml-fontwork/results.md`.
+
+  Three things about it worth carrying forward:
+
+  - **The declared height is thrown away and remeasured from the text**
+    (`vmlformatting.cxx:1041-1056`), unless `trim="t"`, which nothing states. `DOA_Template` states
+    `height:53pt` and the reference imports 57.5; `technical-architecture` states 247.45 pt for the
+    five letters of `DRAFT` and the reference imports 138. Reproducing the ratio from `hhea`'s
+    ascender less its descender over the design advances lands within **0.9%** on five probed
+    (family, string) pairs.
+  - **`gtextFSameHeights` and `gtextFStretch` are *not* reachable from OOXML VML**, contrary to what
+    this round was briefed to expect. `vmlformatting.cxx:966-975` writes `ScaleX` and
+    `SameLetterHeights` as literal `false` for every `v:textpath`, whatever the shape type. They are
+    reachable only from binary Escher, `msdffimp.cxx:2516-2600`.
+  - **`rotation` is read for a WordArt shape and for nothing else**, deliberately: the words track
+    states it on **347** VML shapes across **34** documents and turning all of them is its own round.
+    Fifteen of the 347 are these watermarks, all at `rotation:315`.
+
+- **`RelOrientation::PAGE_PRINT_AREA` starts below the header for LibreOffice and at `w:top` for
+  us, and it moves every margin-relative frame in a document with a tall header.** Measured on an
+  isolated one-page probe with an empty header (A4, `w:top` = `w:header` = 708 twips): the reference
+  centres a `mso-position-vertical:center` shape at y = 409.08 pt and we centre it at 402.48 — a
+  gap of **6.6 pt, exactly half of one empty header line**. On
+  `DOA_Template_Form_Type_Certification_Programme`, whose header is a three-row table, the same gap
+  is 76.6 pt and the watermark lands **34.7 pt high**, which is the whole of why that one document
+  scored worse when its watermark started being drawn. It reaches DrawingML frames as well as VML
+  ones and wants its own probe and its own sweep.
+
 - **`wp:effectExtent` is not added to an inline drawing's *horizontal* position, and the reference
   adds it.** Measured on the WordArt catalogue at 200 dpi: its unwarped gradient-text boxes on page
   3 span x 229.68..359.64 pt for us and 240.84..370.80 for the reference — the same 10.8 pt as their

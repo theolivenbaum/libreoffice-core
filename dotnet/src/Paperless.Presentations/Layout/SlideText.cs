@@ -156,6 +156,42 @@ public sealed record SlideTextBody
     public IReadOnlyList<FontworkAdjustment> WarpAdjustments { get; init; } = [];
 
     /// <summary>
+    /// The LibreOffice Fontwork type an ODF shape states directly, or null when the body is
+    /// DrawingML's and <see cref="WarpPreset"/> names it instead.
+    /// </summary>
+    /// <remarks>
+    /// ODF is the format LibreOffice's Fontwork model is native to, so a <c>draw:custom-shape</c>
+    /// states <c>draw:type="fontwork-arch-up-curve"</c> — the very name
+    /// <see cref="Paperless.Ooxml.DrawingML.FontworkPresets"/> is keyed by — and needs no mapping
+    /// at all. <c>xmloff/source/draw/ximpcustomshape.cxx:1136-1150</c> is where the reference reads
+    /// the <c>draw:text-path*</c> attributes beside it.
+    /// </remarks>
+    public string? WarpFontworkType { get; init; }
+
+    /// <summary>
+    /// The adjustment values an ODF shape's <c>draw:modifiers</c> states, already in WordArt units.
+    /// </summary>
+    /// <remarks>
+    /// Unlike <see cref="WarpAdjustments"/> these need no conversion: <c>draw:modifiers</c> is
+    /// written in the same 21600 viewbox the geometry tables use, and an angle handle is written as
+    /// a plain degree, which is what the tables expect too.
+    /// </remarks>
+    public IReadOnlyList<double>? WarpAdjustmentValues { get; init; }
+
+    /// <summary>
+    /// Whether the warp keeps the run's stated size, when the file says so directly.
+    /// </summary>
+    /// <remarks>
+    /// <c>draw:text-path-scale</c>: <c>shape</c> is <c>TextPathScaleX</c> true and <c>path</c> is
+    /// false (<c>xmloff/source/draw/ximpcustomshape.cxx</c>, <c>EAS_TextPathScale</c>). LibreOffice
+    /// writes <c>shape</c> on exactly the four presets the DrawingML side derives it for —
+    /// <c>fontwork-arch-up-curve</c>, <c>fontwork-arch-down-curve</c>, <c>fontwork-circle-curve</c>
+    /// and <c>fontwork-open-circle-curve</c> — so reading it rather than deriving it agrees with
+    /// the other path and also honours a file that says otherwise.
+    /// </remarks>
+    public bool? WarpKeepsFontSize { get; init; }
+
+    /// <summary>
     /// Whether the body is Fontwork: drawn as glyph outlines rather than as text.
     /// </summary>
     /// <remarks>
@@ -177,9 +213,8 @@ public sealed record SlideTextBody
     /// <see cref="WarpAdjustments"/> are handed to
     /// <see cref="Paperless.Ooxml.DrawingML.Fontwork"/>, which builds the warped outlines, and
     /// <c>SlideFontwork</c> replaces the whole shape with them — its own fill, pen and shadow
-    /// included, as the reference does. What is still drawn as nothing is a warp whose geometry
-    /// is not implemented (the four <c>*Pour</c> and two <c>textRing*</c> presets, which no
-    /// corpus document states) or one set in a face with no <c>glyf</c> outlines. Drawing nothing
+    /// included, as the reference does. All forty <c>ST_TextShapeType</c> warps are built, so what
+    /// is still drawn as nothing is a body set in a face with no <c>glyf</c> outlines. Drawing nothing
     /// stays the right fallback for those, and the measurement is unchanged: on page 13 of
     /// <c>FAAAIandtheArtandScienceofV&amp;Vfinal.pptx</c> the reference's outlines sit 14 to 40 pt
     /// away from where the unwarped runs land, ink in the wrong place counts twice in a comparison
@@ -193,7 +228,7 @@ public sealed record SlideTextBody
     /// turns them into a picture.
     /// </para>
     /// </remarks>
-    public bool IsTextPath => WarpPreset is not null;
+    public bool IsTextPath => WarpPreset is not null || WarpFontworkType is not null;
 
     /// <summary>
     /// Whether the text wraps at the shape's width.

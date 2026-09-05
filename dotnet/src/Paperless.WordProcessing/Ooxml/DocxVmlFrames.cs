@@ -4,6 +4,7 @@ using Paperless.Core.Geometry;
 using Paperless.Core.Graphics;
 using Paperless.Core.Units;
 using Paperless.Ooxml;
+using Paperless.Text.Fonts;
 using Paperless.WordProcessing.Layout;
 
 namespace Paperless.WordProcessing.Ooxml;
@@ -52,11 +53,17 @@ internal static class DocxVmlFrames
     /// <param name="anchorOffset">Where in the paragraph's text it sits.</param>
     /// <param name="pictures">How to resolve <c>v:imagedata</c> into bytes, or null for geometry only.</param>
     /// <param name="content">How to read a <c>w:txbxContent</c> into blocks, or null to skip its text.</param>
+    /// <param name="typeface">
+    /// How to resolve a font family into a face, or null to draw no WordArt. Only a
+    /// <c>v:textpath</c> needs it: its text is an attribute rather than a run, so it never reaches
+    /// the layout that resolves every other face in the document.
+    /// </param>
     public static List<PageFrame> ReadAll(
         XElement element,
         int anchorOffset,
         DocxPictures? pictures,
-        Func<XElement, IReadOnlyList<PageBlock>>? content = null)
+        Func<XElement, IReadOnlyList<PageBlock>>? content = null,
+        Func<string?, OpenTypeFace?>? typeface = null)
     {
         ArgumentNullException.ThrowIfNull(element);
 
@@ -69,10 +76,34 @@ internal static class DocxVmlFrames
                 continue;
             }
 
-            if (One(top, element, anchorOffset, pictures, content) is { } frame) frames.Add(frame);
+            if (One(top, element, anchorOffset, pictures, content, typeface) is { } frame)
+            {
+                frames.Add(frame);
+            }
         }
 
         return frames;
+    }
+
+    /// <summary>The <c>v:shapetype</c> a shape's <c>type="#id"</c> names, or null.</summary>
+    /// <remarks>
+    /// Word writes the definition once per <c>w:pict</c> and the shape refers to it, so the number
+    /// that says which WordArt shape this is — <c>o:spt</c>, and the <c>136</c> in the id — lives on
+    /// the sibling rather than on the shape. Searched from the whole <c>w:pict</c> because a
+    /// <c>v:group</c>'s members refer to a definition written outside the group.
+    /// </remarks>
+    private static XElement? ShapeTypeOf(XElement shape, XElement scope)
+    {
+        if (shape.Attribute("type")?.Value is not { Length: > 1 } reference) return null;
+        if (reference[0] != '#') return null;
+
+        string id = reference[1..];
+        foreach (XElement candidate in scope.Descendants(XName.Get("shapetype", OoxmlNamespaces.Vml)))
+        {
+            if (candidate.Attribute("id")?.Value == id) return candidate;
+        }
+
+        return null;
     }
 
     /// <summary>The VML shapes and groups of a <c>w:pict</c> that are not inside another group.</summary>
@@ -298,7 +329,8 @@ internal static class DocxVmlFrames
         XElement element,
         int anchorOffset,
         DocxPictures? pictures,
-        Func<XElement, IReadOnlyList<PageBlock>>? content)
+        Func<XElement, IReadOnlyList<PageBlock>>? content,
+        Func<string?, OpenTypeFace?>? typeface = null)
     {
         Dictionary<string, string> style = Style(shape);
 
@@ -306,7 +338,7 @@ internal static class DocxVmlFrames
         if (style.TryGetValue("position", out string? position)
             && position.Equals("absolute", StringComparison.OrdinalIgnoreCase))
         {
-            return Floating(shape, style, anchorOffset, pictures, content);
+            return Floating(shape, style, element, anchorOffset, pictures, content, typeface);
         }
 
         Length? width = style.TryGetValue("width", out string? w) ? Css(w) : null;
@@ -326,6 +358,14 @@ internal static class DocxVmlFrames
             : FramePicture.None;
 
         VmlPaint paint = PaintOf(shape, style);
+        VmlFontwork warp = DocxVmlFontwork.Read(
+            shape, ShapeTypeOf(shape, element), new DocSize(across, down), typeface);
+
+        if (warp.Outline is not null)
+        {
+            (across, down) = (warp.Box.Width, warp.Box.Height);
+            paint = FontworkPaint(shape, style);
+        }
 
         return new PageFrame
         {
@@ -333,7 +373,10 @@ internal static class DocxVmlFrames
             Anchor = FrameAnchor.AsCharacter,
             AnchorOffset = anchorOffset,
             Wrap = TextWrap.Through,
-            IsImage = box is null,
+            FillOutline = warp.Outline,
+            StrokeOutline = warp.Outline,
+            RotationDegrees = Rotation(style),
+            IsImage = box is null && warp.Outline is null,
             Image = picture.Raster,
             Crop = picture.Crop,
             Vector = picture.Vector,
@@ -366,9 +409,11 @@ internal static class DocxVmlFrames
     private static PageFrame? Floating(
         XElement shape,
         Dictionary<string, string> style,
+        XElement element,
         int anchorOffset,
         DocxPictures? pictures,
-        Func<XElement, IReadOnlyList<PageBlock>>? content)
+        Func<XElement, IReadOnlyList<PageBlock>>? content,
+        Func<string?, OpenTypeFace?>? typeface = null)
     {
         if ((style.TryGetValue("width", out string? w) ? Css(w) : null) is not { } across) return null;
         if ((style.TryGetValue("height", out string? h) ? Css(h) : null) is not { } down) return null;
@@ -389,6 +434,14 @@ internal static class DocxVmlFrames
 
         VmlPaint paint = PaintOf(shape, style);
         VmlLayer layer = LayerOf(style);
+        VmlFontwork warp = DocxVmlFontwork.Read(
+            shape, ShapeTypeOf(shape, element), new DocSize(across, down), typeface);
+
+        if (warp.Outline is not null)
+        {
+            (across, down) = (warp.Box.Width, warp.Box.Height);
+            paint = FontworkPaint(shape, style);
+        }
 
         return new PageFrame
         {
@@ -401,12 +454,17 @@ internal static class DocxVmlFrames
             Wrap = TextWrap.Through,
 
             HorizontalOrigin = HorizontalOriginOf(style),
+            HorizontalAlignment = HorizontalAlignmentOf(style),
             HorizontalOffset = x,
             VerticalOrigin = VerticalOriginOf(style),
+            VerticalAlignment = VerticalAlignmentOf(style),
             VerticalOffset = y,
             BehindText = layer.BehindText,
             ZOrder = layer.ZOrder,
-            IsImage = box is null,
+            FillOutline = warp.Outline,
+            StrokeOutline = warp.Outline,
+            RotationDegrees = Rotation(style),
+            IsImage = box is null && warp.Outline is null,
             Image = picture.Raster,
             Crop = picture.Crop,
             Vector = picture.Vector,
@@ -463,12 +521,19 @@ internal static class DocxVmlFrames
     /// <see cref="DocxFrames"/> already applies to a DrawingML <c>a:fillRef</c>.
     /// </para>
     /// <para>
-    /// <strong>Only two geometries are painted, because only two of them are the rectangle we
+    /// <strong>Only two geometries are painted here, because only two of them are the rectangle we
     /// would draw.</strong> A <c>v:rect</c> and a <c>v:roundrect</c> are; a straight connector is
     /// its box's diagonal, which is what <see cref="Layout.PageFrame.IsLine"/> already means. A
     /// <c>#_x0000_t136</c> WordArt states a <c>fillcolor</c> that fills glyph outlines and a
     /// <c>#_x0000_t15</c> a pentagon, and filling their rectangles would be a confident wrong
-    /// answer; the corpus holds 15 and 3 of them and they keep drawing nothing.
+    /// answer; the corpus holds 15 and 3 of them.
+    /// </para>
+    /// <para>
+    /// <strong>The WordArt half of that has been answered rather than reversed.</strong> The rule
+    /// stands — a rectangle is still not painted for one — and the fifteen <c>#_x0000_t136</c>
+    /// shapes now draw the thing they actually are: <see cref="DocxVmlFontwork"/> builds their glyph
+    /// outlines and <see cref="FontworkPaint"/> paints <em>those</em> with the <c>fillcolor</c>. A
+    /// <c>#_x0000_t15</c> pentagon is still unpainted, and still for the same reason.
     /// </para>
     /// <para>
     /// <strong><c>strokeweight</c> is honoured and its absence is a hairline</strong>, read off
@@ -587,6 +652,123 @@ internal static class DocxVmlFrames
             .FirstOrDefault(candidate => candidate.Attribute("id")?.Value == type)
             ?.Attribute(XName.Get("spt", OoxmlNamespaces.VmlOffice))?.Value is "32";
     }
+
+    /// <summary>
+    /// The fill and stroke of a VML WordArt shape, which are its glyphs' own ink.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Separate from <see cref="PaintOf"/> because the rule is the opposite one. That method paints
+    /// only a <c>v:rect</c> and a <c>v:roundrect</c> and defaults nothing, so that a picture shape
+    /// stating neither is not given a white box and a black border it never asked for. A Fontwork
+    /// has no box: the fill and the stroke <em>are</em> the letters, and LibreOffice's own defaults
+    /// therefore apply — <c>FillModel::pushToPropMap</c> gives an unstated fill white and
+    /// <c>StrokeModel::pushToPropMap</c> gives an unstated stroke black
+    /// (<c>oox/source/vml/vmlformatting.cxx</c>).
+    /// </para>
+    /// <para>
+    /// Nothing in the corpus measures those defaults: all 15 <c>#_x0000_t136</c> shapes state
+    /// <c>fillcolor</c> and <c>stroked="f"</c> explicitly, and 14 of them state
+    /// <c>&lt;v:fill opacity=".5"/&gt;</c> beside it.
+    /// </para>
+    /// </remarks>
+    private static VmlPaint FontworkPaint(XElement shape, Dictionary<string, string> style)
+    {
+        XElement? fillElement = shape.Element(XName.Get("fill", OoxmlNamespaces.Vml));
+        XElement? strokeElement = shape.Element(XName.Get("stroke", OoxmlNamespaces.Vml));
+
+        Colour? fill = On(shape.Attribute("filled")?.Value)
+                       && On(fillElement?.Attribute("on")?.Value)
+            ? VmlColour(shape.Attribute("fillcolor")?.Value ?? fillElement?.Attribute("color")?.Value)
+              ?? Colour.FromRgb(0xFFFFFF)
+            : null;
+
+        if (fill is { } opaque && Opacity(fillElement?.Attribute("opacity")?.Value) is { } opacity)
+        {
+            fill = opaque.WithAlpha((byte)Math.Clamp(Math.Floor((opacity * 255.0) + 0.5), 0.0, 255.0));
+        }
+
+        Colour? line = On(shape.Attribute("stroked")?.Value)
+                       && On(strokeElement?.Attribute("on")?.Value)
+            ? VmlColour(shape.Attribute("strokecolor")?.Value ?? strokeElement?.Attribute("color")?.Value)
+              ?? Colour.FromRgb(0x000000)
+            : null;
+
+        if (line is null) return new VmlPaint(fill, null, Length.Zero, false, false);
+
+        Length width =
+            Css(shape.Attribute("strokeweight")?.Value
+                ?? strokeElement?.Attribute("weight")?.Value
+                ?? string.Empty)
+            ?? Hairline;
+
+        return new VmlPaint(fill, line, width <= Length.Zero ? Hairline : width, false, IsMirrored(style));
+    }
+
+    /// <summary>
+    /// How far a floating VML shape is turned about its own centre, clockwise, in degrees.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>ConversionHelper::decodeRotation</c> (<c>oox/source/vml/vmlformatting.cxx</c>): a bare
+    /// number is degrees and an <c>fd</c> suffix is 1/65536 of one, which is how Word writes an
+    /// angle a user dragged rather than typed.
+    /// </para>
+    /// <para>
+    /// <strong>Read for a WordArt shape and for nothing else, deliberately.</strong> The corpus's
+    /// words track states <c>rotation</c> on <b>347</b> VML shapes across <b>34</b> documents —
+    /// genogram connectors, unit-circle labels, storyboard arrows — and turning all of them is a
+    /// change with its own reach and its own regression risk. Fifteen of the 347 are the
+    /// <c>#_x0000_t136</c> watermarks, every one of them <c>rotation:315</c>, and a watermark drawn
+    /// flat instead of diagonally is not the shape the reference draws at all. So the rest wait for
+    /// a round that measures them.
+    /// </para>
+    /// </remarks>
+    private static double Rotation(Dictionary<string, string> style)
+    {
+        if (!style.TryGetValue("rotation", out string? stated)) return 0;
+
+        string text = stated.Trim();
+        double scale = 1.0;
+
+        if (text.EndsWith("fd", StringComparison.OrdinalIgnoreCase))
+        {
+            text = text[..^2];
+            scale = 1.0 / 65536.0;
+        }
+
+        return double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out double degrees)
+            ? degrees * scale
+            : 0;
+    }
+
+    /// <summary>Where <c>mso-position-horizontal</c> puts the shape, or an offset when it says nothing.</summary>
+    /// <remarks>
+    /// <c>lcl_SetAnchorType</c>, <c>oox/source/vml/vmlshape.cxx:661-680</c>. <c>inside</c> and
+    /// <c>outside</c> also set a page toggle, which this does not carry; they appear on no words
+    /// document.
+    /// </remarks>
+    private static FrameHorizontalAlignment HorizontalAlignmentOf(Dictionary<string, string> style)
+        => style.GetValueOrDefault("mso-position-horizontal") switch
+        {
+            "center" => FrameHorizontalAlignment.Centre,
+            "left" => FrameHorizontalAlignment.Left,
+            "right" => FrameHorizontalAlignment.Right,
+            "inside" => FrameHorizontalAlignment.Left,
+            "outside" => FrameHorizontalAlignment.Right,
+            _ => FrameHorizontalAlignment.Offset,
+        };
+
+    /// <summary>Where <c>mso-position-vertical</c> puts the shape.</summary>
+    /// <remarks><c>oox/source/vml/vmlshape.cxx:700-710</c>.</remarks>
+    private static FrameVerticalAlignment VerticalAlignmentOf(Dictionary<string, string> style)
+        => style.GetValueOrDefault("mso-position-vertical") switch
+        {
+            "center" => FrameVerticalAlignment.Middle,
+            "top" or "inside" => FrameVerticalAlignment.Top,
+            "bottom" or "outside" => FrameVerticalAlignment.Bottom,
+            _ => FrameVerticalAlignment.Offset,
+        };
 
     /// <summary>Which diagonal a connector runs along.</summary>
     /// <remarks>

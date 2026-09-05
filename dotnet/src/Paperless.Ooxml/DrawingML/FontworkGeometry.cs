@@ -73,6 +73,14 @@ public static class FontworkGeometry
             current = [];
         }
 
+        // A vertex component before it is scaled. The two radii of an angle ellipse are lengths
+        // rather than positions and the two angles are neither, so they cannot go through `At`.
+        double Raw(int index, bool first)
+        {
+            int offset = (index * 2) + (first ? 0 : 1);
+            return offset < preset.Vertices.Count ? formulae.Resolve(preset.Vertices[offset]) : 0;
+        }
+
         FontworkPoint At(int index)
         {
             int offset = index * 2;
@@ -128,6 +136,30 @@ public static class FontworkGeometry
                     Flush();
                     break;
 
+                case 0xA1:                                          // angleEllipseTo
+                case 0xA2:                                          // angleEllipse
+                {
+                    // Three vertex pairs each — centre, radii, angles — and the count is thirds
+                    // rather than quarters (`svx/source/svdraw/svdoashp.cxx:124-133`).
+                    int ellipses = count / 3;
+
+                    for (int n = 0; n < ellipses && vertex + 2 < coordinates; n++)
+                    {
+                        if (op == 0xA2) Flush();
+
+                        FontworkPoint centre = At(vertex);
+                        double radiusX = Raw(vertex + 1, first: true) * xScale;
+                        double radiusY = Raw(vertex + 1, first: false) * yScale;
+                        double start = Raw(vertex + 2, first: true);
+                        double swing = Raw(vertex + 2, first: false);
+                        vertex += 3;
+
+                        AngleEllipse(centre, radiusX, radiusY, start, swing, current);
+                    }
+
+                    break;
+                }
+
                 case 0xA3:                                          // arcTo
                 case 0xA4:                                          // arc
                 case 0xA5:                                          // clockwiseArcTo
@@ -173,6 +205,96 @@ public static class FontworkGeometry
 
         for (int i = 0; i < stated.Count && i < values.Length; i++) values[i] = stated[i];
         return values;
+    }
+
+    /// <summary>
+    /// Appends the ellipse segment an <c>ANGLEELLIPSE</c> names, in MS-ODRAW's reading of it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>EnhancedCustomShape2d.cxx:2178-2286</c>, and specifically its <c>bIsFromBinaryImport</c>
+    /// arm — the one taken when the shape's type name starts with <c>mso</c>, which every WordArt
+    /// type using this opcode does. That arm reads the second angle as a <em>swing</em> rather than
+    /// an end, negates both to convert the orientation, and walks the span in half turns because
+    /// <c>createPolygonFromEllipseSegment</c> cannot express a whole one. A negative swing reverses
+    /// the result.
+    /// </para>
+    /// <para>
+    /// <strong>The angles are degrees for <c>mso-spt143</c> and 1/65536ths of one for every other
+    /// binary shape</strong>, which the reference special-cases by name at line 2255. Only
+    /// <c>mso-spt143</c> reaches this in the WordArt tables, so that is the reading here; the
+    /// fixed-point conversion has no caller and is not written.
+    /// </para>
+    /// <para>
+    /// The reference builds a Bézier polygon and lets <c>adaptiveSubdivideByAngle</c> flatten it;
+    /// this samples the ellipse directly, because the fit that consumes it measures arc length along
+    /// the flattened points and is insensitive to how they are distributed along a smooth curve.
+    /// </para>
+    /// </remarks>
+    private static void AngleEllipse(
+        FontworkPoint centre,
+        double radiusX,
+        double radiusY,
+        double startDegrees,
+        double swingDegrees,
+        List<FontworkPoint> into)
+    {
+        if (radiusX == 0 && radiusY == 0)
+        {
+            into.Add(centre);
+            return;
+        }
+
+        double start = -startDegrees;
+        double swing = -swingDegrees;
+        double end = start + swing;
+        if (swing < 0) (start, end) = (end, start);
+
+        List<FontworkPoint> arc = [];
+        double from = start;
+        double to = from + 180.0;
+
+        while (to < end)
+        {
+            Segment(from, to);
+            from = to;
+            to += 180.0;
+        }
+
+        Segment(from, end);
+
+        if (swing < 0) arc.Reverse();
+        into.AddRange(arc);
+
+        void Segment(double fromDegrees, double toDegrees)
+        {
+            double a = Normalised(fromDegrees);
+            double b = Normalised(toDegrees);
+            if (b <= a) b += 2 * Math.PI;
+
+            // One point per two degrees of the span, which is finer than `adaptiveSubdivideByAngle`
+            // and finer than the arcs `CreateArc` builds at any radius a 21600 viewbox can hold.
+            int points = Math.Max(2, (int)Math.Ceiling((b - a) / (2 * Math.PI) * 180));
+            double step = (b - a) / (points - 1);
+
+            for (int i = 0; i < points; i++)
+            {
+                // The first point of a segment repeats the last of the one before it.
+                if (i == 0 && arc.Count > 0) continue;
+
+                double angle = a + (step * i);
+                arc.Add(new FontworkPoint(
+                    centre.X + (radiusX * Math.Cos(angle)),
+                    centre.Y + (radiusY * Math.Sin(angle))));
+            }
+        }
+
+        static double Normalised(double degrees)
+        {
+            double turned = degrees % 360.0;
+            if (turned < 0) turned += 360.0;
+            return turned * Math.PI / 180.0;
+        }
     }
 
     /// <summary>

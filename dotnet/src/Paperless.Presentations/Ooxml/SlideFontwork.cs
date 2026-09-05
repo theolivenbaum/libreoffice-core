@@ -83,8 +83,15 @@ internal static class SlideFontwork
 
         GraphicsPath? outline = Fontwork.Outline(new FontworkRequest
         {
-            Preset = body.WarpPreset!,
+            Preset = body.WarpPreset,
+
+            // ODF names the Fontwork type and states its adjustments in WordArt units directly, so
+            // neither the `prst` map nor the per-guide conversion applies to one. See
+            // `SlideTextBody.WarpFontworkType`.
+            FontworkType = body.WarpFontworkType,
             Adjustments = body.WarpAdjustments,
+            AdjustmentValues = body.WarpAdjustmentValues,
+            KeepsFontSize = body.WarpKeepsFontSize,
 
             // `PROP_FromWordArt` marks a shape that came from a binary WordArt object, which a
             // DrawingML shape tree never does; the arch family therefore keeps its stated size.
