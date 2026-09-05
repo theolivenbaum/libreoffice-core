@@ -77,7 +77,7 @@ public sealed class SlideMasterShapeComparisonTests : IDisposable
     [Fact]
     public void EveryInheritedShapeIsDrawnWhereLibreOfficeDrawsIt()
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         string path = Corpus.Require(Deck);
         List<PdfTextRun> ours = PdfTextRuns.Read(Ours(path));
@@ -115,7 +115,7 @@ public sealed class SlideMasterShapeComparisonTests : IDisposable
     [Fact]
     public void ASlideSuppressingMasterShapesInheritsNothing()
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         string path = Corpus.Require(Deck);
         List<PdfTextRun> ours = PdfTextRuns.Read(Ours(path));

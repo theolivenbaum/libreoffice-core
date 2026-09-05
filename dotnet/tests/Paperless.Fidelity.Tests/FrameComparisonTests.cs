@@ -88,7 +88,7 @@ public sealed class FrameComparisonTests : IDisposable
     [InlineData("frame-wrap.rtf", 0.1)]
     public void EveryLineStartsWhereLibreOfficeStartsIt(string fileName, double tolerance)
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         string path = Corpus.Require(fileName);
         List<Line> expected = Reference(path);
@@ -132,7 +132,7 @@ public sealed class FrameComparisonTests : IDisposable
     [InlineData("frame-wrap.rtf")]
     public void TheWrappedLinesAreIndentedByTheFramesWidth(string fileName)
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         List<Line> lines = Drawn(Corpus.Require(fileName));
         lines.Count.ShouldBeGreaterThan(10, $"{fileName}: too few lines to say anything");
@@ -179,7 +179,7 @@ public sealed class FrameComparisonTests : IDisposable
     [InlineData("frame-wrap.docx")]
     public void TheFramesOwnTextIsDrawnInsideIt(string fileName)
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         string path = Corpus.Require(fileName);
         RecordingDrawingSink sink = Record(path);
@@ -363,7 +363,7 @@ public sealed class FrameComparisonTests : IDisposable
     [InlineData("frame-parallel.odt")]
     public void TextFillsBothSidesOfAFrameThatTouchesNeitherMargin(string fileName)
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         string path = Corpus.Require(fileName);
         List<Line> expected = Reference(path);
@@ -427,7 +427,7 @@ public sealed class FrameComparisonTests : IDisposable
     [InlineData("frame-in-header.odt")]
     public void AFrameAnchoredInAHeaderMovesTheBodyTextBelowIt(string fileName)
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         string path = Corpus.Require(fileName);
 
@@ -491,7 +491,7 @@ public sealed class FrameComparisonTests : IDisposable
     [InlineData("frame-in-cell.odt")]
     public void AFrameAnchoredInATableCellIsPlacedAgainstTheCell(string fileName)
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         string path = Corpus.Require(fileName);
 

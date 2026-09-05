@@ -61,7 +61,7 @@ public sealed class JustificationShrinkComparisonTests : IDisposable
     [InlineData("justify-shrink-2007.docx")]
     public void TheParagraphBreaksWhereLibreOfficeBreaksIt(string document)
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         string path = Corpus.Require(document);
 
@@ -96,7 +96,7 @@ public sealed class JustificationShrinkComparisonTests : IDisposable
     [Fact]
     public void TheReferenceItselfSetsTheModeFifteenDocumentInFewerLines()
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         List<double> newer = Rendered(Corpus.Require("justify-shrink-2013.docx"));
         Assert.SkipWhen(

@@ -120,7 +120,7 @@ public sealed class NoteRestartComparisonTests : IDisposable
     [InlineData("note-restart.rtf")]
     public void TheNumbersAreTheOnesLibreOfficeDraws(string fileName)
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         string path = Corpus.Require(fileName);
         string? ours = ExtractedText(Ours(path));

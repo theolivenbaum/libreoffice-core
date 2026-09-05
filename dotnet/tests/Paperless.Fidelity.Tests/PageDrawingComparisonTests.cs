@@ -64,7 +64,7 @@ public sealed class PageDrawingComparisonTests : IDisposable
     [InlineData("paginated.rtf")]
     public void EveryLineIsDrawnWhereLibreOfficeDrawsIt(string fileName)
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         string path = Corpus.Require(fileName);
 
@@ -109,7 +109,7 @@ public sealed class PageDrawingComparisonTests : IDisposable
     [InlineData("paginated.docx")]
     public void BaselinesFallOnLibreOfficesLinePitch(string fileName)
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         string path = Corpus.Require(fileName);
 

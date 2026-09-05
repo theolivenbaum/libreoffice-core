@@ -51,7 +51,7 @@ public sealed class SlideTextStyleComparisonTests : IDisposable
     [Fact]
     public void EveryRunResolvesToTheColourLibreOfficeDrawsItIn()
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         string path = Corpus.Require("deck-text-style.pptx");
 
@@ -132,7 +132,7 @@ public sealed class SlideTextStyleComparisonTests : IDisposable
     [Fact]
     public void AMastersOtherStyleReachesNothingThatHasText()
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         string path = Corpus.Require("deck-text-style.pptx");
 
@@ -168,7 +168,7 @@ public sealed class SlideTextStyleComparisonTests : IDisposable
     [Fact]
     public void APlainTextBoxTakesThePresentationsDefaultTextStyle()
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         string path = Corpus.Require("slide-other-style.pptx");
 
@@ -208,7 +208,7 @@ public sealed class SlideTextStyleComparisonTests : IDisposable
     [Fact]
     public void AFontReferenceResolvesToTheThemesMinorFace()
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         string path = Corpus.Require("deck-text-style.pptx");
 

@@ -175,7 +175,7 @@ public sealed class PaintFillComparisonTests : IDisposable
     [Fact]
     public void LibreOfficeWritesNoShadingAtAllForTheSameSlide()
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         string reference = _libreOffice.ConvertToPdf(Corpus.Require("paint-fills.fodp"), _workDirectory);
 
@@ -195,7 +195,7 @@ public sealed class PaintFillComparisonTests : IDisposable
     [Fact]
     public void EveryPageRasterisesToTheSameImageAsLibreOffices()
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         List<string> reference = Reference(Corpus.Require("paint-fills.fodp"));
         Assert.SkipWhen(reference.Count == 0, "pdftoppm is not available; install poppler-utils");
@@ -227,7 +227,7 @@ public sealed class PaintFillComparisonTests : IDisposable
     [Fact]
     public void OurPdfRasterisesToTheSameImageAsLibreOfficesPdf()
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         List<string> reference = Reference(Corpus.Require("paint-fills.fodp"));
         Assert.SkipWhen(reference.Count == 0, "pdftoppm is not available; install poppler-utils");

@@ -65,7 +65,7 @@ public sealed class TabStopComparisonTests : IDisposable
     [InlineData("tabbed.rtf")]
     public void EveryTabAdvancesToLibreOfficesStop(string fileName)
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         string path = Corpus.Require(fileName);
         List<DrawnWord> drawn = Drawn(path);
@@ -127,7 +127,7 @@ public sealed class TabStopComparisonTests : IDisposable
     [InlineData("list-label-overrun.doc")]
     public void AListLabelsTabAdvancesToLibreOfficesStop(string fileName)
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         string path = Corpus.Require(fileName);
         List<DrawnWord> drawn = Drawn(path);

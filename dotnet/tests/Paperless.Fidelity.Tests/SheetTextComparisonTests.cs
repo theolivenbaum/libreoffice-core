@@ -74,7 +74,7 @@ public sealed class SheetTextComparisonTests : IDisposable
     [InlineData("sheet-cell-text.xlsx")]
     public void EveryCellIsDrawnWhereLibreOfficeDrawsIt(string name)
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         string path = Corpus.Require(name);
         List<PdfTextRun> ours = Upright(PdfTextRuns.Read(Ours(path)));
@@ -108,7 +108,7 @@ public sealed class SheetTextComparisonTests : IDisposable
     [InlineData("sheet-cell-text.xlsx")]
     public void EveryCellShowsTheCharactersLibreOfficeShows(string name)
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         string path = Corpus.Require(name);
         List<PdfTextRun> ours = Upright(PdfTextRuns.Read(Ours(path)));
@@ -132,7 +132,7 @@ public sealed class SheetTextComparisonTests : IDisposable
     [InlineData("sheet-cell-text.xls")]
     public void EveryFormatDrawsTheSameRunsInTheSameFaces(string name)
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         string path = Corpus.Require(name);
         List<PdfTextRun> ours = Upright(PdfTextRuns.Read(Ours(path)));
@@ -160,7 +160,7 @@ public sealed class SheetTextComparisonTests : IDisposable
     [InlineData("sheet-cell-text.xls")]
     public void ANarrowNumericColumnShortensItsNumberOrHashesIt(string name)
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         string path = Corpus.Require(name);
         List<PdfWord> words = PdfWords.Read(Ours(path));
@@ -184,7 +184,7 @@ public sealed class SheetTextComparisonTests : IDisposable
     [InlineData("sheet-cell-text.xlsx")]
     public void ALongStringOverflowsIntoEmptyCellsAndIsCutOffByOccupiedOnes(string name)
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         string path = Corpus.Require(name);
         List<PdfTextRun> ours = Upright(PdfTextRuns.Read(Ours(path)));

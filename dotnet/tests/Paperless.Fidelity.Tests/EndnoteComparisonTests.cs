@@ -61,7 +61,7 @@ public sealed class EndnoteComparisonTests : IDisposable
     [InlineData("endnotes.doc")]
     public void EndnotesCollectWhereTheirDocumentPutsThem(string fileName)
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         string path = Corpus.Require(fileName);
         List<List<DrawnWord>> drawn = Drawn(path);

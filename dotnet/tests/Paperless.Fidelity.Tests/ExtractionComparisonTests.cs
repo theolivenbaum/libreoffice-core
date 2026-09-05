@@ -35,12 +35,8 @@ public class ExtractionComparisonTests : IDisposable
     {
         Assert.SkipUnless(
             LibreOfficeRunner.IsAvailable,
-            "LibreOffice with its application modules is not installed, so there is no "
-            + "reference to compare against. Run "
-            + ".claude/skills/libreoffice-reference/scripts/check-env.sh for the apt-get lines. "
-            + "A container with libreoffice-core alone has an soffice that runs and then fails "
-            + "on every document, which is why this checks by converting rather than by "
-            + "finding the binary.");
+            LibreOfficeRunner.UnavailableReason
+            + " — see .claude/skills/libreoffice-reference/scripts/check-env.sh");
     }
 
     private string Reference(string corpusName)

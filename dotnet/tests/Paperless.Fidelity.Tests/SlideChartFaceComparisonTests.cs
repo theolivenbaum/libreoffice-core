@@ -80,7 +80,7 @@ public sealed partial class SlideChartFaceComparisonTests : IDisposable
     [Fact]
     public void AChartUnstatedTakesTheThemesMinorFace()
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         const string deck = "chart-face-theme-minor.pptx";
 
@@ -92,7 +92,7 @@ public sealed partial class SlideChartFaceComparisonTests : IDisposable
     [Fact]
     public void AChartStatingAFaceTakesTheStatedOneInstead()
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         const string deck = "chart-face-stated.pptx";
 
@@ -111,7 +111,7 @@ public sealed partial class SlideChartFaceComparisonTests : IDisposable
     [Fact]
     public void TheThemesFaceDecidesTheValueLabelsAdvances()
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
         Assert.SkipUnless(PdfWords.IsAvailable, "pdftotext is not installed");
 
         const string deck = "chart-face-theme-minor.pptx";

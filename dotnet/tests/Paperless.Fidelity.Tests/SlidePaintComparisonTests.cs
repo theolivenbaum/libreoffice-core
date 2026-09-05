@@ -65,7 +65,7 @@ public sealed class SlidePaintComparisonTests : IDisposable
     [InlineData("paint-fills-pptx.pptx")]
     public void EveryPageRasterisesToTheSameImageAsLibreOffices(string fileName)
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         string path = Corpus.Require(fileName);
         List<string> theirs = Rasterise(_libreOffice.ConvertToPdf(path, _workDirectory), "reference");
@@ -132,7 +132,7 @@ public sealed class SlidePaintComparisonTests : IDisposable
     [Fact]
     public void TheTwoFormatsOfOneSlideDrawTheSamePicture()
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         List<string> odf = Rasterise(Ours(Corpus.Require("paint-fills.fodp")), "odf");
         Assert.SkipWhen(odf.Count == 0, "pdftoppm is not available; install poppler-utils");

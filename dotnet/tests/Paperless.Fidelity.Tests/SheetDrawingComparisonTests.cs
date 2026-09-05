@@ -52,7 +52,7 @@ public sealed class SheetDrawingComparisonTests : IDisposable
     [InlineData("sheet-rich-text.xlsx")]
     public void APictureIsDrawnWhereLibreOfficeDrawsIt(string name)
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         string path = Corpus.Require(name);
         List<PdfImageDraw> ours = PdfPaints.ReadImageDraws(Ours(path));

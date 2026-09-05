@@ -91,7 +91,7 @@ public sealed class TableAutoLayoutComparisonTests : IDisposable
     [InlineData("table-autofit.rtf")]
     public void EveryCellStartsWhereLibreOfficeStartsIt(string fileName)
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         string path = Corpus.Require(fileName);
         RecordingDrawingSink sink = Record(path);

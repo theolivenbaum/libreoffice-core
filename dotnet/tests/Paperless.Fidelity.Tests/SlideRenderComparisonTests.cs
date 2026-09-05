@@ -62,7 +62,7 @@ public sealed class SlideRenderComparisonTests : IDisposable
     [InlineData("shape-geometry.odp")]
     public void EverySlideIsTheSizeTheDeckStates(string fileName)
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         string path = Corpus.Require(fileName);
         List<PdfPageSize> ours = PdfPageSizes.Read(Ours(path));
@@ -86,7 +86,7 @@ public sealed class SlideRenderComparisonTests : IDisposable
     [InlineData("shape-geometry.odp")]
     public void EveryRectangularFillIsWhereAndWhatLibreOfficeFillsIt(string fileName)
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         string path = Corpus.Require(fileName);
         List<PdfFill> ours = ShapeFills(PdfFills.Read(Ours(path)));
@@ -118,7 +118,7 @@ public sealed class SlideRenderComparisonTests : IDisposable
     [InlineData("shape-geometry.odp")]
     public void EveryLineOfShapeTextIsDrawnWhereLibreOfficeDrawsIt(string fileName)
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         string path = Corpus.Require(fileName);
         List<PdfTextRun> ours = PdfTextRuns.Read(Ours(path));

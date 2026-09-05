@@ -70,7 +70,7 @@ public sealed class SlideEscapementComparisonTests : IDisposable
     [Fact]
     public void AnEscapedRunIsRaisedAndShrunkTheWayLibreOfficeDoesIt()
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         string path = Corpus.Require("slide-escapement.pptx");
         List<PdfTextRun> ours = PdfTextRuns.Read(Ours(path));
@@ -105,7 +105,7 @@ public sealed class SlideEscapementComparisonTests : IDisposable
     [Fact]
     public void ThePlainParagraphIsUntouched()
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         string path = Corpus.Require("slide-escapement.pptx");
         List<PdfTextRun> ours = PdfTextRuns.Read(Ours(path));

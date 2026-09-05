@@ -81,7 +81,7 @@ public sealed class FootnoteComparisonTests : IDisposable
     // such problem — LibreOffice's WW8 import keeps the note's formatting, so both files are compared here.
     public void EveryNoteSitsAtTheFootOfItsOwnPage(string fileName)
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         string path = Corpus.Require(fileName);
         List<List<DrawnWord>> drawn = Drawn(path);
@@ -157,7 +157,7 @@ public sealed class FootnoteComparisonTests : IDisposable
     [InlineData("footnotes.doc")]
     public void EveryCitationIsSetAndRaisedAsLibreOfficeSetsIt(string fileName)
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         string path = Corpus.Require(fileName);
         List<PdfTextRun> reference = PdfTextRuns.Read(
@@ -193,7 +193,7 @@ public sealed class FootnoteComparisonTests : IDisposable
     [InlineData("footnotes.doc")]
     public void TheRuleAboveTheNotesGoesWhereLibreOfficeDrawsIt(string fileName)
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         string path = Corpus.Require(fileName);
         List<PdfFill> reference =
