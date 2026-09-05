@@ -572,8 +572,37 @@ internal sealed class SheetPageDecoration(SheetLayout sheet, SheetPagePlacement 
         // band whose right area is eight lines and whose left is one. 26.2.4.2 puts `KEEPLEFT`'s
         // ink at y 21.576 against a band top of 21.60; centring it in the right area's 124 pt put
         // it 54 pt lower, and then the clip below deleted it.
-        Length drawn = dynamic ? Length.Min(bandText, height) : height;
-        Length bandTop = dynamic && fromBottom ? top + height - bandText : top;
+        //
+        // **All three of those figures have to be in one space and two of them were not.**
+        // `bandText` is the text at the print scale — `SizeOf` multiplies every em size by the
+        // zoom — while `height` is the band as the file states it, unscaled. Calc has no such
+        // split: `PrintHF` does its whole arithmetic in *logical* twips and lets the map mode
+        // apply the zoom to all of it at once (`printfun.cxx:1867`, `:2645`), so `nDif` is
+        // `(paperHeight - textHeight)` logical and reaches the paper as
+        // `(paperHeight × zoom - textHeight × zoom) / 2`. Comparing a scaled text against an
+        // unscaled band overstates <c>nDif</c> by `height × (1 - zoom)`, which is nothing at all
+        // on an unscaled sheet and 12.3 pt on a sheet printed at 35 %.
+        //
+        // Measured on `sheets/done-014/xls/TICAPCapability_Final.xls`, whose sheets print at 57 %
+        // and 35 %: at 35 % the band is 30.16 pt stated, the text 7.82 pt drawn, and the mixed
+        // arithmetic put the header's pen 6.17 pt below the band's top — far enough that its ink
+        // began at 47.9 against a band ending at 46.6, so the whole area missed the clip
+        // rectangle and six pages lost their header and footer outright. The reference draws that
+        // header hard against the band's top.
+        Length scaled = height * zoom;
+        Length drawn = dynamic ? Length.Min(bandText, scaled) : scaled;
+
+        // The text rectangle's top, which is `PrintHF`'s `aStart`. For a footer that is the band's
+        // own bottom edge — the one figure the scaling leaves fixed — less the rectangle; a
+        // dynamic band measures that rectangle by its own text, which is the figure this line has
+        // always carried and which `SheetBandLinesTests` and `SheetSmallBandTests` pin, and a
+        // pinned one measures it by the stated band at the print scale.
+        //
+        // On an unscaled sheet `scaled` is `height`, so the pinned arm is `top` — exactly what
+        // stood here — and nothing without a print scale can move.
+        Length bandTop = fromBottom
+            ? top + height - (dynamic ? bandText : scaled)
+            : top;
 
         // A footer sits on its own margin line, but **never above the top of its own band**:
         // `PrintHF` offsets the text by `nDif = paperHeight - textHeight` and only when that is
@@ -592,7 +621,14 @@ internal sealed class SheetPageDecoration(SheetLayout sheet, SheetPagePlacement 
         // fit perfectly well, and clamping against `top` moves them. One probe caught it: a
         // 14.4 pt band went from 0.53 pt of the reference to 2.72 pt out. Against the band edge
         // the clamp fires only when the text genuinely does not fit inside the band.
-        if (fromBottom && bandTop < bandTopEdge) bandTop = bandTopEdge;
+        //
+        // The edge is the band's own top at the print scale, anchored — like everything else in a
+        // footer — on the bottom edge the scaling leaves fixed. `bandTopEdge` is stated unscaled,
+        // and the whole band below it, the gap included, is scaled: `top + height` is that bottom
+        // edge and `height + top - bandTopEdge` is the band with its gap. On an unscaled sheet
+        // this is `bandTopEdge` exactly, whatever the band is doing.
+        Length bandEdge = (top + height) - ((height + top - bandTopEdge) * zoom);
+        if (fromBottom && bandTop < bandEdge) bandTop = bandEdge;
 
         // `PrintHF`'s own clip rectangle, which every one of the three areas is drawn through:
         // `Rectangle(aStart, Size(nLineWidth, nHeight - nDistance))`
@@ -605,15 +641,20 @@ internal sealed class SheetPageDecoration(SheetLayout sheet, SheetPagePlacement 
         // (`ScPrintFunc::GetDocPageSize`, `printfun.cxx:3002`, over the map mode's zoom fraction
         // at `:2645`). At an unscaled sheet the two are the same figure and nothing here moves.
         //
-        // A footer's rectangle hangs from the band's own bottom edge — the page's footer margin
-        // line — rather than starting at the text rectangle's top, because that edge is what the
-        // scaling leaves fixed. Both halves read straight off `FY2023-AIP-grants.xlsx` page 3,
-        // whose print scale is 43 %: the reference's content stream opens
-        // `17.995 576.503 755.94 13.91 re W* n` for a 32.4 pt header band 756 pt wide, and
-        // `17.995 21.674 755.94 5.74 re W* n` for a footer whose dynamic band holds one 13.4 pt
-        // line.
-        Length clipHeight = height * zoom;
-        Length clipTop = fromBottom ? top + height - clipHeight : top;
+        // Both halves read straight off `FY2023-AIP-grants.xlsx` page 3, whose print scale is
+        // 43 %: the reference's content stream opens `17.995 576.503 755.94 13.91 re W* n` for a
+        // 32.4 pt header band 756 pt wide, and `17.995 21.674 755.94 5.74 re W* n` for a footer
+        // whose dynamic band holds one 13.4 pt line.
+        //
+        // **Its origin is `bandTop` and is not derived a second time.** `aStart` is both the clip
+        // region's corner and the point the three areas are drawn from — `PrintHF` passes the one
+        // variable to `SetClipRegion` and to each `DrawText_ToPosition`
+        // (`printfun.cxx:1870-1912`) — so computing it twice is what let the window drift out of
+        // step with where the text had actually been put. An area placed outside a window it is
+        // then tested against is not clipped, it is **rejected**, and `TICAPCapability_Final.xls`
+        // lost its header and its footer on six pages that way.
+        Length clipHeight = scaled;
+        Length clipTop = bandTop;
 
         Place(band.Left, _ => left);
         Place(band.Centre, width => left + ((right - left - width) / 2));
