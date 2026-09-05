@@ -36,7 +36,17 @@ public sealed class FrameFontworkTests
     private const string Wps = "http://schemas.microsoft.com/office/word/2010/wordprocessingShape";
     private const string W14 = "http://schemas.microsoft.com/office/word/2010/wordml";
 
-    /// <summary>Every warp the corpus states on the words side, drawn as curves.</summary>
+    /// <summary>Every one of the forty warps, drawn as curves.</summary>
+    /// <remarks>
+    /// The first twenty-five are what the corpus states on the words side. The nine below them are
+    /// what it does not: the two <c>textRing*</c>, the four <c>*Pour</c>, the two
+    /// <c>textDeflateInflate*</c>, and <c>textSlantUp</c>, which is a shared table away from
+    /// <c>textSlantDown</c>. They are pinned against
+    /// <c>/home/user/fixtures/fontwork-presets-{default,adjusted}.docx</c>, where they are measured
+    /// rather than asserted — a table transcribed for a preset nothing checks is a transcription
+    /// nothing checks, and the fixture is what makes them checkable. <c>ST_TextShapeType</c> has 41
+    /// values; the forty-first is <c>textNoShape</c>, which is the identity.
+    /// </remarks>
     [Theory]
     [InlineData("textArchUp")]
     [InlineData("textArchDown")]
@@ -63,6 +73,21 @@ public sealed class FrameFontworkTests
     [InlineData("textFadeLeft")]
     [InlineData("textStop")]
     [InlineData("textPlain")]
+    [InlineData("textFadeUp")]
+    [InlineData("textFadeDown")]
+    [InlineData("textSlantUp")]
+    [InlineData("textCurveDown")]
+    [InlineData("textInflateTop")]
+    [InlineData("textDeflateTop")]
+    [InlineData("textWave4")]
+    [InlineData("textRingInside")]
+    [InlineData("textRingOutside")]
+    [InlineData("textArchUpPour")]
+    [InlineData("textArchDownPour")]
+    [InlineData("textCirclePour")]
+    [InlineData("textButtonPour")]
+    [InlineData("textDeflateInflate")]
+    [InlineData("textDeflateInflateDeflate")]
     public void AWarpedBodyBecomesCurvesAndLeavesTheFlow(string preset)
     {
         PageFrame frame = Frame(preset);
@@ -105,13 +130,17 @@ public sealed class FrameFontworkTests
     /// </summary>
     /// <remarks>
     /// The reference has already emptied the frame by the time it decides what the curves look
-    /// like, so a preset whose geometry is not implemented — the four <c>*Pour</c> and the two
-    /// <c>textRing*</c> — leaves a shape with neither text nor curves. That is what the slides side
-    /// has always done for an undrawable warp, and the two families have to agree.
+    /// like, so a shape whose warp cannot be built leaves neither text nor curves. That is what the
+    /// slides side has always done for an undrawable warp, and the two families have to agree.
+    /// <para>
+    /// Every one of `ST_TextShapeType`'s forty warps is now built, so the case has to be reached
+    /// through a value no schema defines rather than through a preset that is merely unimplemented
+    /// — which is itself the assertion that none is left. It is still a live branch: a face with no
+    /// <c>glyf</c> outlines takes it too.
+    /// </para>
     /// </remarks>
     [Theory]
-    [InlineData("textArchUpPour")]
-    [InlineData("textRingInside")]
+    [InlineData("textNotAPreset")]
     public void AWarpThatCannotBeDrawnStillLeavesNoText(string preset)
     {
         PageFrame frame = Frame(preset);

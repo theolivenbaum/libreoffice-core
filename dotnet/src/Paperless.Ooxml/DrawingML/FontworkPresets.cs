@@ -26,21 +26,24 @@ namespace Paperless.Ooxml.DrawingML;
 /// <see cref="FontworkGeometry"/>.
 /// </para>
 /// <para>
-/// <strong>Which are here and which are not.</strong> Thirty-two of DrawingML's forty warps, which
-/// is every one the corpus states — the 24 on <c>WordArt_Shapes_Arrows_Catalog1.docx</c>,
-/// <c>textPlain</c>, and the ten arch occurrences on the two decks that bend anything — plus the
-/// seven that share a table with one of those and so cost nothing: <c>textCurveDown</c>,
-/// <c>textFadeUp</c>, <c>textFadeDown</c>, <c>textSlantUp</c>, <c>textInflateTop</c>,
-/// <c>textDeflateTop</c> and <c>textWave4</c>.
+/// <strong>All forty of DrawingML's warps are here.</strong> The corpus states twenty-five of them
+/// — the 24 on <c>WordArt_Shapes_Arrows_Catalog1.docx</c> plus <c>textPlain</c> — and seven more
+/// share a table with one of those. The remaining eight were left out for a round on the ground
+/// that <em>a table transcribed for a preset no document states is a transcription nothing
+/// checks</em>, and they are here now because that stopped being true:
+/// <c>fontwork-presets-default.docx</c> and <c>fontwork-presets-adjusted.docx</c> state one shape
+/// per <c>ST_TextShapeType</c> value in the catalogue's own container, so every table is measured
+/// against both LibreOffice references rather than transcribed and hoped for. That took the
+/// fixture's nine-page mean absolute grey difference from <b>2.584 to 0.603</b>.
 /// </para>
 /// <para>
-/// The eight that are absent are absent deliberately, and in two groups. The four <c>*Pour</c> and
-/// two <c>textRing*</c> shapes are drawn with <c>ANGLEELLIPSE</c> and a radius handle rather than
-/// the four opcodes <see cref="FontworkGeometry"/> decodes, so they would need a second path
-/// builder; <c>textDeflateInflate</c> and <c>textDeflateInflateDeflate</c> would need only their
-/// own tables, and are left out because a table transcribed for a preset no document states is a
-/// transcription nothing checks. A preset that is not here draws nothing warped and falls back,
-/// which is what <see cref="Fontwork"/> documents.
+/// Two things about the eight are worth knowing, because the reason they were deferred was partly
+/// wrong. <strong>Five of them needed nothing but their tables</strong>: the four <c>*Pour</c>
+/// shapes and <c>mso-spt142</c> are drawn with <c>0xA304</c> and <c>0xA504</c>, the same arc
+/// opcodes the arch family uses, and a pour is simply two concentric arcs with the text fitted into
+/// the ring between them. <strong>Only <c>mso-spt143</c> needed a new path builder</strong> —
+/// <c>ANGLEELLIPSE</c>, which <see cref="FontworkGeometry"/> now decodes, and whose angles that one
+/// shape states in plain degrees where every other binary user of the opcode states 1/65536ths.
 /// </para>
 /// </remarks>
 public static class FontworkPresets
@@ -394,6 +397,221 @@ public static class FontworkPresets
                 new(0x2001, 0x400, 12070, 20250),
             ],
             [10100]);
+
+        // ---- the four *Pour shapes and mso-spt142 --------------------------------------------
+        // A pour shape is an arch or a circle with a hole in it: two concentric arcs rather than
+        // one, so the text is fitted into the ring between them instead of laid along a line. That
+        // is the same even-rail envelope every other warp uses and needs no new path builder — the
+        // arcs are `0xA504` and `0xA304`, which `FontworkGeometry` already decodes. `adj2` is the
+        // inner radius, and `Fontwork.Adjustments` is what halves it (`fontworkhelpers.cxx:135-141`).
+        int adj2 = FirstAdjustmentProperty + 1;
+
+        FontworkFormula[] archPourCalc =
+        [
+            new(0x400a, 10800, FirstAdjustmentProperty, 0),
+            new(0x4009, 10800, FirstAdjustmentProperty, 0),
+            new(0x2000, 0x400, 10800, 0),
+            new(0x2000, 0x401, 10800, 0),
+            new(0x8000, 21600, 0, 0x402),
+            new(0x8000, 10800, 0, adj2),
+            new(0x600a, 0x405, FirstAdjustmentProperty, 0),
+            new(0x6009, 0x405, FirstAdjustmentProperty, 0),
+            new(0x2000, 0x406, 10800, 0),
+            new(0x2000, 0x407, 10800, 0),
+            new(0x8000, 21600, 0, 0x408),
+            new(0x8000, 21600, 0, 0x405),
+        ];
+
+        Add(
+            "fontwork-arch-up-pour",
+            [
+                0, 0, 21600, 21600, 2 | I, 3 | I, 4 | I, 3 | I,
+                5 | I, 5 | I, 11 | I, 11 | I, 8 | I, 9 | I, 0xa | I, 9 | I,
+            ],
+            [0xA504, 0x8000, 0xA504, 0x8000],
+            archPourCalc,
+            [180, 5400]);
+
+        Add(
+            "fontwork-arch-down-pour",
+            [
+                5 | I, 5 | I, 11 | I, 11 | I, 0xa | I, 9 | I, 8 | I, 9 | I,
+                0, 0, 21600, 21600, 4 | I, 3 | I, 2 | I, 3 | I,
+            ],
+            [0xA304, 0x8000, 0xA304, 0x8000],
+            archPourCalc,
+            [0, 5400]);
+
+        // Not `archPourCalc`: 4 and 10 differ, which is the whole of the difference between an arch
+        // and a full circle here.
+        Add(
+            "fontwork-circle-pour",
+            [
+                0, 0, 21600, 21600, 2 | I, 3 | I, 2 | I, 4 | I,
+                5 | I, 5 | I, 11 | I, 11 | I, 8 | I, 9 | I, 8 | I, 0xa | I,
+            ],
+            [0xA504, 0x8000, 0xA504, 0x8000],
+            [
+                new(0x400a, 10800, FirstAdjustmentProperty, 0),
+                new(0x4009, 10800, FirstAdjustmentProperty, 0),
+                new(0x2000, 0x400, 10800, 0),
+                new(0x2000, 0x401, 10800, 0),
+                new(0x8000, 21600, 0, 0x403),
+                new(0x8000, 10800, 0, adj2),
+                new(0x600a, 0x405, FirstAdjustmentProperty, 0),
+                new(0x6009, 0x405, FirstAdjustmentProperty, 0),
+                new(0x2000, 0x406, 10800, 0),
+                new(0x2000, 0x407, 10800, 0),
+                new(0x8000, 21600, 0, 0x409),
+                new(0x8000, 21600, 0, 0x405),
+                new(0x0000, 21600, 0, 0),
+            ],
+            [-179, 5400]);
+
+        Add(
+            "fontwork-open-circle-pour",
+            [
+                0, 0, 21600, 21600, 2 | I, 3 | I, 4 | I, 3 | I,
+                6 | I, 6 | I, 7 | I, 7 | I, 10 | I, 11 | I, 12 | I, 11 | I,
+                0x16 | I, 16 | I, 0x15 | I, 16 | I,
+                0x16 | I, 15 | I, 0x15 | I, 15 | I,
+                6 | I, 6 | I, 7 | I, 7 | I, 10 | I, 13 | I, 12 | I, 13 | I,
+                0, 0, 21600, 21600, 2 | I, 5 | I, 4 | I, 5 | I,
+            ],
+            [
+                0xA504, 0x8000,
+                0xA504, 0x8000,
+                0x4000, 0x0001, 0x8000,
+                0x4000, 0x0001, 0x8000,
+                0xA304, 0x8000,
+                0xA304, 0x8000,
+            ],
+            [
+                new(0x400a, 10800, FirstAdjustmentProperty, 0),
+                new(0x4009, 10800, FirstAdjustmentProperty, 0),
+                new(0x2000, 0x400, 10800, 0),
+                new(0x2000, 0x401, 10800, 0),
+                new(0x8000, 21600, 0, 0x402),
+                new(0x8000, 21600, 0, 0x403),
+                new(0x8000, 10800, 0, adj2),
+                new(0x8000, 21600, 0, 0x406),
+                new(0x600a, adj2, FirstAdjustmentProperty, 0),
+                new(0x6009, adj2, FirstAdjustmentProperty, 0),
+                new(0x2000, 0x408, 10800, 0),
+                new(0x2000, 0x409, 10800, 0),
+                new(0x8000, 21600, 0, 0x40a),
+                new(0x8000, 21600, 0, 0x40b),
+                new(0x2001, 0x406, 1, 2),
+                new(0x4000, 10800, 0x40e, 0),
+                new(0x8000, 10800, 0, 0x40e),
+                new(0x6001, 0x40e, 0x40e, 1),
+                new(0x6001, adj2, adj2, 1),
+                new(0xa000, 0x412, 0, 0x411),
+                new(0x200d, 0x413, 0, 0),
+                new(0x4000, 10800, 0x414, 0),
+                new(0x8000, 10800, 0, 0x414),
+            ],
+            [180, 5400]);
+
+        // mso-spt142 (textRingInside). Two clockwise arcs each drawn as an implicit-move arc
+        // followed by an arc-to, which is `0xa604 0xa504` — both opcodes already decoded.
+        Add(
+            "mso-spt142",
+            [
+                0, 0, 21600, 2 | I, 0, 0 | I, 21600, 0 | I,
+                0, 0, 21600, 2 | I, 21600, 0 | I, 0, 0 | I,
+                0, 3 | I, 21600, 21600, 0, 1 | I, 21600, 1 | I,
+                0, 3 | I, 21600, 21600, 21600, 1 | I, 0, 1 | I,
+            ],
+            [0xa604, 0xa504, 0x8000, 0xa604, 0xa504, 0x8000],
+            [
+                new(0x2001, FirstAdjustmentProperty, 1, 2),
+                new(0x8000, 21600, 0, 0x400),
+                new(0x2000, FirstAdjustmentProperty, 0, 0),
+                new(0x8000, 21600, 0, FirstAdjustmentProperty),
+            ],
+            [13500]);
+
+        // mso-spt143 (textRingOutside). Two full ellipses, drawn with `ANGLEELLIPSE` rather than
+        // with the arc opcodes — the only WordArt table that uses it, and the reason
+        // `FontworkGeometry` decodes 0xA1 and 0xA2 at all. Its angles are plain degrees where every
+        // other binary `ANGLEELLIPSE` states 1/65536ths, which the reference special-cases by this
+        // very name (`EnhancedCustomShape2d.cxx:2253-2258`).
+        Add(
+            "mso-spt143",
+            [
+                10800, 0 | I, 10800, 0 | I, 180, 359,
+                10800, 1 | I, 10800, 0 | I, 180, 359,
+            ],
+            [0xA203, 0x8000, 0xA203, 0x8000],
+            [
+                new(0x2001, FirstAdjustmentProperty, 1, 2),
+                new(0x8000, 21600, 0, 0x400),
+            ],
+            [13500]);
+
+        // ---- mso-spt166 / mso-spt167 (textDeflateInflate, textDeflateInflateDeflate) ---------
+        // The only two warps whose geometry is four and six rails rather than two, so the text is
+        // split across two and three envelopes and `Distribute` deals the lines out between them.
+        // A single-line body — which is every corpus warp — fills the first envelope and leaves the
+        // others empty, which is what the reference draws too.
+        Add(
+            "mso-spt166",
+            [
+                0, 0, 21600, 0,
+                0, 10100, 3300, 3 | I, 7100, 5 | I, 10800, 5 | I, 14500, 5 | I, 18300, 3 | I, 21600, 10100,
+                0, 11500, 3300, 4 | I, 7100, 6 | I, 10800, 6 | I, 14500, 6 | I, 18300, 4 | I, 21600, 11500,
+                0, 21600, 21600, 21600,
+            ],
+            [
+                0x4000, 0x0001, 0x8000,
+                0x4000, 0x2002, 0x8000,
+                0x4000, 0x2002, 0x8000,
+                0x4000, 0x0001, 0x8000,
+            ],
+            [
+                new(0x2000, FirstAdjustmentProperty, 0, 0),
+                new(0x8000, 10800, 0, 0x400),
+                new(0x2001, 0x401, 5770, 9500),
+                new(0x8000, 10100, 0, 0x402),
+                new(0x8000, 11500, 0, 0x402),
+                new(0x2000, 0x400, 0, 700),
+                new(0x2000, 0x400, 700, 0),
+            ],
+            [6500]);
+
+        Add(
+            "mso-spt167",
+            [
+                0, 0, 21600, 0,
+                0, 6600, 3600, 3 | I, 7250, 4 | I, 10800, 4 | I, 14350, 4 | I, 18000, 3 | I, 21600, 6600,
+                0, 7500, 3600, 5 | I, 7250, 6 | I, 10800, 6 | I, 14350, 6 | I, 18000, 5 | I, 21600, 7500,
+                0, 14100, 3600, 9 | I, 7250, 10 | I, 10800, 10 | I, 14350, 10 | I, 18000, 9 | I, 21600, 14100,
+                0, 15000, 3600, 7 | I, 7250, 8 | I, 10800, 8 | I, 14350, 8 | I, 18000, 7 | I, 21600, 15000,
+                0, 21600, 21600, 21600,
+            ],
+            [
+                0x4000, 0x0001, 0x8000,
+                0x4000, 0x2002, 0x8000,
+                0x4000, 0x2002, 0x8000,
+                0x4000, 0x2002, 0x8000,
+                0x4000, 0x2002, 0x8000,
+                0x4000, 0x0001, 0x8000,
+            ],
+            [
+                new(0x2000, FirstAdjustmentProperty, 0, 850),
+                new(0x2001, 0x400, 6120, 8700),
+                new(0x2000, 0x401, 0, 4280),
+                new(0x4000, 6600, 0x402, 0),
+                new(0x2000, FirstAdjustmentProperty, 0, 450),
+                new(0x2000, 0x403, 900, 0),
+                new(0x2000, 0x404, 900, 0),
+                new(0x8000, 21600, 0, 0x403),
+                new(0x8000, 21600, 0, 0x404),
+                new(0x8000, 21600, 0, 0x405),
+                new(0x8000, 21600, 0, 0x406),
+            ],
+            [6050]);
 
         AddWaves(presets);
         return presets.ToFrozenDictionary(StringComparer.Ordinal);

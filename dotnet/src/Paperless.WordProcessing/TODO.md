@@ -2079,6 +2079,27 @@ is read and verified, so what remains is the filling of pages rather than the me
   - **`wp:effectExtent` moves a warped shape and not an unwarped one's text**, which is the one
     open thread. See the entry two below.
 
+- **[DONE] All forty `ST_TextShapeType` warps are implemented.** The previous round left eight,
+  on a rule worth keeping — *a table transcribed for a preset no document states is a transcription
+  nothing checks* — and the corpus still states none of them. What changed is that a fixture now
+  checks them: `fontwork-presets-{default,adjusted}.docx`, one shape per value authored into the
+  WordArt catalogue's own container, with reference PDFs from both binaries. Nine-page mean
+  absolute grey difference **2.584 → 0.603**, no page above 0.93, extracted words 228/228 and
+  10/10 `WORDART` tokens throughout.
+
+  **Five of the eight needed nothing but their tables, which is not what the standing note said.**
+  A `*Pour` shape is two concentric arcs with the text fitted into the ring between them, drawn
+  with the same `0xA304`/`0xA504` the arch family already used; `mso-spt142` is `0xa604 0xa504`.
+  Only `mso-spt143` needed a path builder — `ANGLEELLIPSE`, `0xA2` with a count in thirds
+  (`svx/source/svdraw/svdoashp.cxx:124-133`), taking the `bIsFromBinaryImport` arm of
+  `EnhancedCustomShape2d.cxx:2178-2286` where the second angle is a swing rather than an end, and
+  which the reference special-cases by that very name at line 2255 because its angles are plain
+  degrees where every other binary user of the opcode states 1/65536ths.
+
+  The catalogue renders **byte-identically** to the build before it, 0.0000 maximum per-page
+  difference over all 52 pages, which is the check that the shared evaluator was not disturbed.
+  Write-up in `dotnet/probes/words-fontwork-presets/results.md`.
+
 - **[DONE] VML WordArt (`v:textpath` on a `#_x0000_t136`) is drawn as warped outlines too.**
   A `v:shape` naming a WordArt shape type becomes a Fontwork custom shape with no conversion step:
   `oox/source/vml/vmlshape.cxx:1329` hands the number straight to

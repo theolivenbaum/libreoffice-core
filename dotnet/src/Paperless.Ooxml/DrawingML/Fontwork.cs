@@ -36,10 +36,9 @@ public static class Fontwork
     /// The LibreOffice Fontwork type each OOXML <c>prst</c> maps to.
     /// </summary>
     /// <remarks>
-    /// <c>oox/source/drawingml/presetgeometrynames.cxx</c>, transcribed whole. Names mapping to a
-    /// preset <see cref="FontworkPresets"/> does not carry are kept: knowing that a warp is a
-    /// <c>*Pour</c> rather than an unknown string is worth having, and the difference decides
-    /// whether a fallback is a gap or a malformed file.
+    /// <c>oox/source/drawingml/presetgeometrynames.cxx</c>, transcribed whole. All forty warps map
+    /// to a preset <see cref="FontworkPresets"/> carries, so a name that is not in this table is a
+    /// malformed file rather than a gap.
     /// </remarks>
     private static readonly FrozenDictionary<string, string> FontworkTypes =
         new Dictionary<string, string>(StringComparer.Ordinal)
@@ -193,11 +192,12 @@ public static class Fontwork
     /// </summary>
     /// <remarks>
     /// <para>
-    /// Null has four causes: the body states no warp; the warp is one of the eight
-    /// <see cref="FontworkPresets"/> does not carry; the face has no <c>glyf</c> outlines
-    /// (see <see cref="GlyphOutlines"/>); or the text is empty. The first means "draw it the
-    /// ordinary way"; the other three mean "the reference drew curves and this cannot", and both
-    /// families answer that by drawing nothing rather than by drawing unwarped text.
+    /// Null has four causes: the body states no warp; it states a <c>prst</c> that is not one of
+    /// the forty (a malformed file, since <see cref="FontworkPresets"/> carries them all); the face
+    /// has no <c>glyf</c> outlines (see <see cref="GlyphOutlines"/>); or the text is empty. The
+    /// first means "draw it the ordinary way"; the other three mean "the reference drew curves and
+    /// this cannot", and both families answer that by drawing nothing rather than by drawing
+    /// unwarped text.
     /// </para>
     /// <para>
     /// The result's origin is the shape's top-left corner and its coordinates are EMUs, so a caller
