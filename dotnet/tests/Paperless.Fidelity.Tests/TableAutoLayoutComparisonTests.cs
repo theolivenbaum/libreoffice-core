@@ -45,6 +45,11 @@ namespace Paperless.Fidelity.Tests;
 /// moves a pen, so this measures the thing under test at a tenth of a point.
 /// </para>
 /// </remarks>
+// [reference moved 24.2.7.2 -> 26.2.4.2] EveryCellStartsWhereLibreOfficeStartsIt fails on all
+// three `.fodt` rows and none of the other formats, on "line 3 run count" — so 26.2 splits or
+// joins that line's runs differently rather than placing them differently. Flat ODF only, which
+// is the lead: the same content through the packaged `.odt` passes. Unclassified between ours and
+// a 26.2 change; a run-count difference is substantive and is not a tolerance question.
 public sealed class TableAutoLayoutComparisonTests : IDisposable
 {
     /// <summary>How far a drawn pen may differ from LibreOffice's, in points.</summary>

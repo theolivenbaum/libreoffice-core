@@ -27,6 +27,12 @@ namespace Paperless.Fidelity.Tests;
 /// honest across a LibreOffice upgrade. Measured on 24.2.7.2.
 /// </para>
 /// </remarks>
+// [reference moved 24.2.7.2 -> 26.2.4.2] Both tests fail, and one of them is a claim about the
+// *reference* rather than about us: TheReferenceItselfSetsTheModeFifteenDocumentInFewerLines
+// asserts `newer.Count` is less than the older document's, which 26.2 no longer satisfies. Its
+// premise is a LibreOffice behaviour and the behaviour changed, so it needs re-establishing
+// against 26.2 before it says anything. TheParagraphBreaksWhereLibreOfficeBreaksIt differs on line
+// count for justify-shrink-2013.docx and is downstream of the same change.
 public sealed class JustificationShrinkComparisonTests : IDisposable
 {
     /// <summary>How far a drawn line's right edge may sit from LibreOffice's, in points.</summary>

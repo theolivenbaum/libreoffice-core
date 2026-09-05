@@ -28,6 +28,10 @@ namespace Paperless.Fidelity.Tests;
 /// page two citing 1, 2, 3, 4 again.
 /// </para>
 /// </remarks>
+// [reference moved 24.2.7.2 -> 26.2.4.2] TheNumbersAreTheOnesLibreOfficeDraws fails on
+// `note-restart.docx` and now passes on `note-restart.doc`, which failed under 24.2 — so the
+// version move fixed one arm of this pair and left the other. The drawn text differs, i.e. the
+// note numbers themselves, not their placement. Substantive and unclassified.
 public sealed class NoteRestartComparisonTests : IDisposable
 {
     private readonly LibreOfficeRunner _libreOffice = new();

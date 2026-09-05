@@ -25,6 +25,9 @@ namespace Paperless.Fidelity.Tests;
 /// <c>Paperless.Rendering</c>'s business and is tested there.
 /// </para>
 /// </remarks>
+// [reference moved 24.2.7.2 -> 26.2.4.2] APictureIsDrawnWhereLibreOfficeDrawsIt fails on
+// `sheet-rich-text.xlsx`, picture 1 on page 3, on width. A picture's width does not depend on text
+// metrics, so this is unlikely to be the sub-point drift the words tests show; unclassified.
 public sealed class SheetDrawingComparisonTests : IDisposable
 {
     /// <summary>A tenth of a point, two twips, as everywhere else in this project.</summary>
