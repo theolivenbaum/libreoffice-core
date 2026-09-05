@@ -609,7 +609,46 @@ bundles its own fonts. Move the 33 duplicates aside first and it is close enough
 ```sh
 D=/opt/libreoffice26.2/share/fonts/truetype
 mkdir -p $D/.duplicates-aside && mv $D/{Carlito,Caladea,Liberation,DejaVu}*.ttf $D/.duplicates-aside/
+# And the Latin Noto, which duplicates nothing installed and is the worse trap of the two:
+mkdir -p $D/.noto-aside && mv $D/Noto{Sans,Serif}-*.ttf $D/.noto-aside/
 ```
+
+**Move the Latin Noto aside too, and leave the script-specific Noto in place.** The line above
+was written for the metric-compatible duplicates, and it is not sufficient. The tarball also
+ships `NotoSans-*` and `NotoSerif-*`, which duplicate *nothing* on this system, so they are not
+caught by that `mv` and they become fontconfig's answer for every unfiled family — which makes
+`ink26` unscoreable on any document naming a font the system lacks. Two agents lost hours to it
+independently in one session before anyone read the faces out of the PDFs. Keep
+`NotoSansArabic`, `NotoSerifHebrew` and the rest: they carry script coverage the system genuinely
+lacks (`fc-list :lang=ar` here answers DejaVu Sans Mono), and removing them changes what a CJK or
+Arabic document can draw at all.
+
+With only the eight Latin faces aside, the tarball answers **DejaVu**, like a distro build.
+
+### The two references differ in a *rule*, not only in their fonts, and it decides font fallback
+
+**24.2.7.2 lets the family name decide; 26.2.4.2 lets a declared family class beat it.**
+`FontConfigManager::Substitute` appends `"serif"` as a second `FC_FAMILY` for `FAMILY_ROMAN` and
+`"sans"` for `FAMILY_SWISS` (`vcl/unx/generic/font/fontconfig.cxx`:1075-1088). **That switch does
+not exist in 24.2.** Measured on three hand-built DOCX naming one uninstalled family, differing
+only in what `word/fontTable.xml` declares, with the Latin Noto aside:
+
+| `w:family` | 24.2.7.2 | 26.2.4.2 | Paperless |
+|---|---|---|---|
+| *(no font table)* | DejaVu Sans | **DejaVu Serif** | DejaVu Serif |
+| `roman` | DejaVu Sans | **DejaVu Serif** | DejaVu Serif |
+| `swiss` | DejaVu Sans | **DejaVu Sans** | DejaVu Sans |
+
+24.2 answers the bare `fc-match` of the name in all three; 26.2 honours the declaration, and a
+DOCX with no font table still inherits Writer's roman default. Over 24 families the tree matches
+clean 26.2 **24 of 24** and 24.2 only 7 of 24.
+
+**So a font-family divergence measured against `/usr/bin/soffice` is very probably not a defect.**
+A `pdffonts` census over the 947 gate renders showed **119 documents** drawing a different family
+from the reference, 85 of them `DejaVu Sans` against our `DejaVu Serif` — and every one of those
+85 is this version rule, not a bug. A round was dispatched to "fix" it and would have broken
+correct behaviour; the agent challenged the brief from the source and was right. Read the faces
+out of both PDFs, with the Latin Noto aside, before believing any of it.
 
 **Screen a document against 26.2 before working it.** `probes/words-version-screen/screen.py` does
 the whole queue and `bucket.py` one catalogued cause. Rescoring the worst thirty words documents
