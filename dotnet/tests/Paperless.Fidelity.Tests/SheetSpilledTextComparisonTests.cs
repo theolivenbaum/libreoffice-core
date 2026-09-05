@@ -73,7 +73,7 @@ public sealed class SheetSpilledTextComparisonTests : IDisposable
     [InlineData("sheet-print-ods.ods")]
     public void EveryPageShowsAsManyWordsAsLibreOfficeShows(string name)
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         string path = Corpus.Require(name);
         List<PdfWord> ours = PdfWords.Read(Ours(path));
@@ -97,7 +97,7 @@ public sealed class SheetSpilledTextComparisonTests : IDisposable
     [Fact]
     public void AStringSpillingPastAPageBreakIsDrawnOnBothSidesOfIt()
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         string path = Corpus.Require("xls-features.xls");
         List<PdfTextRun> ours = PdfTextRuns.Read(Ours(path));

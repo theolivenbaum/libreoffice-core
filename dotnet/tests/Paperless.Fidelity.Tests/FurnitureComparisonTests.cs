@@ -79,7 +79,7 @@ public sealed class FurnitureComparisonTests : IDisposable
     [InlineData("header-table.rtf")]
     public void EveryPageDrawsItsHeaderAndFooterWhereLibreOfficeDoes(string fileName)
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         string path = Corpus.Require(fileName);
         RecordingDrawingSink sink = Record(path);
@@ -204,7 +204,7 @@ public sealed class FurnitureComparisonTests : IDisposable
     [Fact]
     public void APictureOnlyHeadAndFootTakeTheirRoomFromTheBody()
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         string path = Corpus.Require("picture-furniture.doc");
         RecordingDrawingSink sink = Record(path);

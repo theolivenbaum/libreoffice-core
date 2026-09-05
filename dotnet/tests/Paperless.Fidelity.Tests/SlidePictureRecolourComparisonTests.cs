@@ -96,7 +96,7 @@ public sealed class SlidePictureRecolourComparisonTests : IDisposable
     [Fact]
     public void EveryPictureRecolourIsTheOneLibreOfficeApplies()
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         string path = Corpus.Require(Deck);
 

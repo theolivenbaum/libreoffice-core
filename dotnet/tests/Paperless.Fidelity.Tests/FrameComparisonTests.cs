@@ -31,6 +31,11 @@ namespace Paperless.Fidelity.Tests;
 /// with 2 cm margins. A cascade in a document with several frames is far harder to attribute.
 /// </para>
 /// </remarks>
+// [reference moved 24.2.7.2 -> 26.2.4.2] TextFillsBothSidesOfAFrameThatTouchesNeitherMargin
+// fails on `.odt` and `.fodt`: line 4 resumes at 354.40 pt in our output "where LibreOffice drew
+// nothing". 24.2 did draw there, so 26.2 stopped resuming text to the right of a parallel-wrapped
+// frame on that line. A real behaviour difference, substantive rather than metric, and not yet
+// established as ours — the question is which of the two is right about the wrap.
 public sealed class FrameComparisonTests : IDisposable
 {
     /// <summary>How far a drawn pen may differ from LibreOffice's, in points.</summary>
@@ -88,7 +93,7 @@ public sealed class FrameComparisonTests : IDisposable
     [InlineData("frame-wrap.rtf", 0.1)]
     public void EveryLineStartsWhereLibreOfficeStartsIt(string fileName, double tolerance)
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         string path = Corpus.Require(fileName);
         List<Line> expected = Reference(path);
@@ -132,7 +137,7 @@ public sealed class FrameComparisonTests : IDisposable
     [InlineData("frame-wrap.rtf")]
     public void TheWrappedLinesAreIndentedByTheFramesWidth(string fileName)
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         List<Line> lines = Drawn(Corpus.Require(fileName));
         lines.Count.ShouldBeGreaterThan(10, $"{fileName}: too few lines to say anything");
@@ -179,7 +184,7 @@ public sealed class FrameComparisonTests : IDisposable
     [InlineData("frame-wrap.docx")]
     public void TheFramesOwnTextIsDrawnInsideIt(string fileName)
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         string path = Corpus.Require(fileName);
         RecordingDrawingSink sink = Record(path);
@@ -363,7 +368,7 @@ public sealed class FrameComparisonTests : IDisposable
     [InlineData("frame-parallel.odt")]
     public void TextFillsBothSidesOfAFrameThatTouchesNeitherMargin(string fileName)
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         string path = Corpus.Require(fileName);
         List<Line> expected = Reference(path);
@@ -427,7 +432,7 @@ public sealed class FrameComparisonTests : IDisposable
     [InlineData("frame-in-header.odt")]
     public void AFrameAnchoredInAHeaderMovesTheBodyTextBelowIt(string fileName)
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         string path = Corpus.Require(fileName);
 
@@ -491,7 +496,7 @@ public sealed class FrameComparisonTests : IDisposable
     [InlineData("frame-in-cell.odt")]
     public void AFrameAnchoredInATableCellIsPlacedAgainstTheCell(string fileName)
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         string path = Corpus.Require(fileName);
 

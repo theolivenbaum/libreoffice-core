@@ -50,6 +50,11 @@ namespace Paperless.Fidelity.Tests;
 /// about the face. The gap between two of the axis' own labels is.
 /// </para>
 /// </remarks>
+// [reference moved 24.2.7.2 -> 26.2.4.2] TheThemesFaceDecidesTheValueLabelsAdvances fails on the
+// reference's own advances for the value labels. The test's premise is which face the theme
+// resolves to, so it has to be re-measured against 26.2 before the failure means anything about
+// us: 26.2 and 24.2 resolve an unfiled family by different rules, which is the whole subject of
+// this round.
 public sealed partial class SlideChartFaceComparisonTests : IDisposable
 {
     /// <summary>One digit's advance in ten-point Liberation Mono, in points.</summary>
@@ -80,7 +85,7 @@ public sealed partial class SlideChartFaceComparisonTests : IDisposable
     [Fact]
     public void AChartUnstatedTakesTheThemesMinorFace()
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         const string deck = "chart-face-theme-minor.pptx";
 
@@ -92,7 +97,7 @@ public sealed partial class SlideChartFaceComparisonTests : IDisposable
     [Fact]
     public void AChartStatingAFaceTakesTheStatedOneInstead()
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         const string deck = "chart-face-stated.pptx";
 
@@ -111,7 +116,7 @@ public sealed partial class SlideChartFaceComparisonTests : IDisposable
     [Fact]
     public void TheThemesFaceDecidesTheValueLabelsAdvances()
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
         Assert.SkipUnless(PdfWords.IsAvailable, "pdftotext is not installed");
 
         const string deck = "chart-face-theme-minor.pptx";

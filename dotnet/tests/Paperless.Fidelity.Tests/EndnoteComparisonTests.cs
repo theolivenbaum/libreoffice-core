@@ -23,6 +23,11 @@ namespace Paperless.Fidelity.Tests;
 /// that believed the file, or that used the footnote sequence, produces the wrong text on both pages.
 /// </para>
 /// </remarks>
+// [reference moved 24.2.7.2 -> 26.2.4.2] EndnotesCollectWhereTheirDocumentPutsThem fails on
+// `endnotes.docx` alone, on **page count** — the most substantive failure of the twenty and the
+// one to work first. A page-count difference makes every later comparison compare different
+// pages. Not yet classified; `.doc`, `.odt`, `.fodt` and `.rtf` all still pass, which localises it
+// to the DOCX path rather than to endnote collection in general.
 public sealed class EndnoteComparisonTests : IDisposable
 {
     /// <summary>How far a drawn word may differ from LibreOffice's, in points.</summary>
@@ -61,7 +66,7 @@ public sealed class EndnoteComparisonTests : IDisposable
     [InlineData("endnotes.doc")]
     public void EndnotesCollectWhereTheirDocumentPutsThem(string fileName)
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         string path = Corpus.Require(fileName);
         List<List<DrawnWord>> drawn = Drawn(path);

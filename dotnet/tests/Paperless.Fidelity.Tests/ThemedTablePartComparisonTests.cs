@@ -63,7 +63,7 @@ public sealed class ThemedTablePartComparisonTests : IDisposable
     [Fact]
     public void AThemedCellShadeIsTheColourLibreOfficePaintsForTheSameChain()
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         string path = Corpus.Require("theme-table.docx");
         List<uint> twins = Twins(path);
@@ -92,7 +92,7 @@ public sealed class ThemedTablePartComparisonTests : IDisposable
     [Fact]
     public void AThemedBorderIsTheColourLibreOfficePaintsForTheSameChain()
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         string path = Corpus.Require("theme-table.docx");
         List<uint> twins = Twins(path);
@@ -132,7 +132,7 @@ public sealed class ThemedTablePartComparisonTests : IDisposable
     [Fact]
     public void LibreOfficeResolvesNeitherOfThem()
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         string path = Corpus.Require("theme-table.docx");
         string pdf = _libreOffice.ConvertToPdf(path, _workDirectory);

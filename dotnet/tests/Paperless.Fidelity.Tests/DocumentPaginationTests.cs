@@ -56,7 +56,7 @@ public sealed class DocumentPaginationTests : IDisposable
     [InlineData("paginated.rtf")]
     public void ARealDocumentPaginatesTheWayLibreOfficeDoes(string fileName)
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         string path = Corpus.Require(fileName);
         List<List<string>> reference = RenderedPages(path);
@@ -112,7 +112,7 @@ public sealed class DocumentPaginationTests : IDisposable
     [Fact]
     public void AHeadingIsNeverStrandedAtTheFootOfAPage()
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         // The corpus document's headings keep with the next paragraph, which is what every real
         // template does. A heading alone at the foot of a page is the most visible pagination fault

@@ -60,7 +60,7 @@ public sealed class PptSlideRenderComparisonTests : IDisposable
     [InlineData("slides-ppt.ppt")]
     public void EverySlideIsTheSizeTheDocumentAtomStates(string fileName)
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         string path = Corpus.Require(fileName);
         List<PdfPageSize> ours = PdfPageSizes.Read(Ours(path));
@@ -82,7 +82,7 @@ public sealed class PptSlideRenderComparisonTests : IDisposable
     [InlineData("slides-ppt.ppt")]
     public void EveryRectangularFillIsWhereAndWhatLibreOfficeFillsIt(string fileName)
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         string path = Corpus.Require(fileName);
         string mineOnDisk = Ours(path);
@@ -116,7 +116,7 @@ public sealed class PptSlideRenderComparisonTests : IDisposable
     [Fact]
     public void EveryLineOfShapeTextIsDrawnWhereLibreOfficeDrawsIt()
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         // shape-geometry-ppt.ppt alone. slides-ppt.ppt's master carries a footer and a
         // slide-number placeholder, which LibreOffice renders onto every slide and Paperless does

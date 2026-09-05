@@ -65,7 +65,7 @@ public sealed class RasterOutputComparisonTests : IDisposable
     [InlineData("table-shading.odt")]
     public void EveryPageRasterisesToTheSameImageAsLibreOffices(string fileName)
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         string path = Corpus.Require(fileName);
         List<string> reference = Reference(path);

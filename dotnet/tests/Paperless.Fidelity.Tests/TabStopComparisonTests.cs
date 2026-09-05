@@ -24,6 +24,11 @@ namespace Paperless.Fidelity.Tests;
 /// the position of a separator inside the stretch decides it.
 /// </para>
 /// </remarks>
+// [reference moved 24.2.7.2 -> 26.2.4.2] AListLabelsTabAdvancesToLibreOfficesStop fails on all
+// four formats, identically: word 4 ("than") starts at 117.571 pt in the reference against our
+// 117.442 pt, 0.129 pt. Same shape and same conclusion as PageDrawingComparisonTests — ours is
+// unmoved, the reference is not, and the shaper and rasteriser are shared. A real sub-point 26.2
+// layout change, ours to follow, mechanism not established.
 public sealed class TabStopComparisonTests : IDisposable
 {
     /// <summary>How far a drawn word may differ from LibreOffice's, in points.</summary>
@@ -65,7 +70,7 @@ public sealed class TabStopComparisonTests : IDisposable
     [InlineData("tabbed.rtf")]
     public void EveryTabAdvancesToLibreOfficesStop(string fileName)
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         string path = Corpus.Require(fileName);
         List<DrawnWord> drawn = Drawn(path);
@@ -127,7 +132,7 @@ public sealed class TabStopComparisonTests : IDisposable
     [InlineData("list-label-overrun.doc")]
     public void AListLabelsTabAdvancesToLibreOfficesStop(string fileName)
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         string path = Corpus.Require(fileName);
         List<DrawnWord> drawn = Drawn(path);

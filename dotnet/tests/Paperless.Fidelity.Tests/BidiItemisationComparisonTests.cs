@@ -120,7 +120,7 @@ public sealed class BidiItemisationComparisonTests : IDisposable
     [Fact]
     public void EveryDirectionBoundaryIsOneLibreOfficeAlsoSplitsAt()
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         List<List<PdfTextRun>> lines = ReferenceLines();
 
@@ -151,7 +151,7 @@ public sealed class BidiItemisationComparisonTests : IDisposable
     [Fact]
     public void TheRunsAreDrawnInTheOrderTheReorderingPutsThem()
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         List<List<PdfTextRun>> lines = ReferenceLines();
         int reordered = 0;
@@ -201,7 +201,7 @@ public sealed class BidiItemisationComparisonTests : IDisposable
     [Fact]
     public void EverySubRunIsTheWidthLibreOfficeDrewIt()
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         OpenTypeFace? face = DejaVuSans();
         Assert.SkipWhen(face is null, "DejaVu Sans is not installed; see the corpus README");

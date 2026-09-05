@@ -98,7 +98,7 @@ public sealed class PdfOutputComparisonTests : IDisposable
     [InlineData("footnotes.docx")]
     public void EveryLineIsShownWhereLibreOfficeShowsIt(string fileName)
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         string path = Corpus.Require(fileName);
         List<PdfTextRun> ours = LinesOf(PdfTextRuns.Read(Ours(path)));
@@ -141,7 +141,7 @@ public sealed class PdfOutputComparisonTests : IDisposable
     [InlineData("footnotes.docx")]
     public void EveryBaselineFallsOnLibreOfficesPitch(string fileName)
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         string path = Corpus.Require(fileName);
         List<PdfTextRun> ours = LinesOf(PdfTextRuns.Read(Ours(path)));
@@ -182,7 +182,7 @@ public sealed class PdfOutputComparisonTests : IDisposable
     [InlineData("table-borders.rtf")]
     public void EveryBorderIsStrokedWhereLibreOfficeStrokesIt(string fileName)
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         string path = Corpus.Require(fileName);
         List<PdfStroke> ours = PdfStrokes.Read(Ours(path));
@@ -230,7 +230,7 @@ public sealed class PdfOutputComparisonTests : IDisposable
     [InlineData("table-shading.rtf")]
     public void EveryShadeAndRuleIsFilledWhereLibreOfficeFillsIt(string fileName)
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         string path = Corpus.Require(fileName);
 
@@ -266,7 +266,7 @@ public sealed class PdfOutputComparisonTests : IDisposable
     [InlineData("page-geometry.rtf")]
     public void EveryPageTakesTheSheetSizeLibreOfficeGivesIt(string fileName)
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         string path = Corpus.Require(fileName);
         List<PdfPageSize> ours = PdfPageSizes.Read(Ours(path));
@@ -294,7 +294,7 @@ public sealed class PdfOutputComparisonTests : IDisposable
     [InlineData("tabbed.odt")]
     public void TheTextInOurPdfCanBeFoundAndCopied(string fileName)
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         string path = Corpus.Require(fileName);
         string? ours = ExtractedText(Ours(path));

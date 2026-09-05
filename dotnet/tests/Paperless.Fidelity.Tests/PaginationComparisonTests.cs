@@ -380,7 +380,7 @@ public sealed class PaginationComparisonTests : IDisposable
 
     private void AssertPagination(ParagraphFormat format, string odfProperties)
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         (List<LaidOutPage> pages, List<PageParagraph> paragraphs) =
             Paginate(format, PaginationOptions.Default);

@@ -81,7 +81,7 @@ public sealed class TrackedChangeComparisonTests : IDisposable
     [InlineData("revisions.rtf")]
     public void TheReferenceShowsChangeMarksByDefault(string fileName)
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         string pdf = _libreOffice.ConvertToPdf(Corpus.Require(fileName), _workDirectory);
 
@@ -180,7 +180,7 @@ public sealed class TrackedChangeComparisonTests : IDisposable
     [InlineData("revisions.rtf")]
     public void TheDeletedPhraseIsInTheReferenceAndInTheRecordButNotInTheExtraction(string fileName)
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         const string Deleted = "a deleted phrase";
         string path = Corpus.Require(fileName);

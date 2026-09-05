@@ -88,7 +88,7 @@ public sealed class SlideAutofitParagraphSpaceComparisonTests : IDisposable
     [Fact]
     public void TheFitsSpacingScaleReachesAParagraphsOwnSpace()
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         List<PdfTextRun> ours = PdfTextRuns.Read(Ours());
         List<PdfTextRun> theirs = PdfTextRuns.Read(

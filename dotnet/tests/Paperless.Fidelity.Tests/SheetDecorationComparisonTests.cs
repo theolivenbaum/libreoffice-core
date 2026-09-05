@@ -75,7 +75,7 @@ public sealed class SheetDecorationComparisonTests : IDisposable
     [InlineData("sheet-decor-xls.xls")]
     public void ACellsBackgroundIsPaintedWhereLibreOfficePaintsIt(string name)
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         (List<PdfFill> reference, List<PdfFill> actual) = Fills(name);
         Assert.SkipWhen(reference.Count == 0, "the reference PDF holds no fills");
@@ -112,7 +112,7 @@ public sealed class SheetDecorationComparisonTests : IDisposable
     [InlineData("sheet-decor-xls.xls")]
     public void AShareEdgeGoesToTheHeavierOfTheTwoCellsBorders(string name)
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         (List<PdfRule> reference, List<PdfRule> actual) = Rules(name);
         Assert.SkipWhen(reference.Count == 0, "the reference PDF holds no strokes");
@@ -157,7 +157,7 @@ public sealed class SheetDecorationComparisonTests : IDisposable
     [InlineData("sheet-decor-xls.xls")]
     public void ThePrintedGridHasALineAtTheFarEdgeOfEveryColumnAndRow(string name)
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         (List<PdfRule> reference, List<PdfRule> actual) = Rules(name);
         Assert.SkipWhen(reference.Count == 0, "the reference PDF holds no strokes");
@@ -200,7 +200,7 @@ public sealed class SheetDecorationComparisonTests : IDisposable
     public void TheHeaderExpandsItsFieldsIntoThreeSeparatelyAlignedParts(
         string name, string left, string centre, string right)
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         string path = Corpus.Require(name);
         string ours = Render(path);

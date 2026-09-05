@@ -47,6 +47,10 @@ namespace Paperless.Fidelity.Tests;
 /// positional and glyph-count assertions cover the two formats that agree about the geometry.
 /// </para>
 /// </remarks>
+// [reference moved 24.2.7.2 -> 26.2.4.2] EveryCellIsDrawnWhereLibreOfficeDrawsIt fails on
+// `sheet-cell-text.xlsx`, run 12 on page 1, on the across-pen. Consistent with the same sub-point
+// advance drift the words tests show, but on one run of one sheet rather than a whole line, so it
+// is not established as the same thing.
 public sealed class SheetTextComparisonTests : IDisposable
 {
     /// <summary>A tenth of a point, two twips, as everywhere else in this project.</summary>
@@ -74,7 +78,7 @@ public sealed class SheetTextComparisonTests : IDisposable
     [InlineData("sheet-cell-text.xlsx")]
     public void EveryCellIsDrawnWhereLibreOfficeDrawsIt(string name)
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         string path = Corpus.Require(name);
         List<PdfTextRun> ours = Upright(PdfTextRuns.Read(Ours(path)));
@@ -108,7 +112,7 @@ public sealed class SheetTextComparisonTests : IDisposable
     [InlineData("sheet-cell-text.xlsx")]
     public void EveryCellShowsTheCharactersLibreOfficeShows(string name)
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         string path = Corpus.Require(name);
         List<PdfTextRun> ours = Upright(PdfTextRuns.Read(Ours(path)));
@@ -132,7 +136,7 @@ public sealed class SheetTextComparisonTests : IDisposable
     [InlineData("sheet-cell-text.xls")]
     public void EveryFormatDrawsTheSameRunsInTheSameFaces(string name)
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         string path = Corpus.Require(name);
         List<PdfTextRun> ours = Upright(PdfTextRuns.Read(Ours(path)));
@@ -160,7 +164,7 @@ public sealed class SheetTextComparisonTests : IDisposable
     [InlineData("sheet-cell-text.xls")]
     public void ANarrowNumericColumnShortensItsNumberOrHashesIt(string name)
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         string path = Corpus.Require(name);
         List<PdfWord> words = PdfWords.Read(Ours(path));
@@ -184,7 +188,7 @@ public sealed class SheetTextComparisonTests : IDisposable
     [InlineData("sheet-cell-text.xlsx")]
     public void ALongStringOverflowsIntoEmptyCellsAndIsCutOffByOccupiedOnes(string name)
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         string path = Corpus.Require(name);
         List<PdfTextRun> ours = Upright(PdfTextRuns.Read(Ours(path)));

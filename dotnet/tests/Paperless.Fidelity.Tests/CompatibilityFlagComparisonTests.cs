@@ -76,7 +76,7 @@ public sealed class CompatibilityFlagComparisonTests : IDisposable
     [Fact]
     public void TheLineEndedByABreakIsStretchedExactlyWhenLibreOfficeStretchesIt()
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         string expandPath = Corpus.Require("compat-shift-expand.docx");
         string returnPath = Corpus.Require("compat-shift-return.docx");

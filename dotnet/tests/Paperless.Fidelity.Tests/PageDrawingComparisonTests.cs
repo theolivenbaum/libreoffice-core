@@ -28,6 +28,15 @@ namespace Paperless.Fidelity.Tests;
 /// and the measurement separately, which is what makes a failure diagnosable.
 /// </para>
 /// </remarks>
+// [reference moved 24.2.7.2 -> 26.2.4.2] EveryLineIsDrawnWhereLibreOfficeDrawsIt fails on all
+// four formats, identically: page 1 line 1 ends at 530.423 pt in the reference against our
+// 529.903 pt, 0.520 pt over a 0.5 pt tolerance on a ~430 pt line — 0.12%. Ours has not moved;
+// 24.2 drew it within tolerance and 26.2 does not, on the same Liberation Serif file now that
+// the bundle is aside. **Not the tarball's libraries**: /opt/libreoffice26.2/program bundles
+// ICU 78 but no HarfBuzz and no FreeType, so the shaper and the rasteriser are the system's on
+// both sides. So this is a real, sub-point layout change in 26.2 and following it is ours to do;
+// the mechanism was not established this round. Do not widen the tolerance to clear it — the
+// figure sitting 4% over the band is the only thing recording that anything moved.
 public sealed class PageDrawingComparisonTests : IDisposable
 {
     /// <summary>
@@ -64,7 +73,7 @@ public sealed class PageDrawingComparisonTests : IDisposable
     [InlineData("paginated.rtf")]
     public void EveryLineIsDrawnWhereLibreOfficeDrawsIt(string fileName)
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         string path = Corpus.Require(fileName);
 
@@ -109,7 +118,7 @@ public sealed class PageDrawingComparisonTests : IDisposable
     [InlineData("paginated.docx")]
     public void BaselinesFallOnLibreOfficesLinePitch(string fileName)
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         string path = Corpus.Require(fileName);
 

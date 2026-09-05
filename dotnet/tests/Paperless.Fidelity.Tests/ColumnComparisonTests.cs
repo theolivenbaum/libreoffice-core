@@ -67,7 +67,7 @@ public sealed class ColumnComparisonTests : IDisposable
     [InlineData("columns.rtf")]
     public void TextFillsOneColumnBeforeTheNext(string fileName)
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         string path = Corpus.Require(fileName);
         List<List<DrawnWord>> drawn = Drawn(path);
