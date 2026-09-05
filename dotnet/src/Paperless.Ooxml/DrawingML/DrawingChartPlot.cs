@@ -174,6 +174,12 @@ public static class DrawingChartPlot
 
         if (series.Count == 0) return null;
 
+        // The colour every piece of the chart's text falls back to. One value for the whole
+        // chart, because all three of ObjectFormatter's auto-text tables carry the same two
+        // colours and differ only in size and weight.
+        Colour automaticText =
+            DrawingChartAutoFormat.TextColourOf(automatic.Style, theme) ?? Colour.Black;
+
         // The bar group decides the shape of the category axis and the bar arithmetic, so where
         // there is one it is the chart's own kind whatever came first in the file; that is
         // SeriesPlotterContainer's own rule, which ORs shifted-category positioning over every
@@ -237,6 +243,11 @@ public static class DrawingChartPlot
                 Child(axes.Domain ?? axes.Category, "title"), kind),
             ValueAxisTitle = AxisTitleText(Child(axes.Value, "title"), kind),
             Categories = orderedCategories,
+            // The rows a complex category axis is drawn as. The join above stays what it was,
+            // because a legend entry and a data label want one string; see
+            // ChartPlot.CategoryLevels. A date axis has re-ordered its categories by then, so a
+            // levelled axis and a date axis are not both honoured -- no corpus chart is both.
+            CategoryLevels = dateAxis is null ? CategoryLevelsOf(plotArea) : null,
             Series = orderedSeries,
             Kind = kind,
 
@@ -322,16 +333,19 @@ public static class DrawingChartPlot
             IsLabelBold = AxisLabelBoldOf(plotArea) ?? false,
 
             // The five text colours. Each is read where its own object states it, and each falls
-            // back to black — which is what every one of them was before round 60, and what a
-            // chart naming tx1 on a light theme resolves to anyway. See ChartPlot.LabelColour.
-            LabelColour = AxisLabelColourOf(plotArea, theme) ?? Colour.Black,
-            TitleColour = ColourOf(Child(chart, "title"), theme) ?? Colour.Black,
+            // back to the chart style's own automatic text colour — tx1 below style 41 and lt1
+            // from 41 up, which is what makes the text of a dark chart white instead of
+            // invisible. It used to fall back to black, which is what tx1 resolves to on all but
+            // seven of the corpus' chart-bearing files and is not what a dark style states at
+            // all. See DrawingChartAutoFormat.TextColourOf and ChartPlot.LabelColour.
+            LabelColour = AxisLabelColourOf(plotArea, theme) ?? automaticText,
+            TitleColour = ColourOf(Child(chart, "title"), theme) ?? automaticText,
             AxisTitleColour = AxisTitleColourOf(plotArea, theme)
-                              ?? ColourOf(Child(chart, "title"), theme) ?? Colour.Black,
+                              ?? ColourOf(Child(chart, "title"), theme) ?? automaticText,
             DataLabelColour = DataLabelColourOf(plotArea, theme)
-                              ?? AxisLabelColourOf(plotArea, theme) ?? Colour.Black,
+                              ?? AxisLabelColourOf(plotArea, theme) ?? automaticText,
             LegendColour = ColourOf(Child(chart, "legend"), theme)
-                           ?? AxisLabelColourOf(plotArea, theme) ?? Colour.Black,
+                           ?? AxisLabelColourOf(plotArea, theme) ?? automaticText,
 
             // The legend's own c:txPr, not the axes' — every length in the legend is a fraction
             // of it. Read from the legend element directly rather than through its descendants,
@@ -2863,6 +2877,66 @@ public static class DrawingChartPlot
         }
 
         return (text, numbers);
+    }
+
+    /// <summary>
+    /// The levels of a complex category axis, innermost first, or null when there is one level.
+    /// </summary>
+    /// <remarks>
+    /// One entry per category per level, in the file's own order — Excel writes <c>c:lvl</c>
+    /// innermost first and <c>VCartesianAxis</c> draws level zero nearest the axis line, so no
+    /// reversal happens here. A point the cache does not state stays null, which
+    /// <see cref="ChartPlot.CategoryLevels"/> reads as a continuation of the run above it.
+    /// <para>
+    /// Taken from the first series that states one. A chart's series share a category axis, and
+    /// the ones that state a <c>c:cat</c> at all state the same rectangle.
+    /// </para>
+    /// </remarks>
+    private static List<IReadOnlyList<string?>>? CategoryLevelsOf(XElement plotArea)
+    {
+        foreach (XElement group in plotArea.Elements())
+        {
+            if (group.Name.NamespaceName != OoxmlNamespaces.DrawingMLChart) continue;
+
+            foreach (XElement series in group.Elements(Name("ser")))
+            {
+                if (Child(Child(Child(series, "cat"), "multiLvlStrRef"), "multiLvlStrCache")
+                    is not { } cache)
+                {
+                    continue;
+                }
+
+                int declared = Drawing.Number(Child(cache, "ptCount"), "val") ?? -1;
+                if (declared < 0)
+                {
+                    foreach (XElement point in cache.Descendants(Name("pt")))
+                        declared = Math.Max(declared, (Drawing.Number(point, "idx") ?? -1) + 1);
+                }
+
+                int count = Math.Clamp(declared, 0, MaxPointCount);
+                if (count == 0) continue;
+
+                List<IReadOnlyList<string?>> levels = [];
+                foreach (XElement level in cache.Elements(Name("lvl")))
+                {
+                    string?[] texts = new string?[count];
+                    foreach (XElement point in level.Elements(Name("pt")))
+                    {
+                        int index = Drawing.Number(point, "idx") ?? -1;
+                        if (index < 0 || index >= count) continue;
+
+                        string value = Child(point, "v")?.Value ?? string.Empty;
+                        if (value.Length > 0) texts[index] = value;
+                    }
+
+                    levels.Add(texts);
+                }
+
+                return levels.Count > 1 ? levels : null;
+            }
+        }
+
+        return null;
     }
 
     /// <summary>

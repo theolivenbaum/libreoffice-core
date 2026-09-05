@@ -312,10 +312,16 @@ public static class ChartAxisLabels
                 line = candidate;
             }
 
-            if (built.Length > 0) built.Append('\n');
-            built.Append(line);
+            // Whether the label broke at all cannot be asked of the finished string's length: a
+            // break replaces exactly one blank with exactly one newline, so `ACCOUNT MANAGER` set
+            // on two lines is the same fifteen characters it was on one. Asking it that way threw
+            // away every label that broke at a single space — which is what a two-word category
+            // name is — and left the axis to thin itself out instead. `built` holds the lines
+            // already closed and is empty until the first break is taken, so it is the question.
+            if (built.Length == 0) continue;
 
-            if (built.Length == text.Length) continue;
+            built.Append('\n');
+            built.Append(line);
 
             wrapped ??= [.. texts.Take(count)];
             wrapped[at] = built.ToString();
