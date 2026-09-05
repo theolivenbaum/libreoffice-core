@@ -324,6 +324,43 @@ public sealed record PaginationOptions
 
     /// <summary>Word's fixed note-separator length: two inches.</summary>
     public static Length WordNoteSeparatorLength { get; } = Length.FromInches(2);
+
+    /// <summary>
+    /// Whether endnotes collecting at the end of the document follow the body text instead of taking
+    /// pages of their own.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// LibreOffice's <c>DocumentSettingId::CONTINUOUS_ENDNOTES</c>, whose own option string says exactly
+    /// what it does: <em>"Render endnotes at the end of document inline, rather than on a separate
+    /// page"</em> (<c>sw/inc/strings.hrc</c>:1540). On that branch
+    /// <c>SwFootnoteBossFrame::FindFootnoteBossFrame</c>'s caller builds an endnote
+    /// <c>SwSectionFrame</c> and inserts it into the <em>body</em> frame behind the last body content
+    /// (<c>sw/source/core/layout/ftnfrm.cxx</c>:1644-1684), so the notes are ordinary body-flow content
+    /// that begins where the text ended and continues onto the next page when it must. Off it, the
+    /// <c>else</c> arm two lines further down inserts a page marked <c>SetEndNotePage</c> and the notes
+    /// start there.
+    /// </para>
+    /// <para>
+    /// <b>Both Word filters set it and neither ODF one nor the RTF one does</b>, which is why it is a flag
+    /// of its own rather than part of <see cref="Word"/> — the same division
+    /// <see cref="UsesWordNoteSeparator"/> makes and for the same reason:
+    /// <c>WriterFilter::setTargetDocument</c> sets <c>ContinuousEndnotes</c> under a comment reading
+    /// "options that are valid for the DOCX format"
+    /// (<c>sw/source/writerfilter/filter/WriterFilter.cxx</c>:338), <c>SwWW8ImplReader</c> sets
+    /// <c>CONTINUOUS_ENDNOTES</c> for DOC (<c>sw/source/filter/ww8/ww8par.cxx</c>:2050), and
+    /// <c>RtfFilter::setTargetDocument</c> sets neither.
+    /// </para>
+    /// <para>
+    /// <b>This is the reference's own behaviour moving, and only for DOCX.</b> 24.2.7.2 did not set the
+    /// flag in the DOCX filter and 26.2.4.2 does: measured on <c>endnotes.docx</c>, converted through both
+    /// binaries to FODT, <c>ContinuousEndnotes</c> reads <c>false</c> under 24.2.7.2 and <c>true</c> under
+    /// 26.2.4.2, and the same file renders 2 pages against 1. The DOC has been on this branch all along —
+    /// 1 page under both — and the ODT and FODT stay at 2, which is what says it is the filter and not the
+    /// layout.
+    /// </para>
+    /// </remarks>
+    public bool EndnotesFollowTheBody { get; init; }
 }
 
 /// <summary>
@@ -1616,6 +1653,13 @@ public sealed class Paginator
         columnTop = Length.Zero;
         columnBottom = bodyHeight;
 
+        // Endnotes that follow the body join the last page's own notes, before it is written. They are
+        // added here and not while the body was being filled because they must take no room from it: an
+        // endnote section is inserted *behind* the last body content and grows into whatever is left,
+        // spilling onto a further page when there is not enough — which the note-carrying loop below
+        // already does. See `PaginationOptions.EndnotesFollowTheBody`.
+        if (_options.EndnotesFollowTheBody) notes.AddRange(DocumentEndNotes(blocks));
+
         // FinishPage rather than EmitPage, because the last page has to be *emitted*: in a multi-column
         // section EmitPage moves to the next column when there is one, so a document ending part way through
         // column one of a two-column section would advance to column two and never write the page at all.
@@ -1641,8 +1685,13 @@ public sealed class Paginator
         // The endnotes, which are the one flow that is not part of any page's body: they collect *after* the
         // last of them, on pages of their own. Measured — LibreOffice puts a two-endnote document's notes at
         // the top of a fresh second page, in the body's own text area, and takes nothing off page one.
-        pages.AddRange(
-            EndnotePages(blocks, resolved[^1], pageNumber, pages.Count));
+        // Unless the document came from a Word filter, where they follow the body instead and have already
+        // been placed above.
+        if (!_options.EndnotesFollowTheBody)
+        {
+            pages.AddRange(
+                EndnotePages(blocks, resolved[^1], pageNumber, pages.Count));
+        }
 
         _tableOrigins = _nextTableOrigins;
 
@@ -1796,8 +1845,9 @@ public sealed class Paginator
             // column that ended the page rather than under all of them — generous rather than tight,
             // which errs towards placing a note here instead of carrying it, and so cannot start a
             // spill that would not otherwise happen.
+            Length bodyInk = BodyInk(placed, tables, body.TextArea.Y);
             (PlacedFlow? noteArea, List<PageNote> carriedNotes) =
-                NoteArea(notes, body, bodyHeight - BodyInk(placed, tables, body.TextArea.Y));
+                NoteArea(notes, body, bodyHeight - bodyInk, bodyInk);
 
             pages.Add(Page(
                 pages.Count,
@@ -2642,6 +2692,13 @@ public sealed class Paginator
     /// fresh page two in the body's own text area.
     /// </para>
     /// <para>
+    /// <b>For an ODF or an RTF document.</b> A document a Word filter opened does not reach this at all:
+    /// it takes <see cref="PaginationOptions.EndnotesFollowTheBody"/>'s branch instead, where the notes
+    /// join the last page's own note area rather than starting a page. The measurement above was taken on
+    /// the ODT and holds for it; the same content as a DOCX renders one page under 26.2.4.2 and two under
+    /// 24.2.7.2.
+    /// </para>
+    /// <para>
     /// So this is an ordinary pagination of an ordinary flow, done by recursion rather than by a second
     /// implementation — the notes get page breaks, headers and footers exactly as body text does, because
     /// they are body text on those pages. The last section's geometry is what they take, being what the
@@ -2658,8 +2715,7 @@ public sealed class Paginator
         int startingNumber,
         int alreadyEmitted)
     {
-        List<PageBlock> flow = [];
-        Collect(blocks, depth: 0);
+        List<PageBlock> flow = [.. DocumentEndNotes(blocks).SelectMany(note => note.Blocks)];
 
         if (flow.Count == 0 || alreadyEmitted >= _options.MaxPages) return [];
 
@@ -2683,8 +2739,22 @@ public sealed class Paginator
                 Blocks = flow,
             })];
 
-        // Depth-first through tables, because a cell can cite an endnote and its notes still collect with
-        // the rest. Endnote bodies are *not* searched: a note inside a note would collect after itself.
+    }
+
+    /// <summary>
+    /// The notes a flow cites that collect at the end of the document, in the order they are cited.
+    /// </summary>
+    /// <remarks>
+    /// Depth-first through tables, because a cell can cite an endnote and its notes still collect with the
+    /// rest. Endnote bodies are <em>not</em> searched: a note inside a note would collect after itself.
+    /// </remarks>
+    /// <param name="blocks">The body's blocks, whose paragraphs are searched for endnote anchors.</param>
+    private static List<PageNote> DocumentEndNotes(IReadOnlyList<PageBlock> blocks)
+    {
+        List<PageNote> collected = [];
+        Collect(blocks, depth: 0);
+        return collected;
+
         void Collect(IReadOnlyList<PageBlock> from, int depth)
         {
             if (depth > FlowLayouter.MaxNesting) return;
@@ -2696,7 +2766,7 @@ public sealed class Paginator
                     case PageParagraph paragraph:
                         foreach (PageNote note in paragraph.Notes)
                         {
-                            if (note.Placement == NotePlacement.DocumentEnd) flow.AddRange(note.Blocks);
+                            if (note.Placement == NotePlacement.DocumentEnd) collected.Add(note);
                         }
 
                         break;
@@ -2932,8 +3002,12 @@ public sealed class Paginator
     /// <param name="notes">The notes owed by this page, in citation order.</param>
     /// <param name="page">The page's geometry.</param>
     /// <param name="available">The room left beneath the body, which may be nought or less.</param>
+    /// <param name="bodyInk">
+    /// How far down the text area the body reached, which is where an endnote flow that follows the body
+    /// begins. Ignored for every other note area, which is bottom-aligned.
+    /// </param>
     private (PlacedFlow? Area, List<PageNote> Spilled) NoteArea(
-        List<PageNote> notes, PageGeometry page, Length available)
+        List<PageNote> notes, PageGeometry page, Length available, Length bodyInk)
     {
         if (notes.Count == 0) return (null, []);
 
@@ -2964,9 +3038,29 @@ public sealed class Paginator
             blocks.AddRange(note.Blocks);
         }
 
+        // An endnote area that follows the body is body-flow content and begins where the body left off;
+        // a footnote area is bottom-aligned in the text area. That split is measured on both sides, on
+        // one authored document rendered by 26.2.4.2: `footnotes.docx` puts its note area's first line at
+        // 760.831 pt on a page whose body ends at 702.299 — bottom-aligned, which is what we already draw
+        // to 0.002 pt — while `endnotes.docx` and `endnotes.doc` both put theirs at 716.131, directly
+        // under the same body. So the rule is the note's placement and not the filter.
+        //
+        // Decided by the first note the page owes, so a last page carrying a footnote *and* the
+        // document's endnotes keeps the footnote area's own position and takes the endnotes into it — an
+        // approximation, and the only shape where the two rules meet on one page.
+        // The separator's own room comes first, exactly as `taken` charges it above: the endnote
+        // container's top border is the reservation and the notes begin below it. Measured against
+        // 26.2.4.2 on `endnotes.docx` — its body's last line ends at 702.298 pt and its first endnote
+        // line's box begins at 716.131, a gap of 13.833, which is this document's default paragraph
+        // line height and not nought.
+        Length? offsetFromTop =
+            _options.EndnotesFollowTheBody && notes[0].Placement != NotePlacement.PageBottom
+                ? bodyInk + _options.NoteSeparatorHeight
+                : null;
+
         return (
             FlowLayouter.LayOut(
-                blocks, page.TextArea, offsetFromTop: null,
+                blocks, page.TextArea, offsetFromTop,
                 collapsesSpacing: _options.CollapsesSpacing,
                 addsCellLineSpacing: _options.AddsCellLineSpacing),
             spilled);
