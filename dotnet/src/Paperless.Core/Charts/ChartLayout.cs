@@ -820,7 +820,7 @@ public static partial class ChartLayout
         {
             arranged = ArrangeCategories(plot, area, categories, measurer);
 
-            if (arranged is { } first && !IsPlain(first))
+            if (arranged is { } first && Reshapes(first))
             {
                 area = PlotAreaOf(
                     plot, frame, scale, secondary, domain, categories, measurer, arranged);
@@ -1519,7 +1519,7 @@ public static partial class ChartLayout
             ? DataTableHeight(plot, measurer)
             : !categoryLabels
                 ? Length.Zero
-                : arranged is { } layout && !IsPlain(layout)
+                : arranged is { } layout && Reshapes(layout)
                     ? layout.Reserved
                     : labelHeight;
 
@@ -1557,7 +1557,7 @@ public static partial class ChartLayout
             (Length firstLabel, Length lastLabel) =
                 arranged is { } ends && !IsPlain(ends)
                     ? (Length.Zero, Length.Zero)
-                    : EndLabelOverhang(plot, domain, categories, measurer);
+                    : EndLabelOverhang(plot, domain, categories, measurer, arranged?.Texts);
 
             if (area.Left + firstLabel > left) left = area.Left + firstLabel;
 
@@ -2198,6 +2198,26 @@ public static partial class ChartLayout
     /// </remarks>
     private static bool IsPlain(ChartAxisLabelLayout layout)
         => layout.Rotation == 0.0 && layout.Rhythm <= 1 && !layout.Staggered;
+
+    /// <summary>
+    /// Whether the arrangement changed the shape the labels occupy, and so the room they need.
+    /// </summary>
+    /// <remarks>
+    /// <strong>Wrapping is invisible to <see cref="IsPlain"/> and is not invisible to the plot
+    /// rectangle.</strong> A wrapped axis is upright, one row, every label drawn — plain by every
+    /// column that test reads — and is nonetheless two lines deep. Reserving one line for it
+    /// draws the second line through the chart's own bottom edge, which is what
+    /// <c>033_Event_planning_tracker</c> did the moment its labels started breaking at all.
+    /// </remarks>
+    private static bool Reshapes(ChartAxisLabelLayout layout)
+        => !IsPlain(layout) || layout.Texts is not null;
+
+    /// <summary>The label the arrangement produced for one category, or null when it left it.</summary>
+    private static string? Arranged(IReadOnlyList<string?>? texts, int index)
+        => texts is not null && index >= 0 && index < texts.Count
+            && texts[index] is { Length: > 0 } broken
+                ? broken
+                : null;
 
     /// <summary>
     /// How the category labels come out on the axis the plot rectangle gives them.
@@ -3943,7 +3963,8 @@ public static partial class ChartLayout
         ChartPlot plot,
         ChartScaleResult? domain,
         int categories,
-        ChartText measurer)
+        ChartText measurer,
+        IReadOnlyList<string?>? arrangedTexts = null)
     {
         if (!plot.CategoryAxisVisible || plot.ShiftedCategories
             || (categories <= 0 && plot.DateAxis is null))
@@ -3969,12 +3990,17 @@ public static partial class ChartLayout
         {
             int end = Math.Min(categories, plot.Categories.Count) - 1;
             if (end < 0) return (Length.Zero, Length.Zero);
-            first = ChartDataLabel.WriteCategory(plot.Categories[0], plot.CategoryFormat) ?? "";
-            last = ChartDataLabel.WriteCategory(plot.Categories[end], plot.CategoryFormat) ?? "";
+
+            // What overhangs is the label as it is drawn, and the arrangement may have broken it
+            // onto two lines — which makes it exactly as wide as its widest line and no wider.
+            first = Arranged(arrangedTexts, 0)
+                ?? ChartDataLabel.WriteCategory(plot.Categories[0], plot.CategoryFormat) ?? "";
+            last = Arranged(arrangedTexts, end)
+                ?? ChartDataLabel.WriteCategory(plot.Categories[end], plot.CategoryFormat) ?? "";
         }
 
-        return (measurer.Measure(first, plot.LabelSize, plot.IsLabelBold).Width / 2,
-                measurer.Measure(last, plot.LabelSize, plot.IsLabelBold).Width / 2);
+        return (Shape(measurer, first, plot.LabelSize, plot.IsLabelBold).Width / 2,
+                Shape(measurer, last, plot.LabelSize, plot.IsLabelBold).Width / 2);
     }
 
     /// <summary>
