@@ -2079,6 +2079,56 @@ is read and verified, so what remains is the filling of pages rather than the me
   - **`wp:effectExtent` moves a warped shape and not an unwarped one's text**, which is the one
     open thread. See the entry two below.
 
+- **[DONE] VML WordArt (`v:textpath` on a `#_x0000_t136`) is drawn as warped outlines too.**
+  A `v:shape` naming a WordArt shape type becomes a Fontwork custom shape with no conversion step:
+  `oox/source/vml/vmlshape.cxx:1329` hands the number straight to
+  `SdrObjCustomShape::MergeDefaultAttributes`, which resolves it through
+  `EnhancedCustomShapeTypeNames` into the same LibreOffice type names `FontworkPresets` is keyed by,
+  and `TextpathModel::pushToPropMap` (`oox/source/vml/vmlformatting.cxx:962-1057`) puts it into
+  text-path mode. `DocxVmlFontwork` reproduces it.
+
+  The corpus holds **15 of them across 5 documents**, every one a diagonal `EASA Example Documents`
+  or `DRAFT` watermark in a `word/headerN.xml`, and none inside an `mc:Fallback`. 100 dpi mean
+  absolute grey difference over the whole document, before → after:
+
+  | document | against 24.2.7.2 | against 26.2.4.2 |
+  |---|---|---|
+  | `ABCD-FE-01-00 Flight Envelope` | 11.698 → **11.341** | 15.210 → **14.855** |
+  | `ABCD-SDE-23-00 Avionic System Description` | 5.364 → **5.003** | 6.050 → **5.694** |
+  | `ABCD-WB-08-00 Weight and Balance` | 7.081 → **6.738** | 8.515 → **8.197** |
+  | `DOA_Template_Form_Type_Certification_Programme` | 11.322 → *11.602* | 10.960 → *11.239* |
+  | `technical-architecture` | 4.976 → **4.590** | 5.884 → **5.499** |
+
+  Words and pages are unchanged everywhere: the whole `words/*` track sweeps 311/338 before and
+  after with **not one row of `parity.tsv` different**. Full write-up in
+  `dotnet/probes/words-vml-fontwork/results.md`.
+
+  Three things about it worth carrying forward:
+
+  - **The declared height is thrown away and remeasured from the text**
+    (`vmlformatting.cxx:1041-1056`), unless `trim="t"`, which nothing states. `DOA_Template` states
+    `height:53pt` and the reference imports 57.5; `technical-architecture` states 247.45 pt for the
+    five letters of `DRAFT` and the reference imports 138. Reproducing the ratio from `hhea`'s
+    ascender less its descender over the design advances lands within **0.9%** on five probed
+    (family, string) pairs.
+  - **`gtextFSameHeights` and `gtextFStretch` are *not* reachable from OOXML VML**, contrary to what
+    this round was briefed to expect. `vmlformatting.cxx:966-975` writes `ScaleX` and
+    `SameLetterHeights` as literal `false` for every `v:textpath`, whatever the shape type. They are
+    reachable only from binary Escher, `msdffimp.cxx:2516-2600`.
+  - **`rotation` is read for a WordArt shape and for nothing else**, deliberately: the words track
+    states it on **347** VML shapes across **34** documents and turning all of them is its own round.
+    Fifteen of the 347 are these watermarks, all at `rotation:315`.
+
+- **`RelOrientation::PAGE_PRINT_AREA` starts below the header for LibreOffice and at `w:top` for
+  us, and it moves every margin-relative frame in a document with a tall header.** Measured on an
+  isolated one-page probe with an empty header (A4, `w:top` = `w:header` = 708 twips): the reference
+  centres a `mso-position-vertical:center` shape at y = 409.08 pt and we centre it at 402.48 — a
+  gap of **6.6 pt, exactly half of one empty header line**. On
+  `DOA_Template_Form_Type_Certification_Programme`, whose header is a three-row table, the same gap
+  is 76.6 pt and the watermark lands **34.7 pt high**, which is the whole of why that one document
+  scored worse when its watermark started being drawn. It reaches DrawingML frames as well as VML
+  ones and wants its own probe and its own sweep.
+
 - **`wp:effectExtent` is not added to an inline drawing's *horizontal* position, and the reference
   adds it.** Measured on the WordArt catalogue at 200 dpi: its unwarped gradient-text boxes on page
   3 span x 229.68..359.64 pt for us and 240.84..370.80 for the reference — the same 10.8 pt as their

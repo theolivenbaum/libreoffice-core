@@ -1458,7 +1458,7 @@ public sealed partial class DocxLayoutSource
             if (anchor.Element.Name.LocalName is "pict" or "object")
             {
                 frames.AddRange(
-                    DocxVmlFrames.ReadAll(anchor.Element, anchor.Offset, Pictures, content));
+                    DocxVmlFrames.ReadAll(anchor.Element, anchor.Offset, Pictures, content, VmlFace));
                 continue;
             }
 
@@ -2259,6 +2259,19 @@ public sealed partial class DocxLayoutSource
 
         return -1;
     }
+
+    /// <summary>
+    /// The face a VML <c>v:textpath</c> is set in, from the family its CSS names.
+    /// </summary>
+    /// <remarks>
+    /// Its text is an attribute rather than a run, so it never reaches the walk that resolves every
+    /// other face in the document, and the reader has to be handed one. Resolved through the same
+    /// <see cref="Face(WordTextStyle)"/> the body uses so that a family the document also sets text
+    /// in comes out the same face — <c>vmlformatting.cxx:1026-1028</c> sets it as a plain
+    /// <c>CharFontName</c>, which is what a run states too.
+    /// </remarks>
+    private OpenTypeFace? VmlFace(string? family)
+        => Face(new WordTextStyle(family, Length.Zero, 400, false, null));
 
     private OpenTypeFace? Face(WordTextStyle text)
     {
