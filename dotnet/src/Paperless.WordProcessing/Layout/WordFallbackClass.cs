@@ -7,19 +7,6 @@ namespace Paperless.WordProcessing.Layout;
 /// </summary>
 /// <remarks>
 /// <para>
-/// <strong>Nothing this type says reaches the drawn face on 24.2.7.2, and everything it says is
-/// still needed.</strong> The class it computes is handed to <see cref="FontRequest.DeclaredClass"/>
-/// and <c>SystemFontResolver.DeclaredGenericFor</c> decides what to do with it — which, wherever
-/// there is a fontconfig to ask, is nothing, because <c>FontConfigManager::Substitute</c> only
-/// gained the second <c>FC_FAMILY</c> that carries the class in 26.x
-/// (<c>vcl/unx/generic/font/fontconfig.cxx</c>:1075-1088). Re-measured by re-running this type's
-/// own probe unchanged against both binaries on one machine and one <c>/etc/fonts</c>: on 24.2 an
-/// unrecognised family draws what a bare <c>fc-match</c> of its name draws through every filter,
-/// DOCX included, and the declaration moves nothing; on 26.2.4.2 the table below is exact. So the
-/// table is a correct reading of 26.2 and is kept for it, for a distro 26.2, and for every
-/// platform with no fontconfig at all. The measured figures below are 26.2 figures.
-/// </para>
-/// <para>
 /// <strong>This is a property of the filter, not of the resolver, and that is the whole point of
 /// the type.</strong> Asked the same question — an unrecognised family, which DejaVu? — the
 /// LibreOffice 26.2.4.2 filters give two different answers, so a rule put in

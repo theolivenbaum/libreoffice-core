@@ -48,19 +48,10 @@ public interface IFontResolver
 /// The shape the <em>document</em> says the family has — <c>w:family</c> in a DOCX's font table,
 /// the <c>ff</c> bits of a DOC's <c>FFN</c>, <c>style:font-family-generic</c> in ODF,
 /// <c>&lt;family val="N"/&gt;</c> on a SpreadsheetML font. Distinct from the shape LibreOffice's
-/// substitution table files the <em>name</em> under. On 26.2.4.2 it wins over it: a request for
-/// <c>Garamond</c> declared <c>swiss</c> falls back to DejaVu Sans where the same name undeclared
-/// falls back to DejaVu Serif, and <c>Futura</c> declared <c>roman</c> falls back to DejaVu Serif
-/// where undeclared it falls back to DejaVu Sans.
-/// <para>
-/// <strong>On 24.2.7.2 it wins over nothing: the declaration is read, carried and then not acted
-/// on.</strong> The second <c>FC_FAMILY</c> that carries a class into the fontconfig pre-match is
-/// 26.x-only (<c>vcl/unx/generic/font/fontconfig.cxx</c>:1075-1088), so on the binary this tree is
-/// calibrated against the *name* decides alone. Reading the declaration is still this type's job —
-/// it is unrecoverable if a reader drops it, and both 26.x and every no-fontconfig platform act on
-/// it — but where it is spent is <c>SystemFontResolver.DeclaredGenericFor</c>, and that is the one
-/// place to change to target one version rather than the other.
-/// </para>
+/// substitution table files the <em>name</em> under, and it wins over it: measured on 26.2.4.2, a
+/// request for <c>Garamond</c> declared <c>swiss</c> falls back to DejaVu Sans where the same name
+/// undeclared falls back to DejaVu Serif, and <c>Futura</c> declared <c>roman</c> falls back to
+/// DejaVu Serif where undeclared it falls back to DejaVu Sans.
 /// <para>
 /// <strong>Both halves of that last sentence are measurements through <em>different filters</em>,
 /// which round 54 separated and this comment used to run together.</strong> Undeclared,

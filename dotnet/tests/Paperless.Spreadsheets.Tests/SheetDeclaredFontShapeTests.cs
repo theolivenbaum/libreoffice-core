@@ -17,19 +17,10 @@ namespace Paperless.Spreadsheets.Tests;
 /// <c>2017-04-27-Lease-Transition-Records-Checklist-FINAL-1.xlsx</c> sets its body in
 /// <c>Bell MT</c>, which is installed on no Linux box, and declares it <c>family="1"</c> — roman.
 /// Measured on 26.2.4.2, LibreOffice renders it in DejaVu Serif; delete just those five attributes
-/// from <c>xl/styles.xml</c> and the same binary renders the same workbook in DejaVu Sans. So on
-/// that binary the name alone does not decide it — <c>fc-match "Bell MT"</c> answers DejaVu Sans —
-/// and a reader that drops the declaration renders a serif workbook in a grotesque, which moves
-/// every line break and every wrapped row height in it.
-/// </para>
-/// <para>
-/// <strong>24.2.7.2 does not act on it, and that is a version difference rather than a re-reading.</strong>
-/// The same two packages converted by <c>/usr/bin/soffice</c> both render in DejaVu Sans, because
-/// <c>FontConfigManager::Substitute</c> only gained the second <c>FC_FAMILY</c> that carries the
-/// class in 26.x (<c>vcl/unx/generic/font/fontconfig.cxx</c>:1075-1088). Reading the attribute is
-/// still this class's job — it is what a 26.x reference and every no-fontconfig platform act on,
-/// and dropping it would be unrecoverable — but what the resolver does with it is
-/// <c>SystemFontResolver.DeclaredGenericFor</c>'s decision, and there it is currently inert.
+/// from <c>xl/styles.xml</c> and the same binary renders the same workbook in DejaVu Sans. So the
+/// name alone does not decide it — <c>fc-match "Bell MT"</c> answers DejaVu Sans — and a reader
+/// that drops the declaration renders a serif workbook in a grotesque, which moves every line
+/// break and every wrapped row height in it.
 /// </para>
 /// <para>
 /// The codes are the Windows <c>FF_*</c> constants and are shared by SpreadsheetML, XLSB and BIFF:
@@ -103,21 +94,13 @@ public sealed class SheetDeclaredFontShapeTests
     }
 
     [Fact]
-    public void TheDeclarationReachesTheResolverAndTheNameStillDecidesTheFace()
+    public void TheDeclarationReachesTheFaceTheCellIsActuallySetIn()
     {
-        // Bell MT is installed nowhere, so nothing but the declaration and the name can decide the
-        // answer. Both are read; on 24.2.7.2 only the name is acted on. The pair of workbooks in the
-        // class remark, rebuilt as two hand-written packages and converted by both binaries:
-        //
-        //   family="1" present   24.2 DejaVu Sans   26.2.4.2 Noto Serif
-        //   the attribute gone   24.2 DejaVu Sans   26.2.4.2 Noto Sans
-        //
-        // So the *reading* of the attribute is what this class is for and is unchanged — the
-        // assertions above still pin it, and it is what a 26.x reference and a no-fontconfig machine
-        // both act on. What 24.2 does with it is nothing, because `FontConfigManager::Substitute`
-        // does not yet append the class as a second FC_FAMILY there
-        // (vcl/unx/generic/font/fontconfig.cxx:1075-1088). See
-        // `SystemFontResolver.DeclaredGenericFor`.
+        // The whole point, and the only assertion here that depends on the machine: Bell MT is
+        // installed nowhere, so the declaration is the only thing that can decide the answer.
+        // Guarded rather than skipped, because a box without DejaVu would fail this for a reason
+        // that has nothing to do with the code under test — and CLAUDE.md's own warning is that
+        // fc-match never fails, it always returns something.
         SheetFace? serif = SheetFonts.For(FormatFor("1"));
         SheetFace? undeclared = SheetFonts.For(FormatFor(null));
 
@@ -128,7 +111,7 @@ public sealed class SheetDeclaredFontShapeTests
             return;
         }
 
-        serif.Value.Face.FamilyName.ShouldBe("DejaVu Sans");
+        serif.Value.Face.FamilyName.ShouldBe("DejaVu Serif");
         undeclared.Value.Face.FamilyName.ShouldBe("DejaVu Sans");
     }
 

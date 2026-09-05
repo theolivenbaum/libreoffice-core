@@ -864,35 +864,13 @@ public sealed class SystemFontResolver : IFontResolver, IGlyphFallbackResolver
     /// </summary>
     /// <remarks>
     /// <para>
-    /// <strong>Where there is a fontconfig to ask, the declared class decides nothing, and that is a
-    /// version difference rather than a reading of the same binary two ways.</strong>
-    /// <c>FontConfigManager::Substitute</c> appends <c>"serif"</c> as a second <c>FC_FAMILY</c> for
-    /// <c>FAMILY_ROMAN</c> and <c>"sans"</c> for <c>FAMILY_SWISS</c>
-    /// (<c>vcl/unx/generic/font/fontconfig.cxx</c>:1075-1088), and <b>that switch does not exist in
-    /// 24.2.7.2</b>, which is the binary every figure in this tree is measured against. Re-running
-    /// round 54's own probe (<c>probes/words-r54/font-fallback-rule.py</c>) against both binaries on
-    /// the same machine and the same <c>/etc/fonts</c> separates them cleanly, and the ODF rows are
-    /// the discriminator because the ODF filter sets the item's family type in both versions:
-    /// </para>
-    /// <list type="table">
-    /// <listheader><term>case</term><description>24.2.7.2 / 26.2.4.2 draws</description></listheader>
-    /// <item><term><c>odf:Aptos:roman</c></term><description>DejaVu <b>Sans</b> / Noto <b>Serif</b></description></item>
-    /// <item><term><c>declared:Garamond:swiss</c></term><description>DejaVu <b>Serif</b> / Noto <b>Sans</b></description></item>
-    /// <item><term><c>declared:Aptos:roman</c></term><description>DejaVu <b>Sans</b> / Noto <b>Serif</b></description></item>
-    /// <item><term><c>plain:Verdana</c> (nothing declared)</term><description>DejaVu <b>Sans</b> / Noto <b>Serif</b></description></item>
-    /// </list>
-    /// <para>
-    /// On 24.2 every one of the 32 <c>D declared</c> rows answers what a bare <c>fc-match</c> of the
-    /// name answers, across four families and eight declarations each; on 26.2 the declaration moves
-    /// the answer and the name stops mattering. So on 24.2 the pattern carries the family name and
-    /// nothing else, and the class is inert. The Noto in the 26.2 column is the tarball's own bundled
-    /// faces and is an artefact — but the *shape* is not, and a distro 26.2 would answer DejaVu Serif
-    /// where this returns null. <b>This is the one place to change to target 26.2 instead.</b>
-    /// </para>
-    /// <para>
-    /// The declared class is still read where there is no fontconfig — Windows, most macOS — because
-    /// there the pre-match hook does not exist either and <c>ImplFontSubstitute</c> really does route
-    /// on the family type. Nothing in this container measures that path.
+    /// Two classes and only two, because that is what LibreOffice sends: <c>FontConfigManager::Substitute</c>
+    /// (<c>vcl/unx/generic/font/fontconfig.cxx</c>) appends <c>"serif"</c> as a second <c>FC_FAMILY</c>
+    /// for <c>FAMILY_ROMAN</c> and <c>"sans"</c> for <c>FAMILY_SWISS</c>, and nothing at all for any
+    /// other family type. A monospaced class looks as though it ought to add <c>"monospace"</c> and
+    /// does not — measured, <c>Times</c> declared <c>modern</c> still comes out Liberation Serif, which
+    /// is the plain <c>fc-match Times</c> answer. The readers collapse those codes to
+    /// <see cref="FontFamilyClass.Unknown"/> for the same reason.
     /// </para>
     /// <para>
     /// <strong>A declared fixed pitch wins over a declared family</strong>, because a document relying
@@ -913,16 +891,9 @@ public sealed class SystemFontResolver : IFontResolver, IGlyphFallbackResolver
     /// fontconfig's generic families give on this configuration and measured face by face.
     /// </para>
     /// </remarks>
-    private string[]? DeclaredGenericFor(FontRequest request)
+    private static string[]? DeclaredGenericFor(FontRequest request)
     {
-        // A declared fixed pitch is not a family type and does not go through the switch above: it
-        // reaches fontconfig as FC_SPACING, which 24.2 does send. Measured, `odf:Aptos:fixed` answers
-        // DejaVu Sans Mono on both binaries where the same file without the pitch answers DejaVu Sans.
         if (request.Pitch == FontPitch.Fixed) return MonoFallbacks;
-
-        // 24.2's `Substitute` appends no generic family, so the class the document declared never
-        // reaches the pattern and the name alone decides. See the table above.
-        if (_preferences.IsConfigured) return null;
 
         if (FontSubstitutions.ClassOf(request.FamilyName) == FontFamilyClass.Symbol) return null;
 

@@ -514,88 +514,24 @@ public class FontResolutionTests
     }
 
     [Theory]
-    [InlineData("Century Schoolbook", FontFamilyClass.Serif, "DejaVu Sans")]
+    [InlineData("Century Schoolbook", FontFamilyClass.Serif, "DejaVu Serif")]
     [InlineData("Book Antiqua", FontFamilyClass.SansSerif, "DejaVu Sans")]
-    [InlineData("Palatino Linotype", FontFamilyClass.SansSerif, "DejaVu Serif")]
-    public void FontconfigsClassificationOfTheNameSurvivesADeclaredShape(
+    [InlineData("Palatino Linotype", FontFamilyClass.SansSerif, "DejaVu Sans")]
+    public void ADeclaredShapeStillBeatsFontconfigsClassificationOfTheName(
         string requested, FontFamilyClass declared, string expected)
     {
         SystemFontResolver resolver = Resolver();
         Assert.SkipUnless(resolver.Index.Has(expected), $"{expected} is not installed");
 
-        // The same three rows the other way round, and the correction is a version difference rather
-        // than a re-reading of one binary. `FontConfigManager::Substitute` appends the declared
-        // class's generic as a second FC_FAMILY (vcl/unx/generic/font/fontconfig.cxx:1075-1088), and
-        // 24.2.7.2 — what /usr/bin/soffice is, and what the gate measures against — has no such
-        // switch, so the declaration never reaches the pattern and the *name* decides alone.
+        // The two rules compose, and in this order. `FontConfigManager::Substitute` appends the
+        // declared class's generic to the pattern *before* the match runs, so it sits ahead of
+        // whatever generic fontconfig's own <default> rules would append for the name — which is why
+        // a document declaring Century Schoolbook a roman gets DejaVu Serif although fontconfig files
+        // the bare name under nothing, and one declaring Palatino Linotype a grotesque gets DejaVu
+        // Sans although 45-latin.conf files it under serif.
         //
-        // Each expectation is the bare `fc-match` of the name. Century Schoolbook defaults to the
-        // concrete New Century Schoolbook, which nothing files under a generic, so 49-sansserif.conf's
-        // default applies; Palatino Linotype is filed serif by 45-latin.conf and stays serif however
-        // the document declares it. Measured by re-running probes/words-r54/font-fallback-rule.py
-        // unchanged against both binaries: on 24.2 all 32 `D declared` rows answer the bare
-        // `fc-match`, on 26.2.4.2 the declaration decides. See `SystemFontResolver.DeclaredGenericFor`.
-        resolver.Resolve(new FontRequest(requested, DeclaredClass: declared))
-            .FamilyName.ShouldBe(expected);
-    }
-
-    // ------------------------------------------------- the shape the document itself declares
-
-    [Theory]
-    [InlineData("Times", FontFamilyClass.Serif, "Liberation Serif")]
-    [InlineData("Times", FontFamilyClass.SansSerif, "Liberation Serif")]
-    [InlineData("Helvetica", FontFamilyClass.SansSerif, "Liberation Sans")]
-    [InlineData("Albany", FontFamilyClass.SansSerif, "Liberation Sans")]
-    [InlineData("Thorndale", FontFamilyClass.Serif, "Liberation Serif")]
-    public void AnAliasTheChainNamesSurvivesADeclaredShape(
-        string requested, FontFamilyClass declared, string expected)
-    {
-        SystemFontResolver resolver = Resolver();
-        Assert.SkipUnless(resolver.Index.Has(expected), $"{expected} is not installed");
-
-        // These five are the rows where the declaration and the alias chain point opposite ways, so
-        // they are what fixes which of the two wins. Every one has a chain entry that IS installed --
-        // `times` and `thorndale` name `liberationserif`, `helvetica` and `albany` name
-        // `liberationsans` -- so a resolver that read the declaration first would answer DejaVu and
-        // never reach the chain.
-        //
-        // On 24.2.7.2 it must not. `FontConfigManager::Substitute` appends the declared class as a
-        // second FC_FAMILY (vcl/unx/generic/font/fontconfig.cxx:1075-1088) only in 26.x; 24.2 sends
-        // the name alone, 30-metric-aliases.conf binds each of these names to a Liberation face, and
-        // that face is the answer whatever the document declared. Measured directly, one authored
-        // DOCX per row converted by /usr/bin/soffice with the face read out of the PDF: Times and
-        // Thorndale draw Liberation Serif, Albany and Helvetica draw Liberation Sans.
-        //
-        // The reading this replaces was measured on the 26.2.4.2 tarball and was right about it. The
-        // cost of getting the version wrong is the same in either direction and is worth 11% of the
-        // characters on a line -- `1447.doc` sets its body in Times declared roman, and a face wrong
-        // by that much fits nine lines of text into seven.
-        resolver.Resolve(new FontRequest(requested, DeclaredClass: declared))
-            .FamilyName.ShouldBe(expected);
-    }
-
-    [Theory]
-    [InlineData("Garamond", FontFamilyClass.SansSerif, "DejaVu Serif")]
-    [InlineData("Georgia", FontFamilyClass.SansSerif, "DejaVu Serif")]
-    [InlineData("Futura", FontFamilyClass.Serif, "DejaVu Sans")]
-    [InlineData("Tahoma", FontFamilyClass.Serif, "DejaVu Sans")]
-    [InlineData("TimesNewRomanPSMT", FontFamilyClass.Serif, "DejaVu Sans")]
-    public void TheShapeTheNameIsFiledUnderBeatsTheDeclaredShape(
-        string requested, FontFamilyClass declared, string expected)
-    {
-        SystemFontResolver resolver = Resolver();
-        Assert.SkipUnless(resolver.Index.Has(expected), $"{expected} is not installed");
-
-        // Five rows chosen so the declaration and the filing point opposite ways, which is the only
-        // arrangement that can tell the two apart. On 24.2.7.2 the filing wins every time, because
-        // the declaration is never sent: each expectation here is the bare `fc-match` of the name.
-        // 45-latin.conf files Garamond and Georgia under serif and Tahoma under sans-serif, and
-        // nothing files Futura or TimesNewRomanPSMT at all, so those two take 49-sansserif.conf's
-        // default. Both directions matter — a rule that only ever promoted sans would fix Futura and
-        // manufacture Garamond.
-        //
-        // These five names have no installed chain entry, so they cannot tell where in the order the
-        // declaration is read; AnAliasTheChainNamesSurvivesADeclaredShape is what does that.
+        // Written because the classification change could plausibly have made the declared-class
+        // logic redundant, and it does not: these three rows are the only thing separating the two.
         resolver.Resolve(new FontRequest(requested, DeclaredClass: declared))
             .FamilyName.ShouldBe(expected);
     }
@@ -609,13 +545,81 @@ public class FontResolutionTests
         SystemFontIndex index = Index();
         Assert.SkipUnless(index.Has(expected), $"{expected} is not installed");
 
-        // The other side of the same branch, and the reason the declared-class arm is kept rather
-        // than deleted. Windows and most macOS installations have no pre-match hook at all, so there
-        // is no fontconfig filing to beat and `ImplFontSubstitute` routes on the family type the
-        // document stated. Nothing in this container measures that path, so these two rows are the
-        // guard on it: they are the two rows above, answered the other way round.
+        // The declared-class arm has to survive the absence of a fontconfig, and nothing else here
+        // pins that: every other row in this file runs against the machine's own configuration.
+        // Windows and most macOS installations have no pre-match hook at all, so the fontconfig
+        // filing this arm competes with does not exist and only `ImplFontSubstitute` and the
+        // family type are left. These two rows are the ones directly above, answered against
+        // `FontconfigPreferences.None` instead — same answer, different route, which is the claim.
+        //
+        // Written during the round that briefly made this branch conditional on
+        // `IsConfigured`. That change was reverted — 26.2.4.2 is the target and it honours the
+        // declaration — but the guard is worth keeping, because the branch it protects is the one
+        // no reference in this container can measure.
         SystemFontResolver resolver = new(index, FontconfigPreferences.None);
 
+        resolver.Resolve(new FontRequest(requested, DeclaredClass: declared))
+            .FamilyName.ShouldBe(expected);
+    }
+
+    // ------------------------------------------------- the shape the document itself declares
+
+    [Theory]
+    [InlineData("Times", FontFamilyClass.Serif, "DejaVu Serif")]
+    [InlineData("Times", FontFamilyClass.SansSerif, "DejaVu Sans")]
+    [InlineData("Helvetica", FontFamilyClass.SansSerif, "DejaVu Sans")]
+    [InlineData("Albany", FontFamilyClass.SansSerif, "DejaVu Sans")]
+    [InlineData("Thorndale", FontFamilyClass.Serif, "DejaVu Serif")]
+    public void ADeclaredShapeBeatsAWeakAliasTheChainWouldHaveTaken(
+        string requested, FontFamilyClass declared, string expected)
+    {
+        SystemFontResolver resolver = Resolver();
+        Assert.SkipUnless(resolver.Index.Has(expected), $"{expected} is not installed");
+
+        // These five are the cases that fix where in the order the declaration is consulted, and they
+        // are the reason it is consulted *before* the substitution chain rather than after it. Every
+        // one of them has a chain entry that IS installed -- `times` names `liberationserif`,
+        // `helvetica` and `albany` name `liberationsans`, `thorndale` names `liberationserif` -- so a
+        // resolver that tried the chain first would answer Liberation and stop, and never reach the
+        // declaration at all.
+        //
+        // LibreOffice does not. `FontConfigManager::Substitute`
+        // (vcl/unx/generic/font/fontconfig.cxx) adds the requested name as FC_FAMILY and then appends
+        // a *second* FC_FAMILY -- "serif" for FAMILY_ROMAN, "sans" for FAMILY_SWISS -- and it is the
+        // pre-match substitution, so it runs before VCL.xcu is consulted at all. fontconfig then
+        // answers with the generic's own preferred face for a name it aliases only weakly:
+        // `fc-match "Times,serif"` is DejaVu Serif where `fc-match Times` is Liberation Serif.
+        //
+        // Measured against the installed 26.2.4.2 with one authored document per row, and it is worth
+        // 11% of the characters on a line: `1447.doc` sets its body in Times declared roman, the
+        // reference draws every paragraph of it in DejaVu Serif, and reading the declaration late left
+        // us in Liberation Serif with nine lines of text fitted into seven.
+        resolver.Resolve(new FontRequest(requested, DeclaredClass: declared))
+            .FamilyName.ShouldBe(expected);
+    }
+
+    [Theory]
+    [InlineData("Garamond", FontFamilyClass.SansSerif, "DejaVu Sans")]
+    [InlineData("Georgia", FontFamilyClass.SansSerif, "DejaVu Sans")]
+    [InlineData("Futura", FontFamilyClass.Serif, "DejaVu Serif")]
+    [InlineData("Tahoma", FontFamilyClass.Serif, "DejaVu Serif")]
+    [InlineData("TimesNewRomanPSMT", FontFamilyClass.Serif, "DejaVu Serif")]
+    public void TheDeclaredShapeBeatsTheShapeTheTableFilesTheNameUnder(
+        string requested, FontFamilyClass declared, string expected)
+    {
+        SystemFontResolver resolver = Resolver();
+        Assert.SkipUnless(resolver.Index.Has(expected), $"{expected} is not installed");
+
+        // A document's font table says what shape each family it names has, and LibreOffice believes
+        // it over its own classification of the name. Measured on 26.2.4.2 by holding the family name
+        // constant and varying only the declaration: Garamond, which the table files as a roman and
+        // which falls back to DejaVu Serif undeclared, falls back to DejaVu Sans declared swiss; and
+        // Futura and Tahoma, both grotesques by name, fall back to DejaVu Serif declared roman. Both
+        // directions matter — a rule that only ever promoted serif would fix the first case and
+        // manufacture the second.
+        //
+        // These five names have no installed chain entry, so they cannot tell where in the order the
+        // declaration is read; ADeclaredShapeBeatsAWeakAliasTheChainWouldHaveTaken is what does that.
         resolver.Resolve(new FontRequest(requested, DeclaredClass: declared))
             .FamilyName.ShouldBe(expected);
     }
