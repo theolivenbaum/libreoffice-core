@@ -2631,14 +2631,42 @@ which is the honest state of them.
       fill it is told is opaque — but the same shape renders differently in the two formats,
       which is the sharpest kind of evidence there is. The slides corpus holds no `.odp`, so
       this cannot be measured there; the feature corpus can.
-- [ ] **`a:prstTxWarp` is not read, and it is narrower than it looks.** The attribute appears on
-      39 of the 112 corpus `pptx` decks, 722 times — which reads as a wide gap and is not one:
-      **709 of those are `textNoShape`**, the identity, and 3 more are `textPlain`. Only ten
-      occurrences bend anything, across two decks: `FAAAIandtheArtandScienceofV&Vfinal.pptx`
-      (eight, `textArchUp`/`textArchDown` round a dial, and the reason it scores 1201 words
-      against 1145 — the labels are laid straight, wrap, and collide) and
-      `redac-sas-201403-ppt-portfolio-rev-sim.pptx` (two). Worth doing for the shape of the
-      feature rather than for its reach; read the count before budgeting for it.
+- [x] **`a:prstTxWarp` is read and drawn, and it was narrower than it looked.** The attribute
+      appears on 39 of the 112 corpus `pptx` decks, 722 times — which reads as a wide gap and is not
+      one: **709 of those are `textNoShape`**, the identity, and 3 more are `textPlain`. Only ten
+      occurrences bend anything, across two decks. `SlideFontwork` now builds the warped outlines
+      through `Paperless.Ooxml.DrawingML.Fontwork` and *replaces the shape* with them, which is what
+      `EnhancedCustomShapeEngine::render2` does — so the box, its own fill, its pen and its shadow
+      all go, and the fill comes from the first non-empty run's character properties
+      (`lcl_copyCharPropsToShape`, `oox/source/drawingml/shape.cxx:721-905`). That last part is not
+      a detail: every one of `FAAAIandtheArtandScienceofV&Vfinal.pptx`'s dial labels states
+      `<a:noFill/>` on the shape and a white `a:solidFill` on the run, so taking the shape's fill
+      would draw nothing at all.
+
+      Measured, 100 dpi mean absolute grey difference against 26.2.4.2:
+
+      | | page | before | after |
+      |---|---|---:|---:|
+      | `FAAAIandtheArtandScienceofV&Vfinal.pptx` | 13 | 3.05 | **2.18** |
+      | | 14 | 2.16 | **1.29** |
+      | `redac-sas-201403-ppt-portfolio-rev-sim.pptx` | 6 | 5.83 | **5.81** |
+      | | 7 | 3.73 | **3.47** |
+
+      Page 13's ink is now 19.34 against the reference's 19.34. No word moved on either deck,
+      because the slides side already drew nothing for a warped body.
+
+      Two arms of the reference are reached by exactly one shape between them and are implemented
+      anyway, because the alternative is a visibly wrong page rather than a slightly wrong one: the
+      per-preset vertical anchor (`shape.cxx:863-874`) and the parallel-rail placement for a
+      multi-line "follow path" warp (`EnhancedCustomShapeFontWork.cxx:801-970`). The shape is the
+      two-line `Automation / Autonomy` label on slides 13 and 14 of the FAA deck.
+
+      **What is still not drawn**: the four `*Pour` presets and the two `textRing*` ones, whose
+      geometry uses `ANGLEELLIPSE` and a radius handle rather than the four opcodes
+      `FontworkGeometry` decodes, and any warp set in a face with no `glyf` outlines. No corpus
+      document is either. Both fall back to drawing nothing, and the words side now falls back the
+      same way, so the two families agree.
+
 - [ ] **A wrapped line is one glyph shorter here than in the reference.** LibreOffice draws the
       space a line broke at as part of that line's run; the shared layouter stops at the last
       *visible* character (`LineBox.VisibleEnd`). Nothing is visibly missing — it is a space at

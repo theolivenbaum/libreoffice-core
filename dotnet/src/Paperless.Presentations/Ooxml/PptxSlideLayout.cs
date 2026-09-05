@@ -915,6 +915,34 @@ internal sealed partial class PptxSlideLayout
         XElement? themedFill = theme.Styles?.Fill(style, theme.Colours);
         XElement? themedLine = theme.Styles?.Line(style, theme.Colours);
 
+        // WordArt replaces the whole shape, so it is settled before the rest of it is composed:
+        // the curves become the outline, the first run's colour becomes the fill, the shape's own
+        // fill, pen and shadow go, and the text leaves the text layer. See `SlideFontwork`.
+        //
+        // The box is scaled into slide units for the same reason a text rectangle is: the warp is
+        // fitted against a font size, and a group scales its children's coordinates without
+        // scaling their type. The scale then comes back off the matrix that places the curves. The
+        // mirror stays on it, unlike the one that carries text — `EnhancedCustomShapeEngine::render2`
+        // mirrors the Fontwork object with everything else, so a flipped WordArt shape reads
+        // backwards, which is what it does in the reference.
+        SlideFontwork.Drawing warp = SlideFontwork.Read(
+            WarpedBodyOf(shape, theme),
+            ShapeTransform.Scaled(local, scaleX, scaleY).Size,
+            _fonts);
+
+        if (warp.Outline is { } warped)
+        {
+            return new PlacedShape
+            {
+                Name = Name(shape),
+                Outline = ShapeTransform.Apply(
+                    ShapeTransform.WithoutScale(placement, scaleX, scaleY), warped),
+                Bounds = bounds,
+                Fill = warp.Fill,
+                Picture = Picture(shape, slide, bounds),
+            };
+        }
+
         return new PlacedShape
         {
             Name = Name(shape),
@@ -1110,6 +1138,38 @@ internal sealed partial class PptxSlideLayout
     }
 
     /// <summary>
+    /// The shape's body when it is warped, and null otherwise — including when it holds no text.
+    /// </summary>
+    /// <remarks>
+    /// Gated on the markup before the body is read, because reading one is not free and a warp is
+    /// rare: <c>a:prstTxWarp</c> appears on 39 of the 112 corpus decks and 722 times, and 712 of
+    /// those state <c>textNoShape</c> or <c>textPlain</c>. Ten occurrences across two decks bend
+    /// anything at all.
+    /// </remarks>
+    private SlideTextBody? WarpedBodyOf(XElement shape, SlideTheme theme)
+    {
+        XElement? body = Ppt.Child(shape, "txBody");
+        if (body is null) return null;
+
+        bool warped = StatesWarp(Drawing.Child(body, "bodyPr"));
+        if (!warped && _styles?.BodyPropertiesFor(shape) is { } inheritedBody)
+        {
+            foreach (XElement? properties in inheritedBody)
+            {
+                if (StatesWarp(properties)) { warped = true; break; }
+            }
+        }
+
+        if (!warped) return null;
+
+        return BodyOf(shape, theme) is { IsTextPath: true } read ? read : null;
+
+        static bool StatesWarp(XElement? properties)
+            => Fontwork.IsWarp(
+                Drawing.Child(properties, "prstTxWarp")?.Attribute("prst")?.Value);
+    }
+
+    /// <summary>
     /// The text a shape draws, laid out in its text rectangle.
     /// </summary>
     /// <remarks>
@@ -1137,8 +1197,9 @@ internal sealed partial class PptxSlideLayout
         if (BodyOf(shape, theme) is not { } body) return null;
 
         // Fontwork is a picture of words rather than words, in the reference's output and so in
-        // ours. See SlideTextBody.IsTextPath for what LibreOffice does instead and for why the
-        // unwarped runs are not a better answer than none.
+        // ours: the curves are built in `SlideFontwork` and replace the shape outright, and a warp
+        // whose geometry is not implemented draws nothing at all. Either way no run reaches the
+        // text layer. See SlideTextBody.IsTextPath.
         if (body.IsTextPath) return null;
 
         // The text area's own turn, outside the body's and inside the shape's — see
