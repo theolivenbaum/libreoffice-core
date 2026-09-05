@@ -39,6 +39,24 @@ namespace Paperless.Text.Layout;
 /// blank at 83.8% of its natural width — inside the 75% floor, and the reason the reference fits a word
 /// we do not.
 /// </para>
+/// <para>
+/// <b>This is 24.2.7.2's rule and 26.2.4.2 no longer takes the maximum shrink.</b> The floor is still
+/// 75% for a <c>bOldInterop</c> file, but `portxt.cxx`:531-812 is now a weighted decision rather than
+/// "guess again and take the longer": having guessed at the minimum spacing it searches forward for a
+/// break point <em>nearer to normal spacing</em> (the <c>bNewBreak</c> loop at :720), and it only
+/// prefers the shrunk guess when the un-shrunk one would stretch past the maximum word spacing or when
+/// the shrunk spacing is better on a weight of <c>1/1.7</c>. The rewrite carries tdf#158776, tdf#158436
+/// and tdf#164499 and brings word-spacing minimum, maximum and desired plus a hyphenation-zone level
+/// with it.
+/// </para>
+/// <para>
+/// Measured on the corpus pair, both documents through both binaries: 24.2.7.2 sets
+/// <c>justify-shrink-2013.docx</c> in <b>4</b> lines and <c>justify-shrink-2007.docx</c> in 5;
+/// 26.2.4.2 sets <b>both in 5</b>, with the mode-15 document's last line ending at 113.70 pt against
+/// the mode-12 one's 164.92 — so shrinking still carries 51 pt more text into the lines above and no
+/// longer saves the line. We reproduce 24.2.7.2 exactly (4 and 5). Following 26.2.4.2 means porting
+/// that decision, which is a body of work rather than a constant, and it is open.
+/// </para>
 /// </remarks>
 public static class JustificationShrink
 {

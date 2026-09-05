@@ -31,11 +31,34 @@ namespace Paperless.Fidelity.Tests;
 /// with 2 cm margins. A cascade in a document with several frames is far harder to attribute.
 /// </para>
 /// </remarks>
-// [reference moved 24.2.7.2 -> 26.2.4.2] TextFillsBothSidesOfAFrameThatTouchesNeitherMargin
-// fails on `.odt` and `.fodt`: line 4 resumes at 354.40 pt in our output "where LibreOffice drew
-// nothing". 24.2 did draw there, so 26.2 stopped resuming text to the right of a parallel-wrapped
-// frame on that line. A real behaviour difference, substantive rather than metric, and not yet
-// established as ours — the question is which of the two is right about the wrap.
+// [reference moved 24.2.7.2 -> 26.2.4.2, measured, not closed] `TextFillsBothSidesOfAFrame…` fails on
+// `.odt` and `.fodt` because we divide line 4 — the last line of the paragraph *above* the frame, whose
+// box bottom is exactly the frame's top — and 26.2.4.2 does not. 24.2.7.2 did. The obvious fix is to
+// stop inflating the frame's rectangle vertically by the twip `FrameObstacles.Inflation` adds, and
+// **that is refuted**: it turns these two green and turns `EveryLineStartsWhereLibreOfficeStartsIt` on
+// `frame-wrap.odt`/`.fodt` red, because 26.2.4.2 *does* still move that document's touching line. Net
+// zero, and a rule contradicted by the corpus, so it was measured and reverted rather than shipped.
+//
+// What 26.2.4.2 actually does, from a sweep of the frame's `svg:y` and `svg:x` over both binaries with
+// everything else held (the frame's own drawn rectangle is identical in every one of these, top edge
+// 110.501 pt, and the line above ends at 110.499):
+//
+//   * `svg:y` one unit of 1/100 mm **up** — both versions divide the touching line.
+//   * `svg:y` one unit **down** — neither does.
+//   * `svg:y` exactly 0 — 24.2.7.2 divides it, 26.2.4.2 does not.
+//
+// So on the vertical axis the two differ on exact equality alone. But whether 26.2.4.2 leaves the
+// touching line alone turns on the frame's **horizontal** position, which no rectangle intersection can
+// explain — sweeping `svg:x` on `frame-wrap.fodt` with the vertical geometry unchanged:
+//
+//   * 0, 0.01, 0.2, 0.3, 0.5, 0.7, 0.9 cm — 26.2.4.2 moves the touching line, as 24.2.7.2 does.
+//   * 1, 1.9, 2.1, 3, 5, 6.5 cm — 26.2.4.2 leaves it at the margin; 24.2.7.2 still moves it.
+//
+// The flip is between 0.9 and 1.0 cm and it is not the wrap mode: `frame-parallel` re-cut with
+// `style:wrap="right"` behaves like `frame-parallel` (unaffected at 6.5 cm) and `frame-wrap` re-cut with
+// `style:wrap="parallel"` behaves like `frame-wrap` (affected at 0). A threshold near 1 cm with no
+// mechanism behind it is exactly the shape this project does not ship, so this stays open with the
+// measurement recorded. It is ours to follow and it is not a tolerance question.
 public sealed class FrameComparisonTests : IDisposable
 {
     /// <summary>How far a drawn pen may differ from LibreOffice's, in points.</summary>

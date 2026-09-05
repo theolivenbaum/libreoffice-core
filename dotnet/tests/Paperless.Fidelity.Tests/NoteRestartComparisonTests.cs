@@ -28,10 +28,9 @@ namespace Paperless.Fidelity.Tests;
 /// page two citing 1, 2, 3, 4 again.
 /// </para>
 /// </remarks>
-// [reference moved 24.2.7.2 -> 26.2.4.2] TheNumbersAreTheOnesLibreOfficeDraws fails on
-// `note-restart.docx` and now passes on `note-restart.doc`, which failed under 24.2 — so the
-// version move fixed one arm of this pair and left the other. The drawn text differs, i.e. the
-// note numbers themselves, not their placement. Substantive and unclassified.
+// [reference moved 24.2.7.2 -> 26.2.4.2, closed] `TheNumbersAreTheOnesLibreOfficeDraws` failed on
+// `note-restart.docx` on four characters, and every one of them was `pdftotext -layout`'s own column
+// padding: see `WithoutLayoutIndent` for the measurement. Nothing about the rendering differs.
 public sealed class NoteRestartComparisonTests : IDisposable
 {
     private readonly LibreOfficeRunner _libreOffice = new();
@@ -132,11 +131,39 @@ public sealed class NoteRestartComparisonTests : IDisposable
 
         Assert.SkipWhen(ours is null || theirs is null, "pdftotext is not available; install poppler-utils");
 
-        TestKit.Comparison.TextComparer.Normalise(ours!, foldSpaces: true)
+        WithoutLayoutIndent(TestKit.Comparison.TextComparer.Normalise(ours!, foldSpaces: true))
             .ShouldBe(
-                TestKit.Comparison.TextComparer.Normalise(theirs!, foldSpaces: true),
+                WithoutLayoutIndent(
+                    TestKit.Comparison.TextComparer.Normalise(theirs!, foldSpaces: true)),
                 $"{fileName}: the text drawn differs from LibreOffice's");
     }
+
+    /// <summary>
+    /// Drops the leading spaces <c>pdftotext -layout</c> pads a line with, keeping the characters.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>-layout</c> reconstructs columns on a character grid, so a line's indent is a count of grid
+    /// cells rather than anything the document drew — and a pen half a cell either side of a boundary
+    /// rounds to a different count. This document's note bodies sit exactly there.
+    /// </para>
+    /// <para>
+    /// Measured, the note body's first word on page one: <b>59.750 pt under 24.2.7.2, 59.700 under
+    /// 26.2.4.2 and 59.640 in ours</b>, against a body text left edge of 56.8 pt in both references and
+    /// 56.7 in ours — so every rendering puts it 2.90 to 2.94 pt into a 5.5 pt character cell, and
+    /// poppler pads the reference with one space under 26.2.4.2 and two under 24.2.7.2. Four such lines
+    /// on page one is the whole of what this comparison saw: with the indent dropped, our extracted text
+    /// and 26.2.4.2's are identical byte for byte.
+    /// </para>
+    /// <para>
+    /// The trailing end is already trimmed by <c>TextComparer.Normalise</c>, and for the same reason.
+    /// What is being checked here is which characters were drawn, which is why dropping the padding is a
+    /// correction and not a loosening: an indent poppler invented is not a character the document has.
+    /// </para>
+    /// </remarks>
+    /// <param name="text">The extracted text, already normalised.</param>
+    private static string WithoutLayoutIndent(string text)
+        => string.Join('\n', text.Split('\n').Select(line => line.TrimStart(' ')));
 
     // ------------------------------------------------------------------------- the machinery
 

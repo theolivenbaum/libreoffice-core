@@ -27,12 +27,21 @@ namespace Paperless.Fidelity.Tests;
 /// honest across a LibreOffice upgrade. Measured on 24.2.7.2.
 /// </para>
 /// </remarks>
-// [reference moved 24.2.7.2 -> 26.2.4.2] Both tests fail, and one of them is a claim about the
-// *reference* rather than about us: TheReferenceItselfSetsTheModeFifteenDocumentInFewerLines
-// asserts `newer.Count` is less than the older document's, which 26.2 no longer satisfies. Its
-// premise is a LibreOffice behaviour and the behaviour changed, so it needs re-establishing
-// against 26.2 before it says anything. TheParagraphBreaksWhereLibreOfficeBreaksIt differs on line
-// count for justify-shrink-2013.docx and is downstream of the same change.
+// [reference moved 24.2.7.2 -> 26.2.4.2] 26.2.4.2 shrinks less than 24.2.7.2 did, and on this pair it
+// no longer buys a line. Measured, both documents through both binaries — 24.2.7.2 sets the mode-15
+// document in **4** lines and the mode-12 one in 5; 26.2.4.2 sets **both in 5**, with the mode-15
+// document's last line ending at 113.70 pt against the mode-12 one's 164.92, so the setting still has
+// an effect and it is smaller. `sw/source/core/text/portxt.cxx`:531-812 is a rewrite of the shrinking
+// decision — word-spacing minimum, maximum and desired, a hyphenation-zone "level", and a weighted
+// choice between shrinking and expanding at `fExpansionWeight = 1/1.7` — carrying tdf#158776,
+// tdf#158436 and tdf#164499. It is deliberate upstream work rather than a defect, so it is ours to
+// follow and not to close.
+//
+// The guard below is corrected rather than relaxed: its premise was the *line count*, which is one
+// consequence of the setting and not the setting, and it now asserts the pair is set differently by
+// whichever of the two measures applies. `TheParagraphBreaksWhereLibreOfficeBreaksIt` still fails on
+// `justify-shrink-2013.docx`, ours 4 lines against 5, because we implement 24.2.7.2's rule; closing it
+// means porting that decision and it is not a tolerance question.
 public sealed class JustificationShrinkComparisonTests : IDisposable
 {
     /// <summary>How far a drawn line's right edge may sit from LibreOffice's, in points.</summary>
@@ -92,15 +101,26 @@ public sealed class JustificationShrinkComparisonTests : IDisposable
     }
 
     /// <summary>
-    /// The mode-15 document really does set shorter, or the pair proves nothing.
+    /// The mode-15 document really does set tighter, or the pair proves nothing.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// Guards the fixture rather than the engine: if a LibreOffice upgrade or an edit to the documents
     /// left the two paragraphs breaking alike, the test above would pass against an engine that ignored
     /// the setting entirely.
+    /// </para>
+    /// <para>
+    /// <b>Asserted as "tighter" and not "in fewer lines", which is a correction and not a
+    /// loosening.</b> A line saved is one consequence of shrinking and not the thing itself, and how
+    /// much shrinking buys is exactly what moved between the two references: 24.2.7.2 sets the mode-15
+    /// document in 4 lines against the mode-12 one's 5, and 26.2.4.2 sets both in 5 — with the mode-15
+    /// document's last line ending at <b>113.70 pt against the mode-12 one's 164.92</b>, so it has
+    /// carried 51 pt more text into the four lines above. Either measure says the same thing about the
+    /// fixture, and stating both is what makes this survive the next upgrade as well.
+    /// </para>
     /// </remarks>
     [Fact]
-    public void TheReferenceItselfSetsTheModeFifteenDocumentInFewerLines()
+    public void TheReferenceItselfSetsTheModeFifteenDocumentTighter()
     {
         Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
@@ -111,7 +131,19 @@ public sealed class JustificationShrinkComparisonTests : IDisposable
 
         List<double> older = Rendered(Corpus.Require("justify-shrink-2007.docx"));
 
-        newer.Count.ShouldBeLessThan(older.Count);
+        if (newer.Count != older.Count)
+        {
+            newer.Count.ShouldBeLessThan(
+                older.Count,
+                "the mode-15 document should not need more lines than the mode-12 one");
+            return;
+        }
+
+        newer[^1].ShouldBeLessThan(
+            older[^1] - TolerancePoints,
+            $"set in {newer.Count} lines apiece, the mode-15 document's last line ends at "
+            + $"{newer[^1]:F2} pt and the mode-12 one's at {older[^1]:F2} — the shrinking has to have "
+            + "carried more text into the lines above, or the pair proves nothing");
     }
 
     private List<double> Rendered(string path)

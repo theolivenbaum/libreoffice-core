@@ -37,6 +37,15 @@ namespace Paperless.Fidelity.Tests;
 // both sides. So this is a real, sub-point layout change in 26.2 and following it is ours to do;
 // the mechanism was not established this round. Do not widen the tolerance to clear it — the
 // figure sitting 4% over the band is the only thing recording that anything moved.
+//
+// [2026-09-05] Same family as three more, measured since and each a cleaner instrument than a
+// justified line: `SlideChartFaceComparisonTests` (Liberation Mono's digit, the reference 6.010 pt
+// under 24.2.7.2 and 5.839 under 26.2.4.2 at the same size in the same embedded face),
+// `SheetTextComparisonTests` (Liberation Sans' space behind a Calc indent, 55 twips against 55.94) and
+// `SheetDrawingComparisonTests` (an XLSX two-cell picture span, version-stable in the ODF spelling of
+// the same picture and not in the OOXML one). In every one of them ours equals the design metric and
+// 24.2.7.2's rendering, and 26.2.4.2's does not — which says the seat is the reference's own
+// device-measured advance and not any one layout rule. See `CLAUDE.md`'s rule 3.
 public sealed class PageDrawingComparisonTests : IDisposable
 {
     /// <summary>
