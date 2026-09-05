@@ -815,7 +815,28 @@ public static partial class ChartLayout
         // depth, and a third pass has never changed it on the corpus.
         ChartAxisLabelLayout? arranged = null;
 
-        if (plot.HasAxes && columns && plot.CategoryAxisVisible && plot.CategoryLabelsVisible
+        // A complex category axis is arranged by its own rule and not by this one: it draws one
+        // row per level and what would be measured here is the joined string, which is not what
+        // it draws. See ArrangeComplexCategories.
+        if (plot.HasAxes && columns && plot.DateAxis is null && plot.CategoryAxisVisible
+            && plot.CategoryLabelsVisible && domain is null && plot.DataTable is null
+            && plot.CategoryLevels is { Count: > 1 } complexLevels)
+        {
+            arranged = ArrangeComplexCategories(plot, complexLevels, measurer);
+            area = PlotAreaOf(
+                plot, frame, scale, secondary, domain, categories, measurer, arranged);
+
+            if (area.Width <= Length.Zero || area.Height <= Length.Zero)
+                return new ChartDrawing(DocRect.Empty, boxes, lines, labels, shapes);
+
+            arranged = ArrangeComplexCategories(plot, complexLevels, measurer);
+            area = PlotAreaOf(
+                plot, frame, scale, secondary, domain, categories, measurer, arranged);
+
+            if (area.Width <= Length.Zero || area.Height <= Length.Zero)
+                return new ChartDrawing(DocRect.Empty, boxes, lines, labels, shapes);
+        }
+        else if (plot.HasAxes && columns && plot.CategoryAxisVisible && plot.CategoryLabelsVisible
             && domain is null && plot.DataTable is null)
         {
             arranged = ArrangeCategories(plot, area, categories, measurer);
@@ -1515,13 +1536,17 @@ public static partial class ChartLayout
         // staggered labels reserve their arrangement's own depth instead — the rotated shape's
         // height, insets included, which is what LibreOffice reserves and is several times a line
         // on an axis of long names turned 45°.
+        // A complex category axis reserves one line per level, because that is how many rows it
+        // draws — see AddComplexCategoryAxis.
         Length categoryHeight = plot.DataTable is not null
             ? DataTableHeight(plot, measurer)
             : !categoryLabels
                 ? Length.Zero
-                : arranged is { } layout && Reshapes(layout)
-                    ? layout.Reserved
-                    : labelHeight;
+                : columns && plot.CategoryLevels is { Count: > 1 } rows
+                    ? arranged?.Reserved ?? labelHeight * rows.Count
+                    : arranged is { } layout && Reshapes(layout)
+                        ? layout.Reserved
+                        : labelHeight;
 
         if (columns)
         {
@@ -1949,6 +1974,18 @@ public static partial class ChartLayout
             return;
         }
 
+        // A complex category axis draws rows rather than one label per slot, and its ticks are
+        // its runs' boundaries rather than the axis'. It is a different shape from everything
+        // below, so it is a different function.
+        if (columns && plot.CategoryLevels is { Count: > 1 } levels && plot.DateAxis is null)
+        {
+            AddComplexCategoryAxis(
+                plot, area, categories, levels,
+                arranged ?? ArrangeComplexCategories(plot, levels, measurer),
+                outer, stroke, measurer, lines, labels);
+            return;
+        }
+
         ChartAxisLabelLayout layout =
             arranged ?? new ChartAxisLabelLayout(0.0, 1, false, Length.Zero);
 
@@ -2036,6 +2073,143 @@ public static partial class ChartLayout
                 plot.LabelSize,
                 plot.LabelColour,
                 layout.Rotation));
+        }
+    }
+
+    /// <summary>
+    /// How deep a complex category axis' band of rows is.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A levelled axis takes none of <see cref="ChartAxisLabels"/>' cascade: it is upright, one
+    /// row per level, every label drawn. <c>VCartesianAxis::createLabels</c> gives it line
+    /// breaking on and forces every level above zero upright
+    /// (<c>chart2/source/view/axes/VCartesianAxis.cxx:1737-1750</c>). What it returns is
+    /// therefore only a depth — but it goes through <see cref="ChartAxisLabelLayout"/> anyway,
+    /// because that is what puts it in <see cref="Compose"/>'s refinement loop: the band is
+    /// several lines deep, the plot rectangle has to be composed again around it, and the value
+    /// axis' interval count is re-derived from the rectangle that comes out.
+    /// </para>
+    /// <para>
+    /// <strong>Level zero can be turned by the reference and this does not turn it.</strong>
+    /// <c>createTextShapes</c> has a branch that rotates a complex axis' level 90° rather than
+    /// 45° when a label would break inside a word (<c>:894-900</c>), and
+    /// <c>171128IPAP.pptx</c>'s fifty quarter numbers are drawn on their side by both reference
+    /// binaries. **That is not the branch that turns them**: shrinking the chart frame from
+    /// 7 050 024 to 2 500 000 EMU — which makes every slot narrower, so a word-break is *more*
+    /// likely, not less — makes the reference draw the same digits upright, measured from the
+    /// PDF's own glyph boxes (10.03 x 5.01 turned against 4.48 x 10.03 upright). Whatever
+    /// decides it, it is not crowding, so no rule is guessed at here.
+    /// </para>
+    /// </remarks>
+    private static ChartAxisLabelLayout ArrangeComplexCategories(
+        ChartPlot plot,
+        IReadOnlyList<IReadOnlyList<string?>> levels,
+        ChartText measurer)
+        => new(
+            0.0, 1, false,
+            measurer.Measure("0", plot.LabelSize, plot.IsLabelBold).Height
+                * Math.Max(levels.Count, 1));
+
+    /// <summary>
+    /// A complex category axis: one row of labels per level, and a long tick at every run
+    /// boundary.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>VCartesianAxis::createAllTickInfosFromComplexCategories</c>
+    /// (<c>chart2/source/view/axes/VCartesianAxis.cxx:575-610</c>) builds one tick array per
+    /// level, each tick centred on its run — <c>nCatIndex + 1 + nCount/2</c> — and
+    /// <c>createLabels</c> (<c>:1723-1758</c>) draws level zero where an ordinary label goes and
+    /// shifts each level below it by the cumulative height of the levels above
+    /// (<c>doStaggeringOfLabels</c>, <c>:1626-1648</c>).
+    /// </para>
+    /// <para>
+    /// <strong>A run ends at the next stated value, not at the next different one.</strong> See
+    /// <see cref="ChartPlot.CategoryLevels"/>: an empty entry continues the run above it and a
+    /// repeat starts a new one, which is why <c>040_Blood_pressure_tracker</c>'s date is drawn
+    /// once under <c>AM</c> and again under <c>PM</c> rather than once across the pair.
+    /// </para>
+    /// <para>
+    /// <strong>The innermost level's boundaries get no tick when the axis has no major tick
+    /// marks.</strong> <c>createShapes</c> skips depth zero outright in that case
+    /// (<c>:1953</c>), and every levelled axis in the corpus states
+    /// <c>c:majorTickMark val="none"</c> — so what separates the groups on those charts is the
+    /// tick of the level <em>below</em>, which is why the separators run the full depth of the
+    /// label band rather than stopping under the first row.
+    /// </para>
+    /// </remarks>
+    private static void AddComplexCategoryAxis(
+        ChartPlot plot,
+        DocRect area,
+        int categories,
+        IReadOnlyList<IReadOnlyList<string?>> levels,
+        ChartAxisLabelLayout arranged,
+        Length outer,
+        ChartGrid stroke,
+        ChartText measurer,
+        List<ChartLine> lines,
+        List<ChartLabel> labels)
+    {
+        if (categories <= 0) return;
+
+        // An axis label has no text-shape insets — see ChartAxisLabels, which carries the
+        // measurement — so a row is one line of type and PlotAreaOf's own labelHeight.
+        Length line = measurer.Measure("0", plot.LabelSize, plot.IsLabelBold).Height;
+        Length top = area.Bottom + outer + LabelSpacing;
+
+        // Level zero is as deep as the arrangement says — one line upright, its widest label's
+        // width on its side — and every level below it is one line.
+        Length firstRow = arranged.Reserved - (line * (levels.Count - 1));
+        if (firstRow <= Length.Zero) firstRow = line;
+
+        Length depth = Length.Zero;
+        bool ticked = plot.CategoryTicks is not ChartTickMark.None;
+
+        for (int level = 0; level < levels.Count; level++)
+        {
+            IReadOnlyList<string?> texts = levels[level];
+            Length row = level == 0 ? firstRow : line;
+            depth += row;
+
+            int at = 0;
+            while (at < categories)
+            {
+                // The run this entry starts: itself plus every following entry the file leaves
+                // unstated.
+                int end = at + 1;
+                while (end < categories
+                       && (end >= texts.Count || string.IsNullOrEmpty(texts[end])))
+                {
+                    end++;
+                }
+
+                if (at < texts.Count && texts[at] is { Length: > 0 } text)
+                {
+                    Length centre = area.Left
+                        + area.Width * ((at + end) / (2.0 * categories));
+
+                    labels.Add(new ChartLabel(
+                        text,
+                        new DocPoint(centre, top + depth - row),
+                        ChartLabelAnchor.CentreTop,
+                        plot.LabelSize,
+                        plot.LabelColour));
+                }
+
+                // The boundary this run ends at, drawn from the axis line down through every row
+                // laid out so far. The last one is the plot area's own edge and is already drawn.
+                if ((level > 0 || ticked) && end < categories)
+                {
+                    Length x = area.Left + area.Width * ((double)end / categories);
+                    lines.Add(new ChartLine(
+                        new DocPoint(x, area.Bottom),
+                        new DocPoint(x, top + depth),
+                        stroke.Colour, stroke.Width, stroke.Dash));
+                }
+
+                at = end;
+            }
         }
     }
 

@@ -370,6 +370,38 @@ public sealed partial record ChartPlot
     /// <summary>The category labels, in order. Empty for a chart with no category axis.</summary>
     public IReadOnlyList<string?> Categories { get; init; } = [];
 
+    /// <summary>
+    /// The levels of a complex category axis, innermost first, or null for an ordinary one.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>A complex category axis is drawn as rows, not as one joined string.</strong>
+    /// <see cref="Categories"/> holds the join — <c>AM 9/5/2026</c> — because that is what
+    /// <c>ExplicitCategoriesProvider::getSimpleCategories</c> hands to a legend entry and to a
+    /// data label. The axis is the other consumer and it draws each level on a row of its own,
+    /// level zero nearest the axis line, with a long tick at every run boundary
+    /// (<c>VCartesianAxis::createAllTickInfosFromComplexCategories</c>,
+    /// <c>chart2/source/view/axes/VCartesianAxis.cxx:575-610</c>, and the extra ticks at
+    /// <c>:1913-1955</c>).
+    /// </para>
+    /// <para>
+    /// <strong>A run ends at the next value, not at the next <em>different</em> value.</strong>
+    /// <c>lcl_DataSequenceToComplexCategoryVector</c>
+    /// (<c>chart2/source/tools/ExplicitCategoriesProvider.cxx:275-311</c>) says so in its own
+    /// comment: "Empty value is interpreted as a continuation of the previous category. Note that
+    /// having the same value as the previous one does not equate to a continuation." So a null or
+    /// empty entry here extends the run above it and a repeated string starts a new one — which
+    /// is why <c>040_Blood_pressure_tracker</c> draws its date twice, once under <c>AM</c> and
+    /// once under <c>PM</c>, rather than once across the pair.
+    /// </para>
+    /// <para>
+    /// Each level holds one entry per category, so every level is as long as
+    /// <see cref="Categories"/>. Null when the file states a single level or none, which keeps
+    /// every ordinary axis on exactly the path it was on.
+    /// </para>
+    /// </remarks>
+    public IReadOnlyList<IReadOnlyList<string?>>? CategoryLevels { get; init; }
+
     /// <summary>The series, in the order the file states them, which is drawing order.</summary>
     public IReadOnlyList<ChartSeries> Series { get; init; } = [];
 

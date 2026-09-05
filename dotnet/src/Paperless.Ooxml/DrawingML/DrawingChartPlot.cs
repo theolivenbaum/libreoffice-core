@@ -243,6 +243,11 @@ public static class DrawingChartPlot
                 Child(axes.Domain ?? axes.Category, "title"), kind),
             ValueAxisTitle = AxisTitleText(Child(axes.Value, "title"), kind),
             Categories = orderedCategories,
+            // The rows a complex category axis is drawn as. The join above stays what it was,
+            // because a legend entry and a data label want one string; see
+            // ChartPlot.CategoryLevels. A date axis has re-ordered its categories by then, so a
+            // levelled axis and a date axis are not both honoured -- no corpus chart is both.
+            CategoryLevels = dateAxis is null ? CategoryLevelsOf(plotArea) : null,
             Series = orderedSeries,
             Kind = kind,
 
@@ -2872,6 +2877,66 @@ public static class DrawingChartPlot
         }
 
         return (text, numbers);
+    }
+
+    /// <summary>
+    /// The levels of a complex category axis, innermost first, or null when there is one level.
+    /// </summary>
+    /// <remarks>
+    /// One entry per category per level, in the file's own order — Excel writes <c>c:lvl</c>
+    /// innermost first and <c>VCartesianAxis</c> draws level zero nearest the axis line, so no
+    /// reversal happens here. A point the cache does not state stays null, which
+    /// <see cref="ChartPlot.CategoryLevels"/> reads as a continuation of the run above it.
+    /// <para>
+    /// Taken from the first series that states one. A chart's series share a category axis, and
+    /// the ones that state a <c>c:cat</c> at all state the same rectangle.
+    /// </para>
+    /// </remarks>
+    private static List<IReadOnlyList<string?>>? CategoryLevelsOf(XElement plotArea)
+    {
+        foreach (XElement group in plotArea.Elements())
+        {
+            if (group.Name.NamespaceName != OoxmlNamespaces.DrawingMLChart) continue;
+
+            foreach (XElement series in group.Elements(Name("ser")))
+            {
+                if (Child(Child(Child(series, "cat"), "multiLvlStrRef"), "multiLvlStrCache")
+                    is not { } cache)
+                {
+                    continue;
+                }
+
+                int declared = Drawing.Number(Child(cache, "ptCount"), "val") ?? -1;
+                if (declared < 0)
+                {
+                    foreach (XElement point in cache.Descendants(Name("pt")))
+                        declared = Math.Max(declared, (Drawing.Number(point, "idx") ?? -1) + 1);
+                }
+
+                int count = Math.Clamp(declared, 0, MaxPointCount);
+                if (count == 0) continue;
+
+                List<IReadOnlyList<string?>> levels = [];
+                foreach (XElement level in cache.Elements(Name("lvl")))
+                {
+                    string?[] texts = new string?[count];
+                    foreach (XElement point in level.Elements(Name("pt")))
+                    {
+                        int index = Drawing.Number(point, "idx") ?? -1;
+                        if (index < 0 || index >= count) continue;
+
+                        string value = Child(point, "v")?.Value ?? string.Empty;
+                        if (value.Length > 0) texts[index] = value;
+                    }
+
+                    levels.Add(texts);
+                }
+
+                return levels.Count > 1 ? levels : null;
+            }
+        }
+
+        return null;
     }
 
     /// <summary>
