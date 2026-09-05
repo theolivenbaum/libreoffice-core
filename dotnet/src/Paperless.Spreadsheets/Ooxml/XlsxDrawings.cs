@@ -180,7 +180,7 @@ internal static class XlsxDrawings
             To = Point(Child(anchor, DrawingNamespace, "to")),
             Extent = extent,
             Position = Position(Child(anchor, DrawingNamespace, "pos")),
-            Parts = Parts(anchored, transform),
+            Parts = Parts(anchored, transform, package, images),
         };
 
         // Each shape kind wraps its cNvPr in a differently named non-visual container, and they
@@ -561,7 +561,11 @@ internal static class XlsxDrawings
     /// alone is the smaller error than pretending the two add.
     /// </para>
     /// </remarks>
-    private static List<SheetDrawingPart> Parts(XElement? shape, XElement? transform)
+    private static List<SheetDrawingPart> Parts(
+        XElement? shape,
+        XElement? transform,
+        OpcPackage package,
+        Dictionary<string, OpcXml.Relationship> images)
     {
         if (shape is null || transform is null) return [];
 
@@ -599,12 +603,14 @@ internal static class XlsxDrawings
             {
                 if (own is null) return;
 
-                parts.Add(new SheetDrawingPart(
-                    (x - frameX) / frameWidth,
-                    (y - frameY) / frameHeight,
-                    width / frameWidth,
-                    height / frameHeight,
-                    Degrees(own)));
+                parts.Add(Painted(
+                    container, package, images,
+                    new SheetDrawingPart(
+                        (x - frameX) / frameWidth,
+                        (y - frameY) / frameHeight,
+                        width / frameWidth,
+                        height / frameHeight,
+                        Degrees(own))));
                 return;
             }
 
@@ -638,6 +644,73 @@ internal static class XlsxDrawings
                     depth + 1);
             }
         }
+    }
+
+    /// <summary>
+    /// A part with whatever picture its leaf shape holds, or the part unchanged when it holds none.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>A picture inside an <c>xdr:grpSp</c> was read for its bounds and never drawn.</strong>
+    /// <see cref="ReadAnchor"/> looks for an <c>xdr:pic</c> directly under the anchor; a group is
+    /// none, so the anchor came back with no image, no vector, no chart and no text, and
+    /// <see cref="Layout.SheetPageGraphics"/> skipped it — while
+    /// <see cref="Layout.SheetDrawingArea"/> still counted it, so the group widened the printed
+    /// block and put nothing in it. Calc makes no such distinction:
+    /// <c>GroupShapeContext::createShapeContext</c> takes <c>sp</c>, <c>cxnSp</c>, <c>grpSp</c>,
+    /// <c>graphicFrame</c> and <c>pic</c> alike (<c>sc/source/filter/oox/drawingfragment.cxx:198</c>)
+    /// and every leaf ends up on the drawing layer.
+    /// </para>
+    /// <para>
+    /// Measured on <c>SIL_TDB648.xlsx</c>: its eleven sheet drawings hold one group each, of
+    /// fourteen turned, faded copies of the same <c>Honeywell</c> wordmark. <c>pdfimages -list</c>
+    /// counts that image on 86 of the reference's 88 pages and on <b>none</b> of our 90.
+    /// </para>
+    /// <para>
+    /// Only a picture is read here. A leaf <c>xdr:sp</c>'s fill, outline and text body are a
+    /// separate question — <see cref="Layout.SheetDrawing"/> carries one of each for the whole
+    /// anchor and a group has many — and reading them would need the model to grow rather than the
+    /// part.
+    /// </para>
+    /// </remarks>
+    private static SheetDrawingPart Painted(
+        XElement leaf,
+        OpcPackage package,
+        Dictionary<string, OpcXml.Relationship> images,
+        SheetDrawingPart part)
+    {
+        if (leaf.Name.LocalName != "pic") return part;
+
+        XElement? blipFill = Child(leaf, DrawingNamespace, "blipFill");
+        XElement? blip = Child(blipFill, MainNamespace, "blip");
+        if (blip is null) return part;
+
+        BlipReference.Choice choice = BlipReference.Choose(blip);
+        DrawingBlipFill? fill = DrawingFill.ReadBlip(blipFill);
+
+        (RasterImage? raster, Lazy<VectorImage>? vector) =
+            LoadImage(package, images, choice.RelationshipId);
+
+        // The `svgBlip` case: the vector is what to draw and the raster beside it is the fallback,
+        // so an empty decode still leaves a picture. The same choice `ReadAnchor` makes.
+        if (choice.IsVector && choice.FallbackRelationshipId is { } fallback)
+        {
+            (raster, _) = LoadImage(package, images, fallback);
+        }
+
+        if (raster is null && vector is null) return part;
+
+        return part with
+        {
+            Image = vector is null ? KnockedOut(fill, raster) : raster,
+            Vector = vector,
+            Opacity = fill?.Opacity ?? 1,
+            Crop = fill is null || fill.SourceRect.IsWhole
+                ? PictureCropFractions.None
+                : new PictureCropFractions(
+                    fill.SourceRect.Left, fill.SourceRect.Top,
+                    fill.SourceRect.Right, fill.SourceRect.Bottom),
+        };
     }
 
     /// <summary>How far a transform turns its shape clockwise, in degrees.</summary>

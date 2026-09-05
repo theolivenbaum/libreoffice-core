@@ -88,8 +88,15 @@ internal sealed class SheetPageGraphics(SheetLayout sheet, double scale)
             // page. See `SheetDrawing.IsPrintable` for why the two flags are not one.
             if (!drawing.IsPrintable) continue;
 
+            bool paintsParts = false;
+            foreach (SheetDrawingPart part in drawing.Parts)
+            {
+                if (part.HasPicture) { paintsParts = true; break; }
+            }
+
             if (drawing.Image is null && drawing.Vector is null && drawing.Chart is null
-                && drawing.Text is null && drawing.Fill is null && drawing.Stroke is null)
+                && drawing.Text is null && drawing.Fill is null && drawing.Stroke is null
+                && !paintsParts)
             {
                 continue;
             }
@@ -124,7 +131,78 @@ internal sealed class SheetPageGraphics(SheetLayout sheet, double scale)
             // Not an `else`: a shape may carry both a picture and a caption, and the text goes
             // over the fill rather than instead of it.
             if (drawing.Text is { } text) SheetShapePainter.Draw(sink, text, box, scale);
+
+            if (paintsParts) DrawParts(sink, box, drawing.Parts);
         }
+    }
+
+    /// <summary>
+    /// Draws the pictures held by the leaf shapes of a group, each in its own part of the box.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>An anchor holding an <c>xdr:grpSp</c> carries no picture of its own, so the whole
+    /// group was skipped here and painted nothing.</strong> See
+    /// <see cref="SheetDrawingPart.Image"/>: the parts were already read, for the bounding
+    /// rectangle, and this draws them.
+    /// </para>
+    /// <para>
+    /// A part states its rectangle as fractions of the anchor's, with the group's
+    /// <c>a:chOff</c>/<c>a:chExt</c> mapping already folded in, so resolving it is arithmetic on
+    /// the box. Its <c>a:xfrm/@rot</c> turns it about its own centre, which is what DrawingML means
+    /// by a rotation and what <c>SheetDrawingPart.Degrees</c> was carried for.
+    /// </para>
+    /// </remarks>
+    private static void DrawParts(
+        IDrawingSink sink, DocRect box, IReadOnlyList<SheetDrawingPart> parts)
+    {
+        foreach (SheetDrawingPart part in parts)
+        {
+            if (!part.HasPicture) continue;
+
+            DocRect where = new(
+                box.X + Length.FromEmu((long)Math.Round(box.Width.Emu * part.X)),
+                box.Y + Length.FromEmu((long)Math.Round(box.Height.Emu * part.Y)),
+                Length.FromEmu((long)Math.Round(box.Width.Emu * part.Width)),
+                Length.FromEmu((long)Math.Round(box.Height.Emu * part.Height)));
+
+            if (where.Width <= Length.Zero || where.Height <= Length.Zero) continue;
+
+            AffineTransform? turn = Turn(where, part.Degrees);
+            if (turn is { } transform)
+            {
+                sink.Save();
+                sink.Transform(transform);
+            }
+
+            try
+            {
+                DrawPicture(sink, where, part.Crop, part.Vector, part.Image, part.Opacity);
+            }
+            finally
+            {
+                if (turn is not null) sink.Restore();
+            }
+        }
+    }
+
+    /// <summary>A rotation about a rectangle's centre, or null when there is no turn.</summary>
+    /// <remarks>
+    /// Null rather than the identity so an upright picture pays neither a <c>Save</c>/<c>Restore</c>
+    /// pair nor a transform in the output — the same reason <c>PageDrawing.Turn</c> does it.
+    /// </remarks>
+    private static AffineTransform? Turn(DocRect box, double degrees)
+    {
+        if (degrees == 0) return null;
+
+        double cx = box.X.Emu + (box.Width.Emu / 2.0);
+        double cy = box.Y.Emu + (box.Height.Emu / 2.0);
+
+        return AffineTransform.Concat(
+            AffineTransform.Concat(
+                AffineTransform.Translation(-cx, -cy),
+                AffineTransform.Rotation(degrees * Math.PI / 180.0)),
+            AffineTransform.Translation(cx, cy));
     }
 
     /// <summary>
