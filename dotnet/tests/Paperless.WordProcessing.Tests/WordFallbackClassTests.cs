@@ -87,21 +87,25 @@ public sealed class WordFallbackClassTests
     // ------------------------------------------------------- the DOCX filter, end to end
 
     [Theory]
-    [InlineData("Aptos", null, "DejaVu Serif")]
-    [InlineData("Aptos", "roman", "DejaVu Serif")]
-    [InlineData("Aptos", "modern", "DejaVu Serif")]
-    [InlineData("Aptos", "auto", "DejaVu Serif")]
+    [InlineData("Aptos", null, "DejaVu Sans")]
+    [InlineData("Aptos", "roman", "DejaVu Sans")]
+    [InlineData("Aptos", "modern", "DejaVu Sans")]
+    [InlineData("Aptos", "auto", "DejaVu Sans")]
     [InlineData("Aptos", "swiss", "DejaVu Sans")]
-    [InlineData("Candara", null, "DejaVu Serif")]
+    [InlineData("Candara", null, "DejaVu Sans")]
     [InlineData("Candara", "swiss", "DejaVu Sans")]
-    [InlineData("Consolas", null, "DejaVu Serif")]
-    [InlineData("Consolas", "swiss", "DejaVu Sans")]
+    [InlineData("Consolas", null, "DejaVu Sans Mono")]
+    [InlineData("Consolas", "swiss", "DejaVu Sans Mono")]
     [InlineData("Garamond", null, "DejaVu Serif")]
     public void AnUnrecognisedFamilyInADocxFallsBackTheWayTheReferenceDoes(
         string family, string? declared, string expected)
     {
-        // Candara is filed sans-serif and Consolas monospace by fontconfig, and `fc-match` answers
-        // DejaVu Sans and DejaVu Sans Mono for them. The DOCX filter overrides both.
+        // Every row is the bare `fc-match` of the name: nothing files Aptos, 45-latin.conf files
+        // Candara sans-serif, Consolas monospace and Garamond serif, and the declaration moves none
+        // of them. Re-measured against /usr/bin/soffice by re-running round 54's own probe unchanged
+        // (probes/words-r54/font-fallback-rule.py) — all ten rows agree, as do all 32 of its
+        // `D declared` rows. The 26.2.4.2 tarball answers the other way and the reading these
+        // expectations replace was right about it; see `SystemFontResolver.DeclaredGenericFor`.
         FamilyDrawnFor(family, declared).ShouldBe(expected);
     }
 
@@ -148,17 +152,18 @@ public sealed class WordFallbackClassTests
     /// </para>
     /// </remarks>
     [Fact]
-    public void TheRtfArmTakesTheRomanDefaultAndTheDocArmDoesNot()
+    public void TheThreeArmsStateDifferentClassesAndDrawTheSameFace()
     {
         SystemFontIndex index = InstalledIndex();
 
-        // RTF reaches LayoutFonts with no font table at all, so there is nothing to read and the
-        // roman default is the whole answer.
+        // The two arms still state different things — `WordFallbackClass` is where that is asserted,
+        // and it is unchanged — but on 24.2.7.2 no arm's statement reaches the face. All three land
+        // on fontconfig's filing of the name: DejaVu Sans for `Aptos`, which nothing files, and
+        // DejaVu Sans **Mono** for `Consolas`, which 45-latin.conf files under monospace.
         LayoutFonts rtf = new(new SystemFontResolver(index));
-        rtf.Reference("Aptos", 400, isItalic: false)!.FamilyName.ShouldBe("DejaVu Serif");
-        rtf.Reference("Consolas", 400, isItalic: false)!.FamilyName.ShouldBe("DejaVu Serif");
+        rtf.Reference("Aptos", 400, isItalic: false)!.FamilyName.ShouldBe("DejaVu Sans");
+        rtf.Reference("Consolas", 400, isItalic: false)!.FamilyName.ShouldBe("DejaVu Sans Mono");
 
-        // DOC carries the FFN's family code and it is the whole answer, `Unknown` included.
         LayoutFonts swiss = new(new SystemFontResolver(index))
         {
             DeclaredShapes = _ => new DeclaredFontShape(FontFamilyClass.SansSerif),
@@ -169,11 +174,9 @@ public sealed class WordFallbackClassTests
         {
             DeclaredShapes = _ => new DeclaredFontShape(FontFamilyClass.Serif),
         };
-        roman.Reference("Aptos", 400, isItalic: false)!.FamilyName.ShouldBe("DejaVu Serif");
+        roman.Reference("Aptos", 400, isItalic: false)!.FamilyName.ShouldBe("DejaVu Sans");
+        roman.Reference("Consolas", 400, isItalic: false)!.FamilyName.ShouldBe("DejaVu Sans Mono");
 
-        // `ff` 0, 6 and 7 are FAMILY_DONTKNOW, which appends no generic and lands on fontconfig's
-        // own answer — DejaVu Sans for `Aptos`, DejaVu Sans **Mono** for `Consolas`. This is the
-        // case round 54 could not measure and got backwards.
         LayoutFonts undeclared = new(new SystemFontResolver(index))
         {
             DeclaredShapes = _ => default,
@@ -181,9 +184,12 @@ public sealed class WordFallbackClassTests
         undeclared.Reference("Aptos", 400, isItalic: false)!.FamilyName.ShouldBe("DejaVu Sans");
         undeclared.Reference("Consolas", 400, isItalic: false)!.FamilyName.ShouldBe("DejaVu Sans Mono");
 
-        // And the guard survives it: a run naming no family at all still reaches DefaultFonts.
+        // And the guard that separates the two questions survives it, which is the assertion here
+        // that still discriminates: a run naming no family at all is not a run naming a family
+        // nobody has, and it reaches `DefaultFonts` rather than any fallback shape.
         undeclared.Reference(null, 400, isItalic: false)!.FamilyName.ShouldBe("Liberation Serif");
         undeclared.Reference("", 400, isItalic: false)!.FamilyName.ShouldBe("Liberation Serif");
+        rtf.Reference(null, 400, isItalic: false)!.FamilyName.ShouldBe("Liberation Serif");
     }
 
     /// <summary>

@@ -134,7 +134,7 @@ public sealed class WordInheritedFamilyClassTests
     /// </summary>
     [Theory]
     [InlineData("swiss", "DejaVu Sans")]
-    [InlineData("roman", "DejaVu Serif")]
+    [InlineData("roman", "DejaVu Sans")]
     public void AStyleInheritsItsBaseStylesClassThroughAnUnfiledName(string donor, string expected)
         => DrawnFamily(
             normalFont: "Donor", normalClass: donor,
@@ -148,7 +148,7 @@ public sealed class WordInheritedFamilyClassTests
     /// </remarks>
     [Theory]
     [InlineData("swiss", "DejaVu Sans")]
-    [InlineData("roman", "DejaVu Serif")]
+    [InlineData("roman", "DejaVu Sans")]
     public void DirectRunFormattingInheritsTheStylesClass(string donor, string expected)
         => DrawnFamily(
             normalFont: "Donor", normalClass: donor,
@@ -158,7 +158,7 @@ public sealed class WordInheritedFamilyClassTests
     /// <summary>The document defaults are a layer like any other.</summary>
     [Theory]
     [InlineData("swiss", "DejaVu Sans")]
-    [InlineData("roman", "DejaVu Serif")]
+    [InlineData("roman", "DejaVu Sans")]
     public void TheDocumentDefaultsDonateTheClass(string donor, string expected)
         => DrawnFamily(
             normalFont: null, normalClass: null,
@@ -167,7 +167,7 @@ public sealed class WordInheritedFamilyClassTests
 
     /// <summary>An entry of its own beats an ancestor, in both directions.</summary>
     [Theory]
-    [InlineData("swiss", "roman", "DejaVu Serif")]
+    [InlineData("swiss", "roman", "DejaVu Sans")]
     [InlineData("roman", "swiss", "DejaVu Sans")]
     public void TheRunsOwnFiledEntryBeatsTheAncestor(string donor, string own, string expected)
         => DrawnFamily(
@@ -175,17 +175,47 @@ public sealed class WordInheritedFamilyClassTests
             derivedFont: "Target", derivedClass: own,
             useDerivedStyle: true).ShouldBe(expected);
 
-    /// <summary>The control: nothing anywhere states a class, and the roman default stands.</summary>
+    /// <summary>The control: nothing anywhere states a class, and fontconfig's default stands.</summary>
     /// <remarks>
-    /// Round 54's whole result, restated here so that a change to the inheritance cannot quietly
-    /// take the default with it. This is a control, not a detector.
+    /// The class the reader states is still the roman default — <c>WordFallbackClass</c> is where
+    /// that is asserted, and it is unchanged — but on 24.2.7.2 it reaches no face. This is a
+    /// control, not a detector.
     /// </remarks>
     [Fact]
-    public void NothingStatingAClassIsStillTheRomanDefault()
+    public void NothingStatingAClassStillTakesFontconfigsDefault()
         => DrawnFamily(
             normalFont: "Donor", normalClass: "auto",
             derivedFont: "Target", derivedClass: "auto",
-            useDerivedStyle: true).ShouldBe("DejaVu Serif");
+            useDerivedStyle: true).ShouldBe("DejaVu Sans");
+
+    /// <summary>
+    /// What decides the face on 24.2.7.2, now that the inherited class does not: the filing of the
+    /// name.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The end-to-end rows above stopped discriminating when the resolver stopped acting on the
+    /// class — <c>Donor</c> and <c>Target</c> are names fontconfig files nowhere, so every one of
+    /// them now draws the sans-serif default whichever way the table files them. These two rows put
+    /// the discrimination back where it is real: a name 45-latin.conf files <em>against</em> the
+    /// inherited class, in both directions.
+    /// </para>
+    /// <para>
+    /// Measured with one authored DOCX per row converted by <c>/usr/bin/soffice</c>:
+    /// <c>Garamond</c> declared <c>swiss</c> draws DejaVu Serif and <c>Tahoma</c> declared
+    /// <c>roman</c> draws DejaVu Sans, which is the plain <c>fc-match</c> of each name. On the
+    /// 26.2.4.2 tarball both answer the other way.
+    /// </para>
+    /// </remarks>
+    [Theory]
+    [InlineData("Garamond", "swiss", "DejaVu Serif")]
+    [InlineData("Tahoma", "roman", "DejaVu Sans")]
+    public void TheFilingOfTheNameDecidesAndNotTheInheritedClass(
+        string named, string donor, string expected)
+        => DrawnFamily(
+            normalFont: "Donor", normalClass: donor,
+            derivedFont: named, derivedClass: "auto",
+            useDerivedStyle: true).ShouldBe(expected);
 
     /// <summary>The other control: an installed family never reaches any of this.</summary>
     [Fact]
