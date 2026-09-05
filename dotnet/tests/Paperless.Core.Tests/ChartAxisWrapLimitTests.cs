@@ -146,7 +146,13 @@ public class ChartAxisWrapLimitTests
 
         ChartAxisLabelLayout first = Resolve(Labels(8, ordinary, overWide), 90.0);
         first.Rotation.ShouldBe(0.0);
-        first.Texts.ShouldNotBeNull();
+
+        // Upright because every label broke at its own blank, which is the only reason an axis
+        // this crowded stays upright — asserting the rotation alone would pass on an axis that
+        // never wrapped at all.
+        first.Texts.ShouldNotBeNull()[0].ShouldBe(overWide.Replace(' ', '\n'));
+        first.Texts.ShouldNotBeNull()[1].ShouldBe(ordinary.Replace(' ', '\n'));
+        first.Rhythm.ShouldBe(1);
 
         // The same over-wide word anywhere else does turn it, so this is the index and not the
         // width.
@@ -170,7 +176,11 @@ public class ChartAxisWrapLimitTests
         // whether the run before the separator measures 95 or 96.
         ChartAxisLabelLayout blank = Resolve(Labels(8, new string('W', 95) + " AAAAAAAAAA"), 100.0);
         blank.Rotation.ShouldBe(0.0);
-        blank.Texts.ShouldNotBeNull();
+
+        // Upright because the label broke at the blank, and the break is where the blank was —
+        // which is the half of this the rotation cannot show.
+        blank.Texts.ShouldNotBeNull()[0].ShouldBe(new string('W', 95) + "\nAAAAAAAAAA");
+        blank.Rhythm.ShouldBe(1);
 
         Resolve(Labels(8, new string('W', 95) + "-AAAAAAAAAA"), 100.0)
             .Rotation.ShouldBe(Math.PI / 4.0, 1e-12);
