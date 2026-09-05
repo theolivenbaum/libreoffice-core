@@ -394,8 +394,19 @@ public sealed record PageFrame
     /// Zero when the anchor does not declare one, which sorts it below anything that does — and since
     /// the sort is stable, equal values keep document order, which is Word's own tie-break.
     /// </para>
+    /// <para>
+    /// <strong>It is a <c>long</c> because two different declarations land in it and they do not share
+    /// a range.</strong> DrawingML's <c>relativeHeight</c> is an unsigned 32-bit value; VML's
+    /// <c>z-index</c> is signed, and LibreOffice sorts <em>every</em> shape that declares one above
+    /// <em>every</em> <c>relativeHeight</c> whatever the two numbers are —
+    /// <c>GraphicZOrderHelper::adjustRelativeHeight</c>, <c>sw/source/writerfilter/dmapper/
+    /// GraphicHelpers.cxx:279-330</c>: "in general, all z-index-defined shapes appear on top of
+    /// relativeHeight graphics regardless of the value". <see cref="Ooxml.DocxVmlFrames"/> therefore
+    /// offsets a <c>z-index</c> by 2^32, which is above the whole unsigned range and keeps both
+    /// families' internal ordering intact.
+    /// </para>
     /// </remarks>
-    public uint ZOrder { get; init; }
+    public long ZOrder { get; init; }
 
     /// <summary>
     /// The shape's <c>a:prstGeom/@prst</c>, or null when it states none and is a plain box.

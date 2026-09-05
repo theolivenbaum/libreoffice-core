@@ -36,11 +36,11 @@ public sealed class FrameZOrderTests
     /// The maximum is asserted for that reason rather than for completeness.
     /// </remarks>
     [Theory]
-    [InlineData("251659264", 251659264u)]
-    [InlineData("251707392", 251707392u)]
-    [InlineData("4294967295", 4294967295u)]
-    [InlineData("0", 0u)]
-    public void TheAnchorsDeclaredHeightIsRead(string declared, uint expected) =>
+    [InlineData("251659264", 251659264L)]
+    [InlineData("251707392", 251707392L)]
+    [InlineData("4294967295", 4294967295L)]
+    [InlineData("0", 0L)]
+    public void TheAnchorsDeclaredHeightIsRead(string declared, long expected) =>
         Frame(declared).ZOrder.ShouldBe(expected);
 
     /// <summary>An anchor that declares nothing sorts below every anchor that does.</summary>
@@ -51,7 +51,7 @@ public sealed class FrameZOrderTests
     /// </remarks>
     [Fact]
     public void AnAnchorWithNoDeclaredHeightIsZero() =>
-        Frame(null).ZOrder.ShouldBe(0u);
+        Frame(null).ZOrder.ShouldBe(0L);
 
     /// <summary>A value that is not a number is zero rather than an exception.</summary>
     /// <remarks>
@@ -65,7 +65,7 @@ public sealed class FrameZOrderTests
     [InlineData("251659264.5")]
     [InlineData("99999999999999999999")]
     public void AMalformedHeightIsZero(string declared) =>
-        Frame(declared).ZOrder.ShouldBe(0u);
+        Frame(declared).ZOrder.ShouldBe(0L);
 
     private static PageFrame Frame(string? relativeHeight)
     {
