@@ -2079,6 +2079,31 @@ is read and verified, so what remains is the filling of pages rather than the me
   - **`wp:effectExtent` moves a warped shape and not an unwarped one's text**, which is the one
     open thread. See the entry two below.
 
+- **Binary DOC/PPT Escher WordArt reaches 5 shapes across 4 documents, and is not worth writing.**
+  Censused by scanning every `.doc .dot .ppt .pot .pps .xls .xlt .rtf` for an `msofbtSp` record
+  whose instance is in the WordArt shape-type range 136-175: `135.doc` 1, `644730BRI…public0.doc`
+  2, `8.16_AOD_FINAL_Provider_Training_Presentation_9_2009.ppt` 1 (type 144), `pres_ioc_phuket.ppt`
+  1. DOCX VML holds 15 and DrawingML 29 on the words side, so this is the smallest of the three
+  paths — and all four documents sit at 8.25, 23.29, 3.75 and 4.58 mean ink for reasons that have
+  nothing to do with WordArt, so one shape each would be invisible even implemented.
+
+  **It also settles the two knobs this round was briefed to expect from the VML side.**
+  `oox/source/vml/vmlformatting.cxx:966-975` writes `ScaleX` and `SameLetterHeights` as literal
+  `false` for every `v:textpath`, so they are unreachable from OOXML VML by construction; and the
+  binary path, which does read them (`msdffimp.cxx:2516-2600`, bits 0x40 and 0x80 of
+  `DFF_Prop_gtextFStrikethrough`), finds them **clear on all five shapes**, none of which hard-sets
+  `DFF_Prop_gtextFStretch` either. There is no document in this corpus, in any format, that would
+  render differently if `SameLetterHeights` were implemented.
+
+- **CFF/OTTO faces reach nothing WordArt resolves to, so no Type 2 interpreter is written.**
+  Installed set: **45 TrueType `glyf`, 11 CFF, 8 Type 1**, and every CFF face is Loma or a Unifont
+  variant. Every family named in a part carrying a real warp — Arial, Perpetua Titling MT, Kristen
+  ITC, Times New Roman, Calibri, Arial Black, Corpid E1s SCd Regular, Papyrus, Informal Roman —
+  resolves to a `glyf` face. `GlyphOutlines` answering null for a CFF face therefore costs this
+  corpus nothing. Both censuses are reproducible with
+  `dotnet/probes/fontwork-reach/census.py`; the second depends on the installed font set and
+  should be re-run before it is relied on in another container.
+
 - **[DONE] All forty `ST_TextShapeType` warps are implemented.** The previous round left eight,
   on a rule worth keeping — *a table transcribed for a preset no document states is a transcription
   nothing checks* — and the corpus still states none of them. What changed is that a fixture now
