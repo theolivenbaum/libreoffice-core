@@ -196,12 +196,12 @@ internal static class DocxFrames
     /// range round-trips rather than most of it. An unparseable or absent value is zero, which sorts
     /// below every anchor that declares one and leaves document order untouched.
     /// </remarks>
-    private static uint ZOrder(XElement? anchor) =>
+    private static long ZOrder(XElement? anchor) =>
         anchor?.Attribute("relativeHeight")?.Value is { } text
         && uint.TryParse(text, System.Globalization.NumberStyles.Integer,
                          System.Globalization.CultureInfo.InvariantCulture, out uint z)
             ? z
-            : 0u;
+            : 0L;
 
     /// <summary>Whether the anchor asks for one of the four wraps that leave a hole in the text.</summary>
     private static bool WrapsAside(XElement anchor)

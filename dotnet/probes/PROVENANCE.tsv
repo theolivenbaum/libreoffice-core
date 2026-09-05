@@ -366,6 +366,11 @@ dotnet/probes/words-group-transform/measure.py	2026-09-03	current	24.2.7.2	prese
 dotnet/probes/words-group-transform/mk.py	2026-09-03	current	24.2.7.2	present	current	-
 dotnet/probes/words-group-transform/orientation.py	2026-09-03	current	24.2.7.2	present	current	-
 dotnet/probes/words-group-transform/results.md	2026-09-03	current	24.2.7.2	present	current	-
+dotnet/probes/words-hidemark-rowheight/make.py	2026-09-05	current	24.2.7.2+26.2.4.2	present	current	-
+dotnet/probes/words-hidemark-rowheight/make2.py	2026-09-05	current	24.2.7.2+26.2.4.2	present	current	-
+dotnet/probes/words-hidemark-rowheight/make3.py	2026-09-05	current	24.2.7.2+26.2.4.2	present	current	-
+dotnet/probes/words-hidemark-rowheight/measure.py	2026-09-05	current	24.2.7.2+26.2.4.2	present	current	-
+dotnet/probes/words-hidemark-rowheight/results.md	2026-09-05	current	24.2.7.2+26.2.4.2	present	current	-
 dotnet/probes/words-metrics-01/baseline.tsv	2026-08-15	current	26.2.4.2	present	current	-
 dotnet/probes/words-metrics-01/final.tsv	2026-08-15	current	26.2.4.2	present	current	-
 dotnet/probes/words-metrics-01/prediction.md	2026-08-15	current	26.2.4.2	present	current	-

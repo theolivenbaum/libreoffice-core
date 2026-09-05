@@ -260,10 +260,44 @@ public sealed record SheetDrawing
 /// <param name="Height">Its height, as a fraction of the drawing's.</param>
 /// <param name="Degrees">
 /// How far it is turned clockwise, in degrees. The one thing the fractions cannot express, and
-/// the reason a part is carried at all.
+/// the reason a part was first carried at all.
 /// </param>
 public readonly record struct SheetDrawingPart(
-    double X, double Y, double Width, double Height, double Degrees);
+    double X, double Y, double Width, double Height, double Degrees)
+{
+    /// <summary>The part's own picture, still encoded, or null when it holds none.</summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>A picture inside a group was read for its bounds and never drawn.</strong> A
+    /// spreadsheet anchor may hold an <c>xdr:grpSp</c> instead of an <c>xdr:pic</c>, and the group
+    /// carries no picture of its own — so the anchor produced a drawing with nothing to paint and
+    /// the whole group vanished, while still widening the print area because
+    /// <see cref="SheetDrawingArea"/> counts it.
+    /// </para>
+    /// <para>
+    /// Measured on <c>SIL_TDB648.xlsx</c>, whose eleven sheet drawings each hold one group of
+    /// fourteen copies of the same faded, turned <c>Honeywell</c> wordmark: the reference's PDF
+    /// carries that image on 86 of its 88 pages and ours carried it on none.
+    /// </para>
+    /// </remarks>
+    public RasterImage? Image { get; init; }
+
+    /// <summary>The part's picture as a display list, or null when it is a raster or absent.</summary>
+    public Lazy<VectorImage>? Vector { get; init; }
+
+    /// <summary>How much of the part's picture each edge throws away.</summary>
+    public PictureCropFractions Crop { get; init; }
+
+    /// <summary>How opaque the part's picture is painted, as a fraction of one.</summary>
+    /// <remarks>
+    /// The watermark case again, and the reason the fourteen copies in <c>SIL_TDB648.xlsx</c> are
+    /// legible rather than a wall of red: each states <c>a:alphaModFix amt="20000"</c>.
+    /// </remarks>
+    public double Opacity { get; init; } = 1;
+
+    /// <summary>True when there is something here to paint.</summary>
+    public bool HasPicture => Image is not null || Vector is not null;
+}
 
 /// <summary>
 /// The drawings anchored on one sheet, in the order the file lists them.

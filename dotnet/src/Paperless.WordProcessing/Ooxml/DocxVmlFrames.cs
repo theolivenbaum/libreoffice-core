@@ -170,6 +170,7 @@ internal static class DocxVmlFrames
             new DocRect(originX, originY, groupWidth, groupHeight),
             HorizontalOriginOf(style),
             VerticalOriginOf(style),
+            LayerOf(style),
             depth: 0,
             frames,
             anchorOffset,
@@ -193,6 +194,7 @@ internal static class DocxVmlFrames
     /// <param name="area">Where that group sits and how big it is, in real units.</param>
     /// <param name="horizontal">What a member's horizontal offset is measured from.</param>
     /// <param name="vertical">What a member's vertical offset is measured from.</param>
+    /// <param name="layer">Which layer the group paints on, inherited by every member.</param>
     /// <param name="depth">How many groups deep this one is.</param>
     /// <param name="frames">The frames collected so far, appended to.</param>
     /// <param name="anchorOffset">Where in the paragraph's text the drawing sits.</param>
@@ -203,6 +205,7 @@ internal static class DocxVmlFrames
         DocRect area,
         FrameHorizontalOrigin horizontal,
         FrameVerticalOrigin vertical,
+        VmlLayer layer,
         int depth,
         List<PageFrame> frames,
         int anchorOffset,
@@ -241,7 +244,7 @@ internal static class DocxVmlFrames
             if (member.Name.LocalName is "group")
             {
                 Flatten(
-                    member, placed, horizontal, vertical, depth + 1,
+                    member, placed, horizontal, vertical, layer, depth + 1,
                     frames, anchorOffset, pictures, content);
                 continue;
             }
@@ -263,6 +266,8 @@ internal static class DocxVmlFrames
                 HorizontalOffset = placed.X,
                 VerticalOrigin = vertical,
                 VerticalOffset = placed.Y,
+                BehindText = layer.BehindText,
+                ZOrder = layer.ZOrder,
                 IsImage = text is null,
                 Image = picture.Raster,
                 Crop = picture.Crop,
@@ -383,6 +388,7 @@ internal static class DocxVmlFrames
         Length y = (style.TryGetValue("margin-top", out string? mt) ? Css(mt) : null) ?? Length.Zero;
 
         VmlPaint paint = PaintOf(shape, style);
+        VmlLayer layer = LayerOf(style);
 
         return new PageFrame
         {
@@ -398,6 +404,8 @@ internal static class DocxVmlFrames
             HorizontalOffset = x,
             VerticalOrigin = VerticalOriginOf(style),
             VerticalOffset = y,
+            BehindText = layer.BehindText,
+            ZOrder = layer.ZOrder,
             IsImage = box is null,
             Image = picture.Raster,
             Crop = picture.Crop,
@@ -670,6 +678,65 @@ internal static class DocxVmlFrames
     /// <summary>The <c>w:txbxContent</c> a VML shape carries, or null when it carries none.</summary>
     private static XElement? TextBox(XElement shape)
         => shape.Descendants(Word.Name("txbxContent")).FirstOrDefault();
+
+    /// <summary>Which layer a floating VML shape paints on, and where in that layer's stack.</summary>
+    /// <param name="BehindText">True for the hell layer, painted before the text.</param>
+    /// <param name="ZOrder">Where in the layer it sits, low to high.</param>
+    private readonly record struct VmlLayer(bool BehindText, long ZOrder);
+
+    /// <summary>
+    /// The layer and stacking position a VML shape's <c>z-index</c> asks for.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>The sign is the layer and the magnitude is the order, and nothing read either.</strong>
+    /// <c>oox/source/vml/vmlshapecontext.cxx:536</c> keeps the declaration verbatim and
+    /// <c>vmlshape.cxx:408</c> hands it to Writer as <c>VML-Z-ORDER</c>; the mapper then sets the
+    /// shape opaque exactly when it is not negative —
+    /// <c>xShapePropertySet-&gt;setPropertyValue(PROP_OPAQUE, uno::Any(zOrder &gt;= 0))</c>,
+    /// <c>sw/source/writerfilter/dmapper/DomainMapper_Impl.cxx:5157</c> and <c>:5203</c> — so a
+    /// negative <c>z-index</c> is the hell layer and that is how Word writes a watermark.
+    /// </para>
+    /// <para>
+    /// <strong>A shape that declares a <c>z-index</c> outranks every <c>relativeHeight</c>, whatever
+    /// the two numbers are.</strong> <c>GraphicZOrderHelper::adjustRelativeHeight</c>
+    /// (<c>sw/source/writerfilter/dmapper/GraphicHelpers.cxx:279-330</c>) says it in as many words —
+    /// "in general, all z-index-defined shapes appear on top of relativeHeight graphics regardless of
+    /// the value" — and implements it by pushing every DrawingML anchor below zero
+    /// (<c>GraphicImport.cxx:695</c>) while leaving a <c>z-index</c> alone. The two ranges are
+    /// separated here the other way about, by lifting a <c>z-index</c> clear of the whole unsigned
+    /// 32-bit range that <c>relativeHeight</c> occupies, which leaves every stored DrawingML order
+    /// exactly as it was.
+    /// </para>
+    /// <para>
+    /// A shape that declares no <c>z-index</c> keeps document order: zero, in front of the text, which
+    /// is what every VML shape did before this existed.
+    /// </para>
+    /// </remarks>
+    private static VmlLayer LayerOf(Dictionary<string, string> style)
+    {
+        if (!style.TryGetValue("z-index", out string? text)) return default;
+
+        if (!long.TryParse(text.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture,
+                           out long z))
+        {
+            return default;
+        }
+
+        return new VmlLayer(z < 0, VmlZOrderBase + z);
+    }
+
+    /// <summary>
+    /// What a VML <c>z-index</c> is lifted by so that it clears every DrawingML <c>relativeHeight</c>.
+    /// </summary>
+    /// <remarks>
+    /// 2^32, one past the top of <c>ST_RelativeHeight</c>'s unsigned 32-bit range. A negative
+    /// <c>z-index</c> still lands above the range — the corpus's are around −251 million — which is
+    /// right: it shares the hell layer with the <c>behindDoc</c> anchors and LibreOffice puts it above
+    /// them there too (<c>GraphicHelpers.cxx:305-315</c> pushes a behind-text <c>relativeHeight</c>
+    /// down a further level and leaves a negative <c>z-index</c> where it is).
+    /// </remarks>
+    private const long VmlZOrderBase = 4294967296L;
 
     /// <summary>What <c>margin-left</c> is measured from.</summary>
     /// <remarks>

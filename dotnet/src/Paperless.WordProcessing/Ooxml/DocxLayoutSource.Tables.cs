@@ -587,7 +587,7 @@ public sealed partial class DocxLayoutSource
             cells,
             IsHeading: Word.IsOn(Word.Child(properties, "tblHeader"))
                        || Word.Child(properties, "tblHeader") is not null,
-            RowHeight(properties),
+            RowHeight(properties, children),
             // `w:cantSplit` is on when it is present without a `w:val`, which is how Word writes it, and
             // LibreOffice reads the same element the same way — "row can't break across pages if
             // nIntValue == 1" (`dmapper/TablePropertiesHandler.cxx`).
@@ -723,7 +723,7 @@ public sealed partial class DocxLayoutSource
     /// not one states <c>auto</c>.
     /// </para>
     /// </remarks>
-    private static (Length Height, bool IsExact) RowHeight(XElement? properties)
+    private (Length Height, bool IsExact) RowHeight(XElement? properties, List<XElement> cells)
     {
         XElement? height = Word.Child(properties, "trHeight");
         if (height is null) return (Length.Zero, false);
@@ -740,7 +740,123 @@ public sealed partial class DocxLayoutSource
                 ? Length.FromTwips(Math.Abs(twips))
                 : Length.Zero;
 
-        return (measured, rule == "exact");
+        return (measured, rule == "exact" || (measured > Length.Zero && MarkIsHidden(cells)));
+    }
+
+    /// <summary>
+    /// True when the row's <c>w:trHeight</c> is a height rather than a floor because every cell hides
+    /// its end mark and none of them holds anything.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>This is the difference between a graph-paper grid and a wall of oblongs.</strong>
+    /// <c>DomainMapperTableHandler::endTableGetRowProperties</c> — "we have CellHideMark on all cells,
+    /// and also all cells are empty: force the row height to be exactly as specified, and not just as
+    /// the minimum suggestion" (<c>sw/source/writerfilter/dmapper/DomainMapperTableHandler.cxx</c>
+    /// :1157-1162, with <c>lcl_hideMarks</c> at :1027 and <c>lcl_emptyRow</c> at :1085). Measured on
+    /// <c>084_Printable_Graph_Paper_Template_Editable_Layout</c>, whose 48 rows declare
+    /// <c>w:trHeight w:val="180"</c> — 9 pt, well under the 13.7 pt an 11 pt Calibri line asks for.
+    /// Both references draw the row pitch at <b>9.00 pt</b> and we drew it at <b>14.40</b>, which is a
+    /// grid 60% too tall and the <em>Title:</em> and <em>Date:</em> rules pushed off the sheet.
+    /// </para>
+    /// <para>
+    /// <strong>A cell holding nothing but blanks counts as empty, and only below compatibility mode
+    /// 15.</strong> That is a second rule feeding this one: <c>DomainMapper_Impl</c> trims trailing
+    /// spaces, tabs and no-break spaces from a table cell's paragraph when
+    /// <c>0 &lt; mode &lt;= 14</c> (tdf#77417, <c>DomainMapper_Impl.cxx</c>:3032-3045), so an
+    /// all-blank cell in a Word 2010 file <em>is</em> empty by the time the row is measured and the
+    /// same cell in a Word 2013 file is not. It is load-bearing rather than a nicety: every one of
+    /// <c>084</c>'s 1728 cells holds a single no-break space, and it declares
+    /// <c>compatibilityMode 14</c>. Probed across both binaries and four modes in
+    /// <c>probes/words-hidemark-rowheight</c> — 24 documents, 24.2.7.2 and 26.2.4.2 agreeing on every
+    /// one.
+    /// </para>
+    /// <para>
+    /// <strong>Only the emptiness test reads that trim, not the layout.</strong> Trimming trailing
+    /// blanks from every table-cell paragraph in every file below mode 15 is what LibreOffice really
+    /// does, and it would reach far past this: the DOCX corpus holds 1 043 cell paragraphs ending in a
+    /// blank across 61 documents below mode 15, each one a cell width and possibly a line break. That
+    /// is a cascade to measure on its own round rather than a rider on this one.
+    /// </para>
+    /// <para>
+    /// Guarded on a stated height, which LibreOffice does not need: it sets the size <em>type</em> and
+    /// leaves the height to <c>w:trHeight</c>, so a row with no stated height keeps whatever default
+    /// the model has. Here an exact height of zero would be a row that draws nothing, so a row stating
+    /// none keeps its floor.
+    /// </para>
+    /// </remarks>
+    /// <param name="cells">The row's <c>w:tc</c> elements.</param>
+    private bool MarkIsHidden(List<XElement> cells)
+    {
+        if (cells.Count == 0) return false;
+
+        foreach (XElement cell in cells)
+        {
+            XElement? properties = Word.Child(cell, "tcPr");
+
+            // `lcl_hideMarks`: every cell must hide its mark, and none may be vertically merged —
+            // "if anything is vertically merged, the row must not be set to fixed as Writer's layout
+            // doesn't handle that well".
+            if (!Word.IsOn(Word.Child(properties, "hideMark"))) return false;
+            if (Word.Child(properties, "vMerge") is not null) return false;
+            if (!IsEmptyCell(cell)) return false;
+        }
+
+        return true;
+    }
+
+    /// <summary>Whether a cell holds no text at all, in the sense the row-height rule needs.</summary>
+    /// <remarks>
+    /// One paragraph, no nested table, and nothing in it but <c>w:t</c> — a tab, a break, a picture or
+    /// a field all put something in the cell's text range and make <c>lcl_emptyRow</c> false. The text
+    /// itself must be empty, or, below compatibility mode 15, blank: see <see cref="MarkIsHidden"/>.
+    /// </remarks>
+    private bool IsEmptyCell(XElement cell)
+    {
+        // `0 < nMode && nMode <= 14`, and the lower bound is not decoration: a file stating no
+        // compatibility mode at all leaves ours at −1, and both references treat such a file the
+        // modern way — probed, `f-None-hide-nbsp` draws 13.92 pt where `f-14-hide-nbsp` draws 9.12.
+        bool trims = _compatibilityMode is > 0 and <= 14;
+        int paragraphs = 0;
+
+        foreach (XElement child in cell.Elements())
+        {
+            if (Word.Is(child, "tcPr")) continue;
+            if (!Word.Is(child, "p")) return false;
+            if (++paragraphs > 1) return false;
+
+            foreach (XElement inside in child.Descendants())
+            {
+                if (!Word.Is(inside, inside.Name.LocalName)) return false;
+
+                switch (inside.Name.LocalName)
+                {
+                    case "pPr" or "rPr" or "r" or "proofErr" or "bookmarkStart" or "bookmarkEnd"
+                         or "lastRenderedPageBreak":
+                        continue;
+
+                    case "t":
+                        string text = inside.Value;
+                        if (text.Length == 0) continue;
+                        if (!trims) return false;
+                        foreach (char character in text)
+                            if (character is not (' ' or '\t' or '\u00a0')) return false;
+                        continue;
+
+                    default:
+                        // A `w:pPr`'s or `w:rPr`'s own children are formatting, not content.
+                        if (inside.Ancestors().Any(
+                                ancestor => ancestor.Name.LocalName is "pPr" or "rPr"))
+                        {
+                            continue;
+                        }
+
+                        return false;
+                }
+            }
+        }
+
+        return paragraphs == 1;
     }
 
     /// <summary>
