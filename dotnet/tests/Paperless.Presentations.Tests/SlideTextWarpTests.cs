@@ -125,6 +125,35 @@ public class SlideTextWarpTests
     }
 
     /// <summary>
+    /// The warped box draws curves in place of its shape, and its neighbours draw a rectangle.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The count is the discriminator rather than the shape's name: a rectangle is five commands
+    /// and a line of warped Latin is hundreds, so a body that came out as its bounding box would
+    /// fail this even though it is still "an outline".
+    /// </para>
+    /// <para>
+    /// It also pins that the warp <em>replaces</em> the shape. <c>EnhancedCustomShapeEngine::render2</c>
+    /// hands the Fontwork object back in place of the rendered shape, so the box is not drawn under
+    /// the letters and its own fill is not used — this box states none, and the curves are still
+    /// filled, from the run's colour.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void TheWarpedBoxDrawsCurvesInPlaceOfItsRectangle()
+    {
+        LaidOutSlide slide = FixtureSlide();
+
+        PlacedShape warped = slide.Shapes.First(shape => shape.Name == "WarpedBox");
+        PlacedShape plain = slide.Shapes.First(shape => shape.Name == "PlainBox");
+
+        plain.Outline.Commands.Count.ShouldBeLessThan(10);
+        warped.Outline.Commands.Count.ShouldBeGreaterThan(100);
+        warped.Fill.ShouldNotBeNull();
+    }
+
+    /// <summary>
     /// The words stay in the content tree: extraction is not rendering.
     /// </summary>
     /// <remarks>

@@ -249,6 +249,39 @@ internal static class DocxFrames
         (GraphicsPath? fillOutline, GraphicsPath? strokeOutline) =
             CustomOutline(shapeProperties, new DocSize(width, height));
 
+        IReadOnlyList<PageBlock> blocks = box is not null && content is not null ? content(box) : [];
+
+        // WordArt replaces the shape rather than decorating it, so it is settled before the frame is
+        // built: the curves become the frame's outline, the character fill and outline become the
+        // shape's paint, and the text leaves the flow. See `DocxFontwork`.
+        FontworkDrawing warp = box is null
+            ? default
+            : DocxFontwork.Read(
+                placed,
+                shapeProperties,
+                blocks,
+                new DocSize(width, height),
+                EffectExtent(placed, anchor, shapeProperties),
+                context.Theme);
+
+        if (warp.IsWarped)
+        {
+            fillOutline = warp.Outline;
+            strokeOutline = warp.Outline;
+            paint = paint with
+            {
+                Fill = warp.Fill,
+                Gradient = warp.Gradient,
+                Line = warp.Line,
+                Width = warp.LineWidth,
+            };
+
+            preset = null;
+            adjustments = null;
+        }
+
+        if (warp.SuppressesText) blocks = [];
+
         return new PageFrame
         {
             Size = new DocSize(width, height),
@@ -289,7 +322,7 @@ internal static class DocxFrames
             Chart = chart.Plot,
             ChartFontFamily = chart.Family,
             Name = Child(placed, "docPr")?.Attribute("name")?.Value,
-            Blocks = box is not null && content is not null ? content(box) : [],
+            Blocks = blocks,
             Padding = box is null ? default : Insets(placed),
             TextAlignment = box is null ? default : TextAlignment(placed),
             HasFixedHeight = box is not null && !GrowsWithText(placed),
@@ -734,6 +767,13 @@ internal static class DocxFrames
         (GraphicsPath? fillOutline, GraphicsPath? strokeOutline) =
             CustomOutline(properties, new DocSize(within.Width, within.Height));
 
+        // No WordArt here, and the omission is measured rather than an oversight. The reference
+        // converts a warped body at the end of its `wps:bodyPr`, and by then a *group member* is
+        // not yet an `SdrObjCustomShape` — `WpsContext::onEndElement`'s first guard
+        // (`oox/source/shape/WpsContext.cxx:944-947`) fails and the member keeps its text as text.
+        // Both organogram templates in `words/chartset-005` carry a `textPlain` inside a
+        // `wpg:wgp`, and the reference extracts their "Organogram Template" as words; warping it
+        // here cost each of them two words against a reference that had none to lose.
         return envelope with
         {
             Size = new DocSize(within.Width, within.Height),

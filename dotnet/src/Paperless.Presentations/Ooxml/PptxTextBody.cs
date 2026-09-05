@@ -172,6 +172,8 @@ internal static class PptxTextBody
             if (Drawing.Child(source, "noAutofit") is not null) break;
         }
 
+        (string? Preset, IReadOnlyList<FontworkAdjustment> Adjustments) warp = Warp(bodyChain);
+
         return new SlideTextBody
         {
             Paragraphs = paragraphs,
@@ -196,7 +198,8 @@ internal static class PptxTextBody
             Wraps = Stated(bodyChain, "wrap") != "none" || resizes,
             AutoFit = autofit is not null,
             FontScale = Thousandth(autofit, "fontScale", 1.0),
-            WarpPreset = Warp(bodyChain),
+            WarpPreset = warp.Preset,
+            WarpAdjustments = warp.Adjustments,
 
             // a:normAutofit/@lnSpcReduction is deliberately not read: neither does the reference,
             // whose normAutofit handler takes @fontScale alone. See SlideTextBody.AutoFit.
@@ -348,17 +351,38 @@ internal static class PptxTextBody
     /// inherited exactly as an anchor or an inset is.
     /// </para>
     /// </remarks>
-    private static string? Warp(List<XElement> chain)
+    private static (string? Preset, IReadOnlyList<FontworkAdjustment> Adjustments) Warp(
+        List<XElement> chain)
     {
         foreach (XElement source in chain)
         {
             if (Drawing.Child(source, "prstTxWarp") is not { } warp) continue;
 
             string? preset = warp.Attribute("prst")?.Value;
-            return string.IsNullOrEmpty(preset) || preset == "textNoShape" ? null : preset;
+            if (string.IsNullOrEmpty(preset) || preset == "textNoShape") return (null, []);
+
+            List<FontworkAdjustment> adjustments = [];
+            foreach (XElement guide in Drawing.Children(Drawing.Child(warp, "avLst"), "gd"))
+            {
+                string name = guide.Attribute("name")?.Value ?? string.Empty;
+                string formula = guide.Attribute("fmla")?.Value ?? string.Empty;
+
+                // Every guide inside a `prstTxWarp` is a literal: `fmla="val 10800000"`.
+                if (!formula.StartsWith("val ", StringComparison.Ordinal)) continue;
+                if (!double.TryParse(
+                        formula.AsSpan(4), NumberStyles.Float, CultureInfo.InvariantCulture,
+                        out double value))
+                {
+                    continue;
+                }
+
+                adjustments.Add(new FontworkAdjustment(name, value));
+            }
+
+            return (preset, adjustments);
         }
 
-        return null;
+        return (null, []);
     }
 
     /// <summary>

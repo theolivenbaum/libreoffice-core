@@ -1,6 +1,7 @@
 using Paperless.Core.Geometry;
 using Paperless.Core.Graphics;
 using Paperless.Core.Units;
+using Paperless.Ooxml.DrawingML;
 using Paperless.Text.Fonts;
 using Paperless.Text.Layout;
 
@@ -144,6 +145,17 @@ public sealed record SlideTextBody
     public string? WarpPreset { get; init; }
 
     /// <summary>
+    /// The adjustment guides <c>a:prstTxWarp/a:avLst</c> states, in DrawingML units.
+    /// </summary>
+    /// <remarks>
+    /// Carried unconverted: the same number means a degree to one preset and a per-mille of the
+    /// shape to another, and the conversion into the WordArt units the geometry tables expect is
+    /// per preset and per guide name (<c>oox/source/drawingml/fontworkhelpers.cxx:95-150</c>). It
+    /// is done once, inside <see cref="Paperless.Ooxml.DrawingML.Fontwork"/>.
+    /// </remarks>
+    public IReadOnlyList<FontworkAdjustment> WarpAdjustments { get; init; } = [];
+
+    /// <summary>
     /// Whether the body is Fontwork: drawn as glyph outlines rather than as text.
     /// </summary>
     /// <remarks>
@@ -161,15 +173,18 @@ public sealed record SlideTextBody
     /// is absent from the reference too. The test really is "not <c>textNoShape</c>".
     /// </para>
     /// <para>
-    /// <strong>Paperless draws nothing for such a body, which is deliberately a partial.</strong>
-    /// The arch geometry is not implemented, and until it is, the honest choice is between
-    /// leaving unwarped glyphs where they fall and drawing nothing. Measured on that document's
-    /// page 13, the four Fontwork outlines the reference draws sit 14 to 40 pt away from where
-    /// the unwarped runs land — always outward along the box's own local up for
-    /// <c>textArchUp</c> and down for <c>textArchDown</c>, which is the arch's radial
-    /// displacement. Ink in the wrong place counts twice in a comparison against the reference
-    /// and absent ink counts once, so drawing nothing is the nearer of the two; the measurement
-    /// that settles it is in <c>dotnet/probes/slides-extra-01/results.md</c>.
+    /// <strong>Paperless now draws the curves.</strong> <see cref="WarpPreset"/> and
+    /// <see cref="WarpAdjustments"/> are handed to
+    /// <see cref="Paperless.Ooxml.DrawingML.Fontwork"/>, which builds the warped outlines, and
+    /// <c>SlideFontwork</c> replaces the whole shape with them — its own fill, pen and shadow
+    /// included, as the reference does. What is still drawn as nothing is a warp whose geometry
+    /// is not implemented (the four <c>*Pour</c> and two <c>textRing*</c> presets, which no
+    /// corpus document states) or one set in a face with no <c>glyf</c> outlines. Drawing nothing
+    /// stays the right fallback for those, and the measurement is unchanged: on page 13 of
+    /// <c>FAAAIandtheArtandScienceofV&amp;Vfinal.pptx</c> the reference's outlines sit 14 to 40 pt
+    /// away from where the unwarped runs land, ink in the wrong place counts twice in a comparison
+    /// and absent ink once (<c>dotnet/probes/slides-extra-01/results.md</c>). The words side now
+    /// falls back the same way, so the two families agree.
     /// </para>
     /// <para>
     /// Extraction is unaffected. <c>paperless extract</c> reads the body through

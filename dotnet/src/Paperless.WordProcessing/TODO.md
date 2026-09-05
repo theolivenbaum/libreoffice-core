@@ -2042,26 +2042,52 @@ is read and verified, so what remains is the filling of pages rather than the me
   (the document is CJK, so its empty paragraphs' line heights are the suspect) rather than from the
   anchor side.
 
-- **WordArt text warp (`a:prstTxWarp`) is not drawn on the words side, and it is the last open cause on
-  `WordArt_Shapes_Arrows_Catalog1.docx`.** A body whose `wps:bodyPr` carries a `prstTxWarp` other than
-  `textNoShape` becomes a Fontwork custom shape in LibreOffice — `putCustomShapeIntoTextPathMode`, then
-  `svx/source/customshapes/EnhancedCustomShapeFontWork.cxx` converting the characters to
-  `tools::PolyPolygon` outlines — so the reference draws large filled curves carrying no glyph and no
-  `ToUnicode`, scaled to the shape's box and taking the shape's gradient and outline. Paperless draws the
-  run as ordinary text at its stated size in its stated `w:color`, which is small, flat and pale where the
-  reference is large, warped and gradient-filled.
+- **[DONE] WordArt text warp (`a:prstTxWarp`) is drawn as warped outlines.** A body whose
+  `wps:bodyPr` carries a `prstTxWarp` other than `textNoShape` becomes a Fontwork custom shape in
+  LibreOffice — `WpsContext::onEndElement` (`oox/source/shape/WpsContext.cxx:936-1025`) takes the text
+  out of the frame, `FontworkHelpers::putCustomShapeIntoTextPathMode` puts the shape into text-path
+  mode, and `EnhancedCustomShapeEngine::render2` then *replaces the whole shape* with what
+  `svx/source/customshapes/EnhancedCustomShapeFontWork.cxx` builds: filled curves carrying no glyph
+  and no `ToUnicode`. `DocxFontwork` reproduces all of it, through `Paperless.Ooxml.DrawingML.Fontwork`.
 
-  Reach on that document: **24 shapes of 340**, one per preset — `textArchUp`, `textArchDown`,
-  `textCircle`, `textButton`, `textWave1`, `textWave2`, `textDoubleWave1`, `textInflate`, `textDeflate`,
-  `textInflateBottom`, `textDeflateBottom`, `textTriangle`, `textTriangleInverted`, `textChevron`,
-  `textChevronInverted`, `textCascadeUp`, `textCascadeDown`, `textCurveUp`, `textSlantDown`, `textCanUp`,
-  `textCanDown`, `textFadeRight`, `textFadeLeft`, `textStop` — against 75 `textNoShape` bodies that need
-  nothing. Those 24 are the whole of the document's remaining divergence: **pages 17-21 of 52, at 2.11 to
-  6.43 unaccounted ink against 26.2.4.2, and every other page at or below 0.28.**
+  Measured on `WordArt_Shapes_Arrows_Catalog1.docx` (24 warped shapes, one per preset, pages 17-21
+  of 52), 100 dpi mean absolute grey difference against 26.2.4.2:
 
-  The slides side already carries this as a documented partial and draws *nothing* for such a body —
-  `SlideText.IsTextPath`. So the two families disagree about what to do with an unimplemented warp, which
-  is worth settling in the same round that implements the geometry rather than before it.
+  | pages | 17 | 18 | 19 | 20 | 21 | document, 52 pages |
+  |---|---:|---:|---:|---:|---:|---:|
+  | before | 7.31 | 19.83 | 18.41 | 16.93 | 15.66 | 3.748 |
+  | after | **0.47** | **0.55** | **0.50** | **0.48** | **0.39** | **2.292** |
+
+  Words 2492 → **2468**, which is the reference's own count exactly, and 52/52 pages throughout.
+  Against 24.2.7.2 the after column is 0.39 / 0.52 / 0.51 / 0.52 / 0.37. Full write-up, including
+  the `wp:effectExtent` finding below, in `dotnet/probes/words-fontwork/results.md`.
+
+  Four things about it are worth carrying forward:
+
+  - **Twenty of the twenty-four presets ignore the run's font size completely.** They are envelope
+    warps: the text's own ink box is normalised to the unit square and mapped between two rails, so
+    a 25 pt run fills a 72 pt shape. Only `textArchUp`, `textArchDown`, `textCircle` and `textButton`
+    keep the stated size, and then only by shrinking it until the line fits along the curve.
+  - **The reference converts only a plain rectangle**, `sType != "ooxml-rect"`
+    (`WpsContext.cxx:966-970`), and only a *top-level* shape: a group member is not yet an
+    `SdrObjCustomShape` when `onEndElement` runs, so its first guard fails and the member keeps its
+    text. Both organogram templates in `words/chartset-005` are that case and cost two words each
+    until group members were excluded.
+  - **A warp Paperless cannot draw still leaves no text**, because the reference has already emptied
+    the frame by then. That settles the disagreement the slides side had been carrying: both
+    families now draw the curves where they can and nothing where they cannot.
+  - **`wp:effectExtent` moves a warped shape and not an unwarped one's text**, which is the one
+    open thread. See the entry two below.
+
+- **`wp:effectExtent` is not added to an inline drawing's *horizontal* position, and the reference
+  adds it.** Measured on the WordArt catalogue at 200 dpi: its unwarped gradient-text boxes on page
+  3 span x 229.68..359.64 pt for us and 240.84..370.80 for the reference — the same 10.8 pt as their
+  `wp:effectExtent` — while y matches to the pixel. `FrameLayout` places every frame at the *outer*
+  corner because `probes/words-inline-effectextent/` measured the reference laying a `wps:txbx`
+  shape's text out there vertically; that probe never varied x. Warped bodies are moved by the
+  extent inside `DocxFontwork` because for them the draw-shape rule applies unambiguously, and the
+  general case is left alone: it reaches every inline drawing in the corpus and wants its own round
+  and its own probe.
 
 - **`w14:textFill`, `w14:textOutline` and `w14:shadow` on a run are correctly ignored, and that is a
   measurement rather than an omission.** The same catalogue states 104 `w14:textFill` (102 of them
