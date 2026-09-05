@@ -96,6 +96,35 @@ reference's 393, exactly 52 bullets, now 393 against 393.
 
 ## Document model
 
+- **[DONE] An ODF shape in text-path mode is drawn as warped outlines, on the Impress side.**
+  ODF is the format LibreOffice's Fontwork model is native to and it shows in how little there is
+  to read: `draw:type` is the type name `FontworkPresets` is already keyed by, `draw:modifiers` is
+  already in the 21600 viewbox the tables use, and `draw:text-path-scale` is `TextPathScaleX`
+  outright — where the DrawingML filter has to map, convert and derive all three
+  (`oox/source/drawingml/fontworkhelpers.cxx:95-179`). `OdfFontwork` reads it and `OdpSlideLayout`
+  replaces the shape with the curves, as `PptxSlideLayout` already did.
+
+  **Zero corpus reach, and it is worth being exact about why**: the 945-document corpus holds no
+  OpenDocument file of *any* kind, so the gate structurally cannot see this path. Measured instead
+  on `FAAAIandtheArtandScienceofV&Vfinal.pptx` converted to `.odp` by 26.2.4.2, whose eight arch
+  labels are genuine ODF fontwork — 100 dpi mean ink against that reference, slide 13 **8.63 →
+  5.06**, slide 14 **7.32 → 3.74**, whole deck 8.699 → 8.461, extracted words 1289 → 1213 against
+  the reference's 1219. Before the change the labels were laid out as flat overlapping text, which
+  is worse than drawing nothing.
+
+  Two things left undone, with their reasons:
+
+  - **`draw:text-path-same-letter-heights` is not implemented.** It is honoured at
+    `EnhancedCustomShapeFontWork.cxx:488`, LibreOffice writes it only when true, and nothing
+    measured sets it — not the corpus, which has no ODF, and not any of its five binary Escher
+    WordArt shapes, every one of which leaves bit 0x80 of `DFF_Prop_gtextFStrikethrough` clear.
+  - **The Writer ODF side is untouched, because fontwork is not its gap.** `OdfFrames.Read` takes
+    a frame's text only from a `draw:text-box` and reads no geometry for a `draw:custom-shape`, so
+    on the 41-preset fixture converted to `.odt` every one of the 41 shapes draws nothing at all —
+    not even the unwarped one's text. Warping into frames that draw nothing and are the wrong
+    height would be building a leaf of a missing branch. Write-up in
+    `dotnet/probes/odf-fontwork/results.md`.
+
 - [ ] Slides, layouts, masters, notes pages, handouts. **Slides are done**; a notes page and a
       handout are separate page kinds and neither is produced.
 - [x] Shape tree: rectangles, paths, groups, placeholders and pictures, in document order, which

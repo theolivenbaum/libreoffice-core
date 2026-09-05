@@ -7,6 +7,7 @@ using Paperless.OpenDocument;
 using Paperless.OpenDocument.Styles;
 using Paperless.Ooxml.DrawingML;
 using Paperless.Presentations.Layout;
+using Paperless.Presentations.Ooxml;
 using Paperless.Text.Layout;
 using Paperless.Vector;
 
@@ -386,6 +387,29 @@ internal sealed partial class OdpSlideLayout
         Paint? fill = Fill(cascade, box);
         if (!upright && fill is GradientPaint gradient) fill = gradient with { Transform = placement };
 
+        // WordArt replaces the whole shape, exactly as it does on the PPTX side: the curves become
+        // the outline, the shape's own path, pen and shadow go, and the words leave the text layer.
+        // `EnhancedCustomShapeEngine::render2` does not care which filter built the shape — a
+        // `draw:custom-shape` in text-path mode is the same `SdrObjCustomShape` a warped
+        // `p:sp` becomes — so the two paths have to answer the same way. See `OdfFontwork`.
+        //
+        // The fill is the shape's here and the first run's there, and that is not an inconsistency:
+        // ODF is the format the model is native to and states the Fontwork's fill as a shape
+        // property, while `lcl_copyCharPropsToShape` (`oox/source/drawingml/shape.cxx:721-905`) is
+        // what puts a DrawingML run's fill onto the shape in the first place. On a deck LibreOffice
+        // converted from `pptx`, the `draw:fill-color` it wrote *is* that copied run colour.
+        if (Warped(element, geometry, size, cascade) is { } warped)
+        {
+            return new PlacedShape
+            {
+                Name = Attribute(element, OdfNamespaces.Draw, "name"),
+                Outline = ShapeTransform.Apply(placement, warped),
+                Bounds = bounds,
+                Fill = fill,
+                Picture = Picture(element, bounds),
+            };
+        }
+
         return new PlacedShape
         {
             Name = Attribute(element, OdfNamespaces.Draw, "name"),
@@ -397,6 +421,39 @@ internal sealed partial class OdpSlideLayout
             Text = Text(element, outline.TextRectangle, placement, cascade),
             Shadow = Shadow(cascade),
         };
+    }
+
+    /// <summary>
+    /// The warped glyph outlines of a shape in text-path mode, in the shape's own coordinates.
+    /// </summary>
+    /// <remarks>
+    /// Null for the overwhelming majority of shapes, which state no <c>draw:text-path</c>, and also
+    /// for a warp whose face carries no <c>glyf</c> outlines — in which case the shape draws nothing
+    /// at all rather than falling back to unwarped text, because the reference has already replaced
+    /// it by then. That is the same fallback both OOXML families take.
+    /// </remarks>
+    private GraphicsPath? Warped(
+        XElement element,
+        XElement? geometry,
+        DocSize size,
+        IReadOnlyList<OdfStyleReference> cascade)
+    {
+        if (OdfFontwork.Read(geometry) is not { } warp) return null;
+
+        SlideTextBody body = OdfTextBody.Read(
+            _file, Paragraphs(element), [.. cascade, TextStyle(element)]);
+
+        if (body.Paragraphs.Count == 0) return null;
+
+        return SlideFontwork.Read(
+            body with
+            {
+                WarpFontworkType = warp.FontworkType,
+                WarpAdjustmentValues = warp.Adjustments,
+                WarpKeepsFontSize = warp.KeepsFontSize,
+            },
+            size,
+            _fonts).Outline;
     }
 
     /// <summary>
