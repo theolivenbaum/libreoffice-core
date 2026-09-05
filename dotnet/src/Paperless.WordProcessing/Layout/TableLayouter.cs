@@ -349,12 +349,17 @@ public static class TableLayouter
     /// Whether a cell merged down past this row may be cut as well. False everywhere but the one case
     /// where declining hides content — see the remark on the row-span test below.
     /// </param>
+    /// <param name="keepsSpacingAtPages">
+    /// The document's <c>PARA_SPACE_MAX_AT_PAGES</c> — <see cref="UpperSpaceAbove"/>, which is the only
+    /// thing it reaches here. A document without it gives a follow part no upper space at all.
+    /// </param>
     public static RowSlice? SliceRow(
         PageTableRow row,
         IReadOnlyList<PlacedTableCell> cells,
         Length drawn,
         Length room,
-        bool acrossRowSpans = false)
+        bool acrossRowSpans = false,
+        bool keepsSpacingAtPages = true)
     {
         ArgumentNullException.ThrowIfNull(row);
         ArgumentNullException.ThrowIfNull(cells);
@@ -431,7 +436,7 @@ public static class TableLayouter
         {
             if (chosen is { } already && already == candidate) continue;
 
-            Length needed = HeightAt(cells, rowTop, above, candidate, border);
+            Length needed = HeightAt(cells, rowTop, above, candidate, border, keepsSpacingAtPages);
             if (needed > room) break;
 
             chosen = candidate;
@@ -477,7 +482,7 @@ public static class TableLayouter
             {
                 if (chosen is { } already && already == candidate) continue;
 
-                Length needed = HeightAt(cells, rowTop, above, candidate, border);
+                Length needed = HeightAt(cells, rowTop, above, candidate, border, keepsSpacingAtPages);
                 if (needed > room) break;
 
                 chosen = candidate;
@@ -518,7 +523,9 @@ public static class TableLayouter
         // A part holding every remaining line is not a split at all; the caller places the whole row.
         if (complete && drawn <= Length.Zero) return null;
 
-        return new RowSlice(Sliced(cells, rowTop, above, cut, height), height, cut - rowTop, complete);
+        return new RowSlice(
+            Sliced(cells, rowTop, above, cut, height, keepsSpacingAtPages),
+            height, cut - rowTop, complete);
     }
 
     /// <summary>
@@ -553,7 +560,12 @@ public static class TableLayouter
     /// </para>
     /// </remarks>
     private static Length HeightAt(
-        IReadOnlyList<PlacedTableCell> cells, Length rowTop, Length above, Length cut, Length border)
+        IReadOnlyList<PlacedTableCell> cells,
+        Length rowTop,
+        Length above,
+        Length cut,
+        Length border,
+        bool keepsSpacingAtPages)
     {
         // The row's own first part keeps the offset it was laid out with — see `Sliced` — so its cells
         // begin at the top of their flow and not at their first line.
@@ -583,7 +595,7 @@ public static class TableLayouter
 
                 top ??= isFirst
                     ? flow.Area.Y
-                    : flow.Area.Y + line.Top - UpperSpaceAbove(flow, line);
+                    : flow.Area.Y + line.Top - UpperSpaceAbove(flow, line, keepsSpacingAtPages);
                 bottom = end;
             }
 
@@ -670,25 +682,60 @@ public static class TableLayouter
     /// table cell where an ordinary body paragraph would drop it.
     /// </para>
     /// <para>
+    /// <strong>It is the paragraph's own <c>w:spacing w:before</c> and not the gap the flow was laid out
+    /// with, and the two differ whenever the paragraph above it states a space-after.</strong>
+    /// <c>SwFlowFrame::CalcUpperSpace</c> (<c>sw/source/core/layout/flowfrm.cxx:1589,1744-1755</c>) asks
+    /// <c>GetPrevFrameForUpperSpaceCalc_</c> for the frame above and takes the collapsing branch only
+    /// when it finds one. The paragraph that opens a follow part has none — the paragraph above it is in
+    /// the master cell frame on the page before — so it falls to the <c>else if</c>, where
+    /// <c>nUpper = pAttrs-&gt;GetULSpace().GetUpper()</c> is the paragraph's whole upper space, with
+    /// neither the collapse against the previous frame's lower space nor contextual spacing consulted at
+    /// all. <c>HasParaSpaceAtPages</c> (<c>:1438</c>) grants it unconditionally to anything
+    /// <c>IsInTab</c>, and <c>lcl_PartiallyCollapseUpper</c> (<c>:1541</c>) returns early for a frame in
+    /// a table, so nothing takes it away again.
+    /// </para>
+    /// <para>
+    /// Measured on <c>dotnet/probes/words-clip-rowsplit/</c>, a four-paragraph cell cut between two of
+    /// its paragraphs, as the distance from the follow part's own top rule to the first baseline on
+    /// page 2. Both installed references agree on every row:
+    /// </para>
+    /// <code>
+    ///   before  after   24.2.7.2   26.2.4.2   this engine before
+    ///      240      0      12.76      12.76      12.51
+    ///        0    240       0.76       0.76       0.51
+    ///      240    240      12.76      12.76       0.51
+    ///      240    120      12.76      12.76       6.51
+    ///      120    240       6.76       6.76       0.51
+    /// </code>
+    /// <para>
+    /// The reference is the paragraph's own <c>before</c> in all five; the old reading was
+    /// <c>max(before − after, 0)</c>, which agrees only on the two rows where nothing collapses. The
+    /// constant 0.25 pt is where the part's top rule sits and not this spacing — it is there on the
+    /// agreeing rows too. On <c>mde087077~283.docx</c> the missing 6 pt put every page after a split row
+    /// 6 pt high and fitted one bulletin row too many onto page 3.
+    /// </para>
+    /// <para>
     /// Only a follow part is affected: the row's own first part starts at the flow's top, which already
     /// holds the first paragraph's space-before.
     /// </para>
     /// </remarks>
     /// <param name="flow">The cell's flow, for the paragraph the line belongs to.</param>
     /// <param name="line">The first line the part holds.</param>
-    private static Length UpperSpaceAbove(PlacedFlow flow, PlacedLine line)
+    /// <param name="keepsSpacingAtPages">
+    /// The document's <c>PARA_SPACE_MAX_AT_PAGES</c>, which is the gate on the whole <c>else if</c>
+    /// branch above. Both OOXML and ODF default it on, so this is false only for a document that turns
+    /// it off by hand.
+    /// </param>
+    private static Length UpperSpaceAbove(
+        PlacedFlow flow, PlacedLine line, bool keepsSpacingAtPages)
     {
-        // Only a paragraph's first line carries it, so a line cut out of the middle of one has to be
-        // traced back to the line that does.
-        if (line.StartsParagraph) return line.UpperSpace;
+        if (!keepsSpacingAtPages) return Length.Zero;
 
-        foreach (PlacedLine other in flow.Lines)
-        {
-            if (other.ParagraphIndex != line.ParagraphIndex || !other.StartsParagraph) continue;
-            return other.UpperSpace;
-        }
-
-        return Length.Zero;
+        return line.ParagraphIndex >= 0
+               && line.ParagraphIndex < flow.Blocks.Count
+               && flow.Blocks[line.ParagraphIndex] is PageParagraph paragraph
+            ? paragraph.Format.SpaceBefore
+            : Length.Zero;
     }
 
     /// <summary>
@@ -867,7 +914,12 @@ public static class TableLayouter
 
     /// <summary>The cells of one part, holding its lines and positioned from the part's own top.</summary>
     private static List<PlacedTableCell> Sliced(
-        IReadOnlyList<PlacedTableCell> cells, Length rowTop, Length above, Length cut, Length height)
+        IReadOnlyList<PlacedTableCell> cells,
+        Length rowTop,
+        Length above,
+        Length cut,
+        Length height,
+        bool keepsSpacingAtPages)
     {
         List<PlacedTableCell> sliced = new(cells.Count);
 
@@ -905,7 +957,7 @@ public static class TableLayouter
 
                     // Less the space the part is charged for above it, so the text lands where the height
                     // `HeightAt` reported puts it. See `UpperSpaceAbove`.
-                    first ??= line.Top - UpperSpaceAbove(flow, line);
+                    first ??= line.Top - UpperSpaceAbove(flow, line, keepsSpacingAtPages);
                     kept.Add(line);
                 }
 
