@@ -360,13 +360,23 @@ drawings to it, so implementing it once buys shapes in all three.
 ### Look at the rendering. Do not chase it through metrics alone.
 
 **This is the standing instruction and it comes before the rest of this section.** The gate is
-page count, extractable words within max(2%, 3), and unembedded fonts. **It is blind to most real
+page count, extractable text within max(2%, floor), and unembedded fonts. **It is blind to most real
 defects** — a whole track can be 163 of 163 page-exact while the pages are visibly wrong.
 
-*The word band was described here as "2%+3" for several rounds and that is not the rule.
-`batch-check.sh:195` fails a document when `d > b*0.02 && d > 3` — an AND, so the band is
-**max(2%, 3)**, not their sum. It matters at the boundary: a 1299-word document tolerates
-25.98 words and not 28.98, and one regression found on 2026-08-14 sat at exactly 27.*
+*The band was described here as "2%+3" for several rounds and that is not the rule.
+`batch-check.sh` fails a document when `d > b*0.02 && d > floor` — an AND, so it is
+**max(2%, floor)**, not their sum. It matters at the boundary, and one regression found on
+2026-08-14 sat at exactly 27.*
+
+***And the input is no longer words.*** As of **2026-09-05** `batch-check.sh`:279 compares
+**alphanumeric characters** with a floor of **15**, not tokens with a floor of 3 — the same band
+shape over a different count, transferred rather than loosened, and replayed over 9552 stored rows
+without changing one verdict. Two consequences a round pays for. The line number and the "max(2%,
+3)" above were both stale within a fortnight of being written down, so **read the block rather than
+quoting this**. And a scorer written from the older rule silently disagrees with the scoreboard:
+round 67's replay of a banked gate reported eight verdict movements of which **five were the rule
+and not the tree**. The discriminator is in the data — a banked `parity.tsv` scored the new way
+carries a ninth column, `glyphs`, as `ours/ref`.
 
 ```bash
 export PAPERLESS_CLI=<the tree you mean to measure>/dotnet/tools/…/Paperless.Cli
