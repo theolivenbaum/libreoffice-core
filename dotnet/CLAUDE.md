@@ -616,7 +616,8 @@ landed, and `dotnet/probes/` is full of archival scripts that name them. The man
 followed forward through it.
 
 What the grouping surfaced immediately, and the old layout hid: three `ABCD-*` documents share
-one bug, the two Holdover Tables share one bug and one 13-page gap, three documents share
+one bug, the two Holdover Tables were carried as sharing one bug and one 13-page gap (**they do
+not — see the correction below**), three documents share
 rotated cell text drawn upright a glyph per line, two share a background raster emitted after
 the text, and two share a first-page header repeated on every page. Every one of those was
 split across different batches before.
@@ -759,6 +760,22 @@ from the reference, 85 of them `DejaVu Sans` against our `DejaVu Serif` — and 
 85 is this version rule, not a bug. A round was dispatched to "fix" it and would have broken
 correct behaviour; the agent challenged the brief from the source and was right. Read the faces
 out of both PDFs, with the Latin Noto aside, before believing any of it.
+
+**Measured over the whole gate, not a sample: 49 of the 87 mismatches — 56% — are this.** Round 66
+screened every one against 26.2.4.2 before touching anything
+(`probes/mismatch-classify-01/`): 49 the version gap, 7 the two references disagreeing with each
+other, 7 the raster ceiling, 6 a cell holding `TODAY()`, and **no group of three sharing a cause**
+in what is left. The largest movers are outright: `sectors-defense-and-aerospace.xlsx` is 449 pages
+ours, 227 on 24.2 and **449 on 26.2**; `A_320.doc` 118/150/**118**; `CIS_Debian…xls` 88/109/**88**.
+The two Holdover Tables, carried above as sharing a 13-page gap, are **page-exact against 26.2**
+(155/155 and 167/167) and within 0.4% on glyphs.
+
+**And the trap inside that: 21 of the 49 are sheets where 24.2 draws far more text than we do, with
+our output carrying truncated fragments** — which reads exactly like "we clip cell text we should
+spill" and is not. `essd-16-3433-2024-t02.xlsx` is the witness: our pages 2–4 are empty, 24.2's
+carry an overflowing column's continuation, and **26.2 gives 2349 glyphs against our 2346**. A round
+that takes that family on against the gate's own reference will implement 24.2 behaviour and
+regress the tree.
 
 **Screen a document against 26.2 before working it.** `probes/words-version-screen/screen.py` does
 the whole queue and `bucket.py` one catalogued cause. Rescoring the worst thirty words documents
@@ -1109,12 +1126,17 @@ source>` is the first thing to run, not a manifest edit.
 
 **The reference half of the gate is not reproducible for date-bearing sheets, and it decays the
 manifest on its own.** Measured across three sweeps hours apart in round 51: four documents'
-*reference* word counts moved with the wall clock while ours stayed pinned, because
-`batch-check.sh` renders the reference through `soffice` with no `SOURCE_DATE_EPOCH` and a sheet
-whose header holds `&D`/`&T`, or whose cells hold `TODAY()`, prints today. `paperless render`
-honours the reproducible-builds convention on our side, so **the two halves of the gate do not
-have the same reproducibility properties**, and a stored verdict on such a document can go stale
-with nobody touching the code.
+*reference* word counts moved with the wall clock while ours stayed pinned, so **the two halves of
+the gate do not have the same reproducibility properties**, and a stored verdict on such a document
+can go stale with nobody touching the code.
+
+**The mechanism given here was wrong and the correct one has no environment-variable fix.** This
+said `batch-check.sh` renders the reference with no `SOURCE_DATE_EPOCH` while `paperless render`
+honours it — but the script sets the variable on **neither** side, so a `&D`/`&T` header prints
+today in both renderings and cancels. What actually diverges is **`TODAY()` in a cell**: the
+reference recalculates the formula on open and we print the value cached in the file. Six documents
+are affected and they drift *further apart* every day. Setting `SOURCE_DATE_EPOCH` on both sides
+does not close it; only evaluating the volatile function would.
 
 The practical rule when a sweep diff appears: **split it by which side moved.** Round 51 separated
 nine real movements from three calendar ones that way. Volatile dates reach **16 of the 40 open
