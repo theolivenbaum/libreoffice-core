@@ -227,7 +227,19 @@ internal static class XlsxDrawings
         if (shape is not null && Child(shape, DrawingNamespace, "txBody") is { } body
             && ShapeText(body, fonts, StyleFace(shape, fonts)) is { IsEmpty: false } shapeText)
         {
-            drawing = drawing with { Text = shapeText };
+            // The preset the text is laid out inside, which is not the same rectangle as the
+            // anchor: see `SheetShapeText.Preset`.
+            XElement? geometry = Child(
+                Child(shape, DrawingNamespace, "spPr"), MainNamespace, "prstGeom");
+
+            drawing = drawing with
+            {
+                Text = shapeText with
+                {
+                    Preset = Attribute(geometry, "prst"),
+                    Adjustments = Adjustments(geometry),
+                },
+            };
         }
 
         // A shape carries no image and no chart, so it reaches the print area and stops there.
@@ -551,6 +563,39 @@ internal static class XlsxDrawings
            && Child(style, MainNamespace, "fontRef") is { } reference
             ? scheme.ForReference(reference.Attribute("idx")?.Value, "latin")
             : null;
+
+    /// <summary>
+    /// The adjustment values a shape states for its preset, by guide name, or null for none.
+    /// </summary>
+    /// <remarks>
+    /// <c>a:avLst/a:gd</c> states them as <c>fmla="val N"</c>, in the preset's own units — a
+    /// hundred-thousandth of the shape for a fraction, a sixtieth of a degree for an angle — and
+    /// the evaluator wants the bare number. Anything that is not a <c>val</c> is skipped rather
+    /// than guessed at, which leaves the preset's own default in force.
+    /// </remarks>
+    private static Dictionary<string, double>? Adjustments(XElement? geometry)
+    {
+        if (Child(geometry, MainNamespace, "avLst") is not { } list) return null;
+
+        Dictionary<string, double> values = [];
+        foreach (XElement guide in list.Elements(XName.Get("gd", MainNamespace)))
+        {
+            if (guide.Attribute("name")?.Value is not { Length: > 0 } name) continue;
+            if (guide.Attribute("fmla")?.Value is not { Length: > 4 } formula) continue;
+            if (!formula.StartsWith("val ", StringComparison.Ordinal)) continue;
+
+            if (double.TryParse(
+                    formula.AsSpan(4).Trim(),
+                    NumberStyles.Float,
+                    CultureInfo.InvariantCulture,
+                    out double value))
+            {
+                values[name] = value;
+            }
+        }
+
+        return values.Count == 0 ? null : values;
+    }
 
     /// <summary>A run's <c>b</c>, or null where it states none and inherits.</summary>
     /// <remarks>

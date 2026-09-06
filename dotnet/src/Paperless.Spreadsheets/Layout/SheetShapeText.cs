@@ -201,6 +201,40 @@ public sealed record SheetShapeText
     /// </remarks>
     public bool ClipsVerticalOverflow { get; init; }
 
+    /// <summary>
+    /// The <c>a:prstGeom/@prst</c> of the shape the text sits in, or null when it states none.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>A preset shape states its own text rectangle and it is usually not the bounding
+    /// box.</strong> Every preset in the DrawingML catalogue may carry an <c>a:rect</c> of four
+    /// guide expressions, and a rounded rectangle's insets it by the corner radius on all four
+    /// sides — <c>il = x1 * 29289/100000</c> where <c>x1 = min(w, h) * adj/100000</c>, so a
+    /// stadium-shaped button at <c>adj="50000"</c> loses <c>0.1464 * min(w, h)</c> from each edge
+    /// before the text insets are taken at all. LibreOffice reads the same table through
+    /// <c>EnhancedCustomShape2d::GetTextRect</c> and lays the text out in that rectangle.
+    /// </para>
+    /// <para>
+    /// It decides whether a body overflows, so on a shape that also states
+    /// <see cref="ClipsVerticalOverflow"/> it decides whether the text is drawn at all. Measured on
+    /// <c>076_Inventory_list_accessibility_guide…xlsx</c>, whose navigation buttons are 204 x 33 pt
+    /// <c>roundRect</c>s holding one 16 pt line: the bounding box leaves 25.8 pt of room for an
+    /// 18.6 pt line and nothing is clipped, while the preset's own rectangle leaves 16.1 pt and
+    /// the reference draws two of the seven.
+    /// </para>
+    /// </remarks>
+    public string? Preset { get; init; }
+
+    /// <summary>
+    /// The <c>a:avLst</c> values the shape states for its preset, by guide name.
+    /// </summary>
+    /// <remarks>
+    /// Carried beside <see cref="Preset"/> because the text rectangle is a function of them: the
+    /// same <c>roundRect</c> insets its text by nothing at <c>adj="0"</c> and by a seventh of its
+    /// shorter side at the maximum.
+    /// </remarks>
+    public IReadOnlyDictionary<string, double>? Adjustments { get; init; }
+
     /// <summary>True when there is nothing to draw.</summary>
     public bool IsEmpty
     {
