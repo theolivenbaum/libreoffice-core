@@ -294,6 +294,24 @@ internal sealed class XlsChartData
 
     private readonly Dictionary<(int Sheet, int Row, int Column), Held> _cells = [];
 
+    /// <summary>The rows each sheet hides, and the columns, for a chart that plots what it shows.</summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>Recorded as it is met rather than asked for at the end, because it is met
+    /// first.</strong> A <c>ROW</c> record and a <c>COLINFO</c> both precede the cells they
+    /// describe within a sheet substream, and by the time a chart's <c>CHPROPERTIES</c> is read
+    /// the sheet may not have been opened at all. See <see cref="Numbers"/> for the rule this
+    /// serves.
+    /// </para>
+    /// <para>
+    /// Whole sets rather than ranges: a sheet hides tens of rows, not tens of thousands, and only
+    /// the sheets some chart plots are recorded at all.
+    /// </para>
+    /// </remarks>
+    private readonly Dictionary<int, HashSet<int>> _hiddenRows = [];
+
+    private readonly Dictionary<int, HashSet<int>> _hiddenColumns = [];
+
     /// <summary>True when no chart in the workbook names a cell, so no sheet need offer any.</summary>
     public bool IsEmpty => _wanted.Count == 0;
 
@@ -357,12 +375,57 @@ internal sealed class XlsChartData
         NumberFormatCode? format = null)
         => _cells[(sheet, row, column)] = new Held(number, text ?? string.Empty, format);
 
+    /// <summary>Notes that a sheet hides one row.</summary>
+    /// <param name="sheet">Which sheet.</param>
+    /// <param name="row">The row it hides.</param>
+    public void HideRow(int sheet, int row) => Hide(_hiddenRows, sheet, row);
+
+    /// <summary>Notes that a sheet hides a run of columns.</summary>
+    /// <param name="sheet">Which sheet.</param>
+    /// <param name="first">The first column of the run.</param>
+    /// <param name="last">Its last column, inclusive.</param>
+    public void HideColumns(int sheet, int first, int last)
+    {
+        for (int column = first; column <= last && column <= MaxColumn; column++)
+            Hide(_hiddenColumns, sheet, column);
+    }
+
+    private static void Hide(Dictionary<int, HashSet<int>> into, int sheet, int at)
+    {
+        if (sheet < 0 || at < 0) return;
+
+        if (!into.TryGetValue(sheet, out HashSet<int>? hidden)) into[sheet] = hidden = [];
+        hidden.Add(at);
+    }
+
+    /// <summary>
+    /// Whether a cell is one a chart plotting only what its sheet shows would skip.
+    /// </summary>
+    /// <remarks>
+    /// <c>ScChart2DataSequence::BuildDataCache</c> asks <c>ColHidden</c> and then
+    /// <c>RowHidden</c> and <c>continue</c>s past the cell — it does not substitute a gap, so the
+    /// points after it move up (<c>sc/source/ui/unoobj/chart2uno.cxx</c>:2636-2646). That is the
+    /// difference between a series of seven and a series of twenty whose last thirteen are
+    /// <c>#N/A</c>.
+    /// </remarks>
+    private bool IsHidden(int sheet, int row, int column)
+        => (_hiddenRows.TryGetValue(sheet, out HashSet<int>? rows) && rows.Contains(row))
+           || (_hiddenColumns.TryGetValue(sheet, out HashSet<int>? columns) && columns.Contains(column));
+
     /// <summary>The numbers a rectangle holds, one per cell, null where a cell has none.</summary>
-    public List<double?> Numbers(int sheet, XlsChartRange range)
+    /// <param name="sheet">The sheet the rectangle is on.</param>
+    /// <param name="range">The rectangle.</param>
+    /// <param name="visibleOnly">
+    /// Whether a hidden cell is left out of the sequence altogether, which is what
+    /// <c>CHPROPERTIES</c>' <c>SHOWVISIBLEONLY</c> asks for.
+    /// </param>
+    public List<double?> Numbers(int sheet, XlsChartRange range, bool visibleOnly = false)
     {
         List<double?> values = [];
         foreach ((int row, int column) in range.Cells())
         {
+            if (visibleOnly && IsHidden(sheet, row, column)) continue;
+
             values.Add(_cells.TryGetValue((sheet, row, column), out Held cell) ? cell.Number : null);
         }
 
@@ -370,11 +433,16 @@ internal sealed class XlsChartData
     }
 
     /// <summary>The displayed text a rectangle holds, one per cell.</summary>
-    public List<string?> Texts(int sheet, XlsChartRange range)
+    /// <param name="sheet">The sheet the rectangle is on.</param>
+    /// <param name="range">The rectangle.</param>
+    /// <param name="visibleOnly">See <see cref="Numbers"/>.</param>
+    public List<string?> Texts(int sheet, XlsChartRange range, bool visibleOnly = false)
     {
         List<string?> values = [];
         foreach ((int row, int column) in range.Cells())
         {
+            if (visibleOnly && IsHidden(sheet, row, column)) continue;
+
             values.Add(_cells.TryGetValue((sheet, row, column), out Held cell) ? cell.Text : null);
         }
 
@@ -408,10 +476,12 @@ internal sealed class XlsChartData
     /// </remarks>
     /// <param name="sheet">The sheet the rectangle is on.</param>
     /// <param name="range">The rectangle.</param>
-    public NumberFormatCode? FormatOf(int sheet, XlsChartRange range)
+    /// <param name="visibleOnly">See <see cref="Numbers"/>.</param>
+    public NumberFormatCode? FormatOf(int sheet, XlsChartRange range, bool visibleOnly = false)
     {
         foreach ((int row, int column) in range.Cells())
         {
+            if (visibleOnly && IsHidden(sheet, row, column)) continue;
             if (!_cells.TryGetValue((sheet, row, column), out Held cell)) continue;
             if (cell.Number is null) continue;
 
@@ -434,4 +504,7 @@ internal sealed class XlsChartData
     /// bad token can make a sheet read remember.
     /// </remarks>
     private const int MaxCellsPerRange = 65536;
+
+    /// <summary>The last column a BIFF8 sheet can hold, which bounds a <c>COLINFO</c> run.</summary>
+    private const int MaxColumn = 255;
 }

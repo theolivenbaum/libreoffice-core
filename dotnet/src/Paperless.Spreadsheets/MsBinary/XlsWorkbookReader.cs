@@ -2292,8 +2292,11 @@ internal sealed class XlsWorkbookReader
         int xf = _stream.ReadUInt16();
         ushort options = _stream.ReadUInt16();
 
-        _page.AddColumns(first, last, width, (options & 0x0001) != 0);
+        bool hidden = (options & 0x0001) != 0;
+        _page.AddColumns(first, last, width, hidden);
         _sheetDecoration.SetColumns(first, last, xf);
+
+        if (hidden) _chartData?.HideColumns(_sheetIndex, first, last);
 
         for (int column = first; column <= last && column <= SheetAddress.MaxColumn; column++)
         {
@@ -2322,7 +2325,13 @@ internal sealed class XlsWorkbookReader
 
         // fUnsynced, bit 6: the height does not match the font, meaning a user set it. Without it
         // the height is Excel's own measurement and Calc recomputes it on load.
-        _page.AddRow(row, height, (flags & 0x0020) != 0, (flags & 0x0040) != 0);
+        bool hidden = (flags & 0x0020) != 0;
+        _page.AddRow(row, height, hidden, (flags & 0x0040) != 0);
+
+        // A chart that plots only what its sheet shows needs to know which rows those are, and
+        // this record is where a sheet says so. Recorded for every sheet a chart reads, because
+        // the chart is built after the last of them. See XlsChartData.Numbers.
+        if (hidden) _chartData?.HideRow(_sheetIndex, row);
 
         // The trailing ixfe is the row's default cell format, and it only applies when the
         // record says so: fGhostDirty, bit 7 of grbit, is what makes the field mean anything.
