@@ -27,21 +27,24 @@ namespace Paperless.Fidelity.Tests;
 /// honest across a LibreOffice upgrade. Measured on 24.2.7.2.
 /// </para>
 /// </remarks>
-// [reference moved 24.2.7.2 -> 26.2.4.2] 26.2.4.2 shrinks less than 24.2.7.2 did, and on this pair it
-// no longer buys a line. Measured, both documents through both binaries — 24.2.7.2 sets the mode-15
-// document in **4** lines and the mode-12 one in 5; 26.2.4.2 sets **both in 5**, with the mode-15
-// document's last line ending at 113.70 pt against the mode-12 one's 164.92, so the setting still has
-// an effect and it is smaller. `sw/source/core/text/portxt.cxx`:531-812 is a rewrite of the shrinking
-// decision — word-spacing minimum, maximum and desired, a hyphenation-zone "level", and a weighted
-// choice between shrinking and expanding at `fExpansionWeight = 1/1.7` — carrying tdf#158776,
-// tdf#158436 and tdf#164499. It is deliberate upstream work rather than a defect, so it is ours to
-// follow and not to close.
+// [rule ported 2026-09-06; the residual is handed back] 26.2.4.2 shrinks less than 24.2.7.2 did and
+// this pair is where it shows. 24.2.7.2 set the mode-15 document in **4** lines and the mode-12 one in
+// 5; 26.2.4.2 sets both in 5. That was recorded as upstream work to follow, and it has now been
+// followed: `portxt.cxx`:769-805 does not take the deepest squeeze the 75% floor allows, it weighs the
+// blanks the longer line would squeeze against the blanks the shorter line would stretch, discounting
+// the stretch by 1/1.7. `JustificationShrink.PrefersShrinking` is that comparison and it calls all six
+// decided rows of a text-width sweep of this very paragraph — see `probes/words-justify-shrink/`.
 //
-// The guard below is corrected rather than relaxed: its premise was the *line count*, which is one
-// consequence of the setting and not the setting, and it now asserts the pair is set differently by
-// whichever of the two measures applies. `TheParagraphBreaksWhereLibreOfficeBreaksIt` still fails on
-// `justify-shrink-2013.docx`, ours 4 lines against 5, because we implement 24.2.7.2's rule; closing it
-// means porting that decision and it is not a tolerance question.
+// With it in place the pair matches 26.2.4.2 **line for line, both documents**, at text widths of 9639
+// and 9637 twips. The fixture's own width is 9638, and that is the one width in the neighbourhood where
+// the reference disagrees with itself: sweeping the disputed line's own paragraph a twip at a time,
+// 26.2.4.2 takes the word `line` at all thirteen widths from 9631 to 9644 except 9638. 9638 twips is
+// exactly the natural advance of that line as the reference measures it — 481.9000 pt against our
+// 481.9400 — so the fixture's measure lands on the tie, and 0.8 twips of advance puts us the other side
+// of it. `TheParagraphBreaksWhereLibreOfficeBreaksIt` therefore still fails on
+// `justify-shrink-2013.docx`, now on line 3 rather than on the line count, and what it is failing on is
+// the advance divergence at a tie the reference itself does not resolve consistently. It is not ours to
+// close here, and the page width was deliberately not moved to make it green.
 public sealed class JustificationShrinkComparisonTests : IDisposable
 {
     /// <summary>How far a drawn line's right edge may sit from LibreOffice's, in points.</summary>

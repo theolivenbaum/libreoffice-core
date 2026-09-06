@@ -336,6 +336,7 @@ public sealed class LineFiller
             Length chosenWidth = Length.Zero;
             int chosenVisibleEnd = lineStart;
             Length chosenAllowance = Length.Zero;
+            Length chosenBlanks = Length.Zero;
 
             // Where a tab ends the line whatever the break iterator offered, or the text's end when
             // none does. Writer's portions are built in document order and a tab that reaches the
@@ -363,16 +364,31 @@ public sealed class LineFiller
 
                 // The allowance belongs to the candidate rather than to the line already chosen: the
                 // word being tried brings a blank with it, and that blank can be squeezed too.
+                Length blanks = shrinks
+                    ? JustificationShrink.BlanksOn(text, lineStart, visibleEnd, widthBetween)
+                    : Length.Zero;
                 Length allowance = shrinks
                     ? JustificationShrink.AllowanceFor(text, lineStart, visibleEnd, widthBetween)
                     : Length.Zero;
 
                 if (width > limit + allowance && chosen >= 0) break;
 
+                // Reaching the floor is what lets this word onto the line; it is not what decides it.
+                // Word 2013's justification weighs the blanks this candidate would squeeze against the
+                // blanks the candidate already chosen would stretch, and keeps the shorter line when
+                // stretching wins — see <see cref="JustificationShrink.PrefersShrinking"/>.
+                if (shrinks && chosen >= 0 && width > limit
+                    && !JustificationShrink.PrefersShrinking(
+                        limit, chosenWidth, chosenBlanks, width, blanks))
+                {
+                    break;
+                }
+
                 chosen = end;
                 chosenWidth = width;
                 chosenVisibleEnd = visibleEnd;
                 chosenAllowance = allowance;
+                chosenBlanks = blanks;
                 probe++;
 
                 // A required break ends the line whether or not the text would have fitted: a manual
