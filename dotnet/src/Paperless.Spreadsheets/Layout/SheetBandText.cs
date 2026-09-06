@@ -330,8 +330,18 @@ internal static class SheetBandText
     /// <strong>Cap height is a proxy for the glyph bounding box</strong>, which is what
     /// drawinglayer actually measures. It is exact for capitals and too high for text that reaches
     /// no further than the x-height, where it makes us draw a little more readily than the
-    /// reference. The alternative is parsing <c>glyf</c> per glyph, which buys nothing on this
-    /// corpus: the nearest case to the boundary is 85 pt clear of it.
+    /// reference. The alternative is parsing <c>glyf</c> per glyph, which buys nothing on
+    /// <em>this</em> clip: the nearest case to the boundary is 85 pt clear of it.
+    /// </para>
+    /// <para>
+    /// <strong>It buys a great deal on the other clip, and that is a correction to the sentence
+    /// above rather than an exception to it.</strong> A shape stating <c>vertOverflow="clip"</c> is
+    /// measured the same way against a rectangle whose margins are a point or two rather than 85,
+    /// and there a proxy is not good enough: 26.2.4.2 draws <c>Icon sets</c> and drops
+    /// <c>Inventory list</c> from two identical 204 x 33 pt buttons, and all that separates them is
+    /// the ink below the baseline. <see cref="GlyphInkExtents"/> reads the boxes for that and
+    /// <see cref="BandRun.Ink"/> is where they arrive. This band clip is deliberately left on the
+    /// proxy, because moving it would change header and footer text for no measured reason.
     /// </para>
     /// </remarks>
     /// <param name="size">The em size.</param>
@@ -433,7 +443,9 @@ internal static class SheetBandText
     {
         if (text.Length == 0) return null;
 
-        (OpenTypeFace? resolved, FontReference reference, _) = FaceFor(family, bold, italic);
+        (OpenTypeFace? resolved, FontReference reference, LineMetrics? metrics) =
+            FaceFor(family, bold, italic);
+
         if (resolved is not { } face) return null;
 
         ShapedText shaped = TextShaper.Default.Shape(face, text);
@@ -455,7 +467,7 @@ internal static class SheetBandText
             pen += advance;
         }
 
-        return new BandRun(glyphs, clusters, reference, size, text, pen);
+        return new BandRun(glyphs, clusters, reference, size, text, pen, face, metrics);
     }
 
     /// <summary>
@@ -586,6 +598,9 @@ internal sealed class BandRun
     private readonly FontReference _font;
     private readonly Length _size;
     private readonly string _text;
+    private readonly OpenTypeFace? _face;
+    private readonly LineMetrics? _metrics;
+    private (Length Above, Length Below)? _ink;
 
     internal BandRun(
         List<PositionedGlyph> glyphs,
@@ -593,18 +608,77 @@ internal sealed class BandRun
         FontReference font,
         Length size,
         string text,
-        Length width)
+        Length width,
+        OpenTypeFace? face = null,
+        LineMetrics? metrics = null)
     {
         _glyphs = glyphs;
         _clusters = clusters;
         _font = font;
         _size = size;
         _text = text;
+        _face = face;
+        _metrics = metrics;
         Width = width;
     }
 
     /// <summary>How far the run's pen travels.</summary>
     public Length Width { get; }
+
+    /// <summary>
+    /// How far this run's ink reaches above its baseline and how far below it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The <em>ink</em>, not the line box, because that is what LibreOffice clips a shape's text
+    /// against: a portion survives a <c>vertOverflow="clip"</c> body only when its start position
+    /// and both corners of its glyph bounding rectangle lie inside the clip range
+    /// (<c>svx/source/svdraw/svdoutl.cxx</c>:120-160). Two labels of the same size in the same box
+    /// therefore get different answers, and the difference is whether any of their letters
+    /// descends.
+    /// </para>
+    /// <para>
+    /// Measured lazily and once: only the shape painter asks, and it asks per line rather than per
+    /// glyph. A face with no <c>glyf</c> falls back to the declared ascent and descent, which is
+    /// the line box again and clips a little more readily than the reference.
+    /// </para>
+    /// </remarks>
+    public (Length Above, Length Below) Ink => _ink ??= MeasureInk();
+
+    private (Length Above, Length Below) MeasureInk()
+    {
+        Length fallbackAbove = _metrics is { } declared
+            ? declared.ScaledAscent(_size)
+            : _size * 0.9;
+        Length fallbackBelow = _metrics is { } stated
+            ? stated.ScaledDescent(_size)
+            : _size * 0.25;
+
+        if (!GlyphInkExtents.CanMeasure(_face) || _face is not { UnitsPerEm: > 0 } face)
+            return (fallbackAbove, fallbackBelow);
+
+        Length inkAbove = Length.Zero;
+        Length inkBelow = Length.Zero;
+        bool measured = false;
+
+        foreach (PositionedGlyph glyph in _glyphs)
+        {
+            if (GlyphInkExtents.Of(face, glyph.GlyphId) is not { } extent)
+                return (fallbackAbove, fallbackBelow);
+
+            measured = true;
+
+            // The glyph's own offset is in document space, where y grows downward, so it lowers
+            // the ink by exactly as much as it raises the room above it.
+            Length top = (_size * ((double)extent.Above / face.UnitsPerEm)) - glyph.Offset.Y;
+            Length bottom = (_size * ((double)extent.Below / face.UnitsPerEm)) + glyph.Offset.Y;
+
+            if (top > inkAbove) inkAbove = top;
+            if (bottom > inkBelow) inkBelow = bottom;
+        }
+
+        return measured ? (inkAbove, inkBelow) : (Length.Zero, Length.Zero);
+    }
 
     /// <summary>The run placed at a baseline origin.</summary>
     public GlyphRun At(DocPoint origin) => new()

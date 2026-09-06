@@ -841,6 +841,23 @@ Arabic document can draw at all.
 
 With only the eight Latin faces aside, the tarball answers **DejaVu**, like a distro build.
 
+**And there is a third face to know about, which is neither a duplicate nor a Noto:
+`LiberationSansNarrow`.** As of 2026-09-06 the four `LiberationSansNarrow-*.ttf` are still in
+`/opt/libreoffice26.2/share/fonts/truetype` — the `mv` above matched them but they are back, or were
+never moved — and the system carries **no narrow face at all** (`fc-list | grep -i narrow` is
+empty, `fc-match "Arial Narrow"` answers DejaVu Sans). So the tarball is the only stack on this
+machine that can resolve *Arial Narrow*, and on a document naming it the tarball's 26.2.4.2 lays out
+in a face **36% narrower** than anything else here: every line that fits for it wraps for everyone
+else, and the page is not comparable line for line.
+
+Measured on `words/done-013/doc/omrIMInterpretiveGuideLine.doc`: the tarball embeds
+`LiberationSansNarrow` and `LiberationSansNarrow-Bold`, while **24.2.7.2 and Paperless both embed
+DejaVu Sans and DejaVu Sans-Bold** and agree with each other, line for line, to **0.1 pt on 30 of
+the 31 lines of page 1**. Against the tarball the same page disagrees everywhere from the title
+down. **49 of the corpus's documents name a Narrow family** — sheets 25, words 22, slides 2 — so
+this is not a curiosity. On any of them, screen against `/usr/bin/soffice`, not against the tarball;
+the version rule the section above describes is not what separates them.
+
 ### The two references differ in a *rule*, not only in their fonts, and it decides font fallback
 
 **24.2.7.2 lets the family name decide; 26.2.4.2 lets a declared family class beat it.**
