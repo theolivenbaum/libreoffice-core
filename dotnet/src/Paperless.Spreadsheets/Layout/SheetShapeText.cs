@@ -122,6 +122,29 @@ public sealed record SheetShapeText
     /// </remarks>
     public static Length DefaultSize { get; } = Length.FromPoints(12);
 
+    /// <summary>The face a run that names none is set in.</summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>The drawing layer's default, not the sheet's.</strong> A shape on a sheet is an
+    /// <c>SdrObject</c> whose text lives in the drawing layer's item pool, and
+    /// <c>SdrModel::SetTextDefaults</c> seeds that pool with
+    /// <c>DefaultFontType::LATIN_TEXT</c> (<c>svx/source/svdraw/svdmodel.cxx</c>:668-669) — which
+    /// <c>VCL.xcu</c> heads with <b>Liberation Serif</b>. A cell takes
+    /// <c>DefaultFontType::LATIN_SPREADSHEET</c> instead
+    /// (<c>sc/source/core/data/docpool.cxx</c>:201-202), which is Liberation <em>Sans</em>. The
+    /// two defaults are different fonts and the same workbook uses both, so a shape cannot borrow
+    /// the cell face the way a header band correctly does.
+    /// </para>
+    /// <para>
+    /// Measured on 26.2.4.2 over five corpus workbooks that all carry Excel's slicer-fallback
+    /// shape — <c>Part_129_Operators.xlsx</c>, <c>Part_375_Operators.xlsx</c>,
+    /// <c>TDA_Smoke-Detectors.xlsx</c>, <c>DynamicBubbleChart.xlsx</c> and
+    /// <c>049_Expenses_calculator…xlsx</c>. Its runs name no typeface; the reference draws all
+    /// 77 of their spans in <c>LiberationSerif</c> and we drew them in <c>LiberationSans</c>.
+    /// </para>
+    /// </remarks>
+    public const string DefaultFamily = "Liberation Serif";
+
     /// <summary>The paragraphs, in order.</summary>
     public IReadOnlyList<SheetShapeParagraph> Paragraphs { get; init; } = [];
 

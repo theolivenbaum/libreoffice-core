@@ -196,10 +196,21 @@ internal static class SheetShapePainter
     private static Format Blank(SheetShapeParagraph paragraph, double scale)
         => Scaled(paragraph.Runs.Count > 0 ? paragraph.Runs[0] : default, scale);
 
+    /// <remarks>
+    /// The face is defaulted here rather than left null, because null means "the furniture's own"
+    /// to <c>SheetBandText</c> — the workbook's default *cell* font — and a shape is not furniture.
+    /// Its text belongs to the drawing layer's item pool, whose default is
+    /// <see cref="SheetShapeText.DefaultFamily"/>; the two are different fonts and the same
+    /// workbook uses both.
+    /// </remarks>
     private static Format Scaled(SheetShapeRun run, double scale)
     {
         Length size = run.Size > Length.Zero ? run.Size : SheetShapeText.DefaultSize;
-        return new Format(size * scale, run.Family);
+        string family = string.IsNullOrWhiteSpace(run.Family)
+            ? SheetShapeText.DefaultFamily
+            : run.Family;
+
+        return new Format(size * scale, family);
     }
 
     /// <summary>
