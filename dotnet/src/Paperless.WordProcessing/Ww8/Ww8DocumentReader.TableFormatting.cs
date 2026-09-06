@@ -62,6 +62,7 @@ public sealed partial class Ww8DocumentReader
                 : new Ww8Border(bytes[5], bytes[4], ColourOf(bytes[..4]))
                 {
                     SpacePoints = BinaryPrimitives.ReadUInt16LittleEndian(bytes[6..]) & DptSpaceMask,
+                    HasShadow = (bytes[6] & ShadowBit) != 0,
                 };
         }
 
@@ -73,6 +74,7 @@ public sealed partial class Ww8DocumentReader
             : new Ww8Border(bytes[1], bytes[0], IcoPalette[bytes[2] < IcoPalette.Length ? bytes[2] : 0])
             {
                 SpacePoints = bytes[3] & DptSpaceMask,
+                HasShadow = (bytes[3] & ShadowBit) != 0,
             };
     }
 
@@ -84,6 +86,16 @@ public sealed partial class Ww8DocumentReader
     /// and padding. It sits in the fourth byte of a <c>BRC80</c> and in the last word of a <c>BRC</c>.
     /// </remarks>
     private const int DptSpaceMask = 0x1F;
+
+    /// <summary>
+    /// The bit above <see cref="DptSpaceMask"/>: <c>fShadow</c>.
+    /// </summary>
+    /// <remarks>
+    /// Only a page border uses it — <c>SwWW8ImplReader::SetShadow</c> reads it from the section's
+    /// <em>right</em> <c>BRC</c> and from nothing else (<c>ww8par6.cxx</c>:1548-1562) — but it lives
+    /// in the same byte of the same structure, so it is decoded once with the distance.
+    /// </remarks>
+    private const int ShadowBit = 0x20;
 
     /// <summary>
     /// Reads one <c>sprmTSetBrc</c> or <c>sprmTSetBrc80</c>: a range of cells, a set of sides, and a BRC.
@@ -295,6 +307,13 @@ public readonly record struct Ww8Border(int Kind, int EighthPoints, Colour? Colo
     /// </remarks>
     public int SpacePoints { get; init; }
 
+    /// <summary>The <c>fShadow</c> flag: this side asks the box for a shadow.</summary>
+    /// <remarks>
+    /// Read from every <c>BRC</c> because there is one decoder, and acted on only for a section's
+    /// right-hand side, which is the one Word's page border takes its shadow from.
+    /// </remarks>
+    public bool HasShadow { get; init; }
+
     /// <summary>
     /// How much space the border takes, which is not simply its stated width.
     /// </summary>
@@ -380,6 +399,21 @@ public readonly record struct Ww8Border(int Kind, int EighthPoints, Colour? Colo
     /// <c>w:val="none"</c> carries in a <c>w:pBdr</c>, and the reason a paragraph can switch off the rule
     /// its style would have given it.
     /// </remarks>
+    /// <summary>
+    /// The border as one side of a <em>page's</em> box: the rule, its colour, and its distance.
+    /// </summary>
+    /// <remarks>
+    /// The same three quantities as <see cref="ResolvedParagraphSide"/> in a different carrier, because
+    /// what <c>dptSpace</c> measures differs: on a paragraph it is the gap to the text and on a page it
+    /// is the gap to whatever <c>sprmSPgbProp</c>'s <c>pgbOffsetFrom</c> names. It is the same unit —
+    /// whole points — as OOXML's <c>w:space</c>, which is what lets one
+    /// <see cref="Model.PageBorders"/> serve all four readers.
+    /// </remarks>
+    public Model.PageBorderSide ResolvedPageSide
+        => Rule is { } rule
+            ? new Model.PageBorderSide(rule.Width, Drawn, Length.FromPoints(SpacePoints))
+            : default;
+
     public Layout.ParagraphBorder ResolvedParagraphSide
         => Rule is { } rule
             ? new Layout.ParagraphBorder(

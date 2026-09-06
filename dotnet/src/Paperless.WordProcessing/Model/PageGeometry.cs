@@ -69,8 +69,20 @@ public sealed record PageBorders
     /// </summary>
     public bool OffsetFromText { get; init; }
 
-    /// <summary>True when the border casts a shadow down and to the right.</summary>
-    public bool HasShadow { get; init; }
+    /// <summary>
+    /// How wide a shadow the border casts down and to the right, or zero for none.
+    /// </summary>
+    /// <remarks>
+    /// A length rather than a flag because the three readers state its width differently and only one
+    /// of them derives it from the border. <strong>Word puts the shadow on every side and takes its
+    /// width from the <em>right</em> side alone</strong> — <c>ApplyBorderToPageStyles</c> reads
+    /// <c>m_bBorderShadows[BORDER_RIGHT]</c> and <c>getShadowFromBorder</c> takes that side's
+    /// <c>LineWidth</c> (<c>sw/source/writerfilter/dmapper/PropertyMap.cxx</c>:715-734), and WW8's
+    /// <c>SwWW8ImplReader::SetShadow</c> reads <c>pbrc[WW8_RIGHT].fShadow()</c> with a floor of sixteen
+    /// twips (<c>ww8par6.cxx</c>:1548-1562). ODF states the offset outright, in
+    /// <c>style:shadow</c>.
+    /// </remarks>
+    public Length Shadow { get; init; }
 
     /// <summary>Which pages of the section carry it.</summary>
     public PageBorderDisplay Display { get; init; }
@@ -86,6 +98,125 @@ public sealed record PageBorders
         PageBorderDisplay.NotFirstPage => !isFirstOfSection,
         _ => true,
     };
+
+    /// <summary>
+    /// Where the border's rectangle sits on a page of this size with this text area.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>The border never moves the text</strong>, whichever edge it is measured from. That is
+    /// not obvious and it is what <c>editeng::BorderDistanceFromWord</c>
+    /// (<c>editeng/source/items/frmitems.cxx</c>:4143-4174) does: Writer keeps a page's margin as the
+    /// distance to the <em>border box</em> and a separate distance from the box to the text, and both
+    /// of Word's two spellings are converted so that margin + width + distance is the margin Word
+    /// stated. Confirmed by rendering: the first line of a bordered fixture and of the same fixture
+    /// with no border sit at the same point on 26.2.4.2, in both <c>offsetFrom</c> modes.
+    /// </para>
+    /// <para>
+    /// So a side that draws has its box edge <see cref="PageBorderSide.Space"/> from the paper's edge
+    /// when the section says <c>offsetFrom="page"</c>, and <c>margin − space − width</c> from it when
+    /// the section says <c>offsetFrom="text"</c>. <strong>A side that draws nothing keeps the text
+    /// area's own edge</strong> — measured on a fixture bordered left and right only, where 26.2.4.2
+    /// runs the two verticals between the top and bottom margins rather than the length of the paper.
+    /// </para>
+    /// <para>
+    /// The two clamps are that function's, and they fire when a border would land outside the paper
+    /// or inside the text: a <c>page</c> border whose space and width together exceed the margin
+    /// keeps the margin, and a <c>text</c> border whose margin is too small for it sits on the
+    /// paper's edge.
+    /// </para>
+    /// </remarks>
+    /// <param name="page">The sheet's size.</param>
+    /// <param name="textArea">Where body text goes, which the border does not disturb.</param>
+    public PlacedPageBorder? Place(DocSize page, DocRect textArea)
+    {
+        if (!Draws) return null;
+
+        Length left = Inset(Left, textArea.X);
+        Length top = Inset(Top, textArea.Y);
+        Length right = Inset(Right, page.Width - textArea.Right);
+        Length bottom = Inset(Bottom, page.Height - textArea.Bottom);
+
+        DocRect outer = new(
+            left, top,
+            page.Width - left - right,
+            page.Height - top - bottom);
+
+        if (Shadow > Length.Zero)
+        {
+            outer = new DocRect(
+                outer.X,
+                outer.Y,
+                Length.Max(Length.Zero, outer.Width - Shadow),
+                Length.Max(Length.Zero, outer.Height - Shadow));
+        }
+
+        if (outer.Width <= Length.Zero || outer.Height <= Length.Zero) return null;
+
+        return new PlacedPageBorder
+        {
+            Outer = outer,
+            Top = Top,
+            Left = Left,
+            Bottom = Bottom,
+            Right = Right,
+            Shadow = Shadow,
+        };
+    }
+
+    /// <summary>How far one side's box edge stands in from the paper's matching edge.</summary>
+    private Length Inset(PageBorderSide side, Length textInset)
+    {
+        if (!side.Draws) return textInset;
+
+        if (!OffsetFromText)
+        {
+            // The border would reach past the text's own edge, which Word can state and Writer cannot
+            // draw: it keeps the margin instead.
+            return side.Space + side.Width > textInset ? textInset : side.Space;
+        }
+
+        Length inset = textInset - side.Space - side.Width;
+        return inset > Length.Zero ? inset : Length.Zero;
+    }
+}
+
+/// <summary>
+/// A page border placed on one page: the rectangle its sides stand on, and the sides.
+/// </summary>
+/// <remarks>
+/// <para>
+/// The rectangle is the border's <em>outer</em> extent and is already shrunk for the shadow, because
+/// <strong>the shadow shrinks the box rather than hanging off the paper</strong> — measured off
+/// 26.2.4.2's own content stream and the one thing about a page border that cannot be guessed from
+/// the specification.
+/// </para>
+/// <para>
+/// Separate from <see cref="PageBorders"/> so that a page carries a rectangle rather than the four
+/// insets and a rule for combining them: the paginator is the only layer that knows both the sheet
+/// and the text area, and it is also the only one that knows whether a page is the first of its
+/// section.
+/// </para>
+/// </remarks>
+public sealed record PlacedPageBorder
+{
+    /// <summary>The rectangle the four sides stand on, shadow already taken off.</summary>
+    public required DocRect Outer { get; init; }
+
+    /// <summary>The top side.</summary>
+    public PageBorderSide Top { get; init; }
+
+    /// <summary>The left side.</summary>
+    public PageBorderSide Left { get; init; }
+
+    /// <summary>The bottom side.</summary>
+    public PageBorderSide Bottom { get; init; }
+
+    /// <summary>The right side.</summary>
+    public PageBorderSide Right { get; init; }
+
+    /// <summary>The shadow's width, or zero when the border casts none.</summary>
+    public Length Shadow { get; init; }
 }
 
 /// <summary>

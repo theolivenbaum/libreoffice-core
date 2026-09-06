@@ -139,58 +139,55 @@ public static class PageDrawing
     /// draws 4.45 against a stated 4.5, a twentieth of a point that no comparison resolves.
     /// </para>
     /// <para>
-    /// Drawn first, under everything including a behind-text frame. Word's <c>w:zOrder</c> can ask
-    /// for the border in front of the text and nothing in the corpus does; the seven documents that
-    /// declare a border all leave it at the default.
+    /// Drawn first, under everything including a behind-text frame, and <strong><c>w:zOrder</c> is
+    /// deliberately not honoured</strong>. It reaches <c>writerfilter</c>'s token table as
+    /// <c>ooxml:CT_PageBorders_zOrder</c> and <c>PageBordersHandler::lcl_attribute</c> then reads
+    /// only <c>display</c> and <c>offsetFrom</c>
+    /// (<c>sw/source/writerfilter/dmapper/PageBordersHandler.cxx</c>:44-80), so LibreOffice never
+    /// puts a page border in front of the text. Measured as well as read: a fixture declaring
+    /// <c>w:zOrder="front"</c> renders on 26.2.4.2 stroke for stroke like the same fixture without
+    /// it. Honouring the attribute would move us away from the reference, not towards it.
+    /// </para>
+    /// <para>
+    /// An <em>art</em> border — one of the 165 <c>w:val</c> values naming a repeating device rather
+    /// than a line — draws nothing, which is also the reference's behaviour rather than a gap:
+    /// <see cref="BorderRules.WordStyleOf"/> answers 0 for a token Writer's own map does not know
+    /// and <see cref="BorderRules.FromWord"/> answers null for that, exactly as
+    /// <c>lcl_convertBorderStyleFromToken</c> returns <c>none</c>. Fixtures declaring
+    /// <c>apples</c> and <c>basicWhiteDashes</c> render on 26.2.4.2 with no stroke, no image and
+    /// the text in the same place as an unbordered page.
     /// </para>
     /// </remarks>
     private static void DrawPageBorder(LaidOutPage page, IDrawingSink sink)
     {
-        if (page.Borders is not { } borders) return;
+        if (page.Borders is not { } border) return;
 
-        // The box the sides stand on: inset from the paper by each side's own space, or from the
-        // text area when the section says `w:offsetFrom="text"`.
-        DocRect outer = borders.OffsetFromText
-            ? new DocRect(
-                page.BodyArea.X - borders.Left.Space,
-                page.BodyArea.Y - borders.Top.Space,
-                page.BodyArea.Width + borders.Left.Space + borders.Right.Space,
-                page.BodyArea.Height + borders.Top.Space + borders.Bottom.Space)
-            : new DocRect(
-                borders.Left.Space,
-                borders.Top.Space,
-                page.Size.Width - borders.Left.Space - borders.Right.Space,
-                page.Size.Height - borders.Top.Space - borders.Bottom.Space);
+        DocRect outer = border.Outer;
 
-        Length shadow = borders.HasShadow
-            ? Length.Max(borders.Right.Width, borders.Bottom.Width)
-            : Length.Zero;
-
-        if (shadow > Length.Zero)
+        if (border.Shadow > Length.Zero)
         {
-            outer = new DocRect(
-                outer.X, outer.Y,
-                Length.Max(Length.Zero, outer.Width - shadow),
-                Length.Max(Length.Zero, outer.Height - shadow));
-
-            Fill(new DocRect(outer.X + shadow, outer.Bottom, outer.Width, shadow), Colour.Black, sink);
-            Fill(new DocRect(outer.Right, outer.Y + shadow, shadow, outer.Height), Colour.Black, sink);
+            Fill(
+                new DocRect(outer.X + border.Shadow, outer.Bottom, outer.Width, border.Shadow),
+                Colour.Black,
+                sink);
+            Fill(
+                new DocRect(outer.Right, outer.Y + border.Shadow, border.Shadow, outer.Height),
+                Colour.Black,
+                sink);
         }
 
-        if (outer.Width <= Length.Zero || outer.Height <= Length.Zero) return;
-
-        StrokeSide(borders.Top, sink,
-            new DocPoint(outer.X, outer.Y + borders.Top.Width / 2),
-            new DocPoint(outer.Right, outer.Y + borders.Top.Width / 2));
-        StrokeSide(borders.Bottom, sink,
-            new DocPoint(outer.X, outer.Bottom - borders.Bottom.Width / 2),
-            new DocPoint(outer.Right, outer.Bottom - borders.Bottom.Width / 2));
-        StrokeSide(borders.Left, sink,
-            new DocPoint(outer.X + borders.Left.Width / 2, outer.Y),
-            new DocPoint(outer.X + borders.Left.Width / 2, outer.Bottom));
-        StrokeSide(borders.Right, sink,
-            new DocPoint(outer.Right - borders.Right.Width / 2, outer.Y),
-            new DocPoint(outer.Right - borders.Right.Width / 2, outer.Bottom));
+        StrokeSide(border.Top, sink,
+            new DocPoint(outer.X, outer.Y + border.Top.Width / 2),
+            new DocPoint(outer.Right, outer.Y + border.Top.Width / 2));
+        StrokeSide(border.Bottom, sink,
+            new DocPoint(outer.X, outer.Bottom - border.Bottom.Width / 2),
+            new DocPoint(outer.Right, outer.Bottom - border.Bottom.Width / 2));
+        StrokeSide(border.Left, sink,
+            new DocPoint(outer.X + border.Left.Width / 2, outer.Y),
+            new DocPoint(outer.X + border.Left.Width / 2, outer.Bottom));
+        StrokeSide(border.Right, sink,
+            new DocPoint(outer.Right - border.Right.Width / 2, outer.Y),
+            new DocPoint(outer.Right - border.Right.Width / 2, outer.Bottom));
     }
 
     /// <summary>One side of a page border, or nothing when the side draws none.</summary>

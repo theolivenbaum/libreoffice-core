@@ -1,5 +1,6 @@
 using System.Xml.Linq;
 using Paperless.Core.Geometry;
+using Paperless.Core.Graphics;
 using Paperless.Core.Units;
 using Paperless.OpenDocument;
 using Paperless.OpenDocument.Styles;
@@ -51,8 +52,14 @@ internal static class OdfPageGeometry
         // the body — so it is Word's w:header, and the body's own top margin is this plus whatever
         // the header occupies. Reading it as the body's margin puts every line of text too high by
         // the height of the header.
-        Length headerDistance = Length(properties, "margin-top") ?? PageMargins.Default.Top;
-        Length footerDistance = Length(properties, "margin-bottom") ?? PageMargins.Default.Bottom;
+        // The page border, which ODF states as the *page style's own* box rather than as a distance
+        // like Word does — so it has to be read before the margins, which it moves.
+        PageBorders? borders = Borders(properties);
+
+        Length headerDistance =
+            (Length(properties, "margin-top") ?? PageMargins.Default.Top) + BorderBand(borders?.Top, properties, "top");
+        Length footerDistance =
+            (Length(properties, "margin-bottom") ?? PageMargins.Default.Bottom) + BorderBand(borders?.Bottom, properties, "bottom");
 
         // Measuring the furniture needs its own style, which is a child of the page layout rather
         // than a style in its own right. A master page with no header contributes nothing, which is
@@ -70,8 +77,10 @@ internal static class OdfPageGeometry
                 Dimension(properties, "page-width") ?? PageGeometry.Default.Size.Width,
                 Dimension(properties, "page-height") ?? PageGeometry.Default.Size.Height),
             Margins = new PageMargins(
-                Length(properties, "margin-left") ?? PageMargins.Default.Left,
-                Length(properties, "margin-right") ?? PageMargins.Default.Right,
+                (Length(properties, "margin-left") ?? PageMargins.Default.Left)
+                    + BorderBand(borders?.Left, properties, "left"),
+                (Length(properties, "margin-right") ?? PageMargins.Default.Right)
+                    + BorderBand(borders?.Right, properties, "right"),
                 headerDistance + headerHeight,
                 footerDistance + footerHeight),
             HeaderDistance = headerDistance,
@@ -109,6 +118,8 @@ internal static class OdfPageGeometry
                 properties?.Get(OdfNamespaces.Style, "page-usage"),
                 "mirrored",
                 StringComparison.OrdinalIgnoreCase),
+
+            Borders = borders,
         };
 
         return new WritingSection
@@ -127,6 +138,138 @@ internal static class OdfPageGeometry
             HasDifferentFirstPage = master?.FirstHeader is not null || master?.FirstFooter is not null,
             HasDifferentEvenPages = master?.LeftHeader is not null || master?.LeftFooter is not null,
         };
+    }
+
+    /// <summary>
+    /// The page border a page layout declares, or null when it declares none that draws.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>ODF states this the other way round from every Word format, and reading it as Word's
+    /// moves the text.</strong> Word gives a margin to the text and a distance from an edge to the
+    /// border; ODF gives the page layout a box of its own, so <c>fo:margin-left</c> is the distance
+    /// to the <em>border</em> and <c>fo:padding-left</c> the gap from the border to the text — the
+    /// conversion <c>editeng::BorderDistanceFromWord</c> performs on import
+    /// (<c>editeng/source/items/frmitems.cxx</c>:4143-4174), and what LibreOffice's own writer emits
+    /// on the way back out. Measured: 26.2.4.2 converting a DOCX with <c>w:pgMar w:left="1440"</c>,
+    /// <c>w:sz="36"</c> and <c>w:space="15"</c> writes <c>fo:margin-left="0.2083in"</c> (15 pt),
+    /// <c>fo:border="4.51pt solid #396533"</c> and <c>fo:padding="0.7291in"</c> (52.5 pt), which sum
+    /// to the inch Word stated. Taking <c>fo:margin-left</c> for the text's margin would start every
+    /// line 57 pt too far left.
+    /// </para>
+    /// <para>
+    /// So the border's <see cref="PageBorderSide.Space"/> is <c>fo:margin</c> itself and the offset
+    /// is always from the paper's edge — ODF has no equivalent of <c>w:offsetFrom="text"</c> because
+    /// it does not need one.
+    /// </para>
+    /// </remarks>
+    private static PageBorders? Borders(OdfPropertySet? properties)
+    {
+        if (properties is null) return null;
+
+        PageBorderSide all = Side(properties, "border", default);
+
+        PageBorders borders = new()
+        {
+            Top = Side(properties, "border-top", all) with { Space = Margin(properties, "margin-top") },
+            Left = Side(properties, "border-left", all) with { Space = Margin(properties, "margin-left") },
+            Bottom = Side(properties, "border-bottom", all) with { Space = Margin(properties, "margin-bottom") },
+            Right = Side(properties, "border-right", all) with { Space = Margin(properties, "margin-right") },
+            Shadow = Shadow(properties),
+        };
+
+        return borders.Draws ? borders : null;
+    }
+
+    /// <summary>
+    /// One side from CSS's three-part shorthand, or the four-sided value where the side says nothing.
+    /// </summary>
+    /// <remarks>
+    /// <c>fo:border</c> sets all four and <c>fo:border-left</c> and friends override their own side,
+    /// which is CSS's cascade and the same one <c>OdtLayoutSource.Tables</c> follows for a cell — with
+    /// the same rule that a stated <c>none</c> has to beat the fallback rather than fall through it.
+    /// </remarks>
+    private static PageBorderSide Side(OdfPropertySet properties, string name, PageBorderSide fallback)
+    {
+        string? stated = properties.Get(OdfNamespaces.FoCompatible, name);
+        if (string.IsNullOrWhiteSpace(stated)) return fallback;
+        if (string.Equals(stated.Trim(), "none", StringComparison.Ordinal)) return default;
+
+        Core.Units.Length width = Core.Units.Length.Zero;
+        Colour colour = Colour.Black;
+
+        foreach (string part in stated.Split(' ', StringSplitOptions.RemoveEmptyEntries))
+        {
+            if (OdfValue.ParseLength(part) is { } measured)
+            {
+                width = OdfWriterUnits.ToCore(measured);
+                continue;
+            }
+
+            if (part.StartsWith('#') && OdfValue.ParseColour(part) is { } named) colour = named;
+        }
+
+        // A shorthand naming a style and a colour but no width is still a border, drawn at Writer's
+        // thinnest visible stroke rather than not at all — the rule the table reader already applies.
+        if (width <= Core.Units.Length.Zero) width = HairlineBorder;
+
+        return new PageBorderSide(width, colour, Core.Units.Length.Zero);
+    }
+
+    /// <summary>The width a border with no stated one is drawn at: half a point, Writer's hairline.</summary>
+    private static readonly Core.Units.Length HairlineBorder = Core.Units.Length.FromPoints(0.5);
+
+    /// <summary>One <c>fo:margin-*</c>, which for a bordered page is the distance to the border.</summary>
+    private static Core.Units.Length Margin(OdfPropertySet properties, string name)
+        => Length(properties, name) ?? Core.Units.Length.Zero;
+
+    /// <summary>
+    /// How much of the page one side's border and its padding take out of the margin.
+    /// </summary>
+    /// <remarks>
+    /// Zero for a side that draws no line, which is Writer's own rule rather than a simplification:
+    /// <c>SvxBoxItem::CalcLineSpace</c> answers zero for a side with no line unless its caller asks
+    /// otherwise, and <c>SwBorderAttrs</c> does not ask. So a page layout carrying a stray
+    /// <c>fo:padding</c> and no border keeps its margins.
+    /// </remarks>
+    private static Core.Units.Length BorderBand(
+        PageBorderSide? side, OdfPropertySet? properties, string edge)
+    {
+        if (side is not { } stated || !stated.Draws || properties is null) return Core.Units.Length.Zero;
+
+        Core.Units.Length padding =
+            Length(properties, "padding-" + edge)
+            ?? Length(properties, "padding")
+            ?? Core.Units.Length.Zero;
+
+        return stated.Width + padding;
+    }
+
+    /// <summary>
+    /// The shadow <c>style:shadow</c> declares, or zero for none.
+    /// </summary>
+    /// <remarks>
+    /// ODF states the offset outright — <c>#000000 0.0626in 0.0626in</c> — where Word derives it from
+    /// the right border's width, so this is the one format that does not have to choose a side. The
+    /// value is <c>none</c> when there is no shadow, and the first length in it is the offset; the two
+    /// lengths are the horizontal and vertical offsets and LibreOffice writes them equal.
+    /// </remarks>
+    private static Core.Units.Length Shadow(OdfPropertySet properties)
+    {
+        string? stated = properties.Get(OdfNamespaces.Style, "shadow");
+        if (string.IsNullOrWhiteSpace(stated)) return Core.Units.Length.Zero;
+        if (string.Equals(stated.Trim(), "none", StringComparison.Ordinal)) return Core.Units.Length.Zero;
+
+        foreach (string part in stated.Split(' ', StringSplitOptions.RemoveEmptyEntries))
+        {
+            if (OdfValue.ParseLength(part) is { } measured)
+            {
+                Core.Units.Length offset = OdfWriterUnits.ToCore(measured);
+                if (offset > Core.Units.Length.Zero) return offset;
+            }
+        }
+
+        return Core.Units.Length.Zero;
     }
 
     /// <summary>

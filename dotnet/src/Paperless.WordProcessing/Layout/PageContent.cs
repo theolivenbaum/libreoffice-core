@@ -1284,12 +1284,12 @@ public sealed record LaidOutPage
 
     /// <summary>The border drawn round this page, or null when it carries none.</summary>
     /// <remarks>
-    /// Resolved against <c>w:display</c> by the paginator, which is the only layer that knows
-    /// whether a page is the first of its section. Page furniture rather than content: with
-    /// <c>w:offsetFrom="page"</c> it is measured from the paper's edge and does not touch
-    /// <see cref="BodyArea"/>.
+    /// Placed by the paginator, which is the only layer that knows both the sheet and the text area
+    /// and the only one that knows whether a page is the first of its section — the two things
+    /// <c>w:offsetFrom</c> and <c>w:display</c> respectively need. Page furniture rather than
+    /// content: a page border never moves <see cref="BodyArea"/>, in either <c>offsetFrom</c> mode.
     /// </remarks>
-    public PageBorders? Borders { get; init; }
+    public PlacedPageBorder? Borders { get; init; }
 
     /// <summary>Where body text goes, in page coordinates.</summary>
     /// <remarks>

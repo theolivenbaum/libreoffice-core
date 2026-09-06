@@ -181,7 +181,11 @@ public sealed partial class RtfDocumentReader
     public DocumentMetadata Metadata { get; private set; } = DocumentMetadata.Empty;
 
     /// <summary>The sections' page geometry, valid once <see cref="Read"/> has run.</summary>
-    public IReadOnlyList<Model.WritingSection> Sections => _geometry.Sections;
+    /// <remarks>
+    /// The colour table is passed in rather than read out, because a page border's <c>\brdrcf</c> is
+    /// an index and the <c>{\colortbl}</c> may follow the border that names it.
+    /// </remarks>
+    public IReadOnlyList<Model.WritingSection> Sections => _geometry.Resolve(ColourAt);
 
     /// <summary>
     /// True when two consecutive paragraphs' spacings add rather than the larger one winning.
