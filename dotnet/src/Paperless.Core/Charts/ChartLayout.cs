@@ -1550,7 +1550,10 @@ public static partial class ChartLayout
 
         if (columns)
         {
-            left += valueLabel + valueSpace;
+            // The room the value labels take is on the side they are drawn on, which is the side
+            // ValueLabelsFar names and not necessarily the side the axis line is on.
+            if (ValueLabelsFar(plot, false)) right -= valueLabel + valueSpace;
+            else left += valueLabel + valueSpace;
 
             // The bottommost value label is centred on the plot area's bottom-left corner and
             // hangs half of itself below it, exactly as the topmost one hangs above. Whichever of
@@ -1568,12 +1571,15 @@ public static partial class ChartLayout
             // taken off in DiagramAreaOf, with the other three.
             if (secondary is { } second && plot.SecondaryAxisVisible)
             {
-                right -= plot.SecondaryLabelsVisible
+                Length secondaryRoom = plot.SecondaryLabelsVisible
                     ? WidestValueLabel(
                           second, plot.SecondaryValueFormat, plot.LabelSize, measurer,
                       plot.IsLabelBold)
                       + OuterTick(plot.SecondaryTicks) + LabelSpacing
                     : OuterTick(plot.SecondaryTicks);
+
+                if (ValueLabelsFar(plot, true)) right -= secondaryRoom;
+                else left += secondaryRoom;
             }
 
             // On an unshifted axis the first and the last label are centred on the plot area's own
@@ -1598,7 +1604,11 @@ public static partial class ChartLayout
         else
         {
             left += categoryLabel + categorySpace;
-            bottom -= valueHeight + valueSpace;
+
+            // Same rule as the column branch, one dimension over: the labels' own side decides
+            // whether the strip comes off the top of the plot or off its bottom.
+            if (ValueLabelsFar(plot, false)) top += valueHeight + valueSpace;
+            else bottom -= valueHeight + valueSpace;
 
             // The last value label is centred on the axis' right end, so half of it overhangs.
             right -= valueLabel / 2;
@@ -1607,6 +1617,51 @@ public static partial class ChartLayout
         return right <= left || bottom <= top
             ? DocRect.Empty
             : new DocRect(left, top, right - left, bottom - top);
+    }
+
+    /// <summary>
+    /// Which end of the category axis a value axis' line stands at, in that axis' own direction.
+    /// </summary>
+    /// <remarks>
+    /// <c>c:crosses</c> says so outright — <c>AxisProperties::initAxisPositioning</c>,
+    /// <c>chart2/source/view/axes/VAxisProperties.cxx</c>:232-234, reading the
+    /// <c>CrossoverPosition</c> the importer set. A secondary axis is the primary one's other end.
+    /// </remarks>
+    private static bool ValueAxisLineAtEnd(ChartPlot plot, bool secondary)
+        => (plot.ValueAxisCrossing == ChartAxisCrossing.Maximum) != secondary;
+
+    /// <summary>
+    /// Whether a value axis' line stands at the far — right or top — edge of the plot area.
+    /// </summary>
+    /// <remarks>
+    /// The end above, mirrored: a reversed category axis has its maximum at the left or the
+    /// bottom. That mirroring is the whole of what
+    /// <c>m_bCrossingAxisHasReverseDirection</c> does
+    /// (<c>chart2/source/view/axes/VCartesianCoordinateSystem.cxx</c>:145).
+    /// </remarks>
+    private static bool ValueAxisLineFar(ChartPlot plot, bool secondary)
+        => ValueAxisLineAtEnd(plot, secondary) != plot.CategoriesReversed;
+
+    /// <summary>Whether a value axis' <em>labels</em> sit at that far edge.</summary>
+    /// <remarks>
+    /// <c>c:tickLblPos</c> names an end of the crossing axis in that axis' own direction, so the
+    /// answer is the stated end mirrored by the reversal. <c>nextTo</c> states no end and takes
+    /// the axis line's, which is where every chart that says nothing draws them. See
+    /// <see cref="ChartValueLabelPosition"/>.
+    /// </remarks>
+    private static bool ValueLabelsFar(ChartPlot plot, bool secondary)
+    {
+        ChartValueLabelPosition stated =
+            secondary ? plot.SecondaryLabelPosition : plot.ValueLabelPosition;
+
+        bool atLogicalMaximum = stated switch
+        {
+            ChartValueLabelPosition.High => true,
+            ChartValueLabelPosition.Low => false,
+            _ => ValueAxisLineAtEnd(plot, secondary),
+        };
+
+        return atLogicalMaximum != plot.CategoriesReversed;
     }
 
     /// <summary>The value axis: its line, its ticks, its gridlines and its labels.</summary>
@@ -1629,9 +1684,26 @@ public static partial class ChartLayout
         // The axis line itself runs the full extent of the plot area on the side the value axis
         // is on: the left edge for columns, the bottom edge for bars — and the far side of each
         // for a secondary axis.
-        Length axisX = secondary ? area.Right : area.Left;
-        Length axisY = secondary ? area.Top : area.Bottom;
-        int outward = secondary ? 1 : -1;
+        //
+        // A reversed category axis moves it to the other end, because the value axis stands at the
+        // *start* of the axis it crosses and reversing that axis moves its start:
+        // AxisProperties::initAxisPositioning, chart2/source/view/axes/VAxisProperties.cxx:232-234,
+        // sets ChartAxisPosition_END exactly when m_bIsMainAxis == m_bCrossingAxisHasReverseDirection.
+        // A secondary axis is the main axis' other end, so the two statements compose with a
+        // negation rather than override one another. See ChartPlot.CategoriesReversed.
+        bool far = ValueAxisLineFar(plot, secondary);
+        Length axisX = far ? area.Right : area.Left;
+        Length axisY = far ? area.Top : area.Bottom;
+        int outward = far ? 1 : -1;
+
+        // The labels have a line of their own — getLabelLineIntersectionValue,
+        // chart2/source/view/axes/VCartesianAxis.cxx:1103-1113 — so `c:tickLblPos` can send them
+        // to the other end of the plot from the axis they belong to, which is what a Gantt with
+        // `high` on a reversed category axis does.
+        bool labelsFar = ValueLabelsFar(plot, secondary);
+        Length labelX = labelsFar ? area.Right : area.Left;
+        Length labelY = labelsFar ? area.Top : area.Bottom;
+        int labelOutward = labelsFar ? 1 : -1;
 
         // A deleted axis keeps its gridlines and loses everything else, so the line, the ticks and
         // the labels are all gated and the grid inside the loop is not. Turning the *labels* off
@@ -1714,8 +1786,8 @@ public static partial class ChartLayout
 
                 labels.Add(new ChartLabel(
                     ChartDataLabel.Write(tick, format),
-                    new DocPoint(axisX + ((outer + LabelSpacing) * outward), y),
-                    secondary ? ChartLabelAnchor.LeftMiddle : ChartLabelAnchor.RightMiddle,
+                    new DocPoint(labelX + ((outer + LabelSpacing) * labelOutward), y),
+                    labelsFar ? ChartLabelAnchor.LeftMiddle : ChartLabelAnchor.RightMiddle,
                     plot.LabelSize,
                     plot.LabelColour));
             }
@@ -1744,8 +1816,8 @@ public static partial class ChartLayout
 
                 labels.Add(new ChartLabel(
                     ChartDataLabel.Write(tick, format),
-                    new DocPoint(x, axisY - ((outer + LabelSpacing) * outward)),
-                    secondary ? ChartLabelAnchor.CentreBottom : ChartLabelAnchor.CentreTop,
+                    new DocPoint(x, labelY - ((outer + LabelSpacing) * labelOutward)),
+                    labelsFar ? ChartLabelAnchor.CentreBottom : ChartLabelAnchor.CentreTop,
                     plot.LabelSize,
                     plot.LabelColour));
             }
@@ -2008,7 +2080,7 @@ public static partial class ChartLayout
             if (plot.DateAxis is { } dated)
             {
                 label = dated.LabelOf(dated.Ticks[at]);
-                centre = dated.Fraction(dated.Ticks[at]);
+                centre = Mirrored(plot, dated.Fraction(dated.Ticks[at]));
             }
             else
             {
@@ -2477,7 +2549,7 @@ public static partial class ChartLayout
                 ? ChartDataLabel.WriteCategory(plot.Categories[at], plot.CategoryFormat)
                 : null;
 
-            centres[at] = area.Left + area.Width * CategoryAt(plot, at, categories);
+            centres[at] = area.Left + area.Width * CategorySlot(plot, at, categories);
         }
 
         return ChartAxisLabels.Resolve(
@@ -2495,11 +2567,30 @@ public static partial class ChartLayout
     /// draws and what the division would otherwise make a division by zero.
     /// </remarks>
     private static double CategoryAt(ChartPlot plot, int index, int categories)
+        => Mirrored(plot, CategorySlot(plot, index, categories));
+
+    /// <summary>
+    /// Where a category sits along the axis in the axis' <em>own</em> direction, before a
+    /// reversed axis is turned round.
+    /// </summary>
+    /// <remarks>
+    /// The two are separate because only one of them is a position on the page. Whether two
+    /// labels collide, how far apart their ticks are and how many of them fit are all properties
+    /// of the axis and not of which end it starts at, so <see cref="ArrangeCategories"/> asks this
+    /// one and everything that draws asks <see cref="CategoryAt"/>. Measuring the arrangement
+    /// against mirrored centres would hand <see cref="ChartAxisLabels.Resolve"/> a descending
+    /// sequence and negative spacings.
+    /// </remarks>
+    private static double CategorySlot(ChartPlot plot, int index, int categories)
     {
         if (categories <= 0) return 0.5;
         if (plot.ShiftedCategories) return (index + 0.5) / categories;
         return categories == 1 ? 0.5 : (double)index / (categories - 1);
     }
+
+    /// <summary>A fraction along the category axis, turned round when the axis is reversed.</summary>
+    private static double Mirrored(ChartPlot plot, double along)
+        => plot.CategoriesReversed ? 1.0 - along : along;
 
     /// <summary>
     /// Where a category sits, on either kind of category axis, or null when it has nowhere to be.
@@ -2512,7 +2603,7 @@ public static partial class ChartLayout
     /// </remarks>
     private static double? CategoryFraction(ChartPlot plot, int index, int categories)
         => plot.DateAxis is { } date
-            ? date.FractionOf(index)
+            ? date.FractionOf(index) is { } dated ? Mirrored(plot, dated) : null
             : CategoryAt(plot, index, categories);
 
     /// <summary>
@@ -3333,6 +3424,12 @@ public static partial class ChartLayout
                 // The slot the bar sits in, as a fraction of the plot area's long side.
                 double slotStart = (double)at / categories
                     + (outer / 2.0 + index * (1.0 + inner)) * slotFraction;
+
+                // A reversed category axis mirrors the whole bar, not its slot — so the series
+                // within a category turn round with the categories, which is what the reference
+                // draws: on 002_advanced_powerpoint_column.pptx the red series is left of the blue
+                // in every pair with the axis as authored and right of it with the axis reversed.
+                if (plot.CategoriesReversed) slotStart = 1.0 - slotStart - slotFraction;
 
                 DocRect bounds = columns
                     ? Rectangle(
@@ -4224,8 +4321,12 @@ public static partial class ChartLayout
                 ?? ChartDataLabel.WriteCategory(plot.Categories[end], plot.CategoryFormat) ?? "";
         }
 
-        return (Shape(measurer, first, plot.LabelSize, plot.IsLabelBold).Width / 2,
-                Shape(measurer, last, plot.LabelSize, plot.IsLabelBold).Width / 2);
+        Length firstHalf = Shape(measurer, first, plot.LabelSize, plot.IsLabelBold).Width / 2;
+        Length lastHalf = Shape(measurer, last, plot.LabelSize, plot.IsLabelBold).Width / 2;
+
+        // First and last are the axis' own ends; the caller wants the page's. A reversed axis
+        // draws the first category at the right-hand edge, so the two swap.
+        return plot.CategoriesReversed ? (lastHalf, firstHalf) : (firstHalf, lastHalf);
     }
 
     /// <summary>

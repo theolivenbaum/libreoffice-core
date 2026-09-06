@@ -288,6 +288,10 @@ public static class DrawingChartPlot
             SecondaryTicks = TicksOf(axes.Secondary),
             CategoryTicks = TicksOf(axes.Domain ?? axes.Category),
             CategoriesBetween = CrossBetween(axes, group),
+            CategoriesReversed = Reversed(axes.Category),
+            ValueLabelPosition = LabelPositionOf(axes.Value),
+            ValueAxisCrossing = CrossingOf(axes.Value),
+            SecondaryLabelPosition = LabelPositionOf(axes.Secondary),
             Legend = LegendOf(Child(chart, "legend")),
             Background = FillOf(Child(chartSpace, "spPr"), theme)
                          ?? DrawingChartAutoFormat.FrameFillOf(
@@ -877,6 +881,46 @@ public static class DrawingChartPlot
 
 
     /// <summary>What one axis states about its scale.</summary>
+    /// <summary>
+    /// Whether one axis states that it runs from its maximum down to its minimum.
+    /// </summary>
+    /// <remarks>
+    /// The same <c>c:scaling/c:orientation</c> <see cref="ScaleOf"/> reads, asked of the category
+    /// axis, where there is no scale to carry it: a category axis has no minimum or maximum for a
+    /// <see cref="ChartScaleRequest"/> to hold, and its orientation still decides which end the
+    /// first category is at. See <see cref="ChartPlot.CategoriesReversed"/>.
+    /// </remarks>
+    /// <summary>Which end of the crossing axis an axis puts its tick labels at.</summary>
+    /// <remarks>
+    /// <c>none</c> is deliberately not here: it says the labels are not drawn at all and is
+    /// <see cref="Labelled"/>'s business, so it falls through to the default alongside every
+    /// unknown value — which is what <c>lclGetLabelPosition</c> does with it too
+    /// (<c>oox/source/drawingml/chart/axisconverter.cxx:92-101</c>).
+    /// </remarks>
+    /// <summary>Which end of the crossing axis a value axis stands at.</summary>
+    /// <remarks>
+    /// <c>c:crossesAt</c> states a value rather than an end and is not read: on a category
+    /// crossing axis it is a category index, and no corpus chart states one on a value axis.
+    /// </remarks>
+    private static ChartAxisCrossing CrossingOf(XElement? axis)
+        => Value(Child(axis, "crosses")) switch
+        {
+            "min" => ChartAxisCrossing.Minimum,
+            "max" => ChartAxisCrossing.Maximum,
+            _ => ChartAxisCrossing.Automatic,
+        };
+
+    private static ChartValueLabelPosition LabelPositionOf(XElement? axis)
+        => Value(Child(axis, "tickLblPos")) switch
+        {
+            "low" => ChartValueLabelPosition.Low,
+            "high" => ChartValueLabelPosition.High,
+            _ => ChartValueLabelPosition.NextTo,
+        };
+
+    private static bool Reversed(XElement? axis)
+        => Value(Child(Child(axis, "scaling"), "orientation")) == "maxMin";
+
     private static ChartScaleRequest ScaleOf(XElement? axis)
     {
         if (axis is null) return default;

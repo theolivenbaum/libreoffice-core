@@ -198,6 +198,13 @@ public static class OdfChartPlot
             // baseline and overlaps them.
             IsPercentStacked = styles.Flag(plotStyle, "percentage") ?? false,
             ValueScale = ScaleOf(valueAxis, styles),
+
+            // The same chart:reverse-direction ScaleOf reads off the value axis, asked of the
+            // category one — where there is no scale to carry it. See
+            // ChartPlot.CategoriesReversed.
+            CategoriesReversed = styles.Flag(
+                Attribute(categoryAxis, OdfNamespaces.Chart, "style-name"),
+                "reverse-direction") ?? false,
             ValueFormat = styles.Format(Attribute(valueAxis, OdfNamespaces.Chart, "style-name")),
             CategoryFormat = styles.Format(Attribute(categoryAxis, OdfNamespaces.Chart, "style-name")),
             CategoryAxisText = AxisTextOf(

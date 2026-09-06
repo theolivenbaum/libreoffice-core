@@ -1018,6 +1018,16 @@ any punctuated name. `fc-match "Century Schoolbook"` is safe; `fc-match "Foo-Bar
 not. When the answer matters, render a one-cell probe through `soffice` and read the face out of
 the PDF.
 
+**The two binaries disagree about the `?` digit placeholder, and the tree follows 26.2.4.2.**
+An unfilled `?` in a number format — the two that hold an accounting format's zero row clear of
+its column, and every `# ??/??` fraction — is **U+2007 FIGURE SPACE** on 26.2.4.2 and **U+0020**
+on 24.2.7.2. The seat is `cBlankDigit = 0x2007`, `svl/source/numbers/zformat.cxx`:71,
+*"tdf#158890 use figure space for '?'"*. Measured over sixteen cells and seven codes, both
+binaries, glyphs read out of the PDFs rather than out of `pdftotext`, which cannot show the
+difference: `probes/chart-cat-reverse/make-numfmt.py`. It reaches **47 corpus documents** — six
+chart parts and 45 `xl/styles.xml`. So a `?` cell compared against `/usr/bin/soffice` will differ
+by a whitespace character per placeholder and that is the version gap, not a defect.
+
 **And check it at the start of every session, because the install does not survive.**
 `fonts-dejavu-core` was installed and documented as fixed, and a later session found
 `fc-match "DejaVu Sans"` answering `wqy-zenhei.ttc` again — the package was simply absent
@@ -1405,6 +1415,23 @@ git -C <primary> worktree remove --force <worktree>
 ```
 
 ### Three worktree branches hold commits that must NOT be merged
+
+**They are not in this clone, and the four assertions this section sends a round to fetch have
+been re-derived instead.** Checked 2026-09-06 from `/home/user/wt-slidechart`: `git branch -a`
+lists 27 refs — 23 `agent/*`, `master`, and one `claude/*` local and remote — and none of
+`wt-paint-b`, `wt-slides-chart`, `wt-slides-text`. `git grep CategoriesReversed` over every branch
+head finds one hit and it is this file; no branch has ever held `ChartStackingTests.cs` or
+`DrawingChartStackingTests.cs`. So `git show wt-slides-chart:<path>` cannot be run here, and a
+round briefed to read those tests should say so rather than hunt.
+
+Three of the four assertions — a reversed *category* axis putting the first category at the top,
+moving its labels with the bars, and swapping the series within a category — are now
+`ChartReversedCategoryAxisTests`, derived from 26.2.4.2 by patching one attribute of a corpus
+chart rather than from the branch, with the C++ rule at
+`chart2/source/view/axes/VAxisProperties.cxx`:232-234. `probes/chart-cat-reverse/results.md` has
+the measurements. **The fourth is still open**: a series with `a:noFill` holding its place in a
+stack. Keep the paragraphs below for the general point about diff direction, which is the reason
+they were written.
 
 Triaged 2026-08-15. `wt-paint-b` (2 commits), `wt-slides-chart` (4) and `wt-slides-text` (5) each
 carry work that never reached this branch, and merging any of them **reverts newer work**. They

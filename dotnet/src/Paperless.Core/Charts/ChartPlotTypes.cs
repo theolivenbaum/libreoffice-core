@@ -202,3 +202,75 @@ public sealed partial record ChartPlot
     /// <summary>The fill a falling candle's box takes, or null for chart2's black.</summary>
     public Colour? StockLossFill { get; init; }
 }
+
+/// <summary>Which end of the axis it crosses an axis puts its tick labels at.</summary>
+/// <remarks>
+/// <para>
+/// <c>c:tickLblPos</c>, mapped to <c>ChartAxisLabelPosition</c> at
+/// <c>oox/source/drawingml/chart/axisconverter.cxx:92-101</c>, and read back by
+/// <c>VCartesianAxis::getLabelLineIntersectionValue</c>
+/// (<c>chart2/source/view/axes/VCartesianAxis.cxx:1103-1113</c>), which is the whole of the rule:
+/// the labels sit on a line of their own, at the crossing axis' logical minimum for
+/// <see cref="Low"/>, at its logical maximum for <see cref="High"/>, and wherever the axis line
+/// itself is for <see cref="NextTo"/>.
+/// </para>
+/// <para>
+/// <strong>Logical, not screen — so a reversed crossing axis swaps <see cref="Low"/> and
+/// <see cref="High"/> on the page.</strong> That is what puts
+/// <c>N2_E_Maestroni_Swarm_COP.pptx</c>'s date labels along the <em>bottom</em> of a Gantt whose
+/// value axis line is drawn along the top: the axis crosses at the reversed category axis'
+/// minimum, which is the top, and <c>high</c> sends the labels to its maximum, which is the
+/// bottom. See <see cref="ChartPlot.CategoriesReversed"/>.
+/// </para>
+/// <para>
+/// <c>none</c> is not one of these: it turns the labels off altogether and is
+/// <c>ChartPlot.ValueLabelsVisible</c>.
+/// </para>
+/// </remarks>
+public enum ChartValueLabelPosition
+{
+    /// <summary>Beside the axis line, wherever that crosses — <c>nextTo</c>, and the default.</summary>
+    NextTo = 0,
+
+    /// <summary>At the crossing axis' logical minimum — <c>low</c>.</summary>
+    Low,
+
+    /// <summary>At the crossing axis' logical maximum — <c>high</c>.</summary>
+    High,
+}
+
+/// <summary>Where a value axis stands along the axis it crosses.</summary>
+/// <remarks>
+/// <para>
+/// <c>c:crosses</c>, mapped at <c>oox/source/drawingml/chart/axisconverter.cxx</c>:443-451 onto
+/// <c>ChartAxisPosition</c>, and read back by <c>VCartesianAxis::getAxisIntersectionValue</c>
+/// (<c>chart2/source/view/axes/VCartesianAxis.cxx</c>:1092-1101) as the crossing axis' logical
+/// minimum or maximum.
+/// </para>
+/// <para>
+/// <strong><see cref="Automatic"/> and <see cref="Minimum"/> are the same answer here.</strong>
+/// <c>autoZero</c> asks for the value zero on the crossing axis, and the crossing axis of a value
+/// axis is a category axis whose own scale runs from a half to n-and-a-half — so zero is below its
+/// minimum and clamps to it. The distinction would matter for a scatter chart's numeric domain,
+/// which crosses a real zero; that axis is <c>ChartPlot.DomainScale</c> and does not come through
+/// here.
+/// </para>
+/// <para>
+/// Logical, not screen: <see cref="ChartPlot.CategoriesReversed"/> decides which edge of the page
+/// the minimum is at. Of 281 value axes over the corpus's chart parts, <strong>none</strong> that
+/// is primary and crosses a forward category axis says anything but <c>autoZero</c>, so this
+/// changes nothing outside the four bar charts that reverse their categories and cross at the far
+/// end.
+/// </para>
+/// </remarks>
+public enum ChartAxisCrossing
+{
+    /// <summary>At value zero on the crossing axis, which for a category axis is its start.</summary>
+    Automatic = 0,
+
+    /// <summary>At the crossing axis' logical minimum — <c>min</c>.</summary>
+    Minimum,
+
+    /// <summary>At the crossing axis' logical maximum — <c>max</c>.</summary>
+    Maximum,
+}

@@ -623,6 +623,63 @@ public sealed partial record ChartPlot
     /// </remarks>
     public bool? CategoriesBetween { get; init; }
 
+    /// <summary>
+    /// Whether the category axis runs backwards — the last category where the first would be.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>c:catAx/c:scaling/c:orientation val="maxMin"</c>, ODF's
+    /// <c>chart:reverse-direction</c>, and <c>ScaleData::Orientation ==
+    /// AxisOrientation_REVERSE</c> in chart2's own model. It is what a Gantt chart is made of: a
+    /// horizontal bar chart's categories run bottom-to-top, so putting the first task at the top
+    /// takes a reversed axis, and every real Gantt in the wild states one.
+    /// </para>
+    /// <para>
+    /// <strong>It moves the value axis as well as the categories, and that is one rule rather than
+    /// two.</strong> The value axis is drawn at the <em>start</em> of the axis it crosses —
+    /// <c>AxisProperties::initAxisPositioning</c>, <c>chart2/source/view/axes/VAxisProperties.cxx</c>
+    /// :232-234, <c>m_eCrossoverType = START</c> and <c>END</c> exactly when
+    /// <c>m_bIsMainAxis == m_bCrossingAxisHasReverseDirection</c>, with the flag set from the
+    /// crossing scale's orientation at
+    /// <c>chart2/source/view/axes/VCartesianCoordinateSystem.cxx:145</c>. Reversing the category
+    /// axis therefore moves its start to the other end of the plot and the value axis' line, ticks
+    /// and labels go with it.
+    /// </para>
+    /// <para>
+    /// Measured on both directions against 26.2.4.2, by patching one attribute of a corpus chart
+    /// and rendering both versions (<c>probes/chart-cat-reverse/</c>): on
+    /// <c>N2_E_Maestroni_Swarm_COP.pptx</c>'s Gantt, <c>minMax</c> puts <c>LEOP [0000]</c> at the
+    /// bottom with the value axis line at y = 514.97 and <c>maxMin</c> puts it at the top with the
+    /// line at y = 108.00; on <c>002_advanced_powerpoint_column.pptx</c>'s column chart,
+    /// <c>M1</c> moves from x = 109.87 to x = 521.29 and the value axis' line and labels move from
+    /// the left edge (x = 85.58, labels at 62–73) to the right (x = 559.11, labels at 566.19),
+    /// while the category labels stay on the bottom in both.
+    /// </para>
+    /// <para>
+    /// The value axis' own <c>c:orientation</c> is <see cref="ChartScaleRequest.IsReversed"/> and
+    /// is a different statement about a different axis; a chart may make either, both or neither.
+    /// </para>
+    /// </remarks>
+    public bool CategoriesReversed { get; init; }
+
+    /// <summary>Which end of the category axis the value axis' tick labels sit at.</summary>
+    /// <remarks>See <see cref="ChartValueLabelPosition"/>; the axis <em>line</em> does not move
+    /// with them.</remarks>
+    public ChartValueLabelPosition ValueLabelPosition { get; init; }
+
+    /// <summary>The same statement made by a secondary value axis.</summary>
+    public ChartValueLabelPosition SecondaryLabelPosition { get; init; }
+
+    /// <summary>Which end of the category axis the value axis itself stands at.</summary>
+    /// <remarks>
+    /// <c>c:valAx/c:crosses</c>; see <see cref="ChartAxisCrossing"/>. A secondary axis takes the
+    /// other end from the primary rather than reading its own statement — every secondary axis in
+    /// the corpus says <c>max</c> against an <c>autoZero</c> primary, which is that same rule
+    /// spelled out, and honouring both statements separately would let a file put two axes on one
+    /// edge.
+    /// </remarks>
+    public ChartAxisCrossing ValueAxisCrossing { get; init; }
+
     /// <summary>The series drawn as one kind against one value axis, in file order.</summary>
     /// <param name="kind">The geometry.</param>
     /// <param name="axis">
