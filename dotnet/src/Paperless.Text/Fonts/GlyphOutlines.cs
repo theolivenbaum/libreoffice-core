@@ -30,6 +30,14 @@ namespace Paperless.Text.Fonts;
 /// The result is in document space, not font space: y grows downward and the origin is the pen
 /// position on the baseline, so a path can be placed by translating it to where the pen is.
 /// </para>
+/// <para>
+/// <strong>Nothing that draws text reaches this class</strong>, and it is worth saying because a
+/// round has already looked here for a defect that was not here. A glyph run reaches the raster sink
+/// as ids and positions and is drawn through Skia's own <c>SKFont.GetGlyphPath</c>, and reaches the
+/// PDF sink as a font program to embed; neither asks this reader for anything. So a face this reader
+/// cannot outline is not thereby a blank on a page — see <see cref="ColourBitmaps"/> for the one
+/// flavour of face that <em>was</em>, and <see cref="GlyphPainting"/> for what decides it.
+/// </para>
 /// </remarks>
 public static class GlyphOutlines
 {

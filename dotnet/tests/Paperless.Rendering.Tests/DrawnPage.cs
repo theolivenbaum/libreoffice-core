@@ -356,3 +356,91 @@ internal static class TestFacePair
         return null;
     }
 }
+
+/// <summary>
+/// A real installed face whose glyphs are colour bitmaps rather than outlines.
+/// </summary>
+/// <remarks>
+/// <para>
+/// Found by its tables rather than by its name: a face carrying <c>CBLC</c> and <c>CBDT</c> keeps
+/// a whole PNG per glyph, and on this machine exactly one installed face does — Noto Color Emoji,
+/// which is also the face glyph fallback answers with for every character carrying the Unicode
+/// <c>Emoji</c> property. Scanning for the tables keeps the test about the flavour instead of about
+/// one file name.
+/// </para>
+/// <para>
+/// Loaded straight from its path rather than through <c>SystemFontResolver</c>, for the same reason
+/// <see cref="TestCffFace"/> is: a family request would be answered by whatever the machine prefers
+/// under that name.
+/// </para>
+/// </remarks>
+internal static class TestColourFace
+{
+    private static readonly Lazy<(FontReference Reference, OpenTypeFace Face)?> Resolved = new(Resolve);
+
+    /// <summary>True when a colour bitmap face was found on this machine.</summary>
+    public static bool IsAvailable => Resolved.Value is not null;
+
+    /// <summary>The reference; only valid when <see cref="IsAvailable"/>.</summary>
+    public static FontReference Reference => Resolved.Value!.Value.Reference;
+
+    /// <summary>The face behind it.</summary>
+    public static OpenTypeFace Face => Resolved.Value!.Value.Face;
+
+    /// <summary>A one-character run, positioned as layout's own would be.</summary>
+    /// <param name="codePoint">The character to draw; it must be one the face covers.</param>
+    /// <param name="origin">Where the baseline starts.</param>
+    /// <param name="size">The em size.</param>
+    public static GlyphRun Run(int codePoint, DocPoint origin, Length size)
+    {
+        ushort glyph = Face.Characters.GlyphFor(codePoint);
+        Length advance = Length.FromEmu(Face.AdvanceOf(glyph) * size.Emu / Face.UnitsPerEm);
+        string text = char.ConvertFromUtf32(codePoint);
+
+        return new GlyphRun
+        {
+            Font = Reference,
+            FontSize = size,
+            Origin = origin,
+            Glyphs = [new PositionedGlyph(glyph, default, advance)],
+            Text = text,
+            ClusterMap = [0],
+        };
+    }
+
+    private static (FontReference, OpenTypeFace)? Resolve()
+    {
+        foreach (string directory in (string[])
+                 ["/usr/share/fonts", "/usr/local/share/fonts", "/Library/Fonts"])
+        {
+            if (!Directory.Exists(directory)) continue;
+
+            foreach (string path in Directory.EnumerateFiles(directory, "*.ttf", SearchOption.AllDirectories))
+            {
+                try
+                {
+                    if (OpenTypeFace.ReadFile(path) is not { } face) continue;
+                    if (!ColourBitmaps.Has(face)) continue;
+
+                    return (
+                        new FontReference
+                        {
+                            FamilyName = face.FamilyName ?? System.IO.Path.GetFileNameWithoutExtension(path),
+                            FaceKey = path,
+                        },
+                        face);
+                }
+                catch (IOException)
+                {
+                    // Unreadable font file: try the next one.
+                }
+                catch (UnauthorizedAccessException)
+                {
+                    // Likewise.
+                }
+            }
+        }
+
+        return null;
+    }
+}
