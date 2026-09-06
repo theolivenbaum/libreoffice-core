@@ -830,6 +830,45 @@ public sealed partial record ChartPlot
     public ChartAxisText CategoryAxisText { get; init; }
 
     /// <summary>
+    /// What the file says about how the <em>value</em> axis' labels are set.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>c:valAx/c:txPr/a:bodyPr</c>, read by the same function that reads the category axis' —
+    /// and until this existed it was not read at all, so a chart stating its own value-label
+    /// rotation drew them upright. Only <see cref="ChartAxisText.Rotation"/> is used: the other
+    /// three decide an arrangement, and a value axis has none. <c>isBreakOfLabelsAllowed</c> says
+    /// so outright — "no break for value axis", <c>!m_bUseTextLabels</c>
+    /// (<c>chart2/source/view/axes/VCartesianAxis.cxx</c>:521-522) — and
+    /// <c>canAutoAdjustLabelPlacement</c> never reaches one either, because a value axis' tick
+    /// count is reduced until its labels fit rather than its labels being turned.
+    /// </para>
+    /// <para>
+    /// <strong>Reach: one document, and the axis' own title is what the other thirty-six
+    /// are.</strong> Over the corpus' 307 chart parts, 37 value axes carry an in-range non-zero
+    /// <c>rot</c> somewhere inside <c>c:valAx</c> and <strong>35 of them are on the axis
+    /// <em>title</em></strong>, which is a quarter-turn and was already drawn. Read from
+    /// <c>c:txPr</c> alone the count is two, and one of those two is not a value axis either:
+    /// <c>047_Date_tracker_Gantt_chart</c> is a <c>c:scatterChart</c>, whose <em>domain</em> is
+    /// also spelt <c>c:valAx</c>, and its −30° is on the bottom axis that
+    /// <see cref="ChartPlot.DomainScale"/> carries and <c>AddDomainAxis</c> draws. What is left is
+    /// <c>N2_E_Maestroni_Swarm_COP.pptx</c> at −45°, a bar chart whose value axis runs along the
+    /// bottom and whose dates would otherwise overlap. See <c>probes/chart-layout/census.py</c>.
+    /// </para>
+    /// <para>
+    /// <strong>The ODF reader deliberately does not set this yet.</strong> <c>OdfChartPlot</c>
+    /// has the same <c>AxisTextOf</c> and could read <c>style:rotation-angle</c> off the value
+    /// axis' style in one line, but no corpus ODF chart was measured for it and an unmeasured
+    /// rotation would move ODF charts on a rule taken from OOXML's reference. It is a one-line
+    /// change for whoever measures it.
+    /// </para>
+    /// </remarks>
+    public ChartAxisText ValueAxisText { get; init; }
+
+    /// <summary>The same, for a secondary value axis.</summary>
+    public ChartAxisText SecondaryValueAxisText { get; init; }
+
+    /// <summary>
     /// How the category axis' labels are written, or null to draw the cached text as it stands.
     /// </summary>
     /// <remarks>

@@ -272,6 +272,8 @@ public static class DrawingChartPlot
             ValueFormat = FormatOf(axes.Value),
             CategoryFormat = FormatOf(axes.Category),
             CategoryAxisText = AxisTextOf(axes.Domain ?? axes.Category),
+            ValueAxisText = AxisTextOf(axes.Value),
+            SecondaryValueAxisText = AxisTextOf(axes.Secondary),
             DataTable = DataTableOf(Child(plotArea, "dTable"), theme),
             SecondaryValueScale = axes.Secondary is null ? null : ScaleOf(axes.Secondary),
             SecondaryValueFormat = FormatOf(axes.Secondary),
@@ -425,6 +427,20 @@ public static class DrawingChartPlot
     /// was meant to avoid — an outer layout falls back to the computed one, which is at worst as
     /// wrong as it would have been.
     /// </para>
+    /// <para>
+    /// <strong>A rectangle that does not fit the chart is moved, not shrunk, and that is the
+    /// whole of the correction.</strong> The importer resolves the four fractions against the
+    /// chart's page and hands the result to <c>XDiagramPositioning</c>
+    /// (<c>PlotAreaConverter::convertPositionFromModel</c>,
+    /// <c>oox/source/drawingml/chart/plotareaconverter.cxx</c>:510-538), which for
+    /// <c>inner</c> is <c>setDiagramPositionExcludingAxes</c> and therefore
+    /// <c>DiagramHelper::setDiagramPositioning</c>
+    /// (<c>chart2/source/tools/DiagramHelper.cxx</c>:434-476). That function clamps each of the
+    /// four to <c>[0, 1]</c> and then, if the position and the size still overrun,
+    /// <em>moves the position back</em> — <c>aNewPos.Primary = 1.0 - aNewSize.Primary</c> — so the
+    /// plot keeps the width the file asked for and loses the overhang off the far edge instead.
+    /// See <see cref="Fitted"/> for the measurement.
+    /// </para>
     /// </remarks>
     private static (double X, double Y, double Width, double Height)? ManualLayout(XElement? layout)
     {
@@ -437,7 +453,52 @@ public static class DrawingChartPlot
         if (Number(Child(manual, "w")) is not { } width) return null;
         if (Number(Child(manual, "h")) is not { } height) return null;
 
+        (x, width) = Fitted(x, width);
+        (y, height) = Fitted(y, height);
+
         return (x, y, width, height);
+    }
+
+    /// <summary>
+    /// One axis of a stated plot rectangle, fitted inside the chart the way the importer fits it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>lcl_ensureRange0to1</c> on each half and then <c>if (pos + size &gt; 1) pos = 1 - size</c>
+    /// (<c>chart2/source/tools/DiagramHelper.cxx</c>:425-465). The order matters: the size is
+    /// clamped first, so a file stating a width larger than the chart gets the whole chart and a
+    /// position of zero rather than a negative position.
+    /// </para>
+    /// <para>
+    /// <strong>Measured on <c>N2_E_Maestroni_Swarm_COP.pptx</c>, whose Gantt states
+    /// <c>x=0.20148</c> and <c>w=0.82271</c> — 1.0242 between them.</strong> Taking the pair
+    /// verbatim runs the plot 17.4 pt off the right edge of a 720 pt frame; moving the position
+    /// puts it at <c>1 - 0.82271 = 0.17729</c>, which is 127.65 pt. 26.2.4.2 draws that chart's
+    /// plot rectangle from 225.581 to 719.660 on the page, and that chart's primitives are fitted
+    /// into the frame from 119.083 to 719.660 — an embedded chart is stretched onto its own drawn
+    /// extent, <c>svx/source/sdr/contact/viewcontactofsdrole2obj.cxx</c>:88-116 — so the
+    /// reference's own left edge in the chart's coordinates is
+    /// <c>(225.581 - 119.083) / (719.660 - 119.083) × 720 = 127.65</c> — the same number, with no
+    /// free parameter. Shrinking the width instead would put it at 145.06.
+    /// </para>
+    /// <para>
+    /// <strong>A second witness, built rather than found, separates the two readings by 89 pt.</strong>
+    /// <c>probes/chart-layout/mkprobe3.py</c>'s <c>OVER.pptx</c> states <c>x = 0.30</c> and
+    /// <c>w = 0.85</c> in a 590.4 pt frame — an overrun sixty times Maestroni's. 26.2.4.2 centres
+    /// its first value label on the plot's left edge at 138.25, against
+    /// <c>50.4 + 0.15 × 590.4 = 138.9</c> for moving the position and 227.5 for shrinking the size.
+    /// </para>
+    /// <para>
+    /// The importer does this arithmetic in whole 1/100 mm and this does it in the fractions
+    /// themselves, which on that chart is a difference of 0.02 pt.
+    /// </para>
+    /// </remarks>
+    private static (double Position, double Size) Fitted(double position, double size)
+    {
+        position = Math.Clamp(position, 0.0, 1.0);
+        size = Math.Clamp(size, 0.0, 1.0);
+
+        return position + size > 1.0 ? (1.0 - size, size) : (position, size);
     }
 
     /// <summary>

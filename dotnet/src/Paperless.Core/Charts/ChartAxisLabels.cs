@@ -76,6 +76,28 @@ public readonly record struct ChartAxisLabelLayout(
     Length Reserved,
     IReadOnlyList<string?>? Texts = null);
 
+/// <summary>Which way an axis runs across the page.</summary>
+/// <remarks>
+/// <para>
+/// <c>TickFactory2D::isHorizontalAxis</c> and <c>::isVerticalAxis</c>
+/// (<c>chart2/source/view/axes/Tickmarks.cxx</c>:169-192), which decide it from the axis line's
+/// own two ends. A bar chart's category axis runs down the left of the plot and its value axis
+/// along the bottom; a column chart's are the other way round.
+/// </para>
+/// <para>
+/// <strong>It is not a cosmetic distinction: three of the four escape routes are closed on a
+/// vertical axis.</strong> See <see cref="ChartAxisLabels"/>.
+/// </para>
+/// </remarks>
+public enum ChartAxisDirection
+{
+    /// <summary>Along the page — a column chart's category axis.</summary>
+    Horizontal = 0,
+
+    /// <summary>Down the page — a bar chart's category axis.</summary>
+    Vertical,
+}
+
 /// <summary>
 /// Decides whether an axis' labels are rotated, thinned or staggered, and how deep they end up.
 /// </summary>
@@ -112,6 +134,32 @@ public readonly record struct ChartAxisLabelLayout(
 /// number is reachable by drawing the labels correctly, and both were read as missing features
 /// before the content streams were opened.
 /// </para>
+/// <para>
+/// <strong>A vertical category axis is the same loop with three of its four moves taken
+/// away.</strong> <c>canAutoAdjustLabelPlacement</c> (<c>VCartesianAxis.cxx:539-556</c>) is the
+/// joint prerequisite for auto-rotation <em>and</em> auto-staggering, and its last three lines
+/// are the whole rule: <c>if (bIsHorizontalAxis) return !m_bStackCharacters; if (bIsVerticalAxis)
+/// return m_bStackCharacters; return false;</c> — "automatic adjusting labels only works for
+/// horizontal axis with horizontal text or vertical axis with vertical text". Ordinary
+/// horizontal type on an axis running down the page therefore never turns 45 degrees and never
+/// staggers; the only move left is to thin the labels out. What it keeps is line breaking, whose
+/// own gate (<c>isBreakOfLabelsAllowed</c>, <c>:513-535</c>) returns <c>bIsVerticalAxis</c> for a
+/// swapped chart, and whose limit is not the tick spacing at all: <c>:768-773</c> replaces it
+/// with <c>pTickFactory-&gt;getXaxisStartPos().getX()</c>, the whole room between the chart's own
+/// left edge and the axis, and takes <em>no</em> five per cent off it.
+/// </para>
+/// <para>
+/// <strong>Measured, on seventy-five decks built for it and rendered through 26.2.4.2</strong>
+/// (<c>probes/chart-layout/</c>): a bar chart whose eight category names are 184 pt wide draws
+/// every one of them on <em>one</em> line and moves the plot's left edge to make room, and so
+/// does the same chart with those names written as a single unbreakable word — because an
+/// automatically laid-out plot gives up exactly the width the widest label needs, which makes
+/// the wrap limit its own fixed point and never binding. Give the same chart a
+/// <c>c:manualLayout</c> that fixes the plot at 0.10 of the frame and the labels break onto four
+/// lines whose longest is 58.7 pt against the stated band's 59.0, and the axis thins to every
+/// second, third and fifth label at 8, 16 and 32 categories. Neither deck rotates a label or
+/// staggers one.
+/// </para>
 /// </remarks>
 public static class ChartAxisLabels
 {
@@ -144,20 +192,35 @@ public static class ChartAxisLabels
     /// only the drawing because a bold face is wider, so it decides whether two labels collide —
     /// and hence whether the axis is rotated at all. See <see cref="ChartPlot.IsLabelBold"/>.
     /// </param>
+    /// <param name="direction">
+    /// Which way the axis runs. A <see cref="ChartAxisDirection.Vertical"/> axis measures its
+    /// labels' extent along the axis by their <em>height</em> and reserves their width, and it
+    /// may neither rotate nor stagger — see <see cref="ChartAxisLabels"/>.
+    /// </param>
+    /// <param name="room">
+    /// The width a <see cref="ChartAxisDirection.Vertical"/> axis' labels have between the
+    /// chart's own edge and the axis, which is the limit they break at. Zero leaves them
+    /// unbroken. Ignored on a horizontal axis, whose limit is <see cref="WrapFraction"/> of one
+    /// tick's worth of axis.
+    /// </param>
     public static ChartAxisLabelLayout Resolve(
         IReadOnlyList<string?> texts,
         IReadOnlyList<Length> centres,
         ChartAxisText stated,
         Length size,
         ChartText measurer,
-        bool bold = false)
+        bool bold = false,
+        ChartAxisDirection direction = ChartAxisDirection.Horizontal,
+        Length room = default)
     {
         ArgumentNullException.ThrowIfNull(texts);
         ArgumentNullException.ThrowIfNull(centres);
 
+        bool vertical = direction == ChartAxisDirection.Vertical;
+
         double rotation = stated.Rotation;
         bool lineBreak = stated.LineBreakAllowed;
-        ChartLabelStagger stagger = stated.Stagger;
+        ChartLabelStagger stagger = vertical ? ChartLabelStagger.SideBySide : stated.Stagger;
         int rhythm = 1;
 
         int count = Math.Min(texts.Count, centres.Count);
@@ -169,48 +232,61 @@ public static class ChartAxisLabels
         {
             bool staggered = stagger is ChartLabelStagger.Even or ChartLabelStagger.Odd;
 
-            // A label that wraps in the room between two ticks makes chart2 give up on wrapping
-            // altogether and start again (VCartesianAxis.cxx:888-903). That restart is what lets
-            // auto-rotation happen at all on an OOXML axis, whose importer turns line breaking
-            // *on*: canAutoAdjustLabelPlacement refuses while it is on, so the wrap is the only
-            // route from "labels collide" to "labels are turned 45°".
+            // The room one label is laid out in before it breaks. A horizontal axis gets one
+            // tick's worth less five per cent; a vertical one gets the whole band between the
+            // chart's own edge and the axis, and no reduction at all
+            // (VCartesianAxis.cxx:768-773).
+            Length limit = vertical
+                ? room
+                : spacing * (staggered ? 2.0 : 1.0) * WrapFraction;
+
+            // A label that has to break *inside a word* to fit that room makes chart2 give up on
+            // wrapping altogether and start again (VCartesianAxis.cxx:888-903), and a label that
+            // merely breaks at a blank does not — measured on three fixed-layout probe decks
+            // whose lines begin with a hyphen and with a bracket and are wrapped anyway. That
+            // restart is what lets auto-rotation happen at all on an OOXML axis, whose importer
+            // turns line breaking *on*: canAutoAdjustLabelPlacement refuses while it is on, so
+            // the wrap is the only route from "labels collide" to "labels are turned 45°".
             if (lineBreak && !stated.OverlapAllowed && rotation == 0.0
-                && Wraps(texts, count, spacing, staggered, size, measurer, bold))
+                && Wraps(texts, count, limit, size, measurer, bold))
             {
                 lineBreak = false;
                 continue;
             }
 
             // With line breaking still on and the labels upright, each one is laid out inside
-            // `TextMaximumFrameWidth` — one tick's worth of axis less the 5% — and wraps at its
-            // word boundaries. That is the shape `doesOverlap` intersects and the shape the axis
-            // reserves room for, and it is *not* the single-line run: `ACCOUNT MANAGER` set on
-            // one line is nearly two ticks wide and set on two is under one.
+            // `TextMaximumFrameWidth` — the limit above — and wraps at its word boundaries. That
+            // is the shape `doesOverlap` intersects and the shape the axis reserves room for, and
+            // it is *not* the single-line run: `ACCOUNT MANAGER` set on one line is nearly two
+            // ticks wide and set on two is under one.
             //
             // Measured on 033_Event_planning_tracker_Use_this_template_f29a848e.xlsx, whose six
             // category names are all two words: the reference draws all six on two lines each and
             // we drew three, having found a collision between runs it never laid out.
             IReadOnlyList<string?>? wrapped =
-                lineBreak && rotation == 0.0 && spacing > Length.Zero
-                    ? Wrap(texts, count, spacing * (staggered ? 2.0 : 1.0) * WrapFraction,
-                           size, measurer, bold)
+                lineBreak && rotation == 0.0 && limit > Length.Zero
+                    ? Wrap(texts, count, limit, size, measurer, bold)
                     : null;
 
             // The shape each label sits in, insets included — what collides is the shape and not
             // the text, exactly as everything else this file reserves room for.
             DocSize[] boxes = Boxes(wrapped ?? texts, count, size, measurer, bold);
 
-            // canAutoAdjustLabelPlacement, VCartesianAxis.cxx:1478-1495 — and it deliberately
+            // canAutoAdjustLabelPlacement, VCartesianAxis.cxx:539-556 — and it deliberately
             // does *not* test the arrangement, which is why an OOXML axis whose staggering is
-            // turned off may still be rotated.
-            bool canAdjust = !stated.OverlapAllowed && !lineBreak && rotation == 0.0;
+            // turned off may still be rotated. Its last three lines close both routes on an axis
+            // running down the page —
+            // "automatic adjusting labels only works for horizontal axis with horizontal text or
+            // vertical axis with vertical text" — so a vertical axis can only thin.
+            bool canAdjust =
+                !vertical && !stated.OverlapAllowed && !lineBreak && rotation == 0.0;
 
             if (stated.OverlapAllowed
-                || !Collides(boxes, centres, count, rhythm, staggered, rotation))
+                || !Collides(boxes, centres, count, rhythm, staggered, rotation, vertical))
             {
                 return new ChartAxisLabelLayout(
                     rotation, rhythm, staggered,
-                    Depth(boxes, count, rhythm, staggered, rotation),
+                    Depth(boxes, count, rhythm, staggered, rotation, vertical),
                     wrapped);
             }
 
@@ -231,7 +307,8 @@ public static class ChartAxisLabels
         return new ChartAxisLabelLayout(
             rotation, rhythm, lastStaggered,
             Depth(
-                Boxes(texts, count, size, measurer, bold), count, rhythm, false, rotation));
+                Boxes(texts, count, size, measurer, bold), count, rhythm, false, rotation,
+                vertical));
     }
 
     /// <summary>The shape each label sits in.</summary>
@@ -355,7 +432,11 @@ public static class ChartAxisLabels
     /// How much of one tick's worth of axis a label's word is given before it breaks inside
     /// itself — <c>createTextShapes</c>'s own 5% reduction.
     /// </summary>
-    /// <remarks>See <see cref="Wraps"/>, which is the only caller and carries the measurement.</remarks>
+    /// <remarks>
+    /// See <see cref="Wraps"/>, which carries the measurement. It is a <em>horizontal</em> axis'
+    /// constant: a vertical category axis' limit is the whole band left of it, with no reduction
+    /// (<c>VCartesianAxis.cxx:768-773</c>).
+    /// </remarks>
     private const double WrapFraction = 0.95;
 
     /// <summary>Whether any label would wrap in the room one tick's worth of axis gives it.</summary>
@@ -404,16 +485,11 @@ public static class ChartAxisLabels
     private static bool Wraps(
         IReadOnlyList<string?> texts,
         int count,
-        Length spacing,
-        bool staggered,
+        Length limit,
         Length size,
         ChartText measurer,
         bool bold)
     {
-        if (spacing <= Length.Zero) return false;
-
-        Length limit = spacing * (staggered ? 2.0 : 1.0) * WrapFraction;
-
         if (limit <= Length.Zero) return false;
 
         // The first label is not tested — `nTick > 0` guards the whole check
@@ -491,14 +567,20 @@ public static class ChartAxisLabels
         int count,
         int rhythm,
         bool staggered,
-        double rotation)
+        double rotation,
+        bool vertical)
     {
         // Staggering puts alternate labels on two rows, so what a label collides with is the one
         // two places away rather than the one beside it.
         int step = Math.Max(1, rhythm) * (staggered ? 2 : 1);
 
-        double cosine = Math.Abs(Math.Cos(rotation));
-        double sine = Math.Abs(Math.Sin(rotation));
+        // The offset between two neighbours runs along the axis, so turning it back through the
+        // label's own rotation gives (gap·cos, gap·sin) on a horizontal axis and (gap·sin,
+        // gap·cos) on a vertical one — the same test with the two trigonometric terms swapped.
+        // Upright, that is the whole difference between "two labels collide when their widths
+        // meet" and "when their heights do".
+        double cosine = Math.Abs(vertical ? Math.Sin(rotation) : Math.Cos(rotation));
+        double sine = Math.Abs(vertical ? Math.Cos(rotation) : Math.Sin(rotation));
 
         int previous = -1;
 
@@ -532,10 +614,13 @@ public static class ChartAxisLabels
     /// first quadrant first. Staggering doubles it, because the second row sits below the first.
     /// </remarks>
     private static Length Depth(
-        DocSize[] boxes, int count, int rhythm, bool staggered, double rotation)
+        DocSize[] boxes, int count, int rhythm, bool staggered, double rotation, bool vertical)
     {
-        double cosine = Math.Abs(Math.Cos(rotation));
-        double sine = Math.Abs(Math.Sin(rotation));
+        // Away from the axis is across the page for a horizontal axis and along it for a vertical
+        // one, so the two terms swap here exactly as they do in <see cref="Collides"/>: an
+        // upright label on a vertical axis reserves its own width.
+        double cosine = Math.Abs(vertical ? Math.Sin(rotation) : Math.Cos(rotation));
+        double sine = Math.Abs(vertical ? Math.Cos(rotation) : Math.Sin(rotation));
 
         Length deepest = Length.Zero;
 
