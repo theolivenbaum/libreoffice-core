@@ -72,6 +72,35 @@ public class BuiltInNumberFormatTests
         => Format(id, value).ShouldBe(expected);
 
     [Fact]
+    public void TheBiffFilterHasNoCurrencyOrAccountingBuiltInsAtAll()
+    {
+        // The locale row is shared; the covered *set* of ids is not. Both BIFF tables say so in
+        // as many words — "5...8 contained in file" (xlstyle.cxx:826) and "41...44 contained in
+        // file" (:862) — and carry no entry for either run, while the OOXML tables state all
+        // eight (numberformatsbuffer.cxx:294-320, :802). A BIFF file that uses one without
+        // writing its own FORMAT record therefore gets the standard format.
+        foreach (int id in new[] { 5, 6, 7, 8, 41, 42, 43, 44 })
+        {
+            BuiltInNumberFormats.BiffCode(id).ShouldBeNull($"BIFF has no built-in {id}");
+            BuiltInNumberFormats.Code(id).ShouldNotBeNull($"OOXML has a built-in {id}");
+        }
+
+        // 63-66 are built in on both sides and carry the same four codes: the en-US BIFF table
+        // names them outright (xlstyle.cxx:949-952) and the OOXML base table reuses 5-8.
+        foreach (int id in new[] { 63, 64, 65, 66 })
+        {
+            BuiltInNumberFormats.BiffCode(id).ShouldBe(BuiltInNumberFormats.Code(id));
+            BuiltInNumberFormats.BiffCode(id).ShouldNotBeNull();
+        }
+
+        // Everything else is the same table for both.
+        foreach (int id in new[] { 0, 1, 9, 12, 14, 20, 22, 37, 40, 45, 49, 76 })
+        {
+            BuiltInNumberFormats.BiffCode(id).ShouldBe(BuiltInNumberFormats.Code(id));
+        }
+    }
+
+    [Fact]
     public void TheAccountingBuiltInsCarryAFillAndTheirZeroDash()
     {
         // 41-44 hold a `*` fill and, in the two-decimal pair, the `??` that keeps the dash clear

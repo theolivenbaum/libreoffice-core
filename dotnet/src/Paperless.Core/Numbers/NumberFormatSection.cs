@@ -291,11 +291,11 @@ public sealed class NumberFormatSection
             // lower case), `NN`/`NNN`/`NNNN` are LibreOffice's own. They share one case in
             // `zformat.cxx`:3983-4008 and the difference is short name against long, plus the
             // locale's day-of-week separator on `NNNN` alone.
-            if (DayNameRun(code, i, out int nameLength, out int nameCount))
+            if (DayNameRun(code, i, out int nameLength, out int nameCount, out bool otherCalendar))
             {
                 tokens.Add(FormatToken.DateTime('w', nameCount));
                 sawDateTime = true;
-                unreproduced = true;
+                if (otherCalendar) unreproduced = true;
                 i += nameLength;
                 continue;
             }
@@ -348,33 +348,41 @@ public sealed class NumberFormatSection
     /// </summary>
     /// <remarks>
     /// <para>
-    /// The count is 3 for a short name, 4 for a long one and 5 for a long one followed by the
-    /// locale's day-of-week separator, which is what <c>NNNN</c> alone adds
-    /// (<c>rCurrentLang.GetLocaleData()-&gt;getLongDateDayOfWeekSep()</c>,
-    /// <c>svl/source/numbers/zformat.cxx</c>:4004). Runs of one or two <c>a</c>, and a lone
-    /// <c>n</c>, are not keywords and stay literal — <c>sKeyword</c> holds only <c>AAA</c>,
-    /// <c>AAAA</c>, <c>NN</c>, <c>NNN</c> and <c>NNNN</c>
-    /// (<c>svl/source/numbers/zforscan.cxx</c>:60-77).
+    /// <strong>The five keys do not pair up the way their lengths suggest, and the pairing was
+    /// measured rather than counted.</strong> <c>zformat.cxx</c>:3983-4004 puts <c>NN</c> with
+    /// <c>AAA</c> on <c>SHORT_DAY_NAME</c> and <c>NNN</c> with <c>AAAA</c> on
+    /// <c>LONG_DAY_NAME</c>, so <c>nnn</c> is a <em>long</em> name and not a short one; only
+    /// <c>NNNN</c> appends the locale's day-of-week separator (:4004,
+    /// <c>getLongDateDayOfWeekSep</c>). Both binaries draw <c>Sun</c>, <c>Sunday</c> and
+    /// <c>Sunday, </c> for the three. The count below is therefore 3 for a short name, 4 for a
+    /// long one and 5 for a long one with the separator.
     /// </para>
     /// <para>
-    /// <strong>What this does not reproduce is the calendar the key drags in with it.</strong>
-    /// <c>ImpIsOtherCalendar</c> (<c>zformat.cxx</c>:3453-3480) answers true for any subformat
+    /// Runs of one or two <c>a</c>, and a lone <c>n</c>, are not keywords and stay literal —
+    /// <c>sKeyword</c> holds only <c>AAA</c>, <c>AAAA</c>, <c>NN</c>, <c>NNN</c> and
+    /// <c>NNNN</c> (<c>svl/source/numbers/zforscan.cxx</c>:60-77).
+    /// </para>
+    /// <para>
+    /// <strong>An <c>A</c> key drags a calendar in with it and an <c>N</c> key does not.</strong>
+    /// <c>ImpIsOtherCalendar</c> (<c>zformat.cxx</c>:3453-3480) answers true for a subformat
     /// holding <c>AAA</c>, <c>AAAA</c>, <c>EC</c>, <c>EEC</c>, <c>R</c>, <c>RR</c>, <c>G</c>,
-    /// <c>GG</c> or <c>GGG</c>, and <c>SwitchToOtherCalendar</c> (:3486-3512) then renders the
-    /// month and day fields in the <em>first non-Gregorian calendar the locale lists</em>,
-    /// leaving the year Gregorian. Measured on both installed binaries
+    /// <c>GG</c> or <c>GGG</c> — and for none of the <c>N</c> keys — after which
+    /// <c>SwitchToOtherCalendar</c> (:3486-3512) renders the month and day fields in the
+    /// <em>first non-Gregorian calendar the locale lists</em>, leaving the year Gregorian.
+    /// Measured on both installed binaries
     /// (<c>dotnet/probes/numfmt-r68/make-codes.py</c>): under en-US that calendar is the Jewish
-    /// one, so serial 46194 — 21 June 2026, a Sunday — draws <c>04/06/26 Sunday</c> under
-    /// <c>mm/dd/yy aaaa</c> and <c>Tammuz 06 2026 Sunday</c> under <c>mmmm dd yyyy aaaa</c>,
-    /// against <c>06/21/26</c> for the same serial under <c>mm/dd/yy</c> alone. The day name
-    /// itself is exact either way; the date beside it is not, which is why a subformat carrying
-    /// one of these keys reports <see cref="HasUnreproducedDirective"/>.
+    /// one, so serial 44794 — 21 August 2022, a Sunday — draws <c>05/24/22 Sunday</c> under
+    /// <c>mm/dd/yy aaaa</c> and <c>08/21/22 Sunday</c> under <c>mm/dd/yy nnn</c>. The day name
+    /// itself is exact either way; the date beside an <c>A</c> key is not, which is why only
+    /// those report <see cref="HasUnreproducedDirective"/>.
     /// </para>
     /// </remarks>
-    private static bool DayNameRun(string code, int index, out int length, out int count)
+    private static bool DayNameRun(
+        string code, int index, out int length, out int count, out bool otherCalendar)
     {
         length = 0;
         count = 0;
+        otherCalendar = false;
 
         char first = char.ToLowerInvariant(code[index]);
         if (first is not ('a' or 'n')) return false;
@@ -391,8 +399,9 @@ public sealed class NumberFormatSection
 
         length = Math.Min(run, 4);
         count = first == 'a'
-            ? length
-            : length switch { 2 or 3 => 3, _ => 5 };
+            ? length                                        // AAA short, AAAA long
+            : length switch { 2 => 3, 3 => 4, _ => 5 };     // NN short, NNN long, NNNN long+sep
+        otherCalendar = first == 'a';
         return true;
     }
 

@@ -37,11 +37,12 @@ public class NumberFormatDayNameTests
     [InlineData("AAA", "Sun")]
     [InlineData("aaaa", "Sunday")]
     [InlineData("AAAA", "Sunday")]
-    // LibreOffice's own spellings. NNNN carries the long-date day-of-week separator, which is
-    // ", " in en-US and is drawn: the probe reads "Sunday, " off the page for NNNN and "Sunday"
-    // for AAAA on the same serial.
+    // LibreOffice's own spellings, and their lengths do not line up with Excel's: zformat.cxx
+    // :3983-4004 pairs NN with AAA on the short name and **NNN with AAAA on the long one**, so
+    // `nnn` is a long name. Only NNNN adds the locale's day-of-week separator, which is ", " in
+    // en-US. Both binaries draw Sun, Sunday and "Sunday, " for the three.
     [InlineData("nn", "Sun")]
-    [InlineData("nnn", "Sun")]
+    [InlineData("nnn", "Sunday")]
     [InlineData("nnnn", "Sunday, ")]
     public void ADayNameKeyWritesTheWeekday(string code, string expected)
         => Format(code, SundaySerial).ShouldBe(expected);
@@ -85,14 +86,25 @@ public class NumberFormatDayNameTests
     /// </remarks>
     [Fact]
     public void TheDateBesideADayNameStaysGregorian()
-        => Format("mm/dd/yy\\ aaaa", SundaySerial).ShouldBe("08/21/22 Sunday");
+    {
+        // 26.2.4.2 and 24.2.7.2 both draw `05/24/22 Sunday` here — 24 Av 5782 — and both draw
+        // `08/21/22 Sunday` for the N spelling, which does not switch the calendar.
+        Format("mm/dd/yy\\ aaaa", SundaySerial).ShouldBe("08/21/22 Sunday");
+        Format("mm/dd/yy\\ nnn", SundaySerial).ShouldBe("08/21/22 Sunday");
+    }
 
     [Fact]
     public void ADayNameKeyIsReported()
     {
         NumberFormatCode.Parse("mm/dd/yy\\ aaaa").IsFullyReproduced.ShouldBeFalse(
             "AAAA switches the month and day to another calendar, which is not reproduced");
-        NumberFormatCode.Parse("nnnn").IsFullyReproduced.ShouldBeFalse();
+        NumberFormatCode.Parse("aaa").IsFullyReproduced.ShouldBeFalse();
+
+        // The N keys are NOT in ImpIsOtherCalendar's list and do not switch the calendar, so a
+        // format using one is reproduced exactly. Measured: `mm/dd/yy nnn` draws 08/21/22 Sunday
+        // on both binaries where `mm/dd/yy aaaa` draws 05/24/22 Sunday for the same serial.
+        NumberFormatCode.Parse("nnnn").IsFullyReproduced.ShouldBeTrue();
+        NumberFormatCode.Parse("mm/dd/yy\\ nnn").IsFullyReproduced.ShouldBeTrue();
 
         // The control: a date format with no day-name key is reproduced exactly.
         NumberFormatCode.Parse("mm/dd/yy").IsFullyReproduced.ShouldBeTrue();

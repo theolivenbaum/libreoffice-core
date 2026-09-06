@@ -129,10 +129,39 @@ public static class BuiltInNumberFormats
     };
 
     /// <summary>The code for a built-in index, or null when the index is not built in.</summary>
+    /// <remarks>The OOXML answer; see <see cref="BiffCode"/> for the one BIFF difference.</remarks>
     public static string? Code(int index)
     {
         if (Codes.TryGetValue(index, out string? code)) return code;
         if (Aliases.TryGetValue(index, out int target) && Codes.TryGetValue(target, out code)) return code;
         return null;
     }
+
+    /// <summary>
+    /// The same, as a BIFF filter resolves it: ids 5-8 and 41-44 are not built in there.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The locale row is shared — that is the whole point of this file — but the two filters'
+    /// tables do not cover the same <em>set</em> of ids. The BIFF tables state, in as many
+    /// words, <c>// 5...8 contained in file</c> and <c>// 41...44 contained in file</c>
+    /// (<c>sc/source/filter/excel/xlstyle.cxx</c>:826, :862) and carry no entry for either run;
+    /// neither <c>spBuiltInFormats_ENGLISH</c> nor <c>spBuiltInFormats_ENGLISH_US</c> adds one,
+    /// so a BIFF file that uses one of those eight without writing its own <c>FORMAT</c> record
+    /// gets the standard format. The OOXML tables state all eight
+    /// (<c>numberformatsbuffer.cxx</c>:294-320, :802), which is why <see cref="Code"/> does.
+    /// </para>
+    /// <para>
+    /// 63-66 are a separate question and are built in on both sides: the en-US BIFF table names
+    /// them outright (<c>xlstyle.cxx</c>:949-952) and the OOXML base table reuses 5-8 for them,
+    /// with the same four codes.
+    /// </para>
+    /// <para>
+    /// Corpus reach of the difference is nil — every BIFF workbook of the 947 that uses one of
+    /// those eight writes its own <c>FORMAT</c> record for it — so this is reproducing a rule
+    /// rather than closing a measured gap.
+    /// </para>
+    /// </remarks>
+    public static string? BiffCode(int index)
+        => index is (>= 5 and <= 8) or (>= 41 and <= 44) ? null : Code(index);
 }

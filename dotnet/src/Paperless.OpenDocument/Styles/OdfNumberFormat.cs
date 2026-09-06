@@ -90,7 +90,14 @@ public static class OdfNumberFormat
                     : (Long(piece) ? "MM" : "M"));
                 break;
             case "day": code.Append(Long(piece) ? "DD" : "D"); break;
-            case "day-of-week": code.Append(Long(piece) ? "NNNN" : "NNN"); break;
+            // NN is the short day name and NNN the long one; NNNN is the long one with the
+            // locale's day-of-week separator, and `xmloff` never emits it from the element
+            // alone — `AddNfKeyword` rewrites NNNN to NNN and only restores the separator when
+            // a following <number:text> holds exactly it (xmloff/source/style/xmlnumfi.cxx:2037
+            // and :955-970). Measured on both binaries with a hand-built flat ODS
+            // (dotnet/probes/numfmt-r68/dow.fods): a short day-of-week draws `Sun` and a long
+            // one draws `Sunday`, with no trailing comma.
+            case "day-of-week": code.Append(Long(piece) ? "NNN" : "NN"); break;
             case "quarter": code.Append(Long(piece) ? "QQ" : "Q"); break;
             case "week-of-year": code.Append("WW"); break;
             case "era": code.Append(Long(piece) ? "GGG" : "G"); break;
