@@ -225,7 +225,7 @@ internal static class XlsxDrawings
         // does — so the element is looked up in the spreadsheet drawing namespace and everything
         // inside it in the main one.
         if (shape is not null && Child(shape, DrawingNamespace, "txBody") is { } body
-            && ShapeText(body, fonts) is { IsEmpty: false } shapeText)
+            && ShapeText(body, fonts, StyleFace(shape, fonts)) is { IsEmpty: false } shapeText)
         {
             drawing = drawing with { Text = shapeText };
         }
@@ -424,7 +424,8 @@ internal static class XlsxDrawings
     /// <c>oox/source/drawingml/theme.cxx:71</c>).
     /// </para>
     /// </remarks>
-    private static SheetShapeText ShapeText(XElement body, DrawingFontScheme? fonts)
+    private static SheetShapeText ShapeText(
+        XElement body, DrawingFontScheme? fonts, string? styleFace)
     {
         XElement? properties = Child(body, MainNamespace, "bodyPr");
 
@@ -434,7 +435,8 @@ internal static class XlsxDrawings
             XElement? paragraphProperties = Child(paragraph, MainNamespace, "pPr");
             XElement? defaults = Child(paragraphProperties, MainNamespace, "defRPr");
             Length inherited = Points(defaults) ?? SheetShapeText.DefaultSize;
-            string? inheritedFamily = Family(defaults, fonts);
+            string? inheritedFamily = Family(defaults, fonts) ?? styleFace;
+            bool inheritedBold = Bold(defaults) ?? false;
 
             List<SheetShapeRun> runs = [];
             foreach (XElement run in paragraph.Elements(XName.Get("r", MainNamespace)))
@@ -446,7 +448,8 @@ internal static class XlsxDrawings
                 runs.Add(new SheetShapeRun(
                     text,
                     Points(runProperties) ?? inherited,
-                    Family(runProperties, fonts) ?? inheritedFamily));
+                    Family(runProperties, fonts) ?? inheritedFamily,
+                    Bold(runProperties) ?? inheritedBold));
             }
 
             // A paragraph with nothing in it still occupies a line, and `a:endParaRPr` is what
@@ -460,7 +463,8 @@ internal static class XlsxDrawings
                 runs.Add(new SheetShapeRun(
                     string.Empty,
                     Points(ending) ?? inherited,
-                    Family(ending, fonts) ?? inheritedFamily));
+                    Family(ending, fonts) ?? inheritedFamily,
+                    Bold(ending) ?? inheritedBold));
             }
 
             // `a:br` is a line break inside a paragraph. Splitting the paragraph at one gives the
@@ -521,6 +525,46 @@ internal static class XlsxDrawings
         // to the default face is a substitution, and asking for "+mn-lt" is a wrong answer.
         return fonts is { } scheme ? scheme.Resolve(stated) : (stated[0] == '+' ? null : stated);
     }
+
+    /// <summary>
+    /// The face a shape's <c>xdr:style/a:fontRef</c> names, or null when it names none.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>A shape's style reference is where most text boxes get their face, and every run in
+    /// them states none.</strong> <c>a:fontRef idx="minor"</c> means "the theme's minor font", and
+    /// <c>Shape::createAndInsert</c> applies it to the shape's text before any run property is
+    /// (<c>oox/source/drawingml/shape.cxx</c>, the <c>maShapeStyleRefs</c> walk). Without it a box
+    /// authored by Excel — which writes the reference and no <c>a:latin</c> anywhere — falls
+    /// through to the drawing layer's own default and is drawn in Liberation Serif where the
+    /// reference draws Carlito.
+    /// </para>
+    /// <para>
+    /// Measured on 26.2.4.2: <c>Air_Boss_Master_List.xlsx</c>'s note box states
+    /// <c>&lt;a:fontRef idx="minor"&gt;</c> against a Calibri theme and nothing else, and the
+    /// reference draws it in Carlito-Bold.
+    /// </para>
+    /// </remarks>
+    private static string? StyleFace(XElement shape, DrawingFontScheme? fonts)
+        => fonts is { } scheme
+           && Child(shape, DrawingNamespace, "style") is { } style
+           && Child(style, MainNamespace, "fontRef") is { } reference
+            ? scheme.ForReference(reference.Attribute("idx")?.Value, "latin")
+            : null;
+
+    /// <summary>A run's <c>b</c>, or null where it states none and inherits.</summary>
+    /// <remarks>
+    /// Three spellings, because DrawingML's boolean is an <c>xsd:boolean</c> and all of them
+    /// appear in the corpus. Absent is not false: it means "take what the paragraph or the body
+    /// said", which is why this answers null rather than defaulting here.
+    /// </remarks>
+    private static bool? Bold(XElement? properties)
+        => properties?.Attribute("b")?.Value switch
+        {
+            "1" or "true" or "on" => true,
+            "0" or "false" or "off" => false,
+            _ => null,
+        };
 
     /// <summary>A run's <c>sz</c>, in hundredths of a point, or null where it states none.</summary>
     private static Length? Points(XElement? properties)

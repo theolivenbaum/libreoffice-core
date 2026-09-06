@@ -38,7 +38,7 @@ public sealed class SheetShapeDefaultFontTests
     private static readonly DocRect Box = new(
         Length.FromPoints(0), Length.FromPoints(0), Length.FromPoints(400), Length.FromPoints(80));
 
-    private static List<DrawnGlyphRun> Draw(string? family)
+    private static List<DrawnGlyphRun> Draw(string? family, bool bold = false)
     {
         SheetShapeText text = new()
         {
@@ -46,7 +46,7 @@ public sealed class SheetShapeDefaultFontTests
             [
                 new SheetShapeParagraph
                 {
-                    Runs = [new SheetShapeRun("Handgloves", Length.FromPoints(11), family)],
+                    Runs = [new SheetShapeRun("Handgloves", Length.FromPoints(11), family, bold)],
                 },
             ],
         };
@@ -81,5 +81,21 @@ public sealed class SheetShapeDefaultFontTests
 
         runs.ShouldNotBeEmpty();
         runs.ShouldAllBe(run => run.Run.Font.FamilyName == SheetFonts.DefaultFamily);
+    }
+
+    [Fact]
+    public void ABoldRunIsDrawnInTheBoldFace()
+    {
+        // A shape run's `b="1"` was read by nothing: the model did not carry a weight, so a bold
+        // note box was measured and drawn in the regular face. A bold face is a different file with
+        // different advances, so this is a wrap as well as an ink difference — measured on
+        // `Air_Boss_Master_List.xlsx`, whose one bold paragraph 26.2.4.2 draws in Carlito-Bold.
+        List<DrawnGlyphRun> upright = Draw("Liberation Sans");
+        List<DrawnGlyphRun> heavy = Draw("Liberation Sans", bold: true);
+
+        upright.ShouldNotBeEmpty();
+        heavy.ShouldNotBeEmpty();
+        upright.ShouldAllBe(run => run.Run.Font.Weight < 700);
+        heavy.ShouldAllBe(run => run.Run.Font.Weight >= 700);
     }
 }
