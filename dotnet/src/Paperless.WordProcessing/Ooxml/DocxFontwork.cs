@@ -59,16 +59,12 @@ internal static class DocxFontwork
     /// this is where that has already been worked out.
     /// </param>
     /// <param name="size">The shape's rectangle.</param>
-    /// <param name="effects">
-    /// The <c>wp:effectExtent</c> the drawing declares, which the curves are moved by.
-    /// </param>
     /// <param name="theme">The theme a themed stop resolves against.</param>
     public static FontworkDrawing Read(
         XElement shape,
         XElement? properties,
         IReadOnlyList<PageBlock> blocks,
         DocSize size,
-        Margins effects,
         DrawingTheme? theme)
     {
         if (Warp(shape) is not { } warp) return default;
@@ -117,62 +113,7 @@ internal static class DocxFontwork
         (Colour? fill, GradientDescription? gradient) = Fill(runProperties, first.Colour, theme);
         (Colour? line, Length width) = Outline(runProperties, theme);
 
-        return new FontworkDrawing(Inset(outline, effects), fill, gradient, line, width, true);
-    }
-
-    /// <summary>
-    /// The curves moved to where a <em>draw shape</em> sits inside its inline rectangle.
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// An as-character drawing's line box is grown by <c>wp:effectExtent</c> on all four sides, and
-    /// the two halves of LibreOffice disagree about where the object then sits inside it
-    /// <em>vertically</em>: a draw shape's fill and outline are painted at the outer top
-    /// <em>plus</em> the top extent, while a shape carrying a <c>wps:txbx</c> lays its text out at
-    /// the outer top regardless. That is measured in
-    /// <c>dotnet/probes/words-inline-effectextent/</c> and <see cref="FrameLayout"/> places every
-    /// frame the second way, because an ordinary text box's ink <em>is</em> its text.
-    /// </para>
-    /// <para>
-    /// <strong>A warped body is the case where that choice is the wrong one</strong>: the importer
-    /// takes the text out of the frame and clears <c>TextBox</c> (<c>WpsContext.cxx:985</c>), so
-    /// there is no text box left and the object is a plain draw shape. Measured on the catalogue's
-    /// 24 warped shapes, whose <c>wp:effectExtent</c> is 137160 EMU on all four sides: moving the
-    /// curves by it puts our ink at 132.12..479.52 pt across and 95.76..168.84 pt down page 18,
-    /// which is the reference's rectangle to the pixel at 200 dpi.
-    /// </para>
-    /// <para>
-    /// <strong>Only the vertical half, since the horizontal one is now in the frame's own
-    /// position.</strong> There is no draw-shape/TextBox disagreement across the page — measured in
-    /// the same probe's <c>make-x-fixture.py</c>, a 10.8 pt left extent moves a shape's fill band and
-    /// its text box's text by the same 10.8 pt on both references — so <see cref="FrameLayout"/>
-    /// places every inline frame at the outer left plus the left extent, and shifting the curves by
-    /// it again here would put a warped body 10.8 pt to the right of everything else in its own
-    /// shape.
-    /// </para>
-    /// </remarks>
-    private static GraphicsPath Inset(GraphicsPath outline, Margins effects)
-    {
-        if (effects.Top == Length.Zero) return outline;
-
-        GraphicsPath moved = new();
-        foreach (PathCommand command in outline.Commands)
-        {
-            switch (command.Verb)
-            {
-                case PathVerb.MoveTo: moved.MoveTo(Shift(command.Point)); break;
-                case PathVerb.LineTo: moved.LineTo(Shift(command.Point)); break;
-                case PathVerb.CubicTo:
-                    moved.CubicTo(Shift(command.Control1), Shift(command.Control2), Shift(command.Point));
-                    break;
-                case PathVerb.Close: moved.Close(); break;
-                default: break;
-            }
-        }
-
-        return moved;
-
-        DocPoint Shift(DocPoint point) => new(point.X, point.Y + effects.Top);
+        return new FontworkDrawing(outline, fill, gradient, line, width, true);
     }
 
     /// <summary>The <c>prstTxWarp</c> a body states, or null when it states none or the identity.</summary>

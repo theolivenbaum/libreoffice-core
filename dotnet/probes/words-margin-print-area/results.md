@@ -82,6 +82,15 @@ Four things it settles:
    both; it is the body that is out. Untouched here, and it reaches any document with an empty
    paragraph in its running head.
 
+   > **Closed 2026-09-06 in `probes/words-empty-paragraph-height/`, and the reach sentence above is
+   > wrong.** It is not the empty paragraph and not the header: a DOCX import starts at Calibri 11 pt
+   > and is reset to Times New Roman 10 pt the moment a `w:docDefaults/w:rPrDefault` element is seen
+   > at all (`DomainMapper.cxx`:182-193 and `StyleSheetTable.cxx`:2161-2167). These fixtures declare
+   > no styles part, so they were the 11 pt case and we gave them 10. **No corpus document reaches
+   > it** — all 272 words-track DOCX declare a `w:rPrDefault`. After the fix `hdr-empty`'s body top
+   > is 49.36 against 49.36 and its centre 0.12 pt out rather than 0.88; `inhdr-3line` is exact at
+   > 430.00.
+
 ## On the corpus document
 
 `DOA_Template_Form_Type_Certification_Programme.docx`, whose header is a three-row table. The

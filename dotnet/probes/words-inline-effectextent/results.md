@@ -324,6 +324,14 @@ The `dx` column is zero on every one of the 52 pages afterwards. What is left on
 the *vertical* half — pages 23 onwards read `dy` of 1 to 16 px — and that is the draw-shape/TextBox
 disagreement above, not this.
 
+> **Closed 2026-09-06 in `probes/words-inline-shape-ink/`.** *"A frame here is one object and cannot
+> be in two places"* was the obstacle and the answer was two rectangles: `PlacedFrame.Area` is the
+> text's and `PlacedFrame.Ink` the drawing's, the second offset below the first by the top extent.
+> The catalogue goes from 27 pages reading a non-zero `dy`, 164 px in total, to **one page reading
+> one pixel**, with `dx` still zero on all 52 and 52 / 1972 pages and words unchanged. That probe
+> also supersedes this file's claim that the placement is *"where the reference puts the text and the
+> ink it holds"* — it is where the reference puts the text, and the ink is elsewhere.
+
 ### The warped-body offset is now vertical only
 
 `DocxFontwork.Inset` moved a warped body's curves by `(effects.Left, effects.Top)`, because a warped

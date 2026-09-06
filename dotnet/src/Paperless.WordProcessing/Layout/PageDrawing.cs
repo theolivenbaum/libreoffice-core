@@ -268,8 +268,8 @@ public static class PageDrawing
         // than an addition to the shape's — see `PageFrame.TextRotationDegrees` for the census that
         // establishes it and the reference rendering that confirms it. The two are usually equal and
         // are usually both zero.
-        AffineTransform? shape = Turn(frame, frame.Frame.RotationDegrees);
-        AffineTransform? text = Turn(frame, frame.Frame.TextRotationDegrees);
+        AffineTransform? shape = Turn(frame.Ink, frame.Frame.RotationDegrees);
+        AffineTransform? text = Turn(frame.Area, frame.Frame.TextRotationDegrees);
 
         (GraphicsPath? filled, GraphicsPath? stroked) = Outlines(frame);
 
@@ -280,18 +280,18 @@ public static class PageDrawing
         // paint here, against the area the layout engine settled on.
         if (frame.Frame.Gradient is { } ramp)
         {
-            GradientPaint paint = ramp.Paint(frame.Area);
-            if (filled is null) Fill(frame.Area, paint, sink);
+            GradientPaint paint = ramp.Paint(frame.Ink);
+            if (filled is null) Fill(frame.Ink, paint, sink);
             else sink.FillPath(filled, paint);
         }
         else if (frame.Frame.Fill is { } fill)
         {
-            if (filled is null) Fill(frame.Area, fill, sink);
+            if (filled is null) Fill(frame.Ink, fill, sink);
             else sink.FillPath(filled, Paint.Solid(fill));
         }
 
         if (frame.Frame.Chart is { } chart)
-            FrameChart.Draw(sink, chart, frame.Area, frame.Frame.ChartFontFamily);
+            FrameChart.Draw(sink, chart, frame.Ink, frame.Frame.ChartFontFamily);
         else if (frame.Frame.Vector is { } vector && !vector.Value.IsEmpty)
             DrawPicture(sink, frame, vector, null);
         else if (frame.Frame.Image is { } image) DrawPicture(sink, frame, null, image);
@@ -341,11 +341,10 @@ public static class PageDrawing
     /// <c>Save</c>/<c>Restore</c> pair nor a transform in the output: a PDF content stream gains
     /// three operators per turned shape and none per upright one.
     /// </remarks>
-    private static AffineTransform? Turn(PlacedFrame frame, double degrees)
+    private static AffineTransform? Turn(DocRect area, double degrees)
     {
         if (degrees == 0) return null;
 
-        DocRect area = frame.Area;
         double cx = area.X.Emu + (area.Width.Emu / 2.0);
         double cy = area.Y.Emu + (area.Height.Emu / 2.0);
 
@@ -387,7 +386,7 @@ public static class PageDrawing
                 frame.Frame.BorderDash,
                 frame.Frame.BorderWidth,
                 frame.Frame.BorderCap is not LineCap.Butt));
-        DocRect area = frame.Area;
+        DocRect area = frame.Ink;
 
         // The border is stroked inside the room the frame took, where it says so. See
         // PageFrame.BorderInset -- a form checkbox is the only thing that does.
@@ -516,18 +515,18 @@ public static class PageDrawing
     private static void DrawPicture(
         IDrawingSink sink, PlacedFrame frame, Lazy<VectorImage>? vector, RasterImage? image)
     {
-        DocRect destination = frame.Frame.Crop.Apply(frame.Area);
+        DocRect destination = frame.Frame.Crop.Apply(frame.Ink);
 
-        if (destination == frame.Area)
+        if (destination == frame.Ink)
         {
-            PaintPicture(sink, frame.Area, vector, image);
+            PaintPicture(sink, frame.Ink, vector, image);
             return;
         }
 
         sink.Save();
         try
         {
-            sink.ClipPath(GraphicsPath.Rectangle(frame.Area));
+            sink.ClipPath(GraphicsPath.Rectangle(frame.Ink));
             PaintPicture(sink, destination, vector, image);
         }
         finally
@@ -855,7 +854,7 @@ public static class PageDrawing
     /// </remarks>
     private static (GraphicsPath? Fill, GraphicsPath? Stroke) Outlines(PlacedFrame frame)
     {
-        DocRect area = frame.Area;
+        DocRect area = frame.Ink;
         if (area.Width <= Length.Zero || area.Height <= Length.Zero) return (null, null);
 
         if (frame.Frame.FillOutline is { } custom)

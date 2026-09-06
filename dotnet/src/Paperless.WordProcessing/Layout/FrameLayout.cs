@@ -341,12 +341,14 @@ internal sealed class FrameResolution
                 //
                 // Both installed references agree on where the shape lands and it is not where either
                 // half of that sentence alone would put it: measured in
-                // `dotnet/probes/words-inline-effectextent/`, LibreOffice paints a shape's fill and
-                // outline at the outer top plus the top extent — 96.75 pt against 85.75 for a 10.8 pt
+                // `dotnet/probes/words-inline-effectextent/` and again in
+                // `dotnet/probes/words-inline-shape-ink/`, LibreOffice paints a shape's fill and
+                // outline at the outer top plus the top extent — 96.50 pt against 85.75 for a 10.8 pt
                 // extent — while laying the *text* of a shape carrying a `wps:txbx` out at the outer top
                 // regardless, its "INSIDE" run staying at 104.66 pt in both. That is its draw-shape and
-                // TextBox halves disagreeing rather than a rule; a frame here is one object and cannot be
-                // in two places, so it is placed where the reference puts the text and the ink it holds.
+                // TextBox halves disagreeing rather than a rule, and it cannot be met by one rectangle:
+                // the rectangle here is the *text's*, and `PlacedFrame.Ink` is the drawing's, offset
+                // below it by `PageFrame.InlineInkOffset`.
                 //
                 // A *turned* drawing is offset differently again — centred in its line box in both
                 // axes rather than moved by the extent's left edge — and both rules live on
@@ -364,10 +366,25 @@ internal sealed class FrameResolution
                 // TextBox half failing to follow.
                 DocPoint inside = frame.InlineOffset;
 
+                // A member of a group or a `wpc:wpc` canvas takes its place *inside* the drawing,
+                // and it is the drawing that hangs on the line: what rests on the baseline is the
+                // envelope's rectangle, not the member's, and the member is then offset within it.
+                // `Placed` has always done both for an anchored drawing — `PageFrame.GroupSize` is
+                // the envelope's rectangle and `GroupOffset` where the member sits in it — and this
+                // path did neither, so every member of an *as-character* group or canvas was drawn
+                // at the drawing's own top-left corner, a dozen shapes on one spot. Censused over
+                // the corpus, `wpc:wpc` alone is 9 canvases across 4 documents.
+                DocSize outer = frame.GroupSize is { } group
+                    ? new DocSize(
+                        group.Width + frame.EffectExtent.Left + frame.EffectExtent.Right,
+                        group.Height + frame.EffectExtent.Top + frame.EffectExtent.Bottom)
+                    : frame.InlineExtent;
+
                 DocRect placedAt = new(
                     area.X + line.Box.Left + PageDrawing.OffsetOnLine(paragraph, line, frame.AnchorOffset)
-                        + inside.X,
-                    area.Y + line.Baseline - (frame.InlineAscent ?? frame.InlineExtent.Height) + inside.Y,
+                        + inside.X + frame.GroupOffset.X,
+                    area.Y + line.Baseline - (frame.InlineAscent ?? outer.Height) + inside.Y
+                        + frame.GroupOffset.Y,
                     frame.Size.Width,
                     frame.Size.Height);
 
