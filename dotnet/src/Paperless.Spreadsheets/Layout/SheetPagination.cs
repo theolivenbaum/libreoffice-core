@@ -23,7 +23,28 @@ public readonly record struct SheetPagePlacement(
     int ZoomPercentage,
     int ColumnBand,
     int RowBand,
-    int AreaIndex);
+    int AreaIndex)
+{
+    /// <summary>The scale as a fraction: 0.65 for a sheet printed at 65%.</summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>An unset zoom is 100%, not 1%.</strong> This existed four times as
+    /// <c>Math.Max(1, ZoomPercentage) / 100.0</c>, and that guard clamps to one <em>per cent</em>:
+    /// a placement that never had a zoom set — <c>default</c>, which
+    /// <see cref="SheetNotePageDrawing"/> constructs its decoration with — came out as 0.01 and
+    /// drew its band at a hundredth of the stated size.
+    /// </para>
+    /// <para>
+    /// The symptom is not a small band. It is a <em>missing</em> one, and it reads as a drawing
+    /// failure rather than an arithmetic one: <c>Hazard Analysis Template.xls</c> states
+    /// <c>&amp;C&amp;"Arial,Bold"&amp;12</c> and we drew its header and footer at
+    /// <b>0.120 pt</b> against the reference's <b>7.887</b> — same face, same colour, correctly
+    /// centred, and invisible. Every other span on that page is 10 pt, so the fault is exactly the
+    /// two bands.
+    /// </para>
+    /// </remarks>
+    public double Scale => ZoomPercentage <= 0 ? 1.0 : ZoomPercentage / 100.0;
+}
 
 /// <summary>
 /// Splits a sheet into printed pages, the way <c>ScPrintFunc</c> does.

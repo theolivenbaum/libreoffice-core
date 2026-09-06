@@ -63,7 +63,7 @@ public sealed class OutlineMarkerComparisonTests : IDisposable
     [InlineData("slides-features.odp")]
     public void EveryOutlineMarkerAndItsTextAreWhereLibreOfficeDrawsThem(string fileName)
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         string path = Corpus.Require(fileName);
         List<PdfTextRun> ours = Outline(PdfTextRuns.Read(Ours(path)));
@@ -102,7 +102,7 @@ public sealed class OutlineMarkerComparisonTests : IDisposable
     [InlineData("slides-features.odp")]
     public void ADeckHasAPagePerSlideItShows(string fileName)
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         string path = Corpus.Require(fileName);
         List<PdfPageSize> ours = PdfPageSizes.Read(Ours(path));

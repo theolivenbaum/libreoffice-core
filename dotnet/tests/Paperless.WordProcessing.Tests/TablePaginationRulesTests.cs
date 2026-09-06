@@ -71,6 +71,38 @@ public sealed class TablePaginationRulesTests
     }
 
     /// <summary>
+    /// <c>w:hRule="auto"</c> is a floor like any other, not an absence of one.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Writer honours exactly one of <c>w:hRule</c>'s three words. <c>MeasureHandler</c> opens at
+    /// <c>SizeType::MIN</c> and its <c>LN_CT_Height_hRule</c> case tests only for <c>exact</c>
+    /// (<c>sw/source/writerfilter/dmapper/MeasureHandler.cxx</c>:35, 70-76), so <c>auto</c> never
+    /// reaches the layout and the stated <c>w:val</c> stands exactly as <c>atLeast</c>'s does.
+    /// </para>
+    /// <para>
+    /// Reading it as "no height at all" was this reader's own invention, and both reference versions
+    /// refute it at once — six rows at <c>w:val="480" w:hRule="auto"</c> come out 480 twips apart under
+    /// 24.2.7.2 and 489.6 to 740.4 under 26.2.4.2, matching each binary's own <c>atLeast</c> figures to
+    /// the twip, while we drew them 241.2 apart. See <c>probes/words-row-height/pitch.py</c>.
+    /// </para>
+    /// <para>
+    /// It has <b>no corpus reach</b>: 11 230 <c>w:trHeight</c> elements across every DOCX in
+    /// <c>sample-files</c> and not one of them states <c>auto</c>. Asserted as an identity with
+    /// <c>atLeast</c> rather than against a figure, so that the two can never drift apart.
+    /// </para>
+    /// </remarks>
+    [Theory]
+    [InlineData(0)]
+    [InlineData(4)]
+    [InlineData(8)]
+    [InlineData(24)]
+    public void AnAutoHeightIsTheSameFloorAsAtLeast(int borderEighths)
+    {
+        RowPitch(borderEighths, "auto").ShouldBe(RowPitch(borderEighths, "atLeast"), 0.001);
+    }
+
+    /// <summary>
     /// A <c>w:cantSplit</c> row that would not fit on a page of its own is split anyway.
     /// </summary>
     /// <remarks>

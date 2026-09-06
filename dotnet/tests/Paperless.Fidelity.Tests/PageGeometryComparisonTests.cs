@@ -95,7 +95,7 @@ public sealed class PageGeometryComparisonTests : IDisposable
     [InlineData("page-geometry.rtf")]
     public void EveryFormatReadsThePageLibreOfficeRenders(string fileName)
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         string path = Corpus.Require(fileName);
         PageGeometry page = FirstPage(path);
@@ -151,7 +151,7 @@ public sealed class PageGeometryComparisonTests : IDisposable
     [InlineData("page-geometry.rtf")]
     public void TheTextWidthTheMarginsImplyBreaksLinesWhereLibreOfficeDoes(string fileName)
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         string? fontPath = FindFont("Carlito-Regular.ttf");
         Assert.SkipWhen(fontPath is null, "Carlito is not installed; see check-env.sh");

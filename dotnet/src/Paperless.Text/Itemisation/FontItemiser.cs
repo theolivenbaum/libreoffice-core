@@ -50,13 +50,19 @@ public static class FontItemiser
     /// <param name="primary">The face the run asked for.</param>
     /// <param name="fallback">Where to look when the primary face has no glyph, or null to not look.</param>
     /// <param name="report">Called once per contiguous stretch that needed a fallback, resolved or not.</param>
+    /// <param name="item">
+    /// The font item the run is set from, or default when the caller has none. See
+    /// <see cref="FontItem"/>: a word-processing run's script decides which of three items supplies
+    /// the family class and the language the fallback pattern carries.
+    /// </param>
     public static List<FaceRun> Split(
         ReadOnlySpan<char> text,
         int start,
         int length,
         OpenTypeFace primary,
         IGlyphFallbackResolver? fallback,
-        Action<GlyphFallback>? report = null)
+        Action<GlyphFallback>? report = null,
+        FontItem item = default)
     {
         ArgumentNullException.ThrowIfNull(primary);
 
@@ -69,7 +75,16 @@ public static class FontItemiser
             return runs;
         }
 
+        // A pi face is never handed to fontconfig, so a character it lacks is sought only on
+        // LibreOffice's own generic list -- see IGlyphFallbackResolver.SymbolFallbackFor, which
+        // holds the mechanism and the measurements. Decided once per run rather than per character.
+        bool isPiFace = SymbolFontRecode.IsSubstituteFamily(primary.FamilyName);
+
         int end = start + length;
+
+        // The whole set first, because that is the question LibreOffice asks. See `Sought`.
+        Dictionary<int, OpenTypeFace>? found =
+            isPiFace ? null : Resolved(text, start, length, primary, fallback, item);
         int runStart = start;
         OpenTypeFace runFace = primary;
         bool runIsFallback = false;
@@ -104,9 +119,9 @@ public static class FontItemiser
                     face = runFace;
                     isFallback = runIsFallback;
                 }
-                else if (fallback.FallbackFor(codePoint, primary.Weight, primary.IsItalic) is { } found)
+                else if (Sought(fallback, codePoint, primary, isPiFace, found) is { } chosen)
                 {
-                    face = found;
+                    face = chosen;
                     isFallback = true;
                     missing = true;
                 }
@@ -151,6 +166,109 @@ public static class FontItemiser
         runs.Add(new FaceRun(runStart, end - runStart, runFace, runIsFallback));
         return runs;
     }
+
+    /// <summary>Where a missing character is looked for, which depends on the face it is missing from.</summary>
+    /// <remarks>
+    /// A pi face is asked per character, because the list that answers for one is indexed by
+    /// fallback level and not by a charset — <c>ImplInitGenericGlyphFallback</c>'s list is walked
+    /// the same way whatever the run was missing. Everything else was answered for the whole set
+    /// before the walk began.
+    /// </remarks>
+    private static OpenTypeFace? Sought(
+        IGlyphFallbackResolver fallback,
+        int codePoint,
+        OpenTypeFace primary,
+        bool isPiFace,
+        Dictionary<int, OpenTypeFace>? resolved)
+        => isPiFace
+            ? fallback.SymbolFallbackFor(codePoint, primary.Weight, primary.IsItalic)
+            : resolved is not null && resolved.TryGetValue(codePoint, out OpenTypeFace? face) ? face
+            : null;
+
+    /// <summary>
+    /// Which face draws each of the characters a range's own face cannot, decided for all of them
+    /// at once.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>This is the shape of LibreOffice's own loop and not an optimisation of the
+    /// per-character one.</strong> <c>OutputDevice::ImplGlyphFallbackLayout</c> gathers the layout's
+    /// unmapped code units into a single string, asks
+    /// <c>PhysicalFontCollection::GetGlyphFallbackFont</c> for one face for all of them, and
+    /// repeats with whatever that face did not cover — up to <c>MAX_FALLBACK</c> levels
+    /// (<c>vcl/source/outdev/font.cxx</c>). The request reaches fontconfig as one
+    /// <c>FC_CHARSET</c>, whose score is <em>how many of the set the candidate is missing</em> at
+    /// fontconfig's highest priority, so the set genuinely changes the answer: a face covering two
+    /// of the run's missing characters beats a better-placed face covering one.
+    /// </para>
+    /// <para>
+    /// The set is the distinct code points in text order, which is what the C++ builds too — it
+    /// appends the code units of each unmapped run, and duplicates cost nothing in an
+    /// <c>FcCharSet</c>.
+    /// </para>
+    /// </remarks>
+    private static Dictionary<int, OpenTypeFace>? Resolved(
+        ReadOnlySpan<char> text, int start, int length, OpenTypeFace primary,
+        IGlyphFallbackResolver fallback, FontItem item)
+    {
+        List<int> missing = [];
+        HashSet<int> seen = [];
+
+        int end = start + length;
+        for (int at = start; at < end;)
+        {
+            int width = 1;
+            int codePoint = text[at];
+            if (char.IsHighSurrogate(text[at]) && at + 1 < end && char.IsLowSurrogate(text[at + 1]))
+            {
+                codePoint = char.ConvertToUtf32(text[at], text[at + 1]);
+                width = 2;
+            }
+
+            if (!primary.HasGlyphFor(codePoint) && !IsNeverDrawn(codePoint) && seen.Add(codePoint))
+            {
+                missing.Add(codePoint);
+            }
+
+            at += width;
+        }
+
+        if (missing.Count == 0) return null;
+
+        Dictionary<int, OpenTypeFace> resolved = [];
+        List<int> remaining = missing;
+
+        for (int level = 1; level <= MaxFallbackLevels && remaining.Count > 0; level++)
+        {
+            if (fallback.FallbackFor(remaining, primary.Weight, primary.IsItalic, primary, item)
+                is not { } face)
+            {
+                break;
+            }
+
+            List<int> still = [];
+            foreach (int codePoint in remaining)
+            {
+                if (face.HasGlyphFor(codePoint)) resolved[codePoint] = face;
+                else still.Add(codePoint);
+            }
+
+            // A face that covered nothing would loop for ever on the same remainder.
+            if (still.Count == remaining.Count) break;
+
+            remaining = still;
+        }
+
+        return resolved;
+    }
+
+    /// <summary>How many fallback faces one run may stack, which is <c>MAX_FALLBACK</c>.</summary>
+    /// <remarks>
+    /// <c>vcl/inc/sallayout.hxx</c>. LibreOffice stops there and marks the layout incomplete; a
+    /// character still unresolved is drawn as the primary face's missing-glyph box, which is what
+    /// this class does with one too.
+    /// </remarks>
+    private const int MaxFallbackLevels = 16;
 
     /// <summary>
     /// True when a face cannot draw everything in a range, so <see cref="Split"/> would cut it.

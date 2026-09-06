@@ -268,6 +268,52 @@ public class ItemisationTests
     }
 
     /// <summary>
+    /// An object at the text's last boundary is still on the last line, because there is no next one.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The boundary rule above — "a range ending at the boundary does not pay for the object" — is right
+    /// everywhere but at the end of the text, where the range that would have paid for it does not exist.
+    /// A picture-only paragraph is exactly that case and is the commonest inline picture in the corpus: a
+    /// logo on a line of its own, which ODF, RTF and WW8 all write as an empty paragraph with an object at
+    /// boundary nought. Left at nought its line has no width, so a right-aligned or centred line has full
+    /// slack and the picture is drawn from the margin outwards — the whole of its own width too far over.
+    /// </para>
+    /// <para>
+    /// Both shapes are asserted because the readers disagree about whether a picture is a character: with
+    /// text before it (WW8 and ODF for a picture in a sentence) and with none at all.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void AnObjectAtTheTextsEndIsOnTheLastLine()
+    {
+        OpenTypeFace face = Carlito();
+        Length picture = Length.FromMillimetres(10);
+
+        const string Text = "before";
+        List<FormattedRun> runs = [new FormattedRun(0, Text.Length, face, Length.FromPoints(11))];
+
+        MeasuredParagraph plain = MeasuredParagraph.Measure(Text, runs);
+        MeasuredParagraph trailing = MeasuredParagraph.Measure(
+            Text, runs, objects: [new InlineObject(Text.Length, picture, picture)]);
+
+        trailing.Width.ShouldBe(plain.Width + picture);
+        trailing.WidthBetween(0, Text.Length).ShouldBe(plain.WidthBetween(0, Text.Length) + picture);
+
+        // And it belongs to the line that reaches the end, not to one that starts there — the empty line
+        // a trailing manual break opens must not pay for the picture on the line above it.
+        trailing.WidthBetween(Text.Length, Text.Length).ShouldBe(Length.Zero);
+
+        // A paragraph whose whole content is the picture: no text, one object, and the object is the
+        // line's entire width.
+        MeasuredParagraph alone = MeasuredParagraph.Measure(
+            string.Empty, [], objects: [new InlineObject(0, picture, picture)]);
+
+        alone.Width.ShouldBe(picture);
+        alone.WidthBetween(0, 0).ShouldBe(picture);
+    }
+
+    /// <summary>
     /// An inline object raises the line's ascent to its own height and nothing else.
     /// </summary>
     /// <remarks>
@@ -476,6 +522,77 @@ public class ItemisationTests
         List<FaceRun> runs = FontItemiser.Split("\u6c49\u5b57", 0, 2, face, new NoFallback());
         runs.Count.ShouldBe(1);
         runs[0].IsFallback.ShouldBeFalse();
+    }
+
+    /// <summary>
+    /// The run's missing characters are asked about together, and the levels ask for the remainder.
+    /// </summary>
+    /// <remarks>
+    /// <c>OutputDevice::ImplGlyphFallbackLayout</c> gathers every unmapped code unit of the layout
+    /// into one string and hands it to <c>GetGlyphFallbackFont</c>, which passes it to fontconfig
+    /// as a single <c>FC_CHARSET</c>; the chosen face is then subtracted from the set and the next
+    /// level asks with what is left (<c>vcl/source/outdev/font.cxx</c>,
+    /// <c>vcl/unx/generic/font/fontconfig.cxx</c>:1229-1245). Asking once per character is a
+    /// different question and gets a different answer.
+    /// </remarks>
+    [Fact]
+    public void EveryMissingCharacterOfARunIsAskedAboutAtOnce()
+    {
+        OpenTypeFace? face = Carlito();
+        OpenTypeFace? answer = Installed("DejaVu Sans");
+        Assert.SkipWhen(face is null || answer is null, "see check-env.sh");
+
+        // Two Hebrew letters Carlito has not, with Latin between them so the run is cut twice.
+        RecordingFallback recording = new(answer!);
+        FontItemiser.Split("a\u05d0b\u05d1c", 0, 5, face!, recording);
+
+        // One request carrying both -- not two requests of one character each.
+        recording.Asked.Count.ShouldBe(1);
+        recording.Asked[0].ShouldBe([0x05D0, 0x05D1]);
+    }
+
+    /// <summary>A face that covers part of the set leaves the rest to the next level.</summary>
+    [Fact]
+    public void TheNextFallbackLevelAsksForWhatTheLastOneDidNotCover()
+    {
+        OpenTypeFace? face = Carlito();
+        OpenTypeFace? answer = Installed("DejaVu Sans");
+        Assert.SkipWhen(face is null || answer is null, "see check-env.sh");
+        Assert.SkipUnless(
+            answer!.HasGlyphFor(0x05D0) && !answer.HasGlyphFor(0x6C49),
+            "the installed DejaVu Sans does not have the coverage this distinguishes");
+
+        RecordingFallback recording = new(answer);
+        FontItemiser.Split("a\u05d0b\u6c49c", 0, 5, face!, recording);
+
+        recording.Asked.Count.ShouldBe(2);
+        recording.Asked[0].ShouldBe([0x05D0, 0x6C49]);
+        recording.Asked[1].ShouldBe([0x6C49]);
+    }
+
+    /// <summary>The one installed face of a family, or null when the machine has none.</summary>
+    private static OpenTypeFace? Installed(string family)
+    {
+        SystemFontResolver resolver = SystemFontResolver.Build();
+        return resolver.Index.Has(family)
+            ? resolver.LoadOpenType(resolver.Resolve(new FontRequest(family)))
+            : null;
+    }
+
+    /// <summary>A resolver that records the sets it was asked about and always answers one face.</summary>
+    private sealed class RecordingFallback(OpenTypeFace face) : IGlyphFallbackResolver
+    {
+        public List<int[]> Asked { get; } = [];
+
+        public OpenTypeFace? FallbackFor(int codePoint, int weight = 400, bool isItalic = false)
+            => face.HasGlyphFor(codePoint) ? face : null;
+
+        public OpenTypeFace? FallbackFor(
+            IReadOnlyList<int> codePoints, int weight, bool isItalic, OpenTypeFace? primary)
+        {
+            Asked.Add([.. codePoints]);
+            return codePoints.Any(face.HasGlyphFor) ? face : null;
+        }
     }
 
     private sealed class FixedFallback(OpenTypeFace face) : IGlyphFallbackResolver

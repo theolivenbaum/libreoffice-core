@@ -13,13 +13,19 @@ namespace Paperless.WordProcessing.Layout;
 /// paragraphs rather than a paragraph and its margin, so the space is kept on both sides of it.
 /// </param>
 /// <param name="Colour">The colour the rule is drawn in.</param>
+/// <param name="Line">
+/// The line it is drawn as. <paramref name="Width"/> is the whole rule's width, the second stroke of a
+/// double and the gap between them included — see <see cref="BorderRules"/>, which is where a stated
+/// <c>w:sz</c> becomes one.
+/// </param>
 /// <remarks>
 /// The order along the axis is <em>text, space, rule</em>, measured rather than assumed: with a
 /// paragraph's first line topped at 704.10 pt and a 2.25 pt rule at 1 pt distance, LibreOffice puts the
 /// stroke's centre at 706.15, which is the outer edge less half the width. Putting the space outside the
 /// rule instead misplaces every border by its own distance.
 /// </remarks>
-public readonly record struct ParagraphBorder(Length Width, Length Space, Length Trailing, Colour Colour)
+public readonly record struct ParagraphBorder(
+    Length Width, Length Space, Length Trailing, Colour Colour, BorderLine Line = BorderLine.Solid)
 {
     /// <summary>A rule at a width and distance, in the colour given.</summary>
     public ParagraphBorder(Length width, Length space, Colour colour)
@@ -27,11 +33,21 @@ public readonly record struct ParagraphBorder(Length Width, Length Space, Length
     {
     }
 
+    /// <summary>How the rule divides into strokes — one for a plain one, two for a double.</summary>
+    public BorderBands Bands => BorderRules.Bands(Line, Width);
+
     /// <summary>How much room the side takes across the paragraph's edge.</summary>
     /// <remarks>
     /// <c>w:sz/8 + w:space</c>, in points, and nothing else — measured on sixteen probes varying both:
     /// sz 18 space 1 costs 3.25 pt, sz 18 space 0 costs 2.25, sz 4 space 1 costs 1.50 and sz 24 space 10
     /// costs 13.00. It <em>adds to</em> <c>w:spacing</c> rather than merging with it.
+    ///
+    /// <para>
+    /// All sixteen of those state <c>w:val="single"</c>, where the stated width and the drawn one are the
+    /// same. They are not the same for any other style, and <see cref="Width"/> is the drawn one: a 3 pt
+    /// <c>double</c> costs 9 pt here, which the same probe measures at <c>w:sz="24"</c> as the following
+    /// text sitting 6 pt lower than the single rule leaves it.
+    /// </para>
     /// </remarks>
     public Length Allowance => Width + Space + Trailing;
 

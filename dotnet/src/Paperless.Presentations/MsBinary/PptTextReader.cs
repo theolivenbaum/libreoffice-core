@@ -14,11 +14,146 @@ namespace Paperless.Presentations.MsBinary;
 /// <param name="Text">The characters, with the terminator and any trailing NULs removed.</param>
 /// <param name="Paragraphs">The paragraph property runs, in order.</param>
 /// <param name="Characters">The character property runs, in order.</param>
+/// <param name="Ruler">
+/// The shape's own per-level indents, when it carries a <c>TextRulerAtom</c>.
+/// </param>
+/// <param name="Extended">
+/// The shape's <c>ExtendedParagraphAtom</c> entries, which a character run selects into by index.
+/// Empty when the shape carries none.
+/// </param>
 public sealed record PptTextRun(
     PptTextKind Kind,
     string Text,
     IReadOnlyList<PptParagraphRun> Paragraphs,
-    IReadOnlyList<PptCharacterRun> Characters);
+    IReadOnlyList<PptCharacterRun> Characters,
+    PptTextRuler? Ruler = null,
+    IReadOnlyList<PptExtendedParagraph>? Extended = null)
+{
+    /// <summary>The extension a character run selects, or null when it selects none.</summary>
+    /// <param name="index">The run's <see cref="PptCharacterRun.ExtendedIndex"/>.</param>
+    public PptExtendedParagraph? ExtensionAt(int index)
+        => Extended is { } entries && index >= 0 && index < entries.Count ? entries[index] : null;
+}
+
+/// <summary>
+/// One shape's <c>TextRulerAtom</c>: per-outline-level indents that override the master's.
+/// </summary>
+/// <remarks>
+/// <para>
+/// <strong>A shape may state its own indents, and they are not in its paragraph properties.</strong>
+/// PowerPoint writes them into a separate record beside the text — <c>PPT_PST_TextRulerAtom</c>,
+/// 4006 — holding a flags word and then, for each of the five outline levels that the flags name,
+/// where that level's text starts and where its bullet starts. The paragraph property runs say
+/// nothing about them, so a reader that only reads those falls through to the master's levels and
+/// puts every indent and every bullet in the wrong place.
+/// </para>
+/// <para>
+/// <c>PPTTextRulerInterpreter</c>, <c>filter/source/msfilter/svdfppt.cxx:3021-3084</c>. The flags
+/// are: bit 0 a default tab, bit 1 a level count that nothing reads, bit 2 a tab-stop list, then
+/// <c>8 &lt;&lt; level</c> for that level's text offset and <c>256 &lt;&lt; level</c> for its
+/// bullet offset — and the fields appear in exactly that interleaved order, so a flag missed is a
+/// misread of everything after it rather than one absent value.
+/// </para>
+/// <para>
+/// Measured on <c>slides/done-014/ppt/Aerospace_Journey_of_Flight_Chapter_*.ppt</c> page 5, whose
+/// body shape carries a 24-byte ruler with flags <c>0x1EF9</c>: it states
+/// <c>textOfs[0] = 152</c>, <c>textOfs[1] = 419</c> and <c>bulletOfs[1] = 304</c> master units
+/// where the master's Body levels say 228, 495 and 304. The reference draws that page's
+/// level-zero text 18.99 pt from the text area's left edge (152 units), its level-one text
+/// 52.38 pt (419) and its level-one bullet 38.01 pt (304) — the ruler's three numbers to a
+/// hundredth of a point, and none of the master's.
+/// </para>
+/// </remarks>
+/// <param name="DefaultTab">The tab interval in master units, or null when the ruler states none.</param>
+/// <param name="TextOffsets">Where each level's text starts, null for a level the flags omit.</param>
+/// <param name="BulletOffsets">Where each level's bullet starts, on the same terms.</param>
+public sealed record PptTextRuler(
+    ushort? DefaultTab,
+    IReadOnlyList<ushort?> TextOffsets,
+    IReadOnlyList<ushort?> BulletOffsets)
+{
+    /// <summary>How many outline levels a ruler can speak for.</summary>
+    public const int Levels = 5;
+
+    /// <summary>The text offset the ruler states for a level, or null when it states none.</summary>
+    /// <param name="level">The outline level, zero for the first.</param>
+    public ushort? TextOffset(int level)
+        => level >= 0 && level < TextOffsets.Count ? TextOffsets[level] : null;
+
+    /// <summary>The bullet offset the ruler states for a level, or null when it states none.</summary>
+    /// <param name="level">The outline level, zero for the first.</param>
+    public ushort? BulletOffset(int level)
+        => level >= 0 && level < BulletOffsets.Count ? BulletOffsets[level] : null;
+}
+
+/// <summary>
+/// One entry of a shape's <c>ExtendedParagraphAtom</c>: a picture bullet or an automatic number.
+/// </summary>
+/// <remarks>
+/// <para>
+/// <strong>A numbered PowerPoint list does not say so anywhere a paragraph property run can be
+/// seen.</strong> The paragraph still states an ordinary bullet — often the master's round dot —
+/// and the numbering lives in a separate structure in the shape's private data, selected per
+/// <em>character</em> run by four bits of its flags word. A reader that resolves only the
+/// paragraph properties therefore draws a bullet where the reference draws <c>(a)</c> or
+/// <c>I.</c>, with no sign in the file that anything was missed.
+/// </para>
+/// <para>
+/// <c>StyleTextProp9::Read</c>, <c>filter/source/msfilter/svdfppt.cxx:4812-4830</c>. The layout is
+/// three masks with optional fields hanging off each: the paragraph mask, then
+/// <c>buBlip</c> under <c>0x00800000</c>, <c>hasAnm</c> under <c>0x02000000</c>,
+/// <c>anmScheme</c> under <c>0x01000000</c> and a PP10 extension under <c>0x04000000</c>; then a
+/// character mask with one optional word; then a special-info mask with two.
+/// </para>
+/// <para>
+/// Measured on two corpus decks. <c>slides/done-008/ppt/RESPA_-_Section_8_Webinar.ppt</c>'s
+/// page-4 body carries a 52-byte atom whose first entry is
+/// <c>mask=0x03800000 buBlip=0xFFFF hasAnm=1 anmScheme=0x00010008</c> — scheme 8, a lower-case
+/// letter in parentheses, starting at 1 — and the reference labels that slide's four paragraphs
+/// <c>(a) (b) (c) (d)</c> while we draw four round bullets. Its second entry states nothing, and
+/// the character run covering the trailing paragraph selects it, which is why the reference
+/// leaves that paragraph unlabelled.
+/// <c>slides/done-004/ppt/undp_presentation_revised_17_may.ppt</c> carries one entry,
+/// <c>hasAnm=1 anmScheme=0x00010007</c> — scheme 7, an upper-case roman numeral with a full stop,
+/// starting at 1 — reached through the document's presentation-rules route rather than through a
+/// shape, and the reference numbers its outline <c>I. II. III. IV. V. VI.</c>
+/// </para>
+/// </remarks>
+/// <param name="BulletBlip">
+/// The picture-bullet index into the document's BLIP store, or <c>0xFFFF</c> for none.
+/// </param>
+/// <param name="HasAutoNumber">Whether the paragraphs it covers are automatically numbered.</param>
+/// <param name="Scheme">
+/// The numbering scheme in the low word and the start value in the high word, as
+/// <c>ImplGetExtNumberFormat</c> reads them (<c>svdfppt.cxx:3466-3630</c>).
+/// </param>
+public readonly record struct PptExtendedParagraph(
+    ushort BulletBlip,
+    bool HasAutoNumber,
+    uint Scheme)
+{
+    /// <summary>The value meaning "no picture bullet".</summary>
+    public const ushort NoBulletBlip = 0xFFFF;
+
+    /// <summary>The scheme's own number, which names the alphabet and the punctuation.</summary>
+    public int SchemeKind => (int)(Scheme & 0xFFFF);
+
+    /// <summary>
+    /// The number the run starts at, or null when the entry does not state one.
+    /// </summary>
+    /// <remarks>
+    /// <c>rStartNumbering = nAnmScheme &gt;&gt; 16</c>, applied only when the entry states
+    /// <c>hasAnm</c> and the value is not −1 (<c>svdfppt.cxx:3629-3637</c>).
+    /// </remarks>
+    public int? Start
+    {
+        get
+        {
+            int stated = (int)(Scheme >> 16);
+            return HasAutoNumber && stated >= 0 && stated != 0xFFFF ? stated : null;
+        }
+    }
+}
 
 /// <summary>One paragraph's properties, covering <paramref name="Length"/> characters.</summary>
 /// <remarks>
@@ -95,6 +230,11 @@ public readonly record struct PptParagraphRun(
 /// <c>svdfppt.cxx:5764-5775</c> puts the value straight into a <c>SvxEscapementItem</c>, and the
 /// flag alone cannot say whether a file asked for 30% or for 100%.
 /// </param>
+/// <param name="ExtendedIndex">
+/// Which <see cref="PptExtendedParagraph"/> the run selects, from bits 10–13 of its flags word.
+/// Zero when the run's mask does not name them, which is also the first entry — the same
+/// conflation <c>PPTStyleTextPropReader::ReadCharProps</c> makes (<c>svdfppt.cxx:5171-5182</c>).
+/// </param>
 public readonly record struct PptCharacterRun(
     int Length,
     RunEmphasis Emphasis,
@@ -103,7 +243,8 @@ public readonly record struct PptCharacterRun(
     ushort FontIndex = 0,
     ushort FontHeight = 0,
     uint Colour = 0,
-    short Escapement = 0)
+    short Escapement = 0,
+    int ExtendedIndex = 0)
 {
     /// <summary>Whether the run's mask names a property, so its value is the run's own.</summary>
     /// <param name="bit">The mask bit, as <c>PPT_CharAttr_*</c> numbers them.</param>
@@ -170,14 +311,23 @@ public static class PptTextReader
     /// What the run's running fields stand for on the page being read. Left empty by extraction,
     /// which has no page to resolve them against and reports the marker characters as they stand.
     /// </param>
+    /// <param name="extended">
+    /// The shape's <c>ExtendedParagraphAtom</c> entries, which live outside this range — see
+    /// <see cref="ReadExtendedParagraphs"/>.
+    /// </param>
     public static PptTextRun? Read(
-        DffRecordBuffer stream, int start, int end, PptFieldValues fields = default)
+        DffRecordBuffer stream,
+        int start,
+        int end,
+        PptFieldValues fields = default,
+        IReadOnlyList<PptExtendedParagraph>? extended = null)
     {
         ArgumentNullException.ThrowIfNull(stream);
 
         PptTextKind kind = PptTextKind.Other;
         string? text = null;
         DffRecordHeader? style = null;
+        PptTextRuler? ruler = null;
         List<(int Position, string Value)>? markers = null;
 
         foreach (DffRecordHeader record in stream.Range(start, end))
@@ -203,6 +353,10 @@ public static class PptTextReader
 
                 case PptRecordTypes.StyleTextPropAtom:
                     style ??= record;
+                    break;
+
+                case PptRecordTypes.TextRulerAtom:
+                    ruler ??= ReadRuler(content);
                     break;
 
                 case PptRecordTypes.SlideNumberMCAtom:
@@ -235,7 +389,156 @@ public static class PptTextReader
 
         if (markers is not null) text = Substitute(text, markers, paragraphs, characters);
 
-        return new PptTextRun(kind, text, paragraphs, characters);
+        return new PptTextRun(kind, text, paragraphs, characters, ruler, extended);
+    }
+
+    /// <summary>
+    /// Reads a <c>TextRulerAtom</c>, or returns null when it states nothing this consumes.
+    /// </summary>
+    /// <remarks>
+    /// The field order is the interleaved one <see cref="PptTextRuler"/> describes, and it is the
+    /// whole content of the record: a flag skipped is not one value lost but every value after it
+    /// read from the wrong offset. The tab-stop list is stepped over rather than kept, because
+    /// nothing on the slide path consumes an explicit tab stop yet; its size is two words per
+    /// stop, which the count preceding it gives.
+    /// </remarks>
+    private static PptTextRuler? ReadRuler(ReadOnlySpan<byte> content)
+    {
+        if (content.Length < 4) return null;
+
+        int position = 0;
+        uint flags = Take32(content, ref position);
+
+        ushort? defaultTab = null;
+        ushort?[] textOffsets = new ushort?[PptTextRuler.Levels];
+        ushort?[] bulletOffsets = new ushort?[PptTextRuler.Levels];
+
+        // Bit 1 is a level count that LibreOffice reads and discards; it still occupies a word.
+        if ((flags & 0x0002) != 0) Skip(ref position, 2);
+        if ((flags & 0x0001) != 0) defaultTab = Take16(content, ref position);
+
+        if ((flags & 0x0004) != 0)
+        {
+            int stops = Take16(content, ref position);
+            Skip(ref position, 4 * stops);
+        }
+
+        for (int level = 0; level < PptTextRuler.Levels; level++)
+        {
+            if ((flags & (8u << level)) != 0) textOffsets[level] = Take16(content, ref position);
+            if ((flags & (256u << level)) != 0) bulletOffsets[level] = Take16(content, ref position);
+        }
+
+        bool states = defaultTab is not null;
+        foreach (ushort? value in textOffsets) states |= value is not null;
+        foreach (ushort? value in bulletOffsets) states |= value is not null;
+
+        return states ? new PptTextRuler(defaultTab, textOffsets, bulletOffsets) : null;
+    }
+
+    /// <summary>The name PowerPoint 97+ gives its own tagged block.</summary>
+    private const string ProgTagName = "___PPT9";
+
+    /// <summary>
+    /// A shape's <c>ExtendedParagraphAtom</c> entries, from its <c>ClientData</c>.
+    /// </summary>
+    /// <remarks>
+    /// The record is three levels down and the middle level is an <em>atom</em> that holds
+    /// records, so it is reached explicitly rather than by a container walk:
+    /// <c>ClientData</c> → <c>ProgTags</c> → a <c>ProgBinaryTag</c> whose opening
+    /// <c>CString</c> reads <c>___PPT9</c> → its <c>BinaryTagData</c> →
+    /// <c>ExtendedParagraphAtom</c>. Mirrors <c>SeekToContentOfProgTag</c>
+    /// (<c>svdfppt.cxx:6547-6551</c>).
+    /// </remarks>
+    /// <param name="stream">The document stream.</param>
+    /// <param name="clientData">The shape's <c>ClientData</c> record, when it has one.</param>
+    public static IReadOnlyList<PptExtendedParagraph>? ReadExtendedParagraphs(
+        DffRecordBuffer stream, DffRecordHeader? clientData)
+    {
+        ArgumentNullException.ThrowIfNull(stream);
+
+        if (clientData is not { } data) return null;
+
+        foreach (DffRecordHeader tags in stream.Children(data))
+        {
+            if (tags.Type != PptRecordTypes.ProgTags) continue;
+
+            foreach (DffRecordHeader tag in stream.Children(tags))
+            {
+                if (tag.Type != PptRecordTypes.ProgBinaryTag) continue;
+                if (!IsProgTag(stream, tag)) continue;
+
+                foreach (DffRecordHeader payload in stream.Children(tag))
+                {
+                    if (payload.Type != PptRecordTypes.BinaryTagData) continue;
+
+                    foreach (DffRecordHeader record in stream.Children(payload))
+                    {
+                        if (record.Type != PptRecordTypes.ExtendedParagraphAtom) continue;
+
+                        return ReadExtendedParagraphAtom(stream.Content(record));
+                    }
+                }
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>Whether a <c>ProgBinaryTag</c> is the one PowerPoint 97+ writes.</summary>
+    private static bool IsProgTag(DffRecordBuffer stream, DffRecordHeader tag)
+    {
+        foreach (DffRecordHeader child in stream.Children(tag))
+        {
+            if (child.Type != PptRecordTypes.CString) continue;
+
+            return string.Equals(
+                DecodeUtf16(stream.Content(child)), ProgTagName, StringComparison.Ordinal);
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Reads an <c>ExtendedParagraphAtom</c>'s entries, in the order a character run indexes them.
+    /// </summary>
+    /// <remarks>
+    /// Every field is optional and every mask decides the size of what follows it, so an
+    /// unrecognised bit is not one value lost but every entry after it read from the wrong offset.
+    /// The three masks and their fields are <c>StyleTextProp9::Read</c>'s, in its order.
+    /// </remarks>
+    public static IReadOnlyList<PptExtendedParagraph> ReadExtendedParagraphAtom(
+        ReadOnlySpan<byte> content)
+    {
+        List<PptExtendedParagraph> entries = [];
+        int position = 0;
+
+        while (position + 4 <= content.Length)
+        {
+            uint paragraph = Take32(content, ref position);
+
+            ushort blip = PptExtendedParagraph.NoBulletBlip;
+            bool numbered = false;
+            uint scheme = 0;
+
+            if ((paragraph & 0x0080_0000) != 0) blip = Take16(content, ref position);
+            if ((paragraph & 0x0200_0000) != 0) numbered = Take16(content, ref position) != 0;
+            if ((paragraph & 0x0100_0000) != 0) scheme = Take32(content, ref position);
+            if ((paragraph & 0x0400_0000) != 0) Skip(ref position, 4);
+
+            uint character = Take32(content, ref position);
+            if ((character & 0x0010_0000) != 0) Skip(ref position, 4);
+
+            uint special = Take32(content, ref position);
+            if ((special & 0x0000_0020) != 0) Skip(ref position, 4);
+            if ((special & 0x0000_0040) != 0) Skip(ref position, 2);
+
+            if (position > content.Length) break;
+
+            entries.Add(new PptExtendedParagraph(blip, numbered, scheme));
+        }
+
+        return entries;
     }
 
     /// <summary>The character a field occupies in the text until something resolves it.</summary>
@@ -613,7 +916,8 @@ public static class PptTextReader
                 fontIndex,
                 fontHeight,
                 colour,
-                escapement));
+                escapement,
+                (mask & 0x3C00) != 0 ? (flags & 0x3C00) >> 10 : 0));
             if (count <= 0) break;
             covered += count;
         }

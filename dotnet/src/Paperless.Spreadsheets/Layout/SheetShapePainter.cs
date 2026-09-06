@@ -1,6 +1,7 @@
 using Paperless.Core.Geometry;
 using Paperless.Core.Graphics;
 using Paperless.Core.Units;
+using Paperless.Ooxml.DrawingML;
 
 namespace Paperless.Spreadsheets.Layout;
 
@@ -63,8 +64,13 @@ internal static class SheetShapePainter
 
         if (text.IsEmpty || box.Width <= Length.Zero || box.Height <= Length.Zero) return;
 
-        Length left = box.X + (text.LeftInset * scale);
-        Length right = box.X + box.Width - (text.RightInset * scale);
+        // The preset's own text rectangle rather than the anchor's box -- see
+        // `SheetShapeText.Preset`. A shape stating no preset, and every BIFF one, gets the box.
+        DocRect frame = Frame(text, box);
+        if (frame.Width <= Length.Zero || frame.Height <= Length.Zero) return;
+
+        Length left = frame.X + (text.LeftInset * scale);
+        Length right = frame.X + frame.Width - (text.RightInset * scale);
         Length available = right - left;
         if (available <= Length.Zero) return;
 
@@ -74,8 +80,8 @@ internal static class SheetShapePainter
         Length total = Length.Zero;
         foreach (Line line in lines) total += line.Height;
 
-        Length top = box.Y + (text.TopInset * scale);
-        Length room = box.Height - (text.TopInset * scale) - (text.BottomInset * scale);
+        Length top = frame.Y + (text.TopInset * scale);
+        Length room = frame.Height - (text.TopInset * scale) - (text.BottomInset * scale);
 
         // Calc's own condition: the clip applies only when the text really is taller than the box,
         // and while it applies the vertical adjustment is suppressed as well, so an overflowing
@@ -89,14 +95,10 @@ internal static class SheetShapePainter
             else if (text.Anchor == SheetShapeAnchor.Bottom && room > total) top += room - total;
         }
 
+        Length bottom = top + room;
         Length pen = top;
         foreach (Line line in lines)
         {
-            // Wholly inside or not drawn: LibreOffice accepts "only text portions completely
-            // inside" the clip range and discards the rest outright, so an overflowing line is
-            // absent from the output rather than half-drawn (svdoutl.hxx:56-59).
-            if (clipping && pen + line.Height > top + room) break;
-
             // A blank paragraph carries no piece and only advances the pen, which is what keeps
             // the gap a text box puts between its blocks.
             if (line.Pieces.Count > 0)
@@ -113,7 +115,19 @@ internal static class SheetShapePainter
                 Length baseline = pen + line.Ascent;
                 foreach (BandRun piece in line.Pieces)
                 {
-                    sink.DrawGlyphRun(piece.At(new DocPoint(x, baseline)), Paint.Solid(Colour.Black));
+                    // Wholly inside or not drawn, and it is the *portion* that is tested rather
+                    // than the line: LibreOffice keeps one only when its start position and both
+                    // corners of its glyph bounding rectangle lie inside the clip range, and
+                    // discards the rest outright rather than drawing the part that fits
+                    // (`TextHierarchyBreakupBlockText::processDrawPortionInfo`,
+                    // svx/source/svdraw/svdoutl.cxx:120-160). A dropped portion still advances the
+                    // pen, because nothing reflows around it.
+                    if (!clipping || Fits(piece, baseline, top, bottom))
+                    {
+                        sink.DrawGlyphRun(
+                            piece.At(new DocPoint(x, baseline)), Paint.Solid(Colour.Black));
+                    }
+
                     x += piece.Width;
                 }
             }
@@ -122,8 +136,50 @@ internal static class SheetShapePainter
         }
     }
 
-    /// <summary>The size and face one stretch of a paragraph is set in.</summary>
-    private readonly record struct Format(Length Size, string? Family);
+    /// <summary>Whether a portion's baseline and ink both sit inside the clip range.</summary>
+    /// <remarks>
+    /// Three tests, because the reference makes three: the start position, then the top left of
+    /// the text bound rectangle, then its bottom right, each rejected on its own. The horizontal
+    /// half of the range is unbounded, so only the vertical one is asked here.
+    /// </remarks>
+    private static bool Fits(BandRun piece, Length baseline, Length top, Length bottom)
+    {
+        if (baseline < top || baseline > bottom) return false;
+
+        (Length above, Length below) = piece.Ink;
+        return baseline - above >= top && baseline + below <= bottom;
+    }
+
+    /// <summary>The rectangle inside the shape that its text is laid out in.</summary>
+    /// <remarks>
+    /// <para>
+    /// The box arrives already scaled by the print zoom and a preset's geometry is linear in its
+    /// size, so evaluating the preset against the scaled box gives the scaled text rectangle with
+    /// no second conversion.
+    /// </para>
+    /// <para>
+    /// A preset this evaluator does not know, and a shape that states none at all, both answer the
+    /// whole box -- which is what LibreOffice falls back to as well, and what every BIFF shape gets
+    /// since the Escher path carries no preset name.
+    /// </para>
+    /// </remarks>
+    private static DocRect Frame(SheetShapeText text, DocRect box)
+    {
+        if (text.Preset is not { Length: > 0 } preset) return box;
+
+        DocSize size = new(box.Width, box.Height);
+        if (CustomShapeGeometry.Preset(preset, size, text.Adjustments) is not { } geometry)
+            return box;
+
+        DocRect rectangle = geometry.TextRectangle;
+        if (rectangle.Width <= Length.Zero || rectangle.Height <= Length.Zero) return box;
+
+        return new DocRect(
+            box.X + rectangle.X, box.Y + rectangle.Y, rectangle.Width, rectangle.Height);
+    }
+
+    /// <summary>The size, face and weight one stretch of a paragraph is set in.</summary>
+    private readonly record struct Format(Length Size, string? Family, bool Bold);
 
     /// <summary>
     /// One laid-out line: the shaped stretches it is made of, its width, the ascent its pieces
@@ -153,8 +209,8 @@ internal static class SheetShapePainter
                 lines.Add(new Line(
                     [],
                     Length.Zero,
-                    SheetBandText.AscentAt(blank.Size, blank.Family),
-                    SheetBandText.ShapeLineHeightAt(blank.Size, blank.Family),
+                    SheetBandText.AscentAt(blank.Size, blank.Family, blank.Bold),
+                    SheetBandText.ShapeLineHeightAt(blank.Size, blank.Family, blank.Bold),
                     paragraph.Alignment));
                 continue;
             }
@@ -196,10 +252,21 @@ internal static class SheetShapePainter
     private static Format Blank(SheetShapeParagraph paragraph, double scale)
         => Scaled(paragraph.Runs.Count > 0 ? paragraph.Runs[0] : default, scale);
 
+    /// <remarks>
+    /// The face is defaulted here rather than left null, because null means "the furniture's own"
+    /// to <c>SheetBandText</c> — the workbook's default *cell* font — and a shape is not furniture.
+    /// Its text belongs to the drawing layer's item pool, whose default is
+    /// <see cref="SheetShapeText.DefaultFamily"/>; the two are different fonts and the same
+    /// workbook uses both.
+    /// </remarks>
     private static Format Scaled(SheetShapeRun run, double scale)
     {
         Length size = run.Size > Length.Zero ? run.Size : SheetShapeText.DefaultSize;
-        return new Format(size * scale, run.Family);
+        string family = string.IsNullOrWhiteSpace(run.Family)
+            ? SheetShapeText.DefaultFamily
+            : run.Family;
+
+        return new Format(size * scale, family, run.Bold);
     }
 
     /// <summary>
@@ -268,12 +335,14 @@ internal static class SheetShapePainter
 
             // The line's metrics come from the formats it spans and not from the pieces that
             // shaped, so a face that cannot be resolved loses its ink and not the line's height.
-            Length pieceAscent = SheetBandText.AscentAt(format.Size, format.Family);
-            Length pieceHeight = SheetBandText.ShapeLineHeightAt(format.Size, format.Family);
+            Length pieceAscent = SheetBandText.AscentAt(format.Size, format.Family, format.Bold);
+            Length pieceHeight =
+                SheetBandText.ShapeLineHeightAt(format.Size, format.Family, format.Bold);
             if (pieceAscent > ascent) ascent = pieceAscent;
             if (pieceHeight > height) height = pieceHeight;
 
-            if (SheetBandText.Shape(body[at..stop], format.Size, format.Family) is { } run)
+            if (SheetBandText.Shape(body[at..stop], format.Size, format.Family, format.Bold)
+                    is { } run)
             {
                 pieces.Add(run);
                 width += run.Width;
@@ -296,7 +365,9 @@ internal static class SheetShapePainter
             int stop = at + 1;
             while (stop < end && formats[stop] == formats[at]) stop++;
 
-            if (SheetBandText.Shape(body[at..stop], formats[at].Size, formats[at].Family) is { } run)
+            if (SheetBandText.Shape(
+                    body[at..stop], formats[at].Size, formats[at].Family, formats[at].Bold)
+                    is { } run)
             {
                 width += run.Width;
             }

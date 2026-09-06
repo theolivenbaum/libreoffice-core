@@ -7,6 +7,7 @@ using Paperless.OpenDocument;
 using Paperless.OpenDocument.Styles;
 using Paperless.Ooxml.DrawingML;
 using Paperless.Presentations.Layout;
+using Paperless.Presentations.Ooxml;
 using Paperless.Text.Layout;
 using Paperless.Vector;
 
@@ -370,7 +371,27 @@ internal sealed partial class OdpSlideLayout
         XElement? geometry = element.Element(XName.Get("enhanced-geometry", OdfNamespaces.Draw));
         CustomShapeGeometry.Geometry outline = Geometry(element, geometry, size);
 
+        // What is filled, what is stroked and what is shaded, all of which a subpath states for
+        // itself. Split before the mirror, because a subpath has to be mirrored too. Only the
+        // preset fallback reports subpaths today — `OdfEnhancedGeometry` skips the `F` and `S`
+        // commands — so a stated `draw:enhanced-path` is painted whole, exactly as before.
+        PaintedGeometry painted =
+            SlidePresetGeometry.Painted(outline, AffineTransform.Identity, outline.Outline);
+
         GraphicsPath local = Mirrored(outline.Outline, geometry, size);
+        GraphicsPath localFill = ReferenceEquals(painted.Fill, outline.Outline)
+            ? local
+            : Mirrored(painted.Fill, geometry, size);
+        GraphicsPath localStroke = ReferenceEquals(painted.Stroke, outline.Outline)
+            ? local
+            : Mirrored(painted.Stroke, geometry, size);
+        IReadOnlyList<SlideShadedPart> shaded =
+        [
+            .. painted.ShadedParts.Select(part => part with
+            {
+                Outline = ShapeTransform.Apply(placement, Mirrored(part.Outline, geometry, size)),
+            }),
+        ];
         IReadOnlyList<OdfStyleReference> cascade = StyleCascade(element);
         DocRect bounds = ShapeTransform.PlacedBounds(placement, size);
 
@@ -386,10 +407,36 @@ internal sealed partial class OdpSlideLayout
         Paint? fill = Fill(cascade, box);
         if (!upright && fill is GradientPaint gradient) fill = gradient with { Transform = placement };
 
+        // WordArt replaces the whole shape, exactly as it does on the PPTX side: the curves become
+        // the outline, the shape's own path, pen and shadow go, and the words leave the text layer.
+        // `EnhancedCustomShapeEngine::render2` does not care which filter built the shape — a
+        // `draw:custom-shape` in text-path mode is the same `SdrObjCustomShape` a warped
+        // `p:sp` becomes — so the two paths have to answer the same way. See `OdfFontwork`.
+        //
+        // The fill is the shape's here and the first run's there, and that is not an inconsistency:
+        // ODF is the format the model is native to and states the Fontwork's fill as a shape
+        // property, while `lcl_copyCharPropsToShape` (`oox/source/drawingml/shape.cxx:721-905`) is
+        // what puts a DrawingML run's fill onto the shape in the first place. On a deck LibreOffice
+        // converted from `pptx`, the `draw:fill-color` it wrote *is* that copied run colour.
+        if (Warped(element, geometry, size, cascade) is { } warped)
+        {
+            return new PlacedShape
+            {
+                Name = Attribute(element, OdfNamespaces.Draw, "name"),
+                Outline = ShapeTransform.Apply(placement, warped),
+                Bounds = bounds,
+                Fill = fill,
+                Picture = Picture(element, bounds),
+            };
+        }
+
         return new PlacedShape
         {
             Name = Attribute(element, OdfNamespaces.Draw, "name"),
             Outline = ShapeTransform.Apply(placement, local),
+            FillOutline = ShapeTransform.Apply(placement, localFill),
+            StrokeOutline = ShapeTransform.Apply(placement, localStroke),
+            ShadedParts = shaded,
             Bounds = bounds,
             Fill = fill,
             Picture = Picture(element, bounds),
@@ -397,6 +444,39 @@ internal sealed partial class OdpSlideLayout
             Text = Text(element, outline.TextRectangle, placement, cascade),
             Shadow = Shadow(cascade),
         };
+    }
+
+    /// <summary>
+    /// The warped glyph outlines of a shape in text-path mode, in the shape's own coordinates.
+    /// </summary>
+    /// <remarks>
+    /// Null for the overwhelming majority of shapes, which state no <c>draw:text-path</c>, and also
+    /// for a warp whose face carries no <c>glyf</c> outlines — in which case the shape draws nothing
+    /// at all rather than falling back to unwarped text, because the reference has already replaced
+    /// it by then. That is the same fallback both OOXML families take.
+    /// </remarks>
+    private GraphicsPath? Warped(
+        XElement element,
+        XElement? geometry,
+        DocSize size,
+        IReadOnlyList<OdfStyleReference> cascade)
+    {
+        if (OdfFontwork.Read(geometry) is not { } warp) return null;
+
+        SlideTextBody body = OdfTextBody.Read(
+            _file, Paragraphs(element), [.. cascade, TextStyle(element)]);
+
+        if (body.Paragraphs.Count == 0) return null;
+
+        return SlideFontwork.Read(
+            body with
+            {
+                WarpFontworkType = warp.FontworkType,
+                WarpAdjustmentValues = warp.Adjustments,
+                WarpKeepsFontSize = warp.KeepsFontSize,
+            },
+            size,
+            _fonts).Outline;
     }
 
     /// <summary>
@@ -466,11 +546,7 @@ internal sealed partial class OdpSlideLayout
             return stated;
         }
 
-        string? preset = Preset(element, geometry);
-
-        return new CustomShapeGeometry.Geometry(
-            SlidePresetGeometry.Outline(preset, size),
-            SlidePresetGeometry.TextRectangle(preset, size));
+        return SlidePresetGeometry.Of(Preset(element, geometry), size);
     }
 
     /// <summary>
@@ -749,7 +825,7 @@ internal sealed partial class OdpSlideLayout
     /// <para>
     /// An <c>axial</c> gradient is a linear one measured from the middle outwards, so it becomes
     /// three stops on an ordinary ramp — exactly, not approximately; see
-    /// <see cref="SlideGradients.Axial"/>.
+    /// <see cref="GradientGeometry.Axial"/>.
     /// </para>
     /// </remarks>
     private static GradientPaint? Gradient(OdpGradient? definition, DocRect box)
@@ -765,9 +841,9 @@ internal sealed partial class OdpSlideLayout
         switch (gradient.Style)
         {
             case "axial":
-                return SlideGradients.Linear(
+                return GradientGeometry.Linear(
                     box, dx, dy,
-                    SlideGradients.Axial(gradient.StartColour, gradient.EndColour, gradient.Border));
+                    GradientGeometry.Axial(gradient.StartColour, gradient.EndColour, gradient.Border));
 
             case "radial":
             case "ellipsoid":
@@ -781,7 +857,7 @@ internal sealed partial class OdpSlideLayout
                     _ => GradientKind.Rectangular,
                 };
 
-                IReadOnlyList<GradientStop> stops = SlideGradients.WithBorder(
+                IReadOnlyList<GradientStop> stops = GradientGeometry.WithBorder(
                     [
                         new GradientStop(0, gradient.EndColour),
                         new GradientStop(1, gradient.StartColour),
@@ -793,13 +869,13 @@ internal sealed partial class OdpSlideLayout
                     box.Left + (box.Width * gradient.CentreX),
                     box.Top + (box.Height * gradient.CentreY));
 
-                return SlideGradients.Centred(kind, box, centre, stops);
+                return GradientGeometry.Centred(kind, box, centre, stops);
             }
 
             default:
-                return SlideGradients.Linear(
+                return GradientGeometry.Linear(
                     box, dx, dy,
-                    SlideGradients.WithBorder(
+                    GradientGeometry.WithBorder(
                         [
                             new GradientStop(0, gradient.StartColour),
                             new GradientStop(1, gradient.EndColour),

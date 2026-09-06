@@ -82,7 +82,7 @@ public sealed class SlideTextAreaGridComparisonTests : IDisposable
     [Fact]
     public void ATextRectangleIsRoundedToTheDrawLayersOwnGrid()
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         List<PdfTextRun> ours = PdfTextRuns.Read(Ours());
         List<PdfTextRun> theirs = PdfTextRuns.Read(

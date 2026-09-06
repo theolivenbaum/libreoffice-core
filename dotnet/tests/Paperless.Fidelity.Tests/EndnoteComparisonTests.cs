@@ -23,6 +23,11 @@ namespace Paperless.Fidelity.Tests;
 /// that believed the file, or that used the footnote sequence, produces the wrong text on both pages.
 /// </para>
 /// </remarks>
+// [reference moved 24.2.7.2 -> 26.2.4.2, closed] `endnotes.docx` failed here on **page count**, 2
+// against 1, and it was ours: 26.2.4.2's DOCX filter sets `ContinuousEndnotes`
+// (`sw/source/writerfilter/filter/WriterFilter.cxx`:338) and 24.2.7.2's did not, which moves the
+// document's endnotes from a page of their own to the end of the body
+// (`sw/source/core/layout/ftnfrm.cxx`:1644-1684). See `PaginationOptions.EndnotesFollowTheBody`.
 public sealed class EndnoteComparisonTests : IDisposable
 {
     /// <summary>How far a drawn word may differ from LibreOffice's, in points.</summary>
@@ -55,13 +60,16 @@ public sealed class EndnoteComparisonTests : IDisposable
     // The DOC is the same document with its endnotes somewhere else, and it belongs in the same test for
     // exactly that reason: LibreOffice's WW8 export writes the DOP's `epc` as 0, "collect at the end of the
     // *section*", and its import turns that into `SwFormatEndAtTextEnd` (`ww8par6.cxx`, `if (0 == epc)`). So
-    // these notes render in the page-bottom note area instead — one page rather than two — and a reader that
-    // placed notes by class rather than by position lays the same document out two ways depending on which
-    // format it was saved in. RTF is absent for the separate reason given in `FootnoteComparisonTests`.
+    // these notes render in the note area instead — one page rather than two — and a reader that placed
+    // notes by class rather than by position lays the same document out two ways depending on which format
+    // it was saved in. RTF is absent for the separate reason given in `FootnoteComparisonTests`.
+    // Since 26.2.4.2 the DOCX renders on one page too, by the other of the two routes: `epc` is not what
+    // puts it there, `ContinuousEndnotes` is, and the two land in the same place on a one-section
+    // document. Measured — both draw their first note line at 716.131 pt.
     [InlineData("endnotes.doc")]
     public void EndnotesCollectWhereTheirDocumentPutsThem(string fileName)
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         string path = Corpus.Require(fileName);
         List<List<DrawnWord>> drawn = Drawn(path);

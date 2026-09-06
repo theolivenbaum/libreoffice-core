@@ -40,16 +40,30 @@ public readonly record struct CellPadding(Length Left, Length Right, Length Top,
 /// One edge of a cell: how thick its border is and what colour.
 /// </summary>
 /// <remarks>
-/// A width and a colour and no style, because a style is a rasteriser's problem and none of the four formats
-/// agrees on the set — ODF spells CSS's, OOXML has forty-odd names, RTF a control word each. A dashed border
-/// at the right width in the right place is far closer than none, and the width is what changes the layout.
+/// <para>
+/// <em>"A width and a colour and no style, because a style is a rasteriser's problem"</em> stood here and is
+/// measurably wrong, in the one way that matters: the style decides the width. Word states the width of
+/// <em>a</em> line and the style says how many there are, so a 3 pt <c>double</c> covers 9 pt of the page
+/// and a 3 pt <c>thick</c> covers 6 — which is a row height, not a rasteriser's problem. See
+/// <see cref="BorderRules"/> for the measurement and the arithmetic.
+/// </para>
+/// <para>
+/// The four formats do disagree on the set of names, and that is what the reading is for:
+/// <see cref="BorderRules.WordStyleOf"/> takes OOXML's forty-odd, a <c>BRC</c>'s <c>brcType</c> is the same
+/// number already, and RTF's control words and ODF's CSS words map onto it too.
+/// </para>
 /// </remarks>
-/// <param name="Width">How thick the border is; zero means there is none.</param>
+/// <param name="Width">How thick the whole border is, both rules and the gap; zero means there is none.</param>
 /// <param name="Colour">What colour it is drawn in.</param>
-public readonly record struct TableBorder(Length Width, Colour Colour)
+/// <param name="Line">The line it is drawn as. <see cref="BorderLine.Solid"/> for most of the corpus.</param>
+public readonly record struct TableBorder(
+    Length Width, Colour Colour, BorderLine Line = BorderLine.Solid)
 {
     /// <summary>True when the edge has no border at all.</summary>
     public bool IsNone => Width <= Length.Zero;
+
+    /// <summary>How the rule divides into strokes — one for a plain border, two for a double.</summary>
+    public BorderBands Bands => BorderRules.Bands(Line, Width);
 }
 
 /// <summary>The four edges of a cell.</summary>
@@ -111,10 +125,17 @@ public enum CellTextDirection
     TopToBottomRightToLeft,
 }
 
-/// <summary>Where a cell's text sits when its content is shorter than its row.</summary>
-public enum CellVerticalAlignment
+/// <summary>
+/// Where text sits in a container taller than itself.
+/// </summary>
+/// <remarks>
+/// A table cell's <c>w:vAlign</c> and a shape's <c>wps:bodyPr/@anchor</c> are the same question with
+/// the same three answers, so they share an enum rather than each having one — which is why this is
+/// no longer named for the cell that first needed it.
+/// </remarks>
+public enum VerticalTextAlignment
 {
-    /// <summary>Against the top of the cell, which is every format's default.</summary>
+    /// <summary>Against the top, which is every format's default.</summary>
     Top,
 
     /// <summary>Centred in the spare height.</summary>
@@ -588,7 +609,7 @@ public sealed record PageTableCell
     /// horizontal rather than vertical — the property keeps its name because it is what every format
     /// spells <c>vAlign</c>, and because it is the same axis in the cell's own frame.
     /// </remarks>
-    public CellVerticalAlignment VerticalAlignment { get; init; }
+    public VerticalTextAlignment VerticalAlignment { get; init; }
 
     /// <summary>
     /// Which way the cell's text runs; <see cref="CellTextDirection.LeftToRight"/> for almost every cell.

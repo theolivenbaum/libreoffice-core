@@ -83,7 +83,7 @@ public sealed class MixedRunComparisonTests : IDisposable
     [InlineData("mixed-runs.doc")]
     public void EveryRunIsDrawnWhereLibreOfficeDrawsIt(string fileName)
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         string path = Corpus.Require(fileName);
         RecordingDrawingSink sink = Record(path);
@@ -196,7 +196,7 @@ public sealed class MixedRunComparisonTests : IDisposable
     [InlineData("mixed-runs.fodt")]
     public void ALineTakesItsHeightFromItsTallestRun(string fileName)
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         string path = Corpus.Require(fileName);
         List<PdfTextRun> reference = PdfTextRuns.Read(_libreOffice.ConvertToPdf(path, _workDirectory));

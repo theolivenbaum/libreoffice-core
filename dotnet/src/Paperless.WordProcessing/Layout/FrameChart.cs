@@ -234,12 +234,32 @@ internal static class FrameChart
 /// expensive half.
 /// </para>
 /// <para>
-/// <strong>The line height includes the gap, and a paragraph's does not.</strong> The labels are plain
-/// text shapes made by <c>chart2</c> rather than anything Writer laid out, so their height is the face's
-/// own ascent plus descent plus leading — 1.1499 em for Liberation Sans — where a body line drops the
-/// gap. The difference compounds through the insets that place the plot area rather than showing up in
-/// any one label, which is why it is taken from <see cref="LineSpacing"/> here rather than from the
-/// paragraph leading beside it.
+/// <strong>The height and the ascent come through <c>chart2</c>'s own 96 dpi device, and not
+/// through Writer's.</strong> The labels are plain text shapes made by <c>chart2</c> rather than
+/// anything Writer laid out, so they are neither measured against Writer's 8640 dpi reference
+/// device nor scaled exactly from the face — they go through the <c>VirtualDevice</c> that
+/// <c>DrawModelWrapper</c> creates from <c>Application::GetDefaultDevice()</c>
+/// (<c>chart2/source/view/main/DrawModelWrapper.cxx</c>:88-99), which asks for no
+/// <c>RefDevMode</c> and is therefore 96 dpi (<c>SvpSalGraphics::GetResolution</c>,
+/// <c>vcl/headless/svpgdi.cxx</c>:44). See <see cref="MetricGrid.Chart"/>.
+/// </para>
+/// <para>
+/// A 96 dpi pixel is <strong>0.75 pt</strong>, so the em itself is rounded to a whole number of
+/// them before a single metric is read and the line height is a <em>sawtooth</em> in the size
+/// rather than a fixed fraction of it: Liberation Sans stacks at 11.254 pt at 10 pt where its
+/// design metrics give 11.499, and at 12.756 at 11 pt where they give 12.649. The external
+/// leading goes with the grid — <c>IsAddExtLeading()</c> is false in EditEngine and a chart's
+/// label is an EditEngine text — so this is no longer ascent plus descent plus leading.
+/// </para>
+/// <para>
+/// <strong>This is the vertical half of the rule <see cref="Shape"/> applies horizontally</strong>,
+/// and the two are taken together deliberately: a chart label is drawn at
+/// <c>blockCentre − blockHeight/2 + ascent</c>, so a height that moves without its ascent moves
+/// every label. <c>SheetBandText.ChartLineHeightAt</c> is the same rule for a workbook's charts,
+/// landed in round 60; this is the words track catching up. Measured on both reference binaries in
+/// <c>probes/chart-vertical/</c> — three faces × twelve sizes × two binaries × a deck and a Writer
+/// document, <strong>144 of 144</strong> baseline-to-baseline distances within 0.019 pt of it,
+/// where scaling the face's metrics exactly is out by up to 1.208 pt.
 /// </para>
 /// </remarks>
 internal sealed class ChartFace : IChartTextMeasurer
@@ -265,7 +285,7 @@ internal sealed class ChartFace : IChartTextMeasurer
     {
         _face = face;
         _reference = reference ?? new FontReference { FamilyName = family, FaceKey = string.Empty };
-        _metrics = face is null ? null : LineSpacing.Resolve(face);
+        _metrics = face is null ? null : LineSpacing.Resolve(face, MetricGrid.Chart);
     }
 
     /// <summary>The face a family resolves to, resolved once and shared.</summary>
@@ -285,10 +305,23 @@ internal sealed class ChartFace : IChartTextMeasurer
     }
 
     /// <summary>The distance from a line's top to its baseline, at a size.</summary>
+    /// <remarks>
+    /// On <see cref="MetricGrid.Chart"/>, like <see cref="LineHeightAt"/> — the two have to move
+    /// together or the labels that agree today stop agreeing, because a label is drawn at
+    /// <c>blockCentre − blockHeight/2 + ascent</c> and the two errors used to cancel on a
+    /// single-line label. See the remark on this class.
+    /// </remarks>
+    /// <param name="size">The em size.</param>
     public Length AscentAt(Length size)
         => _metrics is { } metrics ? metrics.ScaledAscent(size) : size * 0.9;
 
     /// <summary>How tall one line of a chart's text is, at a size.</summary>
+    /// <remarks>
+    /// Ascent plus descent on <see cref="MetricGrid.Chart"/>, taken as the taller of the two
+    /// roundings EditEngine compares and with no external leading. See the remark on this class
+    /// for the measurement.
+    /// </remarks>
+    /// <param name="size">The em size.</param>
     public Length LineHeightAt(Length size)
         => _metrics is { } metrics ? metrics.ScaledLineHeight(size) : size * 1.15;
 
@@ -324,11 +357,31 @@ internal sealed class ChartFace : IChartTextMeasurer
     }
 
     /// <summary>Shapes one line, or null when there is no face to shape it with.</summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>The advances go through <see cref="MetricGrid.Chart"/>, exactly as
+    /// <c>SheetBandText.ChartShape</c>'s do.</strong> A chart's text is not laid out by Writer: it
+    /// is built by <c>chart2</c>'s own view on the <c>VirtualDevice</c> that
+    /// <c>DrawModelWrapper</c> creates from <c>Application::GetDefaultDevice()</c>
+    /// (<c>chart2/source/view/main/DrawModelWrapper.cxx</c>:88-99), and that device is 96 dpi
+    /// (<c>SvpSalGraphics::GetResolution</c>, <c>vcl/headless/svpgdi.cxx</c>:44). A font is
+    /// instantiated at a whole number of device pixels, so at 10 pt the device sets 13 for 13.333
+    /// and every advance comes back 2.5% narrow, while at 11 pt it sets 15 for 14.667 and they
+    /// come back 2.3% wide.
+    /// </para>
+    /// <para>
+    /// This is the words counterpart of the change round 62 made for a workbook's charts, and it
+    /// was left behind then: the same rule, in the third of the three places that shape a chart's
+    /// text. See <c>probes/chart-text-metafile/results.md</c>, where it is measured on both
+    /// reference binaries at twelve sizes with a slide text box beside the chart as the control.
+    /// </para>
+    /// </remarks>
     public ChartRun? Shape(string text, Length size)
     {
         if (text.Length == 0 || _face is not { } face) return null;
 
         ShapedText shaped = TextShaper.Default.Shape(face, text);
+        double scale = MetricGrid.Chart.PixelEmScale(size);
 
         List<PositionedGlyph> glyphs = new(shaped.Glyphs.Count);
         List<int> clusters = new(shaped.Glyphs.Count);
@@ -336,7 +389,7 @@ internal sealed class ChartFace : IChartTextMeasurer
 
         foreach (ShapedGlyph glyph in shaped.Glyphs)
         {
-            Length advance = shaped.Scale(glyph.Advance, size);
+            Length advance = shaped.Scale(glyph.Advance, size) * scale;
             glyphs.Add(new PositionedGlyph(
                 glyph.GlyphId,
                 new DocPoint(pen + shaped.Scale(glyph.OffsetX, size), -shaped.Scale(glyph.OffsetY, size)),

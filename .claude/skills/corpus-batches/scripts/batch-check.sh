@@ -22,12 +22,32 @@
 # extractable words, then font embedding. Each is cheap and rules out a whole class, and
 # a wrong page count makes everything after it meaningless.
 #
-# NOT COMPARABLE TO ANY SCOREBOARD RECORDED BEFORE 2026-08-13. Check 2 used to count
-# `pdftotext … | wc -w`; it now counts only tokens carrying at least one Unicode letter or
-# digit. See `words_of` below for why, and `dotnet/probes/gate-01/results.md` for the
-# conversion — the raw count is still emitted, as the last TSV column, so a run under this
-# script reproduces the old verdict exactly and the two can be reconciled document by
-# document. A figure quoted without saying which metric produced it is now ambiguous.
+# NOT COMPARABLE TO ANY SCOREBOARD RECORDED BEFORE 2026-09-05. Check 2 has moved twice.
+# It counted `pdftotext … | wc -w`; then, from 2026-08-13, only tokens carrying a Unicode
+# letter or digit; and it now compares **alphanumeric characters** rather than tokens at all.
+# Every earlier count is still emitted — `words/rawwords/glyphs`, in that order, after the
+# verdict — so any run reconciles with any older one document by document. A figure quoted
+# without saying which metric produced it is ambiguous.
+#
+# **Why it moved to characters.** A token count asks `pdftotext` a question it cannot answer
+# stably. 26.2.4.2 writes each kerned cluster as its own text-showing operator, so it reads
+# `2-Way Horizontal Hierarchy` as `2 -W ay H or i z on t a l H ie r a r ch y` — measured on
+# `006_2-Way_Horizontal_Hierarchy…pptx`, words 126 / 162 / 124 across 24.2 / 26.2 / ours
+# against glyphs 645 / 645 / 645. Under the token rule that put ~35 invented words on each of
+# 89 decks and was the single largest obstacle to moving this gate to the version the tree
+# targets.
+#
+# Measured over all 947 documents at one commit, same binary, only the metric changed:
+# **850 → 854 match.** Fourteen rows that were failing now pass, three of them with
+# *identical* character counts (`053_Flow_Wave_Process` 889/889, `032_BCG_Growth-Share_Matrix`
+# 1153/1153, `100_Business_Case_Template` 512/512) — the tokenisation was the whole
+# disagreement. Ten rows that were passing now fail, and they are true positives the token
+# rule could not see: `042_Business_monthly_budget` has **268 words on both sides and 114
+# fewer characters**, `Aircraft_Database.xlsx` is 3 853 characters short at an 0.9 % token
+# difference. So the metric is both more robust to grouping and more sensitive to loss.
+#
+# The band is unchanged in shape — max(2 %, floor) — and the floor converts by measurement:
+# this corpus averages **5.12 glyphs per word**, so the old 3-token floor is 15 characters.
 set -uo pipefail
 
 ROOT_DIR="${1:?usage: batch-check.sh <corpus-root> <batch-glob> [outdir] [workers]}"
@@ -118,11 +138,19 @@ mkdir -p "$OUT/ours" "$OUT/ref"
 # re-decided by the reimplementation — and the `wc -w` reproduction is a *control on poppler's
 # tokenisation*, so a different reader has to re-establish it against the `rawwords` column of a
 # stored sweep before any verdict it produces is comparable to one here.
-words_of() {  # words_of <pdf> -> "<words> <rawwords>"
+words_of() {  # words_of <pdf> -> "<words> <rawwords> <glyphs>"
   pdftotext "$1" - 2>/dev/null | python3 -c '
 import sys
-t = sys.stdin.buffer.read().decode("utf-8", "replace").split()
-print(sum(1 for w in t if any(c.isalnum() for c in w)), len(t))'
+b = sys.stdin.buffer.read().decode("utf-8", "replace")
+t = b.split()
+# `glyphs` counts alphanumeric *characters*, ignoring how they are grouped, and it is what
+# the verdict now uses. A token count asks a question `pdftotext` cannot answer stably:
+# 26.2.4.2 writes each kerned cluster as its own text-showing operator, so it reads
+# `2-Way Horizontal Hierarchy` as `2 -W ay H or i z on t a l H ie r a r ch y`. Measured on
+# `006_2-Way_Horizontal_Hierarchy…pptx`: words 126 / 162 / 124 for 24.2 / 26.2 / ours,
+# and glyphs 645 / 645 / 645. Same ink, same characters, 36 invented words.
+print(sum(1 for w in t if any(c.isalnum() for c in w)), len(t),
+      sum(1 for c in b if c.isalnum()))'
 }
 
 # shellcheck disable=SC2086  # the glob is meant to expand
@@ -189,7 +217,7 @@ mapfile -t FILES < <(
 )
 
 one() {  # one <index>
-  local idx="$1" i=-1 f base ext stem id o r op rp ow rw of rf un v owraw rwraw
+  local idx="$1" i=-1 f base ext stem id o r op rp ow rw of rf un v owraw rwraw og rg
   local prof="$OUT/prof$idx"
   mkdir -p "$prof" "$OUT/t$idx"
   for f in "${FILES[@]}"; do
@@ -207,10 +235,10 @@ one() {  # one <index>
       --headless --convert-to pdf --outdir "$OUT/t$idx" "$f" >/dev/null 2>&1
     [ -f "$OUT/t$idx/$stem.pdf" ] && mv -f "$OUT/t$idx/$stem.pdf" "$r"
 
-    op="-"; rp="-"; ow="-"; rw="-"; of="-"; rf="-"; un="-"; owraw="-"; rwraw="-"
+    op="-"; rp="-"; ow="-"; rw="-"; of="-"; rf="-"; un="-"; owraw="-"; rwraw="-"; og="-"; rg="-"
     if [ -f "$o" ]; then
       op=$(pdfinfo "$o" 2>/dev/null | awk '/^Pages/{print $2}')
-      read -r ow owraw < <(words_of "$o")
+      read -r ow owraw og < <(words_of "$o")
       of=$(pdffonts "$o" 2>/dev/null | tail -n +3 | grep -c .)
       # The `emb` column, found by its position from the *right*: pdffonts ends every row with
       # emb, sub, uni and a two-field object id, so `emb` is NF-4 and not NF-3. Counting from
@@ -223,7 +251,7 @@ one() {  # one <index>
     fi
     if [ -f "$r" ]; then
       rp=$(pdfinfo "$r" 2>/dev/null | awk '/^Pages/{print $2}')
-      read -r rw rwraw < <(words_of "$r")
+      read -r rw rwraw rg < <(words_of "$r")
       rf=$(pdffonts "$r" 2>/dev/null | tail -n +3 | grep -c .)
     fi
 
@@ -241,23 +269,32 @@ one() {  # one <index>
       # Replayed over 9552 stored rows from every probe TSV in the tree, this block returns
       # the stored verdict on all 9552 when fed the raw counts, so the rule is untouched and
       # only its input moved.
-      if [ "$rw" -gt 0 ] 2>/dev/null; then
-        awk -v a="$ow" -v b="$rw" 'BEGIN{d=(a>b?a-b:b-a); exit !(d > b*0.02 && d > 3)}' \
+      #
+      # **The input is `glyphs`, not `words`, and that is the 2026-09-05 change.** The band
+      # is the same shape -- max(2%, floor) -- and the floor moves from 3 tokens to 15
+      # characters, which is three average words on this corpus, so the rule is transferred
+      # rather than loosened. The relative half needs no conversion at all: 2% of a count is
+      # 2% of it however the text is grouped.
+      if [ "$rg" -gt 0 ] 2>/dev/null; then
+        awk -v a="$og" -v b="$rg" 'BEGIN{d=(a>b?a-b:b-a); exit !(d > b*0.02 && d > 15)}' \
           && v="${v:+$v,}words"
-      elif [ "${ow:-0}" -gt 3 ]; then v="${v:+$v,}words"
+      elif [ "${og:-0}" -gt 15 ]; then v="${v:+$v,}words"
       fi
       [ "${un:-0}" = "0" ] || v="${v:+$v,}unembedded"
       [ -n "$v" ] || v="match"
     fi
 
+    # `glyphs` is appended last, after `rawwords`, for the same reason `rawwords` was: every
+    # reader that reaches for an existing column keeps working, and a new scoreboard stays
+    # convertible back to an old one instead of merely incomparable to it.
     # `rawwords` is appended *after* the verdict rather than beside `words`, so that every
     # reader that reaches for `$7` — this script's own tallies, ref-baseline.sh's sibling
     # columns, the replay harness in dotnet/probes/words-rebase-02/verdict.py, and eleven
     # rounds of stored TSVs — keeps working unchanged. It is what makes a new scoreboard
     # convertible back to an old one instead of merely incomparable to it.
-    printf "%s\t%s\t%s/%s\t%s/%s\t%s/%s\t%s\t%s\t%s/%s\n" \
+    printf "%s\t%s\t%s/%s\t%s/%s\t%s/%s\t%s\t%s\t%s/%s\t%s/%s\n" \
       "${f#"$ROOT_DIR"/}" "${ext,,}" "$op" "$rp" "$ow" "$rw" "$of" "$rf" "$un" "$v" \
-      "$owraw" "$rwraw" >> "$OUT/rows.tsv"
+      "$owraw" "$rwraw" "$og" "$rg" >> "$OUT/rows.tsv"
   done
 }
 

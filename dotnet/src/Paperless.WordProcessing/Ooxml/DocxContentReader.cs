@@ -524,7 +524,14 @@ public sealed partial class DocxContentReader
                     ReadAnchoredContent(child, paragraph);
                     break;
 
-                case "separator" or "continuationSeparator" or "lastRenderedPageBreak" or "ptab":
+                // A positional tab is a tab: LibreOffice's tokenizer emits one character for it
+                // (`writerfilter/ooxml/model.xml`:18204-18208, `CT_PTab` → `action="tab"`), so
+                // dropping it here runs a three-part running head into one word.
+                case "ptab":
+                    Emit(paragraph, "\t", format, characterStyleName, hyperlink);
+                    break;
+
+                case "separator" or "continuationSeparator" or "lastRenderedPageBreak":
                     break;
 
                 default:
@@ -801,6 +808,7 @@ public sealed partial class DocxContentReader
         if (!EnterDepth()) return;
 
         if (ReadChart(drawing)) return;
+        if (ReadDiagram(drawing)) return;
 
         ContentSection frame = new()
         {
@@ -878,6 +886,104 @@ public sealed partial class DocxContentReader
 
         _hoisted.Add(section);
         return true;
+    }
+
+    /// <summary>
+    /// Reads a SmartArt diagram's text, hoisting it to a frame section of its own.
+    /// </summary>
+    /// <returns>True when the drawing really was a diagram and has been recorded.</returns>
+    /// <remarks>
+    /// <para>
+    /// The words a diagram shows are the author's, typed into <c>word/diagrams/dataN.xml</c> as
+    /// ordinary DrawingML text bodies. Nothing in the walk that reaches them is specific to a
+    /// word-processing document — <see cref="DiagramParts.AuthoredText"/> is the same reading the
+    /// PresentationML side does — so this is a seat and a hoist, and no second implementation.
+    /// </para>
+    /// <para>
+    /// <strong>It is read from the parts and not from the rendering.</strong> Extraction and
+    /// rendering are separate paths: <c>DocxDiagram</c> translates the <em>baked</em> shape tree
+    /// into shapes a frame can draw, and reaching it costs a theme, the frame's extent and, where
+    /// the baked drawing is absent, the whole layout-atom evaluator. Extraction pays for none of
+    /// that, and it wants a different answer anyway — a node's text once each rather than wherever
+    /// the layout repeated it.
+    /// </para>
+    /// <para>
+    /// A diagram becomes a <see cref="SectionKind.Frame"/> section for the same reason a text box
+    /// does: it holds its own paragraphs, and splicing five circle labels into the sentence that
+    /// happens to anchor them would join two unrelated pieces of prose and split that paragraph in
+    /// two. <c>024_Unit_Circle_Chart_Colorful_Circles</c> is the corpus witness — its five
+    /// <c>YOUR TEXT</c> nodes were absent from the extracted text entirely while the reference's
+    /// own text layer held all five.
+    /// </para>
+    /// <para>
+    /// The relationship is resolved against the main document part because that is the only part
+    /// this reader walks; a diagram anchored in a header would resolve against the header's own
+    /// relationships, and headers are read elsewhere.
+    /// </para>
+    /// </remarks>
+    private bool ReadDiagram(XElement drawing)
+    {
+        XElement? data = drawing
+            .Descendants(XName.Get("graphicData", OoxmlNamespaces.DrawingML))
+            .FirstOrDefault();
+
+        if (data is null) return false;
+        if (data.Attribute("uri")?.Value != DiagramParts.Uri) return false;
+
+        ContentSection frame = new()
+        {
+            Kind = SectionKind.Frame,
+            Index = _hoisted.Count,
+            Name = DrawingName(drawing),
+        };
+
+        if (!DiagramParts.AuthoredText(Diagrams, _file.MainPartName, data, frame)) return false;
+
+        _hoisted.Add(frame);
+        return true;
+    }
+
+    /// <summary>The document as the two lookups a diagram's parts need.</summary>
+    /// <remarks>
+    /// Built once and kept: the resolution walks the same two lookups for each of the parts of
+    /// each diagram, and the part cache is what keeps asking twice cheap.
+    /// </remarks>
+    private DiagramPartSource Diagrams
+        => _diagrams ??= new DiagramPartSource(DiagramTarget, LoadDiagramPart);
+
+    private DiagramPartSource? _diagrams;
+
+    private readonly Dictionary<string, XElement?> _diagramParts = new(StringComparer.Ordinal);
+
+    /// <summary>The part a relationship names, scoped to the part that states it.</summary>
+    private string? DiagramTarget(string partName, string relationshipId)
+    {
+        if (_file.Package is not OpcPackage package) return null;
+
+        foreach (OpcXml.Relationship relationship in package.GetRelationships(partName))
+        {
+            if (!string.Equals(relationship.Id, relationshipId, StringComparison.Ordinal)) continue;
+
+            return relationship.IsExternal ? null : relationship.Target;
+        }
+
+        return null;
+    }
+
+    /// <summary>A part's root element, cached, or null when it is missing or unreadable.</summary>
+    private XElement? LoadDiagramPart(string partName)
+    {
+        if (_diagramParts.TryGetValue(partName, out XElement? cached)) return cached;
+
+        XElement? root = null;
+        if (_file.Package.GetPart(partName) is { } part)
+        {
+            using Stream content = part.Open();
+            root = OoxmlXml.TryLoad(content, out _);
+        }
+
+        _diagramParts[partName] = root;
+        return root;
     }
 
     /// <summary>

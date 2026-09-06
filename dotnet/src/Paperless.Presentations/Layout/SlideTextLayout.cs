@@ -120,7 +120,7 @@ public static partial class SlideTextLayout
             bool first = true;
             foreach (PlacedLine line in block.Lines)
             {
-                if (first) EmitMarker(placed, block, line, area.X, top, fonts);
+                if (first) EmitMarker(placed, block, line, area.X, top, fonts, body.Device);
 
                 Emit(placed, block, line, area.X, top, first);
                 first = false;
@@ -424,7 +424,8 @@ public static partial class SlideTextLayout
         PlacedLine line,
         Length areaLeft,
         Length top,
-        SlideFonts fonts)
+        SlideFonts fonts,
+        MetricGrid device)
     {
         if (Shaped(block.Paragraph, block.Scaling, fonts) is not
             { Face: { } face, Shaped: { } shaped } marked)
@@ -442,7 +443,7 @@ public static partial class SlideTextLayout
 
         if (marker.IsSymbol)
         {
-            LineMetrics metrics = LineSpacing.Resolve(face, MetricGrid.Presentation);
+            LineMetrics metrics = LineSpacing.Resolve(face, device);
             Length ascent = Rounded(metrics.ScaledAscent(size));
             Length descent = Rounded(metrics.ScaledDescent(size));
 
@@ -560,6 +561,41 @@ public static partial class SlideTextLayout
             text = OutlineNumbers.NormaliseBullet(marker.Text);
         }
 
+        // A marker whose face has no glyph for it falls back exactly as a run does.
+        //
+        // <strong>A marker resolves on its own path and never asked.</strong> The run path hands
+        // `SlideFonts.Fallback` to the shared layouter (`ItemisationOptions.GlyphFallback`, below),
+        // so a character Carlito cannot draw is drawn from something that can; this method shapes
+        // its one character against whatever `Resolve` answered and draws `.notdef` when that face
+        // does not hold it -- which for a face that declines to draw a missing-glyph box is
+        // nothing at all, and the marker simply vanishes. It is invisible to every text
+        // comparison, because the recoded code point still reaches the PDF with a ToUnicode.
+        //
+        // It bites hardest on a *recoded* symbol slot, because the recode's target is chosen from
+        // LibreOffice's table rather than from OpenSymbol's coverage and the two do not agree.
+        // Measured on `slides/done-013/ppt/FAA_Form_337.ppt` page 4: five Monotype Sorts slots
+        // 0xB6-0xBA recode to U+2776-U+277A (`aMonotypeSortsTab`'s F0B0 block), OpenSymbol has a
+        // glyph for none of the five, and the reference draws all five circled numerals out of
+        // <b>DejaVu Sans</b> -- its page's /F1 -- while we drew five .notdefs and no marker at all.
+        // The same holds for `Wingdings 2` slot 0xF4, which recodes to the Private Use U+E5CD that
+        // no installed face has.
+        //
+        // Where it looks depends on the face it is looking from. A marker that landed on OpenSymbol
+        // is a pi face, and LibreOffice never hands one to fontconfig -- only to
+        // `ImplInitGenericGlyphFallback`'s fixed list, which is what still finds DejaVu Sans for the
+        // five slots above and what correctly finds *nothing* for a recode target no listed family
+        // holds. See `IGlyphFallbackResolver.SymbolFallbackFor`.
+        if (First(text) is { } wanted
+            && face is { } resolved
+            && !resolved.HasGlyphFor(wanted)
+            && (SymbolFontRecode.IsSubstituteFamily(resolved.FamilyName)
+                    ? fonts.Fallback.SymbolFallbackFor(wanted, weight, italic)
+                    : fonts.Fallback.FallbackFor(wanted, weight, italic, resolved)) is { } substitute)
+        {
+            face = substitute;
+            reference = fonts.Fallback.ReferenceFor(substitute, italic) ?? reference;
+        }
+
         // The marker shrinks with the text it labels: the fit scales the whole outliner, and a
         // bullet left at its authored size on a node scaled to a third overwhelms its own line.
         //
@@ -623,6 +659,21 @@ public static partial class SlideTextLayout
     /// existed.
     /// </para>
     /// </remarks>
+    /// <summary>The first code point of a marker's text, or null when it has none.</summary>
+    /// <remarks>
+    /// A marker is one character in every case the readers produce -- a <c>a:buChar</c> slot, a
+    /// PPT <c>bulletChar</c>, or a generated number's first digit -- and only the first decides
+    /// whether the face can draw it, which is the question a fallback answers.
+    /// </remarks>
+    private static int? First(string text)
+    {
+        if (text.Length == 0) return null;
+
+        return char.IsHighSurrogate(text[0]) && text.Length > 1 && char.IsLowSurrogate(text[1])
+            ? char.ConvertToUtf32(text[0], text[1])
+            : text[0];
+    }
+
     private static string? Recoded(SlideMarker marker, FontReference? reference)
     {
         if (marker is not { IsSymbol: true, Text.Length: 1 }) return null;
@@ -778,7 +829,7 @@ public static partial class SlideTextLayout
                 // draws 20.15 — half a point per line, measured on the wrapping cell of
                 // slide-table-grid.pptx, whose four reference baselines are 20.154 pt apart.
                 (Length ascent, Length metric) =
-                    FaceHeight(runs, styles, box.Line.Start, box.Line.VisibleEnd);
+                    FaceHeight(runs, styles, box.Line.Start, box.Line.VisibleEnd, body.Device);
 
                 Length faceHeight = metric > Length.Zero ? metric : box.Height;
                 // Through LineSpacingRule.Apply, whose whole-twip arithmetic this branch wants:
@@ -945,7 +996,7 @@ public static partial class SlideTextLayout
     /// </para>
     /// </remarks>
     private static (Length Ascent, Length Height) FaceHeight(
-        List<FormattedRun> runs, List<RunStyle> styles, int start, int end)
+        List<FormattedRun> runs, List<RunStyle> styles, int start, int end, MetricGrid device)
     {
         Length ascent = Length.Zero;
         Length height = Length.Zero;
@@ -957,7 +1008,7 @@ public static partial class SlideTextLayout
             bool contains = start == end && run.Covers(start);
             if (!touches && !contains) continue;
 
-            LineMetrics metrics = LineSpacing.Resolve(run.Face, MetricGrid.Presentation);
+            LineMetrics metrics = LineSpacing.Resolve(run.Face, device);
             Length up = Rounded(metrics.ScaledAscent(run.EmSize));
             Length down = Rounded(metrics.ScaledDescent(run.EmSize));
 

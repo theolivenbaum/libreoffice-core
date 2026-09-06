@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 """Separate kerning from base-advance divergence, and locate what actually drifts.
 
+**Superseded 2026-09-06.** The conclusion this probe fed -- that the reference does not
+draw the design advance -- is withdrawn: it was read out of the PDF's glyph positioning,
+which is quantised to whole thousandths of an em, and that is larger than the effect. The
+measurements below stand; the reading of them does not. See `probes/advance-ppem/`.
+
 Why
 ---
 

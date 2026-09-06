@@ -366,14 +366,14 @@ public sealed partial class OdtLayoutSource
     /// <c>automatic</c> is a real value and means the top, which is also what an unstated alignment means —
     /// so both fall through to the same answer rather than one of them being treated as unknown.
     /// </remarks>
-    private CellVerticalAlignment VerticalAlignment(string? styleName)
+    private VerticalTextAlignment VerticalAlignment(string? styleName)
         => _styles.ResolveProperty(
             styleName, OdfStyleFamily.TableCell, OdfPropertyKind.TableCell,
             OdfNamespaces.Style, "vertical-align").Value switch
         {
-            "middle" => CellVerticalAlignment.Middle,
-            "bottom" => CellVerticalAlignment.Bottom,
-            _ => CellVerticalAlignment.Top,
+            "middle" => VerticalTextAlignment.Middle,
+            "bottom" => VerticalTextAlignment.Bottom,
+            _ => VerticalTextAlignment.Top,
         };
 
     /// <summary>

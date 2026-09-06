@@ -172,12 +172,30 @@ public readonly record struct ChartShape(
 /// A chart laid out: every mark it draws, in paint order, in the frame's coordinates.
 /// </summary>
 /// <param name="PlotArea">The inner plot rectangle — the axes' extent, labels excluded.</param>
-/// <param name="Boxes">The filled and outlined rectangles, back to front.</param>
+/// <param name="Boxes">
+/// The chart's furniture: its own background, the plot area's wall and the legend's keys, back to
+/// front. Every consumer paints these <em>before</em> <paramref name="Lines"/>, so nothing a
+/// series draws may go here — see <paramref name="Shapes"/>.
+/// </param>
 /// <param name="Lines">The axes, ticks and gridlines.</param>
 /// <param name="Labels">The text.</param>
 /// <param name="Shapes">
-/// The paths — wedges, polylines and areas — drawn after <paramref name="Boxes"/> and before
-/// <paramref name="Labels"/>, which is where the reference draws them.
+/// <strong>Every mark a series draws</strong> — a bar, a candle, a wedge, a polyline, an area —
+/// drawn after <paramref name="Lines"/> and before <paramref name="Labels"/>, which is where the
+/// reference draws them.
+/// <para>
+/// <strong>A bar belongs here and not in <paramref name="Boxes"/>, and the reason is Z order.</strong>
+/// <c>VCoordinateSystem::initPlottingTargets</c> creates the grid group, then the series-behind-axis
+/// group, then the axis group, all as children of the diagram's coordinate region
+/// (<c>chart2/source/view/axes/VCoordinateSystem.cxx:91-115</c>); the series plotters then add their
+/// shapes to the coordinate region <em>itself</em>, after all three
+/// (<c>ChartView.cxx:638-680</c>), unless <c>ChartType::isSeriesInFrontOfAxisLine</c> says otherwise —
+/// and it says otherwise only for a filled net (<c>ChartType.cxx:609-615</c>). So the grid and the
+/// axes are under the data on every chart type in the corpus. A rectangle emitted into
+/// <paramref name="Boxes"/> is painted before <paramref name="Lines"/> and therefore ends up
+/// <em>under</em> the gridlines, which draws a light-grey rule across every bar at every major tick —
+/// the "bars filled with horizontal stripes" seen on three unrelated workbooks.
+/// </para>
 /// </param>
 /// <param name="DiagramArea">
 /// The <em>outer</em> rectangle the diagram was laid out in — what is left of the frame once the
@@ -797,12 +815,41 @@ public static partial class ChartLayout
         // depth, and a third pass has never changed it on the corpus.
         ChartAxisLabelLayout? arranged = null;
 
-        if (plot.HasAxes && columns && plot.CategoryAxisVisible && plot.CategoryLabelsVisible
-            && domain is null && plot.DataTable is null)
+        // A complex category axis is arranged by its own rule and not by this one: it draws one
+        // row per level and what would be measured here is the joined string, which is not what
+        // it draws. See ArrangeComplexCategories.
+        if (plot.HasAxes && columns && plot.DateAxis is null && plot.CategoryAxisVisible
+            && plot.CategoryLabelsVisible && domain is null && plot.DataTable is null
+            && plot.CategoryLevels is { Count: > 1 } complexLevels)
         {
-            arranged = ArrangeCategories(plot, area, categories, measurer);
+            arranged = ArrangeComplexCategories(plot, complexLevels, measurer);
+            area = PlotAreaOf(
+                plot, frame, scale, secondary, domain, categories, measurer, arranged);
 
-            if (arranged is { } first && !IsPlain(first))
+            if (area.Width <= Length.Zero || area.Height <= Length.Zero)
+                return new ChartDrawing(DocRect.Empty, boxes, lines, labels, shapes);
+
+            arranged = ArrangeComplexCategories(plot, complexLevels, measurer);
+            area = PlotAreaOf(
+                plot, frame, scale, secondary, domain, categories, measurer, arranged);
+
+            if (area.Width <= Length.Zero || area.Height <= Length.Zero)
+                return new ChartDrawing(DocRect.Empty, boxes, lines, labels, shapes);
+        }
+        // A bar chart's category axis runs down the left and is arranged by a rule of its own —
+        // it may thin its labels but never turn or stagger them, and it breaks them at the band
+        // between the chart's edge and the axis rather than at a tick's worth. Until this ran on
+        // it at all, a crowded horizontal bar chart drew every category name on top of the next:
+        // N2_E_Maestroni_Swarm_COP page 7 drew all 55 against the reference's 19.
+        else if (plot.HasAxes && plot.CategoryAxisVisible && plot.CategoryLabelsVisible
+            && domain is null && plot.DataTable is null
+            && (columns || plot.CategoryLevels is not { Count: > 1 }))
+        {
+            Length room = columns ? Length.Zero : Length.Max(area.Left - frame.X, Length.Zero);
+
+            arranged = ArrangeCategories(plot, area, categories, measurer, columns, room);
+
+            if (arranged is { } first && Reshapes(first))
             {
                 area = PlotAreaOf(
                     plot, frame, scale, secondary, domain, categories, measurer, arranged);
@@ -810,7 +857,8 @@ public static partial class ChartLayout
                 if (area.Width <= Length.Zero || area.Height <= Length.Zero)
                     return new ChartDrawing(DocRect.Empty, boxes, lines, labels, shapes);
 
-                arranged = ArrangeCategories(plot, area, categories, measurer);
+                room = columns ? Length.Zero : Length.Max(area.Left - frame.X, Length.Zero);
+                arranged = ArrangeCategories(plot, area, categories, measurer, columns, room);
                 area = PlotAreaOf(
                     plot, frame, scale, secondary, domain, categories, measurer, arranged);
 
@@ -878,12 +926,14 @@ public static partial class ChartLayout
 
         if (plot.HasAxes)
         {
-            AddValueAxis(plot, area, scale, columns, plot.ValueFormat, false, lines, labels);
+            AddValueAxis(
+                plot, area, scale, columns, plot.ValueFormat, false, measurer, lines, labels);
 
             if (secondary is { } second && plot.SecondaryAxisVisible)
             {
                 AddValueAxis(
-                    plot, area, second, columns, plot.SecondaryValueFormat, true, lines, labels);
+                    plot, area, second, columns, plot.SecondaryValueFormat, true, measurer,
+                    lines, labels);
             }
 
             if (domain is { } across) AddDomainAxis(plot, area, across, columns, lines, labels);
@@ -939,14 +989,14 @@ public static partial class ChartLayout
                         AddBubbles(part, area, against, domain, shapes, labels);
                         break;
                     case ChartPlotKind.Stock:
-                        AddCandles(part, area, against, categories, boxes, lines, labels);
+                        AddCandles(part, area, against, categories, shapes, lines, labels);
                         break;
                     case ChartPlotKind.OfPie:
                         AddOfPie(part, area, DiagramAreaOf(plot, frame, measurer),
                                  measurer, shapes, lines, labels);
                         break;
                     default:
-                        AddBars(part, area, against, categories, columns, boxes, labels);
+                        AddBars(part, area, against, categories, columns, shapes, labels);
                         break;
                 }
             }
@@ -973,7 +1023,7 @@ public static partial class ChartLayout
         }
 
         AddTitles(plot, frame, area, DiagramAreaOf(plot, frame, measurer), measurer, labels);
-        AddLegend(plot, frame, area, measurer, boxes, lines, labels);
+        AddLegend(plot, frame, area, measurer, boxes, lines, labels, shapes);
 
         return new ChartDrawing(
             area, boxes, lines, labels, shapes, DiagramAreaOf(plot, frame, measurer));
@@ -1484,6 +1534,14 @@ public static partial class ChartLayout
                       across, plot.DomainFormat, plot.LabelSize, measurer, plot.IsLabelBold)
                 : WidestCategoryLabel(plot, categories, measurer);
 
+        // A value axis running along the bottom may state its own label rotation, and a turned
+        // label is deeper and narrower than an upright one. Both halves move: the band the plot
+        // gives up is the rotated shape's height, and the overhang past the last tick is half its
+        // rotated width. Zero rotation leaves both exactly as they were.
+        double valueTurn = plot.ValueAxisText.Rotation;
+        double valueCos = Math.Abs(Math.Cos(valueTurn));
+        double valueSin = Math.Abs(Math.Sin(valueTurn));
+
         Length valueSpace = plot.ValueAxisVisible
             ? OuterTick(plot.ValueTicks) + (valueLabels ? LabelSpacing : Length.Zero)
             : Length.Zero;
@@ -1497,17 +1555,24 @@ public static partial class ChartLayout
         // staggered labels reserve their arrangement's own depth instead — the rotated shape's
         // height, insets included, which is what LibreOffice reserves and is several times a line
         // on an axis of long names turned 45°.
+        // A complex category axis reserves one line per level, because that is how many rows it
+        // draws — see AddComplexCategoryAxis.
         Length categoryHeight = plot.DataTable is not null
             ? DataTableHeight(plot, measurer)
             : !categoryLabels
                 ? Length.Zero
-                : arranged is { } layout && !IsPlain(layout)
-                    ? layout.Reserved
-                    : labelHeight;
+                : columns && plot.CategoryLevels is { Count: > 1 } rows
+                    ? arranged?.Reserved ?? labelHeight * rows.Count
+                    : arranged is { } layout && Reshapes(layout)
+                        ? layout.Reserved
+                        : labelHeight;
 
         if (columns)
         {
-            left += valueLabel + valueSpace;
+            // The room the value labels take is on the side they are drawn on, which is the side
+            // ValueLabelsFar names and not necessarily the side the axis line is on.
+            if (ValueLabelsFar(plot, false)) right -= valueLabel + valueSpace;
+            else left += valueLabel + valueSpace;
 
             // The bottommost value label is centred on the plot area's bottom-left corner and
             // hangs half of itself below it, exactly as the topmost one hangs above. Whichever of
@@ -1525,12 +1590,15 @@ public static partial class ChartLayout
             // taken off in DiagramAreaOf, with the other three.
             if (secondary is { } second && plot.SecondaryAxisVisible)
             {
-                right -= plot.SecondaryLabelsVisible
+                Length secondaryRoom = plot.SecondaryLabelsVisible
                     ? WidestValueLabel(
                           second, plot.SecondaryValueFormat, plot.LabelSize, measurer,
                       plot.IsLabelBold)
                       + OuterTick(plot.SecondaryTicks) + LabelSpacing
                     : OuterTick(plot.SecondaryTicks);
+
+                if (ValueLabelsFar(plot, true)) right -= secondaryRoom;
+                else left += secondaryRoom;
             }
 
             // On an unshifted axis the first and the last label are centred on the plot area's own
@@ -1539,7 +1607,7 @@ public static partial class ChartLayout
             (Length firstLabel, Length lastLabel) =
                 arranged is { } ends && !IsPlain(ends)
                     ? (Length.Zero, Length.Zero)
-                    : EndLabelOverhang(plot, domain, categories, measurer);
+                    : EndLabelOverhang(plot, domain, categories, measurer, arranged?.Texts);
 
             if (area.Left + firstLabel > left) left = area.Left + firstLabel;
 
@@ -1554,16 +1622,72 @@ public static partial class ChartLayout
         }
         else
         {
-            left += categoryLabel + categorySpace;
-            bottom -= valueHeight + valueSpace;
+            // The band the category labels take is their arrangement's own depth once the
+            // arrangement has changed their shape — which on a vertical axis is the widest of
+            // them, wrapped, rather than the widest of them as written. The counterpart of the
+            // column branch's `categoryHeight`, and the same test.
+            left += (arranged is { } band && Reshapes(band) ? band.Reserved : categoryLabel)
+                + categorySpace;
+
+            // Same rule as the column branch, one dimension over: the labels' own side decides
+            // whether the strip comes off the top of the plot or off its bottom.
+            Length valueBand = (valueLabel * valueSin) + (valueHeight * valueCos);
+
+            if (ValueLabelsFar(plot, false)) top += valueBand + valueSpace;
+            else bottom -= valueBand + valueSpace;
 
             // The last value label is centred on the axis' right end, so half of it overhangs.
-            right -= valueLabel / 2;
+            right -= ((valueLabel * valueCos) + (valueHeight * valueSin)) / 2;
         }
 
         return right <= left || bottom <= top
             ? DocRect.Empty
             : new DocRect(left, top, right - left, bottom - top);
+    }
+
+    /// <summary>
+    /// Which end of the category axis a value axis' line stands at, in that axis' own direction.
+    /// </summary>
+    /// <remarks>
+    /// <c>c:crosses</c> says so outright — <c>AxisProperties::initAxisPositioning</c>,
+    /// <c>chart2/source/view/axes/VAxisProperties.cxx</c>:232-234, reading the
+    /// <c>CrossoverPosition</c> the importer set. A secondary axis is the primary one's other end.
+    /// </remarks>
+    private static bool ValueAxisLineAtEnd(ChartPlot plot, bool secondary)
+        => (plot.ValueAxisCrossing == ChartAxisCrossing.Maximum) != secondary;
+
+    /// <summary>
+    /// Whether a value axis' line stands at the far — right or top — edge of the plot area.
+    /// </summary>
+    /// <remarks>
+    /// The end above, mirrored: a reversed category axis has its maximum at the left or the
+    /// bottom. That mirroring is the whole of what
+    /// <c>m_bCrossingAxisHasReverseDirection</c> does
+    /// (<c>chart2/source/view/axes/VCartesianCoordinateSystem.cxx</c>:145).
+    /// </remarks>
+    private static bool ValueAxisLineFar(ChartPlot plot, bool secondary)
+        => ValueAxisLineAtEnd(plot, secondary) != plot.CategoriesReversed;
+
+    /// <summary>Whether a value axis' <em>labels</em> sit at that far edge.</summary>
+    /// <remarks>
+    /// <c>c:tickLblPos</c> names an end of the crossing axis in that axis' own direction, so the
+    /// answer is the stated end mirrored by the reversal. <c>nextTo</c> states no end and takes
+    /// the axis line's, which is where every chart that says nothing draws them. See
+    /// <see cref="ChartValueLabelPosition"/>.
+    /// </remarks>
+    private static bool ValueLabelsFar(ChartPlot plot, bool secondary)
+    {
+        ChartValueLabelPosition stated =
+            secondary ? plot.SecondaryLabelPosition : plot.ValueLabelPosition;
+
+        bool atLogicalMaximum = stated switch
+        {
+            ChartValueLabelPosition.High => true,
+            ChartValueLabelPosition.Low => false,
+            _ => ValueAxisLineAtEnd(plot, secondary),
+        };
+
+        return atLogicalMaximum != plot.CategoriesReversed;
     }
 
     /// <summary>The value axis: its line, its ticks, its gridlines and its labels.</summary>
@@ -1580,15 +1704,33 @@ public static partial class ChartLayout
         bool columns,
         NumberFormatCode? format,
         bool secondary,
+        ChartText measurer,
         List<ChartLine> lines,
         List<ChartLabel> labels)
     {
         // The axis line itself runs the full extent of the plot area on the side the value axis
         // is on: the left edge for columns, the bottom edge for bars — and the far side of each
         // for a secondary axis.
-        Length axisX = secondary ? area.Right : area.Left;
-        Length axisY = secondary ? area.Top : area.Bottom;
-        int outward = secondary ? 1 : -1;
+        //
+        // A reversed category axis moves it to the other end, because the value axis stands at the
+        // *start* of the axis it crosses and reversing that axis moves its start:
+        // AxisProperties::initAxisPositioning, chart2/source/view/axes/VAxisProperties.cxx:232-234,
+        // sets ChartAxisPosition_END exactly when m_bIsMainAxis == m_bCrossingAxisHasReverseDirection.
+        // A secondary axis is the main axis' other end, so the two statements compose with a
+        // negation rather than override one another. See ChartPlot.CategoriesReversed.
+        bool far = ValueAxisLineFar(plot, secondary);
+        Length axisX = far ? area.Right : area.Left;
+        Length axisY = far ? area.Top : area.Bottom;
+        int outward = far ? 1 : -1;
+
+        // The labels have a line of their own — getLabelLineIntersectionValue,
+        // chart2/source/view/axes/VCartesianAxis.cxx:1103-1113 — so `c:tickLblPos` can send them
+        // to the other end of the plot from the axis they belong to, which is what a Gantt with
+        // `high` on a reversed category axis does.
+        bool labelsFar = ValueLabelsFar(plot, secondary);
+        Length labelX = labelsFar ? area.Right : area.Left;
+        Length labelY = labelsFar ? area.Top : area.Bottom;
+        int labelOutward = labelsFar ? 1 : -1;
 
         // A deleted axis keeps its gridlines and loses everything else, so the line, the ticks and
         // the labels are all gated and the grid inside the loop is not. Turning the *labels* off
@@ -1671,8 +1813,8 @@ public static partial class ChartLayout
 
                 labels.Add(new ChartLabel(
                     ChartDataLabel.Write(tick, format),
-                    new DocPoint(axisX + ((outer + LabelSpacing) * outward), y),
-                    secondary ? ChartLabelAnchor.LeftMiddle : ChartLabelAnchor.RightMiddle,
+                    new DocPoint(labelX + ((outer + LabelSpacing) * labelOutward), y),
+                    labelsFar ? ChartLabelAnchor.LeftMiddle : ChartLabelAnchor.RightMiddle,
                     plot.LabelSize,
                     plot.LabelColour));
             }
@@ -1699,12 +1841,50 @@ public static partial class ChartLayout
 
                 if (!labelled) continue;
 
+                string written = ChartDataLabel.Write(tick, format);
+                Length edge = labelY - ((outer + LabelSpacing) * labelOutward);
+
+                // A value axis running along the bottom may state its own label rotation, and a
+                // Gantt's does: the dates are wider than the ticks are apart and the file turns
+                // them rather than letting the axis thin itself. The anchoring is the category
+                // axis' — LabelPositionHelper's _Bottom and _Top corrections, which differ only
+                // in the sign of the one term Lean carries. See AddCategoryAxis.
+                //
+                // Only the horizontal branch reads it. A *vertical* value axis stating a rotation
+                // needs LabelPositionHelper's _Left and _Right corrections instead, and no corpus
+                // document states one: the only value axis in the corpus that carries a rotation
+                // on its own c:txPr is N2_E_Maestroni_Swarm_COP.pptx's, at -45 degrees, and it
+                // runs along the bottom of a bar chart. See ChartPlot.ValueAxisText.
+                double turn = secondary
+                    ? plot.SecondaryValueAxisText.Rotation
+                    : plot.ValueAxisText.Rotation;
+
+                if (turn == 0.0)
+                {
+                    labels.Add(new ChartLabel(
+                        written,
+                        new DocPoint(x, edge),
+                        labelsFar ? ChartLabelAnchor.CentreBottom : ChartLabelAnchor.CentreTop,
+                        plot.LabelSize,
+                        plot.LabelColour));
+
+                    continue;
+                }
+
+                DocSize turned = Shape(measurer, written, plot.LabelSize, plot.IsLabelBold);
+                Length reach = (turned.Width * Math.Abs(Math.Sin(turn)))
+                    + (turned.Height * Math.Abs(Math.Cos(turn)));
+                double lean = labelsFar ? -Lean(turn) : Lean(turn);
+
                 labels.Add(new ChartLabel(
-                    ChartDataLabel.Write(tick, format),
-                    new DocPoint(x, axisY - ((outer + LabelSpacing) * outward)),
-                    secondary ? ChartLabelAnchor.CentreBottom : ChartLabelAnchor.CentreTop,
+                    written,
+                    new DocPoint(
+                        x + (turned.Width * lean / 2.0),
+                        labelsFar ? edge - (reach / 2) : edge + (reach / 2)),
+                    ChartLabelAnchor.Centre,
                     plot.LabelSize,
-                    plot.LabelColour));
+                    plot.LabelColour,
+                    turn));
             }
         }
     }
@@ -1931,6 +2111,18 @@ public static partial class ChartLayout
             return;
         }
 
+        // A complex category axis draws rows rather than one label per slot, and its ticks are
+        // its runs' boundaries rather than the axis'. It is a different shape from everything
+        // below, so it is a different function.
+        if (columns && plot.CategoryLevels is { Count: > 1 } levels && plot.DateAxis is null)
+        {
+            AddComplexCategoryAxis(
+                plot, area, categories, levels,
+                arranged ?? ArrangeComplexCategories(plot, levels, measurer),
+                outer, stroke, measurer, lines, labels);
+            return;
+        }
+
         ChartAxisLabelLayout layout =
             arranged ?? new ChartAxisLabelLayout(0.0, 1, false, Length.Zero);
 
@@ -1953,7 +2145,7 @@ public static partial class ChartLayout
             if (plot.DateAxis is { } dated)
             {
                 label = dated.LabelOf(dated.Ticks[at]);
-                centre = dated.Fraction(dated.Ticks[at]);
+                centre = Mirrored(plot, dated.Fraction(dated.Ticks[at]));
             }
             else
             {
@@ -1961,6 +2153,15 @@ public static partial class ChartLayout
 
                 label = ChartDataLabel.WriteCategory(plot.Categories[at], plot.CategoryFormat);
                 centre = CategoryAt(plot, at, categories);
+
+                // The arrangement may have broken this label onto two lines to make it fit its
+                // slot. Drawing the unwrapped string in a rectangle reserved for the wrapped one
+                // puts it back over its neighbours; see ChartAxisLabelLayout.Texts.
+                if (layout.Texts is { } arrangedTexts && at < arrangedTexts.Count
+                    && arrangedTexts[at] is { Length: > 0 } broken)
+                {
+                    label = broken;
+                }
             }
 
             if (label is not { Length: > 0 } text) continue;
@@ -1994,21 +2195,209 @@ public static partial class ChartLayout
                 continue;
             }
 
-            // A rotated label is placed by the centre of its rotated bounding box, because that is
-            // the only thing a glyph run — which carries an origin and advances, not a matrix —
-            // can be positioned by after the fact. Measured against LibreOffice's own PDF for
-            // bnc889755.pptx: its rotated labels' boxes are centred on the tick horizontally and
-            // start at the tick-to-text distance below the axis, which is exactly this.
+            // A rotated label is drawn through the centre of its rotated bounding box, because
+            // that is the only thing a glyph run — which carries an origin and advances, not a
+            // matrix — can be positioned by after the fact. Where that centre goes is
+            // LabelPositionHelper::correctPositionForRotation for a bottom axis,
+            // lcl_correctRotation_Bottom (chart2/source/view/main/LabelPositionHelper.cxx:241-282),
+            // and the whole of what it adds over "centred on the tick" is one term, gated on
+            // bRotateAroundCenter — which is m_bComplexCategories (VCartesianAxis.cxx:147-148) and
+            // therefore *false* for the simple category axis this branch draws.
             DocSize box = Shape(measurer, text, plot.LabelSize, plot.IsLabelBold);
             Length depth = box.Width * sine + box.Height * cosine;
 
             labels.Add(new ChartLabel(
                 text,
-                new DocPoint(x, top + depth / 2),
+                new DocPoint(x + box.Width * Lean(layout.Rotation) / 2.0, top + depth / 2),
                 ChartLabelAnchor.Centre,
                 plot.LabelSize,
                 plot.LabelColour,
                 layout.Rotation));
+        }
+    }
+
+    /// <summary>
+    /// How far along its own baseline a rotated category label leans off its tick, as a multiple
+    /// of the label's unrotated width: 0 upright or on its side, ∓0.7071 at ±45°.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>A rotated category label hangs from its tick by a corner, not by its middle.</strong>
+    /// <c>lcl_correctRotation_Bottom</c> (<c>chart2/source/view/main/LabelPositionHelper.cxx:241-282</c>)
+    /// takes four branches over the angle and each of them carries exactly one term guarded by
+    /// <c>if( !bRotateAroundCenter )</c> — <c>-W·cos(a)/2</c>, <c>+W·sin(a-90°)/2</c>,
+    /// <c>-W·sin(270°-a)/2</c> and <c>+W·cos(360°-a)/2</c>. Written out, all four are the same
+    /// quantity: <c>-sign(sin a)·W·cos(a)/2</c>. Everything else in that function is common to
+    /// both modes, so the whole difference between LibreOffice's two anchorings is this one
+    /// horizontal lean, and <c>bRotateAroundCenter</c> is <c>m_bComplexCategories</c>
+    /// (<c>chart2/source/view/axes/VCartesianAxis.cxx:147-148</c>) — false for every simple
+    /// category axis.
+    /// </para>
+    /// <para>
+    /// <strong>What it is worth, measured on both references rather than read off the source.</strong>
+    /// <c>057_Simple_balance_sheet_Use_this_template_e2d4cbb2.xlsx</c>'s chart sheet turns twenty
+    /// category names of very unequal length to 45°, which separates the two anchorings by up to
+    /// 53 pt. 26.2.4.2 draws those labels as vector outlines rather than as text, so they have to
+    /// be read out of the PDF's paths and clustered — 309 paths in the band below the axis fall
+    /// into exactly twenty groups — and the group's right edge then advances by
+    /// <strong>28.67, 28.92, 29.14 … 28.73 pt</strong> from label to label against a category slot
+    /// of <strong>28.9465 pt</strong>. Constant, and equal to the pitch, over widths from 22 to
+    /// 141 pt. Ours advanced by <strong>11.47, 23.31, 21.45 … 53.51</strong> — that is
+    /// <c>W/2</c> each time, which is what centring on the tick gives and what left
+    /// <c>Goodwill</c> drawn through <c>Less accumulated depreciation</c>.
+    /// </para>
+    /// <para>
+    /// <strong>Why the overlap is the symptom.</strong> Two labels at 45° are strips whose
+    /// separation is measured perpendicular to their own baselines, at
+    /// <c>q = (x + y)/√2</c>. Corner-anchored, every corner sits at its own tick and the same
+    /// depth below the axis, so <c>q</c> advances by <c>slot/√2</c> — 22.7 pt here, against a
+    /// label 10.5 pt tall, and nothing can touch. Centred, <c>q</c> carries half the label's own
+    /// width as well: <c>Less accumulated depreciation</c> landed at <c>q</c> 565.1 and
+    /// <c>Goodwill</c>, three times shorter, at 562.4, which is the same strip.
+    /// </para>
+    /// </remarks>
+    /// <param name="rotation">The label's rotation in radians, anticlockwise.</param>
+    private static double Lean(double rotation)
+    {
+        double sine = Math.Sin(rotation);
+        double cosine = Math.Cos(rotation);
+        return sine >= 0.0 ? -cosine : cosine;
+    }
+
+    /// <summary>
+    /// How deep a complex category axis' band of rows is.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A levelled axis takes none of <see cref="ChartAxisLabels"/>' cascade: it is upright, one
+    /// row per level, every label drawn. <c>VCartesianAxis::createLabels</c> gives it line
+    /// breaking on and forces every level above zero upright
+    /// (<c>chart2/source/view/axes/VCartesianAxis.cxx:1737-1750</c>). What it returns is
+    /// therefore only a depth — but it goes through <see cref="ChartAxisLabelLayout"/> anyway,
+    /// because that is what puts it in <see cref="Compose"/>'s refinement loop: the band is
+    /// several lines deep, the plot rectangle has to be composed again around it, and the value
+    /// axis' interval count is re-derived from the rectangle that comes out.
+    /// </para>
+    /// <para>
+    /// <strong>Level zero can be turned by the reference and this does not turn it.</strong>
+    /// <c>createTextShapes</c> has a branch that rotates a complex axis' level 90° rather than
+    /// 45° when a label would break inside a word (<c>:894-900</c>), and
+    /// <c>171128IPAP.pptx</c>'s fifty quarter numbers are drawn on their side by both reference
+    /// binaries. **That is not the branch that turns them**: shrinking the chart frame from
+    /// 7 050 024 to 2 500 000 EMU — which makes every slot narrower, so a word-break is *more*
+    /// likely, not less — makes the reference draw the same digits upright, measured from the
+    /// PDF's own glyph boxes (10.03 x 5.01 turned against 4.48 x 10.03 upright). Whatever
+    /// decides it, it is not crowding, so no rule is guessed at here.
+    /// </para>
+    /// </remarks>
+    private static ChartAxisLabelLayout ArrangeComplexCategories(
+        ChartPlot plot,
+        IReadOnlyList<IReadOnlyList<string?>> levels,
+        ChartText measurer)
+        => new(
+            0.0, 1, false,
+            measurer.Measure("0", plot.LabelSize, plot.IsLabelBold).Height
+                * Math.Max(levels.Count, 1));
+
+    /// <summary>
+    /// A complex category axis: one row of labels per level, and a long tick at every run
+    /// boundary.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>VCartesianAxis::createAllTickInfosFromComplexCategories</c>
+    /// (<c>chart2/source/view/axes/VCartesianAxis.cxx:575-610</c>) builds one tick array per
+    /// level, each tick centred on its run — <c>nCatIndex + 1 + nCount/2</c> — and
+    /// <c>createLabels</c> (<c>:1723-1758</c>) draws level zero where an ordinary label goes and
+    /// shifts each level below it by the cumulative height of the levels above
+    /// (<c>doStaggeringOfLabels</c>, <c>:1626-1648</c>).
+    /// </para>
+    /// <para>
+    /// <strong>A run ends at the next stated value, not at the next different one.</strong> See
+    /// <see cref="ChartPlot.CategoryLevels"/>: an empty entry continues the run above it and a
+    /// repeat starts a new one, which is why <c>040_Blood_pressure_tracker</c>'s date is drawn
+    /// once under <c>AM</c> and again under <c>PM</c> rather than once across the pair.
+    /// </para>
+    /// <para>
+    /// <strong>The innermost level's boundaries get no tick when the axis has no major tick
+    /// marks.</strong> <c>createShapes</c> skips depth zero outright in that case
+    /// (<c>:1953</c>), and every levelled axis in the corpus states
+    /// <c>c:majorTickMark val="none"</c> — so what separates the groups on those charts is the
+    /// tick of the level <em>below</em>, which is why the separators run the full depth of the
+    /// label band rather than stopping under the first row.
+    /// </para>
+    /// </remarks>
+    private static void AddComplexCategoryAxis(
+        ChartPlot plot,
+        DocRect area,
+        int categories,
+        IReadOnlyList<IReadOnlyList<string?>> levels,
+        ChartAxisLabelLayout arranged,
+        Length outer,
+        ChartGrid stroke,
+        ChartText measurer,
+        List<ChartLine> lines,
+        List<ChartLabel> labels)
+    {
+        if (categories <= 0) return;
+
+        // An axis label has no text-shape insets — see ChartAxisLabels, which carries the
+        // measurement — so a row is one line of type and PlotAreaOf's own labelHeight.
+        Length line = measurer.Measure("0", plot.LabelSize, plot.IsLabelBold).Height;
+        Length top = area.Bottom + outer + LabelSpacing;
+
+        // Level zero is as deep as the arrangement says — one line upright, its widest label's
+        // width on its side — and every level below it is one line.
+        Length firstRow = arranged.Reserved - (line * (levels.Count - 1));
+        if (firstRow <= Length.Zero) firstRow = line;
+
+        Length depth = Length.Zero;
+        bool ticked = plot.CategoryTicks is not ChartTickMark.None;
+
+        for (int level = 0; level < levels.Count; level++)
+        {
+            IReadOnlyList<string?> texts = levels[level];
+            Length row = level == 0 ? firstRow : line;
+            depth += row;
+
+            int at = 0;
+            while (at < categories)
+            {
+                // The run this entry starts: itself plus every following entry the file leaves
+                // unstated.
+                int end = at + 1;
+                while (end < categories
+                       && (end >= texts.Count || string.IsNullOrEmpty(texts[end])))
+                {
+                    end++;
+                }
+
+                if (at < texts.Count && texts[at] is { Length: > 0 } text)
+                {
+                    Length centre = area.Left
+                        + area.Width * ((at + end) / (2.0 * categories));
+
+                    labels.Add(new ChartLabel(
+                        text,
+                        new DocPoint(centre, top + depth - row),
+                        ChartLabelAnchor.CentreTop,
+                        plot.LabelSize,
+                        plot.LabelColour));
+                }
+
+                // The boundary this run ends at, drawn from the axis line down through every row
+                // laid out so far. The last one is the plot area's own edge and is already drawn.
+                if ((level > 0 || ticked) && end < categories)
+                {
+                    Length x = area.Left + area.Width * ((double)end / categories);
+                    lines.Add(new ChartLine(
+                        new DocPoint(x, area.Bottom),
+                        new DocPoint(x, top + depth),
+                        stroke.Colour, stroke.Width, stroke.Dash));
+                }
+
+                at = end;
+            }
         }
     }
 
@@ -2173,11 +2562,59 @@ public static partial class ChartLayout
         => layout.Rotation == 0.0 && layout.Rhythm <= 1 && !layout.Staggered;
 
     /// <summary>
+    /// Whether the arrangement changed the shape the labels occupy, and so the room they need.
+    /// </summary>
+    /// <remarks>
+    /// <strong>Wrapping is invisible to <see cref="IsPlain"/> and is not invisible to the plot
+    /// rectangle.</strong> A wrapped axis is upright, one row, every label drawn — plain by every
+    /// column that test reads — and is nonetheless two lines deep. Reserving one line for it
+    /// draws the second line through the chart's own bottom edge, which is what
+    /// <c>033_Event_planning_tracker</c> did the moment its labels started breaking at all.
+    /// </remarks>
+    private static bool Reshapes(ChartAxisLabelLayout layout)
+        => !IsPlain(layout) || layout.Texts is not null;
+
+    /// <summary>The label the arrangement produced for one category, or null when it left it.</summary>
+    private static string? Arranged(IReadOnlyList<string?>? texts, int index)
+        => texts is not null && index >= 0 && index < texts.Count
+            && texts[index] is { Length: > 0 } broken
+                ? broken
+                : null;
+
+    /// <summary>
     /// How the category labels come out on the axis the plot rectangle gives them.
     /// </summary>
+    /// <param name="plot">The chart.</param>
+    /// <param name="area">The plot rectangle the labels are arranged against.</param>
+    /// <param name="categories">How many category slots the axis has.</param>
+    /// <param name="measurer">Measures a line of text.</param>
+    /// <param name="columns">
+    /// Whether the category axis runs along the bottom. False for a bar chart, whose category
+    /// axis runs down the left — a different arrangement rule, not the same one mirrored. See
+    /// <see cref="ChartAxisLabels"/>.
+    /// </param>
+    /// <param name="room">
+    /// The band a vertical axis' labels have between the chart's own left edge and the axis,
+    /// which is what they break at. Zero on a horizontal axis, which breaks at its tick spacing.
+    /// </param>
     private static ChartAxisLabelLayout ArrangeCategories(
-        ChartPlot plot, DocRect area, int categories, ChartText measurer)
+        ChartPlot plot,
+        DocRect area,
+        int categories,
+        ChartText measurer,
+        bool columns = true,
+        Length room = default)
     {
+        ChartAxisDirection direction =
+            columns ? ChartAxisDirection.Horizontal : ChartAxisDirection.Vertical;
+
+        // The centres are taken in the axis' own direction, which for a vertical axis is down the
+        // plot rectangle. Only the gaps between them are read, so the origin and the sign are
+        // immaterial — see CategorySlot.
+        Length Centre(double along) => columns
+            ? area.Left + area.Width * along
+            : area.Top + area.Height * along;
+
         // A date axis' labels are its ticks, not its categories: there are 679 of the first and
         // 799 of the second on the corpus's one such chart, and they are in different places.
         if (plot.DateAxis is { } date)
@@ -2188,12 +2625,12 @@ public static partial class ChartLayout
             for (int at = 0; at < date.Ticks.Count; at++)
             {
                 tickTexts[at] = date.LabelOf(date.Ticks[at]);
-                tickCentres[at] = area.Left + area.Width * date.Fraction(date.Ticks[at]);
+                tickCentres[at] = Centre(date.Fraction(date.Ticks[at]));
             }
 
             return ChartAxisLabels.Resolve(
                 tickTexts, tickCentres, plot.CategoryAxisText, plot.LabelSize, measurer,
-                plot.IsLabelBold);
+                plot.IsLabelBold, direction, room);
         }
 
         string?[] texts = new string?[categories];
@@ -2205,11 +2642,12 @@ public static partial class ChartLayout
                 ? ChartDataLabel.WriteCategory(plot.Categories[at], plot.CategoryFormat)
                 : null;
 
-            centres[at] = area.Left + area.Width * CategoryAt(plot, at, categories);
+            centres[at] = Centre(CategorySlot(plot, at, categories));
         }
 
         return ChartAxisLabels.Resolve(
-            texts, centres, plot.CategoryAxisText, plot.LabelSize, measurer, plot.IsLabelBold);
+            texts, centres, plot.CategoryAxisText, plot.LabelSize, measurer, plot.IsLabelBold,
+            direction, room);
     }
 
 
@@ -2223,11 +2661,30 @@ public static partial class ChartLayout
     /// draws and what the division would otherwise make a division by zero.
     /// </remarks>
     private static double CategoryAt(ChartPlot plot, int index, int categories)
+        => Mirrored(plot, CategorySlot(plot, index, categories));
+
+    /// <summary>
+    /// Where a category sits along the axis in the axis' <em>own</em> direction, before a
+    /// reversed axis is turned round.
+    /// </summary>
+    /// <remarks>
+    /// The two are separate because only one of them is a position on the page. Whether two
+    /// labels collide, how far apart their ticks are and how many of them fit are all properties
+    /// of the axis and not of which end it starts at, so <see cref="ArrangeCategories"/> asks this
+    /// one and everything that draws asks <see cref="CategoryAt"/>. Measuring the arrangement
+    /// against mirrored centres would hand <see cref="ChartAxisLabels.Resolve"/> a descending
+    /// sequence and negative spacings.
+    /// </remarks>
+    private static double CategorySlot(ChartPlot plot, int index, int categories)
     {
         if (categories <= 0) return 0.5;
         if (plot.ShiftedCategories) return (index + 0.5) / categories;
         return categories == 1 ? 0.5 : (double)index / (categories - 1);
     }
+
+    /// <summary>A fraction along the category axis, turned round when the axis is reversed.</summary>
+    private static double Mirrored(ChartPlot plot, double along)
+        => plot.CategoriesReversed ? 1.0 - along : along;
 
     /// <summary>
     /// Where a category sits, on either kind of category axis, or null when it has nowhere to be.
@@ -2240,7 +2697,7 @@ public static partial class ChartLayout
     /// </remarks>
     private static double? CategoryFraction(ChartPlot plot, int index, int categories)
         => plot.DateAxis is { } date
-            ? date.FractionOf(index)
+            ? date.FractionOf(index) is { } dated ? Mirrored(plot, dated) : null
             : CategoryAt(plot, index, categories);
 
     /// <summary>
@@ -3007,7 +3464,7 @@ public static partial class ChartLayout
         ChartScaleResult scale,
         int categories,
         bool columns,
-        List<ChartBox> boxes,
+        List<ChartShape> shapes,
         List<ChartLabel> labels)
     {
         if (categories <= 0 || plot.Series.Count == 0) return;
@@ -3062,6 +3519,12 @@ public static partial class ChartLayout
                 double slotStart = (double)at / categories
                     + (outer / 2.0 + index * (1.0 + inner)) * slotFraction;
 
+                // A reversed category axis mirrors the whole bar, not its slot — so the series
+                // within a category turn round with the categories, which is what the reference
+                // draws: on 002_advanced_powerpoint_column.pptx the red series is left of the blue
+                // in every pair with the axis as authored and right of it with the axis reversed.
+                if (plot.CategoriesReversed) slotStart = 1.0 - slotStart - slotFraction;
+
                 DocRect bounds = columns
                     ? Rectangle(
                         area.Left + area.Width * slotStart,
@@ -3074,7 +3537,10 @@ public static partial class ChartLayout
                         area.Width * Math.Abs(to - from),
                         area.Height * slotFraction);
 
-                boxes.Add(new ChartBox(bounds, one.Fill, one.Line, one.LineWidth));
+                // A path rather than a ChartBox: a bar is a series mark and must paint over the
+                // grid. See ChartDrawing.Shapes.
+                shapes.Add(new ChartShape(
+                    GraphicsPath.Rectangle(bounds), one.Fill, one.Line, one.LineWidth));
 
                 if (one.LabelAt(at) is { Draws: true } label)
                     AddBarLabel(plot, one, label, at, value, bounds, to >= from, columns, labels);
@@ -3346,7 +3812,8 @@ public static partial class ChartLayout
         ChartText measurer,
         List<ChartBox> boxes,
         List<ChartLine> lines,
-        List<ChartLabel> labels)
+        List<ChartLabel> labels,
+        List<ChartShape> shapes)
     {
         if (plot.Legend == ChartLegendPosition.None) return;
 
@@ -3417,6 +3884,28 @@ public static partial class ChartLayout
                         entry.Width,
                         entry.Dash,
                         entry.Cap));
+
+                    // And the series' own symbol on top of it, centred in the key.
+                    // VLegendSymbolFactory::createSymbol's Line arm draws the rule and *then*
+                    // createSymbol2D at the key's centre, at min(keyWidth, keyHeight), whenever
+                    // the series carries a symbol — and it paints it in the series' colour for
+                    // both fill and border: "take series color as fill color … border of symbols
+                    // always same as fill color"
+                    // (chart2/source/view/main/VLegendSymbolFactory.cxx:115-155). Drawing only the
+                    // rule loses the secondary encoding the reference gives every marked line
+                    // series; measured on Demick_JetBlue.pptx page 4, whose three keys carry a
+                    // square, a diamond and a down-arrow.
+                    if (entry.Marker is not ChartMarker.None)
+                    {
+                        Length symbol = Smaller(box.Key.Width, box.Key.Height);
+
+                        shapes.Add(Marker(
+                            entry.Marker,
+                            new DocPoint(columnX + (box.Key.Width / 2), middle),
+                            entry.MarkerSize ?? symbol,
+                            sample,
+                            sample));
+                    }
                 }
                 else
                 {
@@ -3517,7 +4006,8 @@ public static partial class ChartLayout
 
             entries.Add(new LegendEntry(
                 name, series.Fill, series.Line, series.LineWidth,
-                DrawsLineKey(plot, series), series.DashPattern, series.LineCap));
+                DrawsLineKey(plot, series), series.DashPattern, series.LineCap,
+                series.Marker, series.MarkerSize));
         }
 
         // A horizontal bar chart, and a chart stacked in Y beside a side legend, list their
@@ -3537,6 +4027,15 @@ public static partial class ChartLayout
     /// <param name="IsLine">Whether the sample is a line rather than a filled box.</param>
     /// <param name="Dash">The sample line's dash array, or null for solid.</param>
     /// <param name="Cap">The sample line's cap, which is what makes a dotted key dotted.</param>
+    /// <param name="Marker">
+    /// The symbol drawn over a line sample, or <see cref="ChartMarker.None"/>. Only a line key
+    /// carries one: <c>VLegendSymbolFactory::createSymbol</c> reads the explicit symbol on its
+    /// <c>LegendSymbolStyle::Line</c> arm alone.
+    /// </param>
+    /// <param name="MarkerSize">
+    /// The symbol's stated size, or null to take the key's own square extent — which is what the
+    /// source does, <c>min(rEntryKeyAspectRatio.Width, rEntryKeyAspectRatio.Height)</c>.
+    /// </param>
     private readonly record struct LegendEntry(
         string Name,
         Colour? Fill,
@@ -3544,7 +4043,9 @@ public static partial class ChartLayout
         Length Width,
         bool IsLine,
         IReadOnlyList<Length>? Dash,
-        LineCap Cap = LineCap.Butt);
+        LineCap Cap = LineCap.Butt,
+        ChartMarker Marker = ChartMarker.None,
+        Length? MarkerSize = null);
 
     /// <summary>
     /// Whether a series' legend key is a line sample rather than a filled box.
@@ -3797,6 +4298,8 @@ public static partial class ChartLayout
     /// <summary>The larger of two lengths.</summary>
     private static Length Larger(Length one, Length other) => one > other ? one : other;
 
+    private static Length Smaller(Length one, Length other) => one < other ? one : other;
+
     /// <summary>The width of the widest value-axis label.</summary>
     private static Length WidestValueLabel(
         ChartScaleResult scale,
@@ -3876,7 +4379,8 @@ public static partial class ChartLayout
         ChartPlot plot,
         ChartScaleResult? domain,
         int categories,
-        ChartText measurer)
+        ChartText measurer,
+        IReadOnlyList<string?>? arrangedTexts = null)
     {
         if (!plot.CategoryAxisVisible || plot.ShiftedCategories
             || (categories <= 0 && plot.DateAxis is null))
@@ -3902,12 +4406,21 @@ public static partial class ChartLayout
         {
             int end = Math.Min(categories, plot.Categories.Count) - 1;
             if (end < 0) return (Length.Zero, Length.Zero);
-            first = ChartDataLabel.WriteCategory(plot.Categories[0], plot.CategoryFormat) ?? "";
-            last = ChartDataLabel.WriteCategory(plot.Categories[end], plot.CategoryFormat) ?? "";
+
+            // What overhangs is the label as it is drawn, and the arrangement may have broken it
+            // onto two lines — which makes it exactly as wide as its widest line and no wider.
+            first = Arranged(arrangedTexts, 0)
+                ?? ChartDataLabel.WriteCategory(plot.Categories[0], plot.CategoryFormat) ?? "";
+            last = Arranged(arrangedTexts, end)
+                ?? ChartDataLabel.WriteCategory(plot.Categories[end], plot.CategoryFormat) ?? "";
         }
 
-        return (measurer.Measure(first, plot.LabelSize, plot.IsLabelBold).Width / 2,
-                measurer.Measure(last, plot.LabelSize, plot.IsLabelBold).Width / 2);
+        Length firstHalf = Shape(measurer, first, plot.LabelSize, plot.IsLabelBold).Width / 2;
+        Length lastHalf = Shape(measurer, last, plot.LabelSize, plot.IsLabelBold).Width / 2;
+
+        // First and last are the axis' own ends; the caller wants the page's. A reversed axis
+        // draws the first category at the right-hand edge, so the two swap.
+        return plot.CategoriesReversed ? (lastHalf, firstHalf) : (firstHalf, lastHalf);
     }
 
     /// <summary>

@@ -551,7 +551,7 @@ public sealed partial class RtfDocumentReader
         public int?[] RowPadding { get; } = new int?[4];
 
         /// <summary>The vertical alignment <c>\clvertal*</c> stated for the cell being declared.</summary>
-        public Layout.CellVerticalAlignment PendingCellAlignment { get; set; }
+        public Layout.VerticalTextAlignment PendingCellAlignment { get; set; }
 
         /// <summary>The <c>\clcbpat</c> colour index for the cell being declared, or null for none.</summary>
         public int? PendingCellShading { get; set; }
@@ -612,7 +612,7 @@ public sealed partial class RtfDocumentReader
         bool VerticalFirst,
         bool VerticalMerged,
         int?[]? Padding = null,
-        Layout.CellVerticalAlignment VerticalAlignment = Layout.CellVerticalAlignment.Top,
+        Layout.VerticalTextAlignment VerticalAlignment = Layout.VerticalTextAlignment.Top,
         int? ShadingColourIndex = null,
         (int Twips, int? ColourIndex, bool IsNone)[]? Borders = null);
 
@@ -645,7 +645,7 @@ public sealed partial class RtfDocumentReader
         public Layout.CellPadding Padding { get; set; }
 
         /// <summary>Where its text sits when the row is taller than its content.</summary>
-        public Layout.CellVerticalAlignment VerticalAlignment { get; set; }
+        public Layout.VerticalTextAlignment VerticalAlignment { get; set; }
 
         public List<ContentNode> Content { get; } = [];
 

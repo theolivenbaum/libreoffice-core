@@ -113,7 +113,7 @@ internal sealed class PptxShapeReader
         }
 
         if (uri == DrawingChart.ChartUri && ReadChart(data!, target)) return;
-        if (uri == PptxDiagram.Uri && ReadDiagram(data!, target)) return;
+        if (uri == DiagramParts.Uri && ReadDiagram(data!, target)) return;
 
         target.Children.Add(new ContentImage
         {
@@ -164,57 +164,14 @@ internal sealed class PptxShapeReader
     /// Reads the text of a SmartArt diagram from its data model.
     /// </summary>
     /// <remarks>
-    /// <para>
-    /// A diagram's text is <em>typed by the author</em> and lives in <c>data1.xml</c> as ordinary
-    /// DrawingML text bodies, one per <c>dgm:pt</c>. Only the <em>shapes</em> need the layout
-    /// algorithm — the declarative "layout atom" program in <c>layout1.xml</c> that LibreOffice
-    /// executes in <c>oox/source/drawingml/diagram/</c>, and which is the single largest
-    /// subsystem in the PPTX importer. Extraction needs none of it: the words are already there.
-    /// </para>
-    /// <para>
-    /// Skipping that is worth roughly a dozen files in LibreOffice's own PPTX test corpus that
-    /// otherwise extract to nothing at all, and it is the reason "SmartArt: fallback or
-    /// implement?" is answered "extract the text, decline the layout" rather than deferred.
-    /// </para>
-    /// <para>
-    /// Points are read in <c>dgm:ptLst</c> order. LibreOffice walks the connection list instead,
-    /// which is the difference between authoring order and drawn order — they agree for every
-    /// diagram measured, and reconstructing a tree from <c>dgm:cxnLst</c> to reorder text is
-    /// work the extracted output would not visibly benefit from.
-    /// </para>
-    /// <para>
-    /// The data model is still the right source for extraction even now that
-    /// <see cref="PptxDiagram"/> reads the <em>baked</em> shape tree for rendering, and the two
-    /// disagree on purpose. The baked tree is what the author sees, so it repeats a node's text
-    /// wherever the layout drew it and adds text the layout generated; the data model is what the
-    /// author typed, once each. An index wants the second.
-    /// </para>
+    /// The walk itself is <see cref="DiagramParts.AuthoredText"/>, which is where the reasons for
+    /// reading the data model rather than the baked shape tree are written down; a diagram is the
+    /// same five parts in a deck and in a document, so the reading is shared with them.
     /// </remarks>
     private bool ReadDiagram(XElement data, ContentNode target)
-    {
-        if (PptxDiagram.DataModel(_file, _partName, data) is not { } model) return false;
-
-        int before = target.Children.Count;
-        foreach (XElement point in model.Element(XName.Get("ptLst", PptxDiagram.Uri))
-                                       ?.Elements(XName.Get("pt", PptxDiagram.Uri)) ?? [])
-        {
-            // "doc" is the diagram itself, "pres" is a generated presentation node, and the two
-            // transition types are the connectors between points. None of them carries text a
-            // reader sees, and a "pres" point can duplicate a real one's.
-            string? type = point.Attribute("type")?.Value;
-            if (type is "doc" or "pres" or "parTrans" or "sibTrans") continue;
-
-            XElement? body = point.Element(XName.Get("t", PptxDiagram.Uri));
-            if (DrawingTextBody.IsEmpty(body)) continue;
-
-            DrawingTextBody.Read(body!, target, new DrawingTextOptions
-            {
-                ResolveHyperlink = ResolveHyperlink,
-            });
-        }
-
-        return target.Children.Count > before;
-    }
+        => DiagramParts.AuthoredText(
+            _file.Diagrams, _partName, data, target,
+            new DrawingTextOptions { ResolveHyperlink = ResolveHyperlink });
 
     private void ReadPicture(XElement picture, ContentNode target)
     {

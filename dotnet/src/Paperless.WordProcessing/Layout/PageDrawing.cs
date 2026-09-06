@@ -1,3 +1,4 @@
+using Paperless.Ooxml.DrawingML;
 using Paperless.Core.Geometry;
 using Paperless.Core.Graphics;
 using Paperless.Core.Units;
@@ -6,6 +7,7 @@ using Paperless.Text.Itemisation;
 using Paperless.Text.Layout;
 using Paperless.Text.Shaping;
 using Paperless.Vector;
+using Paperless.WordProcessing.Model;
 
 namespace Paperless.WordProcessing.Layout;
 
@@ -70,9 +72,11 @@ public static class PageDrawing
         sink.BeginPage(page.Size);
         try
         {
-            foreach (PlacedFrame frame in page.Frames)
+            DrawPageBorder(page, sink);
+
+            foreach (PlacedFrame frame in Stacked(page.Frames, behind: true))
             {
-                if (frame.Frame.BehindText) DrawFrame(frame, sink);
+                DrawFrame(frame, sink);
             }
 
             DrawFlow(page.Header, sink);
@@ -82,9 +86,9 @@ public static class PageDrawing
             DrawSeparator(page.NoteSeparator, sink);
             DrawFlow(page.Notes, sink);
 
-            foreach (PlacedFrame frame in page.Frames)
+            foreach (PlacedFrame frame in Stacked(page.Frames, behind: false))
             {
-                if (!frame.Frame.BehindText) DrawFrame(frame, sink);
+                DrawFrame(frame, sink);
             }
 
             DrawFlow(page.Footer, sink);
@@ -96,6 +100,137 @@ public static class PageDrawing
             sink.EndPage();
         }
     }
+
+    /// <summary>
+    /// Draws the section's page border and its shadow, if it has one.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>This was not drawn at all until round 67</strong>, and no gate column could see it:
+    /// a border adds no words and no pages, so all seven corpus documents that declare one pass the
+    /// word gate while missing a 4.5 pt rectangle round the whole page.
+    /// <c>Case-Study-Heathrow-Airport.docx</c> is the witness — 11.55 of its 14.70 <c>|ink|%</c>
+    /// against 26.2.4.2 is this one rectangle, which put it at the head of the words track's
+    /// per-page ink ranking.
+    /// </para>
+    /// <para>
+    /// The geometry is measured off 26.2.4.2's own PDF of that document rather than derived from
+    /// the specification. A4 595.304 x 841.89, <c>w:sz="36"</c> (4.5 pt), <c>w:space="15"</c>,
+    /// <c>w:offsetFrom="page"</c>, <c>w:shadow="1"</c>:
+    /// </para>
+    /// <list type="bullet">
+    /// <item><description>
+    /// four strokes of <c>4.5 w</c> at <c>0.2235 0.3961 0.2 RG</c>, centrelines at 17.25 from the
+    /// left and top — that is <c>space + width/2</c> — and at 573.60 and 21.69, which are
+    /// <c>space + width/2</c> from the far edges <em>plus the shadow's own width</em>;
+    /// </description></item>
+    /// <item><description>
+    /// each stroke spanning the rectangle's full outer extent in its own direction, so the corners
+    /// overlap rather than mitre;
+    /// </description></item>
+    /// <item><description>
+    /// the shadow as two black rectangles offset down and right by its width —
+    /// <c>19.4 15.039 560.85 4.45 re f*</c> and <c>575.8 19.439 4.45 803.05 re f*</c>.
+    /// </description></item>
+    /// </list>
+    /// <para>
+    /// So the shadow <em>shrinks the box</em> rather than hanging off the paper, which is the one
+    /// thing about it that cannot be guessed. Its width is taken as the border's own; the reference
+    /// draws 4.45 against a stated 4.5, a twentieth of a point that no comparison resolves.
+    /// </para>
+    /// <para>
+    /// Drawn first, under everything including a behind-text frame. Word's <c>w:zOrder</c> can ask
+    /// for the border in front of the text and nothing in the corpus does; the seven documents that
+    /// declare a border all leave it at the default.
+    /// </para>
+    /// </remarks>
+    private static void DrawPageBorder(LaidOutPage page, IDrawingSink sink)
+    {
+        if (page.Borders is not { } borders) return;
+
+        // The box the sides stand on: inset from the paper by each side's own space, or from the
+        // text area when the section says `w:offsetFrom="text"`.
+        DocRect outer = borders.OffsetFromText
+            ? new DocRect(
+                page.BodyArea.X - borders.Left.Space,
+                page.BodyArea.Y - borders.Top.Space,
+                page.BodyArea.Width + borders.Left.Space + borders.Right.Space,
+                page.BodyArea.Height + borders.Top.Space + borders.Bottom.Space)
+            : new DocRect(
+                borders.Left.Space,
+                borders.Top.Space,
+                page.Size.Width - borders.Left.Space - borders.Right.Space,
+                page.Size.Height - borders.Top.Space - borders.Bottom.Space);
+
+        Length shadow = borders.HasShadow
+            ? Length.Max(borders.Right.Width, borders.Bottom.Width)
+            : Length.Zero;
+
+        if (shadow > Length.Zero)
+        {
+            outer = new DocRect(
+                outer.X, outer.Y,
+                Length.Max(Length.Zero, outer.Width - shadow),
+                Length.Max(Length.Zero, outer.Height - shadow));
+
+            Fill(new DocRect(outer.X + shadow, outer.Bottom, outer.Width, shadow), Colour.Black, sink);
+            Fill(new DocRect(outer.Right, outer.Y + shadow, shadow, outer.Height), Colour.Black, sink);
+        }
+
+        if (outer.Width <= Length.Zero || outer.Height <= Length.Zero) return;
+
+        StrokeSide(borders.Top, sink,
+            new DocPoint(outer.X, outer.Y + borders.Top.Width / 2),
+            new DocPoint(outer.Right, outer.Y + borders.Top.Width / 2));
+        StrokeSide(borders.Bottom, sink,
+            new DocPoint(outer.X, outer.Bottom - borders.Bottom.Width / 2),
+            new DocPoint(outer.Right, outer.Bottom - borders.Bottom.Width / 2));
+        StrokeSide(borders.Left, sink,
+            new DocPoint(outer.X + borders.Left.Width / 2, outer.Y),
+            new DocPoint(outer.X + borders.Left.Width / 2, outer.Bottom));
+        StrokeSide(borders.Right, sink,
+            new DocPoint(outer.Right - borders.Right.Width / 2, outer.Y),
+            new DocPoint(outer.Right - borders.Right.Width / 2, outer.Bottom));
+    }
+
+    /// <summary>One side of a page border, or nothing when the side draws none.</summary>
+    private static void StrokeSide(PageBorderSide side, IDrawingSink sink, DocPoint from, DocPoint to)
+    {
+        if (!side.Draws) return;
+
+        sink.StrokePath(
+            new GraphicsPath().MoveTo(from).LineTo(to),
+            new Stroke(Paint.Solid(side.Colour), side.Width));
+    }
+
+    /// <summary>
+    /// One side of the page's frames, back to front by the z order their anchors declare.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Document order is not paint order. A <c>wp:anchor</c> carries its own <c>relativeHeight</c>,
+    /// and a file is free to declare a background last and a caption first — which is exactly what
+    /// the corpus's templates do: of the five documents where this was measured, all five declare
+    /// <c>relativeHeight</c> on every anchor and not one of them is in document order.
+    /// </para>
+    /// <para>
+    /// Painting in document order there does not look like a z-order fault. It looks like missing
+    /// content: the text is drawn, correctly positioned, and a shape declared later covers it, so
+    /// every pixel metric reports the page as having lost it. Five separate readings in this
+    /// repository's parity catalogue were one instance of this.
+    /// </para>
+    /// <para>
+    /// <see cref="Enumerable.OrderBy{TSource, TKey}(IEnumerable{TSource}, Func{TSource, TKey})"/> is
+    /// a stable sort, which is the property that matters as much as the ordering itself: frames whose
+    /// anchors declare no <c>relativeHeight</c> all compare equal at zero and therefore keep document
+    /// order among themselves, which is both Word's own tie-break and exactly what this code did
+    /// before the z order was read at all.
+    /// </para>
+    /// </remarks>
+    private static IEnumerable<PlacedFrame> Stacked(
+        IReadOnlyList<PlacedFrame> frames, bool behind) =>
+        frames.Where(frame => frame.Frame.BehindText == behind)
+              .OrderBy(frame => frame.Frame.ZOrder);
 
     /// <summary>
     /// Draws the body's lines, each relative to the rectangle of the column it landed in.
@@ -229,13 +364,44 @@ public static class PageDrawing
     /// </remarks>
     private static void DrawFrame(PlacedFrame frame, IDrawingSink sink)
     {
-        if (frame.Frame.Fill is { } fill) Fill(frame.Area, fill, sink);
+        // A turned shape is the same drawing in a turned space, so the fill, the outline and a
+        // picture all go through one transform rather than each being rotated in its own terms.
+        // `a:xfrm/@rot` turns the shape about the centre of its stated rectangle, which is what the
+        // translate-rotate-translate composition below says.
+        //
+        // The text goes through its own, because `wps:bodyPr/@rot` states the text's angle rather
+        // than an addition to the shape's — see `PageFrame.TextRotationDegrees` for the census that
+        // establishes it and the reference rendering that confirms it. The two are usually equal and
+        // are usually both zero.
+        AffineTransform? shape = Turn(frame.Ink, frame.Frame.RotationDegrees);
+        AffineTransform? text = Turn(frame.Area, frame.Frame.TextRotationDegrees);
+
+        (GraphicsPath? filled, GraphicsPath? stroked) = Outlines(frame);
+
+        Turned(sink, shape);
+
+        // A gradient before a colour, because the two are never both set and a gradient is the
+        // one that needs the placed rectangle: it is carried unplaced on the frame and becomes a
+        // paint here, against the area the layout engine settled on.
+        if (frame.Frame.Gradient is { } ramp)
+        {
+            GradientPaint paint = ramp.Paint(frame.Ink);
+            if (filled is null) Fill(frame.Ink, paint, sink);
+            else sink.FillPath(filled, paint);
+        }
+        else if (frame.Frame.Fill is { } fill)
+        {
+            if (filled is null) Fill(frame.Ink, fill, sink);
+            else sink.FillPath(filled, Paint.Solid(fill));
+        }
 
         if (frame.Frame.Chart is { } chart)
-            FrameChart.Draw(sink, chart, frame.Area, frame.Frame.ChartFontFamily);
+            FrameChart.Draw(sink, chart, frame.Ink, frame.Frame.ChartFontFamily);
         else if (frame.Frame.Vector is { } vector && !vector.Value.IsEmpty)
             DrawPicture(sink, frame, vector, null);
         else if (frame.Frame.Image is { } image) DrawPicture(sink, frame, null, image);
+
+        Upright(sink, shape);
 
         // The frame's own fill *is* the background an automatic font colour resolves against, and the
         // reason it was not, for four rounds, is that the two witnesses against it were misread.
@@ -254,13 +420,78 @@ public static class PageDrawing
         // *anchor's* background, which is the other limb of round 62's rule and the one `012`'s white
         // title needs. The anchor is not reachable from here — frames are drawn from a per-page list —
         // so that limb is still open.
+        Turned(sink, text);
         DrawFlow(frame.Content, sink, frame.Frame.Fill ?? default);
+        Upright(sink, text);
 
         if (frame.Frame.BorderColour is not { } colour) return;
         if (frame.Frame.BorderWidth <= Length.Zero) return;
 
-        Stroke stroke = new(Paint.Solid(colour), frame.Frame.BorderWidth);
-        DocRect area = frame.Area;
+        Turned(sink, shape);
+        try
+        {
+            DrawBorder(frame, stroked, colour, sink);
+        }
+        finally
+        {
+            Upright(sink, shape);
+        }
+    }
+
+    /// <summary>
+    /// The rotation a frame is drawn through at a given angle, or null when it is square to the page.
+    /// </summary>
+    /// <remarks>
+    /// Null rather than the identity so that the overwhelming majority of frames pay neither a
+    /// <c>Save</c>/<c>Restore</c> pair nor a transform in the output: a PDF content stream gains
+    /// three operators per turned shape and none per upright one.
+    /// </remarks>
+    private static AffineTransform? Turn(DocRect area, double degrees)
+    {
+        if (degrees == 0) return null;
+
+        double cx = area.X.Emu + (area.Width.Emu / 2.0);
+        double cy = area.Y.Emu + (area.Height.Emu / 2.0);
+
+        return AffineTransform.Concat(
+            AffineTransform.Concat(
+                AffineTransform.Translation(-cx, -cy),
+                AffineTransform.Rotation(degrees * Math.PI / 180.0)),
+            AffineTransform.Translation(cx, cy));
+    }
+
+    /// <summary>Enters a turned space, or does nothing when there is no turn.</summary>
+    private static void Turned(IDrawingSink sink, AffineTransform? turn)
+    {
+        if (turn is not { } transform) return;
+
+        sink.Save();
+        sink.Transform(transform);
+    }
+
+    /// <summary>Leaves it again.</summary>
+    private static void Upright(IDrawingSink sink, AffineTransform? turn)
+    {
+        if (turn is not null) sink.Restore();
+    }
+
+    /// <summary>The frame's outline, stroked where the shape's own geometry says.</summary>
+    private static void DrawBorder(
+        PlacedFrame frame, GraphicsPath? outline, Colour colour, IDrawingSink sink)
+    {
+        // The dash pattern is expanded here rather than at the reader because it is a function of the
+        // pen width and the cap as well as of the preset's name, and only the width is settled by the
+        // time the frame is built. `capExtendsDash` is the round/square case, where MSO measures the
+        // cap inside the ink and LibreOffice shortens the ink to compensate.
+        Stroke stroke = new(
+            Paint.Solid(colour),
+            frame.Frame.BorderWidth,
+            Cap: frame.Frame.BorderCap,
+            DashPattern: DashPresets.Pattern(
+                frame.Frame.BorderDash,
+                frame.Frame.BorderWidth,
+                frame.Frame.BorderCap is not LineCap.Butt));
+        DocRect area = frame.Ink;
 
         // The border is stroked inside the room the frame took, where it says so. See
         // PageFrame.BorderInset -- a form checkbox is the only thing that does.
@@ -276,13 +507,25 @@ public static class PageDrawing
         // A line shape's outline is its diagonal rather than its rectangle: corner to opposite corner,
         // which is the two-point path `ImportShape` builds for it, with the mirror flags choosing which
         // pair of corners. Drawing the box instead puts three sides on the page that are not in the file.
+        // The shape's own geometry, when it declares one. Before the line shape below, because a
+        // preset never reaches here -- `line` and `straightConnector1` are excluded at the reader.
+        if (outline is not null)
+        {
+            Arrowed(outline, frame, stroke, sink);
+            return;
+        }
+
         if (frame.Frame.IsLine)
         {
-            sink.StrokePath(
-                new GraphicsPath()
-                    .MoveTo(new DocPoint(area.X, frame.Frame.IsLineMirrored ? area.Bottom : area.Y))
-                    .LineTo(new DocPoint(area.Right, frame.Frame.IsLineMirrored ? area.Y : area.Bottom)),
-                stroke);
+            DocPoint near = new(area.X, frame.Frame.IsLineMirrored ? area.Bottom : area.Y);
+            DocPoint far = new(area.Right, frame.Frame.IsLineMirrored ? area.Y : area.Bottom);
+
+            // Which end the line starts at, which is invisible until it carries an arrowhead —
+            // see PageFrame.IsLineReversed.
+            (DocPoint from, DocPoint to) =
+                frame.Frame.IsLineReversed ? (far, near) : (near, far);
+
+            Arrowed(new GraphicsPath().MoveTo(from).LineTo(to), frame, stroke, sink);
             return;
         }
 
@@ -308,6 +551,46 @@ public static class PageDrawing
                 .MoveTo(new DocPoint(area.Right, area.Y))
                 .LineTo(new DocPoint(area.X, area.Bottom)),
             stroke);
+    }
+
+    /// <summary>
+    /// Strokes a path with whichever arrowheads its shape declares, shortened to make room.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// An arrowhead is a filled polygon beside the shaft rather than a property of the pen, so
+    /// there is nothing for a backend to know about: <see cref="LineEnds.Apply"/> returns the
+    /// shortened line and one closed path per end, filled with the line's own paint. It is
+    /// LibreOffice's own decomposition, at the same layer —
+    /// <c>PolygonStrokeArrowPrimitive2D</c> becomes a stroke and up to two filled polygons.
+    /// </para>
+    /// <para>
+    /// Called for every stroked shaft, including ones that carry no marker, because
+    /// <see cref="LineEnds.Apply"/> hands a path straight back when neither end names a shape and
+    /// when the path is not an open polyline. The rectangle border below therefore needs no test
+    /// of its own — a closed path is left exactly as it was.
+    /// </para>
+    /// <para>
+    /// The corpus has <b>608 line ends across 38 <c>docx</c></b> — 353 tails and 255 heads, with
+    /// 208 of them in one integrated-management-system manual. Every one drew as a plain line,
+    /// which on a flowchart is the difference between a diagram and a set of boxes joined by
+    /// sticks.
+    /// </para>
+    /// </remarks>
+    private static void Arrowed(
+        GraphicsPath path, PlacedFrame frame, Stroke stroke, IDrawingSink sink)
+    {
+        if (frame.Frame.HeadEnd.Type is null && frame.Frame.TailEnd.Type is null)
+        {
+            sink.StrokePath(path, stroke);
+            return;
+        }
+
+        (GraphicsPath shaft, List<GraphicsPath> markers) =
+            LineEnds.Apply(path, stroke, frame.Frame.HeadEnd, frame.Frame.TailEnd);
+
+        sink.StrokePath(shaft, stroke);
+        foreach (GraphicsPath marker in markers) sink.FillPath(marker, stroke.Paint);
     }
 
     /// <summary>
@@ -337,18 +620,18 @@ public static class PageDrawing
     private static void DrawPicture(
         IDrawingSink sink, PlacedFrame frame, Lazy<VectorImage>? vector, RasterImage? image)
     {
-        DocRect destination = frame.Frame.Crop.Apply(frame.Area);
+        DocRect destination = frame.Frame.Crop.Apply(frame.Ink);
 
-        if (destination == frame.Area)
+        if (destination == frame.Ink)
         {
-            PaintPicture(sink, frame.Area, vector, image);
+            PaintPicture(sink, frame.Ink, vector, image);
             return;
         }
 
         sink.Save();
         try
         {
-            sink.ClipPath(GraphicsPath.Rectangle(frame.Area));
+            sink.ClipPath(GraphicsPath.Rectangle(frame.Ink));
             PaintPicture(sink, destination, vector, image);
         }
         finally
@@ -463,20 +746,37 @@ public static class PageDrawing
 
         foreach (Edge edge in edges)
         {
-            Stroke stroke = new(Paint.Solid(edge.Border.Colour), edge.Border.Width);
+            // The stated width is the whole rule's, so a double's two strokes are drawn inside it — one
+            // against each edge of the band the grid line is the middle of. See `BorderRules`.
+            BorderBands bands = edge.Border.Bands;
+            IReadOnlyList<Length>? dashes = BorderRules.Dashes(edge.Border.Line);
             Length half = edge.Border.Width / 2;
             Length from = edge.From - half;
             Length to = edge.To + half;
 
-            GraphicsPath path = edge.IsHorizontal
-                ? new GraphicsPath()
-                    .MoveTo(new DocPoint(from, edge.At))
-                    .LineTo(new DocPoint(to, edge.At))
-                : new GraphicsPath()
-                    .MoveTo(new DocPoint(edge.At, from))
-                    .LineTo(new DocPoint(edge.At, to));
+            Rule((bands.Outer / 2) - half, bands.Outer);
+            if (bands.HasTwoRules) Rule(half - (bands.Inner / 2), bands.Inner);
 
-            sink.StrokePath(path, stroke);
+            // `offset` is where the stroke's own centre sits relative to the grid line: nought for a
+            // single rule, since its width is the band's, and against each edge of the band for a double.
+            void Rule(Length offset, Length thick)
+            {
+                if (thick <= Length.Zero) return;
+
+                Length at = edge.At + offset;
+                Stroke stroke = new(
+                    Paint.Solid(edge.Border.Colour), thick, DashPattern: dashes);
+
+                GraphicsPath path = edge.IsHorizontal
+                    ? new GraphicsPath()
+                        .MoveTo(new DocPoint(from, at))
+                        .LineTo(new DocPoint(to, at))
+                    : new GraphicsPath()
+                        .MoveTo(new DocPoint(at, from))
+                        .LineTo(new DocPoint(at, to));
+
+                sink.StrokePath(path, stroke);
+            }
         }
     }
 
@@ -626,8 +926,93 @@ public static class PageDrawing
         return runs;
     }
 
+    /// <summary>
+    /// The two paths a frame's own geometry draws, placed in the page: what is filled and what is
+    /// stroked. Nulls when the shape states no geometry and the caller should paint its rectangle.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>Word documents declare shape geometry and this side used to ignore it.</strong> The
+    /// same <c>spPr</c> was already being read for fill and outline, so every anchored shape was
+    /// painted as its bounding rectangle whatever it asked for: a timeline's milestone circles came
+    /// out as squares, a roadmap's chevrons as bars. The catalogue was never the gap — all 187
+    /// presets are in <c>PresetShapeGeometry.txt</c> and the slide side has resolved them all along.
+    /// </para>
+    /// <para>
+    /// <strong>Two paths and not one, because a subpath states whether it is filled and whether it
+    /// is stroked.</strong> Every connector — <c>bentConnector1</c> to <c>5</c>, the curved ones —
+    /// is a single open subpath declaring <c>fill="none"</c>, and a shape carrying one still takes
+    /// a fill from its <c>a:fillRef</c>. Filling the whole outline of one draws a solid blob where
+    /// the file states a line, which is what this did while it returned a single path.
+    /// </para>
+    /// <para>
+    /// An <c>a:custGeom</c> arrives already resolved, on the frame, because its guide formulae need
+    /// the shape's extent and the reader has it; a preset is a name, so it is cheapest evaluated
+    /// once here with the placed rectangle in hand. Either way the result is translated rather than
+    /// transformed — the geometry is in the shape's own coordinates with its origin at the top left,
+    /// and any rotation is applied by the caller around the whole drawing.
+    /// </para>
+    /// <para>
+    /// A preset the catalogue does not know returns nulls and the caller paints the rectangle,
+    /// which is what LibreOffice falls back to as well.
+    /// </para>
+    /// </remarks>
+    private static (GraphicsPath? Fill, GraphicsPath? Stroke) Outlines(PlacedFrame frame)
+    {
+        DocRect area = frame.Ink;
+        if (area.Width <= Length.Zero || area.Height <= Length.Zero) return (null, null);
+
+        if (frame.Frame.FillOutline is { } custom)
+        {
+            return (Placed(custom, area), Placed(frame.Frame.StrokeOutline, area));
+        }
+
+        if (frame.Frame.Preset is not { Length: > 0 } preset) return (null, null);
+
+        if (CustomShapeGeometry.Preset(
+                preset, new DocSize(area.Width, area.Height), frame.Frame.Adjustments)
+            is not { } geometry)
+        {
+            return (null, null);
+        }
+
+        return (Placed(geometry.FillOutline, area), Placed(geometry.StrokeOutline, area));
+    }
+
+    /// <summary>A path in shape coordinates, moved to where the frame was placed.</summary>
+    private static GraphicsPath? Placed(GraphicsPath? path, DocRect area)
+    {
+        if (path is null) return null;
+
+        GraphicsPath placed = new();
+        foreach (PathCommand command in path.Commands)
+        {
+            switch (command.Verb)
+            {
+                case PathVerb.MoveTo: placed.MoveTo(Shift(command.Point)); break;
+                case PathVerb.LineTo: placed.LineTo(Shift(command.Point)); break;
+                case PathVerb.CubicTo:
+                    placed.CubicTo(
+                        Shift(command.Control1), Shift(command.Control2), Shift(command.Point));
+                    break;
+                case PathVerb.Close: placed.Close(); break;
+                default: break;
+            }
+        }
+
+        return placed;
+
+        DocPoint Shift(DocPoint point) => new(area.X + point.X, area.Y + point.Y);
+    }
+
     /// <summary>Fills a rectangle, which is what a shade and a rule both are.</summary>
     private static void Fill(DocRect area, Colour colour, IDrawingSink sink)
+        => Fill(area, Paint.Solid(colour), sink);
+
+    /// <summary>
+    /// The same, with any paint: the sink has no rectangle of its own, so both go through a path.
+    /// </summary>
+    private static void Fill(DocRect area, Paint paint, IDrawingSink sink)
     {
         if (area.Width <= Length.Zero || area.Height <= Length.Zero) return;
 
@@ -638,7 +1023,7 @@ public static class PageDrawing
             .LineTo(new DocPoint(area.X, area.Bottom))
             .Close();
 
-        sink.FillPath(path, Paint.Solid(colour));
+        sink.FillPath(path, paint);
     }
 
     /// <summary>
@@ -839,27 +1224,30 @@ public static class PageDrawing
 
             if (borders.Top is { Draws: true } rule)
             {
-                Fill(
+                DrawRule(
                     new DocRect(left, text.Y - rule.Space - rule.Width, right - left, rule.Width),
-                    rule.Colour, sink);
+                    rule, across: true, outerLast: false, sink);
             }
 
             if (borders.Bottom is { Draws: true } under)
             {
-                Fill(
+                DrawRule(
                     new DocRect(left, text.Bottom + under.Space, right - left, under.Width),
-                    under.Colour, sink);
+                    under, across: true, outerLast: true, sink);
             }
 
             if (borders.Left is { Draws: true } start)
             {
-                Fill(new DocRect(left, above, start.Width, below - above), start.Colour, sink);
+                DrawRule(
+                    new DocRect(left, above, start.Width, below - above),
+                    start, across: false, outerLast: false, sink);
             }
 
             if (borders.Right is { Draws: true } end)
             {
-                Fill(
-                    new DocRect(right - end.Width, above, end.Width, below - above), end.Colour, sink);
+                DrawRule(
+                    new DocRect(right - end.Width, above, end.Width, below - above),
+                    end, across: false, outerLast: true, sink);
             }
         }
 
@@ -878,6 +1266,76 @@ public static class PageDrawing
         }
 
         Flush();
+    }
+
+    /// <summary>
+    /// Fills one paragraph border's band with the strokes its line style actually draws.
+    /// </summary>
+    /// <param name="band">The whole band the border covers, the second rule and the gap included.</param>
+    /// <param name="rule">The border.</param>
+    /// <param name="across">True for a top or bottom rule, false for a side one.</param>
+    /// <param name="outerLast">
+    /// True when the band's <em>far</em> edge is the one away from the text — a bottom or a right rule.
+    /// It decides which end of the band the outer stroke sits at, which is visible the moment the two
+    /// strokes differ in width: an <c>outset</c> puts its thin rule outside on all four sides.
+    /// </param>
+    /// <param name="sink">Where to draw.</param>
+    /// <remarks>
+    /// The strokes are <em>filled</em> rather than stroked, as the single rule always was, and a dashed
+    /// one is filled a dash at a time. A stroked path would put the pen's centre on the band's edge and
+    /// need every rectangle here recomputed round it; the dash lengths are the pen's own multiples
+    /// either way. See <see cref="BorderRules"/>.
+    /// </remarks>
+    private static void DrawRule(
+        DocRect band, ParagraphBorder rule, bool across, bool outerLast, IDrawingSink sink)
+    {
+        BorderBands bands = rule.Bands;
+        IReadOnlyList<Length>? dashes = BorderRules.Dashes(rule.Line);
+        Length span = across ? band.Height : band.Width;
+
+        Piece(outerLast ? span - bands.Outer : Length.Zero, bands.Outer);
+
+        if (bands.HasTwoRules)
+        {
+            Piece(outerLast ? Length.Zero : bands.Outer + bands.Gap, bands.Inner);
+        }
+
+        void Piece(Length at, Length thick)
+        {
+            if (thick <= Length.Zero) return;
+
+            DocRect stroke = across
+                ? new DocRect(band.X, band.Y + at, band.Width, thick)
+                : new DocRect(band.X + at, band.Y, thick, band.Height);
+
+            if (dashes is null || dashes.Count == 0)
+            {
+                Fill(stroke, rule.Colour, sink);
+                return;
+            }
+
+            Length along = across ? stroke.Width : stroke.Height;
+            Length drawn = Length.Zero;
+
+            for (int i = 0; drawn < along; i += 2)
+            {
+                Length ink = dashes[i % dashes.Count];
+                Length gap = dashes[(i + 1) % dashes.Count];
+                if (ink + gap <= Length.Zero) return;
+
+                Length here = Length.Min(ink, along - drawn);
+                if (here > Length.Zero)
+                {
+                    Fill(
+                        across
+                            ? new DocRect(stroke.X + drawn, stroke.Y, here, stroke.Height)
+                            : new DocRect(stroke.X, stroke.Y + drawn, stroke.Width, here),
+                        rule.Colour, sink);
+                }
+
+                drawn += ink + gap;
+            }
+        }
     }
 
     /// <summary>The rectangle a paragraph's shading fills, in the coordinates of the area holding it.</summary>
@@ -1048,7 +1506,8 @@ public static class PageDrawing
                     run.Font ?? Reference(paragraph, run.Face),
                     new DocPoint(pen, baseline - run.Rise),
                     spaceAdd,
-                    run.Tracking);
+                    run.Tracking,
+                    run.WidthScale);
 
                 runs.Add((glyphRun, run.ColourOn(background)));
 
@@ -1437,7 +1896,8 @@ public static class PageDrawing
                             paragraph.Font,
                             paragraph.Colour,
                             paragraph.Shaping,
-                            Tracking: paragraph.Tracking),
+                            Tracking: paragraph.Tracking,
+                            Item: paragraph.Item),
                     ])));
         }
 
@@ -1519,7 +1979,7 @@ public static class PageDrawing
         foreach (PageRun run in runs)
         {
             List<FaceRun> faces = FontItemiser.Split(
-                paragraph.Text, run.Start, run.Length, run.Face, fallback);
+                paragraph.Text, run.Start, run.Length, run.Face, fallback, item: run.Item);
 
             if (faces.Count == 1 && !faces[0].IsFallback)
             {
@@ -1775,7 +2235,8 @@ public static class PageDrawing
         FontReference font,
         DocPoint origin,
         Length spaceAdd,
-        Length tracking = default)
+        Length tracking = default,
+        double widthScale = 1.0)
     {
         List<PositionedGlyph> glyphs = new(shaped.Glyphs.Count);
         List<int> clusters = new(shaped.Glyphs.Count);
@@ -1784,7 +2245,12 @@ public static class PageDrawing
 
         foreach (ShapedGlyph glyph in shaped.Glyphs)
         {
-            Length advance = shaped.Scale(glyph.Advance, emSize);
+            // `w:rPr/w:w` multiplies the face's own advance and nothing else. The two distances added
+            // below it are page-space distances that the character width does not reach: tracking is a
+            // gap between glyphs — measured unscaled on the probe, where a run at 50 per cent with a
+            // 40-twip spacing comes to 41.958 + 14 x 2 pt — and a justification share is decided after
+            // the line's width is known.
+            Length advance = Squeezed(shaped.Scale(glyph.Advance, emSize), widthScale);
 
             // Every glyph carries its tracking, the run's last included, so the text after a tracked
             // run starts one tracking unit further on.
@@ -1833,7 +2299,7 @@ public static class PageDrawing
             glyphs.Add(new PositionedGlyph(
                 glyph.GlyphId,
                 new DocPoint(
-                    pen + shaped.Scale(glyph.OffsetX, emSize),
+                    pen + Squeezed(shaped.Scale(glyph.OffsetX, emSize), widthScale),
                     -shaped.Scale(glyph.OffsetY, emSize)),
                 advance));
 
@@ -1849,8 +2315,16 @@ public static class PageDrawing
             Glyphs = glyphs,
             Text = text,
             ClusterMap = clusters,
+
+            // The positions above are already squeezed; this is what tells a backend to squeeze the
+            // glyphs themselves. See GlyphRun.WidthScale.
+            WidthScale = widthScale,
         };
     }
+
+    /// <summary>One advance under the run's character width, or as it is when the run states none.</summary>
+    private static Length Squeezed(Length advance, double widthScale)
+        => widthScale == 1.0 ? advance : Length.FromEmu((long)Math.Round(advance.Emu * widthScale));
 
     /// <summary>How far a run's pen travels: the sum of its advances, justification included.</summary>
     private static Length Extent(GlyphRun run)

@@ -199,7 +199,7 @@ public sealed partial class RtfDocumentReader
         table.PendingCellMerged = false;
         table.PendingCellVerticalFirst = false;
         table.PendingCellVerticalMerged = false;
-        table.PendingCellAlignment = CellVerticalAlignment.Top;
+        table.PendingCellAlignment = VerticalTextAlignment.Top;
         table.PendingCellShading = null;
         table.PendingBorderSide = null;
         Array.Clear(table.PendingCellBorders);

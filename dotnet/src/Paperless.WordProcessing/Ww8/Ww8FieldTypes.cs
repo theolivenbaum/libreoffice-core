@@ -56,6 +56,16 @@ public sealed class Ww8FieldTypes
     /// </remarks>
     public const int CurrentPage = 33;
 
+    /// <summary>The legacy <c>FORMCHECKBOX</c>, whose square is drawn inside its own instruction.</summary>
+    /// <remarks>
+    /// 71, <c>Read_F_FormCheckBox</c>'s slot in <c>aWW8FieldTab</c> (<c>ww8par5.cxx</c>:918). The one
+    /// field type this walk has to know before it has read a separator, because there is no separator:
+    /// Word writes the control as <c>U+0013 " FORMCHECKBOX " U+0001 U+0015</c>, so the placeholder that
+    /// stands for the box is the last character of the field's <em>code</em>. LibreOffice reads it at
+    /// exactly that offset — <c>if (rStr[pF-&gt;nLCode-1]==0x01)</c>, <c>ww8par3.cxx</c>:191.
+    /// </remarks>
+    public const int FormCheckBox = 71;
+
     /// <summary>The <c>NUMPAGES</c> field: how many pages the document has.</summary>
     /// <remarks>
     /// 26, the first of the three <c>Read_F_Num</c> slots (26 <c>NUMPAGES</c>, 27 <c>NUMWORDS</c>,

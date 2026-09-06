@@ -308,6 +308,17 @@ public sealed record PageParagraph : PageBlock
     public IGlyphFallbackResolver? Fallback { get; init; }
 
     /// <summary>
+    /// The font item the paragraph's own face was resolved from, for a paragraph with no runs.
+    /// </summary>
+    /// <remarks>
+    /// Beside <see cref="Fallback"/> and set by the same readers, because it is half of the same
+    /// question: the resolver answers <em>which face draws this character</em> and the item is what
+    /// the pattern it asks with is built from. A paragraph that has runs takes each run's own; see
+    /// <see cref="FontItem"/> for why it cannot be recovered from the face.
+    /// </remarks>
+    public FontItem Item { get; init; }
+
+    /// <summary>
     /// Whether a script change with East Asian text on one side opens Writer's extra gap.
     /// </summary>
     /// <remarks>
@@ -438,8 +449,59 @@ public sealed record PageParagraph : PageBlock
             ? [.. Frames
                 .Where(frame => frame.Anchor == FrameAnchor.AsCharacter)
                 .Select(frame => new InlineObject(
-                    frame.AnchorOffset, frame.Size.Width, frame.Size.Height, frame.InlineAscent))]
+                    frame.AnchorOffset,
+                    frame.InlineExtent.Width,
+                    frame.InlineExtent.Height + ShapeLineTwip(frame),
+                    frame.InlineAscent ?? frame.InlineExtent.Height))]
             : [];
+
+    /// <summary>
+    /// The extra twip a <em>drawn shape</em> adds to the line it hangs on, below the baseline.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// An as-character picture and an as-character shape do not reach Writer's line the same way. A
+    /// picture is a fly holding a <c>SwNoTextFrame</c> and its size is its size; a shape is a draw
+    /// object, and a draw object's rectangle is inclusive — <c>SwRect::Bottom() == Top() + Height() - 1</c>
+    /// — so the line it hangs on comes out one twip taller than the shape.
+    /// </para>
+    /// <para>
+    /// Measured against 26.2.4.2 on two fixtures differing only in what their <c>a:graphicData</c> holds,
+    /// ten identical paragraphs of one inline object each, the pitch between the objects being the line
+    /// height (<c>probes/words-catalogue-bias/</c>):
+    /// </para>
+    /// <list type="bullet">
+    /// <item><description>
+    /// a <c>wps:wsp</c> shape of stated height <c>cy</c>: the reference's line is <c>cy + 1</c> twips and
+    /// ours was <c>cy</c>, at every one of twelve heights from 560 to 571 twips.
+    /// </description></item>
+    /// <item><description>
+    /// a <c>pic:pic</c> picture, the same sweep: <b>no difference at all</b>, six of six. So the twip is
+    /// the shape's, not every inline object's, and the picture is the control that says so.
+    /// </description></item>
+    /// </list>
+    /// <para>
+    /// Below the baseline rather than above it, which the same fixture settles: the <em>first</em> shape
+    /// on the page is drawn at the same place in both engines, 785.19 pt against 785.20, so the extra
+    /// twip is behind the object and not in front of it. That is why the ascent is resolved here to the
+    /// unpadded height rather than left to <c>InlineObject</c>'s default, which would otherwise take the
+    /// padded one and move the drawing down with it.
+    /// </para>
+    /// <para>
+    /// Its reach on the corpus is the catalogue this was found on,
+    /// <c>WordArt_Shapes_Arrows_Catalog1.docx</c>, whose rows are paragraphs of inline shapes: the twip
+    /// accumulates down each page, to 14.6 twips by the fifteenth row of page 48. That residual was
+    /// recorded by an earlier round as sub-point placement noise on the twip grid, and it is not noise:
+    /// over 466 paired drawing records the vertical offset runs <b>+418 / −11 / 0 37</b> with a mean of
+    /// +0.2059 pt, twenty-eight standard errors from zero, while the horizontal offset's mean is
+    /// +0.0009 pt.
+    /// </para>
+    /// </remarks>
+    private static Length ShapeLineTwip(PageFrame frame)
+        => frame.Image is not null || frame.Vector is not null || frame.Chart is not null
+            || frame.IsTextPortion
+            ? Length.Zero
+            : Length.FromTwips(1);
 
     /// <summary>True when an as-character frame is set in the paragraph's text.</summary>
     public bool HasInlineObjects
@@ -578,7 +640,7 @@ public sealed record PageParagraph : PageBlock
 
         if (runs.Count == 0)
         {
-            runs.Add(new FormattedRun(0, Text.Length, Face, EmSize, Shaping, Tracking: Tracking));
+            runs.Add(new FormattedRun(0, Text.Length, Face, EmSize, Shaping, Tracking: Tracking, Item: Item));
         }
 
         return MeasuredParagraph.Measure(
@@ -874,6 +936,18 @@ public sealed record PageNote
 /// shortcut or the paragraph is measured without it. See <see cref="FormattedRun.Tracking"/> for how the
 /// distance is charged.
 /// </param>
+/// <param name="WidthPerCent">
+/// How wide the run's glyphs are drawn against their own design, 100 for none — <c>w:rPr/w:w</c> and
+/// <c>\charscalex</c>. It changes a measurement like <paramref name="Tracking"/> does and so has the same
+/// duty to survive the uniform-paragraph shortcut, and it changes the glyphs' shape as well, which
+/// tracking does not. See <see cref="FormattedRun.WidthPerCent"/> for why the factor is not the
+/// percentage.
+/// </param>
+/// <param name="Item">
+/// The font item this run is set from, or default when the reader distinguishes none. It carries
+/// the family class and the language the glyph-fallback pattern is built with; see
+/// <see cref="Paperless.Text.Fonts.FontItem"/>.
+/// </param>
 public readonly record struct PageRun(
     int Start,
     int Length,
@@ -888,10 +962,17 @@ public readonly record struct PageRun(
     Colour Highlight = default,
     bool IsUnderlined = false,
     bool IsStruckThrough = false,
-    Length Tracking = default)
+    Length Tracking = default,
+    int WidthPerCent = 100,
+    FontItem Item = default)
 {
     /// <summary>One past the run's last character.</summary>
     public int End => Start + Length;
+
+    /// <summary>
+    /// <see cref="WidthPerCent"/> as the factor this run's advances and glyphs are drawn at.
+    /// </summary>
+    public double WidthScale => TextWidthScale.Of(EmSize, WidthPerCent);
 
     /// <summary>
     /// The shaping this run is drawn with, once its tracking has had its say.
@@ -935,8 +1016,13 @@ public readonly record struct PageRun(
     public bool IsHighlighted => Highlight.A != 0;
 
     /// <summary>The measurement half of this run.</summary>
+    /// <remarks>
+    /// <see cref="Item"/> is carried, and it has to be: it decides which face a character this one
+    /// cannot draw is looked for in, and measurement and drawing choosing different faces for the
+    /// same character is a line laid out at one width and painted at another.
+    /// </remarks>
     public FormattedRun ToFormattedRun()
-        => new(Start, Length, Face, EmSize, Shaping, MetricEmSize, Tracking);
+        => new(Start, Length, Face, EmSize, Shaping, MetricEmSize, Tracking, WidthPerCent, Item);
 
     /// <summary>
     /// True when two resolved fonts disagree about whether their glyphs are drawn leaning.
@@ -1005,6 +1091,11 @@ public readonly record struct PageRun(
 /// The stated widths of those columns, already fitted to the body's measure, for a section that does not
 /// space them evenly; null for the ordinary case.
 /// </param>
+/// <param name="FlyDisplacement">
+/// How much of <paramref name="Top"/> is a floated table having pushed this paragraph clear of itself.
+/// Zero on every line of every paragraph but the first one a fly displaced — see
+/// <see cref="ParagraphTop"/> for why it has to come back off again.
+/// </param>
 /// <remarks>
 /// <see cref="UpperSpace"/> is carried because a frame anchored to the paragraph is positioned from a
 /// point above the line: Writer's <c>SwAnchoredObjectPosition::GetTopForObjPos</c>
@@ -1031,15 +1122,29 @@ public readonly record struct PlacedLine(
     Length UpperSpace = default,
     int Columns = 1,
     Length ColumnGap = default,
-    ColumnRuler? ColumnRuler = null)
+    ColumnRuler? ColumnRuler = null,
+    Length FlyDisplacement = default)
 {
     /// <summary>Where a frame anchored to this line's paragraph measures its offset from.</summary>
     /// <remarks>
     /// The paragraph's top for object positioning — see <see cref="UpperSpace"/>. Equal to
     /// <see cref="Top"/> for every line that is not a paragraph's first, and for a paragraph whose space
     /// above was collapsed away or dropped at the top of a page.
+    ///
+    /// <para>
+    /// <see cref="FlyDisplacement"/> comes off for a reason the field's own summary cannot give: Writer
+    /// positions a paragraph's anchored objects when the paragraph is <em>first</em> formatted, which is
+    /// before a floated table above it has pushed the paragraph clear of itself, and it does not position
+    /// them again afterwards. So the object stays where the flow was and the text moves out from under
+    /// it. Measured on 21 authored documents in <c>probes/words-fly-clearance/</c>: with a fly filling
+    /// the column and a text box anchored to the paragraph directly after it, 24.2.7.2 draws the box at
+    /// the top of the body at every fly height, and draws the paragraph's own text a line below the fly's
+    /// bottom. Put an empty paragraph between the two and the box moves down with its paragraph — that
+    /// paragraph is no longer the one being displaced, which is exactly what makes this a property of the
+    /// displacement rather than of the anchor.
+    /// </para>
     /// </remarks>
-    public Length ParagraphTop => Top - UpperSpace;
+    public Length ParagraphTop => Top - UpperSpace - FlyDisplacement;
 
     /// <summary>The baseline's distance from the top of the body area.</summary>
     public Length Baseline => Top + Box.Baseline;
@@ -1176,6 +1281,15 @@ public sealed record LaidOutPage
 
     /// <summary>The sheet's size.</summary>
     public required DocSize Size { get; init; }
+
+    /// <summary>The border drawn round this page, or null when it carries none.</summary>
+    /// <remarks>
+    /// Resolved against <c>w:display</c> by the paginator, which is the only layer that knows
+    /// whether a page is the first of its section. Page furniture rather than content: with
+    /// <c>w:offsetFrom="page"</c> it is measured from the paper's edge and does not touch
+    /// <see cref="BodyArea"/>.
+    /// </remarks>
+    public PageBorders? Borders { get; init; }
 
     /// <summary>Where body text goes, in page coordinates.</summary>
     /// <remarks>

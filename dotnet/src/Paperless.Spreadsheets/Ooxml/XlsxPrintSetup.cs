@@ -188,10 +188,20 @@ internal static class XlsxPrintSetup
                 defaultFont)
             : Length.Zero;
 
-        bool landscape = string.Equals(
-            Xlsx.Attribute(setupElement, "orientation"), "landscape", StringComparison.Ordinal);
+        // A chart sheet is a sheet part like any other and is read through this reader, but three
+        // of its print settings are decided by what it *is* rather than by what it states. See
+        // `IsChartSheet`.
+        bool chartSheet = IsChartSheet(worksheet);
 
-        (PrintScaleMode mode, int percentage, int wide, int tall) = ReadScale(worksheet, setupElement);
+        // A chart sheet is landscape unless the file names an orientation of its own, which is a
+        // default rather than an override: one that says `portrait` gets portrait.
+        string? orientation = Xlsx.Attribute(setupElement, "orientation");
+        bool landscape = string.Equals(orientation, "landscape", StringComparison.Ordinal)
+            || (chartSheet && !string.Equals(orientation, "portrait", StringComparison.Ordinal));
+
+        (PrintScaleMode mode, int percentage, int wide, int tall) = chartSheet
+            ? (PrintScaleMode.FitToPageCount, 100, 0, 0)
+            : ReadScale(worksheet, setupElement);
 
         SheetPrintSetup setup = new()
         {
@@ -268,6 +278,7 @@ internal static class XlsxPrintSetup
             ScalePercentage = percentage,
             FitToPagesWide = wide,
             FitToPagesTall = tall,
+            FitToPageCount = chartSheet ? 1 : 0,
             PageOrder = string.Equals(
                 Xlsx.Attribute(setupElement, "pageOrder"), "overThenDown", StringComparison.Ordinal)
                 ? PagePrintOrder.AcrossThenDown
@@ -275,8 +286,8 @@ internal static class XlsxPrintSetup
             PrintAreas = printAreas,
             RepeatColumns = repeatColumns,
             RepeatRows = repeatRows,
-            PrintsGrid = Xlsx.Flag(options, "gridLines"),
-            PrintsHeadings = Xlsx.Flag(options, "headings"),
+            PrintsGrid = !chartSheet && Xlsx.Flag(options, "gridLines"),
+            PrintsHeadings = !chartSheet && Xlsx.Flag(options, "headings"),
 
             // `asDisplayed`, not `atEnd`, and that is not a slip. Calc has one mode — the notes
             // are listed after the sheet — so its OOXML filter has to pick which of the two
@@ -305,6 +316,48 @@ internal static class XlsxPrintSetup
 
         return (setup, ReadGrid(worksheet, defaultFont, isMicrosoftGenerated));
     }
+
+    /// <summary>Whether the part read is a chart sheet rather than a worksheet.</summary>
+    /// <remarks>
+    /// <para>
+    /// A chart sheet is a whole sheet whose only content is one chart. Its part is
+    /// <c>xl/chartsheets/sheetN.xml</c> with a <c>chartsheet</c> root, and it carries the same
+    /// <c>pageMargins</c>, <c>pageSetup</c> and <c>drawing</c> children a worksheet does — which
+    /// is why it comes through this reader unremarked and rendered, until now, as a worksheet
+    /// with a very large drawing on it.
+    /// </para>
+    /// <para>
+    /// <strong>Three of its print settings are decided by what it is, not by what it states</strong>
+    /// (<c>PageSettingsConverter::writePageSettingsProperties</c>,
+    /// <c>sc/source/filter/oox/pagesettings.cxx:905-972</c>):
+    /// </para>
+    /// <list type="bullet">
+    ///   <item><description>
+    ///     it is <em>always</em> scaled to fit exactly one page — <c>ScaleToPages = 1</c>, with
+    ///     the comment "always fit chart sheet to 1 page" — whatever <c>scale</c> or
+    ///     <c>fitToPage</c> say;
+    ///   </description></item>
+    ///   <item><description>
+    ///     it defaults to landscape when the file names no orientation, rather than to portrait;
+    ///   </description></item>
+    ///   <item><description>
+    ///     it never prints gridlines or row/column headings — "no gridlines in chart sheets".
+    ///   </description></item>
+    /// </list>
+    /// <para>
+    /// The first is the one with teeth. A chart whose <c>xdr:absoluteAnchor</c> extent, plus the
+    /// overhang of its rotated category labels, exceeds the printable area spills onto a second
+    /// page — and both of the corpus's two chart-sheet workbooks did exactly that, each printing
+    /// one page more than the reference with the spill's stray glyphs on it.
+    /// </para>
+    /// <para>
+    /// Detected from the root element rather than from the workbook relationship's type, because
+    /// this reader is handed the loaded part and nothing else, and the root name is the same fact:
+    /// a <c>chartsheet</c> part has a <c>chartsheet</c> root by schema.
+    /// </para>
+    /// </remarks>
+    private static bool IsChartSheet(XElement worksheet)
+        => string.Equals(worksheet.Name.LocalName, "chartsheet", StringComparison.Ordinal);
 
     /// <summary>
     /// Which scaling mode the sheet uses, and the numbers that go with it.

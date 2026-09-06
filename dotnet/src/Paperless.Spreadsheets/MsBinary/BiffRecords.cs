@@ -80,6 +80,21 @@ public static class BiffRecords
     /// <summary>The workbooks a 3D reference can name; <c>0x0401</c> means this one.</summary>
     public const ushort SupBook = 0x01AE;
 
+    /// <summary>Opens one saved custom view's copy of a sheet's settings.</summary>
+    /// <remarks>
+    /// <c>EXC_ID_USERSVIEWBEGIN</c>, <c>sc/source/filter/inc/xlconst.hxx:226</c>. Everything
+    /// between this and <see cref="UsersViewEnd"/> is one entry of Excel's "Custom Views" list —
+    /// its own <c>HEADER</c>, <c>FOOTER</c>, <c>SETUP</c>, margins, page breaks and filters — and
+    /// none of it is the sheet's own setting. LibreOffice ignores the whole block
+    /// (<c>ImportExcel8::Read</c>, <c>sc/source/filter/excel/read.cxx:952-966</c>,
+    /// <c>#i39464#</c>: "Otherwise view settings and filters are loaded multiple times").
+    /// </remarks>
+    public const ushort UsersViewBegin = 0x01AA;
+
+    /// <summary>Closes a custom view's block.</summary>
+    /// <remarks><c>EXC_ID_USERSVIEWEND</c>, the same header.</remarks>
+    public const ushort UsersViewEnd = 0x01AB;
+
     /// <summary>The table a formula's <c>ixti</c> indexes into.</summary>
     public const ushort ExternSheet = 0x0017;
     public const ushort Window2 = 0x023E;

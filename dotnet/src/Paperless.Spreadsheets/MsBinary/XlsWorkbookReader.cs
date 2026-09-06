@@ -913,7 +913,7 @@ internal sealed class XlsWorkbookReader
 
         string? code = _formatCodes.TryGetValue(index, out string? stated)
             ? stated
-            : BuiltInNumberFormats.Code(index);
+            : BuiltInNumberFormats.BiffCode(index);
 
         NumberFormatCode parsed = code is null ? NumberFormatCode.General : NumberFormatCode.Parse(code);
 
@@ -949,7 +949,7 @@ internal sealed class XlsWorkbookReader
 
         string? code = _formatCodes.TryGetValue(index, out string? stated)
             ? stated
-            : BuiltInNumberFormats.Code(index);
+            : BuiltInNumberFormats.BiffCode(index);
 
         if (code is null) return null;
 
@@ -1628,9 +1628,41 @@ internal sealed class XlsWorkbookReader
         // sheet's. Counting depth is what keeps the inner EOF from ending the sheet early.
         int depth = 0;
 
+        // **A saved custom view repeats the sheet's whole page-settings block, and reading it
+        // overwrites the sheet's own.** `USERSVIEWBEGIN`/`USERSVIEWEND` bracket one entry of
+        // Excel's Custom Views list; LibreOffice skips every record between them
+        // (`ImportExcel8::Read`, `sc/source/filter/excel/read.cxx:952-966`, `#i39464#`) and this
+        // did not, so the *last* view's `HEADER`, `FOOTER`, `SETUP` and margins won.
+        //
+        // Measured on `programs contact list as of 07-01-10.xls`, whose single `CONTACTS`
+        // substream holds six `HEADER` records — its own, then one per custom view. The sheet's
+        // own is `&C&"Arial,Bold"&16 PROGRAMS CONTACTS`; the last view's is
+        // `&C&"Arial,Bold"&16APF-100 PROGRAM CONTACTS`, which is what this printed and the
+        // reference does not. Two further corpus workbooks carry the same shape
+        // (`CSA_CCM_v1.2.xls`, four views; `ECA Sinters.xls`, two), and in both the views also
+        // repeat `SETUP` — paper size, scale and orientation — so this is a pagination input and
+        // not only a string.
+        bool inCustomView = false;
+
         while (_stream.MoveNext())
         {
             ushort id = _stream.RecordId;
+
+            if (id == BiffRecords.UsersViewBegin)
+            {
+                inCustomView = true;
+                continue;
+            }
+
+            if (id == BiffRecords.UsersViewEnd)
+            {
+                inCustomView = false;
+                continue;
+            }
+
+            // Skipped wholesale, exactly as `read.cxx` does: the block can hold a `BOF`/`EOF`
+            // pair of its own, so the depth counter must not see it either.
+            if (inCustomView) continue;
 
             if (BiffRecords.IsBof(id))
             {

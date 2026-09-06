@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text.RegularExpressions;
 using System.Text;
 using System.Xml.Linq;
 using Paperless.Core.Charts;
@@ -173,6 +174,12 @@ public static class DrawingChartPlot
 
         if (series.Count == 0) return null;
 
+        // The colour every piece of the chart's text falls back to. One value for the whole
+        // chart, because all three of ObjectFormatter's auto-text tables carry the same two
+        // colours and differ only in size and weight.
+        Colour automaticText =
+            DrawingChartAutoFormat.TextColourOf(automatic.Style, theme) ?? Colour.Black;
+
         // The bar group decides the shape of the category axis and the bar arithmetic, so where
         // there is one it is the chart's own kind whatever came first in the file; that is
         // SeriesPlotterContainer's own rule, which ORs shifted-category positioning over every
@@ -232,9 +239,15 @@ public static class DrawingChartPlot
             // title hangs off that element — so reading only c:catAx loses it entirely. The same
             // fallback CategoryAxisVisible already takes, and tdf127720.pptx is what shows it:
             // "Dissolved Oxygen (%)" is three words the reference draws and this did not.
-            CategoryAxisTitle = TitleText(Child(axes.Domain ?? axes.Category, "title")),
-            ValueAxisTitle = TitleText(Child(axes.Value, "title")),
+            CategoryAxisTitle = AxisTitleText(
+                Child(axes.Domain ?? axes.Category, "title"), kind),
+            ValueAxisTitle = AxisTitleText(Child(axes.Value, "title"), kind),
             Categories = orderedCategories,
+            // The rows a complex category axis is drawn as. The join above stays what it was,
+            // because a legend entry and a data label want one string; see
+            // ChartPlot.CategoryLevels. A date axis has re-ordered its categories by then, so a
+            // levelled axis and a date axis are not both honoured -- no corpus chart is both.
+            CategoryLevels = dateAxis is null ? CategoryLevelsOf(plotArea) : null,
             Series = orderedSeries,
             Kind = kind,
 
@@ -259,12 +272,23 @@ public static class DrawingChartPlot
             ValueFormat = FormatOf(axes.Value),
             CategoryFormat = FormatOf(axes.Category),
             CategoryAxisText = AxisTextOf(axes.Domain ?? axes.Category),
+            ValueAxisText = AxisTextOf(axes.Value),
+            SecondaryValueAxisText = AxisTextOf(axes.Secondary),
             DataTable = DataTableOf(Child(plotArea, "dTable"), theme),
             SecondaryValueScale = axes.Secondary is null ? null : ScaleOf(axes.Secondary),
             SecondaryValueFormat = FormatOf(axes.Secondary),
-            SecondaryValueAxisTitle = TitleText(Child(axes.Secondary, "title")),
+            SecondaryValueAxisTitle = AxisTitleText(Child(axes.Secondary, "title"), kind),
             DomainScale = ScaleOf(axes.Domain),
-            DomainFormat = FormatOf(axes.Domain),
+
+            // The horizontal axis a scatter group is measured against is normally the second
+            // c:valAx, and ChartAxes.Domain finds it there. A combination chart pairing a
+            // scatter group with an area or line one has only one c:valAx, so the X axis is the
+            // chart's c:catAx or c:dateAx and Domain is null — and the ticks along it were then
+            // written through General, printing a date column's serial numbers. The same
+            // `?? axes.Category` fallback is already what the axis text, its visibility and its
+            // labels take. The scale is deliberately not given the same fallback: it decides
+            // where the points sit and not only how a tick reads.
+            DomainFormat = FormatOf(axes.Domain ?? axes.Category),
             ValueAxisVisible = Shown(axes.Value),
             SecondaryAxisVisible = Shown(axes.Secondary),
             CategoryAxisVisible = Shown(axes.Domain ?? axes.Category),
@@ -275,6 +299,10 @@ public static class DrawingChartPlot
             SecondaryTicks = TicksOf(axes.Secondary),
             CategoryTicks = TicksOf(axes.Domain ?? axes.Category),
             CategoriesBetween = CrossBetween(axes, group),
+            CategoriesReversed = Reversed(axes.Category),
+            ValueLabelPosition = LabelPositionOf(axes.Value),
+            ValueAxisCrossing = CrossingOf(axes.Value),
+            SecondaryLabelPosition = LabelPositionOf(axes.Secondary),
             Legend = LegendOf(Child(chart, "legend")),
             Background = FillOf(Child(chartSpace, "spPr"), theme)
                          ?? DrawingChartAutoFormat.FrameFillOf(
@@ -320,16 +348,19 @@ public static class DrawingChartPlot
             IsLabelBold = AxisLabelBoldOf(plotArea) ?? false,
 
             // The five text colours. Each is read where its own object states it, and each falls
-            // back to black — which is what every one of them was before round 60, and what a
-            // chart naming tx1 on a light theme resolves to anyway. See ChartPlot.LabelColour.
-            LabelColour = AxisLabelColourOf(plotArea, theme) ?? Colour.Black,
-            TitleColour = ColourOf(Child(chart, "title"), theme) ?? Colour.Black,
+            // back to the chart style's own automatic text colour — tx1 below style 41 and lt1
+            // from 41 up, which is what makes the text of a dark chart white instead of
+            // invisible. It used to fall back to black, which is what tx1 resolves to on all but
+            // seven of the corpus' chart-bearing files and is not what a dark style states at
+            // all. See DrawingChartAutoFormat.TextColourOf and ChartPlot.LabelColour.
+            LabelColour = AxisLabelColourOf(plotArea, theme) ?? automaticText,
+            TitleColour = ColourOf(Child(chart, "title"), theme) ?? automaticText,
             AxisTitleColour = AxisTitleColourOf(plotArea, theme)
-                              ?? ColourOf(Child(chart, "title"), theme) ?? Colour.Black,
+                              ?? ColourOf(Child(chart, "title"), theme) ?? automaticText,
             DataLabelColour = DataLabelColourOf(plotArea, theme)
-                              ?? AxisLabelColourOf(plotArea, theme) ?? Colour.Black,
+                              ?? AxisLabelColourOf(plotArea, theme) ?? automaticText,
             LegendColour = ColourOf(Child(chart, "legend"), theme)
-                           ?? AxisLabelColourOf(plotArea, theme) ?? Colour.Black,
+                           ?? AxisLabelColourOf(plotArea, theme) ?? automaticText,
 
             // The legend's own c:txPr, not the axes' — every length in the legend is a fraction
             // of it. Read from the legend element directly rather than through its descendants,
@@ -405,6 +436,20 @@ public static class DrawingChartPlot
     /// was meant to avoid — an outer layout falls back to the computed one, which is at worst as
     /// wrong as it would have been.
     /// </para>
+    /// <para>
+    /// <strong>A rectangle that does not fit the chart is moved, not shrunk, and that is the
+    /// whole of the correction.</strong> The importer resolves the four fractions against the
+    /// chart's page and hands the result to <c>XDiagramPositioning</c>
+    /// (<c>PlotAreaConverter::convertPositionFromModel</c>,
+    /// <c>oox/source/drawingml/chart/plotareaconverter.cxx</c>:510-538), which for
+    /// <c>inner</c> is <c>setDiagramPositionExcludingAxes</c> and therefore
+    /// <c>DiagramHelper::setDiagramPositioning</c>
+    /// (<c>chart2/source/tools/DiagramHelper.cxx</c>:434-476). That function clamps each of the
+    /// four to <c>[0, 1]</c> and then, if the position and the size still overrun,
+    /// <em>moves the position back</em> — <c>aNewPos.Primary = 1.0 - aNewSize.Primary</c> — so the
+    /// plot keeps the width the file asked for and loses the overhang off the far edge instead.
+    /// See <see cref="Fitted"/> for the measurement.
+    /// </para>
     /// </remarks>
     private static (double X, double Y, double Width, double Height)? ManualLayout(XElement? layout)
     {
@@ -417,7 +462,52 @@ public static class DrawingChartPlot
         if (Number(Child(manual, "w")) is not { } width) return null;
         if (Number(Child(manual, "h")) is not { } height) return null;
 
+        (x, width) = Fitted(x, width);
+        (y, height) = Fitted(y, height);
+
         return (x, y, width, height);
+    }
+
+    /// <summary>
+    /// One axis of a stated plot rectangle, fitted inside the chart the way the importer fits it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>lcl_ensureRange0to1</c> on each half and then <c>if (pos + size &gt; 1) pos = 1 - size</c>
+    /// (<c>chart2/source/tools/DiagramHelper.cxx</c>:425-465). The order matters: the size is
+    /// clamped first, so a file stating a width larger than the chart gets the whole chart and a
+    /// position of zero rather than a negative position.
+    /// </para>
+    /// <para>
+    /// <strong>Measured on <c>N2_E_Maestroni_Swarm_COP.pptx</c>, whose Gantt states
+    /// <c>x=0.20148</c> and <c>w=0.82271</c> — 1.0242 between them.</strong> Taking the pair
+    /// verbatim runs the plot 17.4 pt off the right edge of a 720 pt frame; moving the position
+    /// puts it at <c>1 - 0.82271 = 0.17729</c>, which is 127.65 pt. 26.2.4.2 draws that chart's
+    /// plot rectangle from 225.581 to 719.660 on the page, and that chart's primitives are fitted
+    /// into the frame from 119.083 to 719.660 — an embedded chart is stretched onto its own drawn
+    /// extent, <c>svx/source/sdr/contact/viewcontactofsdrole2obj.cxx</c>:88-116 — so the
+    /// reference's own left edge in the chart's coordinates is
+    /// <c>(225.581 - 119.083) / (719.660 - 119.083) × 720 = 127.65</c> — the same number, with no
+    /// free parameter. Shrinking the width instead would put it at 145.06.
+    /// </para>
+    /// <para>
+    /// <strong>A second witness, built rather than found, separates the two readings by 89 pt.</strong>
+    /// <c>probes/chart-layout/mkprobe3.py</c>'s <c>OVER.pptx</c> states <c>x = 0.30</c> and
+    /// <c>w = 0.85</c> in a 590.4 pt frame — an overrun sixty times Maestroni's. 26.2.4.2 centres
+    /// its first value label on the plot's left edge at 138.25, against
+    /// <c>50.4 + 0.15 × 590.4 = 138.9</c> for moving the position and 227.5 for shrinking the size.
+    /// </para>
+    /// <para>
+    /// The importer does this arithmetic in whole 1/100 mm and this does it in the fractions
+    /// themselves, which on that chart is a difference of 0.02 pt.
+    /// </para>
+    /// </remarks>
+    private static (double Position, double Size) Fitted(double position, double size)
+    {
+        position = Math.Clamp(position, 0.0, 1.0);
+        size = Math.Clamp(size, 0.0, 1.0);
+
+        return position + size > 1.0 ? (1.0 - size, size) : (position, size);
     }
 
     /// <summary>
@@ -861,6 +951,46 @@ public static class DrawingChartPlot
 
 
     /// <summary>What one axis states about its scale.</summary>
+    /// <summary>
+    /// Whether one axis states that it runs from its maximum down to its minimum.
+    /// </summary>
+    /// <remarks>
+    /// The same <c>c:scaling/c:orientation</c> <see cref="ScaleOf"/> reads, asked of the category
+    /// axis, where there is no scale to carry it: a category axis has no minimum or maximum for a
+    /// <see cref="ChartScaleRequest"/> to hold, and its orientation still decides which end the
+    /// first category is at. See <see cref="ChartPlot.CategoriesReversed"/>.
+    /// </remarks>
+    /// <summary>Which end of the crossing axis an axis puts its tick labels at.</summary>
+    /// <remarks>
+    /// <c>none</c> is deliberately not here: it says the labels are not drawn at all and is
+    /// <see cref="Labelled"/>'s business, so it falls through to the default alongside every
+    /// unknown value — which is what <c>lclGetLabelPosition</c> does with it too
+    /// (<c>oox/source/drawingml/chart/axisconverter.cxx:92-101</c>).
+    /// </remarks>
+    /// <summary>Which end of the crossing axis a value axis stands at.</summary>
+    /// <remarks>
+    /// <c>c:crossesAt</c> states a value rather than an end and is not read: on a category
+    /// crossing axis it is a category index, and no corpus chart states one on a value axis.
+    /// </remarks>
+    private static ChartAxisCrossing CrossingOf(XElement? axis)
+        => Value(Child(axis, "crosses")) switch
+        {
+            "min" => ChartAxisCrossing.Minimum,
+            "max" => ChartAxisCrossing.Maximum,
+            _ => ChartAxisCrossing.Automatic,
+        };
+
+    private static ChartValueLabelPosition LabelPositionOf(XElement? axis)
+        => Value(Child(axis, "tickLblPos")) switch
+        {
+            "low" => ChartValueLabelPosition.Low,
+            "high" => ChartValueLabelPosition.High,
+            _ => ChartValueLabelPosition.NextTo,
+        };
+
+    private static bool Reversed(XElement? axis)
+        => Value(Child(Child(axis, "scaling"), "orientation")) == "maxMin";
+
     private static ChartScaleRequest ScaleOf(XElement? axis)
     {
         if (axis is null) return default;
@@ -1163,7 +1293,8 @@ public static class DrawingChartPlot
                 theme, automatic.Styles);
 
             series.Add(new ChartSeries(
-                DrawingChartText.Label(Child(element, "tx")),
+                SeriesName(Child(element, "tx"), ranges)
+                ?? GeneratedSeriesName(valueSource, ranges),
                 numbers,
                 SuppressesFill(properties) ? null : FillOf(properties, theme) ?? autoFill,
                 SuppressesLine(properties) ? null : LineOf(properties, theme) ?? autoLine,
@@ -1189,7 +1320,8 @@ public static class DrawingChartPlot
                 LineCap = CapOf(properties),
                 Label = WithSource(LabelOf(seriesLabels, groupLabel, kind, office2007), sourceFormat),
                 PointLabels = PointLabelsOf(
-                    seriesLabels, numbers.Length, groupLabel, kind, sourceFormat, office2007),
+                    seriesLabels, numbers.Length, groupLabel, kind, sourceFormat, office2007,
+                    DataLabelsRangeOf(element)),
                 AxisIndex = axisIndex,
                 Trendlines = TrendlinesOf(element, theme, office2007),
                 SizeValues = sizes,
@@ -1498,7 +1630,8 @@ public static class DrawingChartPlot
         ChartDataLabel? inherited,
         ChartPlotKind kind,
         NumberFormatCode? source,
-        bool office2007)
+        bool office2007,
+        IReadOnlyList<string?>? dataLabelsRange = null)
     {
         if (labels is null) return null;
 
@@ -1513,10 +1646,125 @@ public static class DrawingChartPlot
             points ??= new ChartDataLabel?[Math.Max(count, index + 1)];
             if (index >= points.Length) continue;
 
-            points[index] = WithSource(LabelOf(point, seriesLevel, kind, office2007), source);
+            ChartDataLabel? read =
+                WithSource(LabelOf(point, seriesLevel, kind, office2007), source);
+
+            points[index] = WithCellRange(read, point, index, dataLabelsRange);
         }
 
         return points;
+    }
+
+    /// <summary>The Office extension a <c>CELLRANGE</c> field's text actually comes from.</summary>
+    /// <remarks><c>{02D57815-91ED-43cb-92C2-25804820EDAC}</c>'s namespace.</remarks>
+    private const string Chart2012 = "http://schemas.microsoft.com/office/drawing/2012/chart";
+
+    /// <summary>
+    /// A series' data-label range — the strings a <c>CELLRANGE</c> field stands for, by point.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>A <c>CELLRANGE</c> field's own <c>a:t</c> is the placeholder and never the
+    /// answer.</strong> Excel writes the literal <c>[CELLRANGE]</c> there and puts the text in
+    /// <c>c:ser/c:extLst/c:ext/c15:datalabelsRange/c15:dlblRangeCache</c>, keyed by point index.
+    /// <c>SeriesConverter::createDataSeries</c> reads exactly that —
+    /// <c>mrModel.mrParent.mpLabelsSource-&gt;mxDataSeq-&gt;maData.find(mrModel.mnIndex)</c>, then
+    /// <c>xCustomLabel-&gt;setString(oaLabelText)</c>
+    /// (<c>oox/source/drawingml/chart/seriesconverter.cxx:366-410</c>), with
+    /// <c>mpLabelsSource</c> bound at <c>seriescontext.cxx:461</c>.
+    /// </para>
+    /// <para>
+    /// Measured on <c>047_Date_tracker_Gantt_chart_bf34f3a8.xlsx</c>: nine data labels reading
+    /// <c>[CELLRANGE]</c> against a reference that reads <c>Activity 1</c> … <c>Activity 7</c>,
+    /// <c>Today</c> and <c>Milestone 1</c> — the cache is in the file and was never opened.
+    /// </para>
+    /// <para>
+    /// The cache and not the resolver, deliberately: the converter reads the parsed
+    /// <c>DataSequenceModel::maData</c> map, which is the <c>c15:dlblRangeCache</c> the file
+    /// carries, and never asks the data provider for those cells.
+    /// </para>
+    /// </remarks>
+    private static string?[]? DataLabelsRangeOf(XElement series)
+    {
+        XName cache = XName.Get("dlblRangeCache", Chart2012);
+        XElement? found = null;
+
+        foreach (XElement extension in Children(Child(series, "extLst"), "ext"))
+        {
+            found = extension
+                .Descendants(cache)
+                .FirstOrDefault();
+
+            if (found is not null) break;
+        }
+
+        if (found is null) return null;
+
+        int declared = Drawing.Number(Child(found, "ptCount"), "val") ?? -1;
+
+        foreach (XElement point in found.Descendants(Name("pt")))
+            declared = Math.Max(declared, (Drawing.Number(point, "idx") ?? -1) + 1);
+
+        int count = Math.Clamp(declared, 0, MaxPointCount);
+        if (count == 0) return null;
+
+        string?[] text = new string?[count];
+
+        foreach (XElement point in found.Descendants(Name("pt")))
+        {
+            int index = Drawing.Number(point, "idx") ?? -1;
+            if (index < 0 || index >= count) continue;
+
+            text[index] = Child(point, "v")?.Value;
+        }
+
+        return text;
+    }
+
+    /// <summary>
+    /// One point's label with its <c>CELLRANGE</c> fields resolved against the series' range.
+    /// </summary>
+    /// <remarks>
+    /// Gated on <c>c15:showDataLabelsRange</c>, which is what <c>DataLabelContext</c> parses into
+    /// <c>mobShowDataLabelsRange</c> (<c>seriescontext.cxx:134-139</c>) and what
+    /// <c>seriesconverter.cxx:368</c> tests before it looks the text up at all. Without a value
+    /// for this point the placeholder stands, exactly as the source leaves
+    /// <c>oaLabelText.value_or("")</c> unset when the map has no entry.
+    /// </remarks>
+    private static ChartDataLabel? WithCellRange(
+        ChartDataLabel? label,
+        XElement point,
+        int index,
+        IReadOnlyList<string?>? dataLabelsRange)
+    {
+        if (label?.Parts is not { Count: > 0 } parts) return label;
+        if (dataLabelsRange is null || index >= dataLabelsRange.Count) return label;
+        if (dataLabelsRange[index] is not { } resolved) return label;
+
+        bool shown = Child(Child(point, "extLst"), "ext")
+                         ?.Descendants(XName.Get("showDataLabelsRange", Chart2012))
+                         .Any(flag => flag.Attribute("val")?.Value is not ("0" or "false"))
+                     ?? false;
+
+        if (!shown) return label;
+
+        List<ChartLabelPart> rewritten = new(parts.Count);
+        bool changed = false;
+
+        foreach (ChartLabelPart part in parts)
+        {
+            if (part.Field == ChartLabelField.CellRange)
+            {
+                rewritten.Add(part with { Text = resolved });
+                changed = true;
+            }
+            else
+            {
+                rewritten.Add(part);
+            }
+        }
+
+        return changed ? label with { Parts = rewritten } : label;
     }
 
     /// <summary>
@@ -2425,6 +2673,38 @@ public static class DrawingChartPlot
         return null;
     }
 
+    /// <summary>
+    /// An axis title's text, with LibreOffice's own caption where the element states none.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>A <c>c:title</c> with no text in it is still a title, and the reference draws
+    /// <c>Axis Title</c> in it.</strong> <c>AxisConverter::convertFromModel</c> passes
+    /// <c>OoxResId(STR_DIAGRAM_AXISTITLE)</c> as the default string to
+    /// <c>TitleConverter::convertFromModel</c> whenever the model holds a title element and the
+    /// type group is not a radar (<c>oox/source/drawingml/chart/axisconverter.cxx:461-470</c>),
+    /// and <c>TextConverter::createStringSequence</c> falls back to that default once the rich
+    /// body, the <c>c:txPr</c> paragraphs and the <c>c:tx</c> cache have all come back empty
+    /// (<c>titleconverter.cxx:141-160</c>). Unlike the chart title's, this arm has no
+    /// tdf#146487 escape and no <c>autoTitleDeleted</c>: the element being present is the whole
+    /// condition.
+    /// </para>
+    /// <para>
+    /// Measured on <c>040_Blood_pressure_tracker_872b6833.xlsx</c>, whose category axis carries
+    /// <c>&lt;c:title&gt;</c> with a <c>c:overlay</c>, a <c>c:spPr</c> and a <c>c:txPr</c> and no
+    /// <c>c:tx</c> at all: the reference prints <c>Axis Title</c> under the axis and we printed
+    /// nothing.
+    /// </para>
+    /// </remarks>
+    private static string? AxisTitleText(XElement? title, ChartPlotKind kind)
+    {
+        if (title is null) return null;
+        if (TitleText(title) is { Length: > 0 } stated) return stated;
+
+        // "in radar charts, title objects may exist, but are not shown".
+        return kind is ChartPlotKind.Radar ? null : DrawingChartTitle.AxisTitle;
+    }
+
     private static string? TitleText(XElement? title)
     {
         if (title is null) return null;
@@ -2438,6 +2718,189 @@ public static class DrawingChartPlot
             && DrawingTextBody.Text(properties) is { Length: > 0 } fallback)
         {
             return fallback;
+        }
+
+        return DrawingChartText.Label(tx);
+    }
+
+    /// <summary>
+    /// The name a Calc-hosted series with no <c>c:tx</c> at all is given — <c>Column C</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>An unnamed series is not a series without a legend entry.</strong>
+    /// <c>DataSeries::getLabelForRole</c> falls through to
+    /// <c>xValueSeq-&gt;generateLabel(LabelOrigin_SHORT_SIDE)</c> when the label sequence is
+    /// absent or empty (<c>chart2/source/model/main/DataSeries.cxx:641-672</c>), and Calc answers
+    /// it: <c>ScChart2DataSequence::generateLabel</c> sums the columns and rows of every range
+    /// token, labels along the short side, and <c>GenerateLabelStrings</c> writes
+    /// <c>ScResId(STR_COLUMN) + " " + &lt;column letter&gt;</c> or
+    /// <c>ScResId(STR_ROW) + " " + &lt;1-based row&gt;</c>
+    /// (<c>sc/source/ui/unoobj/chart2uno.cxx:3147-3243</c>). Equal counts return an empty
+    /// sequence and therefore no name.
+    /// </para>
+    /// <para>
+    /// Measured on <c>057_Simple_balance_sheet_Use_this_template_e2d4cbb2.xlsx</c>, whose two
+    /// <c>c:ser</c> state a <c>c:spPr</c>, a <c>c:cat</c> and a <c>c:val</c> and no <c>c:tx</c>:
+    /// the reference draws a two-entry legend reading <c>Column C</c> and <c>Column D</c> — its
+    /// value ranges are unions of six column-C and column-D fragments, twenty rows against six
+    /// columns — and we drew no legend at all.
+    /// </para>
+    /// <para>
+    /// <strong>Gated on there being a resolver, which is the Calc host and only Calc.</strong>
+    /// A deck's or a document's sequences are <c>CachedDataSequence</c>s, whose
+    /// <c>generateLabel</c> returns an empty sequence, so the reference names those series by
+    /// another route entirely (<c>lcl_getDataSequenceLabel</c> over the values) and never by this
+    /// one. Firing it without a resolver would invent legends on every unnamed pptx series.
+    /// </para>
+    /// <para>
+    /// The strings are LibreOffice's localized <c>STR_COLUMN</c>/<c>STR_ROW</c>, in the en-US
+    /// resource this project's reference binary runs under — the same standing caveat
+    /// <see cref="DrawingChartTitle.DiagramTitle"/> carries.
+    /// </para>
+    /// </remarks>
+    private static string? GeneratedSeriesName(XElement? values, ChartRangeResolver? ranges)
+    {
+        if (ranges is null || values is null) return null;
+        if (FormulaOf(values) is not { } formula) return null;
+
+        int columns = 0;
+        int rows = 0;
+        string? firstColumn = null;
+        int firstRow = -1;
+
+        foreach ((string Column, int Row, string EndColumn, int EndRow) area in Areas(formula))
+        {
+            columns += ColumnNumber(area.EndColumn) - ColumnNumber(area.Column) + 1;
+            rows += area.EndRow - area.Row + 1;
+
+            firstColumn ??= area.Column;
+            if (firstRow < 0) firstRow = area.Row;
+        }
+
+        if (firstColumn is null || firstRow < 0) return null;
+
+        // LabelOrigin_SHORT_SIDE: label along whichever side is shorter, and nothing at all when
+        // the two are equal.
+        if (rows > columns) return "Column " + firstColumn;
+        if (columns > rows) return "Row " + firstRow.ToString(CultureInfo.InvariantCulture);
+
+        return null;
+    }
+
+    /// <summary>Every A1 area in a <c>c:f</c>, sheet qualifiers and unions included.</summary>
+    /// <remarks>
+    /// <para>
+    /// <c>AccumulateRangeSize</c> walks the token list a formula parsed into; this reads the same
+    /// areas straight out of the text, which is all the two figures it feeds need. A reference
+    /// this cannot read contributes nothing, exactly as an unresolvable token does.
+    /// </para>
+    /// <para>
+    /// The sheet qualifier is cut off before the pattern runs, because a name such as
+    /// <c>Q1Data</c> reads as the cell <c>Q1</c> otherwise. A union's members are separated at the
+    /// commas the file writes them with.
+    /// </para>
+    /// </remarks>
+    private static IEnumerable<(string Column, int Row, string EndColumn, int EndRow)> Areas(
+        string formula)
+    {
+        foreach (string member in formula.Trim('(', ')').Split(','))
+        {
+            int qualifier = member.LastIndexOf('!');
+            string area = qualifier >= 0 ? member[(qualifier + 1)..] : member;
+
+            foreach ((string, int, string, int) found in AreasIn(area)) yield return found;
+        }
+    }
+
+    /// <summary>The areas in one member of a union, its sheet qualifier already cut off.</summary>
+    private static IEnumerable<(string Column, int Row, string EndColumn, int EndRow)> AreasIn(
+        string area)
+    {
+        foreach (Match match in AreaPattern.Matches(area))
+        {
+            string column = match.Groups[1].Value.ToUpperInvariant();
+            string endColumn = match.Groups[3].Success
+                ? match.Groups[3].Value.ToUpperInvariant()
+                : column;
+
+            if (!int.TryParse(
+                    match.Groups[2].Value, NumberStyles.None, CultureInfo.InvariantCulture,
+                    out int row))
+            {
+                continue;
+            }
+
+            int endRow = row;
+            if (match.Groups[4].Success
+                && !int.TryParse(
+                    match.Groups[4].Value, NumberStyles.None, CultureInfo.InvariantCulture,
+                    out endRow))
+            {
+                continue;
+            }
+
+            yield return (column, row, endColumn, endRow);
+        }
+    }
+
+    /// <summary>One A1 area: <c>$B$6</c> or <c>$B$6:$C$11</c>, dollars optional.</summary>
+    private static readonly Regex AreaPattern = new(
+        @"\$?([A-Za-z]{1,3})\$?([0-9]{1,7})(?::\$?([A-Za-z]{1,3})\$?([0-9]{1,7}))?",
+        RegexOptions.CultureInvariant);
+
+    /// <summary>A column letter's 1-based number.</summary>
+    private static int ColumnNumber(string letters)
+    {
+        int number = 0;
+
+        foreach (char letter in letters)
+            number = (number * 26) + (letter - 'A' + 1);
+
+        return number;
+    }
+
+    /// <summary>
+    /// A series' name: its live cells where the caller can reach them, else its cached points.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>A <c>c:tx/c:strRef</c> need not carry a <c>c:strCache</c> at all</strong>, and a
+    /// reader that only looks at the cache then leaves the series unnamed — which drops the
+    /// <em>whole legend</em>, because a legend is built from the entries that have a name.
+    /// Measured on <c>microsoft_learn_multi_chart_examples.xlsx</c>, whose five charts state
+    /// <c>&lt;tx&gt;&lt;strRef&gt;&lt;f&gt;'Examples'!B4&lt;/f&gt;&lt;/strRef&gt;&lt;/tx&gt;</c>
+    /// and no cache anywhere in the part: the reference draws <c>Product A/B/C</c> beside its
+    /// line, column and area charts and we drew no legend on any of the three.
+    /// </para>
+    /// <para>
+    /// The order is <see cref="ReadSequence"/>'s and for the same reason — the <c>c:f</c> wins and
+    /// the cache is the fallback, because <c>ExcelChartConverter::createDataSequence</c> resolves
+    /// the formula and falls back to the cached data only when there is no formula
+    /// (<c>sc/source/filter/oox/excelchartconverter.cxx:76-105</c>). With no resolver, which is
+    /// every host but Calc, this is exactly the cache-only reader it was.
+    /// </para>
+    /// <para>
+    /// Several cells join with one space, which is <see cref="DrawingChartText.Label"/>'s rule and
+    /// <c>datasourceconverter.cxx:50-73</c>'s.
+    /// </para>
+    /// </remarks>
+    private static string? SeriesName(XElement? tx, ChartRangeResolver? ranges)
+    {
+        if (tx is null) return null;
+
+        if (ranges is not null && FormulaOf(tx) is { } formula && ranges(formula) is { } live)
+        {
+            System.Text.StringBuilder joined = new();
+
+            foreach (string? cell in live.Text)
+            {
+                if (cell is not { Length: > 0 }) continue;
+                if (joined.Length > 0) joined.Append(' ');
+                joined.Append(cell);
+            }
+
+            if (joined.Length > 0) return joined.ToString();
         }
 
         return DrawingChartText.Label(tx);
@@ -2467,6 +2930,25 @@ public static class DrawingChartPlot
     {
         if (source is null) return ([], []);
 
+        // A multi-level cache before *everything*, the resolver included, and that ordering is
+        // the whole of this branch.
+        //
+        // <strong>A c:multiLvlStrRef's c:f names a rectangle, and the resolver hands back its
+        // cells as one flat run.</strong> The reference does not read them that way:
+        // ExplicitCategoriesProvider builds one category per *row* and stacks the columns as the
+        // levels of its label, so a two-column, eight-row range is eight categories with a
+        // two-line name each — not sixteen categories. ChartRangeValues carries no shape, so the
+        // rectangle cannot be recovered from it, and the c15-free c:multiLvlStrCache Excel wrote
+        // is the only source in the file that states the level structure at all.
+        //
+        // Measured on 040_Blood_pressure_tracker_872b6833.xlsx, whose c:cat is
+        // 'BLOOD PRESSURE DATA'!$C$12:$D$19 with an eight-point, two-level cache: resolving the
+        // range gave sixteen categories — AM, 11/6/2022, PM, 11/6/2022, … — so the axis drew
+        // sixteen slots of which eight were empty and every label was a level rather than a
+        // category. The reference draws eight, each reading AM (or PM) over its date.
+        if (Child(Child(source, "multiLvlStrRef"), "multiLvlStrCache") is { } levelled)
+            return ReadMultiLevel(levelled);
+
         // An *empty* resolved sequence is a real answer — a range every cell of which is an
         // Excel table's totals row — and must not fall through to the cache. See
         // ChartRangeResolver for the two states a resolver distinguishes.
@@ -2475,13 +2957,6 @@ public static class DrawingChartPlot
         {
             return ([.. live.Text], [.. live.Numbers]);
         }
-
-        // A multi-level cache before the flat ones, because it must not be walked as one: its
-        // c:lvl elements each restart at idx 0 and the flat walk below lets every level overwrite
-        // the one before it, so the last level written wins and a three-level category comes out
-        // as its outermost level alone.
-        if (Child(Child(source, "multiLvlStrRef"), "multiLvlStrCache") is { } levelled)
-            return ReadMultiLevel(levelled);
 
         XElement? cache =
             Child(Child(source, "strRef"), "strCache")
@@ -2516,6 +2991,66 @@ public static class DrawingChartPlot
         }
 
         return (text, numbers);
+    }
+
+    /// <summary>
+    /// The levels of a complex category axis, innermost first, or null when there is one level.
+    /// </summary>
+    /// <remarks>
+    /// One entry per category per level, in the file's own order — Excel writes <c>c:lvl</c>
+    /// innermost first and <c>VCartesianAxis</c> draws level zero nearest the axis line, so no
+    /// reversal happens here. A point the cache does not state stays null, which
+    /// <see cref="ChartPlot.CategoryLevels"/> reads as a continuation of the run above it.
+    /// <para>
+    /// Taken from the first series that states one. A chart's series share a category axis, and
+    /// the ones that state a <c>c:cat</c> at all state the same rectangle.
+    /// </para>
+    /// </remarks>
+    private static List<IReadOnlyList<string?>>? CategoryLevelsOf(XElement plotArea)
+    {
+        foreach (XElement group in plotArea.Elements())
+        {
+            if (group.Name.NamespaceName != OoxmlNamespaces.DrawingMLChart) continue;
+
+            foreach (XElement series in group.Elements(Name("ser")))
+            {
+                if (Child(Child(Child(series, "cat"), "multiLvlStrRef"), "multiLvlStrCache")
+                    is not { } cache)
+                {
+                    continue;
+                }
+
+                int declared = Drawing.Number(Child(cache, "ptCount"), "val") ?? -1;
+                if (declared < 0)
+                {
+                    foreach (XElement point in cache.Descendants(Name("pt")))
+                        declared = Math.Max(declared, (Drawing.Number(point, "idx") ?? -1) + 1);
+                }
+
+                int count = Math.Clamp(declared, 0, MaxPointCount);
+                if (count == 0) continue;
+
+                List<IReadOnlyList<string?>> levels = [];
+                foreach (XElement level in cache.Elements(Name("lvl")))
+                {
+                    string?[] texts = new string?[count];
+                    foreach (XElement point in level.Elements(Name("pt")))
+                    {
+                        int index = Drawing.Number(point, "idx") ?? -1;
+                        if (index < 0 || index >= count) continue;
+
+                        string value = Child(point, "v")?.Value ?? string.Empty;
+                        if (value.Length > 0) texts[index] = value;
+                    }
+
+                    levels.Add(texts);
+                }
+
+                return levels.Count > 1 ? levels : null;
+            }
+        }
+
+        return null;
     }
 
     /// <summary>

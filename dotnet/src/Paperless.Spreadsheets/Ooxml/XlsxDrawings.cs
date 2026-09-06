@@ -180,7 +180,7 @@ internal static class XlsxDrawings
             To = Point(Child(anchor, DrawingNamespace, "to")),
             Extent = extent,
             Position = Position(Child(anchor, DrawingNamespace, "pos")),
-            Parts = Parts(anchored, transform),
+            Parts = Parts(anchored, transform, package, images),
         };
 
         // Each shape kind wraps its cNvPr in a differently named non-visual container, and they
@@ -225,9 +225,21 @@ internal static class XlsxDrawings
         // does — so the element is looked up in the spreadsheet drawing namespace and everything
         // inside it in the main one.
         if (shape is not null && Child(shape, DrawingNamespace, "txBody") is { } body
-            && ShapeText(body, fonts) is { IsEmpty: false } shapeText)
+            && ShapeText(body, fonts, StyleFace(shape, fonts)) is { IsEmpty: false } shapeText)
         {
-            drawing = drawing with { Text = shapeText };
+            // The preset the text is laid out inside, which is not the same rectangle as the
+            // anchor: see `SheetShapeText.Preset`.
+            XElement? geometry = Child(
+                Child(shape, DrawingNamespace, "spPr"), MainNamespace, "prstGeom");
+
+            drawing = drawing with
+            {
+                Text = shapeText with
+                {
+                    Preset = Attribute(geometry, "prst"),
+                    Adjustments = Adjustments(geometry),
+                },
+            };
         }
 
         // A shape carries no image and no chart, so it reaches the print area and stops there.
@@ -424,7 +436,8 @@ internal static class XlsxDrawings
     /// <c>oox/source/drawingml/theme.cxx:71</c>).
     /// </para>
     /// </remarks>
-    private static SheetShapeText ShapeText(XElement body, DrawingFontScheme? fonts)
+    private static SheetShapeText ShapeText(
+        XElement body, DrawingFontScheme? fonts, string? styleFace)
     {
         XElement? properties = Child(body, MainNamespace, "bodyPr");
 
@@ -434,7 +447,8 @@ internal static class XlsxDrawings
             XElement? paragraphProperties = Child(paragraph, MainNamespace, "pPr");
             XElement? defaults = Child(paragraphProperties, MainNamespace, "defRPr");
             Length inherited = Points(defaults) ?? SheetShapeText.DefaultSize;
-            string? inheritedFamily = Family(defaults, fonts);
+            string? inheritedFamily = Family(defaults, fonts) ?? styleFace;
+            bool inheritedBold = Bold(defaults) ?? false;
 
             List<SheetShapeRun> runs = [];
             foreach (XElement run in paragraph.Elements(XName.Get("r", MainNamespace)))
@@ -446,7 +460,8 @@ internal static class XlsxDrawings
                 runs.Add(new SheetShapeRun(
                     text,
                     Points(runProperties) ?? inherited,
-                    Family(runProperties, fonts) ?? inheritedFamily));
+                    Family(runProperties, fonts) ?? inheritedFamily,
+                    Bold(runProperties) ?? inheritedBold));
             }
 
             // A paragraph with nothing in it still occupies a line, and `a:endParaRPr` is what
@@ -460,7 +475,8 @@ internal static class XlsxDrawings
                 runs.Add(new SheetShapeRun(
                     string.Empty,
                     Points(ending) ?? inherited,
-                    Family(ending, fonts) ?? inheritedFamily));
+                    Family(ending, fonts) ?? inheritedFamily,
+                    Bold(ending) ?? inheritedBold));
             }
 
             // `a:br` is a line break inside a paragraph. Splitting the paragraph at one gives the
@@ -522,6 +538,79 @@ internal static class XlsxDrawings
         return fonts is { } scheme ? scheme.Resolve(stated) : (stated[0] == '+' ? null : stated);
     }
 
+    /// <summary>
+    /// The face a shape's <c>xdr:style/a:fontRef</c> names, or null when it names none.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>A shape's style reference is where most text boxes get their face, and every run in
+    /// them states none.</strong> <c>a:fontRef idx="minor"</c> means "the theme's minor font", and
+    /// <c>Shape::createAndInsert</c> applies it to the shape's text before any run property is
+    /// (<c>oox/source/drawingml/shape.cxx</c>, the <c>maShapeStyleRefs</c> walk). Without it a box
+    /// authored by Excel — which writes the reference and no <c>a:latin</c> anywhere — falls
+    /// through to the drawing layer's own default and is drawn in Liberation Serif where the
+    /// reference draws Carlito.
+    /// </para>
+    /// <para>
+    /// Measured on 26.2.4.2: <c>Air_Boss_Master_List.xlsx</c>'s note box states
+    /// <c>&lt;a:fontRef idx="minor"&gt;</c> against a Calibri theme and nothing else, and the
+    /// reference draws it in Carlito-Bold.
+    /// </para>
+    /// </remarks>
+    private static string? StyleFace(XElement shape, DrawingFontScheme? fonts)
+        => fonts is { } scheme
+           && Child(shape, DrawingNamespace, "style") is { } style
+           && Child(style, MainNamespace, "fontRef") is { } reference
+            ? scheme.ForReference(reference.Attribute("idx")?.Value, "latin")
+            : null;
+
+    /// <summary>
+    /// The adjustment values a shape states for its preset, by guide name, or null for none.
+    /// </summary>
+    /// <remarks>
+    /// <c>a:avLst/a:gd</c> states them as <c>fmla="val N"</c>, in the preset's own units — a
+    /// hundred-thousandth of the shape for a fraction, a sixtieth of a degree for an angle — and
+    /// the evaluator wants the bare number. Anything that is not a <c>val</c> is skipped rather
+    /// than guessed at, which leaves the preset's own default in force.
+    /// </remarks>
+    private static Dictionary<string, double>? Adjustments(XElement? geometry)
+    {
+        if (Child(geometry, MainNamespace, "avLst") is not { } list) return null;
+
+        Dictionary<string, double> values = [];
+        foreach (XElement guide in list.Elements(XName.Get("gd", MainNamespace)))
+        {
+            if (guide.Attribute("name")?.Value is not { Length: > 0 } name) continue;
+            if (guide.Attribute("fmla")?.Value is not { Length: > 4 } formula) continue;
+            if (!formula.StartsWith("val ", StringComparison.Ordinal)) continue;
+
+            if (double.TryParse(
+                    formula.AsSpan(4).Trim(),
+                    NumberStyles.Float,
+                    CultureInfo.InvariantCulture,
+                    out double value))
+            {
+                values[name] = value;
+            }
+        }
+
+        return values.Count == 0 ? null : values;
+    }
+
+    /// <summary>A run's <c>b</c>, or null where it states none and inherits.</summary>
+    /// <remarks>
+    /// Three spellings, because DrawingML's boolean is an <c>xsd:boolean</c> and all of them
+    /// appear in the corpus. Absent is not false: it means "take what the paragraph or the body
+    /// said", which is why this answers null rather than defaulting here.
+    /// </remarks>
+    private static bool? Bold(XElement? properties)
+        => properties?.Attribute("b")?.Value switch
+        {
+            "1" or "true" or "on" => true,
+            "0" or "false" or "off" => false,
+            _ => null,
+        };
+
     /// <summary>A run's <c>sz</c>, in hundredths of a point, or null where it states none.</summary>
     private static Length? Points(XElement? properties)
         => properties?.Attribute("sz")?.Value is { } text
@@ -561,7 +650,11 @@ internal static class XlsxDrawings
     /// alone is the smaller error than pretending the two add.
     /// </para>
     /// </remarks>
-    private static List<SheetDrawingPart> Parts(XElement? shape, XElement? transform)
+    private static List<SheetDrawingPart> Parts(
+        XElement? shape,
+        XElement? transform,
+        OpcPackage package,
+        Dictionary<string, OpcXml.Relationship> images)
     {
         if (shape is null || transform is null) return [];
 
@@ -599,12 +692,14 @@ internal static class XlsxDrawings
             {
                 if (own is null) return;
 
-                parts.Add(new SheetDrawingPart(
-                    (x - frameX) / frameWidth,
-                    (y - frameY) / frameHeight,
-                    width / frameWidth,
-                    height / frameHeight,
-                    Degrees(own)));
+                parts.Add(Painted(
+                    container, package, images,
+                    new SheetDrawingPart(
+                        (x - frameX) / frameWidth,
+                        (y - frameY) / frameHeight,
+                        width / frameWidth,
+                        height / frameHeight,
+                        Degrees(own))));
                 return;
             }
 
@@ -638,6 +733,73 @@ internal static class XlsxDrawings
                     depth + 1);
             }
         }
+    }
+
+    /// <summary>
+    /// A part with whatever picture its leaf shape holds, or the part unchanged when it holds none.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>A picture inside an <c>xdr:grpSp</c> was read for its bounds and never drawn.</strong>
+    /// <see cref="ReadAnchor"/> looks for an <c>xdr:pic</c> directly under the anchor; a group is
+    /// none, so the anchor came back with no image, no vector, no chart and no text, and
+    /// <see cref="Layout.SheetPageGraphics"/> skipped it — while
+    /// <see cref="Layout.SheetDrawingArea"/> still counted it, so the group widened the printed
+    /// block and put nothing in it. Calc makes no such distinction:
+    /// <c>GroupShapeContext::createShapeContext</c> takes <c>sp</c>, <c>cxnSp</c>, <c>grpSp</c>,
+    /// <c>graphicFrame</c> and <c>pic</c> alike (<c>sc/source/filter/oox/drawingfragment.cxx:198</c>)
+    /// and every leaf ends up on the drawing layer.
+    /// </para>
+    /// <para>
+    /// Measured on <c>SIL_TDB648.xlsx</c>: its eleven sheet drawings hold one group each, of
+    /// fourteen turned, faded copies of the same <c>Honeywell</c> wordmark. <c>pdfimages -list</c>
+    /// counts that image on 86 of the reference's 88 pages and on <b>none</b> of our 90.
+    /// </para>
+    /// <para>
+    /// Only a picture is read here. A leaf <c>xdr:sp</c>'s fill, outline and text body are a
+    /// separate question — <see cref="Layout.SheetDrawing"/> carries one of each for the whole
+    /// anchor and a group has many — and reading them would need the model to grow rather than the
+    /// part.
+    /// </para>
+    /// </remarks>
+    private static SheetDrawingPart Painted(
+        XElement leaf,
+        OpcPackage package,
+        Dictionary<string, OpcXml.Relationship> images,
+        SheetDrawingPart part)
+    {
+        if (leaf.Name.LocalName != "pic") return part;
+
+        XElement? blipFill = Child(leaf, DrawingNamespace, "blipFill");
+        XElement? blip = Child(blipFill, MainNamespace, "blip");
+        if (blip is null) return part;
+
+        BlipReference.Choice choice = BlipReference.Choose(blip);
+        DrawingBlipFill? fill = DrawingFill.ReadBlip(blipFill);
+
+        (RasterImage? raster, Lazy<VectorImage>? vector) =
+            LoadImage(package, images, choice.RelationshipId);
+
+        // The `svgBlip` case: the vector is what to draw and the raster beside it is the fallback,
+        // so an empty decode still leaves a picture. The same choice `ReadAnchor` makes.
+        if (choice.IsVector && choice.FallbackRelationshipId is { } fallback)
+        {
+            (raster, _) = LoadImage(package, images, fallback);
+        }
+
+        if (raster is null && vector is null) return part;
+
+        return part with
+        {
+            Image = vector is null ? KnockedOut(fill, raster) : raster,
+            Vector = vector,
+            Opacity = fill?.Opacity ?? 1,
+            Crop = fill is null || fill.SourceRect.IsWhole
+                ? PictureCropFractions.None
+                : new PictureCropFractions(
+                    fill.SourceRect.Left, fill.SourceRect.Top,
+                    fill.SourceRect.Right, fill.SourceRect.Bottom),
+        };
     }
 
     /// <summary>How far a transform turns its shape clockwise, in degrees.</summary>

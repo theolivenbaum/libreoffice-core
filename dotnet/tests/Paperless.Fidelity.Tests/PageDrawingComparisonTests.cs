@@ -28,6 +28,31 @@ namespace Paperless.Fidelity.Tests;
 /// and the measurement separately, which is what makes a failure diagnosable.
 /// </para>
 /// </remarks>
+// [2026-09-06, diagnosed, left failing on purpose] EveryLineIsDrawnWhereLibreOfficeDrawsIt fails
+// on all four formats, identically, and it is **not** an advance divergence. `Close(right)` compares
+// our exact run extent against poppler's reconstruction of the reference's pen from the PDF's own
+// declared widths, and LibreOffice writes those as **truncated integer thousandths of an em**:
+// `registerGlyph` records `XUnits(upem, width)`, which is `(n * 1000) / nUPEM`
+// (`vcl/inc/fontsubset.hxx`:29) — integer division — and `drawHorizontalGlyphs`
+// (`vcl/source/pdf/pdfwriter_impl.cxx`:5814) corrects a gap only when
+// `trunc(declared - actual*1000/ppem + 0.5)` is non-zero, which a systematic sub-unit deficit never
+// makes it. Measured over every glyph of this document's two subsets, every declared width is
+// `floor(hmtx * 1000 / upem)` in both binaries, mean deficit 0.567 and 0.655 thousandths of an em.
+//
+// Line 1 is 100 glyphs of 11 pt Carlito, and Sum(exact - floor) over exactly those glyphs is
+// **0.461 pt**. Measured widths: ours 459.573, 24.2.7.2 459.239, 26.2.4.2 458.953. So the 0.520 pt
+// this note used to report is that deficit, and it had the two sides the wrong way round — **ours is
+// 530.423 and the reference 529.903**, not the reverse.
+//
+// The channel's resolution here is `glyphs x 0.5/1000 em x size` = **0.55 pt, above this file's
+// 0.5 pt tolerance**. Nothing in our layout can close that: measured through the reference's own
+// `Td` pen instead, over 5 faces x 6 units x up to 11 sizes, our laid-out widths agree with both
+// binaries to 0.011% (`probes/advance-ppem/`). Only writing our PDF with LibreOffice's truncated
+// integer widths would move this number, and that is making our output worse to make a test
+// greener. Do not widen the tolerance either; the figure sitting over it is the record.
+//
+// The line *count* and the word sequence are asserted before any position and they pass, on all
+// four formats — which is the check that says the layouts agree where it matters.
 public sealed class PageDrawingComparisonTests : IDisposable
 {
     /// <summary>
@@ -64,7 +89,7 @@ public sealed class PageDrawingComparisonTests : IDisposable
     [InlineData("paginated.rtf")]
     public void EveryLineIsDrawnWhereLibreOfficeDrawsIt(string fileName)
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         string path = Corpus.Require(fileName);
 
@@ -109,7 +134,7 @@ public sealed class PageDrawingComparisonTests : IDisposable
     [InlineData("paginated.docx")]
     public void BaselinesFallOnLibreOfficesLinePitch(string fileName)
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         string path = Corpus.Require(fileName);
 

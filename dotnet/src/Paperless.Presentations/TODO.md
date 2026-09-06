@@ -96,6 +96,35 @@ reference's 393, exactly 52 bullets, now 393 against 393.
 
 ## Document model
 
+- **[DONE] An ODF shape in text-path mode is drawn as warped outlines, on the Impress side.**
+  ODF is the format LibreOffice's Fontwork model is native to and it shows in how little there is
+  to read: `draw:type` is the type name `FontworkPresets` is already keyed by, `draw:modifiers` is
+  already in the 21600 viewbox the tables use, and `draw:text-path-scale` is `TextPathScaleX`
+  outright — where the DrawingML filter has to map, convert and derive all three
+  (`oox/source/drawingml/fontworkhelpers.cxx:95-179`). `OdfFontwork` reads it and `OdpSlideLayout`
+  replaces the shape with the curves, as `PptxSlideLayout` already did.
+
+  **Zero corpus reach, and it is worth being exact about why**: the 945-document corpus holds no
+  OpenDocument file of *any* kind, so the gate structurally cannot see this path. Measured instead
+  on `FAAAIandtheArtandScienceofV&Vfinal.pptx` converted to `.odp` by 26.2.4.2, whose eight arch
+  labels are genuine ODF fontwork — 100 dpi mean ink against that reference, slide 13 **8.63 →
+  5.06**, slide 14 **7.32 → 3.74**, whole deck 8.699 → 8.461, extracted words 1289 → 1213 against
+  the reference's 1219. Before the change the labels were laid out as flat overlapping text, which
+  is worse than drawing nothing.
+
+  Two things left undone, with their reasons:
+
+  - **`draw:text-path-same-letter-heights` is not implemented.** It is honoured at
+    `EnhancedCustomShapeFontWork.cxx:488`, LibreOffice writes it only when true, and nothing
+    measured sets it — not the corpus, which has no ODF, and not any of its five binary Escher
+    WordArt shapes, every one of which leaves bit 0x80 of `DFF_Prop_gtextFStrikethrough` clear.
+  - **The Writer ODF side is untouched, because fontwork is not its gap.** `OdfFrames.Read` takes
+    a frame's text only from a `draw:text-box` and reads no geometry for a `draw:custom-shape`, so
+    on the 41-preset fixture converted to `.odt` every one of the 41 shapes draws nothing at all —
+    not even the unwarped one's text. Warping into frames that draw nothing and are the wrong
+    height would be building a leaf of a missing branch. Write-up in
+    `dotnet/probes/odf-fontwork/results.md`.
+
 - [ ] Slides, layouts, masters, notes pages, handouts. **Slides are done**; a notes page and a
       handout are separate page kinds and neither is produced.
 - [x] Shape tree: rectangles, paths, groups, placeholders and pictures, in document order, which
@@ -802,10 +831,10 @@ Two reference artefacts worth knowing before chasing them:
 - [x] Solid fills, including themed ones, and lines with width, cap and join. Drop shadows too,
       as a hard-edged offset copy — see the shadow note below for what blur costs.
 - [x] **Gradient fills**, for both formats: `a:gradFill` and `draw:gradient`, linear, axial,
-      radial, elliptical and rectangular. `Layout/SlideGradients.cs` holds the geometry, which is
-      LibreOffice's rather than either format's — both importers converge on `basegfx::BGradient`
-      and everything that decides where the ends land happens after that. See **Two gradient
-      conventions that are invisible except in colour** below.
+      radial, elliptical and rectangular. `Paperless.Core`'s `Graphics/GradientGeometry.cs` holds
+      the geometry, which is LibreOffice's rather than either format's — both importers
+      converge on `basegfx::BGradient` and everything that decides where the ends land happens
+      after that. See **Two gradient conventions that are invisible except in colour** below.
 - [x] **Bitmap fills**, tiled or stretched: `a:blipFill` and `draw:fill="bitmap"`. A tile's size
       is the picture's *natural* size scaled by `a:tile/@sx`, so the reader has to know how large
       a picture is without decoding it — twenty bytes of header, in `Layout/SlideImages.cs`.
@@ -1467,7 +1496,7 @@ against the reference PDF's own `rg` operators. The colour map comes from the sl
       (`lineproperties.cxx:91-140`) — so a faithful port has to reproduce the guessing as well as
       the folding, and nothing in the corpus carries one.
 - [x] **Arrowheads.** `a:headEnd`/`a:tailEnd`, all five marker types, in
-      `Layout/SlideLineEnds.cs`. A marker is a *filled polygon* beside the shaft rather than a
+      `Paperless.Core`'s `Graphics/LineEnds.cs`. A marker is a *filled polygon* beside the shaft rather than a
       property of the stroke, which is why the display list needed no new record.
 - [ ] **Compound lines.** `cmpd="dbl"`, `"thickThin"`, `"tri"`. A double line is two strokes with
       a gap, and the widths are fractions of the stated one; nothing in the corpus carries one.
@@ -1555,7 +1584,7 @@ Two more, smaller, both from `initEllipticalGradientInfo` and `init1DGradientInf
   gradient's corners flat.
 - `draw:border` shortens the ramp rather than shifting it, and which end it holds depends on which
   end the format put first — so after the ODF swap a centred gradient's border is at the far end
-  of the stop list. `SlideGradients.WithBorder` takes that as a parameter for exactly that reason.
+  of the stop list. `GradientGeometry.WithBorder` takes that as a parameter for exactly that reason.
 
 ### A tile's size needs the picture's size, and the picture must not be decoded
 
@@ -2631,14 +2660,42 @@ which is the honest state of them.
       fill it is told is opaque — but the same shape renders differently in the two formats,
       which is the sharpest kind of evidence there is. The slides corpus holds no `.odp`, so
       this cannot be measured there; the feature corpus can.
-- [ ] **`a:prstTxWarp` is not read, and it is narrower than it looks.** The attribute appears on
-      39 of the 112 corpus `pptx` decks, 722 times — which reads as a wide gap and is not one:
-      **709 of those are `textNoShape`**, the identity, and 3 more are `textPlain`. Only ten
-      occurrences bend anything, across two decks: `FAAAIandtheArtandScienceofV&Vfinal.pptx`
-      (eight, `textArchUp`/`textArchDown` round a dial, and the reason it scores 1201 words
-      against 1145 — the labels are laid straight, wrap, and collide) and
-      `redac-sas-201403-ppt-portfolio-rev-sim.pptx` (two). Worth doing for the shape of the
-      feature rather than for its reach; read the count before budgeting for it.
+- [x] **`a:prstTxWarp` is read and drawn, and it was narrower than it looked.** The attribute
+      appears on 39 of the 112 corpus `pptx` decks, 722 times — which reads as a wide gap and is not
+      one: **709 of those are `textNoShape`**, the identity, and 3 more are `textPlain`. Only ten
+      occurrences bend anything, across two decks. `SlideFontwork` now builds the warped outlines
+      through `Paperless.Ooxml.DrawingML.Fontwork` and *replaces the shape* with them, which is what
+      `EnhancedCustomShapeEngine::render2` does — so the box, its own fill, its pen and its shadow
+      all go, and the fill comes from the first non-empty run's character properties
+      (`lcl_copyCharPropsToShape`, `oox/source/drawingml/shape.cxx:721-905`). That last part is not
+      a detail: every one of `FAAAIandtheArtandScienceofV&Vfinal.pptx`'s dial labels states
+      `<a:noFill/>` on the shape and a white `a:solidFill` on the run, so taking the shape's fill
+      would draw nothing at all.
+
+      Measured, 100 dpi mean absolute grey difference against 26.2.4.2:
+
+      | | page | before | after |
+      |---|---|---:|---:|
+      | `FAAAIandtheArtandScienceofV&Vfinal.pptx` | 13 | 3.05 | **2.18** |
+      | | 14 | 2.16 | **1.29** |
+      | `redac-sas-201403-ppt-portfolio-rev-sim.pptx` | 6 | 5.83 | **5.81** |
+      | | 7 | 3.73 | **3.47** |
+
+      Page 13's ink is now 19.34 against the reference's 19.34. No word moved on either deck,
+      because the slides side already drew nothing for a warped body.
+
+      Two arms of the reference are reached by exactly one shape between them and are implemented
+      anyway, because the alternative is a visibly wrong page rather than a slightly wrong one: the
+      per-preset vertical anchor (`shape.cxx:863-874`) and the parallel-rail placement for a
+      multi-line "follow path" warp (`EnhancedCustomShapeFontWork.cxx:801-970`). The shape is the
+      two-line `Automation / Autonomy` label on slides 13 and 14 of the FAA deck.
+
+      **What is still not drawn**: the four `*Pour` presets and the two `textRing*` ones, whose
+      geometry uses `ANGLEELLIPSE` and a radius handle rather than the four opcodes
+      `FontworkGeometry` decodes, and any warp set in a face with no `glyf` outlines. No corpus
+      document is either. Both fall back to drawing nothing, and the words side now falls back the
+      same way, so the two families agree.
+
 - [ ] **A wrapped line is one glyph shorter here than in the reference.** LibreOffice draws the
       space a line broke at as part of that line's run; the shared layouter stops at the last
       *visible* character (`LineBox.VisibleEnd`). Nothing is visibly missing — it is a space at

@@ -139,7 +139,7 @@ public sealed class ParagraphLayoutComparisonTests : IDisposable
     /// </summary>
     private void AssertPitch(string spacingAttribute, LineSpacingRule rule)
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         string? fontPath = FindFont("Carlito-Regular.ttf");
         Assert.SkipWhen(fontPath is null, "Carlito is not installed; see check-env.sh");
@@ -187,7 +187,7 @@ public sealed class ParagraphLayoutComparisonTests : IDisposable
     public void IndentsPutLinesWhereWriterDoes(
         string attributes, double startIndentMm, double firstLineIndentMm)
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         string? fontPath = FindFont("Carlito-Regular.ttf");
         Assert.SkipWhen(fontPath is null, "Carlito is not installed; see check-env.sh");
@@ -227,7 +227,7 @@ public sealed class ParagraphLayoutComparisonTests : IDisposable
     [InlineData("center", TextAlignment.Centre)]
     public void AlignmentPutsLinesWhereWriterDoes(string odfAlignment, TextAlignment alignment)
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         string? fontPath = FindFont("Carlito-Regular.ttf");
         Assert.SkipWhen(fontPath is null, "Carlito is not installed; see check-env.sh");

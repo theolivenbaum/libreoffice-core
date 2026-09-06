@@ -221,6 +221,213 @@ public sealed record PageFrame
     /// </remarks>
     public Margins Spacing { get; init; }
 
+    /// <summary>
+    /// The room an as-character drawing's effects need beyond its extent, from <c>wp:effectExtent</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A shadow, a glow or a fat stroke paints outside the <c>wp:extent</c> the file states, and
+    /// <c>wp:effectExtent</c> is how much on each side. For a <c>wp:inline</c> LibreOffice folds it
+    /// straight into the object's own margins — <c>GraphicImport.cxx</c>:1036-1055, guarded by
+    /// <c>IMPORT_AS_DETECTED_INLINE</c> and a zero rotation, and commented there
+    /// <em>"EffectExtent contains all needed additional space, including fat stroke and shadow. Simple
+    /// add it to the margins."</em> Those margins are then part of the portion Writer hangs on the line:
+    /// <c>SwFlyCntPortion::SetBase</c> sizes itself from
+    /// <c>SwAsCharAnchoredObjectPosition::GetObjBoundRectInclSpacing()</c>, which is the object's
+    /// rectangle enlarged by its spacing.
+    /// </para>
+    /// <para>
+    /// So it grows the line rather than the drawing, which is why it is a margin here and not folded
+    /// into <see cref="Size"/> — the shape is still painted at the size the file gives it.
+    /// </para>
+    /// <para>
+    /// Measured against both installed references, which agree to the twip on every fixture, in
+    /// <c>dotnet/probes/words-inline-effectextent/</c>. One 50.4 pt shape between two text lines, the
+    /// gap between those lines against a zero-extent control: <c>27432</c> EMU adds <strong>4.30 pt</strong>
+    /// (2 x 2.16 rounded to the twip), <c>91440</c> adds <strong>14.40 pt</strong> (2 x 7.2) and
+    /// <c>137160</c> adds <strong>21.60 pt</strong> (2 x 10.8). A top-only extent and a bottom-only
+    /// extent each add half of that, so the two edges are independent and additive.
+    /// </para>
+    /// <para>
+    /// Empty for a <c>wp:anchor</c>. LibreOffice does fold the extent into a floating drawing's wrap
+    /// margins as well, by a different and much longer route; the note on <see cref="Spacing"/> records
+    /// why that one is deliberately not read yet.
+    /// </para>
+    /// </remarks>
+    public Margins EffectExtent { get; init; }
+
+    /// <summary>
+    /// How much room the drawing takes on its line: <see cref="Size"/> grown by
+    /// <see cref="EffectExtent"/>, and for a turned drawing the room its <em>turned</em> rectangle
+    /// needs as well.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Upright, this is the box the file states grown by the four extent edges, and the drawing sits
+    /// at its top-left corner plus the left edge — see <see cref="InlineOffset"/>.
+    /// </para>
+    /// <para>
+    /// <strong>Turned, the same two rectangles are both still here and neither is the answer on its
+    /// own.</strong> LibreOffice keeps <em>both</em>: the object it lays out is the turned snap
+    /// rectangle, and the margins round it are the difference between that and the rectangle Word
+    /// reserved — <c>GraphicImport.cxx</c>:1055-1090, which takes Word's base rectangle, applies
+    /// Word's own width/height swap to it, expands it by the effect extent, and sets each margin to
+    /// the signed gap between that and the snap rectangle. The horizontal margins keep their sign and
+    /// the vertical ones are clamped at nought (<c>GraphicImport.cxx</c>:1245-1249, tdf#141880), so
+    /// the room taken comes out as
+    /// </para>
+    /// <list type="bullet">
+    ///   <item><description>across: Word's box, whatever the turn does to the drawing; and</description></item>
+    ///   <item><description>down: the larger of Word's box and the turned one.</description></item>
+    /// </list>
+    /// <para>
+    /// Measured in <c>dotnet/probes/words-inline-rotated-bbox/</c> on a 144 x 50.4 pt black
+    /// rectangle, both installed references identical. Room on the line, in points, against a
+    /// zero-degree control of 144.00 x 50.40:
+    /// </para>
+    /// <list type="table">
+    ///   <item><term>20 deg</term><description>144.00 x <b>96.60</b> — the turned height, Word's width</description></item>
+    ///   <item><term>20 deg, extent 137160</term><description><b>165.60</b> x 96.60 — the extent still grows the width</description></item>
+    ///   <item><term>45 deg</term><description><b>50.40</b> x <b>144.00</b> — the swap, and it beats the turned 137.46</description></item>
+    ///   <item><term>90 deg</term><description>50.40 x 144.00</description></item>
+    ///   <item><term>135 deg</term><description>144.00 x <b>137.46</b> — no swap at 135, so the turned height wins</description></item>
+    ///   <item><term>315 deg</term><description>144.00 x 137.46</description></item>
+    ///   <item><term>20 deg, 144 x 144</term><description>144.00 x <b>184.57</b></description></item>
+    /// </list>
+    /// <para>
+    /// The 45-degree row is the one that settles the shape of the rule: the turned box is
+    /// 137.46 square there, and both references take <b>144.00</b> — Word's swapped height — which
+    /// only a rule that keeps both rectangles can produce.
+    /// </para>
+    /// </remarks>
+    public DocSize InlineExtent
+    {
+        get
+        {
+            DocSize word = WordInlineBox;
+            if (RotationDegrees == 0) return word;
+
+            Length turned = TurnedSize.Height;
+            return new DocSize(word.Width, turned > word.Height ? turned : word.Height);
+        }
+    }
+
+    /// <summary>
+    /// Where the drawing's own rectangle sits inside <see cref="InlineExtent"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Upright it is the extent's <em>left</em> edge and no vertical offset at all, which is not
+    /// symmetrical and is measured: LibreOffice moves an as-character object by both its left and its
+    /// upper spacing (<c>SwAsCharAnchoredObjectPosition::CalcPosition</c>,
+    /// <c>sw/source/core/objectpositioning/ascharanchoredobjectposition.cxx</c>:129-133) and then
+    /// loses the vertical half again wherever the object is a shape carrying a <c>wps:txbx</c>, whose
+    /// TextBox does not follow its draw shape. See <c>FrameLayout.HangInline</c>.
+    /// </para>
+    /// <para>
+    /// Turned, it is a centring in both axes, because the margins that surround a turned object are
+    /// symmetrical by construction — each is half the gap between Word's box and the snap rectangle —
+    /// and the drawing's own rectangle shares its centre with that snap rectangle. Measured on the
+    /// same fixtures, the drawn rectangle's left edge in points against a line starting at 103.50:
+    /// 20 deg <b>99.25</b> (its 152.25 pt turned box centred in Word's 144), 45 deg <b>60.00</b>
+    /// (137.25 centred in the swapped 50.40, so it hangs into the margin), 135 deg <b>106.75</b>.
+    /// </para>
+    /// </remarks>
+    public DocPoint InlineOffset
+    {
+        get
+        {
+            if (RotationDegrees == 0) return new DocPoint(EffectExtent.Left, Length.Zero);
+
+            DocSize box = InlineExtent;
+            return new DocPoint(
+                (box.Width - Size.Width) / 2,
+                (box.Height - Size.Height) / 2);
+        }
+    }
+
+    /// <summary>
+    /// How far below <see cref="InlineOffset"/> the drawing's own ink is painted.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The vertical half of the effect extent, and it moves the <em>drawing</em> without moving the
+    /// text of a <c>wps:txbx</c> — which is why it is not folded into <see cref="InlineOffset"/>,
+    /// whose horizontal half moves both. <see cref="PlacedFrame.Ink"/> carries the measurement that
+    /// establishes the split.
+    /// </para>
+    /// <para>
+    /// Zero for a turned drawing, whose two rectangles are centred in one another instead
+    /// (<see cref="InlineOffset"/>), and zero for everything <see cref="EffectExtent"/> is empty
+    /// for — an anchored drawing, and a plain picture, which LibreOffice converts to a Writer
+    /// graphic object before the margin code can reach it.
+    /// </para>
+    /// </remarks>
+    public Length InlineInkOffset
+        => RotationDegrees == 0 ? EffectExtent.Top : Length.Zero;
+
+    /// <summary>
+    /// The rectangle Word reserved on the line: the stated extent with Word's own width/height swap,
+    /// grown by the effect extent.
+    /// </summary>
+    /// <remarks>
+    /// <c>lcl_doMSOWidthHeightSwap</c> (<c>GraphicImport.cxx</c>:533-548) swaps the two about the
+    /// rectangle's centre when the angle, truncated to whole degrees and taken modulo 180, lands in
+    /// <c>[45, 135)</c>. That half-open interval is the reason 45 degrees and 135 degrees behave
+    /// differently on an oblong, and the fixtures in <see cref="InlineExtent"/> show both.
+    /// </remarks>
+    private DocSize WordInlineBox
+    {
+        get
+        {
+            (Length width, Length height) = SwapsWidthAndHeight
+                ? (Size.Height, Size.Width)
+                : (Size.Width, Size.Height);
+
+            return new DocSize(
+                width + EffectExtent.Left + EffectExtent.Right,
+                height + EffectExtent.Top + EffectExtent.Bottom);
+        }
+    }
+
+    /// <summary>The bounding box of <see cref="Size"/> turned by <see cref="RotationDegrees"/>.</summary>
+    /// <remarks>
+    /// Snapped to the twip, which is the grid LibreOffice's own snap rectangle lives on.
+    /// </remarks>
+    private DocSize TurnedSize
+    {
+        get
+        {
+            double radians = RotationDegrees * Math.PI / 180.0;
+            double across = Math.Abs(Math.Cos(radians));
+            double down = Math.Abs(Math.Sin(radians));
+            double width = Size.Width.Emu;
+            double height = Size.Height.Emu;
+
+            return new DocSize(
+                Twips((width * across) + (height * down)),
+                Twips((width * down) + (height * across)));
+
+            static Length Twips(double emu)
+                => Length.FromTwips(Length.FromEmu((long)Math.Round(emu)).Twips);
+        }
+    }
+
+    /// <summary>Whether Word reserved the drawing's height across the line and its width down it.</summary>
+    private bool SwapsWidthAndHeight
+    {
+        get
+        {
+            if (RotationDegrees == 0) return false;
+
+            // Truncated to whole degrees and then taken modulo 180, both exactly as
+            // `(nMSOAngle / 60000) % 180` does on a `sal_Int32` — so a negative angle stays negative
+            // and never swaps, which is LibreOffice's behaviour rather than a simplification.
+            int degrees = (int)RotationDegrees % 180;
+            return degrees is >= 45 and < 135;
+        }
+    }
+
     /// <summary>Where the anchoring character sits in the paragraph's text, for a character anchor.</summary>
     public int AnchorOffset { get; init; }
 
@@ -329,14 +536,237 @@ public sealed record PageFrame
     /// </remarks>
     public bool BehindText { get; init; }
 
+    /// <summary>
+    /// The anchor's <c>relativeHeight</c> — where this frame sits in the stack, low to high.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A <c>wp:anchor</c> declares its own place in the z order, and it is <em>not</em> the order the
+    /// anchors appear in the document. Painting in document order is therefore wrong whenever a file
+    /// declares them out of order, which real templates do constantly: measured over the five corpus
+    /// documents where the fault showed, all five declare <c>relativeHeight</c> on every anchor and
+    /// <em>none</em> of the five is in document order.
+    /// </para>
+    /// <para>
+    /// The symptom is not subtle and does not look like a z-order fault. A background shape declared
+    /// late paints over content declared early, so the page loses text the renderer did in fact draw:
+    /// <c>045_Visual_Product_Roadmap</c> shows <c>2021</c> at content-stream offset 2473 and fills the
+    /// black box over it at 4180; <c>060_Human_Body_Concept_Map</c> draws the whole slide and then the
+    /// grey ground across all of it. Every pixel metric reports that as missing content.
+    /// </para>
+    /// <para>
+    /// Zero when the anchor does not declare one, which sorts it below anything that does — and since
+    /// the sort is stable, equal values keep document order, which is Word's own tie-break.
+    /// </para>
+    /// <para>
+    /// <strong>It is a <c>long</c> because two different declarations land in it and they do not share
+    /// a range.</strong> DrawingML's <c>relativeHeight</c> is an unsigned 32-bit value; VML's
+    /// <c>z-index</c> is signed, and LibreOffice sorts <em>every</em> shape that declares one above
+    /// <em>every</em> <c>relativeHeight</c> whatever the two numbers are —
+    /// <c>GraphicZOrderHelper::adjustRelativeHeight</c>, <c>sw/source/writerfilter/dmapper/
+    /// GraphicHelpers.cxx:279-330</c>: "in general, all z-index-defined shapes appear on top of
+    /// relativeHeight graphics regardless of the value". <see cref="Ooxml.DocxVmlFrames"/> therefore
+    /// offsets a <c>z-index</c> by 2^32, which is above the whole unsigned range and keeps both
+    /// families' internal ordering intact.
+    /// </para>
+    /// </remarks>
+    public long ZOrder { get; init; }
+
+    /// <summary>
+    /// The shape's <c>a:prstGeom/@prst</c>, or null when it states none and is a plain box.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>A Word document's anchored shapes declare geometry and it was never read.</strong>
+    /// <c>a:prstGeom</c> is resolved on the slide side — <c>PptxSlideLayout</c> feeds it to
+    /// <see cref="Paperless.Ooxml.DrawingML.CustomShapeGeometry"/> — and the DOCX reader consulted
+    /// the same <c>spPr</c> for fill and outline while ignoring the preset, so every shape in a
+    /// Word file was drawn as its bounding rectangle whatever it asked for.
+    /// </para>
+    /// <para>
+    /// The catalogue was never the problem: all 187 presets are in
+    /// <c>PresetShapeGeometry.txt</c>, this side simply did not ask. Six corpus templates showed it
+    /// at once, and they are ordinary business documents rather than exotica: a timeline's
+    /// milestone circles came out as squares (<c>ellipse</c>, 32 uses across the six), a roadmap's
+    /// chevrons as bars (<c>homePlate</c>, 33), plus <c>diamond</c>, <c>rightArrow</c>,
+    /// <c>roundRect</c> and <c>bentConnector3</c>.
+    /// </para>
+    /// </remarks>
+    public string? Preset { get; init; }
+
+    /// <summary>
+    /// The path the shape states outright, in its own coordinates with the origin at its top left,
+    /// or null when it states a preset or nothing.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>a:custGeom</c> — a shape whose guides and paths the file writes out rather than naming.
+    /// It was not read at all on this side, so all <b>124 of them across 21 corpus documents</b>
+    /// were painted as their bounding rectangles. The storyboard templates are where it shows:
+    /// their rings came out as squares and their arrows, being rotated squares, as diamonds.
+    /// </para>
+    /// <para>
+    /// Resolved when the drawing is read rather than when it is drawn, unlike
+    /// <see cref="Preset"/>, because a custom geometry is evaluated from the shape's own guide
+    /// formulae and the shape's extent is known at that point — where a preset is a name that
+    /// costs nothing to carry and is cheapest evaluated once the placed rectangle is in hand.
+    /// </para>
+    /// <para>
+    /// Two paths and not one, because a subpath states whether it is filled and whether it is
+    /// stroked, and every connector is one open subpath saying <c>fill="none"</c>. Filling the
+    /// whole outline of one draws a solid blob where the file states a line.
+    /// </para>
+    /// </remarks>
+    public GraphicsPath? FillOutline { get; init; }
+
+    /// <summary>The part of <see cref="FillOutline"/>'s geometry that is stroked, or null.</summary>
+    /// <remarks>
+    /// Set together with <see cref="FillOutline"/> and never on its own; the two differ only where
+    /// the shape's subpaths state <c>fill="none"</c> or <c>stroke="false"</c>.
+    /// </remarks>
+    public GraphicsPath? StrokeOutline { get; init; }
+
+    /// <summary>The <c>a:avLst</c> values the shape states, by name.</summary>
+    /// <remarks>
+    /// Null when it states none, which is not the same as an empty set: the preset's own defaults
+    /// apply, and they are what make an unadjusted <c>roundRect</c> round rather than square.
+    /// </remarks>
+    public IReadOnlyDictionary<string, double>? Adjustments { get; init; }
+
+    /// <summary>
+    /// How far the shape is turned about its own centre, clockwise, in degrees.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>a:xfrm/@rot</c>, in degrees rather than the file's sixtieths of one. Zero for the great
+    /// majority of frames, which is why it is a plain <c>double</c> rather than something nullable:
+    /// no rotation and a rotation of nothing are the same drawing.
+    /// </para>
+    /// <para>
+    /// The extent is stated <em>unrotated</em> and the rotation is applied about the centre of that
+    /// rectangle, so <see cref="Size"/> is the shape's own width and height whatever this says. It
+    /// is the drawing that turns, not the box: a connector 22 pt wide and nothing tall at 270° is
+    /// still 22 pt long, drawn down the page instead of across it.
+    /// </para>
+    /// <para>
+    /// <b>The wrap is not turned with it.</b> LibreOffice wraps text round a rotated shape's
+    /// enclosing rectangle, which is larger; this still wraps round the stated one. That is visible
+    /// only for a rotated shape that text flows beside, and the corpus's rotated shapes are
+    /// overwhelmingly connectors and arrows inside groups, which wrap through.
+    /// </para>
+    /// </remarks>
+    public double RotationDegrees { get; init; }
+
+    /// <summary>
+    /// How far the frame's own text is turned, clockwise, in degrees — which is not always the
+    /// same as <see cref="RotationDegrees"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>wps:bodyPr/@rot</c> is the angle of the text itself, and it is stated absolutely rather
+    /// than as an addition to the shape's: a shape turned 345° whose body states <c>rot="0"</c>
+    /// carries upright text across a slanting box. Where the body states nothing, the text takes
+    /// the shape's angle, which is the ordinary case of a label turning with the thing it labels.
+    /// </para>
+    /// <para>
+    /// It is not a corner of the schema. <b>Every one of the 112 rotated text-bearing shapes in the
+    /// 271-document corpus states <c>rot="0"</c></b> — 107 plainly and 5 with <c>upright="1"</c>
+    /// beside it — so treating the shape's angle as the text's would have been wrong on all 112.
+    /// The reference settles it too: <c>025_Unit_Circle_Chart_Cos_and_Sin_Model</c> arranges 32
+    /// labels round a circle at 32 different angles and LibreOffice draws every one of them
+    /// horizontal.
+    /// </para>
+    /// </remarks>
+    public double TextRotationDegrees { get; init; }
+
+    /// <summary>
+    /// Where the frame's own text sits when the frame is taller than the text is.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>wps:bodyPr/@anchor</c>. Top for the great majority, which is why it is the default and why
+    /// this went unnoticed: a text box sized to its text shows nothing either way.
+    /// </para>
+    /// <para>
+    /// It shows on a shape sized to be a shape. Censused over the 271 corpus <c>docx</c>, <b>132
+    /// text-bearing shapes across 20 documents</b> ask for <c>ctr</c> — the Venn diagram templates
+    /// are eight of the twenty, and their labels sit in circles two or three times the height of a
+    /// line, so a label drawn against the top of its circle lands outside the ink it names.
+    /// </para>
+    /// <para>
+    /// <c>just</c> and <c>dist</c> are read as top. They ask for the <em>lines</em> to be spread
+    /// through the box rather than for the block to be moved, which is a different mechanism, and
+    /// LibreOffice's own importer takes neither: no corpus document states either.
+    /// </para>
+    /// </remarks>
+    public VerticalTextAlignment TextAlignment { get; init; }
+
+    /// <summary>The marker at the start of a line, if it carries one.</summary>
+    /// <remarks>
+    /// <c>a:headEnd</c>. An arrowhead is a filled polygon beside the shaft rather than a property
+    /// of the pen, so it is carried here as what the file said and built at drawing time by
+    /// <see cref="LineEnds"/> — which needs the placed line to know where the point goes.
+    /// </remarks>
+    public LineEnd HeadEnd { get; init; }
+
+    /// <summary>The marker at the end of a line. <c>a:tailEnd</c>, and much the commoner of the two.</summary>
+    public LineEnd TailEnd { get; init; }
+
     /// <summary>The frame's background, or null when it has none.</summary>
     public Colour? Fill { get; init; }
+
+    /// <summary>
+    /// The frame's background when it is a gradient rather than a flat colour, or null.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Beside <see cref="Fill"/> rather than replacing it, and the two are never both set. A
+    /// gradient cannot be built here because a <see cref="GradientPaint"/> holds absolute points
+    /// and this frame does not yet know where on the page it lands — so what is carried is the
+    /// shape's own description of the ramp, and <c>PageDrawing</c> turns it into a paint against
+    /// the area the frame was placed in.
+    /// </para>
+    /// <para>
+    /// Keeping <see cref="Fill"/> a colour is not a compromise for the sake of the callers. It is
+    /// what the automatic font colour resolves against — a frame's fill decides whether the text
+    /// on it comes out black or white — and that question wants one colour whatever the shape is
+    /// painted with. A gradient-filled frame therefore answers it the way an unfilled one does,
+    /// which is what it did before this existed.
+    /// </para>
+    /// </remarks>
+    public GradientDescription? Gradient { get; init; }
 
     /// <summary>The frame's border colour, or null when it has no border.</summary>
     public Colour? BorderColour { get; init; }
 
     /// <summary>How thick that border is.</summary>
     public Length BorderWidth { get; init; }
+
+    /// <summary>
+    /// The preset naming the border's dash pattern — <c>a:prstDash/@val</c> — or null for a solid line.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Kept as the preset's name rather than as an expanded array because the array depends on the pen
+    /// width and the cap as well as on the name, and <see cref="Core.Graphics.DashPresets"/> already
+    /// holds that arithmetic — ported from <c>lclConvertPresetDash</c>
+    /// (<c>oox/source/drawingml/lineproperties.cxx</c>:60-83) and <c>XDash::CreateDotDashArray</c>
+    /// (<c>svx/source/xoutdev/xattr.cxx</c>:503-640) — for the chart, table and slide paths. Storing
+    /// the name keeps one expansion rather than four.
+    /// </para>
+    /// <para>
+    /// Null covers <c>solid</c> and an unrecognised token alike, which is deliberate and is
+    /// <see cref="Core.Graphics.DashPresets"/>'s own rule rather than this one's.
+    /// </para>
+    /// </remarks>
+    public string? BorderDash { get; init; }
+
+    /// <summary>How the border's ends, and each of its dashes, are capped.</summary>
+    /// <remarks>
+    /// <c>a:ln/@cap</c>, default <c>flat</c>. It is carried beside the dash because it changes the
+    /// pattern's arithmetic as well as the line's ends — see <see cref="BorderDash"/>.
+    /// </remarks>
+    public LineCap BorderCap { get; init; }
 
     /// <summary>
     /// How far inside its own rectangle the frame's border is stroked, zero for on the edge.
@@ -396,6 +826,25 @@ public sealed record PageFrame
     /// two of these shapes over one rectangle, distinguished by nothing else.
     /// </remarks>
     public bool IsLineMirrored { get; init; }
+
+    /// <summary>
+    /// Whether the line runs from its far end to its near one — which only an arrowhead can see.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>a:xfrm/@flipH</c> mirrors a shape about its own centre, and for a line that means the
+    /// same segment traversed the other way. <see cref="IsLineMirrored"/> — the exclusive-or of the
+    /// two flips — already picks the right <em>diagonal</em>, so nothing about the ink depended on
+    /// the direction and it was never carried.
+    /// </para>
+    /// <para>
+    /// An arrowhead depends on it entirely. The organogram templates join their boxes with
+    /// horizontal connectors that carry a tail arrow, are flipped horizontally, and are then turned
+    /// through 270° — so the arrow the reference draws pointing <em>down</em> came out pointing up,
+    /// on every one of them. The rotation was right and the flip was the missing half.
+    /// </para>
+    /// </remarks>
+    public bool IsLineReversed { get; init; }
 
     /// <summary>True when the frame holds a picture rather than text.</summary>
     /// <remarks>
@@ -494,6 +943,20 @@ public sealed record PageFrame
     /// </remarks>
     public string? ChartFontFamily { get; init; }
 
+    /// <summary>
+    /// True when the frame is not a drawing at all, but a portion the text layer paints itself.
+    /// </summary>
+    /// <remarks>
+    /// One thing wears this: a form check box. Writer strokes it in
+    /// <c>SwTextPaintInfo::DrawCheckBox</c> (<c>sw/source/core/text/inftxt.cxx</c>) as part of painting
+    /// the line, and it never becomes an <c>SdrObject</c>; it is a <see cref="PageFrame"/> here only
+    /// because that is the vehicle this model has for something that takes room on a line and draws
+    /// geometry. The distinction is not cosmetic — everything that <em>does</em> go through the draw
+    /// layer inherits its inclusive rectangle, which is a twip taller than the object; see
+    /// <c>PageContent.InlineObjects</c>.
+    /// </remarks>
+    public bool IsTextPortion { get; init; }
+
     /// <summary>What the frame was called in the document, for diagnostics.</summary>
     public string? Name { get; init; }
 }
@@ -502,6 +965,57 @@ public sealed record PageFrame
 /// A frame after it has been given a rectangle on a page.
 /// </summary>
 /// <param name="Frame">What was placed.</param>
-/// <param name="Area">Where it went, in page coordinates.</param>
+/// <param name="Area">Where its <em>text</em> went, in page coordinates.</param>
 /// <param name="Content">Its own text laid out inside that rectangle, or null when it has none.</param>
-public sealed record PlacedFrame(PageFrame Frame, DocRect Area, PlacedFlow? Content = null);
+/// <remarks>
+/// Two rectangles rather than one, because an inline drawing genuinely has two — see
+/// <see cref="Ink"/>. They are equal for every frame that states no top effect extent, which is
+/// nearly all of them.
+/// </remarks>
+public sealed record PlacedFrame(PageFrame Frame, DocRect Area, PlacedFlow? Content = null)
+{
+    /// <summary>
+    /// Where the frame's own drawing — its fill, its outline, its picture and its chart — is
+    /// painted, which is not always where its text is laid out.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A <c>wp:inline</c> drawing's line box is grown by <c>wp:effectExtent</c> on all four sides
+    /// and the drawing then sits <em>inside</em> that box. Across, the whole object moves by the
+    /// left edge and both halves follow it, so <see cref="PageFrame.InlineOffset"/> carries that in
+    /// the frame's own position. Down, the two halves of LibreOffice part company: the draw shape's
+    /// fill and outline are painted at the outer top <em>plus</em> the top extent, while a shape
+    /// carrying a <c>wps:txbx</c> lays its text out at the outer top regardless, because
+    /// <c>SwTextBoxHelper</c> never carries the offset
+    /// <c>SwAsCharAnchoredObjectPosition::CalcPosition</c> applied
+    /// (<c>sw/source/core/objectpositioning/ascharanchoredobjectposition.cxx</c>:129-133).
+    /// </para>
+    /// <para>
+    /// One rectangle cannot be in two places, which is why there are two. Measured in
+    /// <c>dotnet/probes/words-inline-shape-ink/</c> on a 144 x 50.4 pt inline drawing between two
+    /// 12 pt lines, both installed references identical on every row — the fill's own band top and
+    /// the <c>INSIDE</c> run of a text box, in PDF points from the page top:
+    /// </para>
+    /// <list type="table">
+    ///   <item><term>no extent</term><description>fill 85.75, <c>INSIDE</c> 104.66</description></item>
+    ///   <item><term><c>t</c> 27432 (2.16 pt)</term><description>fill <b>88.00</b></description></item>
+    ///   <item><term><c>t</c> 91440 (7.2 pt)</term><description>fill <b>93.00</b></description></item>
+    ///   <item><term><c>t</c> 137160 (10.8 pt)</term><description>fill <b>96.50</b>, <c>INSIDE</c> <b>104.66</b> — unmoved</description></item>
+    ///   <item><term><c>b</c> 137160</term><description>fill 85.75 — the bottom edge moves nothing</description></item>
+    /// </list>
+    /// <para>
+    /// It is the drawing and not the rectangle: an <c>ellipse</c> preset's curves move by the same
+    /// 10.75 pt, and so does a picture that keeps its shape by declaring an <c>a:effectLst</c>.
+    /// </para>
+    /// </remarks>
+    public DocRect Ink
+    {
+        get
+        {
+            Length down = Frame.InlineInkOffset;
+            return down == Length.Zero
+                ? Area
+                : new DocRect(Area.X, Area.Y + down, Area.Width, Area.Height);
+        }
+    }
+}

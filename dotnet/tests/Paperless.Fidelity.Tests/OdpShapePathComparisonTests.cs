@@ -51,7 +51,7 @@ public sealed class OdpShapePathComparisonTests : IDisposable
     [Fact]
     public void EveryEnhancedPathIsTheShapeLibreOfficeDraws()
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         string path = Corpus.Require(Deck);
         List<PdfPath> ours = Shapes(PdfPaths.Read(Ours(path)));
@@ -109,7 +109,7 @@ public sealed class OdpShapePathComparisonTests : IDisposable
     [Fact]
     public void TheHandWrittenGridIsTheGridLibreOfficeDraws()
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         string path = Corpus.Require(Deck);
         List<PdfStroke> ours = PdfStrokes.Read(Ours(path));
@@ -137,7 +137,7 @@ public sealed class OdpShapePathComparisonTests : IDisposable
     [Fact]
     public void EveryCellsTextIsDrawnWhereLibreOfficeDrawsIt()
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         string path = Corpus.Require(Deck);
         List<PdfTextRun> ours = PdfTextRuns.Read(Ours(path));

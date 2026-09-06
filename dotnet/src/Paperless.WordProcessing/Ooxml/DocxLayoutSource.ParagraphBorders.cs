@@ -95,20 +95,25 @@ public sealed partial class DocxLayoutSource
                 ? Length.FromPoints(points)
                 : Length.Zero;
 
-        if (Word.Attribute(stated, "val") is null or "none" or "nil")
-        {
-            return new ParagraphBorder(Length.Zero, Length.Zero, Colour.Black);
-        }
+        string? val = Word.Attribute(stated, "val");
 
-        Length width =
+        // A style that draws nothing is still an answer: `none` and `nil` say so outright, and so does
+        // every art border, which Writer has no line for at all. See `BorderRules.WordStyleOf`.
+        Length stateWidth =
             Word.Integer(Word.Attribute(stated, "sz"), out int eighths) && eighths > 0
                 ? Length.FromPoints(eighths / 8.0)
                 : HairlineBorder;
+
+        if (val is null or "none" or "nil"
+            || BorderRules.FromWord(BorderRules.WordStyleOf(val), stateWidth) is not { } rule)
+        {
+            return new ParagraphBorder(Length.Zero, Length.Zero, Colour.Black);
+        }
 
         Colour colour =
             WordThemeColour.Read(stated, _theme, "color", "themeColor", "themeTint", "themeShade")
             ?? Colour.Black;
 
-        return new ParagraphBorder(width, space, colour);
+        return new ParagraphBorder(rule.Width, space, Length.Zero, colour, rule.Line);
     }
 }

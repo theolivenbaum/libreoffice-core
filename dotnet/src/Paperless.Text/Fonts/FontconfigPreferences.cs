@@ -107,6 +107,17 @@ public sealed class FontconfigPreferences
     /// 26.2.4.2 draws it in DejaVu <em>Sans</em>. Filing it as a roman is the sort of guess this
     /// whole class exists to stop making.
     /// </para>
+    /// <para>
+    /// <strong>That last paragraph holds only where no face declares the mathematical
+    /// orthography, and the entry here is no longer what decides a maths family.</strong> The
+    /// same <c>45-generic.conf</c> prepends <c>lang=und-zmth</c> to any pattern whose family is
+    /// <c>math</c>, so where an installed face declares that orthography the match is decided by
+    /// coverage and not by the overall default. On this machine <c>fc-list :lang=und-zmth</c>
+    /// answers <b>FreeSerif</b> and nothing else, and 26.2.4.2 draws Cambria Math in FreeSerif in
+    /// four corpus documents. <see cref="GenericNameOf"/> keeps the generic's own name so
+    /// <see cref="SystemFontResolver"/> can route it; this shape stays as the answer for a machine
+    /// with no such face, which is the case the paragraph above was measured in.
+    /// </para>
     /// </remarks>
     private static readonly Dictionary<string, FontFamilyClass> GenericShapes =
         new(StringComparer.Ordinal)
@@ -132,13 +143,18 @@ public sealed class FontconfigPreferences
     private const int MaxDefaultDepth = 16;
 
     private readonly Dictionary<string, int> _ranks;
+    private readonly Dictionary<string, Dictionary<string, int>> _ranksByGeneric;
     private readonly Dictionary<string, List<string>> _aliasEdges;
-    private readonly Dictionary<string, FontFamilyClass> _classes = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, string?> _generics = new(StringComparer.Ordinal);
 
     private FontconfigPreferences(
-        Dictionary<string, int> ranks, Dictionary<string, List<string>> aliasEdges, bool configured)
+        Dictionary<string, int> ranks,
+        Dictionary<string, Dictionary<string, int>> ranksByGeneric,
+        Dictionary<string, List<string>> aliasEdges,
+        bool configured)
     {
         _ranks = ranks;
+        _ranksByGeneric = ranksByGeneric;
         _aliasEdges = aliasEdges;
         IsConfigured = configured;
     }
@@ -147,6 +163,7 @@ public sealed class FontconfigPreferences
     public static FontconfigPreferences None { get; } =
         new(
             new Dictionary<string, int>(StringComparer.Ordinal),
+            new Dictionary<string, Dictionary<string, int>>(StringComparer.Ordinal),
             new Dictionary<string, List<string>>(StringComparer.Ordinal),
             configured: false);
 
@@ -186,6 +203,72 @@ public sealed class FontconfigPreferences
         => _ranks.TryGetValue(FontSubstitutions.Normalise(familyName), out int rank)
             ? rank
             : int.MaxValue;
+
+    /// <summary>
+    /// Where a family sits in <em>one generic's</em> preference order, or
+    /// <see cref="int.MaxValue"/> when that generic does not name it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>The merged order <see cref="RankOf(string?)"/> reports is not what fontconfig
+    /// matches against, and glyph fallback is where the difference shows.</strong> A pattern
+    /// carries one generic — the one <c>FontConfigManager::Substitute</c> appended for the item's
+    /// family class, or the one the requested family is filed under — and <c>FcConfigSubstitute</c>
+    /// expands <em>that</em> generic's <c>&lt;prefer&gt;</c> list into the pattern's family list.
+    /// The other generics' lists are not in the pattern at all, so their members score no better
+    /// than any unnamed face.
+    /// </para>
+    /// <para>
+    /// Measured on 26.2.4.2 over six declared family classes and twelve characters
+    /// (<c>probes/fonts-r64/gen-generic.py</c>): a run whose class is <c>swiss</c> draws
+    /// <c>U+2713</c> in <b>DejaVu Sans</b> and the same run declared <c>roman</c> — or declared
+    /// nothing, which is Writer's roman default — draws it in <b>FreeSerif</b>. Both faces cover
+    /// the character; the only thing separating them is which generic's list they are on, DejaVu
+    /// Sans through <c>60-latin.conf</c>'s <c>sans-serif</c> and FreeSerif through
+    /// <c>69-unifont.conf</c>'s <c>serif</c>. The merged order puts DejaVu Sans ahead of FreeSerif
+    /// unconditionally and so answers the swiss row for both.
+    /// </para>
+    /// </remarks>
+    /// <param name="familyName">A family name; normalised here, so either form is accepted.</param>
+    /// <param name="generic">
+    /// A generic family name — <c>serif</c>, <c>sans-serif</c>, <c>monospace</c>, <c>emoji</c> and
+    /// the rest, in either spelling. Null or a generic the configuration expresses no preference
+    /// for falls back to the merged order.
+    /// </param>
+    public int RankOf(string? familyName, string? generic)
+    {
+        if (generic is null) return RankOf(familyName);
+
+        return _ranksByGeneric.TryGetValue(CanonicalGeneric(generic), out Dictionary<string, int>? ranks)
+               && ranks.TryGetValue(FontSubstitutions.Normalise(familyName), out int rank)
+            ? rank
+            : int.MaxValue;
+    }
+
+    /// <summary>The families one generic prefers, best first, as normalised names.</summary>
+    /// <param name="generic">A generic family name, in either spelling.</param>
+    public IReadOnlyList<string> InOrderFor(string? generic)
+        => generic is not null
+           && _ranksByGeneric.TryGetValue(CanonicalGeneric(generic), out Dictionary<string, int>? ranks)
+            ? ranks.OrderBy(entry => entry.Value).Select(entry => entry.Key).ToList()
+            : [];
+
+    /// <summary>
+    /// The one spelling a generic's preferences are filed under.
+    /// </summary>
+    /// <remarks>
+    /// fontconfig's own aliases collapse <c>sans</c> onto <c>sans-serif</c> and <c>mono</c> onto
+    /// <c>monospace</c>, and LibreOffice appends the <em>short</em> spelling — <c>"sans"</c> for
+    /// <c>FAMILY_SWISS</c> — while the configuration files its preference lists under the long one.
+    /// Reading them as two generics would leave the swiss case with an empty list.
+    /// </remarks>
+    private static string CanonicalGeneric(string generic)
+        => FontSubstitutions.Normalise(generic) switch
+        {
+            "sans" or "sansserif" => "sansserif",
+            "mono" or "monospace" => "monospace",
+            string other => other,
+        };
 
     /// <summary>
     /// True when the configuration has an <c>&lt;alias&gt;</c> rule whose subject is this family,
@@ -230,27 +313,55 @@ public sealed class FontconfigPreferences
     /// </para>
     /// </remarks>
     public FontFamilyClass GenericClassOf(string? familyName)
+        => GenericNameOf(familyName) is { } generic && GenericShapes.TryGetValue(generic, out FontFamilyClass shape)
+            ? shape
+            : IsConfigured ? FontFamilyClass.SansSerif : FontFamilyClass.Unknown;
+
+    /// <summary>
+    /// The generic family fontconfig files a family under, by name, or null when there is no
+    /// configuration or the walk reaches none.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The same walk <see cref="GenericClassOf"/> makes, stopping one step earlier. Collapsing a
+    /// generic to a shape loses the one generic whose answer is not a shape at all:
+    /// <strong><c>math</c></strong>. <c>45-generic.conf</c> files <c>Cambria Math</c> and its six
+    /// siblings under it and then, in the same file, <em>prepends <c>lang=und-zmth</c> to any
+    /// pattern whose family is <c>math</c></em> — so the match is decided by which installed face
+    /// declares the mathematical orthography rather than by any shape. On this machine exactly one
+    /// does: <c>fc-list :lang=und-zmth</c> answers <b>FreeSerif</b> and nothing else, and
+    /// <c>fc-match "Cambria Math"</c>, <c>fc-match "Cambria Math,serif"</c> and
+    /// <c>fc-match "Cambria Math,sans"</c> all answer FreeSerif.
+    /// </para>
+    /// <para>
+    /// Callers that only want a shape should keep using <see cref="GenericClassOf"/>; this exists
+    /// for <see cref="SystemFontResolver"/>, which needs the generic's own name to route the
+    /// maths one.
+    /// </para>
+    /// </remarks>
+    /// <param name="familyName">A family name; normalised here, so either form is accepted.</param>
+    public string? GenericNameOf(string? familyName)
     {
-        if (!IsConfigured) return FontFamilyClass.Unknown;
+        if (!IsConfigured) return null;
 
         string key = FontSubstitutions.Normalise(familyName);
-        if (key.Length == 0) return FontFamilyClass.Unknown;
+        if (key.Length == 0) return null;
 
-        lock (_classes)
+        lock (_generics)
         {
-            if (_classes.TryGetValue(key, out FontFamilyClass cached)) return cached;
+            if (_generics.TryGetValue(key, out string? cached)) return cached;
 
-            FontFamilyClass found = Walk(key);
-            _classes[key] = found;
+            string? found = Walk(key);
+            _generics[key] = found;
             return found;
         }
     }
 
-    private FontFamilyClass Walk(string key)
+    private string? Walk(string key)
     {
         // A family that *is* a generic classifies as itself, which is how `sans-serif` and `serif`
         // answer when a document names one outright.
-        if (GenericShapes.TryGetValue(key, out FontFamilyClass direct)) return direct;
+        if (GenericShapes.ContainsKey(key)) return key;
 
         HashSet<string> seen = new(StringComparer.Ordinal) { key };
         Queue<(string Name, int Depth)> queue = new();
@@ -264,14 +375,14 @@ public sealed class FontconfigPreferences
 
             foreach (string target in targets)
             {
-                if (GenericShapes.TryGetValue(target, out FontFamilyClass generic)) return generic;
+                if (GenericShapes.ContainsKey(target)) return target;
                 if (seen.Add(target)) queue.Enqueue((target, depth + 1));
             }
         }
 
         // fontconfig's own answer for a name it has no generic for: `49-sansserif.conf` appends
         // sans-serif to every pattern that named none.
-        return FontFamilyClass.SansSerif;
+        return "sansserif";
     }
 
     /// <summary>Reads the machine's configuration from its usual place.</summary>
@@ -288,9 +399,10 @@ public sealed class FontconfigPreferences
             if (!File.Exists(candidate)) continue;
 
             Dictionary<string, int> ranks = new(StringComparer.Ordinal);
+            Dictionary<string, Dictionary<string, int>> byGeneric = new(StringComparer.Ordinal);
             Dictionary<string, List<string>> aliasEdges = new(StringComparer.Ordinal);
-            ReadFile(candidate, ranks, aliasEdges, 0);
-            return new FontconfigPreferences(ranks, aliasEdges, configured: true);
+            ReadFile(candidate, ranks, byGeneric, aliasEdges, 0);
+            return new FontconfigPreferences(ranks, byGeneric, aliasEdges, configured: true);
         }
 
         return None;
@@ -302,9 +414,10 @@ public sealed class FontconfigPreferences
         ArgumentNullException.ThrowIfNull(files);
 
         Dictionary<string, int> ranks = new(StringComparer.Ordinal);
+        Dictionary<string, Dictionary<string, int>> byGeneric = new(StringComparer.Ordinal);
         Dictionary<string, List<string>> aliasEdges = new(StringComparer.Ordinal);
-        foreach (string file in files) ReadFile(file, ranks, aliasEdges, 0);
-        return new FontconfigPreferences(ranks, aliasEdges, configured: true);
+        foreach (string file in files) ReadFile(file, ranks, byGeneric, aliasEdges, 0);
+        return new FontconfigPreferences(ranks, byGeneric, aliasEdges, configured: true);
     }
 
     private static IEnumerable<string> RootCandidates()
@@ -325,6 +438,7 @@ public sealed class FontconfigPreferences
     private static void ReadFile(
         string path,
         Dictionary<string, int> ranks,
+        Dictionary<string, Dictionary<string, int>> byGeneric,
         Dictionary<string, List<string>> aliasEdges,
         int depth)
     {
@@ -353,12 +467,12 @@ public sealed class FontconfigPreferences
             switch (element.Name.LocalName)
             {
                 case "alias":
-                    ReadAlias(element, ranks, aliasEdges);
+                    ReadAlias(element, ranks, byGeneric, aliasEdges);
                     break;
                 case "include":
                     foreach (string included in Included(element, path))
                     {
-                        ReadFile(included, ranks, aliasEdges, depth + 1);
+                        ReadFile(included, ranks, byGeneric, aliasEdges, depth + 1);
                     }
 
                     break;
@@ -367,7 +481,10 @@ public sealed class FontconfigPreferences
     }
 
     private static void ReadAlias(
-        XElement alias, Dictionary<string, int> ranks, Dictionary<string, List<string>> aliasEdges)
+        XElement alias,
+        Dictionary<string, int> ranks,
+        Dictionary<string, Dictionary<string, int>> byGeneric,
+        Dictionary<string, List<string>> aliasEdges)
     {
         // The subject is the alias's own `family` child; the preferences are inside `prefer`.
         string? subject = alias.Elements()
@@ -410,6 +527,13 @@ public sealed class FontconfigPreferences
 
         if (!generic) return;
 
+        string subjectGeneric = CanonicalGeneric(subject);
+        if (!byGeneric.TryGetValue(subjectGeneric, out Dictionary<string, int>? own))
+        {
+            own = new Dictionary<string, int>(StringComparer.Ordinal);
+            byGeneric[subjectGeneric] = own;
+        }
+
         foreach (XElement prefer in alias.Elements().Where(e => e.Name.LocalName == "prefer"))
         {
             foreach (XElement family in prefer.Elements().Where(e => e.Name.LocalName == "family"))
@@ -420,6 +544,7 @@ public sealed class FontconfigPreferences
                 // First mention wins: a family named by two files takes the better rank, which is
                 // what prepending at the matched family's position produces.
                 if (!ranks.ContainsKey(normalised)) ranks[normalised] = ranks.Count;
+                if (!own.ContainsKey(normalised)) own[normalised] = own.Count;
             }
         }
     }

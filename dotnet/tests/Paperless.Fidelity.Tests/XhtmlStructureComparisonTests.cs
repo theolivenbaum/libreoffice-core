@@ -49,9 +49,8 @@ public class XhtmlStructureComparisonTests : IDisposable
     {
         Assert.SkipUnless(
             LibreOfficeRunner.IsAvailable,
-            "LibreOffice with its application modules is not installed, so there is no "
-            + "reference to compare against. Run "
-            + ".claude/skills/libreoffice-reference/scripts/check-env.sh for the apt-get lines.");
+            LibreOfficeRunner.UnavailableReason
+            + " — see .claude/skills/libreoffice-reference/scripts/check-env.sh");
     }
 
     /// <summary>

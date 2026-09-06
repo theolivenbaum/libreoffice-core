@@ -1,6 +1,37 @@
 path	added	era	libreoffice	dejavu	risk	cited_by
 dotnet/probes/PROVENANCE.tsv	2026-08-15	current	26.2.4.2	present	current	dotnet/CLAUDE.md;dotnet/TODO.batches.md;dotnet/TODO.raster-ceiling.md
+dotnet/probes/advance-ppem/indent.tsv	2026-09-06	current	24.2.7.2;26.2.4.2	present	current	dotnet/CLAUDE.md;dotnet/tests/Paperless.Fidelity.Tests/PageDrawingComparisonTests.cs;dotnet/tests/Paperless.Fidelity.Tests/TabStopComparisonTests.cs;dotnet/tests/Paperless.Fidelity.Tests/SheetTextComparisonTests.cs;dotnet/tests/Paperless.Fidelity.Tests/SlideChartFaceComparisonTests.cs;dotnet/tests/Paperless.Fidelity.Tests/SheetDrawingComparisonTests.cs;dotnet/src/Paperless.Spreadsheets/Ooxml/XlsxCellFormats.cs;dotnet/tests/Paperless.Spreadsheets.Tests/SheetIndentUnitTests.cs
+dotnet/probes/advance-ppem/results.md	2026-09-06	current	24.2.7.2;26.2.4.2	present	current	dotnet/CLAUDE.md;dotnet/tests/Paperless.Fidelity.Tests/PageDrawingComparisonTests.cs;dotnet/tests/Paperless.Fidelity.Tests/TabStopComparisonTests.cs;dotnet/tests/Paperless.Fidelity.Tests/SheetTextComparisonTests.cs;dotnet/tests/Paperless.Fidelity.Tests/SlideChartFaceComparisonTests.cs;dotnet/tests/Paperless.Fidelity.Tests/SheetDrawingComparisonTests.cs;dotnet/src/Paperless.Spreadsheets/Ooxml/XlsxCellFormats.cs;dotnet/tests/Paperless.Spreadsheets.Tests/SheetIndentUnitTests.cs
+dotnet/probes/advance-ppem/width.tsv	2026-09-06	current	24.2.7.2;26.2.4.2	present	current	dotnet/CLAUDE.md;dotnet/tests/Paperless.Fidelity.Tests/PageDrawingComparisonTests.cs;dotnet/tests/Paperless.Fidelity.Tests/TabStopComparisonTests.cs;dotnet/tests/Paperless.Fidelity.Tests/SheetTextComparisonTests.cs;dotnet/tests/Paperless.Fidelity.Tests/SlideChartFaceComparisonTests.cs;dotnet/tests/Paperless.Fidelity.Tests/SheetDrawingComparisonTests.cs;dotnet/src/Paperless.Spreadsheets/Ooxml/XlsxCellFormats.cs;dotnet/tests/Paperless.Spreadsheets.Tests/SheetIndentUnitTests.cs
+dotnet/probes/advance-ppem/word-pens.tsv	2026-09-06	current	24.2.7.2;26.2.4.2	present	current	dotnet/CLAUDE.md;dotnet/tests/Paperless.Fidelity.Tests/PageDrawingComparisonTests.cs;dotnet/tests/Paperless.Fidelity.Tests/TabStopComparisonTests.cs;dotnet/tests/Paperless.Fidelity.Tests/SheetTextComparisonTests.cs;dotnet/tests/Paperless.Fidelity.Tests/SlideChartFaceComparisonTests.cs;dotnet/tests/Paperless.Fidelity.Tests/SheetDrawingComparisonTests.cs;dotnet/src/Paperless.Spreadsheets/Ooxml/XlsxCellFormats.cs;dotnet/tests/Paperless.Spreadsheets.Tests/SheetIndentUnitTests.cs
 dotnet/probes/caption-keepnext-table/README.md	2026-08-16	current	26.2.4.2	present	current	-
+dotnet/probes/chart-text-metafile/chart-gap.py	2026-09-06	current	24.2.7.2;26.2.4.2	present	current	
+dotnet/probes/chart-text-metafile/chart-vs-textbox.py	2026-09-06	current	24.2.7.2;26.2.4.2	present	current	
+dotnet/probes/chart-text-metafile/facts.py	2026-09-06	current	24.2.7.2;26.2.4.2	present	current	
+dotnet/probes/chart-text-metafile/facts.tsv	2026-09-06	current	24.2.7.2;26.2.4.2	present	current	
+dotnet/probes/chart-text-metafile/gap.tsv	2026-09-06	current	24.2.7.2;26.2.4.2	present	current	
+dotnet/probes/chart-text-metafile/measure.py	2026-09-06	current	24.2.7.2;26.2.4.2	present	current	
+dotnet/probes/chart-text-metafile/measure.tsv	2026-09-06	current	24.2.7.2;26.2.4.2	present	current	
+dotnet/probes/chart-text-metafile/pdftext.py	2026-09-06	current	24.2.7.2;26.2.4.2	present	current	
+dotnet/probes/chart-text-metafile/reach.py	2026-09-06	current	24.2.7.2;26.2.4.2	present	current	
+dotnet/probes/chart-text-metafile/reach.tsv	2026-09-06	current	24.2.7.2;26.2.4.2	present	current	
+dotnet/probes/chart-text-metafile/results.md	2026-09-06	current	24.2.7.2;26.2.4.2	present	current	dotnet/CLAUDE.md;dotnet/src/Paperless.Presentations/Layout/SlideChart.cs;dotnet/src/Paperless.WordProcessing/Layout/FrameChart.cs;dotnet/tests/Paperless.Fidelity.Tests/SlideChartFaceComparisonTests.cs;dotnet/tests/Paperless.Presentations.Tests/SlideChartDeviceAdvanceTests.cs;dotnet/tests/Paperless.WordProcessing.Tests/FrameChartDeviceAdvanceTests.cs
+dotnet/probes/chart-text-metafile/textbox.tsv	2026-09-06	current	24.2.7.2;26.2.4.2	present	current	
+dotnet/probes/chart-vertical/corpus-after.tsv	2026-09-06	current	24.2.7.2;26.2.4.2	present	current	
+dotnet/probes/chart-vertical/corpus-before.tsv	2026-09-06	current	24.2.7.2;26.2.4.2	present	current	
+dotnet/probes/chart-vertical/corpus-ref262.tsv	2026-09-06	current	24.2.7.2;26.2.4.2	present	current	
+dotnet/probes/chart-vertical/corpus.py	2026-09-06	current	24.2.7.2;26.2.4.2	present	current	
+dotnet/probes/chart-vertical/facemetrics.py	2026-09-06	current	24.2.7.2;26.2.4.2	present	current	
+dotnet/probes/chart-vertical/ours-after.tsv	2026-09-06	current	24.2.7.2;26.2.4.2	present	current	
+dotnet/probes/chart-vertical/ours-before.tsv	2026-09-06	current	24.2.7.2;26.2.4.2	present	current	
+dotnet/probes/chart-vertical/ours.py	2026-09-06	current	24.2.7.2;26.2.4.2	present	current	
+dotnet/probes/chart-vertical/pitch.py	2026-09-06	current	24.2.7.2;26.2.4.2	present	current	
+dotnet/probes/chart-vertical/pitch.tsv	2026-09-06	current	24.2.7.2;26.2.4.2	present	current	
+dotnet/probes/chart-vertical/pitch.txt	2026-09-06	current	24.2.7.2;26.2.4.2	present	current	
+dotnet/probes/chart-vertical/results.md	2026-09-06	current	24.2.7.2;26.2.4.2	present	current	dotnet/CLAUDE.md;dotnet/src/Paperless.Text/Fonts/LineSpacing.cs;dotnet/src/Paperless.Presentations/Layout/SlideChart.cs;dotnet/src/Paperless.WordProcessing/Layout/FrameChart.cs;dotnet/tests/Paperless.Presentations.Tests/SlideChartDeviceMetricTests.cs;dotnet/tests/Paperless.WordProcessing.Tests/FrameChartDeviceMetricTests.cs
+dotnet/probes/chart-vertical/tickoffset.py	2026-09-06	current	24.2.7.2;26.2.4.2	present	current	
+dotnet/probes/chart-vertical/tickoffset.tsv	2026-09-06	current	24.2.7.2;26.2.4.2	present	current	
+dotnet/probes/chart-vertical/tickoffset.txt	2026-09-06	current	24.2.7.2;26.2.4.2	present	current	
 dotnet/probes/crop-wiring-01/prediction.md	2026-08-13	current	26.2.4.2	present	current	-
 dotnet/probes/crop-wiring-01/results.md	2026-08-13	current	26.2.4.2	present	current	-
 dotnet/probes/emptypage-01/results.md	2026-08-15	current	26.2.4.2	present	current	-
@@ -42,6 +73,10 @@ dotnet/probes/lineheight-01/slides-after.tsv	2026-08-15	current	26.2.4.2	present
 dotnet/probes/lineheight-01/slides-before.tsv	2026-08-15	current	26.2.4.2	present	current	-
 dotnet/probes/lineheight-01/words-after.tsv	2026-08-15	current	26.2.4.2	present	current	dotnet/TODO.batches.md
 dotnet/probes/lineheight-01/words-before.tsv	2026-08-15	current	26.2.4.2	present	current	-
+dotnet/probes/mismatch-classify-01/classification.tsv	2026-09-06	current	24.2.7.2;26.2.4.2	present	current	dotnet/probes/mismatch-classify-01/results.md;dotnet/tests/Paperless.Spreadsheets.Tests/SheetChartSheetPrintTests.cs
+dotnet/probes/mismatch-classify-01/screen26.tsv	2026-09-06	current	24.2.7.2;26.2.4.2	present	current	dotnet/probes/mismatch-classify-01/results.md
+dotnet/probes/mismatch-classify-01/sheets-after.tsv	2026-09-06	current	24.2.7.2	present	current	dotnet/probes/mismatch-classify-01/results.md
+dotnet/probes/mismatch-classify-01/the87.txt	2026-09-06	current	24.2.7.2	present	current	dotnet/probes/mismatch-classify-01/results.md
 dotnet/probes/mso-shape-type-presets.json	2026-08-09	pre-container	24.2.7.2	unverified	CITED-STALE	dotnet/TODO.batches.md
 dotnet/probes/nested-table-slice/README.md	2026-08-15	current	26.2.4.2	present	current	-
 dotnet/probes/refdev-01/prediction.md	2026-08-15	current	26.2.4.2	present	current	-
@@ -319,12 +354,23 @@ dotnet/probes/tooling-01/poppler-534.tsv	2026-08-13	current	26.2.4.2	present	cur
 dotnet/probes/tooling-01/results.md	2026-08-13	current	26.2.4.2	present	current	-
 dotnet/probes/trailing-nbsp-wrap/README.md	2026-08-16	current	26.2.4.2	present	current	-
 dotnet/probes/user-review-slides-02/review.md	2026-08-13	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/words-apo-table/movers.tsv	2026-09-06	current	24.2.7.2;26.2.4.2	present	current	dotnet/src/Paperless.WordProcessing/Ww8/Ww8DocumentReader.LayoutTables.cs;dotnet/tests/Paperless.WordProcessing.Tests/Ww8FramedTableTests.cs
+dotnet/probes/words-apo-table/results.md	2026-09-06	current	24.2.7.2;26.2.4.2	present	current	dotnet/src/Paperless.WordProcessing/Ww8/Ww8DocumentReader.LayoutTables.cs;dotnet/tests/Paperless.WordProcessing.Tests/Ww8FramedTableTests.cs
+dotnet/probes/words-apo-table/spot.tsv	2026-09-06	current	26.2.4.2	present	current	-
 dotnet/probes/words-b-01/prediction.md	2026-08-13	current	26.2.4.2	present	current	-
 dotnet/probes/words-b-01/results.md	2026-08-13	current	26.2.4.2	present	current	-
 dotnet/probes/words-b008-01/prediction.md	2026-08-14	current	26.2.4.2	present	current	-
 dotnet/probes/words-b008-01/results.md	2026-08-14	current	26.2.4.2	present	current	-
 dotnet/probes/words-b010-01/prediction.md	2026-08-14	current	26.2.4.2	present	current	-
 dotnet/probes/words-b010-01/results.md	2026-08-14	current	26.2.4.2	present	current	dotnet/TODO.batches.md
+dotnet/probes/words-border-style/dashlen.py	2026-09-04	current	24.2.7.2	present	current	-
+dotnet/probes/words-border-style/results.md	2026-09-04	current	24.2.7.2	present	current	-
+dotnet/probes/words-border-style/rules.py	2026-09-04	current	24.2.7.2	present	current	-
+dotnet/probes/words-border-style/tables.py	2026-09-04	current	24.2.7.2	present	current	-
+dotnet/probes/words-cell-anchor/results.md	2026-09-04	current	24.2.7.2+26.2.4.2	present	current	-
+dotnet/probes/words-cell-anchor/valign.py	2026-09-04	current	24.2.7.2+26.2.4.2	present	current	-
+dotnet/probes/words-character-scale/results.md	2026-09-03	current	24.2.7.2	present	current	-
+dotnet/probes/words-character-scale/scale.py	2026-09-03	current	24.2.7.2	present	current	-
 dotnet/probes/words-d-01/div.tsv	2026-08-13	current	26.2.4.2	present	current	-
 dotnet/probes/words-d-01/gate-after.tsv	2026-08-13	current	26.2.4.2	present	current	-
 dotnet/probes/words-d-01/gate-base.tsv	2026-08-13	current	26.2.4.2	present	current	-
@@ -345,6 +391,24 @@ dotnet/probes/words-f-01/gate-after.tsv	2026-08-13	current	26.2.4.2	present	curr
 dotnet/probes/words-f-01/gate-base.tsv	2026-08-13	current	26.2.4.2	present	current	-
 dotnet/probes/words-f-01/prediction.md	2026-08-13	current	26.2.4.2	present	current	-
 dotnet/probes/words-f-01/results.md	2026-08-13	current	26.2.4.2	present	current	-
+dotnet/probes/words-floating-table/position.py	2026-09-03	current	24.2.7.2	present	current	-
+dotnet/probes/words-floating-table/results.md	2026-09-03	current	24.2.7.2	present	current	-
+dotnet/probes/words-fly-clearance/anchored.py	2026-09-04	current	24.2.7.2	present	current	-
+dotnet/probes/words-fly-clearance/clearance.py	2026-09-04	current	24.2.7.2	present	current	-
+dotnet/probes/words-fly-clearance/law.py	2026-09-04	current	24.2.7.2	present	current	-
+dotnet/probes/words-fly-clearance/results.md	2026-09-04	current	24.2.7.2	present	current	-
+dotnet/probes/words-frame-origins/results.md	2026-09-03	current	24.2.7.2	present	current	-
+dotnet/probes/words-group-transform/census.py	2026-09-03	current	24.2.7.2	present	current	-
+dotnet/probes/words-group-transform/ink.py	2026-09-03	current	24.2.7.2	present	current	-
+dotnet/probes/words-group-transform/measure.py	2026-09-03	current	24.2.7.2	present	current	-
+dotnet/probes/words-group-transform/mk.py	2026-09-03	current	24.2.7.2	present	current	-
+dotnet/probes/words-group-transform/orientation.py	2026-09-03	current	24.2.7.2	present	current	-
+dotnet/probes/words-group-transform/results.md	2026-09-03	current	24.2.7.2	present	current	-
+dotnet/probes/words-hidemark-rowheight/make.py	2026-09-05	current	24.2.7.2+26.2.4.2	present	current	-
+dotnet/probes/words-hidemark-rowheight/make2.py	2026-09-05	current	24.2.7.2+26.2.4.2	present	current	-
+dotnet/probes/words-hidemark-rowheight/make3.py	2026-09-05	current	24.2.7.2+26.2.4.2	present	current	-
+dotnet/probes/words-hidemark-rowheight/measure.py	2026-09-05	current	24.2.7.2+26.2.4.2	present	current	-
+dotnet/probes/words-hidemark-rowheight/results.md	2026-09-05	current	24.2.7.2+26.2.4.2	present	current	-
 dotnet/probes/words-metrics-01/baseline.tsv	2026-08-15	current	26.2.4.2	present	current	-
 dotnet/probes/words-metrics-01/final.tsv	2026-08-15	current	26.2.4.2	present	current	-
 dotnet/probes/words-metrics-01/prediction.md	2026-08-15	current	26.2.4.2	present	current	-
@@ -360,6 +424,8 @@ dotnet/probes/words-missing-01/prediction.md	2026-08-15	current	26.2.4.2	present
 dotnet/probes/words-missing-01/results.md	2026-08-15	current	26.2.4.2	present	current	-
 dotnet/probes/words-p1-01/prediction.md	2026-08-15	current	26.2.4.2	present	current	-
 dotnet/probes/words-p1-01/results.md	2026-08-15	current	26.2.4.2	present	current	-
+dotnet/probes/words-page-anchored-table/place.py	2026-09-04	current	24.2.7.2+26.2.4.2	present	current	-
+dotnet/probes/words-page-anchored-table/results.md	2026-09-04	current	24.2.7.2+26.2.4.2	present	current	-
 dotnet/probes/words-pages-01/batch-001-006.tsv	2026-08-14	current	26.2.4.2	present	current	-
 dotnet/probes/words-pages-01/prediction.md	2026-08-14	current	26.2.4.2	present	current	-
 dotnet/probes/words-pages-01/results.md	2026-08-14	current	26.2.4.2	present	current	dotnet/TODO.batches.md
@@ -455,8 +521,13 @@ dotnet/probes/words-regress-01/prediction.md	2026-08-15	current	26.2.4.2	present
 dotnet/probes/words-regress-01/results.md	2026-08-15	current	26.2.4.2	present	current	-
 dotnet/probes/words-regress-01/words-after.tsv	2026-08-15	current	26.2.4.2	present	current	-
 dotnet/probes/words-regress-01/words-before.tsv	2026-08-15	current	26.2.4.2	present	current	-
+dotnet/probes/words-row-height/pitch.py	2026-09-04	current	24.2.7.2+26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/words-row-height/results.md	2026-09-04	current	24.2.7.2+26.2.4.2	present	current	dotnet/CLAUDE.md
 dotnet/probes/words-table-01/prediction.md	2026-08-15	current	26.2.4.2	present	current	-
 dotnet/probes/words-table-01/results.md	2026-08-15	current	26.2.4.2	present	current	-
+dotnet/probes/words-version-screen/bucket.py	2026-09-04	current	24.2.7.2+26.2.4.2	present	current	-
+dotnet/probes/words-version-screen/results.md	2026-09-04	current	24.2.7.2+26.2.4.2	present	current	-
+dotnet/probes/words-version-screen/screen.py	2026-09-04	current	24.2.7.2+26.2.4.2	present	current	-
 dotnet/probes/words-vision-01/prediction.md	2026-08-13	current	26.2.4.2	present	current	-
 dotnet/probes/words-vision-01/results.md	2026-08-14	current	26.2.4.2	present	current	-
 dotnet/probes/words-w-pitch/results.md	2026-08-15	current	26.2.4.2	present	current	-

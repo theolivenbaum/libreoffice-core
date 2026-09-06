@@ -224,6 +224,13 @@ public sealed class Ww8Document : IWordProcessingDocument, IPaginatedDocument
             // (`ww8par.cxx`:2050), as `WriterFilter` does for every DOCX — and as neither the RTF
             // filter nor either ODF one does. See PaginationOptions.UsesWordNoteSeparator.
             UsesWordNoteSeparator = true,
+
+            // The other half of that same setting, and the half it is named for: endnotes collecting at
+            // the end of the document follow the last body content instead of taking pages of their own.
+            // It changes nothing for a DOC whose `epc` is zero, whose endnotes collect at the end of the
+            // section instead. See PaginationOptions.EndnotesFollowTheBody.
+            EndnotesFollowTheBody = true,
+
             NoteSeparatorHeight = NoteReservation(fonts) is { } reservation
                 ? reservation
                 : PaginationOptions.Word.NoteSeparatorHeight,
@@ -695,9 +702,11 @@ public sealed class Ww8Document : IWordProcessingDocument, IPaginatedDocument
                 Runs = runs,
                 Fields = paragraph.Fields ?? [],
                 Notes = NotesOf(fonts, paragraph.Notes),
-                Frames = FramesOf(
-                    fonts, paragraph.Frames, paragraph.TextFrames, WidthFor(paragraph),
-                    paragraph.IsInTable),
+                Frames = WithCheckBoxes(
+                    FramesOf(
+                        fonts, paragraph.Frames, paragraph.TextFrames, WidthFor(paragraph),
+                        paragraph.IsInTable),
+                    fonts, paragraph, face),
             });
         }
 
@@ -708,6 +717,80 @@ public sealed class Ww8Document : IWordProcessingDocument, IPaginatedDocument
                 ? textWidths[Math.Clamp(paragraph.SectionIndex, 0, textWidths.Count - 1)]
                 : Length.Zero;
     }
+
+    /// <summary>
+    /// Adds the square each legacy <c>FORMCHECKBOX</c> in the paragraph puts on its line.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>SwFieldFormCheckboxPortion::Format</c> (<c>sw/source/core/text/portxt.cxx</c>:1492) sets the
+    /// portion's width and height to <c>rInf.GetTextHeight()</c> and its ascent to
+    /// <c>rInf.GetAscent()</c> — "the width of the checkbox portion is the same as its height since
+    /// it's a square and that size depends on the font size" — and
+    /// <c>SwTextPaintInfo::DrawCheckBox</c> (<c>inftxt.cxx</c>:1247) strokes that rectangle deflated by
+    /// 25 twips a side, plus both diagonals when it is ticked. The same geometry the DOCX side already
+    /// draws, and the measurement that pinned it is recorded on
+    /// <c>DocxLayoutSource.CheckBoxFrame</c>: the square follows the run's text height and nothing the
+    /// field declares.
+    /// </para>
+    /// <para>
+    /// The run under the anchor decides the face, not the paragraph: a form's boxes are regularly set
+    /// in a face of their own, and the square is as tall as the line it sits on.
+    /// </para>
+    /// </remarks>
+    private static List<PageFrame> WithCheckBoxes(
+        List<PageFrame> frames,
+        LayoutFonts fonts,
+        Ww8DocumentReader.Ww8LayoutParagraph paragraph,
+        OpenTypeFace face)
+    {
+        if (paragraph.CheckBoxes is not { Count: > 0 } boxes) return frames;
+
+        foreach (Ww8DocumentReader.Ww8LayoutCheckBox box in boxes)
+        {
+            OpenTypeFace boxFace = face;
+            Length size = paragraph.Size;
+
+            foreach (Ww8DocumentReader.Ww8LayoutRun run in paragraph.Runs ?? [])
+            {
+                if (box.Offset < run.Start || box.Offset >= run.End) continue;
+
+                if (fonts.Face(run.FamilyName ?? paragraph.FamilyName, run.Weight, run.IsItalic)
+                    is { } resolved)
+                {
+                    boxFace = resolved;
+                }
+
+                if (run.Size > Length.Zero) size = run.Size;
+                break;
+            }
+
+            LineMetrics metrics =
+                LineSpacing.Resolve(boxFace, fonts.Metrics, WriterLineBox.LeadingAboveText);
+            Length side = metrics.ScaledLineHeight(size);
+            if (side <= CheckBoxInset + CheckBoxInset) continue;
+
+            frames.Add(new PageFrame
+            {
+                Size = new Core.Geometry.DocSize(side, side),
+                Anchor = FrameAnchor.AsCharacter,
+                AnchorOffset = box.Offset,
+                InlineAscent = metrics.ScaledAscent(size),
+                BorderColour = Colour.Black,
+                BorderWidth = CheckBoxStroke,
+                BorderInset = CheckBoxInset,
+                IsCrossed = box.IsChecked,
+            });
+        }
+
+        return frames;
+    }
+
+    /// <summary>How far inside the portion the box is stroked — <c>DrawCheckBox</c>'s own 25 twips.</summary>
+    private static readonly Length CheckBoxInset = Length.FromTwips(25);
+
+    /// <summary>The hairline the reference strokes it with — the 0.1 pt its PDF writer sets for a nought-width pen.</summary>
+    private static readonly Length CheckBoxStroke = Length.FromPoints(0.1);
 
     /// <summary>
     /// The label a list item draws, or null when it draws none.

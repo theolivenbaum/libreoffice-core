@@ -370,6 +370,38 @@ public sealed partial record ChartPlot
     /// <summary>The category labels, in order. Empty for a chart with no category axis.</summary>
     public IReadOnlyList<string?> Categories { get; init; } = [];
 
+    /// <summary>
+    /// The levels of a complex category axis, innermost first, or null for an ordinary one.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>A complex category axis is drawn as rows, not as one joined string.</strong>
+    /// <see cref="Categories"/> holds the join — <c>AM 9/5/2026</c> — because that is what
+    /// <c>ExplicitCategoriesProvider::getSimpleCategories</c> hands to a legend entry and to a
+    /// data label. The axis is the other consumer and it draws each level on a row of its own,
+    /// level zero nearest the axis line, with a long tick at every run boundary
+    /// (<c>VCartesianAxis::createAllTickInfosFromComplexCategories</c>,
+    /// <c>chart2/source/view/axes/VCartesianAxis.cxx:575-610</c>, and the extra ticks at
+    /// <c>:1913-1955</c>).
+    /// </para>
+    /// <para>
+    /// <strong>A run ends at the next value, not at the next <em>different</em> value.</strong>
+    /// <c>lcl_DataSequenceToComplexCategoryVector</c>
+    /// (<c>chart2/source/tools/ExplicitCategoriesProvider.cxx:275-311</c>) says so in its own
+    /// comment: "Empty value is interpreted as a continuation of the previous category. Note that
+    /// having the same value as the previous one does not equate to a continuation." So a null or
+    /// empty entry here extends the run above it and a repeated string starts a new one — which
+    /// is why <c>040_Blood_pressure_tracker</c> draws its date twice, once under <c>AM</c> and
+    /// once under <c>PM</c>, rather than once across the pair.
+    /// </para>
+    /// <para>
+    /// Each level holds one entry per category, so every level is as long as
+    /// <see cref="Categories"/>. Null when the file states a single level or none, which keeps
+    /// every ordinary axis on exactly the path it was on.
+    /// </para>
+    /// </remarks>
+    public IReadOnlyList<IReadOnlyList<string?>>? CategoryLevels { get; init; }
+
     /// <summary>The series, in the order the file states them, which is drawing order.</summary>
     public IReadOnlyList<ChartSeries> Series { get; init; } = [];
 
@@ -591,6 +623,63 @@ public sealed partial record ChartPlot
     /// </remarks>
     public bool? CategoriesBetween { get; init; }
 
+    /// <summary>
+    /// Whether the category axis runs backwards — the last category where the first would be.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>c:catAx/c:scaling/c:orientation val="maxMin"</c>, ODF's
+    /// <c>chart:reverse-direction</c>, and <c>ScaleData::Orientation ==
+    /// AxisOrientation_REVERSE</c> in chart2's own model. It is what a Gantt chart is made of: a
+    /// horizontal bar chart's categories run bottom-to-top, so putting the first task at the top
+    /// takes a reversed axis, and every real Gantt in the wild states one.
+    /// </para>
+    /// <para>
+    /// <strong>It moves the value axis as well as the categories, and that is one rule rather than
+    /// two.</strong> The value axis is drawn at the <em>start</em> of the axis it crosses —
+    /// <c>AxisProperties::initAxisPositioning</c>, <c>chart2/source/view/axes/VAxisProperties.cxx</c>
+    /// :232-234, <c>m_eCrossoverType = START</c> and <c>END</c> exactly when
+    /// <c>m_bIsMainAxis == m_bCrossingAxisHasReverseDirection</c>, with the flag set from the
+    /// crossing scale's orientation at
+    /// <c>chart2/source/view/axes/VCartesianCoordinateSystem.cxx:145</c>. Reversing the category
+    /// axis therefore moves its start to the other end of the plot and the value axis' line, ticks
+    /// and labels go with it.
+    /// </para>
+    /// <para>
+    /// Measured on both directions against 26.2.4.2, by patching one attribute of a corpus chart
+    /// and rendering both versions (<c>probes/chart-cat-reverse/</c>): on
+    /// <c>N2_E_Maestroni_Swarm_COP.pptx</c>'s Gantt, <c>minMax</c> puts <c>LEOP [0000]</c> at the
+    /// bottom with the value axis line at y = 514.97 and <c>maxMin</c> puts it at the top with the
+    /// line at y = 108.00; on <c>002_advanced_powerpoint_column.pptx</c>'s column chart,
+    /// <c>M1</c> moves from x = 109.87 to x = 521.29 and the value axis' line and labels move from
+    /// the left edge (x = 85.58, labels at 62–73) to the right (x = 559.11, labels at 566.19),
+    /// while the category labels stay on the bottom in both.
+    /// </para>
+    /// <para>
+    /// The value axis' own <c>c:orientation</c> is <see cref="ChartScaleRequest.IsReversed"/> and
+    /// is a different statement about a different axis; a chart may make either, both or neither.
+    /// </para>
+    /// </remarks>
+    public bool CategoriesReversed { get; init; }
+
+    /// <summary>Which end of the category axis the value axis' tick labels sit at.</summary>
+    /// <remarks>See <see cref="ChartValueLabelPosition"/>; the axis <em>line</em> does not move
+    /// with them.</remarks>
+    public ChartValueLabelPosition ValueLabelPosition { get; init; }
+
+    /// <summary>The same statement made by a secondary value axis.</summary>
+    public ChartValueLabelPosition SecondaryLabelPosition { get; init; }
+
+    /// <summary>Which end of the category axis the value axis itself stands at.</summary>
+    /// <remarks>
+    /// <c>c:valAx/c:crosses</c>; see <see cref="ChartAxisCrossing"/>. A secondary axis takes the
+    /// other end from the primary rather than reading its own statement — every secondary axis in
+    /// the corpus says <c>max</c> against an <c>autoZero</c> primary, which is that same rule
+    /// spelled out, and honouring both statements separately would let a file put two axes on one
+    /// edge.
+    /// </remarks>
+    public ChartAxisCrossing ValueAxisCrossing { get; init; }
+
     /// <summary>The series drawn as one kind against one value axis, in file order.</summary>
     /// <param name="kind">The geometry.</param>
     /// <param name="axis">
@@ -739,6 +828,45 @@ public sealed partial record ChartPlot
     /// another. Resolved by <see cref="ChartAxisLabels"/>, which is where the rules live.
     /// </remarks>
     public ChartAxisText CategoryAxisText { get; init; }
+
+    /// <summary>
+    /// What the file says about how the <em>value</em> axis' labels are set.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>c:valAx/c:txPr/a:bodyPr</c>, read by the same function that reads the category axis' —
+    /// and until this existed it was not read at all, so a chart stating its own value-label
+    /// rotation drew them upright. Only <see cref="ChartAxisText.Rotation"/> is used: the other
+    /// three decide an arrangement, and a value axis has none. <c>isBreakOfLabelsAllowed</c> says
+    /// so outright — "no break for value axis", <c>!m_bUseTextLabels</c>
+    /// (<c>chart2/source/view/axes/VCartesianAxis.cxx</c>:521-522) — and
+    /// <c>canAutoAdjustLabelPlacement</c> never reaches one either, because a value axis' tick
+    /// count is reduced until its labels fit rather than its labels being turned.
+    /// </para>
+    /// <para>
+    /// <strong>Reach: one document, and the axis' own title is what the other thirty-six
+    /// are.</strong> Over the corpus' 307 chart parts, 37 value axes carry an in-range non-zero
+    /// <c>rot</c> somewhere inside <c>c:valAx</c> and <strong>35 of them are on the axis
+    /// <em>title</em></strong>, which is a quarter-turn and was already drawn. Read from
+    /// <c>c:txPr</c> alone the count is two, and one of those two is not a value axis either:
+    /// <c>047_Date_tracker_Gantt_chart</c> is a <c>c:scatterChart</c>, whose <em>domain</em> is
+    /// also spelt <c>c:valAx</c>, and its −30° is on the bottom axis that
+    /// <see cref="ChartPlot.DomainScale"/> carries and <c>AddDomainAxis</c> draws. What is left is
+    /// <c>N2_E_Maestroni_Swarm_COP.pptx</c> at −45°, a bar chart whose value axis runs along the
+    /// bottom and whose dates would otherwise overlap. See <c>probes/chart-layout/census.py</c>.
+    /// </para>
+    /// <para>
+    /// <strong>The ODF reader deliberately does not set this yet.</strong> <c>OdfChartPlot</c>
+    /// has the same <c>AxisTextOf</c> and could read <c>style:rotation-angle</c> off the value
+    /// axis' style in one line, but no corpus ODF chart was measured for it and an unmeasured
+    /// rotation would move ODF charts on a rule taken from OOXML's reference. It is a one-line
+    /// change for whoever measures it.
+    /// </para>
+    /// </remarks>
+    public ChartAxisText ValueAxisText { get; init; }
+
+    /// <summary>The same, for a secondary value axis.</summary>
+    public ChartAxisText SecondaryValueAxisText { get; init; }
 
     /// <summary>
     /// How the category axis' labels are written, or null to draw the cached text as it stands.

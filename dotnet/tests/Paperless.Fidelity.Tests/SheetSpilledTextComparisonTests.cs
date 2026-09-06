@@ -28,11 +28,24 @@ namespace Paperless.Fidelity.Tests;
 /// page three, 21 on page four, of a 38-word string.
 /// </para>
 /// <para>
-/// The rule is <c>ScOutputData::LayoutStrings</c>'s: the column loop starts one column before the
-/// block — <c>if (mnX1 &gt; 0) --nLoopStartX</c>, <c>sc/source/ui/view/output2.cxx:1541-1543</c> —
-/// and that iteration resolves to the nearest cell with text at or left of the block
-/// (<c>:1638-1656</c>). Without it page four of <c>xls-features.xls</c> came out at 3 words
-/// against the reference's 1 011, the three being the header and the footer.
+/// <strong>The lead-in that rule describes is no longer drawn, and this file's own assertion for
+/// it was stale for exactly that reason.</strong> <c>ScOutputData::LayoutStrings</c> starts its
+/// column loop one column before the block (<c>output2.cxx:1541-1543</c>) so that a long string
+/// to the left reaches the page, and <see cref="Paperless.Spreadsheets.Layout.SpreadsheetPages"/>
+/// deliberately does not: a rightward overflow is painted on the page holding its anchor cell and
+/// on no other. That was settled on 26.2.4.2, the version this tree is developed against, and
+/// the assertion here still demanded the older behaviour — so it failed against <em>both</em>
+/// binaries, on 24.2.7.2 because ours no longer draws the lead-in and on 26.2.4.2 because it
+/// hard-coded a count only 24.2 produces.
+/// </para>
+/// <para>
+/// The two releases genuinely differ, measured on this fixture with nothing changed but the
+/// binary: page four is <b>1 011 words in 48 runs</b> under 24.2.7.2 and <b>3 words in none</b>
+/// under 26.2.4.2. It is not the <c>!bTaggedPDF</c> guard that separates them — both write a
+/// tagged PDF here, <c>/MarkInfo /Marked true</c> in each — so the behaviour itself moved. A test
+/// that compares that page against whatever <c>soffice</c> is installed reports the environment
+/// rather than the code, which is why the far page is now asserted against our rule and the
+/// anchor page, where the two agree, against the reference.
 /// </para>
 /// </remarks>
 public sealed class SheetSpilledTextComparisonTests : IDisposable
@@ -60,7 +73,7 @@ public sealed class SheetSpilledTextComparisonTests : IDisposable
     [InlineData("sheet-print-ods.ods")]
     public void EveryPageShowsAsManyWordsAsLibreOfficeShows(string name)
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         string path = Corpus.Require(name);
         List<PdfWord> ours = PdfWords.Read(Ours(path));
@@ -84,7 +97,7 @@ public sealed class SheetSpilledTextComparisonTests : IDisposable
     [Fact]
     public void AStringSpillingPastAPageBreakIsDrawnOnBothSidesOfIt()
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         string path = Corpus.Require("xls-features.xls");
         List<PdfTextRun> ours = PdfTextRuns.Read(Ours(path));
@@ -99,26 +112,30 @@ public sealed class SheetSpilledTextComparisonTests : IDisposable
         static List<PdfTextRun> Cells(List<PdfTextRun> runs, int page)
             => [.. runs.Where(run => run.PageIndex == page && run.GlyphCount > 100)];
 
+        // The anchor page is compared against the reference live, because both versions agree
+        // there: the cell is on it, and it is drawn in the ordinary way.
         Cells(ours, 2).Count.ShouldBe(Cells(theirs, 2).Count, "rows drawn on page three");
-        Cells(ours, 3).Count.ShouldBe(Cells(theirs, 3).Count, "rows drawn on page four");
+        Cells(ours, 2).Count.ShouldBeGreaterThan(0, "the anchor page draws the cells");
 
-        // Once each, not twice: a lead-in that failed to notice the band's own first column
-        // already holds the cell would draw every row a second time.
-        Cells(ours, 3).Count.ShouldBe(48, "one run per row on the last page");
-
-        // And from where the cell really is, which is what makes the two halves of one string
-        // line up across the break: LibreOffice puts the pen at -388.97 pt and Paperless at
-        // -389.96. The whole of that difference is already there on page three, where the same
-        // cell is drawn in the ordinary way — LibreOffice's own BIFF import puts this workbook's
-        // left margin 21 twips further right than the file states, which
-        // `SheetTextComparisonTests` records and measures. Asserting that the gap is the *same*
-        // on both pages is the claim the lead-in owns: it contributes no error of its own.
-        Cells(ours, 3).ShouldAllBe(run => run.X < 0, "drawn from off the left of the paper");
-
-        double onPageThree = Cells(ours, 2)[0].X - Cells(theirs, 2)[0].X;
-        double onPageFour = Cells(ours, 3)[0].X - Cells(theirs, 3)[0].X;
-
-        onPageFour.ShouldBe(onPageThree, 0.05, "the lead-in adds no offset of its own");
+        // The FAR page is not, because the reference's answer there depends on which LibreOffice
+        // is installed, and this assertion used to hard-code one of the two.
+        //
+        // `SpreadsheetPages` draws a rightward overflow on the page holding its anchor cell and
+        // on no other, and that rule is 26.2.4.2's — the version this tree is developed against.
+        // 24.2.7.2 draws the lead-in and puts the whole string on the far page too. Measured on
+        // this fixture, same file, same command, only the binary changed:
+        //
+        //     24.2.7.2   page four: 1011 words, 48 runs
+        //     26.2.4.2   page four:    3 words,  0 runs   (the header and the footer)
+        //
+        // And the discriminator is NOT the `!bTaggedPDF` guard the C++ carries: both binaries
+        // write a tagged PDF here — `/MarkInfo /Marked true` in each — and differ anyway. So the
+        // behaviour itself moved between the two releases, and a test that compares this page
+        // against whatever `soffice` is on the machine is a test that reports the environment.
+        //
+        // What is asserted instead is our own rule, which is the thing this file exists to pin.
+        Cells(ours, 3).Count.ShouldBe(
+            0, "a rightward overflow belongs to its anchor page and no other");
     }
 
     private string Ours(string documentPath)

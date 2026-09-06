@@ -28,6 +28,16 @@ namespace Paperless.Core.Tests;
 /// comes out upright. That is why round 30's decks — every one of them one-word — read the limit
 /// as 1.000 and rejected the source's own 0.95.</description></item>
 /// </list>
+/// <para>
+/// <strong>The upright half of each case used to assert a thinned axis and no longer does, and
+/// that change is a correction rather than a relaxation.</strong> A label that breaks at a space
+/// is at most one line's worth of the limit wide — 0.95 of a tick — so it cannot reach its
+/// neighbour and the axis is never thinned: every label is drawn, on two lines. The old
+/// expectation was reachable only because the wrap was computed and then discarded by a guard
+/// that compared string lengths, and a newline is exactly as long as the blank it replaces. The
+/// reference settles it: <c>033_Event_planning_tracker</c>'s six two-word categories are all
+/// drawn on two lines, and we drew three of six on one.
+/// </para>
 /// </remarks>
 public class ChartAxisWrapLimitTests
 {
@@ -82,7 +92,8 @@ public class ChartAxisWrapLimitTests
         else
         {
             layout.Rotation.ShouldBe(0.0);
-            layout.Rhythm.ShouldBeGreaterThan(1);
+            layout.Rhythm.ShouldBe(1);
+            layout.Texts.ShouldNotBeNull();
         }
     }
 
@@ -135,7 +146,13 @@ public class ChartAxisWrapLimitTests
 
         ChartAxisLabelLayout first = Resolve(Labels(8, ordinary, overWide), 90.0);
         first.Rotation.ShouldBe(0.0);
-        first.Rhythm.ShouldBeGreaterThan(1);
+
+        // Upright because every label broke at its own blank, which is the only reason an axis
+        // this crowded stays upright — asserting the rotation alone would pass on an axis that
+        // never wrapped at all.
+        first.Texts.ShouldNotBeNull()[0].ShouldBe(overWide.Replace(' ', '\n'));
+        first.Texts.ShouldNotBeNull()[1].ShouldBe(ordinary.Replace(' ', '\n'));
+        first.Rhythm.ShouldBe(1);
 
         // The same over-wide word anywhere else does turn it, so this is the index and not the
         // width.
@@ -159,7 +176,11 @@ public class ChartAxisWrapLimitTests
         // whether the run before the separator measures 95 or 96.
         ChartAxisLabelLayout blank = Resolve(Labels(8, new string('W', 95) + " AAAAAAAAAA"), 100.0);
         blank.Rotation.ShouldBe(0.0);
-        blank.Rhythm.ShouldBeGreaterThan(1);
+
+        // Upright because the label broke at the blank, and the break is where the blank was —
+        // which is the half of this the rotation cannot show.
+        blank.Texts.ShouldNotBeNull()[0].ShouldBe(new string('W', 95) + "\nAAAAAAAAAA");
+        blank.Rhythm.ShouldBe(1);
 
         Resolve(Labels(8, new string('W', 95) + "-AAAAAAAAAA"), 100.0)
             .Rotation.ShouldBe(Math.PI / 4.0, 1e-12);

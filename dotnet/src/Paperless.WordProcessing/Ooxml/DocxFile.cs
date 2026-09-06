@@ -56,9 +56,12 @@ public sealed class DocxFile : IDisposable
         // The colour map is not in the theme part. DrawingML hangs an a:clrMap on a slide master
         // and Word writes a w:clrSchemeMapping beside its compatibility options, so the two
         // halves of a resolvable theme arrive from different parts and are joined here.
+        XElement? theme = LoadRelated("theme", "word/theme/theme1.xml");
+        ThemePart = theme;
         Theme = DrawingTheme
-            .Read(LoadRelated("theme", "word/theme/theme1.xml"))
+            .Read(theme)
             ?.WithMap(DrawingColourMap.Read(Word.Child(Settings, "clrSchemeMapping")));
+        ShapeStyles = DrawingStyleMatrix.Read(theme);
 
         IsOffice2007 = OoxmlMetadata.IsOffice2007(package);
 
@@ -119,6 +122,30 @@ public sealed class DocxFile : IDisposable
     /// one resolves to nothing rather than to a guess.
     /// </remarks>
     public DrawingTheme? Theme { get; }
+
+    /// <summary>
+    /// The <c>a:theme</c> root itself, or null when the document has no theme part.
+    /// </summary>
+    /// <remarks>
+    /// Beside <see cref="Theme"/> and <see cref="ShapeStyles"/> rather than replacing either,
+    /// because a SmartArt colour transform indexes the format scheme by position and resolves its
+    /// <c>phClr</c> against the colour scheme — so the one consumer that needs the part needs the
+    /// element and not a model of it. Nothing else reads it.
+    /// </remarks>
+    public XElement? ThemePart { get; }
+
+    /// <summary>
+    /// The theme's <c>a:fmtScheme</c> — the fill and line styles a shape's <c>wps:style</c>
+    /// indexes into — or null when the document has no theme part or its theme declares none.
+    /// </summary>
+    /// <remarks>
+    /// Beside <see cref="Theme"/> rather than inside it because the two answer different
+    /// questions and are wanted by different callers: a run's <c>w:themeColor</c> needs the
+    /// colour scheme and never the matrix, while an anchored shape stating no fill needs both —
+    /// the matrix for <em>which</em> style and the scheme for the colour that style's
+    /// <c>phClr</c> stands in for. The slide side keeps them apart the same way.
+    /// </remarks>
+    public DrawingStyleMatrix? ShapeStyles { get; }
 
     /// <summary>
     /// Whether Office 2007 wrote the document, which inverts several unstated chart defaults.

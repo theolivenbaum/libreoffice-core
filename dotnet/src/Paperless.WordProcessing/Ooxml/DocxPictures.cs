@@ -245,6 +245,93 @@ public sealed class DocxPictures
         return chart;
     }
 
+    /// <summary>
+    /// The SmartArt diagram a <c>w:drawing</c> holds, translated into a shape group, or null.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Beside <see cref="Chart"/> and for the same reason: a diagram names four parts by
+    /// relationship and a fifth through one of them, every one of those ids is scoped to the part
+    /// the drawing sits in, and <see cref="Scope"/> is what already tracks that. A diagram in a
+    /// header resolves against the header's own relationships, and resolving it against
+    /// <c>document.xml</c>'s does not fail — it finds whatever that part calls <c>rId9</c>.
+    /// </para>
+    /// <para>
+    /// <strong>We drew an empty frame here until this existed.</strong> Diagram support has been
+    /// thorough since the slides track needed it, and it was reachable only from a deck; three
+    /// corpus documents carry one and all three drew nothing where the reference draws the
+    /// diagram. On <c>024_Unit_Circle_Chart_Colorful_Circles</c> the deficit is exactly the five
+    /// nodes' <c>YOUR TEXT</c> — ten words and forty alphanumeric characters, against both
+    /// reference binaries.
+    /// </para>
+    /// <para>
+    /// Not cached by part, unlike a chart. The translation depends on the frame's extent as well
+    /// as on the parts — the evaluator lays the diagram out inside it — so two frames naming one
+    /// data part at different sizes are two different answers, and a diagram is drawn once per
+    /// anchor rather than once per page the way a header's logo is.
+    /// </para>
+    /// </remarks>
+    /// <param name="drawing">The <c>wp:anchor</c> or <c>wp:inline</c>.</param>
+    /// <param name="frame">The frame's extent, which is the diagram's own coordinate space.</param>
+    /// <param name="theme">The document's theme, for the node colours and the text face.</param>
+    /// <returns>A group of translated shapes, or null when the drawing holds no diagram.</returns>
+    public XElement? Diagram(XElement drawing, DocSize frame, DrawingTheme? theme)
+    {
+        ArgumentNullException.ThrowIfNull(drawing);
+
+        XElement? data = drawing
+            .Descendants(XName.Get("graphicData", OoxmlNamespaces.DrawingML))
+            .FirstOrDefault();
+
+        if (data is null) return null;
+        if (data.Attribute("uri")?.Value != DiagramParts.Uri) return null;
+
+        return DocxDiagram.Read(data, frame, Diagrams, Scope, _file.ThemePart, theme);
+    }
+
+    /// <summary>The document as the two lookups a diagram's parts need.</summary>
+    /// <remarks>
+    /// Built once and kept: the resolution walks the same two methods for each of the five parts
+    /// of each diagram, and the part cache is what keeps asking twice cheap.
+    /// </remarks>
+    private DiagramPartSource Diagrams
+        => _diagrams ??= new DiagramPartSource(Target, LoadPart);
+
+    private DiagramPartSource? _diagrams;
+
+    private readonly Dictionary<string, XElement?> _partsByName = new(StringComparer.Ordinal);
+
+    /// <summary>The part a relationship names, scoped to the part that states it.</summary>
+    private string? Target(string partName, string relationshipId)
+    {
+        if (_file.Package is not OpcPackage package) return null;
+
+        foreach (OpcXml.Relationship relationship in package.GetRelationships(partName))
+        {
+            if (!string.Equals(relationship.Id, relationshipId, StringComparison.Ordinal)) continue;
+
+            return relationship.IsExternal ? null : relationship.Target;
+        }
+
+        return null;
+    }
+
+    /// <summary>A part's root element, cached, or null when it is missing or unreadable.</summary>
+    private XElement? LoadPart(string partName)
+    {
+        if (_partsByName.TryGetValue(partName, out XElement? cached)) return cached;
+
+        XElement? root = null;
+        if (_file.Package.GetPart(partName) is { } part)
+        {
+            using Stream content = part.Open();
+            root = OoxmlXml.TryLoad(content, out _);
+        }
+
+        _partsByName[partName] = root;
+        return root;
+    }
+
     /// <summary>The chart a package part holds, or nothing when the part is missing or unreadable.</summary>
     private DocxChart LoadChart(OpcPackage package, string partName)
     {

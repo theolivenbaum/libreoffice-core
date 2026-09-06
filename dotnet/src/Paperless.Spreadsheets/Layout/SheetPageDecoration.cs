@@ -86,7 +86,7 @@ internal sealed class SheetPageDecoration(SheetLayout sheet, SheetPagePlacement 
     /// </remarks>
     private static readonly Length HairlineWidth = Length.FromPoints(0.1);
 
-    private readonly double _scale = Math.Max(1, placement.ZoomPercentage) / 100.0;
+    private readonly double _scale = placement.Scale;
 
     /// <summary>Paints the cells' fills.</summary>
     /// <remarks>
@@ -339,14 +339,15 @@ internal sealed class SheetPageDecoration(SheetLayout sheet, SheetPagePlacement 
             foreach (PlacedColumn column in columns)
             {
                 Box(new DocRect(column.X, top, column.Width, headingHeight),
-                    ColumnName(column.Column), sink);
+                    ColumnName(column.Column), _scale, sink);
             }
 
             Length left = origin.X;
             foreach (PlacedRow row in rows)
             {
                 Box(new DocRect(left, row.Y, headingWidth, row.Height),
-                    (row.Row + 1).ToString(System.Globalization.CultureInfo.CurrentCulture), sink);
+                    (row.Row + 1).ToString(System.Globalization.CultureInfo.CurrentCulture),
+                    _scale, sink);
             }
         }
 
@@ -480,9 +481,11 @@ internal sealed class SheetPageDecoration(SheetLayout sheet, SheetPagePlacement 
     /// <paramref name="height"/>, the two figures this method is already given. Each area then
     /// goes through <c>ImpEditEngine::DrawText_ToPosition</c>, which takes the area's whole
     /// primitive range and <em>returns having emitted nothing at all</em> when that range does
-    /// not meet the clip (<c>editeng/source/editeng/impedit3.cxx:3367-3372</c>). Only when the
-    /// two overlap partly does it wrap the area in a <c>MaskPrimitive2D</c>, which keeps every
-    /// line — so this is all-or-nothing per area and never per line.
+    /// not meet the clip (<c>editeng/source/editeng/impedit3.cxx:3367-3379</c>). When the two
+    /// overlap only partly it wraps the area in a <c>MaskPrimitive2D</c> of the clip polygon
+    /// (<c>:3380-3389</c>), which keeps every line in the primitive tree and <em>cuts</em> all of
+    /// them when they are rendered. So the decision to draw at all is per area and never per
+    /// line, and the cut that follows it is geometric and lands wherever the band's edge is.
     /// </para>
     /// <para>
     /// A band is only ever shorter than its text when the file's own margins make it so, and both
@@ -537,7 +540,7 @@ internal sealed class SheetPageDecoration(SheetLayout sheet, SheetPagePlacement 
         // `aTwipMode`, which carries the zoom as its scale fraction
         // (`InitModes`, sc/source/ui/view/printfun.cxx:2645), so a header on a sheet printed at
         // 33% is drawn at a third of its stated size along with everything else.
-        double zoom = Math.Max(1, placement.ZoomPercentage) / 100.0;
+        double zoom = placement.Scale;
 
         // The three parts share one band and are each centred in it, which is why the band's own
         // height is the tallest of the three rather than each part's own: `PrintHF` gives the
@@ -569,8 +572,37 @@ internal sealed class SheetPageDecoration(SheetLayout sheet, SheetPagePlacement 
         // band whose right area is eight lines and whose left is one. 26.2.4.2 puts `KEEPLEFT`'s
         // ink at y 21.576 against a band top of 21.60; centring it in the right area's 124 pt put
         // it 54 pt lower, and then the clip below deleted it.
-        Length drawn = dynamic ? Length.Min(bandText, height) : height;
-        Length bandTop = dynamic && fromBottom ? top + height - bandText : top;
+        //
+        // **All three of those figures have to be in one space and two of them were not.**
+        // `bandText` is the text at the print scale — `SizeOf` multiplies every em size by the
+        // zoom — while `height` is the band as the file states it, unscaled. Calc has no such
+        // split: `PrintHF` does its whole arithmetic in *logical* twips and lets the map mode
+        // apply the zoom to all of it at once (`printfun.cxx:1867`, `:2645`), so `nDif` is
+        // `(paperHeight - textHeight)` logical and reaches the paper as
+        // `(paperHeight × zoom - textHeight × zoom) / 2`. Comparing a scaled text against an
+        // unscaled band overstates <c>nDif</c> by `height × (1 - zoom)`, which is nothing at all
+        // on an unscaled sheet and 12.3 pt on a sheet printed at 35 %.
+        //
+        // Measured on `sheets/done-014/xls/TICAPCapability_Final.xls`, whose sheets print at 57 %
+        // and 35 %: at 35 % the band is 30.16 pt stated, the text 7.82 pt drawn, and the mixed
+        // arithmetic put the header's pen 6.17 pt below the band's top — far enough that its ink
+        // began at 47.9 against a band ending at 46.6, so the whole area missed the clip
+        // rectangle and six pages lost their header and footer outright. The reference draws that
+        // header hard against the band's top.
+        Length scaled = height * zoom;
+        Length drawn = dynamic ? Length.Min(bandText, scaled) : scaled;
+
+        // The text rectangle's top, which is `PrintHF`'s `aStart`. For a footer that is the band's
+        // own bottom edge — the one figure the scaling leaves fixed — less the rectangle; a
+        // dynamic band measures that rectangle by its own text, which is the figure this line has
+        // always carried and which `SheetBandLinesTests` and `SheetSmallBandTests` pin, and a
+        // pinned one measures it by the stated band at the print scale.
+        //
+        // On an unscaled sheet `scaled` is `height`, so the pinned arm is `top` — exactly what
+        // stood here — and nothing without a print scale can move.
+        Length bandTop = fromBottom
+            ? top + height - (dynamic ? bandText : scaled)
+            : top;
 
         // A footer sits on its own margin line, but **never above the top of its own band**:
         // `PrintHF` offsets the text by `nDif = paperHeight - textHeight` and only when that is
@@ -589,7 +621,40 @@ internal sealed class SheetPageDecoration(SheetLayout sheet, SheetPagePlacement 
         // fit perfectly well, and clamping against `top` moves them. One probe caught it: a
         // 14.4 pt band went from 0.53 pt of the reference to 2.72 pt out. Against the band edge
         // the clamp fires only when the text genuinely does not fit inside the band.
-        if (fromBottom && bandTop < bandTopEdge) bandTop = bandTopEdge;
+        //
+        // The edge is the band's own top at the print scale, anchored — like everything else in a
+        // footer — on the bottom edge the scaling leaves fixed. `bandTopEdge` is stated unscaled,
+        // and the whole band below it, the gap included, is scaled: `top + height` is that bottom
+        // edge and `height + top - bandTopEdge` is the band with its gap. On an unscaled sheet
+        // this is `bandTopEdge` exactly, whatever the band is doing.
+        Length bandEdge = (top + height) - ((height + top - bandTopEdge) * zoom);
+        if (fromBottom && bandTop < bandEdge) bandTop = bandEdge;
+
+        // `PrintHF`'s own clip rectangle, which every one of the three areas is drawn through:
+        // `Rectangle(aStart, Size(nLineWidth, nHeight - nDistance))`
+        // (`sc/source/ui/view/printfun.cxx:1870`).
+        //
+        // **It is as tall as the band at the print scale and as wide as the band at full size**,
+        // which is the same asymmetry <see cref="SheetPrintSetup.PrintableAreaAt"/> already
+        // carries: `aPageRect` is in *document* twips, so `nLineWidth` comes off it and arrives
+        // unscaled while `nHeight - nDistance` is added whole and arrives at `nHeight × zoom`
+        // (`ScPrintFunc::GetDocPageSize`, `printfun.cxx:3002`, over the map mode's zoom fraction
+        // at `:2645`). At an unscaled sheet the two are the same figure and nothing here moves.
+        //
+        // Both halves read straight off `FY2023-AIP-grants.xlsx` page 3, whose print scale is
+        // 43 %: the reference's content stream opens `17.995 576.503 755.94 13.91 re W* n` for a
+        // 32.4 pt header band 756 pt wide, and `17.995 21.674 755.94 5.74 re W* n` for a footer
+        // whose dynamic band holds one 13.4 pt line.
+        //
+        // **Its origin is `bandTop` and is not derived a second time.** `aStart` is both the clip
+        // region's corner and the point the three areas are drawn from — `PrintHF` passes the one
+        // variable to `SetClipRegion` and to each `DrawText_ToPosition`
+        // (`printfun.cxx:1870-1912`) — so computing it twice is what let the window drift out of
+        // step with where the text had actually been put. An area placed outside a window it is
+        // then tested against is not clipped, it is **rejected**, and `TICAPCapability_Final.xls`
+        // lost its header and its footer on six pages that way.
+        Length clipHeight = scaled;
+        Length clipTop = bandTop;
 
         Place(band.Left, _ => left);
         Place(band.Centre, width => left + ((right - left - width) / 2));
@@ -695,15 +760,67 @@ internal sealed class SheetPageDecoration(SheetLayout sheet, SheetPagePlacement 
             // area whose ink misses it entirely is not drawn — not the ink and not the text.
             bool overlaps = inkLeft < right
                             && inkRight > left
-                            && inkTop < top + height
-                            && inkBottom > top;
+                            && inkTop < clipTop + clipHeight
+                            && inkBottom > clipTop;
 
             if (!overlaps) return;
 
-            foreach ((BandRun run, DocPoint origin) in placed)
-                sink.DrawGlyphRun(run.At(origin), Paint.Solid(Colour.Black));
+            // Ink that is only *partly* inside is cut at the band's edge, and the remark above
+            // said the opposite until round `clip`. `DrawText_ToPosition` has three branches, not
+            // two: no overlap returns having drawn nothing, wholly inside draws unwrapped, and
+            // anything else embeds the area in a `MaskPrimitive2D` of the clip polygon
+            // (`editeng/source/editeng/impedit3.cxx:3367-3389`). A mask keeps every line in the
+            // primitive tree — which is what "keeps every line" meant and why it read as no clip
+            // at all — and cuts every one of them geometrically when it is rendered.
+            //
+            // `ClipPathKeepingText`, because a band's words are the document's own: the reference
+            // cuts the ink at the same edge and leaves the glyphs in its PDF's text layer. On
+            // `sheets/done-011/xlsx/FY2023-AIP-grants.xlsx` the header is three centred lines in
+            // a band that holds two — `pdftotext` reads all three off the reference's page 3 while
+            // its content stream opens with `17.995 576.503 755.94 13.91 re W* n` and the third
+            // line's ink stops just inside that rectangle's bottom edge.
+            //
+            // **The rectangle is as tall as the band at the print scale and as wide as the band
+            // at full size**, which is the same asymmetry `SheetPrintSetup.PrintableAreaAt`
+            // already carries: `aPageRect` is in *document* twips, so `nLineWidth` comes off it
+            // and arrives unscaled while `aPaperSize.Height() = nHeight - nDistance` is added
+            // whole and arrives at `nHeight × zoom` (`ScPrintFunc::GetDocPageSize`,
+            // `printfun.cxx:3002`, over the map mode's zoom fraction at `:2645`). Both halves
+            // read straight off that one document: the header's clip is
+            // `(32.4 - 0) × 0.4293 = 13.91` pt tall and `774 - 18 = 756` pt wide, and the
+            // footer's — a dynamic band, so its own text height — is `13.4 × 0.4293 = 5.74`.
+            bool inside = inkLeft >= left
+                          && inkRight <= right
+                          && inkTop >= clipTop
+                          && inkBottom <= clipTop + clipHeight;
+
+            if (!inside)
+            {
+                sink.Save();
+                sink.ClipPathKeepingText(
+                    Rectangle(new DocRect(left, clipTop, right - left, clipHeight)));
+            }
+
+            try
+            {
+                foreach ((BandRun run, DocPoint origin) in placed)
+                    sink.DrawGlyphRun(run.At(origin), Paint.Solid(Colour.Black));
+            }
+            finally
+            {
+                if (!inside) sink.Restore();
+            }
         }
     }
+
+    /// <summary>A rectangle as a closed path, for a clip.</summary>
+    private static GraphicsPath Rectangle(DocRect rect)
+        => new GraphicsPath()
+           .MoveTo(new DocPoint(rect.X, rect.Y))
+           .LineTo(new DocPoint(rect.Right, rect.Y))
+           .LineTo(new DocPoint(rect.Right, rect.Bottom))
+           .LineTo(new DocPoint(rect.X, rect.Bottom))
+           .Close();
 
     /// <summary>How tall one part of a band is: the sum of its lines.</summary>
     private static Length TextHeight(
@@ -860,11 +977,33 @@ internal sealed class SheetPageDecoration(SheetLayout sheet, SheetPagePlacement 
             new Stroke(Paint.Solid(FurnitureColour), HairlineWidth));
 
     /// <summary>A heading cell: its box, and its label centred inside it.</summary>
-    private static void Box(DocRect area, string label, IDrawingSink sink)
+    /// <remarks>
+    /// <para>
+    /// <strong>The label is drawn at the page's own print scale, not at a fixed ten point.</strong>
+    /// <c>ScPrintFunc::PrintPage</c> sets the heading font on the device while its map mode is
+    /// <c>aOffsetMode</c> (<c>sc/source/ui/view/printfun.cxx:2350-2357</c>), and <c>InitModes</c>
+    /// builds that map mode with the zoom as its scale fraction (<c>:2642</c>), so
+    /// <c>PrintColHdr</c>'s <c>DrawText</c> is scaled along with the cells. The strip itself was
+    /// already scaled by the caller — <c>HeadingWidth * _scale</c> — so only the text was out.
+    /// </para>
+    /// <para>
+    /// Measured on a probe stating <c>printOptions headings="1"</c> through LibreOffice 24.2.7.2:
+    /// at <c>pageSetup scale="30"</c> the reference's column heading <c>A</c> is 3.35 pt tall and
+    /// this drew it 11.17 pt tall, while at <c>scale="100"</c> both are 11.17 pt. The corpus
+    /// witness is <c>Application_Compliance_Checklist_5_Apr_2021.xlsx</c>, whose sheets print at
+    /// 28, 50 and 59 per cent with headings switched on: its row numbers were drawn three times
+    /// over the cells.
+    /// </para>
+    /// </remarks>
+    /// <param name="area">The heading cell's rectangle.</param>
+    /// <param name="label">The column letter or row number.</param>
+    /// <param name="scale">The page's print scale, as a fraction.</param>
+    /// <param name="sink">Receives the drawing commands.</param>
+    private static void Box(DocRect area, string label, double scale, IDrawingSink sink)
     {
         Outline(area, sink);
 
-        Length size = SheetBandText.DefaultSize;
+        Length size = SheetBandText.DefaultSize * scale;
         if (SheetBandText.Shape(label, size) is not { } run) return;
 
         Length x = area.X + ((area.Width - run.Width) / 2);

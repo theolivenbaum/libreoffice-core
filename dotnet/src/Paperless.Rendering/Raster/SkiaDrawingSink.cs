@@ -35,6 +35,8 @@ internal sealed class SkiaDrawingSink : IDrawingSink, IDisposable
     private readonly SKCanvas _canvas;
     private readonly RasterRenderOptions _options;
     private readonly Dictionary<string, SKTypeface?> _typefaces = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, OpenTypeFace?> _faces = new(StringComparer.Ordinal);
+    private readonly Dictionary<(string Face, ushort Glyph), SKImage?> _strikes = [];
     private readonly List<int> _groups = [];
     private readonly float _scale;
 
@@ -231,6 +233,10 @@ internal sealed class SkiaDrawingSink : IDrawingSink, IDisposable
             font.SkewX = -(float)FontReference.SyntheticObliqueShear;
         }
 
+        // `w:rPr/w:w`, which VCL draws by setting the font's width away from its height — see
+        // GlyphRun.WidthScale. The positions below are already scaled; this is the glyph's own shape.
+        if (run.WidthScale != 1.0) font.ScaleX = (float)run.WidthScale;
+
         ushort[] ids = new ushort[run.Glyphs.Count];
         SKPoint[] positions = new SKPoint[run.Glyphs.Count];
 
@@ -242,6 +248,12 @@ internal sealed class SkiaDrawingSink : IDrawingSink, IDisposable
                 (float)((run.Origin.X + glyph.Offset.X).Emu * _scale),
                 (float)((run.Origin.Y + glyph.Offset.Y).Emu * _scale));
         }
+
+        // Before anything asks the typeface for an outline, because a colour bitmap face has none
+        // to give: what comes back is the glyphs the strikes did not account for, which is all of
+        // them for an ordinary face and none of them for Noto Color Emoji.
+        (ids, positions) = DrawColourBitmaps(run, ids, positions);
+        if (ids.Length == 0) return;
 
         using SKPaint brush = Brush(paint, SKPaintStyle.Fill);
 
@@ -257,6 +269,105 @@ internal sealed class SkiaDrawingSink : IDrawingSink, IDisposable
         if (blob is null) return;
 
         _canvas.DrawText(blob, 0, 0, brush);
+    }
+
+    /// <summary>
+    /// Draws whichever of a run's glyphs the face holds a colour bitmap for.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A colour bitmap face keeps a whole PNG per glyph in <c>CBDT</c> and no outline anywhere, so
+    /// every outline-shaped path through this sink draws nothing for it. The strike carries its own
+    /// placement in pixels of its own resolution and
+    /// <see cref="ColourBitmap.PlacementIn(int)"/> turns that into design units; from there it is
+    /// the same <c>em / unitsPerEm</c> scale every other metric in this class uses.
+    /// </para>
+    /// <para>
+    /// The <em>same</em> arithmetic the PDF sink writes into a Type 3 char proc, on purpose. The
+    /// two backends draw one display list and a strike placed by two different derivations would put
+    /// the emoji in two different places on the same page — which is the class of divergence this
+    /// class already pays a slow per-glyph outline path to avoid.
+    /// </para>
+    /// <para>
+    /// Per glyph rather than per run, so a face carrying both strikes and outlines draws each glyph
+    /// from whichever it has; the glyphs handed back are the ones still to be drawn as outlines.
+    /// </para>
+    /// </remarks>
+    private (ushort[] Ids, SKPoint[] Positions) DrawColourBitmaps(
+        GlyphRun run, ushort[] ids, SKPoint[] positions)
+    {
+        if (FaceFor(run.Font) is not { } face || !ColourBitmaps.Has(face)) return (ids, positions);
+
+        int upem = face.UnitsPerEm > 0 ? face.UnitsPerEm : 1000;
+        float em = (float)(run.FontSize.Emu * _scale);
+        float unit = em / upem;
+        int perEm = (int)Math.Round(em, MidpointRounding.AwayFromZero);
+
+        List<ushort> rest = [];
+        List<SKPoint> restAt = [];
+
+        using SKPaint brush = new() { IsAntialias = _options.Antialias };
+
+        for (int i = 0; i < ids.Length; i++)
+        {
+            ColourBitmap? bitmap = ColourBitmaps.Of(face, ids[i], perEm);
+            if (bitmap is null || Strike(run.Font, ids[i], bitmap) is not { } image)
+            {
+                rest.Add(ids[i]);
+                restAt.Add(positions[i]);
+                continue;
+            }
+
+            (int left, int bottom, int width, int height) = bitmap.PlacementIn(upem);
+
+            // The placement's y grows upward from the baseline and the canvas's grows downward, so
+            // the box's *top* is the pen's y less the height above the baseline.
+            SKRect box = SKRect.Create(
+                positions[i].X + (left * unit),
+                positions[i].Y - ((bottom + height) * unit),
+                width * unit,
+                height * unit);
+
+            _canvas.DrawImage(image, box, new SKSamplingOptions(SKFilterMode.Linear, SKMipmapMode.None), brush);
+        }
+
+        return ([.. rest], [.. restAt]);
+    }
+
+    /// <summary>A glyph's decoded strike, kept for as long as the sink is, or null when it will not decode.</summary>
+    private SKImage? Strike(FontReference font, ushort glyphId, ColourBitmap bitmap)
+    {
+        (string Face, ushort Glyph) key = (font.FaceKey.Length > 0 ? font.FaceKey : font.FamilyName, glyphId);
+        if (_strikes.TryGetValue(key, out SKImage? cached)) return cached;
+
+        using SKData data = SKData.CreateCopy(bitmap.Image.Span);
+        SKImage? image = SKImage.FromEncodedData(data);
+
+        _strikes[key] = image;
+        return image;
+    }
+
+    /// <summary>The OpenType face behind a resolved reference, for the tables Skia does not expose.</summary>
+    private OpenTypeFace? FaceFor(FontReference font)
+    {
+        string key = font.FaceKey.Length > 0 ? font.FaceKey : font.FamilyName;
+        if (_faces.TryGetValue(key, out OpenTypeFace? cached)) return cached;
+
+        (string path, int index) = SplitKey(font.FaceKey);
+
+        OpenTypeFace? face = null;
+        try
+        {
+            if (path.Length > 0 && File.Exists(path)) face = OpenTypeFace.ReadFile(path, index);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            // A face Skia loaded and this reader cannot is drawn from its outlines as before.
+            face = null;
+        }
+
+        _faces[key] = face;
+        return face;
     }
 
     /// <summary>
@@ -344,6 +455,7 @@ internal sealed class SkiaDrawingSink : IDrawingSink, IDisposable
     /// <inheritdoc/>
     public void Dispose()
     {
+        foreach (SKImage? strike in _strikes.Values) strike?.Dispose();
         foreach (SKTypeface? typeface in _typefaces.Values) typeface?.Dispose();
         _typefaces.Clear();
     }

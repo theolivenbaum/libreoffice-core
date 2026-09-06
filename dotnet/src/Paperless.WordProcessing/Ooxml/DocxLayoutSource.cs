@@ -85,10 +85,11 @@ public sealed partial class DocxLayoutSource
     private readonly ConstantFields _constants;
 
     private readonly DrawingTheme? _theme;
-    private readonly Dictionary<(string? Family, int Weight, bool Italic, FontFamilyClass Class),
-        OpenTypeFace?> _faces = [];
-    private readonly Dictionary<(string? Family, int Weight, bool Italic, FontFamilyClass Class),
-        FontReference> _references = [];
+    private readonly DrawingStyleMatrix? _shapeStyles;
+    private readonly Dictionary<(string? Family, int Weight, bool Italic, FontFamilyClass Class,
+        WriterScript Script, string? Language), OpenTypeFace?> _faces = [];
+    private readonly Dictionary<(string? Family, int Weight, bool Italic, FontFamilyClass Class,
+        WriterScript Script, string? Language), FontReference> _references = [];
 
     /// <summary>Creates a source over a document's styles and settings.</summary>
     /// <param name="styles">The document's styles, including its <c>w:docDefaults</c>.</param>
@@ -97,6 +98,11 @@ public sealed partial class DocxLayoutSource
     /// <param name="footnotes">The footnote bodies by <c>w:id</c>, or null for a document with none.</param>
     /// <param name="endnotes">The endnote bodies by <c>w:id</c>.</param>
     /// <param name="theme">The document's theme, for themed run colours, or null.</param>
+    /// <param name="shapeStyles">
+    /// The theme's <c>a:fmtScheme</c>, or null. An anchored shape stating no fill and no line
+    /// width takes both from it — see <c>DocxFrames.Appearance</c> — so a caller that omits it
+    /// gets the flowchart boxes and Gantt bars of a themed template drawn as empty outlines.
+    /// </param>
     /// <param name="pictures">
     /// How to reach the bytes an <c>a:blip</c> names, or null to lay the document out with its picture
     /// frames empty — which is what a caller who wants only measurements should pay for.
@@ -122,6 +128,7 @@ public sealed partial class DocxLayoutSource
         IReadOnlyDictionary<string, XElement>? footnotes = null,
         IReadOnlyDictionary<string, XElement>? endnotes = null,
         DrawingTheme? theme = null,
+        DrawingStyleMatrix? shapeStyles = null,
         DocxPictures? pictures = null,
         WordNumbering? numbering = null,
         WordFontTable? fontTable = null,
@@ -134,6 +141,7 @@ public sealed partial class DocxLayoutSource
         _numbering = numbering ?? new WordNumbering();
         Pictures = pictures;
         _theme = theme;
+        _shapeStyles = shapeStyles;
         _fonts = fonts ?? new SystemFontResolver(SystemFontIndex.Build());
         _defaultTabInterval = TabInterval(settings);
         _compatibilityMode = CompatibilityMode(settings);
@@ -341,6 +349,7 @@ public sealed partial class DocxLayoutSource
         _sectionIndex = 0;
         _blocksInSection = 0;
         _pendingBelowTarget = -1;
+        _sectionLeftMargins = LeftMargins(body);
 
         // The body is where the document's lists start counting. Reset rather than assumed clean,
         // because the numbering may be the same instance the extraction pass already walked.
@@ -497,6 +506,41 @@ public sealed partial class DocxLayoutSource
     /// call rather than being restored with it.
     /// </remarks>
     private int _sectionIndex;
+
+    /// <summary>
+    /// Each section's left margin, in the order the body states them — for a table anchored to the page.
+    /// </summary>
+    /// <remarks>
+    /// The one place this reader needs page geometry. <c>w:horzAnchor="page"</c> measures
+    /// <c>w:tblpX</c> from the sheet's own left edge, and everything downstream of here works in the
+    /// text area's coordinates, so the margin has to come off before the offset leaves this class. See
+    /// <see cref="PositionedLeftEdge"/>.
+    /// </remarks>
+    private List<Length> _sectionLeftMargins = [];
+
+    /// <summary>The left margin of each <c>w:sectPr</c> in the body, in order.</summary>
+    /// <remarks>
+    /// Read here rather than taken from the geometry the paginator builds, because a table is read long
+    /// before a page exists. A section stating no <c>w:pgMar</c> gets Letter's inch, which is what
+    /// <c>SectionPropertyMap</c>'s constructor gives it — see <see cref="PageGeometry.Letter"/>.
+    /// </remarks>
+    private static List<Length> LeftMargins(XElement body)
+        => [.. body
+            .Descendants(Word.Name("sectPr"))
+            .Select(section => Twips(Word.Child(section, "pgMar"), "left")
+                               ?? PageGeometry.Letter.Margins.Left)];
+
+    /// <summary>
+    /// The left margin of the section the walk is in, for a page-anchored table's offset.
+    /// </summary>
+    /// <remarks>
+    /// Clamped rather than indexed, because a body's last blocks belong to the section its final
+    /// <c>w:sectPr</c> states and <see cref="_sectionIndex"/> has counted past the marks by then.
+    /// </remarks>
+    private Length SectionLeftMargin
+        => _sectionLeftMargins.Count == 0
+            ? PageGeometry.Letter.Margins.Left
+            : _sectionLeftMargins[Math.Clamp(_sectionIndex, 0, _sectionLeftMargins.Count - 1)];
 
     /// <summary>
     /// How many blocks the current section has already contributed, reset when a section closes.
@@ -847,7 +891,7 @@ public sealed partial class DocxLayoutSource
 
         // The runs first, then the text they map: `Apply` rewrites both together, and the offsets it
         // preserves are the ones the notes and frames below were recorded against.
-        List<PageRun> runs = RunsOf(walker.Ranges, properties, body, face);
+        List<PageRun> runs = RunsOf(walker.Ranges, properties, body, face, walker.Text);
         string mapped = CaseMapping.Apply(walker.Text, runs);
 
         // A paragraph with nothing in it is its mark, so that is what sizes it; one with text is
@@ -888,6 +932,7 @@ public sealed partial class DocxLayoutSource
             // Word's "add space between Asian and Western text". See ScriptSpacing; the DOC reader
             // sets it for the same reason and the ODF one does not.
             AddsScriptSpace = true,
+            Item = text.FontItem,
             EmSize = text.Size,
             Language = text.Language,
             Shaping = new ShapingOptions(
@@ -942,6 +987,23 @@ public sealed partial class DocxLayoutSource
     /// <param name="name">The style the field named.</param>
     private string? StyleReferenceText(string name)
     {
+        // Not in a running head, where this map cannot answer. A header is read once per section, after
+        // the body walk has finished (`OoxmlWordDocument.Layout` calls `source.Read(body)` before
+        // `Paginated`), so `_styleText` holds the *last* paragraph in each style in the whole document
+        // — an answer that is right on at most one page and wrong on all the others. Writer resolves a
+        // STYLEREF from the field's own position instead, scanning backwards from it
+        // (`SwGetRefFieldType::FindAnchorRefStyleOther`), which for a running head means "the heading
+        // in force on this page" and is a different answer on every page.
+        //
+        // Measured on `231164_SystemDesignDocument.docx`: the reference's running head reads
+        // "List of Figures", "Introduction", "General Overview and Design Guidelines/Approach" on
+        // pages 3, 4 and 5; this map answers "List of Tables" and "External Interfaces" — the last
+        // front-matter heading and the last `Heading 2` — on all of them. Declining leaves the
+        // producer's cached result, which is the stated policy of this method ("a wrong substitution is
+        // worse than a stale one") and is what Word wrote for the page the field was last laid out on.
+        // Closing this properly needs a per-page substitution like `PageFields`; see findings.md.
+        if (InHeaderFooter) return null;
+
         if (_styleText.Count == 0) return null;
         if (_styleText.TryGetValue(name, out string? byId)) return byId;
 
@@ -1084,11 +1146,22 @@ public sealed partial class DocxLayoutSource
     /// its text is still part of the paragraph, and losing it would silently shorten the document.
     /// </para>
     /// </remarks>
+    /// <param name="ranges">The stretches of the paragraph and the run properties over each.</param>
+    /// <param name="paragraphProperties">The paragraph's <c>w:pPr</c>.</param>
+    /// <param name="paragraph">The paragraph mark's own style, which an unstyled run inherits.</param>
+    /// <param name="paragraphFace">The face the paragraph is set in, for a run whose own cannot load.</param>
+    /// <param name="text">
+    /// The paragraph's text, which the ranges index into. It is needed because a run's script
+    /// decides <em>which of Writer's three character-font items</em> the run is set from, and the
+    /// item carries its own family class and its own language — see
+    /// <see cref="WriterScripts.ForRun"/>.
+    /// </param>
     private List<PageRun> RunsOf(
         IReadOnlyList<StyledRange> ranges,
         XElement? paragraphProperties,
         WordTextStyle paragraph,
-        OpenTypeFace paragraphFace)
+        OpenTypeFace paragraphFace,
+        string text)
     {
         List<PageRun> runs = new(ranges.Count);
         bool varies = false;
@@ -1100,9 +1173,16 @@ public sealed partial class DocxLayoutSource
                 ? paragraph
                 : WordParagraphFormats.ResolveRun(
                     _styles, paragraphProperties, range.RunProperties, _theme, _tableStyleRun,
-                    _fontTable);
+                    _fontTable, ignoreCharacterStyle: range.InIndexField);
 
             if (range.IsCitation) style = AsCitation(style);
+
+            // Which font item this run's text selects. A run of Latin prose selects the western one
+            // and nothing changes; a run of the ambiguous characters Word marks `w:hint="eastAsia"`
+            // selects the East Asian item, which carries neither the western item's roman default
+            // nor its language.
+            int from = Math.Clamp(range.Start, 0, text.Length);
+            style = style.OnScript(text.AsSpan(from, Math.Clamp(range.Length, 0, text.Length - from)));
 
             // A `w:sym` names its own face for one character, and it was resolved when the character was
             // chosen. Everything else about the run — its size, its colour, its escapement — still comes
@@ -1128,6 +1208,12 @@ public sealed partial class DocxLayoutSource
                 || size != paragraph.Size
                 || style.Colour != paragraph.Colour
                 || style.Language != paragraph.Language
+                // And the font item, which decides where a character this face cannot draw is
+                // looked for. Two runs can resolve to the *same* face off different items -- a
+                // `w:hint="eastAsia"` run naming the paragraph's own family is the shape -- so
+                // nothing above can see the difference, and folding them would leave the run
+                // asking under the paragraph mark's western item.
+                || style.FontItem != paragraph.FontItem
                 || rise != Length.Zero
                 // A case map has to survive the uniform-paragraph shortcut: it is the one property here
                 // that changes the *characters*, so dropping the runs would draw the text as stored.
@@ -1146,6 +1232,10 @@ public sealed partial class DocxLayoutSource
                 // And tracking, for the same reason and more sharply: it is a distance per character,
                 // so a run that disagrees with its paragraph mark is wrong by its own length.
                 || style.Tracking != paragraph.Tracking
+                // And a character width, which is tracking's twin in this respect and worse in one:
+                // it multiplies the run's whole advance rather than adding to it, so a 99 per cent run
+                // measured at the paragraph's 100 is out by its own length and a quarter.
+                || style.WidthPerCent != paragraph.WidthPerCent
                 // And a synthetic oblique, which is drawing-only in the same way and was the one
                 // missing from this list: an italic run whose family has no italic installed resolves to
                 // the *same* face as its upright neighbour, so nothing above can see it and the fold
@@ -1168,7 +1258,9 @@ public sealed partial class DocxLayoutSource
                 Highlight: style.Highlight ?? default,
                 IsUnderlined: style.IsUnderlined,
                 IsStruckThrough: style.IsStruckThrough,
-                Tracking: style.Tracking));
+                Tracking: style.Tracking,
+                WidthPerCent: style.WidthPerCent,
+                Item: style.FontItem));
         }
 
         return varies ? runs : [];
@@ -1191,12 +1283,17 @@ public sealed partial class DocxLayoutSource
     /// the same decision picks the character: a slot recoded into OpenSymbol is a different code point
     /// from the one the file states, so the face cannot be chosen after the text is built.
     /// </param>
+    /// <param name="InIndexField">
+    /// True when the range sits in the *result* of a <c>TOC</c>, <c>INDEX</c> or <c>BIBLIOGRAPHY</c>
+    /// field, where the character style a run names is not applied. See <see cref="RunWalker"/>.
+    /// </param>
     private readonly record struct StyledRange(
         int Start,
         int Length,
         XElement? RunProperties,
         bool IsCitation = false,
-        (OpenTypeFace Face, FontReference? Font)? Symbol = null);
+        (OpenTypeFace Face, FontReference? Font)? Symbol = null,
+        bool InIndexField = false);
 
     /// <summary>A note found while walking a paragraph, before its body has been read.</summary>
     /// <param name="Offset">Where its citation sits in the paragraph's text.</param>
@@ -1346,6 +1443,7 @@ public sealed partial class DocxLayoutSource
             BorderWidth = CheckBoxStroke,
             BorderInset = CheckBoxInset,
             IsCrossed = box.IsChecked,
+            IsTextPortion = true,
         };
     }
 
@@ -1387,13 +1485,16 @@ public sealed partial class DocxLayoutSource
             if (anchor.Element.Name.LocalName is "pict" or "object")
             {
                 frames.AddRange(
-                    DocxVmlFrames.ReadAll(anchor.Element, anchor.Offset, Pictures, content));
+                    DocxVmlFrames.ReadAll(anchor.Element, anchor.Offset, Pictures, content, VmlFace));
                 continue;
             }
 
             frames.AddRange(DocxFrames.ReadAll(
                 anchor.Element, content, anchor.Offset, Pictures,
-                new DocxFrameContext(_theme, InHeaderFooter, _compatibilityMode)));
+                new DocxFrameContext(_theme, InHeaderFooter, _compatibilityMode)
+                {
+                    Styles = _shapeStyles,
+                }));
         }
 
         return frames;
@@ -1586,7 +1687,54 @@ public sealed partial class DocxLayoutSource
             /// <c>w:rPr</c>, which is what makes this the right guess rather than merely a guess.
             /// </remarks>
             internal XElement? InstructionProperties { get; set; }
+
+            /// <summary>
+            /// True when this field is a <c>TOC</c>, <c>INDEX</c> or <c>BIBLIOGRAPHY</c> whose result
+            /// is being read, so the runs inside it do not take the character style they name.
+            /// </summary>
+            internal bool IsIndexResult { get; set; }
         }
+
+        /// <summary>
+        /// How many index fields' results the walk is inside, so a run's <c>w:rStyle</c> is ignored.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// A table of contents is written by Word as a field whose cached result is a run of paragraphs,
+        /// each entry a <c>w:hyperlink</c> around a run naming the <c>Hyperlink</c> character style — so
+        /// taken at its word every entry is blue and underlined. LibreOffice does not take it at its
+        /// word: <c>DomainMapper.cxx</c>:3037-3047 looks the style up and then declines to apply it,
+        /// <em>"do not add it elements in TOC: they will receive later another style references from
+        /// TOC"</em>, so the entries come out in the <c>TOC N</c> paragraph style alone — plain, black,
+        /// not underlined. That is what the reference draws, on every document in the corpus that has a
+        /// contents list.
+        /// </para>
+        /// <para>
+        /// A counter rather than a flag, and scoped to the field's <em>result</em> rather than to the
+        /// whole field, because that is the extent LibreOffice gives it: <c>m_bStartTOC</c> is set when
+        /// the field command closes (<c>DomainMapper_Impl.cxx</c>:7643, reached from
+        /// <c>CloseFieldCommand</c> at the <c>w:fldChar w:fldCharType="separate"</c>) and cleared only
+        /// when that same field's context is popped (<c>DomainMapper_Impl.cxx</c>:9269, guarded by
+        /// <c>pContext-&gt;GetTOC().is()</c>), so the <c>PAGEREF</c> fields nested inside each entry do
+        /// not end it.
+        /// </para>
+        /// </remarks>
+        private int _indexResults;
+
+        /// <summary>True while the walk is inside an index field's result.</summary>
+        private bool InIndexField => _indexResults > 0;
+
+        /// <summary>
+        /// Whether an instruction names a field whose result LibreOffice regenerates, and whose runs
+        /// therefore lose the character style they name.
+        /// </summary>
+        /// <remarks>
+        /// The three <c>DomainMapper_Impl::IsInTOC</c> covers: <c>handleToc</c>, <c>handleIndex</c> and
+        /// <c>handleBibliography</c> all set <c>m_bStartTOC</c>.
+        /// </remarks>
+        private static bool IsIndexField(string instruction)
+            => FieldInstructions.Name(instruction)?.ToUpperInvariant()
+                is "TOC" or "INDEX" or "BIBLIOGRAPHY";
 
         /// <summary>The value a constant field evaluates to, or null when nothing can be computed.</summary>
         private string? ValueOf(string instruction)
@@ -1739,6 +1887,16 @@ public sealed partial class DocxLayoutSource
                                     OpenField open = _fields.Peek();
                                     open.ResultAt = _builder.Length;
 
+                                    // The instruction has been read in full, which is the earliest the
+                                    // field's name is known — and it is exactly where LibreOffice
+                                    // decides the same thing, in `CloseFieldCommand`.
+                                    if (!open.IsIndexResult
+                                        && IsIndexField(open.Instruction.ToString()))
+                                    {
+                                        open.IsIndexResult = true;
+                                        _indexResults++;
+                                    }
+
                                     // The one point at which a field this walk computes can be written:
                                     // the instruction has been read in full, so the field's name is
                                     // known, and the cached result it replaces starts here.
@@ -1752,6 +1910,8 @@ public sealed partial class DocxLayoutSource
                                 if (_fields.Count > 0)
                                 {
                                     OpenField closing = _fields.Pop();
+
+                                    if (closing.IsIndexResult) _indexResults--;
 
                                     // A field with no separator has no cached result at all, and
                                     // LibreOffice still draws its value — measured on the second
@@ -1796,7 +1956,18 @@ public sealed partial class DocxLayoutSource
                         }
                         else
                         {
-                            Append(child, depth + 1);
+                            // The compact form of an index carries its result the same way and loses
+                            // its runs' character styles for the same reason.
+                            bool index = IsIndexField(simple.Instruction.ToString());
+                            if (index) _indexResults++;
+                            try
+                            {
+                                Append(child, depth + 1);
+                            }
+                            finally
+                            {
+                                if (index) _indexResults--;
+                            }
                         }
 
                         CloseField(simple);
@@ -1809,6 +1980,30 @@ public sealed partial class DocxLayoutSource
 
                     case "tab" when !Suppressed:
                         Emit("\t");
+                        break;
+
+                    // A *positional* tab: an absolute stop stated on the element rather than in the
+                    // paragraph's `w:tabs`, which is how Word writes a three-part running head with no
+                    // tab stops of its own. LibreOffice emits an ordinary tab character for every one
+                    // of them — the tokenizer's `CT_PTab` resource is
+                    // `<action name="end" action="tab"/>` (`writerfilter/ooxml/model.xml`:18204-18208)
+                    // — and only then, for a *left*-aligned one that follows text on the line,
+                    // replaces that tab with a line break (`DomainMapper_Impl::HandlePTab`,
+                    // `DomainMapper_Impl.cxx`:5550-5604, which returns immediately for every other
+                    // alignment). Dropping the element instead runs the parts together: measured on
+                    // `PI-doc.-no.-2E-Technical-Review-Report.docx`, whose footer draws
+                    // `Page 5 of 12Version 1Last saved …` where the reference spaces the three across
+                    // the page.
+                    case "ptab" when !Suppressed:
+                        if (Word.Attribute(child, "alignment") == "left" && _builder.Length > 0)
+                        {
+                            Emit(LineSeparator.ToString());
+                        }
+                        else
+                        {
+                            Emit("\t");
+                        }
+
                         break;
 
                     // A character named by slot in a face of its own, and the only run-level element
@@ -1977,6 +2172,7 @@ public sealed partial class DocxLayoutSource
                 && _symbolFace is null
                 && _ranges[^1].Symbol is null
                 && _ranges[^1].IsCitation == _inCitation
+                && _ranges[^1].InIndexField == InIndexField
                 && _ranges[^1].RunProperties == _runProperties)
             {
                 _ranges[^1] = _ranges[^1] with { Length = _ranges[^1].Length + text.Length };
@@ -1984,7 +2180,8 @@ public sealed partial class DocxLayoutSource
             }
 
             _ranges.Add(new StyledRange(
-                _builder.Length - text.Length, text.Length, _runProperties, _inCitation, _symbolFace));
+                _builder.Length - text.Length, text.Length, _runProperties, _inCitation, _symbolFace,
+                InIndexField));
         }
 
         /// <summary>True while a note's citation is being emitted.</summary>
@@ -2090,9 +2287,23 @@ public sealed partial class DocxLayoutSource
         return -1;
     }
 
+    /// <summary>
+    /// The face a VML <c>v:textpath</c> is set in, from the family its CSS names.
+    /// </summary>
+    /// <remarks>
+    /// Its text is an attribute rather than a run, so it never reaches the walk that resolves every
+    /// other face in the document, and the reader has to be handed one. Resolved through the same
+    /// <see cref="Face(WordTextStyle)"/> the body uses so that a family the document also sets text
+    /// in comes out the same face — <c>vmlformatting.cxx:1026-1028</c> sets it as a plain
+    /// <c>CharFontName</c>, which is what a run states too.
+    /// </remarks>
+    private OpenTypeFace? VmlFace(string? family)
+        => Face(new WordTextStyle(family, Length.Zero, 400, false, null));
+
     private OpenTypeFace? Face(WordTextStyle text)
     {
-        (string? Family, int Weight, bool Italic, FontFamilyClass Class) key = text.FaceKey;
+        (string? Family, int Weight, bool Italic, FontFamilyClass Class, WriterScript Script,
+            string? Language) key = text.FaceKey;
         if (_faces.TryGetValue(key, out OpenTypeFace? cached)) return cached;
 
         OpenTypeFace? face = null;
@@ -2111,13 +2322,13 @@ public sealed partial class DocxLayoutSource
             // through this filter comes out DejaVu Serif where the same name through the ODF filter
             // comes out whatever fontconfig files it under. See `WordFallbackClass`, and
             // `probes/words-r54/font-fallback-rule.py` for the 98 files that measure it.
-            FontFamilyClass declared = WordFallbackClass.ForDeclared(
-                text.FamilyName, text.DeclaredClass);
+            FontFamilyClass declared = WordFallbackClass.ForScript(
+                text.FamilyName, text.DeclaredClass, text.Script);
 
             FontReference reference = _fonts.Resolve(
                 new FontRequest(
                     text.FamilyName ?? string.Empty, text.Weight, text.IsItalic,
-                    DeclaredClass: declared));
+                    DeclaredClass: declared, Language: text.ItemLanguage));
 
             face = _fonts.LoadOpenType(reference);
             _references[key] = reference;

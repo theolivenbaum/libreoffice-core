@@ -1,6 +1,7 @@
 using Paperless.Core.Geometry;
 using Paperless.Core.Graphics;
 using Paperless.Core.Units;
+using Paperless.Ooxml.DrawingML;
 using Paperless.Text.Fonts;
 using Paperless.Text.Layout;
 
@@ -144,6 +145,53 @@ public sealed record SlideTextBody
     public string? WarpPreset { get; init; }
 
     /// <summary>
+    /// The adjustment guides <c>a:prstTxWarp/a:avLst</c> states, in DrawingML units.
+    /// </summary>
+    /// <remarks>
+    /// Carried unconverted: the same number means a degree to one preset and a per-mille of the
+    /// shape to another, and the conversion into the WordArt units the geometry tables expect is
+    /// per preset and per guide name (<c>oox/source/drawingml/fontworkhelpers.cxx:95-150</c>). It
+    /// is done once, inside <see cref="Paperless.Ooxml.DrawingML.Fontwork"/>.
+    /// </remarks>
+    public IReadOnlyList<FontworkAdjustment> WarpAdjustments { get; init; } = [];
+
+    /// <summary>
+    /// The LibreOffice Fontwork type an ODF shape states directly, or null when the body is
+    /// DrawingML's and <see cref="WarpPreset"/> names it instead.
+    /// </summary>
+    /// <remarks>
+    /// ODF is the format LibreOffice's Fontwork model is native to, so a <c>draw:custom-shape</c>
+    /// states <c>draw:type="fontwork-arch-up-curve"</c> — the very name
+    /// <see cref="Paperless.Ooxml.DrawingML.FontworkPresets"/> is keyed by — and needs no mapping
+    /// at all. <c>xmloff/source/draw/ximpcustomshape.cxx:1136-1150</c> is where the reference reads
+    /// the <c>draw:text-path*</c> attributes beside it.
+    /// </remarks>
+    public string? WarpFontworkType { get; init; }
+
+    /// <summary>
+    /// The adjustment values an ODF shape's <c>draw:modifiers</c> states, already in WordArt units.
+    /// </summary>
+    /// <remarks>
+    /// Unlike <see cref="WarpAdjustments"/> these need no conversion: <c>draw:modifiers</c> is
+    /// written in the same 21600 viewbox the geometry tables use, and an angle handle is written as
+    /// a plain degree, which is what the tables expect too.
+    /// </remarks>
+    public IReadOnlyList<double>? WarpAdjustmentValues { get; init; }
+
+    /// <summary>
+    /// Whether the warp keeps the run's stated size, when the file says so directly.
+    /// </summary>
+    /// <remarks>
+    /// <c>draw:text-path-scale</c>: <c>shape</c> is <c>TextPathScaleX</c> true and <c>path</c> is
+    /// false (<c>xmloff/source/draw/ximpcustomshape.cxx</c>, <c>EAS_TextPathScale</c>). LibreOffice
+    /// writes <c>shape</c> on exactly the four presets the DrawingML side derives it for —
+    /// <c>fontwork-arch-up-curve</c>, <c>fontwork-arch-down-curve</c>, <c>fontwork-circle-curve</c>
+    /// and <c>fontwork-open-circle-curve</c> — so reading it rather than deriving it agrees with
+    /// the other path and also honours a file that says otherwise.
+    /// </remarks>
+    public bool? WarpKeepsFontSize { get; init; }
+
+    /// <summary>
     /// Whether the body is Fontwork: drawn as glyph outlines rather than as text.
     /// </summary>
     /// <remarks>
@@ -161,15 +209,17 @@ public sealed record SlideTextBody
     /// is absent from the reference too. The test really is "not <c>textNoShape</c>".
     /// </para>
     /// <para>
-    /// <strong>Paperless draws nothing for such a body, which is deliberately a partial.</strong>
-    /// The arch geometry is not implemented, and until it is, the honest choice is between
-    /// leaving unwarped glyphs where they fall and drawing nothing. Measured on that document's
-    /// page 13, the four Fontwork outlines the reference draws sit 14 to 40 pt away from where
-    /// the unwarped runs land — always outward along the box's own local up for
-    /// <c>textArchUp</c> and down for <c>textArchDown</c>, which is the arch's radial
-    /// displacement. Ink in the wrong place counts twice in a comparison against the reference
-    /// and absent ink counts once, so drawing nothing is the nearer of the two; the measurement
-    /// that settles it is in <c>dotnet/probes/slides-extra-01/results.md</c>.
+    /// <strong>Paperless now draws the curves.</strong> <see cref="WarpPreset"/> and
+    /// <see cref="WarpAdjustments"/> are handed to
+    /// <see cref="Paperless.Ooxml.DrawingML.Fontwork"/>, which builds the warped outlines, and
+    /// <c>SlideFontwork</c> replaces the whole shape with them — its own fill, pen and shadow
+    /// included, as the reference does. All forty <c>ST_TextShapeType</c> warps are built, so what
+    /// is still drawn as nothing is a body set in a face with no <c>glyf</c> outlines. Drawing nothing
+    /// stays the right fallback for those, and the measurement is unchanged: on page 13 of
+    /// <c>FAAAIandtheArtandScienceofV&amp;Vfinal.pptx</c> the reference's outlines sit 14 to 40 pt
+    /// away from where the unwarped runs land, ink in the wrong place counts twice in a comparison
+    /// and absent ink once (<c>dotnet/probes/slides-extra-01/results.md</c>). The words side now
+    /// falls back the same way, so the two families agree.
     /// </para>
     /// <para>
     /// Extraction is unaffected. <c>paperless extract</c> reads the body through
@@ -178,7 +228,7 @@ public sealed record SlideTextBody
     /// turns them into a picture.
     /// </para>
     /// </remarks>
-    public bool IsTextPath => WarpPreset is not null;
+    public bool IsTextPath => WarpPreset is not null || WarpFontworkType is not null;
 
     /// <summary>
     /// Whether the text wraps at the shape's width.
@@ -228,6 +278,30 @@ public sealed record SlideTextBody
     /// </para>
     /// </remarks>
     public bool FontIndependentLineSpacing { get; init; } = true;
+
+    /// <summary>
+    /// The reference device this body's vertical metrics are quantised through.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <see cref="MetricGrid.Presentation"/> for everything Impress lays out — the one
+    /// <c>VirtualDevice</c> <c>SdModule</c> makes at <c>RefDevMode::Dpi600</c> in 1/100 mm
+    /// (<c>sd/source/ui/app/sdmod.cxx</c>:83-85). It is a property of the body rather than a
+    /// constant in the layout because <b>not every text on a slide is laid out by Impress</b>: a
+    /// chart's labels are built by <c>chart2</c>'s own view on a <c>VirtualDevice</c> it creates
+    /// from <c>Application::GetDefaultDevice()</c>, which asks for no <c>RefDevMode</c> at all
+    /// and is therefore <b>96 dpi</b> — a pixel of 0.75 pt against Impress's 0.24. See
+    /// <see cref="MetricGrid.Chart"/>, and <c>SlideChart</c>, which is the only thing that sets
+    /// this to anything else.
+    /// </para>
+    /// <para>
+    /// It reaches the layout through the body so that the height a caller <em>measures</em> and
+    /// the baselines the layout <em>places</em> cannot come from two different devices: both
+    /// <c>SlideTextLayout.Height</c> and <c>SlideTextLayout.Place</c> take the body and nothing
+    /// else decides it.
+    /// </para>
+    /// </remarks>
+    public MetricGrid Device { get; init; } = MetricGrid.Presentation;
 }
 
 /// <summary>One paragraph of a shape's text.</summary>

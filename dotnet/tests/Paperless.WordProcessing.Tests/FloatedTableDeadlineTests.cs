@@ -53,7 +53,7 @@ public sealed class FloatedTableDeadlineTests
     /// Six 100 pt rows anchored 100 pt below the body top reach 700 pt against a 697.9 pt body, so five
     /// fit — 100 + 500 = 600 — and the sixth would reach 700. The whole table is 600 pt, which is
     /// shorter than the body, so this is the fly arm and not the flow arm; see
-    /// <see cref="ATableTallerThanTheBodyIsLeftInTheFlow"/> for the guard that separates them.
+    /// <see cref="ATableTallerThanTheBodyIsFloatedAndSplit"/> for the guard that separates them.
     /// </remarks>
     [Fact]
     public void AWordTwentyThirteenFlyIsSplitAtTheBottomOfTheBody()
@@ -138,34 +138,42 @@ public sealed class FloatedTableDeadlineTests
     }
 
     /// <summary>
-    /// A table taller than a whole body is not floated at all: it stays in the flow, which is
-    /// <c>PlaceFloatedTable</c>'s guard and <b>not</b> what Writer does.
+    /// A table taller than a whole body is floated and split like any other fly, at <c>w:tblpY</c>.
     /// </summary>
     /// <remarks>
     /// <para>
-    /// Eight 100 pt rows are 800 pt against a 697.9 pt body. The document still comes out on two pages
-    /// and every row is still drawn once, so the guard is neutral on the page count here — but the fly
-    /// is gone: the table starts at the top of the body rather than 100 pt down it, and the flow below
-    /// it has been pushed rather than left where it was.
+    /// Eight 100 pt rows are 800 pt against a 697.9 pt body. The page count is the same either way and
+    /// every row is drawn once either way, so neither of those can tell the two behaviours apart — the
+    /// first part's own y is what does: floated it starts 100 pt down the body, where <c>w:tblpY</c>
+    /// puts it, and in the flow it starts at the body's top.
     /// </para>
     /// <para>
-    /// <b>This test pins a known divergence rather than a correct behaviour.</b> Writer floats and
-    /// splits that table too; its own height term is <c>nFlyHeight &lt;= nPageHeight</c> against the
-    /// <em>page's</em> print area, which is larger than the body whenever a running head takes room, so
-    /// even the threshold is not the one below. Two corpus documents are in this class and both pass the
-    /// gate today — <c>ESPN-R - MCF - RA - Ed1.docx</c> and <c>part-147_approval list_20230119.docx</c> —
-    /// which is why round 62 kept the guard rather than trading it blind. Measured the other half on the
-    /// corpus: doubling every row of <c>080_Printable_Graph_Paper_Template_Black_Theme</c>, so its table
-    /// is 1382 pt against a 697.9 pt print area, brings 26.2.4.2's own split back.
+    /// <b>This test used to assert the opposite, and said so in its own remark: a known divergence
+    /// pinned rather than a correct behaviour.</b> <c>PlaceFloatedTable</c> carried a
+    /// <c>height &gt; area.Height</c> guard that left such a table in the flow, which dropped
+    /// <c>w:tblpY</c> along with the fly treatment. Round 62 kept it deliberately — the two corpus
+    /// documents then in its class, <c>ESPN-R - MCF - RA - Ed1.docx</c> and
+    /// <c>part-147_approval list_20230119.docx</c>, both passed the gate, so trading it blind would have
+    /// risked them for nothing. Both are unchanged by its removal, at 58 and 2 pages.
+    /// </para>
+    /// <para>
+    /// What settled it is <c>Case-Study-Heathrow-Airport.docx</c>, a third document in the class that
+    /// does <em>not</em> pass: its whole first page is a three-page fly, and the guard cost it the 33 pt
+    /// its <c>w:tblpY="662"</c> states. Measured on ten authored fixtures against both installed
+    /// references, which agree to a tenth of a point: a 90-row table at that offset puts its first row at
+    /// y = 105.6 and its thirty-third at 72.5 on <em>page two</em>, the body's own top, with the same x.
+    /// See <c>probes/words-page-anchored-table/</c>. The corpus half was already recorded here too —
+    /// doubling every row of <c>080_Printable_Graph_Paper_Template_Black_Theme</c>, to 1382 pt against a
+    /// 697.9 pt print area, brings 26.2.4.2's own split back.
     /// </para>
     /// </remarks>
     [Fact]
-    public void ATableTallerThanTheBodyIsLeftInTheFlow()
+    public void ATableTallerThanTheBodyIsFloatedAndSplit()
     {
         WordProcessingPages pages = Lay(mode: 14, anchor: "page", rows: 8);
 
         pages.Pages[0].Tables.ShouldHaveSingleItem().Area.Y
-            .ShouldBe(BodyTop, "in the flow at the top of the body, w:tblpY not applied");
+            .ShouldBe(BodyTop + Length.FromPoints(100), "floated, at w:tblpY down the body");
 
         List<int> all = [.. RowsOn(pages, 0), .. RowsOn(pages, 1)];
         all.ShouldBe([0, 1, 2, 3, 4, 5, 6, 7], "and every row is still drawn exactly once");

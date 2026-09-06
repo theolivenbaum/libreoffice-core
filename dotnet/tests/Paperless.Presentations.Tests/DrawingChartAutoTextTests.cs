@@ -1,5 +1,6 @@
 using System.Xml.Linq;
 using Paperless.Core.Charts;
+using Paperless.Core.Graphics;
 using Paperless.Core.Units;
 using Paperless.Ooxml.DrawingML;
 using Shouldly;
@@ -184,5 +185,98 @@ public class DrawingChartAutoTextTests
 
         Read(Bar() + Legend).IsLegendBold.ShouldBe(true);
         Read(Bar()).IsLegendBold.ShouldBeNull();
+    }
+
+    /// <summary>A theme whose <c>dk1</c> is not black and whose <c>lt1</c> is not white.</summary>
+    /// <remarks>
+    /// Both are off the obvious values so that a fallback to <c>Colour.Black</c> or to
+    /// <c>Colour.White</c> cannot pass by coincidence.
+    /// </remarks>
+    private static DrawingTheme Theme() => DrawingTheme.Read(XElement.Parse(
+        $"""
+         <a:theme xmlns:a="{A}"><a:themeElements><a:clrScheme name="t">
+           <a:dk1><a:srgbClr val="3C3D36"/></a:dk1>
+           <a:lt1><a:srgbClr val="FDFCF7"/></a:lt1>
+           <a:dk2><a:srgbClr val="323232"/></a:dk2>
+           <a:lt2><a:srgbClr val="E3DED1"/></a:lt2>
+           <a:accent1><a:srgbClr val="F07F09"/></a:accent1>
+           <a:accent2><a:srgbClr val="9F2936"/></a:accent2>
+           <a:accent3><a:srgbClr val="1B587C"/></a:accent3>
+           <a:accent4><a:srgbClr val="4E8542"/></a:accent4>
+           <a:accent5><a:srgbClr val="604878"/></a:accent5>
+           <a:accent6><a:srgbClr val="C19859"/></a:accent6>
+           <a:hlink><a:srgbClr val="6B9F25"/></a:hlink>
+           <a:folHlink><a:srgbClr val="B26B02"/></a:folHlink>
+         </a:clrScheme></a:themeElements></a:theme>
+         """))!;
+
+    private static ChartPlot ReadThemed(string inner, string space = "")
+        => DrawingChartPlot.Read(
+               XElement.Parse(
+                   $"<c:chartSpace xmlns:c=\"{C}\" xmlns:a=\"{A}\">"
+                   + $"<c:chart>{inner}</c:chart>{space}</c:chartSpace>"),
+               Theme())
+           ?? throw new InvalidOperationException("the reader found nothing to draw");
+
+    /// <summary>
+    /// Below style 41 a chart's unstated text is the theme's <c>tx1</c>, not black.
+    /// </summary>
+    /// <remarks>
+    /// The colour half of the same three tables the sizes above come from —
+    /// <c>spChartTitleTexts</c>, <c>spAxisTitleTexts</c> and <c>spOtherTexts</c>
+    /// (<c>objectformatter.cxx:415-434</c>) all carry <c>tx1</c> for styles 1 to 40. It is black
+    /// on all but seven of the corpus' chart-bearing files, which is why a hardcoded black
+    /// survived so long.
+    /// </remarks>
+    [Fact]
+    public void UnstatedTextBelowStyleFortyOneIsTheThemesDarkColour()
+    {
+        ChartPlot plot = ReadThemed(Bar(Title("Sales"), Title("Year")));
+
+        plot.TitleColour.ShouldBe(new Colour(0x3C, 0x3D, 0x36));
+        plot.AxisTitleColour.ShouldBe(new Colour(0x3C, 0x3D, 0x36));
+        plot.LabelColour.ShouldBe(new Colour(0x3C, 0x3D, 0x36));
+        plot.LegendColour.ShouldBe(new Colour(0x3C, 0x3D, 0x36));
+        plot.DataLabelColour.ShouldBe(new Colour(0x3C, 0x3D, 0x36));
+    }
+
+    /// <summary>
+    /// From style 41 up it is <c>lt1</c>, which is what makes a dark chart's text visible.
+    /// </summary>
+    /// <remarks>
+    /// The second row of each table. Style 41 and up also paints the chart space <c>dk1</c>
+    /// (<c>DrawingChartAutoFormat.FrameFillOf</c>), so taking the first row here draws every
+    /// title, tick label and legend entry in dark text on a dark ground — measured on
+    /// <c>DynamicBubbleChart.xlsx</c>, style 42, whose seven pieces of chart text were all in
+    /// our PDF's text layer and none of them visible.
+    /// </remarks>
+    [Fact]
+    public void UnstatedTextFromStyleFortyOneUpIsTheThemesLightColour()
+    {
+        ChartPlot plot = ReadThemed(
+            Bar(Title("Sales"), Title("Year")), "<c:style val=\"42\"/>");
+
+        plot.TitleColour.ShouldBe(new Colour(0xFD, 0xFC, 0xF7));
+        plot.AxisTitleColour.ShouldBe(new Colour(0xFD, 0xFC, 0xF7));
+        plot.LabelColour.ShouldBe(new Colour(0xFD, 0xFC, 0xF7));
+        plot.LegendColour.ShouldBe(new Colour(0xFD, 0xFC, 0xF7));
+    }
+
+    /// <summary>An element that states its own colour keeps it whatever the style says.</summary>
+    /// <remarks>
+    /// The automatic colour is the placeholder the element's own <c>a:defRPr</c> overrides
+    /// (<c>TextFormatter::TextFormatter</c>, <c>:906-928</c>), not a colour applied over it.
+    /// </remarks>
+    [Fact]
+    public void AStatedColourWinsOverTheStylesOwn()
+    {
+        const string Red =
+            "<c:title><c:tx><c:rich><a:p><a:pPr><a:defRPr>"
+            + "<a:solidFill><a:srgbClr val=\"FF0000\"/></a:solidFill>"
+            + "</a:defRPr></a:pPr><a:r><a:t>Sales</a:t></a:r></a:p></c:rich></c:tx></c:title>";
+
+        ChartPlot plot = ReadThemed(Bar(Red), "<c:style val=\"42\"/>");
+
+        plot.TitleColour.ShouldBe(new Colour(0xFF, 0x00, 0x00));
     }
 }

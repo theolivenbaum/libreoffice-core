@@ -52,7 +52,7 @@ public sealed class SlideTableComparisonTests : IDisposable
     [InlineData("deck-features.pptx")]
     public void ADeckHasAPagePerSlideItShows(string fileName)
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         string path = Corpus.Require(fileName);
         List<PdfPageSize> ours = PdfPageSizes.Read(Ours(path));
@@ -70,7 +70,7 @@ public sealed class SlideTableComparisonTests : IDisposable
     [Fact]
     public void EveryGridLineIsTheStrokeLibreOfficeDraws()
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         string path = Corpus.Require("slide-table-grid.pptx");
         List<PdfStroke> ours = PdfStrokes.Read(Ours(path));
@@ -103,7 +103,7 @@ public sealed class SlideTableComparisonTests : IDisposable
     [Fact]
     public void EveryCellBackgroundIsWhereAndWhatLibreOfficeFillsIt()
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         string path = Corpus.Require("slide-table-grid.pptx");
         List<PdfFill> ours = CellFills(PdfFills.Read(Ours(path)));
@@ -141,7 +141,7 @@ public sealed class SlideTableComparisonTests : IDisposable
     [Fact]
     public void EveryCellsTextIsDrawnWhereLibreOfficeDrawsIt()
     {
-        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, "LibreOffice is not installed");
+        Assert.SkipUnless(LibreOfficeRunner.IsAvailable, LibreOfficeRunner.UnavailableReason);
 
         const string fileName = "slide-table-grid.pptx";
         string path = Corpus.Require(fileName);

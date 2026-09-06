@@ -135,6 +135,17 @@ public sealed partial class Ww8DocumentReader
         public bool HasAutoSpaceAfter { get; init; }
 
         /// <summary>
+        /// The legacy <c>FORMCHECKBOX</c> squares in the paragraph, by the offset each stands at.
+        /// </summary>
+        /// <remarks>
+        /// Not a frame, because nothing in the file says how big the square is: Writer sizes it from
+        /// the line's own text height, which only a resolved face can give. So the walk records where
+        /// each one is and the layout source builds the frame — the same division the DOCX reader
+        /// makes in <c>DocxLayoutSource.CheckBoxFrame</c>.
+        /// </remarks>
+        public IReadOnlyList<Ww8LayoutCheckBox>? CheckBoxes { get; init; }
+
+        /// <summary>
         /// Where a <c>PAGE</c> or <c>NUMPAGES</c> field's cached result sits in <see cref="Text"/>.
         /// </summary>
         /// <remarks>
@@ -625,14 +636,33 @@ public sealed partial class Ww8DocumentReader
         List<int> positions = [];
         int start = 0;
 
-        // How many fields deep the walk is inside an *instruction*. A field's text holds both halves —
-        // the instruction and the cached result — separated by a U+0014, and only the second is shown.
-        int instruction = 0;
+        // One entry per open field, innermost last: true while that field is still in its own
+        // *instruction*. A field's text holds both halves — the instruction and the cached result —
+        // separated by a U+0014, and only the second is shown.
+        //
+        // A counter was wrong here and the corpus says how. `150_5300_13_chg8.doc` writes each numbered
+        // heading as a TC field with no separator of its own, holding five SEQ fields inside its
+        // instruction that each *have* one:
+        //
+        //     U+0013 tc  \l 2 " U+0013 seq level0 \r307 \*arabic U+0014 307 U+0015 . … U+0015
+        //
+        // A counter decremented at both a U+0014 and a U+0015 is decremented twice for a nested field
+        // it was only incremented once for, so the inner field's end declared the walk out of the
+        // *outer* field's instruction: `. RUNWAY OBJECT FREE AREA"` was drawn on every heading, and the
+        // inner SEQ's own result was suppressed instead. Measured against the reference's
+        // `307. OBJECT FREE AREA307.` on page 4 of that document, and on `chg10` and `chg12` with it.
+        //
+        // The innermost field decides, not "any enclosing field is in an instruction": a nested field's
+        // cached result *is* drawn inside an outer instruction, because LibreOffice inserts it through
+        // the field machinery rather than through the character reader `m_bIgnoreText` gates
+        // (`SwWW8ImplReader::ReadChars`, `ww8par.cxx`:3395). That is what puts the second `307` in the
+        // reference's heading.
+        Stack<bool> fieldInstructions = new();
 
-        // The fields the walk is inside, innermost last, by type. Separate from `instruction`, which
-        // counts only the hidden half: a shape sits in the *result*, where `instruction` is already
-        // back to nought and the field is still open. Nested fields are why it is a stack and not a
-        // single value — `IsInlineEscherHack` asks about the innermost one alone.
+        // The fields the walk is inside, innermost last, by type. Separate from `fieldInstructions`,
+        // which describes only the hidden half: a shape sits in the *result*, where the field is still
+        // open. Nested fields are why it is a stack and not a single value — `IsInlineEscherHack` asks
+        // about the innermost one alone.
         (Ww8FieldTypes fieldTypes, int fieldBase) = FieldTypesOf(body);
         Stack<int> openFields = new();
 
@@ -644,8 +674,12 @@ public sealed partial class Ww8DocumentReader
         Stack<int> fieldResults = new();
         List<Layout.PageFieldSpan> pageFields = [];
 
+        // The FORMCHECKBOX squares in the paragraph being built. Beside `pageFields` because they are
+        // the same kind of thing — something the walk found at an offset that only the layout can size.
+        List<Ww8LayoutCheckBox> checkBoxes = [];
+
         // How many enclosing fields had their result replaced by a computed one, and which they were.
-        // A count for the same reason `instruction` is one — fields nest, and the result of an outer
+        // A count for the same reason the field stack is one — fields nest, and the result of an outer
         // field can contain a whole inner field whose characters are equally not to be drawn — with the
         // stack beside it so that the right field's end is the one that stops the suppression.
         int computed = 0;
@@ -676,7 +710,18 @@ public sealed partial class Ww8DocumentReader
             // keeping the instruction puts the literal word "SHAPE" into the sentence — measured on
             // `picture-flow.doc`, where it made our word count 191 against the reference's 190. The
             // markers themselves are handled below and carry no width either way.
-            if (instruction > 0 && character is not (Special.FieldBegin or Special.FieldSeparator
+            // The one placeholder that has to survive an instruction. A FORMCHECKBOX is written
+            // `U+0013 " FORMCHECKBOX " U+0001 U+0015` — no separator, so its square is the last
+            // character of the field's *code*, and LibreOffice reads it at exactly that offset
+            // (`rStr[pF->nLCode-1] == 0x01`, ww8par3.cxx:191). Dropping it with the rest of the
+            // instruction is what left 37 squares off `1528364855.doc` and 58 off `f111.doc`.
+            bool isCheckBoxPlaceholder = character == Special.Picture
+                && openFields.Count > 0
+                && openFields.Peek() == Ww8FieldTypes.FormCheckBox;
+
+            if (!isCheckBoxPlaceholder
+                && fieldInstructions.Count > 0 && fieldInstructions.Peek()
+                && character is not (Special.FieldBegin or Special.FieldSeparator
                 or Special.FieldEnd or ParagraphMark or Special.SectionMark or CellMark))
             {
                 continue;
@@ -754,7 +799,7 @@ public sealed partial class Ww8DocumentReader
                 case Special.FieldBegin:
                     // Nested fields are legal and Word writes them — a hyperlink around a cross
                     // reference is two — so this counts rather than toggling.
-                    instruction++;
+                    fieldInstructions.Push(true);
                     openFields.Push(fieldTypes.At(position - fieldBase) ?? 0);
                     replacedFields.Push(false);
                     fieldResults.Push(-1);
@@ -762,9 +807,11 @@ public sealed partial class Ww8DocumentReader
 
                 case Special.FieldSeparator:
                 {
-                    // The instruction ends and the cached result begins. A field with no separator has
-                    // no result, and its instruction stays hidden until its end.
-                    if (instruction > 0) instruction--;
+                    // The instruction ends and the cached result begins — for *this* field. A field
+                    // with no separator has no result, and its instruction stays hidden until its end,
+                    // which is why the entry is replaced rather than popped.
+                    if (fieldInstructions.Count > 0) fieldInstructions.Pop();
+                    fieldInstructions.Push(false);
 
                     if (fieldResults.Count > 0)
                     {
@@ -774,7 +821,7 @@ public sealed partial class Ww8DocumentReader
 
                     // The one point at which a computed field can be written: the instruction has been
                     // read, so the field's type is known, and the result it is replacing starts here.
-                    if (instruction == 0
+                    if (fieldInstructions.Count == 1
                         && computed == 0
                         && openFields.Count > 0
                         && openFields.Peek() == Ww8FieldTypes.FileName
@@ -792,7 +839,7 @@ public sealed partial class Ww8DocumentReader
 
                 case Special.FieldEnd:
                 {
-                    if (instruction > 0) instruction--;
+                    if (fieldInstructions.Count > 0) fieldInstructions.Pop();
                     int closed = openFields.Count > 0 ? openFields.Pop() : 0;
                     int resultAt = fieldResults.Count > 0 ? fieldResults.Pop() : -1;
 
@@ -873,6 +920,16 @@ public sealed partial class Ww8DocumentReader
                 }
 
                 case Special.Picture or Special.DrawnObject or Special.AnnotationReference:
+                    // A checkbox takes room on its line as well as putting a square on the page — the
+                    // portion is as wide as it is tall — so it gets an anchor character like any other
+                    // as-character frame. Recorded before the emit, so the offset is the anchor's own.
+                    if (isCheckBoxPlaceholder)
+                    {
+                        checkBoxes.Add(new Ww8LayoutCheckBox(current.Length, IsCheckedBox(position)));
+                        Emit(current, positions, AnchorCharacter, position);
+                        continue;
+                    }
+
                     // Collected before the character is considered, so that the frame's offset is where
                     // the anchor sits rather than one past it — which is what an as-character frame
                     // needs and what a character origin measures from.
@@ -941,6 +998,7 @@ public sealed partial class Ww8DocumentReader
                     Notes = _pendingNotes.Count == 0 ? null : [.. _pendingNotes],
                     Frames = _pendingFrames.Count == 0 ? null : [.. _pendingFrames],
                     Fields = pageFields.Count == 0 ? null : [.. pageFields],
+                    CheckBoxes = checkBoxes.Count == 0 ? null : [.. checkBoxes],
                 };
 
             // The U+000C above this paragraph was a hard page break rather than a section boundary, so
@@ -964,6 +1022,7 @@ public sealed partial class Ww8DocumentReader
             current.Clear();
             positions.Clear();
             pageFields.Clear();
+            checkBoxes.Clear();
 
             // A field still open across the paragraph mark loses its result start with the builder it
             // pointed into; its cached result stays, which is what it was before this existed.
@@ -1303,13 +1362,14 @@ public sealed partial class Ww8DocumentReader
             Tracking = TrackingOf(character),
             Borders = layout.ToParagraphBorders(),
 
-            // Not for a paragraph in a table: Word applies a frame to a whole row or to nothing, and
-            // LibreOffice declines the test outright unless the paragraph is the first in the first cell
-            // (`SwWW8ImplReader::TestApo`, ww8par2.cxx:440). Declining for every cell paragraph is the
-            // conservative half of that and leaves a table where the document put it.
-            TextFrame = paragraph.IsInTable
-                ? Ww8TextFramePosition.None
-                : ResolveTextFrame(markPosition),
+            // Resolved for a paragraph in a table too, and the assembler decides what to do with it.
+            // Word applies a frame to a whole *row* or to nothing, and `SwWW8ImplReader::TestApo`
+            // (ww8par2.cxx:440) allows the test only at the first paragraph of the first cell of a row —
+            // "if it is the first cell of a row then the whole table row jumps into the new frame, if it
+            // isn't then the paragraph attributes are applied except for the floating frame stuff". So
+            // every cell paragraph resolves its position and `LayoutTableAssembler` reads only the ones
+            // that stand at a row's head; see `Ww8LayoutTable.TextFrame`.
+            TextFrame = ResolveTextFrame(markPosition),
         };
     }
 
@@ -1494,8 +1554,17 @@ public sealed partial class Ww8DocumentReader
     }
 
     /// <summary>True when two runs' formatting is identical, whatever their ranges.</summary>
-    private static bool MatchesFormatting(Ww8LayoutRun a, Ww8LayoutRun b)
-        => string.Equals(a.FamilyName, b.FamilyName, StringComparison.Ordinal)
+    /// <remarks>
+    /// <strong>The slot is compared first because it is the one field that is not formatting.</strong>
+    /// <c>sprmCSymbol</c> names the character the run draws, and <c>SwWW8ImplReader::ReadChars</c>
+    /// inserts <em>that</em> character once per position the sprm covers
+    /// (<c>ww8par.cxx</c>:3410-3413). Merging a symbol run into the ordinary run beside it therefore
+    /// does not merely lose a decoration: it either loses the symbol, when the ordinary run is
+    /// first, or spreads the symbol over the ordinary run's characters, when the symbol run is.
+    /// </remarks>
+    internal static bool MatchesFormatting(Ww8LayoutRun a, Ww8LayoutRun b)
+        => a.SymbolSlot == b.SymbolSlot
+           && string.Equals(a.FamilyName, b.FamilyName, StringComparison.Ordinal)
            && a.Size == b.Size
            && a.Weight == b.Weight
            && a.IsItalic == b.IsItalic
@@ -1579,12 +1648,12 @@ public sealed partial class Ww8DocumentReader
     /// </para>
     /// </remarks>
     /// <param name="blocks">The flow's blocks, in order.</param>
-    private static List<Ww8LayoutBlock> LiftTextFrames(List<Ww8LayoutBlock> blocks)
+    internal static List<Ww8LayoutBlock> LiftTextFrames(List<Ww8LayoutBlock> blocks)
     {
         bool any = false;
         foreach (Ww8LayoutBlock block in blocks)
         {
-            if (block.Paragraph is { } paragraph && !paragraph.TextFrame.IsEmpty) { any = true; break; }
+            if (!FramePositionOf(block).IsEmpty) { any = true; break; }
         }
 
         if (!any) return blocks;
@@ -1594,18 +1663,16 @@ public sealed partial class Ww8DocumentReader
 
         for (int index = 0; index < blocks.Count; index++)
         {
-            if (blocks[index].Paragraph is not { } paragraph || paragraph.TextFrame.IsEmpty)
+            Ww8TextFramePosition position = FramePositionOf(blocks[index]);
+            if (position.IsEmpty)
             {
                 kept.Add(Anchoring(blocks[index], pending));
                 continue;
             }
 
-            Ww8TextFramePosition position = paragraph.TextFrame;
             List<Ww8LayoutBlock> inside = [];
 
-            while (index < blocks.Count
-                && blocks[index].Paragraph is { } member
-                && member.TextFrame == position)
+            while (index < blocks.Count && FramePositionOf(blocks[index]) == position)
             {
                 inside.Add(blocks[index]);
                 index++;
@@ -1636,6 +1703,17 @@ public sealed partial class Ww8DocumentReader
             return anchored;
         }
     }
+
+    /// <summary>Where a block says it belongs, whether it is a paragraph or a whole table.</summary>
+    /// <remarks>
+    /// A table states it on the table rather than on its paragraphs because Word tests for it once per
+    /// row, at the row's head, and moves the row entire — see <see cref="Ww8LayoutTable.TextFrame"/>.
+    /// Reading a cell paragraph's own position here instead would take the table apart.
+    /// </remarks>
+    private static Ww8TextFramePosition FramePositionOf(Ww8LayoutBlock block)
+        => block.Paragraph is { } paragraph ? paragraph.TextFrame
+            : block.Table is { } table ? table.TextFrame
+            : Ww8TextFramePosition.None;
 
     /// <summary>
     /// Where a paragraph's properties say it belongs, if they say it belongs in a text frame.
@@ -2002,17 +2080,34 @@ public sealed partial class Ww8DocumentReader
     /// </remarks>
     private Ww8LayoutFormat ApplyLayoutSprms(
         Ww8LayoutFormat format, ReadOnlyMemory<byte> grpprl)
+        => ApplyLayoutSprms(format, grpprl, DocumentProperties);
+
+    /// <summary>
+    /// The same walk with the document's properties passed rather than read off the reader.
+    /// </summary>
+    /// <remarks>
+    /// The only thing the walk needs from the document is what its two automatic spacings stand
+    /// for, so taking that as an argument makes the whole sprm walk a function of its inputs — and
+    /// therefore checkable against a hand-built grpprl, which is how the ordering rules in it are
+    /// tested. See <c>Ww8CharacterSprmTests</c>.
+    /// </remarks>
+    internal static Ww8LayoutFormat ApplyLayoutSprms(
+        Ww8LayoutFormat format, ReadOnlyMemory<byte> grpprl, Ww8DocumentProperties properties)
     {
         // What `sprmPFDyaBeforeAuto` and `sprmPFDyaAfterAuto` stand for in this document. Fourteen
         // points ordinarily and five when the document switched HTML auto-spacing off, which is the
         // whole of `SwWW8ImplReader::GetParagraphAutoSpace` (`ww8par6.cxx:4609`).
-        int autoSpacing = DocumentProperties.CollapsesSpacing
+        int autoSpacing = properties.CollapsesSpacing
             ? Ww8LayoutFormat.HtmlAutoSpacingTwips
             : Ww8LayoutFormat.WordAutoSpacingTwips;
 
         // Which of the five paragraph border sides this grpprl has already stated in its WW9 form, so
         // that the WW8 form beside it cannot overwrite an RGB colour with a palette index.
         int ninetySides = 0;
+
+        // Whether `sprmCSymbol` has already been seen in this grpprl, which silences every font code
+        // after it -- see the `FontIndex` case.
+        bool symbolSeen = false;
 
         foreach (Ww8Sprm sprm in Ww8SprmReader.Read(grpprl))
         {
@@ -2196,13 +2291,26 @@ public sealed partial class Ww8DocumentReader
                 case LayoutSprms.FontSize:
                     format = format with { FontSizeHalfPoints = sprm.Word };
                     break;
-                case LayoutSprms.FontIndex:
+                // A font code *after* `sprmCSymbol` in the same grpprl is not the run's font and is
+                // dropped, which is the whole of `Read_FontCode`'s first two lines:
+                // `if (m_bSymbol) return;` -- "if bSymbol, the symbol's font (see sprmCSymbol) is
+                // valid!" (`sw/source/filter/ww8/ww8par6.cxx`:3963-3966). Word writes both, in that
+                // order: the CHPX behind `150_5300_13_chg12.doc`'s greater-or-equal sign is
+                // `096A 0100 B3F0` -- Symbol, `U+F0B3` -- followed by `4F4A 0000`, Times New Roman.
+                // Applying the later one wins the face back for the paragraph and loses the symbol:
+                // the run is then set in a text face, so nothing recodes the slot into OpenSymbol
+                // and the reference's twenty-one OpenSymbol characters in that document were drawn
+                // as tofu or as the Latin letter the slot spells.
+                case LayoutSprms.FontIndex when !symbolSeen:
                     format = format with { FontIndex = sprm.Word };
+                    break;
+                case LayoutSprms.FontIndex:
                     break;
 
                 // The face comes with the slot, exactly as Read_Symbol sets RES_CHRATR_FONT beside
                 // m_cSymbol: a slot means nothing without the face it indexes into.
                 case LayoutSprms.Symbol when sprm.Operand.Length >= 4:
+                    symbolSeen = true;
                     format = format with
                     {
                         FontIndex = BinaryPrimitives.ReadUInt16LittleEndian(sprm.Operand.Span),

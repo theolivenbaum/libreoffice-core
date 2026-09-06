@@ -1,7 +1,92 @@
+using Paperless.Core.Graphics;
 using Paperless.Core.Geometry;
 using Paperless.Core.Units;
 
 namespace Paperless.WordProcessing.Model;
+
+/// <summary>Which pages of a section a page border is drawn on.</summary>
+public enum PageBorderDisplay
+{
+    /// <summary>Every page of the section — <c>w:display="allPages"</c>, and the default.</summary>
+    AllPages,
+
+    /// <summary>Its first page only — <c>w:display="firstPage"</c>.</summary>
+    FirstPage,
+
+    /// <summary>Every page but its first — <c>w:display="notFirstPage"</c>.</summary>
+    NotFirstPage,
+}
+
+/// <summary>One side of a page border.</summary>
+/// <param name="Width">The line's width; zero for a side that draws nothing.</param>
+/// <param name="Colour">The line's colour.</param>
+/// <param name="Space">
+/// How far the line stands off the edge it is measured from — the paper's edge or the text's,
+/// depending on <see cref="PageBorders.OffsetFromText"/>. Word states this in whole points.
+/// </param>
+public readonly record struct PageBorderSide(Length Width, Colour Colour, Length Space)
+{
+    /// <summary>True when the side draws a line at all.</summary>
+    public bool Draws => Width > Length.Zero;
+}
+
+/// <summary>
+/// A border drawn round the page rather than round a paragraph — Word's <c>w:pgBorders</c>.
+/// </summary>
+/// <remarks>
+/// <para>
+/// It is page furniture and not content: with <see cref="OffsetFromText"/> false the rectangle is
+/// measured from the paper's edge and does not touch the text area at all, which is why it can be
+/// carried on the geometry and drawn without anything in the layout knowing about it.
+/// </para>
+/// <para>
+/// <strong>The shadow shrinks the rectangle rather than growing the page.</strong> Measured off
+/// 26.2.4.2's own PDF of <c>Case-Study-Heathrow-Airport.docx</c> — A4, <c>w:sz="36"</c> (4.5 pt),
+/// <c>w:space="15"</c>, <c>w:shadow="1"</c> — the four strokes are 4.5 pt wide at
+/// <c>#396533</c> with their centrelines at 17.25 from the left and top, 573.60 from the left
+/// (21.70 from the right) and 21.69 from the bottom: the right and bottom edges come in by the
+/// shadow's own width, and the shadow is two black rectangles offset by it,
+/// <c>19.4 15.039 560.85 4.45 re f*</c> and <c>575.8 19.439 4.45 803.05 re f*</c>.
+/// </para>
+/// </remarks>
+public sealed record PageBorders
+{
+    /// <summary>The top side.</summary>
+    public PageBorderSide Top { get; init; }
+
+    /// <summary>The left side.</summary>
+    public PageBorderSide Left { get; init; }
+
+    /// <summary>The bottom side.</summary>
+    public PageBorderSide Bottom { get; init; }
+
+    /// <summary>The right side.</summary>
+    public PageBorderSide Right { get; init; }
+
+    /// <summary>
+    /// True when the spacing is measured from the text rather than from the paper's edge —
+    /// <c>w:offsetFrom="text"</c>.
+    /// </summary>
+    public bool OffsetFromText { get; init; }
+
+    /// <summary>True when the border casts a shadow down and to the right.</summary>
+    public bool HasShadow { get; init; }
+
+    /// <summary>Which pages of the section carry it.</summary>
+    public PageBorderDisplay Display { get; init; }
+
+    /// <summary>True when at least one side draws a line.</summary>
+    public bool Draws => Top.Draws || Left.Draws || Bottom.Draws || Right.Draws;
+
+    /// <summary>Whether a page of the section carries the border.</summary>
+    /// <param name="isFirstOfSection">True for the section's first page.</param>
+    public bool AppearsOn(bool isFirstOfSection) => Display switch
+    {
+        PageBorderDisplay.FirstPage => isFirstOfSection,
+        PageBorderDisplay.NotFirstPage => !isFirstOfSection,
+        _ => true,
+    };
+}
 
 /// <summary>
 /// The four page margins.
@@ -314,6 +399,14 @@ public sealed record PageGeometry
     /// True when the margins swap on facing pages, so the gutter stays on the binding edge.
     /// </summary>
     public bool HasMirroredMargins { get; init; }
+
+    /// <summary>The border drawn round the page, or null when the section declares none.</summary>
+    /// <remarks>
+    /// Page furniture rather than content — see <see cref="PageBorders"/>. Null rather than a
+    /// no-sides value so that the overwhelming majority of sections, which declare nothing, cost
+    /// one null check at drawing time and nothing at all in the layout.
+    /// </remarks>
+    public PageBorders? Borders { get; init; }
 
     /// <summary>The width a line of body text has to fit in.</summary>
     public Length TextWidth

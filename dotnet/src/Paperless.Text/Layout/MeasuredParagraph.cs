@@ -60,6 +60,29 @@ namespace Paperless.Text.Layout;
 /// and one tracking unit generous for a line that starts part-way in.
 /// </para>
 /// </param>
+/// <param name="WidthPerCent">
+/// How wide the glyphs are drawn against their own design, 100 for a face drawn as it is drawn.
+/// <para>
+/// <c>w:rPr/w:w</c> and RTF's <c>\charscalex</c>, which VCL applies by setting the font's width away
+/// from its height (<c>Font::SetAverageFontWidth</c>). It is not tracking — that puts a gap between
+/// glyphs and leaves them their own shape — and it is not a size, which would change the line's height.
+/// </para>
+/// <para>
+/// <strong>The width it lands on is an integer number of twips, and that is measurable rather than
+/// pedantic.</strong> VCL's font width is a <c>tools::Long</c> in the map mode's own unit, which for
+/// Writer is twips, so a 12 pt run at 99 per cent is set at <c>trunc(240 × 99 / 100) = 237</c> twips and
+/// scales by 237/240 = <b>0.9875</b>, not 0.99. Measured against 24.2.7.2 on
+/// <c>dotnet/probes/words-character-scale/</c>: <c>Hamburgefonstiv 12345</c> at 12 pt comes to 83.928 pt
+/// unscaled and 82.879 at <c>w:w="99"</c>, and 82.879/83.928 is 0.98750 to five places. Every other
+/// value in the corpus divides 240 exactly, so this shows on the commonest one alone — which is
+/// 1226 of the corpus's 1440 scaled runs.
+/// </para>
+/// </param>
+/// <param name="Item">
+/// The font item this run is set from, or default when the reader distinguishes none. It carries
+/// the family class and the language the glyph-fallback pattern is built with; see
+/// <see cref="Fonts.FontItem"/>.
+/// </param>
 public readonly record struct FormattedRun(
     int Start,
     int Length,
@@ -67,10 +90,21 @@ public readonly record struct FormattedRun(
     Length EmSize,
     ShapingOptions Shaping = default,
     Length MetricEmSize = default,
-    Length Tracking = default)
+    Length Tracking = default,
+    int WidthPerCent = 100,
+    Fonts.FontItem Item = default)
 {
     /// <summary>One past the run's last character.</summary>
     public int End => Start + Length;
+
+    /// <summary>
+    /// <see cref="WidthPerCent"/> as the factor the run's advances are actually multiplied by.
+    /// </summary>
+    /// <remarks>
+    /// One for an unscaled run, so the ordinary path multiplies by nothing. See the parameter for why
+    /// this is not simply the percentage.
+    /// </remarks>
+    public double WidthScale => TextWidthScale.Of(EmSize, WidthPerCent);
 
     /// <summary>
     /// The shaping this run is actually shaped with, once its tracking has had its say.
@@ -208,6 +242,38 @@ public sealed class MeasuredParagraph
 
     private readonly bool _blanksAreTransparentToHeight;
 
+    /// <summary>
+    /// The width of the as-character objects standing at the very end of the text.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// An object is a <em>boundary</em> in the prefix table: it widens every prefix past the position it
+    /// occupies and none at or before it, which is what makes it sit between two characters rather than
+    /// replace one, and what lets a picture too wide for the room left on a line move to the next line
+    /// whole. The last boundary has no prefix past it, so an object there is worth nothing to every
+    /// width the table answers — and that is the commonest inline picture there is: a paragraph whose
+    /// entire content is a logo.
+    /// </para>
+    /// <para>
+    /// It is invisible in a DOCX and unmissable in every other format, because the readers disagree
+    /// about whether a picture is a character. OOXML puts a <c>U+0001</c> where one stands, so the
+    /// object sits at boundary 0 of a one-character paragraph and the table carries it; ODF, RTF and —
+    /// for a paragraph holding nothing else — WW8 put nothing there, so the object sits at boundary 0
+    /// of an empty paragraph, which <em>is</em> the last boundary. Measured on one right-aligned
+    /// picture-only paragraph written five ways by LibreOffice 26.2.4.2, the picture's left edge:
+    /// 394.55 in all five references, and ours 394.50 from the <c>.docx</c> against <b>540.00</b> from
+    /// the <c>.odt</c>, the <c>.doc</c>, the <c>.rtf</c> and the <c>.fodt</c> — the whole picture's
+    /// width out, drawn from the right margin rightwards. See <c>probes/words-aschar-band/</c>.
+    /// </para>
+    /// <para>
+    /// Writer has no such gap because it has no prefix table: an as-character fly is a
+    /// <c>SwFlyCntPortion</c> in the line and its width is the line's like any other portion's
+    /// (<c>sw/source/core/text/txtfly.cxx</c>). This is the one place the boundary model needs telling
+    /// that there is no next line.
+    /// </para>
+    /// </remarks>
+    private readonly long _trailingObjectsEmu;
+
     private MeasuredParagraph(
         string text,
         MeasuredRun[] runs,
@@ -224,6 +290,14 @@ public sealed class MeasuredParagraph
         ParagraphLevel = paragraphLevel;
         _objects = objects;
         _blanksAreTransparentToHeight = blanksAreTransparentToHeight;
+
+        long trailing = 0;
+        foreach (InlineObject one in objects)
+        {
+            if (one.Offset >= text.Length) trailing += one.Width.Emu;
+        }
+
+        _trailingObjectsEmu = trailing;
     }
 
     /// <summary>The paragraph's text.</summary>
@@ -339,9 +413,12 @@ public sealed class MeasuredParagraph
                 // the running total. Summing in design units instead would add numbers from two
                 // different grids; reading the running total off the table instead would break the
                 // moment a control character left a gap between two sub-runs.
+                double squeeze = part.WidthScale;
+
                 for (int i = 1; i <= part.Length; i++)
                 {
-                    prefix[part.Start + i] = running + Advance(shaped, shaped.AdvanceUpTo(i), part.EmSize, grid);
+                    prefix[part.Start + i] = running
+                        + Scaled(Advance(shaped, shaped.AdvanceUpTo(i), part.EmSize, grid), squeeze);
                 }
 
                 if (part.Tracking != Length.Zero)
@@ -350,7 +427,7 @@ public sealed class MeasuredParagraph
                     for (int i = 0; i < part.Length; i++) tracking[part.Start + i] = part.Tracking.Emu;
                 }
 
-                running += Advance(shaped, shaped.AdvanceInDesignUnits, part.EmSize, grid);
+                running += Scaled(Advance(shaped, shaped.AdvanceInDesignUnits, part.EmSize, grid), squeeze);
             }
         }
 
@@ -523,29 +600,44 @@ public sealed class MeasuredParagraph
     /// but the same <see cref="ShapingOptions"/> the caller passed, so a paragraph of Latin prose
     /// reaches HarfBuzz in the identical call it did before any of this existed. Anything else is
     /// split at every change of direction, script or face, and each piece is told which it is.
+    /// <para>
+    /// <strong>The faces are chosen over the whole run and the items are applied to the result, not
+    /// the other way about.</strong> Glyph fallback asks for one face covering <em>all</em> of a
+    /// run's missing characters at once — see <see cref="FontItemiser.Split"/> — so the answer
+    /// depends on which characters were in the request, and the drawing pass
+    /// (<c>PageDrawing.ByFace</c>) asks per run. Splitting by item first would ask a different
+    /// question here and let measurement and drawing pick different faces for the same character,
+    /// which is a line laid out at one width and painted at another.
+    /// </para>
     /// </remarks>
     private static List<FormattedRun> SubRuns(
         string text, FormattedRun run, List<TextItem> items, ItemisationOptions options)
     {
         List<FormattedRun> parts = [];
 
+        List<FaceRun> faces = FontItemiser.Split(
+            text, run.Start, run.Length, run.Face,
+            options.GlyphFallback, options.OnGlyphFallback, run.Item);
+
         foreach (TextItem item in items)
         {
-            int start = Math.Max(item.Start, run.Start);
-            int end = Math.Min(item.End, run.End);
-            if (end <= start) continue;
+            int from = Math.Max(item.Start, run.Start);
+            int to = Math.Min(item.End, run.End);
+            if (to <= from) continue;
 
-            foreach (FaceRun face in FontItemiser.Split(
-                         text, start, end - start, run.Face,
-                         options.GlyphFallback, options.OnGlyphFallback))
+            foreach (FaceRun face in faces)
             {
-                bool wholeRun = face.Start == run.Start && face.End == run.End;
+                int start = Math.Max(face.Start, from);
+                int end = Math.Min(face.End, to);
+                if (end <= start) continue;
+
+                bool wholeRun = start == run.Start && end == run.End;
                 bool plain = wholeRun && !item.IsRightToLeft && !face.IsFallback;
 
                 parts.Add(run with
                 {
-                    Start = face.Start,
-                    Length = face.Length,
+                    Start = start,
+                    Length = end - start,
                     Face = face.Face,
                     Shaping = plain
                         ? run.Shaping
@@ -587,17 +679,35 @@ public sealed class MeasuredParagraph
     /// The truncation is monotonic, so the prefix table stays monotonic, which every reader of it
     /// depends on.
     /// </remarks>
+    /// <summary>An advance squeezed by the run's character width, or left alone when it states none.</summary>
+    /// <remarks>
+    /// The multiply is guarded on the ordinary case rather than applied always, because every run in
+    /// the corpus but 1440 of them is unscaled and a double round trip on each of their advances would
+    /// move the last twip of some of them for nothing. See <see cref="TextWidthScale"/>.
+    /// </remarks>
+    private static long Scaled(long advance, double squeeze)
+        => squeeze == 1.0 ? advance : (long)Math.Round(advance * squeeze);
+
     private static long Advance(ShapedText shaped, long designUnits, Length emSize, MetricGrid? grid)
         => grid is { QuantisesAdvances: true } device
             ? device.ToAdvance(designUnits, shaped.UnitsPerEm, emSize).Emu
             : shaped.Scale(designUnits, emSize).Emu;
 
     /// <summary>The width of the characters between two indices.</summary>
+    /// <remarks>
+    /// A range reaching the end of the text also carries the objects standing at that last boundary —
+    /// see <see cref="_trailingObjectsEmu"/>. A range that <em>starts</em> there does not, so the empty
+    /// line a trailing manual break opens does not pay for the picture on the line above it.
+    /// </remarks>
     public Length WidthBetween(int start, int end)
-        => Length.FromEmu(At(end) - At(start));
+        => Length.FromEmu(At(end) - At(start) + (HoldsTrailingObjects(start, end) ? _trailingObjectsEmu : 0));
+
+    /// <summary>Whether a range carries the objects standing at the text's last boundary.</summary>
+    private bool HoldsTrailingObjects(int start, int end)
+        => _trailingObjectsEmu != 0 && end >= Text.Length && (start < Text.Length || Text.Length == 0);
 
     /// <summary>The whole paragraph's width.</summary>
-    public Length Width => Length.FromEmu(_prefixEmu[^1]);
+    public Length Width => Length.FromEmu(_prefixEmu[^1] + _trailingObjectsEmu);
 
     /// <summary>
     /// The natural line height and ascent for a range of the text.

@@ -316,7 +316,8 @@ public sealed class OoxmlWordDocument : IWordProcessingDocument, IPaginatedDocum
 
         DocxLayoutSource source = new(
             _file.Styles, _file.Settings, footnotes: _file.Footnotes, endnotes: _file.Endnotes,
-            theme: _file.Theme, pictures: new DocxPictures(_file, _laidOut),
+            theme: _file.Theme, shapeStyles: _file.ShapeStyles,
+            pictures: new DocxPictures(_file, _laidOut),
             numbering: _file.Numbering, fontTable: _file.FontTable,
             constants: new ConstantFields(_fileName, Content.Metadata.Title))
         {
@@ -359,6 +360,12 @@ public sealed class OoxmlWordDocument : IWordProcessingDocument, IPaginatedDocum
             // read from the document, exactly as `AddsCellLineSpacing` above is not. The RTF reader
             // shares `PaginationOptions.Word` and must *not* set it; see the flag's own remarks.
             UsesWordNoteSeparator = true,
+
+            // The same two filters, the same place, one line further down: `setTargetDocument` also sets
+            // `ContinuousEndnotes`, which puts the document's endnotes after its last body content rather
+            // than on pages of their own. 26.2.4.2 sets it and 24.2.7.2 did not — see the flag's remarks
+            // for the measurement, which is a page count on this repository's own `endnotes.docx`.
+            EndnotesFollowTheBody = true,
             // Zero means no face could be read, in which case Writer's fixed reservation is a better
             // answer than reserving nothing: a note area with no room above it would overprint.
             NoteSeparatorHeight = source.DefaultParagraphLineHeight > Core.Units.Length.Zero

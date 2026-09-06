@@ -671,6 +671,39 @@ internal static class SheetTextLayout
             SkipOutsideFormat(lines, paragraphStarts, cell.Box.Height - (2 * margin), Pitch);
         }
 
+        // A justified cell's lines are stretched to the paper they were broken against, which
+        // happens after the lines are settled and before any of them is placed: Calc maps both
+        // `justify` and `distributed` to `SvxAdjust::Block` and the engine shares the room left
+        // over among each line's blanks (`ImpEditEngine::ImpAdjustBlocks`,
+        // `editeng/source/editeng/impedit3.cxx:1694-1701`). Nothing above moves — the break
+        // positions, the line count and every row height are decided before this and are not
+        // touched by it, which is why a workbook with no justified cell cannot be affected.
+        //
+        // A paragraph's **last** line is not stretched (`!bEOC`, `:1699`), and `distributed` is
+        // exactly the setting that lifts that exemption — `bDistLastLine` is
+        // `GetJustifyMethod(nPara) == SvxCellJustifyMethod::Distribute` (`:1696`), which Calc sets
+        // from `ATTR_HOR_JUSTIFY_METHOD`. A cell that does not wrap has one line, and that line is
+        // its paragraph's last, so only `distributed` reaches this at all without a wrap.
+        //
+        // `format.Horizontal` and not the resolved `horizontal`: `Resolve` has already turned both
+        // of these into `Left`, which is where a justified line *starts*, and the stretch is the
+        // half of the same setting it could not carry.
+        if (format.Horizontal is SheetHorizontalAlignment.Justify
+                or SheetHorizontalAlignment.Distributed
+            && available > Length.Zero)
+        {
+            bool distributesLastLine =
+                format.Horizontal == SheetHorizontalAlignment.Distributed;
+
+            for (int at = 0; at < lines.Count; at++)
+            {
+                bool endsParagraph = at == lines.Count - 1 || paragraphStarts.Contains(at + 1);
+                if (endsParagraph && !distributesLastLine) continue;
+
+                lines[at] = SheetText.Justified(lines[at], available);
+            }
+        }
+
         // The block's height is the sum of its lines rather than a pitch times a count, because a
         // rich cell's lines are not all the same height: EditEngine makes a line as tall as the
         // tallest portion on it. For a cell in one face the two are the same number. The last line
@@ -747,8 +780,9 @@ internal static class SheetTextLayout
                 ? SheetHorizontalAlignment.Right
                 : SheetHorizontalAlignment.Left,
 
-            // Justified and distributed text is placed from the left and stretched; the stretch is
-            // not reproduced, so they place as left. Fill repeats from the left as well.
+            // Justified and distributed text is placed from the left and stretched. Placing is
+            // all this decides — the stretch is `SheetText.Justified`, applied to the lines a
+            // moment after they are broken. Fill repeats from the left as well.
             SheetHorizontalAlignment.Justify or SheetHorizontalAlignment.Distributed
                 or SheetHorizontalAlignment.Fill => SheetHorizontalAlignment.Left,
 

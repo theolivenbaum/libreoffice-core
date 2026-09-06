@@ -103,7 +103,7 @@ public class ChartAxisLabelTests
     }
 
     /// <summary>
-    /// An axis that may wrap thins its labels out rather than rotating them — unless a single
+    /// An axis that may wrap breaks its labels rather than rotating them — unless a single
     /// word does not fit, which is the one thing that turns wrapping off.
     /// </summary>
     /// <remarks>
@@ -131,14 +131,16 @@ public class ChartAxisLabelTests
             .Rotation.ShouldBe(Math.PI / 4.0, 1e-12);
 
         // The same width split into two words, each of which fits: wrapping stays on, so the
-        // rotation branch is closed and the labels are thinned out instead.
+        // rotation branch is closed and the labels break onto two lines instead. Each line is
+        // then at most 0.95 of a tick wide, so nothing collides and nothing is thinned either.
         string?[] breakable = [.. unbreakable.Select(_ => "Sep tem")];
 
-        ChartAxisLabelLayout thinned =
+        ChartAxisLabelLayout broken =
             ChartAxisLabels.Resolve(breakable, centres, wrapping, Size, new ChartText(new Ruler(), null));
 
-        thinned.Rotation.ShouldBe(0.0);
-        thinned.Rhythm.ShouldBeGreaterThan(1);
+        broken.Rotation.ShouldBe(0.0);
+        broken.Rhythm.ShouldBe(1);
+        broken.Texts.ShouldNotBeNull()[3].ShouldBe("Sep\ntem");
     }
 
     /// <summary>
@@ -148,17 +150,25 @@ public class ChartAxisLabelTests
     /// <c>nTick % nRhythm != 0</c> keeps tick zero whatever the rhythm, so a crowded axis never
     /// ends up with no labels at all — which is the failure that would look exactly like a bug in
     /// the reader.
+    /// <para>
+    /// <strong>The axis has to be one that cannot wrap, and it used to be one that could.</strong>
+    /// A label that breaks at a blank comes out at most 0.95 of a tick wide, so a wrapping axis
+    /// never collides and is therefore never thinned; the case reaches thinning only through the
+    /// rotation branch, which needs line breaking off — an ODF axis, or a <c>c:dateAx</c>. Twenty
+    /// one-word categories in a 200 pt frame turn 45° and are still too crowded at that.
+    /// </para>
     /// </remarks>
     [Fact]
     public void AThinnedAxisStillDrawsItsFirstLabel()
     {
+        string?[] names = [.. Enumerable.Repeat<string?>("September", 20)];
+        double?[] values = [.. Enumerable.Range(1, 20).Select(at => (double?)at)];
+
         ChartPlot plot = new()
         {
-            Categories = ["Sep tem", "Sep tem", "Sep tem", "Sep tem",
-                          "Sep tem", "Sep tem", "Sep tem", "Sep tem"],
-            Series = [new ChartSeries("North", [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0],
-                Colour.FromRgb(0x99CCFF))],
-            CategoryAxisText = new ChartAxisText(LineBreakAllowed: true),
+            Categories = names,
+            Series = [new ChartSeries("North", values, Colour.FromRgb(0x99CCFF))],
+            CategoryAxisText = new ChartAxisText(LineBreakAllowed: false),
         };
 
         ChartDrawing drawing = ChartLayout.Place(
@@ -166,9 +176,9 @@ public class ChartAxisLabelTests
             new DocRect(Length.Zero, Length.Zero, Length.FromPoints(200), Length.FromPoints(150)),
             new Ruler());
 
-        int drawn = drawing.Labels.Count(label => label.Text == "Sep tem");
+        int drawn = drawing.Labels.Count(label => label.Text == "September");
         drawn.ShouldBeGreaterThan(0);
-        drawn.ShouldBeLessThan(8);
+        drawn.ShouldBeLessThan(20);
     }
 
     /// <summary>
@@ -205,8 +215,8 @@ public class ChartAxisLabelTests
     }
 
     /// <summary>
-    /// A word exactly as wide as the space between two ticks does not wrap, so the axis is
-    /// thinned rather than turned.
+    /// A word exactly as wide as the space between two ticks does not break inside itself, so the
+    /// axis wraps at the blank rather than turning.
     /// </summary>
     /// <remarks>
     /// <para>
@@ -219,8 +229,14 @@ public class ChartAxisLabelTests
     /// </para>
     /// <para>
     /// Two words of five characters at half an em each fit the 50 pt spacing one at a time and
-    /// the label they make — eleven characters, 55 pt — does not, so the labels collide without
-    /// any of them wrapping. That is the state the old rule turned and this one thins.
+    /// the label they make — eleven characters, 55 pt — does not, so each label breaks at its
+    /// blank and comes out 25 pt wide on two lines. That is the state the old rule turned.
+    /// </para>
+    /// <para>
+    /// <strong>It asserted a thinned axis until 2026-09-05 and that was an artefact.</strong> The
+    /// wrap was computed and thrown away by a guard comparing string lengths, and a newline is
+    /// exactly as long as the blank it replaces — so the collision test measured the unwrapped
+    /// 55 pt run and thinned an axis that had already fitted itself.
     /// </para>
     /// <para>
     /// <strong>It used to be one ten-character word and that boundary has moved</strong>, because
@@ -241,7 +257,8 @@ public class ChartAxisLabelTests
             new ChartText(new Ruler(), null));
 
         layout.Rotation.ShouldBe(0.0);
-        layout.Rhythm.ShouldBeGreaterThan(1);
+        layout.Rhythm.ShouldBe(1);
+        layout.Texts.ShouldNotBeNull()[0].ShouldBe("ABCDE\nFGHIJ");
     }
 
     /// <summary>One character more than the spacing wraps, and the axis is turned.</summary>
