@@ -204,9 +204,18 @@ format (Paperless reads), macro execution (never — Paperless only reports that
    moves the **position** — `aNewPos.Primary = 1.0 - aNewSize.Primary` — rather than shrinking the
    size.
 
-   **Reach: 168 of 947 corpus documents carry a chart** — sheets 90, slides 68, words 10 — and 131
-   of them are at 1% or worse, 111 at 2% or worse, at the sizes their charts declare. The 90 sheets
-   documents were already right; the 78 slides and words ones are what this moved.
+   **Reach: 176 of 947 corpus documents carry a chart** — sheets 99, slides 67, words 10 — and 131
+   of them are at 1% or worse, 111 at 2% or worse, at the sizes their charts declare. The sheets
+   documents were already right; the slides and words ones are what this moved.
+
+   *The figure stood at "168 — sheets 90, slides 68, words 10" and was short by eight, because it
+   was counted by walking zip parts for a `c:chartSpace`.* **A `.xls` chart lives in a BIFF
+   substream, not a zip part**, and counting a `BOF` of substream type `0x0020` in *any* OLE2
+   stream — the ObjectPool included — finds **seven more `.xls` charts** that no zip walk can see.
+   No `.ppt` or `.doc` in the corpus embeds one. The OOXML part count is **309**, against the 281,
+   307 and 61 quoted in various places. **Census a chart both ways or the legacy binaries vanish
+   from your reach figure**, which is exactly the track a chart round is least likely to have
+   tested.
 
    **A single wrapped line short is amplified by section breaks into whole pages, and that is
    why some documents are wildly out.** Worked through on `AWR OPS-AOC 044` (metrics-001, then
@@ -600,6 +609,18 @@ grep '^TOTAL' sweep.log
 The `TOTAL` line is computed by the script from what it actually processed, so it is the
 column to check — a run that lost a worker reports a smaller total, not a wrong verdict. But
 that is only a safety net if you read it; a truncated per-document TSV looks fine on its own.
+
+### A parallel sweep must give each document its own directory
+
+`probes/chart-layout/sweep.py` allocates a worker directory as `out / f'w{i % jobs}'`, which is
+correct for a fixed pool working consecutive indices and **wrong for a thread pool**, which does
+not. Two live renders land in one directory and one `rm -rf`s the other's output. It cost a round
+**124 of 947 renders** before it was found, and the failure is silent: the sweep reports fewer
+rows, not an error, so it reads as documents that could not be rendered.
+
+`probes/chart-secaxis/sweep-parallel.py` is the corrected form — one directory per *document*, not
+per worker slot. Prefer it, and if you write your own, key the directory on something unique to
+the item rather than on a slot index.
 
 ### A sweep and a rebuild must never overlap
 
