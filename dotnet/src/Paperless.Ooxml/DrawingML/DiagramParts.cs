@@ -1,4 +1,5 @@
 using System.Xml.Linq;
+using Paperless.Core.Extraction;
 
 namespace Paperless.Ooxml.DrawingML;
 
@@ -90,6 +91,73 @@ public static class DiagramParts
     public static XElement? DataModel(
         DiagramPartSource source, string partName, XElement graphicData)
         => Part(source, partName, graphicData, "dm");
+
+    /// <summary>
+    /// Appends the text an author typed into a diagram, read from its data model.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A diagram's text is <em>typed by the author</em> and lives in <c>data1.xml</c> as ordinary
+    /// DrawingML text bodies, one per <c>dgm:pt</c>. Only the <em>shapes</em> need the layout
+    /// algorithm — the declarative "layout atom" program in <c>layout1.xml</c> that LibreOffice
+    /// executes in <c>oox/source/drawingml/diagram/</c>, and which is the single largest subsystem
+    /// in the OOXML shape importer. Extraction needs none of it: the words are already there.
+    /// </para>
+    /// <para>
+    /// <strong>The data model is the right source for extraction even where the baked shape tree
+    /// exists, and the two disagree on purpose.</strong> <see cref="Baked"/> is what the author
+    /// sees, so it repeats a node's text wherever the layout drew it and adds text the layout
+    /// generated; the data model is what the author typed, once each. An index wants the second.
+    /// That is also why this reads the parts rather than the rendering: extraction and rendering
+    /// are separate paths, and extraction must not pay for fonts or layout.
+    /// </para>
+    /// <para>
+    /// Points are read in <c>dgm:ptLst</c> order. LibreOffice walks the connection list instead,
+    /// which is the difference between authoring order and drawn order — they agree for every
+    /// diagram measured, and reconstructing a tree from <c>dgm:cxnLst</c> to reorder text is work
+    /// the extracted output would not visibly benefit from.
+    /// </para>
+    /// <para>
+    /// This stands here rather than in either family's reader because a diagram is the same five
+    /// parts in a deck, a document and a workbook: the walk parses <c>dgm:</c> markup and emits
+    /// content nodes, so it is a reader of OOXML that serves more than one family.
+    /// </para>
+    /// </remarks>
+    /// <param name="source">The package, as the two lookups a diagram needs from one.</param>
+    /// <param name="partName">The part carrying the <c>dgm:relIds</c>, which resolves its ids.</param>
+    /// <param name="graphicData">The <c>a:graphicData</c> holding the <c>dgm:relIds</c>.</param>
+    /// <param name="target">The node the diagram's paragraphs are appended to.</param>
+    /// <param name="options">Inheritance and relationship resolution for the text bodies.</param>
+    /// <returns>True when the diagram contributed at least one paragraph.</returns>
+    public static bool AuthoredText(
+        DiagramPartSource source,
+        string partName,
+        XElement graphicData,
+        ContentNode target,
+        DrawingTextOptions? options = null)
+    {
+        ArgumentNullException.ThrowIfNull(target);
+
+        if (DataModel(source, partName, graphicData) is not { } model) return false;
+
+        int before = target.Children.Count;
+        foreach (XElement point in model.Element(XName.Get("ptLst", Uri))
+                                       ?.Elements(XName.Get("pt", Uri)) ?? [])
+        {
+            // "doc" is the diagram itself, "pres" is a generated presentation node, and the two
+            // transition types are the connectors between points. None of them carries text a
+            // reader sees, and a "pres" point can duplicate a real one's.
+            string? type = point.Attribute("type")?.Value;
+            if (type is "doc" or "pres" or "parTrans" or "sibTrans") continue;
+
+            XElement? body = point.Element(XName.Get("t", Uri));
+            if (DrawingTextBody.IsEmpty(body)) continue;
+
+            DrawingTextBody.Read(body!, target, options);
+        }
+
+        return target.Children.Count > before;
+    }
 
     /// <summary>One of the four parts a <c>dgm:relIds</c> names, loaded, or null.</summary>
     private static XElement? Part(
