@@ -140,6 +140,13 @@ public sealed partial class Ww8DocumentReader
             // made the disagreement visible: `A_320.doc` pads each of its 106 entries with twenty-one
             // blank paragraphs, and losing those let one and a half entries share a page where
             // LibreOffice gives each its own.
+            //
+            // A row's head — the first paragraph of its first cell — is the one place Word tests for a
+            // frame inside a table, and what it finds there moves the whole row. Rows that disagree
+            // would each start a frame of their own, which this does not model; a table whose rows do
+            // not all state the same position keeps none, which is where it was before.
+            if (open.RowCells.Count == 0 && open.Cell.Count == 0) open.NoteRowFrame(paragraph.TextFrame);
+
             bool closesCell = endsCell || format.IsInnerTableCell;
             open.Cell.Add(new Ww8LayoutBlock(paragraph));
             if (closesCell) FinishCell(open);
@@ -228,8 +235,18 @@ public sealed partial class Ww8DocumentReader
 
                     if (LayoutTableOf(open.Rows, open.Section) is { } table)
                     {
-                        if (deeper == 1) _blocks.Add(new Ww8LayoutBlock(table));
-                        else LevelAt(deeper - 1).Cell.Add(new Ww8LayoutBlock(table));
+                        if (deeper == 1)
+                        {
+                            // Only the outermost table can leave the flow. `TestApo` reaches its guard
+                            // at all only when `nCellLevel == m_nInTable`, so a table nested in a cell
+                            // is never tested and stays where its cell put it.
+                            _blocks.Add(new Ww8LayoutBlock(
+                                table with { TextFrame = AgreedRowFrame(open.RowFrames) }));
+                        }
+                        else
+                        {
+                            LevelAt(deeper - 1).Cell.Add(new Ww8LayoutBlock(table));
+                        }
                     }
                 }
 
@@ -246,9 +263,49 @@ public sealed partial class Ww8DocumentReader
 
             public List<Ww8RowDraft> Rows { get; } = [];
 
+            /// <summary>What each row's head said about a frame, in row order.</summary>
+            public List<Ww8TextFramePosition> RowFrames { get; } = [];
+
             /// <summary>The section its rows were in, taken from the paragraphs that made them.</summary>
             public int Section { get; set; }
+
+            /// <summary>Takes what the paragraph at a row's head says about a frame.</summary>
+            public void NoteRowFrame(Ww8TextFramePosition frame) => RowFrames.Add(frame);
         }
+    }
+
+    /// <summary>
+    /// The Word text frame a table's rows agree on, empty when they do not all name the same one.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Word tests for a frame once per row and at one place in it — the first paragraph of the first
+    /// cell — and what it finds there moves that row entire:
+    /// <em>"if it is the first cell of a row then the whole table row jumps into the new frame, if it
+    /// isn't then the paragraph attributes are applied except for the floating frame stuff"</em>
+    /// (<c>SwWW8ImplReader::TestApo</c>, <c>sw/source/filter/ww8/ww8par2.cxx</c>:440). Rows that name
+    /// different frames therefore end up in different frames, which this reader does not model — it
+    /// assembles a table as one block and has nowhere to put half of it. So the agreement is required
+    /// rather than assumed, and a table whose rows disagree keeps the flow, which is where a reader
+    /// that knew nothing about any of this would have left it.
+    /// </para>
+    /// <para>
+    /// A table with no rows at all names nothing, which is the same answer.
+    /// </para>
+    /// </remarks>
+    /// <param name="rowFrames">What each row's head said, in row order.</param>
+    internal static Ww8TextFramePosition AgreedRowFrame(IReadOnlyList<Ww8TextFramePosition> rowFrames)
+    {
+        ArgumentNullException.ThrowIfNull(rowFrames);
+        if (rowFrames.Count == 0) return Ww8TextFramePosition.None;
+
+        Ww8TextFramePosition first = rowFrames[0];
+        foreach (Ww8TextFramePosition frame in rowFrames)
+        {
+            if (frame != first) return Ww8TextFramePosition.None;
+        }
+
+        return first;
     }
 
     /// <summary>
@@ -649,7 +706,31 @@ public sealed record Ww8LayoutTable(
     int HeaderRowCount,
     Length LeftIndent,
     int SectionIndex = 0,
-    Layout.FrameHorizontalAlignment? HorizontalPosition = null);
+    Layout.FrameHorizontalAlignment? HorizontalPosition = null)
+{
+    /// <summary>
+    /// The Word text frame the whole table belongs in, empty when it belongs in the flow.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A DOC puts a table in a frame by putting the frame's paragraph sprms on the table's own
+    /// paragraphs, and Word reads them only at a row's head: <em>"if it is the first cell of a row then
+    /// the whole table row jumps into the new frame, if it isn't then the paragraph attributes are
+    /// applied except for the floating frame stuff"</em> (<c>SwWW8ImplReader::TestApo</c>,
+    /// <c>sw/source/filter/ww8/ww8par2.cxx</c>:440, whose own guard is
+    /// <c>GetCurrentCol() == 0 &amp;&amp; InFirstParaInCell()</c>).
+    /// </para>
+    /// <para>
+    /// A masthead is the commonest shape it takes — a two-column table holding a logo and an address
+    /// block, floated over the top of the first page — and a reader that lays it out in the flow instead
+    /// spends the frame's whole height on it and pushes the body down by that much. Measured on
+    /// <c>AAC-AD-No-2021-01-Boeing-737-8-and-737-9-MAX.doc</c> that is <strong>72.3 pt</strong> off the
+    /// first page and a whole page off the document; five corpus <c>.doc</c> renderings move and all
+    /// five move towards 26.2.4.2. <c>dotnet/probes/words-apo-table/</c>.
+    /// </para>
+    /// </remarks>
+    public Ww8TextFramePosition TextFrame { get; init; }
+}
 
 /// <summary>One row of a DOC table.</summary>
 /// <param name="Cells">Its cells, left to right; one covered by a merge above is absent.</param>

@@ -350,6 +350,9 @@ dotnet/probes/tooling-01/poppler-534.tsv	2026-08-13	current	26.2.4.2	present	cur
 dotnet/probes/tooling-01/results.md	2026-08-13	current	26.2.4.2	present	current	-
 dotnet/probes/trailing-nbsp-wrap/README.md	2026-08-16	current	26.2.4.2	present	current	-
 dotnet/probes/user-review-slides-02/review.md	2026-08-13	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/words-apo-table/movers.tsv	2026-09-06	current	24.2.7.2;26.2.4.2	present	current	dotnet/src/Paperless.WordProcessing/Ww8/Ww8DocumentReader.LayoutTables.cs;dotnet/tests/Paperless.WordProcessing.Tests/Ww8FramedTableTests.cs
+dotnet/probes/words-apo-table/results.md	2026-09-06	current	24.2.7.2;26.2.4.2	present	current	dotnet/src/Paperless.WordProcessing/Ww8/Ww8DocumentReader.LayoutTables.cs;dotnet/tests/Paperless.WordProcessing.Tests/Ww8FramedTableTests.cs
+dotnet/probes/words-apo-table/spot.tsv	2026-09-06	current	26.2.4.2	present	current	-
 dotnet/probes/words-b-01/prediction.md	2026-08-13	current	26.2.4.2	present	current	-
 dotnet/probes/words-b-01/results.md	2026-08-13	current	26.2.4.2	present	current	-
 dotnet/probes/words-b008-01/prediction.md	2026-08-14	current	26.2.4.2	present	current	-
