@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 """Isolate one glyph's advance and compare both stacks against the font's own hmtx.
 
+**Superseded 2026-09-06.** The conclusion this probe fed -- that the reference does not
+draw the design advance -- is withdrawn: it was read out of the PDF's glyph positioning,
+which is quantised to whole thousandths of an em, and that is larger than the effect. The
+measurements below stand; the reading of them does not. See `probes/advance-ppem/`.
+
 The trick is differencing two repeat counts. Rendering a character N times gives an ink
 box of (N-1) advances plus one glyph's ink width; rendering it M times and subtracting
 cancels that trailing term exactly, so (w_N - w_M) / (N - M) is the advance and nothing

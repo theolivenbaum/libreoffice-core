@@ -30,97 +30,92 @@ format (Paperless reads), macro execution (never — Paperless only reports that
    access and our own precedence rules. Before adding any graphics dependency, read the note
    at the top of `Directory.Packages.props`.
 
-   **"So advance widths agree by construction" used to stand here and is measurably false.**
-   Shared shaper or not, the two stacks do not agree: there is a real ~0.1% advance divergence,
-   and tab stops are exact to **0.0000 pt**, so the pen is right and the drift accumulates
-   *between* them. It underlies 8 of the Fidelity failures.
+   **Advance widths do agree, and the "~0.1% advance divergence" that stood here for four
+   rounds does not exist.** It was an artefact of the instrument, and every figure that was
+   ever quoted for it — "ours is exactly `hmtx × size / upem` and the reference's is not",
+   "differs per glyph by up to 0.3%", "no quantisation grid fits", "the reference must be
+   grid-fitting the outline at LibreOffice's ppem" — came from reading the reference's
+   advances out of a LibreOffice PDF's *glyph positioning*, whether through
+   `pdftotext -bbox` or from the `TJ` integers. **That channel is quantised to whole
+   thousandths of an em, and one thousandth of an em is 0.36% of a Liberation Serif `i` and
+   0.17% of a Liberation Mono digit.** The instrument's resolution was several times the
+   defect it was used to measure.
 
-   **It is not kerning, and the "LibreOffice kerns 19% harder" line that stood here was wrong.**
-   That claim came from one line of one document. Measured 2026-08-15 on a probe built to
-   separate the two — the same string set three ways, pair-kerned, with `w:kern w:val="0"`, and
-   with a space between every letter so no pair can form — across two faces and two sizes:
+   Two facts settle it, and `probes/advance-ppem/` holds both:
 
-   | | ref | ours | ours/ref |
-   |---|---:|---:|---:|
-   | kerning's own contribution, Liberation Serif 12 pt | 16.500 pt | 16.588 pt | **1.0053** |
-   | Liberation Serif 24 pt | 32.904 | 33.176 | 1.0083 |
-   | Carlito 12 pt | 10.344 | 10.412 | 1.0066 |
-   | Carlito 24 pt | 20.616 | 20.825 | 1.0101 |
+   - **LibreOffice shapes unhinted, exactly as we do.**
+     `LogicalFontInstance::InitHbFont` (`vcl/source/font/LogicalFontInstance.cxx`:94-103)
+     builds its HarfBuzz font with `hb_font_set_scale(font, upem, upem)` and
+     `hb_ot_font_set_funcs` — HarfBuzz's own OpenType functions, reading `hmtx`. There is no
+     FreeType font-funcs object in the advance path and no hinting anywhere in it.
+   - **Its PDF writer truncates every declared width.** `registerGlyph` records
+     `XUnits(upem, width)`, and `XUnits` is `(n * 1000) / nUPEM`
+     (`vcl/inc/fontsubset.hxx`:29) — integer division, so every declared width is
+     `floor(hmtx × 1000 / upem)` by construction and up to a thousandth of an em *short*;
+     `drawHorizontalGlyphs` (`vcl/source/pdf/pdfwriter_impl.cxx`:5814) corrects a gap only
+     when `trunc(declared − actual·1000/ppem + 0.5)` is non-zero, which a systematic
+     sub-unit deficit never makes it. Measured over every glyph of every subset in three
+     corpus documents, **every declared width is `floor(hmtx × 1000 / upem)` in both
+     binaries, mean deficit 0.48–0.65 thousandths of an em per glyph.** A pen reconstructed
+     inside one text object therefore falls behind the pen the layout intended by about half
+     a thousandth of an em per glyph and resets at every `Td`. That is the whole of "0.1%,
+     and it accumulates *between* the stops".
 
-   **Kerning agrees to better than 1%, and we kern very slightly *harder*, not softer.** The
-   divergence is still there with kerning switched off (+0.041% on Liberation Serif, +0.113% on
-   Carlito) and with every pair broken by a space, so it lives in the *base advances*.
+   Measured through a channel that is **not** quantised — differencing two right-aligned
+   lines, so the `Td` the writer states is `margin − width(line)` and every fixed term
+   cancels — over **5 faces × 6 units × up to 11 sizes = 314 cases**: ours agrees with
+   26.2.4.2 to a **worst case of 0.0077%** and with 24.2.7.2 to **0.0107%**, which is the
+   instrument's own floor. The units include `Hamburgefonstiv`, a six-kern-pair phrase, a prose sentence and
+   ` o`, so shaping, kerning, ligatures and the space glyph are all inside that agreement.
 
-   What it actually is, per-glyph from the PDFs' own geometry:
+   **The control is in the suite already.** `TabStopComparisonTests` runs one assertion at one
+   tolerance over two documents: `tabbed.docx` passes and `list-label-overrun.docx` fails.
+   In the first, every stretch after a tab is its own text object with its own `Td`, so the
+   reference *states* each position and all three renderings agree at every word. In the
+   second the whole line is one text object and every position after the first has to be
+   reconstructed. Same test, same tolerance — what changes is whether the number was stated
+   or reconstructed.
 
-   - **It is face-dependent by an order of magnitude.** On the space-separated line the total is
-     **+0.011% for Liberation Serif and +0.115% for Carlito**.
-   - **Liberation Serif does not accumulate.** Its pen offset stays within 0.06–0.10 pt of the
-     reference's across the line — a constant, which is the text origin, not a drift.
-   - **Carlito accumulates**, about **+0.0125 pt per glyph** at 12 pt: the pen starts 0.100 pt
-     behind the reference's and is 0.063 pt ahead by the fourteenth glyph.
-   - Per-glyph *ink* widths differ by at most 0.010 pt and do not accumulate, so the ink is not
-     the driver — the advances are.
+   **26.2.4.2 is not "further from the design metric" than 24.2.7.2.** On the failing
+   documents the `Td` origins of every portion are *identical* between the two binaries: the
+   layout did not move. What moved is the `TJ` arrays — 24.2.7.2 emits an adjustment at a
+   handful of positions and 26.2.4.2 at nearly every one, because 26.2.4.2 encodes the
+   kerning the layout applied and 24.2.7.2 dropped some of it, which made its lines wider and
+   cancelled part of the truncation deficit.
 
-   **The seat, isolated one glyph at a time.** Rendering one character 10 times and 60 times and
-   differencing the two widths gives an advance with the trailing side-bearing cancelled exactly.
-   Against the faces' own `hmtx`, at 12 pt:
+   So there is nothing to reproduce in `Paperless.Text`, and **the fidelity failures in this
+   family are left failing on purpose**: eight of them compare a position N glyphs deep
+   inside one reference text object, where the channel's resolution is `N × 0.5/1000 em ×
+   size` — 0.55 pt on `paginated.docx` line 1, against a 0.5 pt tolerance. Only writing our
+   own PDF with LibreOffice's truncated integer widths would close them, and that is making
+   our output worse to make a test greener. Each of those tests now carries the correction in
+   its own remarks.
 
-   | face | ch | hmtx | exact `hmtx·size/upem` | ours | ref | ref/exact |
-   |---|---|---:|---:|---:|---:|---:|
-   | Liberation Serif | `o` | 1024 | 6.000000 | 6.000000 | 6.000000 | 1.000000 |
-   | Liberation Serif | `.` | 512 | 3.000000 | 3.000000 | 3.000000 | 1.000000 |
-   | Liberation Serif | `A` | 1479 | 8.666016 | 8.666016 | 8.663520 | 0.999712 |
-   | Liberation Serif | `i` | 569 | 3.333984 | 3.333984 | 3.324480 | 0.997149 |
-   | Carlito | `A` | 1185 | 6.943359 | 6.943360 | 6.931680 | 0.998318 |
-   | Carlito | `.` | 517 | 3.029297 | 3.029297 | 3.020880 | 0.997222 |
+   **`SheetTextComparisonTests` was never this family and is now closed.** Its failure is a
+   Calc *indent*: an OOXML `indent` level is three spaces of the workbook's default font
+   (`sc/source/filter/oox/stylesbuffer.cxx`:1263) and one space is
+   `xFont->getCharWidth(' ')` (`unitconverter.cxx`:139), which is
+   `OutputDevice::GetTextWidth` cast to `sal_Int16` — a **whole number of twips**. It rounds;
+   we truncated. Measured over the six default font sizes at which Liberation Sans' 5.5566
+   twips per point separate the two rules, 26.2.4.2 rounds at six of six and 24.2.7.2 at four
+   of six. `SheetDrawingComparisonTests` is not this family either — its own remark
+   classifies it as 26.2.4.2 clamping a full-cell anchor offset, on 34 probe renderings.
 
-   **Ours is exactly `hmtx × size / upem` on every glyph tested — the unhinted design advance.
-   The reference's is not, and differs per glyph by up to 0.3%.** Where it agrees exactly, the
-   design advance is a clean fraction of the em: `o` and `n` are 1024 = upem/2, `.` is 512 =
-   upem/4. Carlito, whose advances are drawn to match Calibri rather than to sit on round
-   fractions, agrees on none of its six.
+   **`SlideChartFaceComparisonTests`' 5.839 pt digit is a separate, unexplained defect and
+   should not be filed here.** Its `TJ` adjustment is 16 at *every* inter-glyph position on a
+   monospaced face — 2.7% of the advance, thirty times the quantisation — and the chart's own
+   `Tm` origins move between the two binaries where Writer's do not. So the chart text really
+   is laid out differently by the two binaries, and the shape of the data is **per-position
+   and constant, not per-glyph and outline-dependent**: a constant relative scale on a
+   monospaced face cannot be outline hinting. The seat is in the metafile a chart is drawn
+   into and replayed from; `tdf#168002` and `GetSubpixelPositioning`
+   (`vcl/source/outdev/text.cxx`:1258) are in that area. Worth a round; it is not this one.
 
-   That last observation suggests a quantisation grid, and **the grid hypothesis is refuted**:
-   searching every N from 16 to 4000 units per em for one that reproduces all twelve reference
-   advances from `hmtx` leaves a best-case maximum error of **0.007 pt**, the same order as the
-   defect. No single grid fits, so the reference is not rounding the design advance — it is
-   **grid-fitting the outline**, which is per-glyph and cannot be derived from `hmtx` at all.
-
-   So closing this means reproducing FreeType's hinted advance at LibreOffice's ppem, which is a
-   real architectural question for a stack that reads its own OpenType tables, not a rounding
-   patch. Do **not** re-derive the kerning question or the grid question — both probes above
-   settle them, and both are in `probes/advance-divergence/`.
-
-   Treat it as a real open defect with a known seat, not as a rounding artefact — and do not
-   re-derive "our pen is off", because the declared-margin probe already refuted that.
-
-   **It moved again with the reference, and 26.2.4.2 is further from the design metric than
-   24.2.7.2 was.** Measured 2026-09-05 in three instruments that are each cleaner than a justified
-   line, and in every one of them ours equals the design metric *and* 24.2.7.2's rendering while
-   26.2.4.2's does not:
-
-   | instrument | design | 24.2.7.2 | 26.2.4.2 | ours |
-   |---|---:|---:|---:|---:|
-   | Liberation Mono digit, 10.005 pt, chart value labels | 6.004 | 6.010 | **5.839** | 6.009 |
-   | Liberation Sans space, 10 pt, behind a Calc indent | 55.57 tw | 55 tw | **55.94 tw** | 54.99 tw |
-   | an XLSX two-cell picture span, in points | — | 95.017 | **94.904** | 95.074 |
-
-   The chart one is the instrument to reach for: the labels are right-aligned digits in a
-   *monospaced* face, so the gap between the `100` and `80` labels is one advance and nothing else,
-   and the reference's own `TJ` array states its internal pen positions outright — 26.2.4.2 shifts
-   16/1000 em at every inter-glyph position where 24.2.7.2 shifted 76/1000 once. The picture row is
-   the control that says it is not a text-layout rule: the **ODF spelling of the same picture is
-   95.046 × 46.800 pt under both binaries** and only the OOXML one, whose extents are derived from
-   font-dependent grid units, moves.
-
-   Its reach is now five fidelity test methods — `PageDrawingComparisonTests` (×4),
-   `TabStopComparisonTests` (×4), `SheetTextComparisonTests`, `SheetDrawingComparisonTests` and
-   `SlideChartFaceComparisonTests`' residual — and each of those files carries its own measurement.
-
-   **Section breaks amplify it from a fraction of a line into whole pages, and that is why some
-   documents are wildly out.** Worked through on `AWR OPS-AOC 044` (metrics-001, ours 12 pages
-   against 15). A narrow table cell whose text wraps one line short makes its row shorter; a
+   **A single wrapped line short is amplified by section breaks into whole pages, and that is
+   why some documents are wildly out.** Worked through on `AWR OPS-AOC 044` (metrics-001, ours
+   12 pages against 15). *This used to be filed as the advance divergence arriving at corpus
+   scale, and that attribution is withdrawn with the rest of it: the wrap is real and its cause
+   is now unattributed.* A narrow table cell whose text wraps one line short makes its row shorter; a
    shorter row lets one extra row onto the page; and the document's **ten `nextPage` section
    breaks** each convert that one-row overshoot into a full blank page, because the section ends
    wherever the overshoot has left it. Measured, full-width rules per page: **page 1 ours 11 to

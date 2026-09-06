@@ -540,11 +540,19 @@ internal static class XlsxCellFormats
         if (SheetFonts.For(probe) is not { } face)
             return Length.FromTwips(FallbackTwipsPerIndentLevel);
 
-        // Truncated to whole twips, because that is the unit LibreOffice's own measurement lands
-        // in before it is multiplied: XFont::getCharWidth answers in twips. Ten-point Liberation
-        // Sans has a 55.57-twip space, and rounding it to 56 rather than truncating to 55 puts a
-        // two-level indent 0.3 pt out.
-        long space = SheetText.Measure(" ", face, first.Size).Emu / 635;
+        // Rounded to the nearest whole twip, because that is the unit LibreOffice's own
+        // measurement lands in before it is multiplied: XFont::getCharWidth is
+        // OutputDevice::GetTextWidth cast to sal_Int16 (toolkit/source/awt/vclxfont.cxx:77), so
+        // the space is a whole number of twips and the only question is which way it goes.
+        //
+        // It rounds. Measured over the six default font sizes at which Liberation Sans' 5.5566
+        // twips per point separate floor from round -- 10, 12, 14, 16, 28 and 30 pt, one
+        // workbook each, indent against no indent in the same column so the pen difference is
+        // the indent and nothing else (probes/advance-ppem/indent-twip-rounding.py):
+        // 26.2.4.2 rounds at 6 of 6 and 24.2.7.2 at 4 of 6, and truncating is wrong at every
+        // one of the six against the target. This used to truncate, which was calibrated on the
+        // two sizes where 24.2.7.2 happens to agree with it.
+        long space = SheetText.Measure(" ", face, first.Size).Twips;
         return space > 0
             ? Length.FromTwips(space * SpacesPerIndentLevel)
             : Length.FromTwips(FallbackTwipsPerIndentLevel);

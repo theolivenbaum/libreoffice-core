@@ -28,24 +28,31 @@ namespace Paperless.Fidelity.Tests;
 /// and the measurement separately, which is what makes a failure diagnosable.
 /// </para>
 /// </remarks>
-// [reference moved 24.2.7.2 -> 26.2.4.2] EveryLineIsDrawnWhereLibreOfficeDrawsIt fails on all
-// four formats, identically: page 1 line 1 ends at 530.423 pt in the reference against our
-// 529.903 pt, 0.520 pt over a 0.5 pt tolerance on a ~430 pt line — 0.12%. Ours has not moved;
-// 24.2 drew it within tolerance and 26.2 does not, on the same Liberation Serif file now that
-// the bundle is aside. **Not the tarball's libraries**: /opt/libreoffice26.2/program bundles
-// ICU 78 but no HarfBuzz and no FreeType, so the shaper and the rasteriser are the system's on
-// both sides. So this is a real, sub-point layout change in 26.2 and following it is ours to do;
-// the mechanism was not established this round. Do not widen the tolerance to clear it — the
-// figure sitting 4% over the band is the only thing recording that anything moved.
+// [2026-09-06, diagnosed, left failing on purpose] EveryLineIsDrawnWhereLibreOfficeDrawsIt fails
+// on all four formats, identically, and it is **not** an advance divergence. `Close(right)` compares
+// our exact run extent against poppler's reconstruction of the reference's pen from the PDF's own
+// declared widths, and LibreOffice writes those as **truncated integer thousandths of an em**:
+// `registerGlyph` records `XUnits(upem, width)`, which is `(n * 1000) / nUPEM`
+// (`vcl/inc/fontsubset.hxx`:29) — integer division — and `drawHorizontalGlyphs`
+// (`vcl/source/pdf/pdfwriter_impl.cxx`:5814) corrects a gap only when
+// `trunc(declared - actual*1000/ppem + 0.5)` is non-zero, which a systematic sub-unit deficit never
+// makes it. Measured over every glyph of this document's two subsets, every declared width is
+// `floor(hmtx * 1000 / upem)` in both binaries, mean deficit 0.567 and 0.655 thousandths of an em.
 //
-// [2026-09-05] Same family as three more, measured since and each a cleaner instrument than a
-// justified line: `SlideChartFaceComparisonTests` (Liberation Mono's digit, the reference 6.010 pt
-// under 24.2.7.2 and 5.839 under 26.2.4.2 at the same size in the same embedded face),
-// `SheetTextComparisonTests` (Liberation Sans' space behind a Calc indent, 55 twips against 55.94) and
-// `SheetDrawingComparisonTests` (an XLSX two-cell picture span, version-stable in the ODF spelling of
-// the same picture and not in the OOXML one). In every one of them ours equals the design metric and
-// 24.2.7.2's rendering, and 26.2.4.2's does not — which says the seat is the reference's own
-// device-measured advance and not any one layout rule. See `CLAUDE.md`'s rule 3.
+// Line 1 is 100 glyphs of 11 pt Carlito, and Sum(exact - floor) over exactly those glyphs is
+// **0.461 pt**. Measured widths: ours 459.573, 24.2.7.2 459.239, 26.2.4.2 458.953. So the 0.520 pt
+// this note used to report is that deficit, and it had the two sides the wrong way round — **ours is
+// 530.423 and the reference 529.903**, not the reverse.
+//
+// The channel's resolution here is `glyphs x 0.5/1000 em x size` = **0.55 pt, above this file's
+// 0.5 pt tolerance**. Nothing in our layout can close that: measured through the reference's own
+// `Td` pen instead, over 5 faces x 6 units x up to 11 sizes, our laid-out widths agree with both
+// binaries to 0.011% (`probes/advance-ppem/`). Only writing our PDF with LibreOffice's truncated
+// integer widths would move this number, and that is making our output worse to make a test
+// greener. Do not widen the tolerance either; the figure sitting over it is the record.
+//
+// The line *count* and the word sequence are asserted before any position and they pass, on all
+// four formats — which is the check that says the layouts agree where it matters.
 public sealed class PageDrawingComparisonTests : IDisposable
 {
     /// <summary>

@@ -580,10 +580,14 @@ foot of the page rather than assuming it, is the model.
    and shipping on that would be a rounding rule resting on an unresolved metric.
 3. **Hyperlink underline and colour — 41 of 112 `.pptx`, 297 runs.** A hyperlink run stating
    neither gets both from `textrun.cxx:161-166`.
-4. **The ~0.1% advance divergence.** Tab stops exact to 0.0000 pt so the pen is right; drift
-   accumulates *between* them and LibreOffice **kerns 19% harder**. Underlies 8 Fidelity failures.
-   The claim "advance widths agree by construction" was false and has been removed from both places
-   it appeared.
+4. **The ~0.1% advance divergence — withdrawn 2026-09-06; it was the instrument.** Measured
+   through the reference's own stated pen instead of through a PDF's glyph positioning, over 5
+   faces x 6 units x up to 11 sizes, the two stacks agree to 0.011%. What accumulated *between*
+   the tab stops is LibreOffice's PDF writer declaring every glyph width as
+   `floor(hmtx x 1000 / upem)` and correcting only per-gap, so a reconstructed pen falls half a
+   thousandth of an em behind per glyph. The 8 Fidelity failures are left failing on purpose;
+   only writing our own PDF with those truncated widths would close them. `probes/advance-ppem/`,
+   and `CLAUDE.md` rule 3, which is rewritten.
 5. **`apron-area.xls` page 1 draws no grid at all on our side** — 70 vertical and 56 horizontal
    reference hairlines, three missing border classes — **while matching the gate exactly**.
 
