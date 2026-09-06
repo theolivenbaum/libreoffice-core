@@ -3,6 +3,7 @@ using Paperless.Core.Geometry;
 using Paperless.Core.Graphics;
 using Paperless.Core.Units;
 using Paperless.Ooxml.DrawingML;
+using Paperless.Text.Fonts;
 using Paperless.Text.Layout;
 
 namespace Paperless.Presentations.Layout;
@@ -216,8 +217,75 @@ public static class SlideChart
             area = new DocRect(corner.X / stretch, corner.Y, box.Width, box.Height);
         }
 
-        List<PlacedGlyphRun> runs = SlideTextLayout.Place(body, area, fonts);
+        List<PlacedGlyphRun> runs = OnChartDevice(
+            SlideTextLayout.Place(body, area, fonts), label.Size);
         return runs.Count == 0 ? null : new PlacedText(runs, transform);
+    }
+
+    /// <summary>
+    /// Puts a chart label's advances onto <c>chart2</c>'s own device before anything reads them.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>A chart's text is not laid out by Impress.</strong> It is built by
+    /// <c>chart2</c>'s view as plain text shapes on the <c>VirtualDevice</c> that
+    /// <c>DrawModelWrapper</c> creates from <c>Application::GetDefaultDevice()</c> with
+    /// <c>MapUnit::Map100thMM</c> (<c>chart2/source/view/main/DrawModelWrapper.cxx</c>:88-99), and
+    /// that device is <strong>96 dpi</strong> (<c>SvpSalGraphics::GetResolution</c>,
+    /// <c>vcl/headless/svpgdi.cxx</c>:44). An <c>OutputDevice</c> instantiates a font at a whole
+    /// number of device pixels, so at 10 pt it sets <strong>13</strong> for 13.333 and every
+    /// advance the chart measures is 2.5% narrow, while at 11 pt it sets 15 for 14.667 and they
+    /// are 2.3% wide. <see cref="MetricGrid.PixelEmScale"/> is that ratio.
+    /// </para>
+    /// <para>
+    /// <strong>The glyphs keep the size the file states; only the pen moves.</strong> The
+    /// reference draws a 10 pt label at 10.005 pt with the narrower advances rather than at
+    /// 9.75 pt, so the em is quantised for the advance and not for the glyph — which is why this
+    /// scales the run's positions and leaves <see cref="GlyphRun.FontSize"/> alone.
+    /// </para>
+    /// <para>
+    /// <strong>Measuring and drawing take it together or neither may.</strong> The width a value
+    /// axis' labels measure is what reserves the plot area and what right-aligns them against it,
+    /// so a label measured wide and drawn narrow is aligned on a width it does not have — which
+    /// is precisely what 24.2.7.2 does and 26.2.4.2 stopped doing. Both paths here go through
+    /// this one call for that reason.
+    /// </para>
+    /// <para>
+    /// <c>SheetBandText.ChartShape</c> is the same rule for a workbook's charts, landed one round
+    /// earlier; <c>FrameChart.ChartFace.Shape</c> is the third. What is deliberately left out on
+    /// all three is the reference's further rounding of each glyph's advance to a whole hundredth
+    /// of a millimetre, worth at most 0.014 pt a glyph — see
+    /// <see cref="MetricGrid.PixelEmScale"/>. Decorations in
+    /// <see cref="PlacedGlyphRun.Rules"/> are in slide coordinates rather than run-relative ones
+    /// and are left alone; a chart label carries none.
+    /// </para>
+    /// </remarks>
+    /// <param name="runs">The runs the ordinary slide text layout produced.</param>
+    /// <param name="size">The em size the label states.</param>
+    private static List<PlacedGlyphRun> OnChartDevice(List<PlacedGlyphRun> runs, Length size)
+    {
+        double scale = MetricGrid.Chart.PixelEmScale(size);
+        if (runs.Count == 0 || scale == 1.0) return runs;
+
+        for (int i = 0; i < runs.Count; i++)
+        {
+            PlacedGlyphRun placed = runs[i];
+            IReadOnlyList<PositionedGlyph> glyphs = placed.Run.Glyphs;
+            List<PositionedGlyph> scaled = new(glyphs.Count);
+
+            foreach (PositionedGlyph glyph in glyphs)
+            {
+                scaled.Add(glyph with
+                {
+                    Offset = new DocPoint(glyph.Offset.X * scale, glyph.Offset.Y),
+                    Advance = glyph.Advance * scale,
+                });
+            }
+
+            runs[i] = placed with { Run = placed.Run with { Glyphs = scaled } };
+        }
+
+        return runs;
     }
 
     /// <summary>
@@ -269,10 +337,12 @@ public static class SlideChart
             // because it decides how much room the value axis' labels are given and an
             // underestimate puts the widest of them outside the frame. Laying the line out at
             // the origin and adding up its advances is the same arithmetic the layout used to
-            // place them, so the two cannot disagree.
+            // place them — through the same `OnChartDevice` call — so the two cannot disagree.
             Length width = Length.Zero;
-            foreach (PlacedGlyphRun placed in SlideTextLayout.Place(
-                body, new DocRect(Length.Zero, Length.Zero, Length.Zero, height), fonts))
+            foreach (PlacedGlyphRun placed in OnChartDevice(
+                SlideTextLayout.Place(
+                    body, new DocRect(Length.Zero, Length.Zero, Length.Zero, height), fonts),
+                size))
             {
                 foreach (PositionedGlyph glyph in placed.Run.Glyphs) width += glyph.Advance;
             }

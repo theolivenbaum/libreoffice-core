@@ -324,11 +324,31 @@ internal sealed class ChartFace : IChartTextMeasurer
     }
 
     /// <summary>Shapes one line, or null when there is no face to shape it with.</summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>The advances go through <see cref="MetricGrid.Chart"/>, exactly as
+    /// <c>SheetBandText.ChartShape</c>'s do.</strong> A chart's text is not laid out by Writer: it
+    /// is built by <c>chart2</c>'s own view on the <c>VirtualDevice</c> that
+    /// <c>DrawModelWrapper</c> creates from <c>Application::GetDefaultDevice()</c>
+    /// (<c>chart2/source/view/main/DrawModelWrapper.cxx</c>:88-99), and that device is 96 dpi
+    /// (<c>SvpSalGraphics::GetResolution</c>, <c>vcl/headless/svpgdi.cxx</c>:44). A font is
+    /// instantiated at a whole number of device pixels, so at 10 pt the device sets 13 for 13.333
+    /// and every advance comes back 2.5% narrow, while at 11 pt it sets 15 for 14.667 and they
+    /// come back 2.3% wide.
+    /// </para>
+    /// <para>
+    /// This is the words counterpart of the change round 62 made for a workbook's charts, and it
+    /// was left behind then: the same rule, in the third of the three places that shape a chart's
+    /// text. See <c>probes/chart-text-metafile/results.md</c>, where it is measured on both
+    /// reference binaries at twelve sizes with a slide text box beside the chart as the control.
+    /// </para>
+    /// </remarks>
     public ChartRun? Shape(string text, Length size)
     {
         if (text.Length == 0 || _face is not { } face) return null;
 
         ShapedText shaped = TextShaper.Default.Shape(face, text);
+        double scale = MetricGrid.Chart.PixelEmScale(size);
 
         List<PositionedGlyph> glyphs = new(shaped.Glyphs.Count);
         List<int> clusters = new(shaped.Glyphs.Count);
@@ -336,7 +356,7 @@ internal sealed class ChartFace : IChartTextMeasurer
 
         foreach (ShapedGlyph glyph in shaped.Glyphs)
         {
-            Length advance = shaped.Scale(glyph.Advance, size);
+            Length advance = shaped.Scale(glyph.Advance, size) * scale;
             glyphs.Add(new PositionedGlyph(
                 glyph.GlyphId,
                 new DocPoint(pen + shaped.Scale(glyph.OffsetX, size), -shaped.Scale(glyph.OffsetY, size)),

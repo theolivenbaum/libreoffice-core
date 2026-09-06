@@ -101,15 +101,44 @@ format (Paperless reads), macro execution (never — Paperless only reports that
    of six. `SheetDrawingComparisonTests` is not this family either — its own remark
    classifies it as 26.2.4.2 clamping a full-cell anchor offset, on 34 probe renderings.
 
-   **`SlideChartFaceComparisonTests`' 5.839 pt digit is a separate, unexplained defect and
-   should not be filed here.** Its `TJ` adjustment is 16 at *every* inter-glyph position on a
-   monospaced face — 2.7% of the advance, thirty times the quantisation — and the chart's own
-   `Tm` origins move between the two binaries where Writer's do not. So the chart text really
-   is laid out differently by the two binaries, and the shape of the data is **per-position
-   and constant, not per-glyph and outline-dependent**: a constant relative scale on a
-   monospaced face cannot be outline hinting. The seat is in the metafile a chart is drawn
-   into and replayed from; `tdf#168002` and `GetSubpixelPositioning`
-   (`vcl/source/outdev/text.cxx`:1258) are in that area. Worth a round; it is not this one.
+   **`SlideChartFaceComparisonTests`' 5.839 pt digit was a separate defect, and it was ours.** A
+   chart's text is not laid out by Writer, Calc or Impress: `chart2`'s view builds it as plain text
+   shapes on the `VirtualDevice` that `DrawModelWrapper` creates from
+   `Application::GetDefaultDevice()` with `MapUnit::Map100thMM`
+   (`chart2/source/view/main/DrawModelWrapper.cxx`:88-99), and **that device is 96 dpi**
+   (`SvpSalGraphics::GetResolution`, `vcl/headless/svpgdi.cxx`:44). An `OutputDevice` instantiates a
+   font at a whole number of device pixels, so a 10 pt label is laid out at **13** rather than 13.34
+   and every advance in it is **2.5% narrow**; at 11 pt the device sets 15 for 14.67 and they are
+   2.3% *wide*. The scale is `round(size × 96/72) / (size × 96/72)` and it is
+   `MetricGrid.Chart.PixelEmScale`, which `SheetBandText.ChartShape` has applied to a workbook's
+   charts since round 62. `SlideChart` and `FrameChart` did not, and now do.
+
+   Measured over **twelve sizes × two binaries**, with no free parameter: the drawn advance follows
+   `round(px96)/px96` on the sign at 12 of 12 for **both** 24.2.7.2 and 26.2.4.2, magnitude within
+   0.003; the same string in an ordinary slide text box on the same slide of the same deck stays
+   within 0.7% of the design metric at every one of them; four chart frame widths give identical
+   output, so no metafile scale is involved. `probes/chart-text-metafile/`.
+
+   **Three things this file used to say about it are wrong and should not be re-derived.**
+   (1) *"The seat is in the metafile a chart is drawn into and replayed from"* — there is no
+   metafile. `ViewContactOfSdrOle2Obj` takes a chart's content as **primitives** straight from the
+   chart's own draw page (`ChartHelper::tryToGetChartContentAsPrimitive2DSequence`), and the
+   quantisation happens when `chart2` measures, long before any playback. (2) *"`tdf#168002` and
+   `GetSubpixelPositioning` are the leads"* — they explain only the difference **between** the two
+   binaries: 24.2.7.2 additionally snaps each glyph position to a whole 96 dpi pixel (its gaps are 7
+   or 8 px where 26.2.4.2's are a flat 7.79), and removing that made 26.2.4.2 *better*. (3) *"the
+   chart's `Tm` origins move between the two binaries where a Writer document's do not"* — the
+   chart's move by 0.17 to 0.31 pt, and a Writer document's move too, on **4 of 39** runs of
+   `tabbed.docx`, by one twip each. The magnitudes are the claim.
+
+   **And 24.2.7.2 never "sat on the design metric".** Its mean advance follows the same 96 dpi rule
+   at every size. The 6.010 the fidelity test used to read there is 24.2.7.2 right-aligning the value
+   axis' labels on their **design** widths while drawing them from the device's narrower array — it
+   reserves 18.012 pt for `100` and draws 17.249. 26.2.4.2 uses one width for both, and so do we.
+
+   **Reach: 168 of 947 corpus documents carry a chart** — sheets 90, slides 68, words 10 — and 131
+   of them are at 1% or worse, 111 at 2% or worse, at the sizes their charts declare. The 90 sheets
+   documents were already right; the 78 slides and words ones are what this moved.
 
    **A single wrapped line short is amplified by section breaks into whole pages, and that is
    why some documents are wildly out.** Worked through on `AWR OPS-AOC 044` (metrics-001, ours
@@ -589,6 +618,11 @@ Verify the environment before trusting any comparison:
 
 The project has moved containers, and two of the three things a measurement depends on are
 not what the stored figures were taken against. Neither is a defect in the tree.
+
+**Roots have moved again, and `/c/sandbox` does not exist here.** As of 2026-09-06 the primary
+checkout is `/home/user/libreoffice-core`, agent worktrees are `/home/user/wt-*`, and the corpus is
+`/home/user/sample-files`. The `grep -r` doubling described below does **not** occur on that corpus:
+`find` and `git ls-files` both count 963. Check `pwd` before pasting any stored path.
 
 **Roots.** The repository is at `/c/sandbox/workdir/libreoffice-core` and the corpus at
 `/c/sandbox/workdir/sample-files`. The live scripts and documents have been rewritten to
