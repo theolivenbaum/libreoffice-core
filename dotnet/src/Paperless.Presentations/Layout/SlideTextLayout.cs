@@ -589,7 +589,7 @@ public static partial class SlideTextLayout
             && !resolved.HasGlyphFor(wanted)
             && (SymbolFontRecode.IsSubstituteFamily(resolved.FamilyName)
                     ? fonts.Fallback.SymbolFallbackFor(wanted, weight, italic)
-                    : fonts.Fallback.FallbackFor(wanted, weight, italic)) is { } substitute)
+                    : fonts.Fallback.FallbackFor(wanted, weight, italic, resolved)) is { } substitute)
         {
             face = substitute;
             reference = fonts.Fallback.ReferenceFor(substitute, italic) ?? reference;

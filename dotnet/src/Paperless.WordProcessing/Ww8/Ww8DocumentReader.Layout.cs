@@ -1553,8 +1553,17 @@ public sealed partial class Ww8DocumentReader
     }
 
     /// <summary>True when two runs' formatting is identical, whatever their ranges.</summary>
-    private static bool MatchesFormatting(Ww8LayoutRun a, Ww8LayoutRun b)
-        => string.Equals(a.FamilyName, b.FamilyName, StringComparison.Ordinal)
+    /// <remarks>
+    /// <strong>The slot is compared first because it is the one field that is not formatting.</strong>
+    /// <c>sprmCSymbol</c> names the character the run draws, and <c>SwWW8ImplReader::ReadChars</c>
+    /// inserts <em>that</em> character once per position the sprm covers
+    /// (<c>ww8par.cxx</c>:3410-3413). Merging a symbol run into the ordinary run beside it therefore
+    /// does not merely lose a decoration: it either loses the symbol, when the ordinary run is
+    /// first, or spreads the symbol over the ordinary run's characters, when the symbol run is.
+    /// </remarks>
+    internal static bool MatchesFormatting(Ww8LayoutRun a, Ww8LayoutRun b)
+        => a.SymbolSlot == b.SymbolSlot
+           && string.Equals(a.FamilyName, b.FamilyName, StringComparison.Ordinal)
            && a.Size == b.Size
            && a.Weight == b.Weight
            && a.IsItalic == b.IsItalic
@@ -2061,17 +2070,34 @@ public sealed partial class Ww8DocumentReader
     /// </remarks>
     private Ww8LayoutFormat ApplyLayoutSprms(
         Ww8LayoutFormat format, ReadOnlyMemory<byte> grpprl)
+        => ApplyLayoutSprms(format, grpprl, DocumentProperties);
+
+    /// <summary>
+    /// The same walk with the document's properties passed rather than read off the reader.
+    /// </summary>
+    /// <remarks>
+    /// The only thing the walk needs from the document is what its two automatic spacings stand
+    /// for, so taking that as an argument makes the whole sprm walk a function of its inputs — and
+    /// therefore checkable against a hand-built grpprl, which is how the ordering rules in it are
+    /// tested. See <c>Ww8CharacterSprmTests</c>.
+    /// </remarks>
+    internal static Ww8LayoutFormat ApplyLayoutSprms(
+        Ww8LayoutFormat format, ReadOnlyMemory<byte> grpprl, Ww8DocumentProperties properties)
     {
         // What `sprmPFDyaBeforeAuto` and `sprmPFDyaAfterAuto` stand for in this document. Fourteen
         // points ordinarily and five when the document switched HTML auto-spacing off, which is the
         // whole of `SwWW8ImplReader::GetParagraphAutoSpace` (`ww8par6.cxx:4609`).
-        int autoSpacing = DocumentProperties.CollapsesSpacing
+        int autoSpacing = properties.CollapsesSpacing
             ? Ww8LayoutFormat.HtmlAutoSpacingTwips
             : Ww8LayoutFormat.WordAutoSpacingTwips;
 
         // Which of the five paragraph border sides this grpprl has already stated in its WW9 form, so
         // that the WW8 form beside it cannot overwrite an RGB colour with a palette index.
         int ninetySides = 0;
+
+        // Whether `sprmCSymbol` has already been seen in this grpprl, which silences every font code
+        // after it -- see the `FontIndex` case.
+        bool symbolSeen = false;
 
         foreach (Ww8Sprm sprm in Ww8SprmReader.Read(grpprl))
         {
@@ -2255,13 +2281,26 @@ public sealed partial class Ww8DocumentReader
                 case LayoutSprms.FontSize:
                     format = format with { FontSizeHalfPoints = sprm.Word };
                     break;
-                case LayoutSprms.FontIndex:
+                // A font code *after* `sprmCSymbol` in the same grpprl is not the run's font and is
+                // dropped, which is the whole of `Read_FontCode`'s first two lines:
+                // `if (m_bSymbol) return;` -- "if bSymbol, the symbol's font (see sprmCSymbol) is
+                // valid!" (`sw/source/filter/ww8/ww8par6.cxx`:3963-3966). Word writes both, in that
+                // order: the CHPX behind `150_5300_13_chg12.doc`'s greater-or-equal sign is
+                // `096A 0100 B3F0` -- Symbol, `U+F0B3` -- followed by `4F4A 0000`, Times New Roman.
+                // Applying the later one wins the face back for the paragraph and loses the symbol:
+                // the run is then set in a text face, so nothing recodes the slot into OpenSymbol
+                // and the reference's twenty-one OpenSymbol characters in that document were drawn
+                // as tofu or as the Latin letter the slot spells.
+                case LayoutSprms.FontIndex when !symbolSeen:
                     format = format with { FontIndex = sprm.Word };
+                    break;
+                case LayoutSprms.FontIndex:
                     break;
 
                 // The face comes with the slot, exactly as Read_Symbol sets RES_CHRATR_FONT beside
                 // m_cSymbol: a slot means nothing without the face it indexes into.
                 case LayoutSprms.Symbol when sprm.Operand.Length >= 4:
+                    symbolSeen = true;
                     format = format with
                     {
                         FontIndex = BinaryPrimitives.ReadUInt16LittleEndian(sprm.Operand.Span),

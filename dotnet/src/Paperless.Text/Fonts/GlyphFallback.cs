@@ -11,14 +11,20 @@ namespace Paperless.Text.Fonts;
 /// characters a run cannot show, and a document that needs neither should pay for neither.
 /// </para>
 /// <para>
-/// LibreOffice asks the platform first — fontconfig's <c>FcFontMatch</c> with the missing characters
-/// as a charset, in <c>vcl/unx/generic/fontmanager/fontconfig.cxx</c> — and falls back to a
-/// hard-coded list of families when that fails. Paperless takes the second half as its main path,
-/// deliberately: going through fontconfig for substitution would add a second source of truth rather
-/// than the missing one. It reads the platform's configuration for one thing only — the order in
-/// which faces are tried once <em>nothing</em> on that hard-coded list is installed, where there is
-/// no other source of truth to compete with. See <see cref="FontconfigPreferences"/>, which records
-/// the measurement showing that this last step's answer cannot be derived from the font files.
+/// LibreOffice asks the platform first — <c>FcFontSetMatch</c> with the missing characters as a
+/// charset, in <c>vcl/unx/generic/font/fontconfig.cxx</c> — and falls back to a hard-coded list of
+/// families only when that answers nothing
+/// (<c>PhysicalFontCollection::GetGlyphFallbackFont</c>, <c>:231-291</c>). Paperless asks them in
+/// the same order, and the platform half is modelled from the machine's own fontconfig
+/// configuration rather than from the font files: see <see cref="FontconfigPreferences"/>, which
+/// records the measurement showing that this answer cannot be derived from the fonts.
+/// <para>
+/// <strong>The list came first here until round 64 and it was a measured defect.</strong> The list
+/// heads with <c>starsymbol, opensymbol</c>, so every character OpenSymbol covers was drawn from
+/// OpenSymbol — while OpenSymbol is on no fontconfig preference list at all, so the reference never
+/// answers a glyph fallback with it. On a machine with no fontconfig the list still comes first,
+/// because there is then no configuration for the other half to read.
+/// </para>
 /// </para>
 /// </remarks>
 public interface IGlyphFallbackResolver
@@ -30,6 +36,33 @@ public interface IGlyphFallbackResolver
     /// <param name="weight">The weight to match, on the OpenType 1-1000 scale.</param>
     /// <param name="isItalic">Whether an italic face is wanted.</param>
     OpenTypeFace? FallbackFor(int codePoint, int weight = 400, bool isItalic = false);
+
+    /// <summary>
+    /// The same question, told which face the run was set in.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>Which face fontconfig answers with depends on the request, not only on the
+    /// character.</strong> <c>FontConfigManager::Substitute</c> builds the pattern from the
+    /// requested family and appends <c>serif</c> or <c>sans</c> for the item's family class
+    /// (<c>vcl/unx/generic/font/fontconfig.cxx</c>:1075-1088), and it is <em>that</em> generic's
+    /// preference list that ranks the faces covering the character. Measured on 26.2.4.2: a run
+    /// declared <c>swiss</c> draws <c>U+2713</c> in DejaVu Sans and the same run declared
+    /// <c>roman</c> draws it in FreeSerif.
+    /// </para>
+    /// <para>
+    /// The face is passed rather than the request because it is what every caller already holds —
+    /// <see cref="Itemisation.FontItemiser"/> is given the primary face and nothing else — and
+    /// because a resolver that chose the face can look the request back up from it. A resolver that
+    /// cannot answers as it did before, which is what the default does.
+    /// </para>
+    /// </remarks>
+    /// <param name="codePoint">The character the primary face has no glyph for.</param>
+    /// <param name="weight">The weight to match, on the OpenType 1-1000 scale.</param>
+    /// <param name="isItalic">Whether an italic face is wanted.</param>
+    /// <param name="primary">The face the run was set in, or null when the caller has none.</param>
+    OpenTypeFace? FallbackFor(int codePoint, int weight, bool isItalic, OpenTypeFace? primary)
+        => FallbackFor(codePoint, weight, isItalic);
 
     /// <summary>
     /// The same question for a run set in a pi face, which fontconfig is never asked about.
@@ -65,7 +98,7 @@ public interface IGlyphFallbackResolver
     /// </para>
     /// <para>
     /// Defaulted to the ordinary answer so an implementation that does not model the distinction
-    /// stays valid and behaves as it did. A wrapper that forwards <see cref="FallbackFor"/> must
+    /// stays valid and behaves as it did. A wrapper that forwards <see cref="FallbackFor(int, int, bool)"/> must
     /// forward this too, or the run it guards silently loses the rule.
     /// </para>
     /// </remarks>
@@ -129,11 +162,11 @@ public interface IGlyphFallbackResolver
     /// whole of the fix.</strong> Hebrew from an italic <c>Carlito</c> run is covered by DejaVu Sans,
     /// which has no italic here, and by Liberation Sans, which does. 26.2.4.2 draws it in
     /// <b>DejaVu Sans, sheared</b> — its fallback order wins over the slant, exactly as
-    /// <see cref="SystemFontResolver.FallbackFor"/> already ranks family above slant. So the face
+    /// <see cref="SystemFontResolver.FallbackFor(int, int, bool)"/> already ranks family above slant. So the face
     /// this interface picks was already right and only the lean was missing.
     /// </para>
     /// </remarks>
-    /// <param name="face">A face <see cref="FallbackFor"/> returned.</param>
+    /// <param name="face">A face <see cref="FallbackFor(int, int, bool)"/> returned.</param>
     /// <param name="isItalicRequested">
     /// Whether the run this face is standing in for asked for italic. That is <em>not</em> the
     /// primary face's <c>IsItalic</c> alone: a primary that is itself being sheared asked for italic

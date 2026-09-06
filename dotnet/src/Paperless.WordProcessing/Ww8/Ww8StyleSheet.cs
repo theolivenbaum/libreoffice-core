@@ -67,6 +67,36 @@ public sealed class Ww8StyleSheet
     /// <summary>The styles, in index order.</summary>
     public IReadOnlyList<Ww8Style> Styles => _styles;
 
+    /// <summary>
+    /// The font a style that names none of its own is set in: <c>Stshi.ftcAsci</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>A WW8 document's default font is not in any style's CHPX and not in the DOP; it is a
+    /// bare font-table index in the stylesheet's own header.</strong> <c>WW8Style</c> reads it as
+    /// <c>m_ftcAsci</c>, twelve bytes into the <c>Stshi</c> and only when the header is long enough
+    /// to hold it (<c>sw/source/filter/ww8/ww8scan.cxx</c>:6919-6921), and
+    /// <c>WW8RStyle::Set1StyleDefaults</c> then applies it to every paragraph style that is based on
+    /// nothing and set no font of its own — <c>if (!mbFontChanged) SetNewFontAttr(m_ftcAsci, true,
+    /// RES_CHRATR_FONT)</c> (<c>ww8par2.cxx</c>:3724-3725, called from <c>PostStyle</c> at :3862).
+    /// </para>
+    /// <para>
+    /// Word 2007 and later write .doc that way whenever the document's default is not the first
+    /// entry of the font table. <c>AAC-AD-No-2021-01-Boeing-737-8-and-737-9-MAX.doc</c> is the
+    /// corpus's plainest case: <c>Normal</c>'s CHPX is
+    /// <c>5f48 0104 6d48 0904 7348 0904 7448 0904</c> and holds no <c>sprmCRgFtc0</c> at all, while
+    /// <c>rgftcStandardChpStsh</c> is <c>(4, 4, 4)</c> and font 4 is <c>Calibri</c>. Without this
+    /// every run that states no font of its own falls to the resolver's own default, so the body of
+    /// the document is set in Liberation Serif where 26.2.4.2 sets it in Carlito — which is not a
+    /// metric-compatible pair, so it reflows.
+    /// </para>
+    /// <para>
+    /// Nought when the header is too short to state one, which is <c>WW8Style</c>'s own initial value
+    /// and means the font table's first entry.
+    /// </para>
+    /// </remarks>
+    public ushort DefaultFontIndex { get; private set; }
+
     /// <summary>An empty stylesheet, for a document that declares none.</summary>
     public static Ww8StyleSheet Empty { get; } = new();
 
@@ -90,6 +120,14 @@ public sealed class Ww8StyleSheet
         ushort styleCount = BinaryPrimitives.ReadUInt16LittleEndian(stsh[2..]);
         ushort fixedPartSize = BinaryPrimitives.ReadUInt16LittleEndian(stsh[4..]);
         if (fixedPartSize is < 8 or > 64) fixedPartSize = 10;
+
+        // `ftcAsci` sits twelve bytes into the Stshi, behind `cstd`, `cbSTDBaseInFile`, the flags,
+        // `stiMaxWhenSaved`, `istdMaxFixedWhenSaved` and `nVerBuiltInNamesWhenSaved` -- six words.
+        // Read only when the header declares it, exactly as `WW8Style` does.
+        if (headerLength >= 14 && stsh.Length >= 16)
+        {
+            sheet.DefaultFontIndex = BinaryPrimitives.ReadUInt16LittleEndian(stsh[14..]);
+        }
 
         int position = 2 + headerLength;
         for (int i = 0; i < styleCount && position + 2 <= stsh.Length; i++)
@@ -154,6 +192,7 @@ public sealed class Ww8StyleSheet
     {
         List<ReadOnlyMemory<byte>> chain = [];
         HashSet<int> visited = [];
+        bool rootless = false;
 
         int current = index;
         for (int depth = 0; depth < MaxBaseChainDepth; depth++)
@@ -163,13 +202,50 @@ public sealed class Ww8StyleSheet
             Ww8Style style = _styles[current];
             ReadOnlyMemory<byte> half = character ? style.CharacterProperties : style.Properties;
             if (!half.IsEmpty) chain.Add(half);
-            if (style.BaseIndex == Ww8Style.NoBaseStyle) break;
+
+            // The chain's root is where `Set1StyleDefaults` fires, and its condition is
+            // `rSI.m_nBase >= m_cstd` -- a base index the stylesheet has no style for, of which the
+            // `NoBaseStyle` sentinel is the ordinary case and an out-of-range one the malformed
+            // case that reaches the same arm.
+            if (style.BaseIndex == Ww8Style.NoBaseStyle || style.BaseIndex >= _styles.Count)
+            {
+                rootless = style.IsParagraphStyle;
+                break;
+            }
+
             current = style.BaseIndex;
         }
 
         chain.Reverse();
+
+        // The document's default font, behind everything the chain itself says. Prepending rather
+        // than testing whether the chain set a font is what makes it a *default*: a style that does
+        // state one states it later in the list and wins, which is `mbFontChanged` expressed as
+        // ordering. See `DefaultFontIndex`.
+        if (character && rootless) chain.Insert(0, DefaultFontGrpprl());
+
         return chain;
     }
+
+    /// <summary>A one-sprm grpprl setting <c>sprmCRgFtc0</c> to the document's default font.</summary>
+    /// <remarks>
+    /// Synthesised rather than plumbed as a separate value so that it travels the one path every
+    /// other character property travels — <c>ApplyLayoutSprms</c> — and so that anything that later
+    /// changes how a font code is read changes this with it. Cached, because it is the same four
+    /// bytes for every chain in a document.
+    /// </remarks>
+    private ReadOnlyMemory<byte> DefaultFontGrpprl()
+    {
+        if (_defaultFontGrpprl.IsEmpty)
+        {
+            byte[] grpprl = [0x4F, 0x4A, (byte)(DefaultFontIndex & 0xFF), (byte)(DefaultFontIndex >> 8)];
+            _defaultFontGrpprl = grpprl;
+        }
+
+        return _defaultFontGrpprl;
+    }
+
+    private ReadOnlyMemory<byte> _defaultFontGrpprl;
 
     private static Ww8Style ReadStyle(ReadOnlySpan<byte> definition, int fixedPartSize)
     {
