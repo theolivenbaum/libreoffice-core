@@ -584,9 +584,19 @@ Comparing against LibreOffice — use the skills, they encode hard-won details:
 
 ### The sample corpus
 
-`theolivenbaum/sample-files` holds 534 real-world documents — collected from the open web
+`theolivenbaum/sample-files` holds real-world documents — collected from the open web
 and kept as found, mislabelled extensions and malformed markup included — ordered by what
 their LibreOffice rendering demands of a renderer and cut into batches of at most ten:
+
+**Every figure in this section is the 534-document corpus's and the corpus is now 947.**
+Counted 2026-09-06 from `MANIFEST.tsv`, which is the authority: **947 rows — words 338,
+slides 302, sheets 307** — of which 803 are `done` and 144 `open`, and the kinds are
+`ceiling` 69, `text` 61, `pagination` 7, `metrics` 3, `unstable` 2, and one each of `missing`,
+`extra` and `chart`. The whole-corpus gate at `2f4709c08` is **947 documents, 860 match, 87
+mismatch**. So "459 of 534", the batch-size arithmetic below, and the per-track 200 / 163 / 171
+in the version table further down are all pre-expansion and none of them is a denominator to
+score against. What survives is the *shape* — grouped by what is wrong, ordered by complexity
+within a group, `MANIFEST.tsv` as the undo — and that is why the prose is kept.
 
 **The corpus is no longer batched by complexity — it is grouped by what is wrong.** As of
 2026-08-14, with 459 of 534 passing, the old ordering had stopped earning its keep: the 75
@@ -1199,8 +1209,16 @@ extension as spelled (`report__xls` and `report__XLS` are two identities, so nei
 other) — it is only the counts that inflate.
 
 Canonical reference renderings for this environment, all 534 documents at 26.2.4.2 with the
-correct font set, are kept at `/c/sandbox/workdir/refpdfs-26.2.4.2-fonts/` with a
-`ref-baseline-all.tsv` beside them. Reuse them rather than re-rendering the reference.
+correct font set, were kept at `/c/sandbox/workdir/refpdfs-26.2.4.2-fonts/` with a
+`ref-baseline-all.tsv` beside them.
+
+**That bank does not exist in this container and there is nothing to reuse.** `/c/sandbox` is
+absent — as the *Roots have moved again* paragraph above already says — and no `refpdfs-*`
+directory exists anywhere under `/home/user` either (checked 2026-09-06). A round that reads
+this and plans around a banked reference discovers the gap only after it has been dispatched;
+budget for rendering the reference half yourself, with `ref-baseline.sh` when only the
+reference changed. The bank was also 534 documents, so it could not have covered the corpus
+as it now stands in any case.
 
 Individual claims calibrated to 24.2.7.2 behaviour — "the document-level `w:widowControl` is
 inert", the 720 dpi device round trip, the reference's own table-only-header import defect —

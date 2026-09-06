@@ -1362,13 +1362,14 @@ public sealed partial class Ww8DocumentReader
             Tracking = TrackingOf(character),
             Borders = layout.ToParagraphBorders(),
 
-            // Not for a paragraph in a table: Word applies a frame to a whole row or to nothing, and
-            // LibreOffice declines the test outright unless the paragraph is the first in the first cell
-            // (`SwWW8ImplReader::TestApo`, ww8par2.cxx:440). Declining for every cell paragraph is the
-            // conservative half of that and leaves a table where the document put it.
-            TextFrame = paragraph.IsInTable
-                ? Ww8TextFramePosition.None
-                : ResolveTextFrame(markPosition),
+            // Resolved for a paragraph in a table too, and the assembler decides what to do with it.
+            // Word applies a frame to a whole *row* or to nothing, and `SwWW8ImplReader::TestApo`
+            // (ww8par2.cxx:440) allows the test only at the first paragraph of the first cell of a row —
+            // "if it is the first cell of a row then the whole table row jumps into the new frame, if it
+            // isn't then the paragraph attributes are applied except for the floating frame stuff". So
+            // every cell paragraph resolves its position and `LayoutTableAssembler` reads only the ones
+            // that stand at a row's head; see `Ww8LayoutTable.TextFrame`.
+            TextFrame = ResolveTextFrame(markPosition),
         };
     }
 
@@ -1647,12 +1648,12 @@ public sealed partial class Ww8DocumentReader
     /// </para>
     /// </remarks>
     /// <param name="blocks">The flow's blocks, in order.</param>
-    private static List<Ww8LayoutBlock> LiftTextFrames(List<Ww8LayoutBlock> blocks)
+    internal static List<Ww8LayoutBlock> LiftTextFrames(List<Ww8LayoutBlock> blocks)
     {
         bool any = false;
         foreach (Ww8LayoutBlock block in blocks)
         {
-            if (block.Paragraph is { } paragraph && !paragraph.TextFrame.IsEmpty) { any = true; break; }
+            if (!FramePositionOf(block).IsEmpty) { any = true; break; }
         }
 
         if (!any) return blocks;
@@ -1662,18 +1663,16 @@ public sealed partial class Ww8DocumentReader
 
         for (int index = 0; index < blocks.Count; index++)
         {
-            if (blocks[index].Paragraph is not { } paragraph || paragraph.TextFrame.IsEmpty)
+            Ww8TextFramePosition position = FramePositionOf(blocks[index]);
+            if (position.IsEmpty)
             {
                 kept.Add(Anchoring(blocks[index], pending));
                 continue;
             }
 
-            Ww8TextFramePosition position = paragraph.TextFrame;
             List<Ww8LayoutBlock> inside = [];
 
-            while (index < blocks.Count
-                && blocks[index].Paragraph is { } member
-                && member.TextFrame == position)
+            while (index < blocks.Count && FramePositionOf(blocks[index]) == position)
             {
                 inside.Add(blocks[index]);
                 index++;
@@ -1704,6 +1703,17 @@ public sealed partial class Ww8DocumentReader
             return anchored;
         }
     }
+
+    /// <summary>Where a block says it belongs, whether it is a paragraph or a whole table.</summary>
+    /// <remarks>
+    /// A table states it on the table rather than on its paragraphs because Word tests for it once per
+    /// row, at the row's head, and moves the row entire — see <see cref="Ww8LayoutTable.TextFrame"/>.
+    /// Reading a cell paragraph's own position here instead would take the table apart.
+    /// </remarks>
+    private static Ww8TextFramePosition FramePositionOf(Ww8LayoutBlock block)
+        => block.Paragraph is { } paragraph ? paragraph.TextFrame
+            : block.Table is { } table ? table.TextFrame
+            : Ww8TextFramePosition.None;
 
     /// <summary>
     /// Where a paragraph's properties say it belongs, if they say it belongs in a text frame.
