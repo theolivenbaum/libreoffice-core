@@ -35,7 +35,19 @@ public enum SheetShapeAnchor
 /// The typeface the run states, with the theme's indirection already followed, or null where it
 /// states none and the default face is right.
 /// </param>
-public readonly record struct SheetShapeRun(string Text, Length Size, string? Family = null);
+/// <param name="Bold">
+/// Whether the run states <c>b="1"</c>.
+/// </param>
+/// <remarks>
+/// The weight is carried and the slant is not, and the asymmetry is measured rather than tidy: a
+/// bold face is a <em>different file</em> with different advances, so a bold run measured in the
+/// regular face wraps in the wrong place and is drawn in the wrong ink — <c>Air_Boss_Master_List
+/// .xlsx</c>'s note box is one paragraph of <c>b="1"</c> that 26.2.4.2 draws in Carlito-Bold and
+/// wraps two lines shorter than we did. Nothing downstream reads a slant yet, so reading one here
+/// would be a field with no consumer.
+/// </remarks>
+public readonly record struct SheetShapeRun(
+    string Text, Length Size, string? Family = null, bool Bold = false);
 
 /// <summary>One paragraph of a shape's text.</summary>
 /// <remarks>
@@ -75,9 +87,9 @@ public sealed record SheetShapeParagraph
 /// <c>PrintDrawingLayer</c> like any other object.
 /// </para>
 /// <para>
-/// <strong>What this carries is what can be drawn, and no more.</strong> A run's size and typeface
-/// are carried because both decide the line height and the wrap; its weight, slant and colour are
-/// not, because nothing downstream would use them. The typeface arrives already resolved — a
+/// <strong>What this carries is what can be drawn, and no more.</strong> A run's size, typeface and
+/// weight are carried because all three decide the face, the line height and the wrap; its slant
+/// and colour are not, because nothing downstream would use them. The typeface arrives already resolved — a
 /// <c>a:latin typeface="+mn-lt"</c> has been through the theme's font scheme before it gets here,
 /// since taking that attribute literally asks the resolver for a family called <c>+mn-lt</c> and
 /// gets whatever fontconfig offers for a name that exists nowhere.
@@ -121,6 +133,29 @@ public sealed record SheetShapeText
     /// </para>
     /// </remarks>
     public static Length DefaultSize { get; } = Length.FromPoints(12);
+
+    /// <summary>The face a run that names none is set in.</summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>The drawing layer's default, not the sheet's.</strong> A shape on a sheet is an
+    /// <c>SdrObject</c> whose text lives in the drawing layer's item pool, and
+    /// <c>SdrModel::SetTextDefaults</c> seeds that pool with
+    /// <c>DefaultFontType::LATIN_TEXT</c> (<c>svx/source/svdraw/svdmodel.cxx</c>:668-669) — which
+    /// <c>VCL.xcu</c> heads with <b>Liberation Serif</b>. A cell takes
+    /// <c>DefaultFontType::LATIN_SPREADSHEET</c> instead
+    /// (<c>sc/source/core/data/docpool.cxx</c>:201-202), which is Liberation <em>Sans</em>. The
+    /// two defaults are different fonts and the same workbook uses both, so a shape cannot borrow
+    /// the cell face the way a header band correctly does.
+    /// </para>
+    /// <para>
+    /// Measured on 26.2.4.2 over five corpus workbooks that all carry Excel's slicer-fallback
+    /// shape — <c>Part_129_Operators.xlsx</c>, <c>Part_375_Operators.xlsx</c>,
+    /// <c>TDA_Smoke-Detectors.xlsx</c>, <c>DynamicBubbleChart.xlsx</c> and
+    /// <c>049_Expenses_calculator…xlsx</c>. Its runs name no typeface; the reference draws all
+    /// 77 of their spans in <c>LiberationSerif</c> and we drew them in <c>LiberationSans</c>.
+    /// </para>
+    /// </remarks>
+    public const string DefaultFamily = "Liberation Serif";
 
     /// <summary>The paragraphs, in order.</summary>
     public IReadOnlyList<SheetShapeParagraph> Paragraphs { get; init; } = [];

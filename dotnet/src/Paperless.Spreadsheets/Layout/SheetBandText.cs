@@ -287,6 +287,18 @@ internal static class SheetBandText
             ? Ungridded(metrics).ScaledLineHeight(size)
             : size * 1.15;
 
+    /// <inheritdoc cref="ShapeLineHeightAt(Length, string?)"/>
+    /// <param name="size">The em size.</param>
+    /// <param name="family">The family name, or null for the furniture's own face.</param>
+    /// <param name="bold">
+    /// Whether the family's bold face is wanted. A bold face is a different file with its own
+    /// <c>hhea</c>, so a bold line is not always the height of the regular one.
+    /// </param>
+    public static Length ShapeLineHeightAt(Length size, string? family, bool bold)
+        => FaceFor(family, bold).Metrics is { } metrics
+            ? Ungridded(metrics).ScaledLineHeight(size)
+            : size * 1.15;
+
     /// <inheritdoc cref="AscentAt(Length)"/>
     /// <param name="size">The em size.</param>
     /// <param name="family">The family name, or null for the furniture's own face.</param>

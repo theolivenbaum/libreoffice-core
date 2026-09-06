@@ -122,8 +122,8 @@ internal static class SheetShapePainter
         }
     }
 
-    /// <summary>The size and face one stretch of a paragraph is set in.</summary>
-    private readonly record struct Format(Length Size, string? Family);
+    /// <summary>The size, face and weight one stretch of a paragraph is set in.</summary>
+    private readonly record struct Format(Length Size, string? Family, bool Bold);
 
     /// <summary>
     /// One laid-out line: the shaped stretches it is made of, its width, the ascent its pieces
@@ -153,8 +153,8 @@ internal static class SheetShapePainter
                 lines.Add(new Line(
                     [],
                     Length.Zero,
-                    SheetBandText.AscentAt(blank.Size, blank.Family),
-                    SheetBandText.ShapeLineHeightAt(blank.Size, blank.Family),
+                    SheetBandText.AscentAt(blank.Size, blank.Family, blank.Bold),
+                    SheetBandText.ShapeLineHeightAt(blank.Size, blank.Family, blank.Bold),
                     paragraph.Alignment));
                 continue;
             }
@@ -196,10 +196,21 @@ internal static class SheetShapePainter
     private static Format Blank(SheetShapeParagraph paragraph, double scale)
         => Scaled(paragraph.Runs.Count > 0 ? paragraph.Runs[0] : default, scale);
 
+    /// <remarks>
+    /// The face is defaulted here rather than left null, because null means "the furniture's own"
+    /// to <c>SheetBandText</c> — the workbook's default *cell* font — and a shape is not furniture.
+    /// Its text belongs to the drawing layer's item pool, whose default is
+    /// <see cref="SheetShapeText.DefaultFamily"/>; the two are different fonts and the same
+    /// workbook uses both.
+    /// </remarks>
     private static Format Scaled(SheetShapeRun run, double scale)
     {
         Length size = run.Size > Length.Zero ? run.Size : SheetShapeText.DefaultSize;
-        return new Format(size * scale, run.Family);
+        string family = string.IsNullOrWhiteSpace(run.Family)
+            ? SheetShapeText.DefaultFamily
+            : run.Family;
+
+        return new Format(size * scale, family, run.Bold);
     }
 
     /// <summary>
@@ -268,12 +279,14 @@ internal static class SheetShapePainter
 
             // The line's metrics come from the formats it spans and not from the pieces that
             // shaped, so a face that cannot be resolved loses its ink and not the line's height.
-            Length pieceAscent = SheetBandText.AscentAt(format.Size, format.Family);
-            Length pieceHeight = SheetBandText.ShapeLineHeightAt(format.Size, format.Family);
+            Length pieceAscent = SheetBandText.AscentAt(format.Size, format.Family, format.Bold);
+            Length pieceHeight =
+                SheetBandText.ShapeLineHeightAt(format.Size, format.Family, format.Bold);
             if (pieceAscent > ascent) ascent = pieceAscent;
             if (pieceHeight > height) height = pieceHeight;
 
-            if (SheetBandText.Shape(body[at..stop], format.Size, format.Family) is { } run)
+            if (SheetBandText.Shape(body[at..stop], format.Size, format.Family, format.Bold)
+                    is { } run)
             {
                 pieces.Add(run);
                 width += run.Width;
@@ -296,7 +309,9 @@ internal static class SheetShapePainter
             int stop = at + 1;
             while (stop < end && formats[stop] == formats[at]) stop++;
 
-            if (SheetBandText.Shape(body[at..stop], formats[at].Size, formats[at].Family) is { } run)
+            if (SheetBandText.Shape(
+                    body[at..stop], formats[at].Size, formats[at].Family, formats[at].Bold)
+                    is { } run)
             {
                 width += run.Width;
             }

@@ -393,6 +393,13 @@ internal static class SheetFonts
             lock (Gate) return Shared.FallbackFor(codePoint, weight, isItalic);
         }
 
+        // Forwarded rather than inherited: the interface's default sends this to FallbackFor, which
+        // would silently give a cell set in a pi face the fontconfig answer LibreOffice refuses it.
+        public OpenTypeFace? SymbolFallbackFor(int codePoint, int weight = 400, bool isItalic = false)
+        {
+            lock (Gate) return Shared.SymbolFallbackFor(codePoint, weight, isItalic);
+        }
+
         public FontReference? ReferenceFor(OpenTypeFace face)
         {
             lock (Gate) return Shared.ReferenceFor(face);
