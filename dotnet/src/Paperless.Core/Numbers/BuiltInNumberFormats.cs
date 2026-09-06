@@ -11,13 +11,34 @@ namespace Paperless.Core.Numbers;
 /// majority of workbooks.
 /// </para>
 /// <para>
-/// The codes are LibreOffice's <c>spBuiltInFormats_DONTKNOW</c> table
-/// (<c>sc/source/filter/excel/xlstyle.cxx:820-905</c>), which is the one it falls back to
-/// when a file's language is unknown. That matters for the date formats specifically: index
-/// 14 is <c>DD/MM/YYYY</c> here and <c>M/D/YYYY</c> in the US table, and which one a reader
-/// shows depends on <em>its</em> locale rather than on anything in the file. Files written
-/// by LibreOffice sidestep the question by writing an explicit FORMAT record for every
-/// format they use, so this table is consulted mainly for files Excel wrote.
+/// <strong>Which table is not decided by the file. It is decided by the locale of the
+/// application doing the reading</strong> — <c>XclNumFmtBuffer</c>'s <c>meSysLang</c> is
+/// <c>rRoot.GetSysLanguage()</c>, documented in <c>sc/source/filter/inc/xlstyle.hxx</c>:469 as
+/// <em>"Current system language"</em>, and <c>InsertBuiltinFormats</c> walks from that language's
+/// table up through its parents to <c>spBuiltInFormats_DONTKNOW</c>
+/// (<c>sc/source/filter/excel/xlstyle.cxx</c>:1437-1470). The OOXML filter does the same thing
+/// with the same shape of table and its own system locale
+/// (<c>NumberFormatsBuffer::insertBuiltinFormats</c>,
+/// <c>sc/source/filter/oox/numberformatsbuffer.cxx</c>:1919-1975).
+/// </para>
+/// <para>
+/// So the codes below are the <em>en-US</em> row — <c>spBuiltInFormats_ENGLISH_US</c>
+/// (<c>xlstyle.cxx</c>:937-953) over <c>spBuiltInFormats_ENGLISH</c> (:911-919) over
+/// <c>spBuiltInFormats_DONTKNOW</c> (:820-905), which is what the reference binaries this tree is
+/// calibrated against resolve to. This table used to be the <c>DONTKNOW</c> one, on the reading
+/// that an unknown file language should fall back to it; that is the wrong axis, and it was
+/// measurably wrong in three places. Measured on both installed binaries over a probe workbook
+/// (<c>dotnet/probes/numfmt-r68/make-codes.py</c>, thirty cells, glyphs read out of the PDFs):
+/// id 20 draws <c>2:20</c> and <c>0:00</c> where <c>DONTKNOW</c>'s <c>hh:mm</c> would draw
+/// <c>02:20</c> and <c>00:00</c>; id 14 draws <c>8/21/2022</c> where <c>DD/MM/YYYY</c> would draw
+/// <c>21/08/2022</c>; and ids 37-40 draw <c>(100)</c> and <c>(100.00)</c> where
+/// <c>#,##0;-#,##0</c> would draw <c>-100</c>. 24.2.7.2 and 26.2.4.2 agree on all thirty.
+/// </para>
+/// <para>
+/// The same table serves the OOXML readers through <see cref="Code"/>. It used to be duplicated
+/// in <c>XlsxStyles</c> with the en-US answers while this one carried the <c>DONTKNOW</c> ones,
+/// so the two disagreed about the same id in the same workbook depending on which reader asked;
+/// there is now one table.
 /// </para>
 /// </remarks>
 public static class BuiltInNumberFormats
@@ -39,25 +60,43 @@ public static class BuiltInNumberFormats
         [2] = "0.00",
         [3] = "#,##0",
         [4] = "#,##0.00",
-        // 5 to 8 are currency formats, and a file that uses them writes them out itself.
+
+        // 5 to 8 are the currency formats, and 37 to 40 the same four with the symbol blank.
+        // A BIFF file writes 5 to 8 out itself and the en-US BIFF table therefore leaves them
+        // alone; the OOXML table states them, and stating them here is what a malformed file
+        // that omits the record needs (numberformatsbuffer.cxx:295-320, :802).
+        [5] = "$#,##0_);($#,##0)",
+        [6] = "$#,##0_);[RED]($#,##0)",
+        [7] = "$#,##0.00_);($#,##0.00)",
+        [8] = "$#,##0.00_);[RED]($#,##0.00)",
+
         [9] = "0%",
         [10] = "0.00%",
         [11] = "0.00E+00",
         [12] = "# ?/?",
         [13] = "# ??/??",
-        [14] = "DD/MM/YYYY",
-        [15] = "DD-MMM-YY",
-        [16] = "DD-MMM",
+        [14] = "M/D/YYYY",
+        [15] = "D-MMM-YY",
+        [16] = "D-MMM",
         [17] = "MMM-YY",
         [18] = "h:mm AM/PM",
         [19] = "h:mm:ss AM/PM",
-        [20] = "hh:mm",
-        [21] = "hh:mm:ss",
-        [22] = "DD/MM/YYYY hh:mm",
-        [37] = "#,##0;-#,##0",
-        [38] = "#,##0;[RED]-#,##0",
-        [39] = "#,##0.00;-#,##0.00",
-        [40] = "#,##0.00;[RED]-#,##0.00",
+        [20] = "h:mm",
+        [21] = "h:mm:ss",
+        [22] = "M/D/YYYY h:mm",
+
+        [37] = "#,##0_);(#,##0)",
+        [38] = "#,##0_);[RED](#,##0)",
+        [39] = "#,##0.00_);(#,##0.00)",
+        [40] = "#,##0.00_);[RED](#,##0.00)",
+
+        // The accounting four. `*` reserves the fill and `??` holds the dash clear of the
+        // column's decimal point — see NumberFormatter.FillMarker and the `?` placeholder.
+        [41] = "_(* #,##0_);_(* (#,##0);_(* \"-\"_);_(@_)",
+        [42] = "_($* #,##0_);_($* (#,##0);_($* \"-\"_);_(@_)",
+        [43] = "_(* #,##0.00_);_(* (#,##0.00);_(* \"-\"??_);_(@_)",
+        [44] = "_($* #,##0.00_);_($* (#,##0.00);_($* \"-\"??_);_(@_)",
+
         [45] = "mm:ss",
         [46] = "[h]:mm:ss",
         [47] = "mm:ss.0",
@@ -71,7 +110,9 @@ public static class BuiltInNumberFormats
     /// </summary>
     /// <remarks>
     /// Excel used these for the date and time formats of locales it shipped; LibreOffice maps
-    /// them onto the base formats rather than reproducing each locale, and so does this.
+    /// them onto the base formats rather than reproducing each locale, and so does this. The
+    /// pairs are its own — <c>NUMFMT_REUSE</c> in <c>numberformatsbuffer.cxx</c>:466-524 and the
+    /// matching <c>XclBuiltInFormat</c> reuse rows in <c>xlstyle.cxx</c>:845-902.
     /// </remarks>
     private static readonly Dictionary<int, int> Aliases = new()
     {
@@ -81,6 +122,7 @@ public static class BuiltInNumberFormats
         [50] = 14, [51] = 14, [52] = 14, [53] = 14, [54] = 14,
         [55] = 14, [56] = 14, [57] = 14, [58] = 14,
         [59] = 1, [60] = 2, [61] = 3, [62] = 4,
+        [63] = 5, [64] = 6, [65] = 7, [66] = 8,
         [67] = 9, [68] = 10, [69] = 12, [70] = 13,
         [71] = 14, [72] = 14, [73] = 15, [74] = 16, [75] = 17,
         [76] = 20, [77] = 21, [78] = 22, [79] = 45, [80] = 46, [81] = 47,

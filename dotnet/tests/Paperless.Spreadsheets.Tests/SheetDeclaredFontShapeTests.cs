@@ -69,7 +69,7 @@ public sealed class SheetDeclaredFontShapeTests
     private static SheetCellFormat FormatFor(string? family)
     {
         XElement sheet = StyleSheet(family);
-        return XlsxCellFormats.Read(sheet, XlsxStyles.Read(sheet)).Formats[0];
+        return XlsxCellFormats.Read(sheet, XlsxStyles.Read(sheet), null).Formats[0];
     }
 
     [Theory]
@@ -122,7 +122,7 @@ public sealed class SheetDeclaredFontShapeTests
         // to decides the geometry of every column — not just the ink. The declaration has to reach
         // SheetDefaultFont or a serif workbook is paginated on a grotesque's digit.
         XElement sheet = StyleSheet("1");
-        XlsxCellFormatTable table = XlsxCellFormats.Read(sheet, XlsxStyles.Read(sheet));
+        XlsxCellFormatTable table = XlsxCellFormats.Read(sheet, XlsxStyles.Read(sheet), null);
 
         table.DefaultColumnFont.DeclaredClass.ShouldBe(FontFamilyClass.Serif);
         table.DefaultFont.DeclaredFontClass.ShouldBe(FontFamilyClass.Serif);
@@ -136,7 +136,7 @@ public sealed class SheetDeclaredFontShapeTests
         // name under the old one's family is how a serif cell would drag a sans run into DejaVu
         // Serif. A run that renames nothing is the other case and does keep it.
         XElement sheet = StyleSheet("1");
-        XlsxCellFormatTable table = XlsxCellFormats.Read(sheet, XlsxStyles.Read(sheet));
+        XlsxCellFormatTable table = XlsxCellFormats.Read(sheet, XlsxStyles.Read(sheet), null);
         SheetCellFormat cell = table.Formats[0];
 
         table.Apply(cell, new XlsxRunFont("Arial", null, null, null, null))

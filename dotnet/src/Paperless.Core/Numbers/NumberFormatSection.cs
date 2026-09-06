@@ -286,6 +286,20 @@ public sealed class NumberFormatSection
                 continue;
             }
 
+            // The day-name keys, which are not letters of a date the way `d` and `m` are:
+            // `AAA`/`AAAA` are Excel's (East Asian in origin, and every producer writes them
+            // lower case), `NN`/`NNN`/`NNNN` are LibreOffice's own. They share one case in
+            // `zformat.cxx`:3983-4008 and the difference is short name against long, plus the
+            // locale's day-of-week separator on `NNNN` alone.
+            if (DayNameRun(code, i, out int nameLength, out int nameCount))
+            {
+                tokens.Add(FormatToken.DateTime('w', nameCount));
+                sawDateTime = true;
+                unreproduced = true;
+                i += nameLength;
+                continue;
+            }
+
             if (IsDateTimeLetter(c))
             {
                 char lower = char.ToLowerInvariant(c);
@@ -328,6 +342,59 @@ public sealed class NumberFormatSection
     private static bool MatchesWord(string code, int index, string word)
         => index + word.Length <= code.Length
            && string.Compare(code, index, word, 0, word.Length, StringComparison.OrdinalIgnoreCase) == 0;
+
+    /// <summary>
+    /// Matches a day-name key at <paramref name="index"/> and says how it is written.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The count is 3 for a short name, 4 for a long one and 5 for a long one followed by the
+    /// locale's day-of-week separator, which is what <c>NNNN</c> alone adds
+    /// (<c>rCurrentLang.GetLocaleData()-&gt;getLongDateDayOfWeekSep()</c>,
+    /// <c>svl/source/numbers/zformat.cxx</c>:4004). Runs of one or two <c>a</c>, and a lone
+    /// <c>n</c>, are not keywords and stay literal — <c>sKeyword</c> holds only <c>AAA</c>,
+    /// <c>AAAA</c>, <c>NN</c>, <c>NNN</c> and <c>NNNN</c>
+    /// (<c>svl/source/numbers/zforscan.cxx</c>:60-77).
+    /// </para>
+    /// <para>
+    /// <strong>What this does not reproduce is the calendar the key drags in with it.</strong>
+    /// <c>ImpIsOtherCalendar</c> (<c>zformat.cxx</c>:3453-3480) answers true for any subformat
+    /// holding <c>AAA</c>, <c>AAAA</c>, <c>EC</c>, <c>EEC</c>, <c>R</c>, <c>RR</c>, <c>G</c>,
+    /// <c>GG</c> or <c>GGG</c>, and <c>SwitchToOtherCalendar</c> (:3486-3512) then renders the
+    /// month and day fields in the <em>first non-Gregorian calendar the locale lists</em>,
+    /// leaving the year Gregorian. Measured on both installed binaries
+    /// (<c>dotnet/probes/numfmt-r68/make-codes.py</c>): under en-US that calendar is the Jewish
+    /// one, so serial 46194 — 21 June 2026, a Sunday — draws <c>04/06/26 Sunday</c> under
+    /// <c>mm/dd/yy aaaa</c> and <c>Tammuz 06 2026 Sunday</c> under <c>mmmm dd yyyy aaaa</c>,
+    /// against <c>06/21/26</c> for the same serial under <c>mm/dd/yy</c> alone. The day name
+    /// itself is exact either way; the date beside it is not, which is why a subformat carrying
+    /// one of these keys reports <see cref="HasUnreproducedDirective"/>.
+    /// </para>
+    /// </remarks>
+    private static bool DayNameRun(string code, int index, out int length, out int count)
+    {
+        length = 0;
+        count = 0;
+
+        char first = char.ToLowerInvariant(code[index]);
+        if (first is not ('a' or 'n')) return false;
+
+        int run = 0;
+        while (index + run < code.Length && char.ToLowerInvariant(code[index + run]) == first) run++;
+
+        // Longest key first, left to right, and the remainder of an over-long run is whatever
+        // it parses as next. Measured on both binaries: `aaaaa` draws `Sundaya` and `nnnnn`
+        // draws `Sunday, n`, so the scanner takes AAAA/NNNN and leaves the tail — not the other
+        // way round, which would draw `aSunday`.
+        int shortest = first == 'a' ? 3 : 2;
+        if (run < shortest) return false;
+
+        length = Math.Min(run, 4);
+        count = first == 'a'
+            ? length
+            : length switch { 2 or 3 => 3, _ => 5 };
+        return true;
+    }
 
     private static bool IsDateTimeLetter(char c)
         => char.ToLowerInvariant(c) is 'y' or 'm' or 'd' or 'h' or 's' or 'g' or 'e' or 'b';
@@ -401,7 +468,8 @@ public sealed class NumberFormatSection
 
             switch (token.Symbol)
             {
-                case 'y' or 'd' or 'g' or 'e' or 'b':
+                // 'w' is a day name, which is a date part even though it draws no digits.
+                case 'y' or 'd' or 'g' or 'e' or 'b' or 'w':
                     hasDate = true;
                     break;
                 case 'h' or 's':

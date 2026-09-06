@@ -69,8 +69,7 @@ internal sealed class XlsxPalette
 
         if (Xlsx.Attribute(element, "rgb") is { } rgb) colour = ParseRgb(rgb);
         else if (Xlsx.Integer(element, "indexed") is { } indexed) colour = Indexed(indexed);
-        else if (Xlsx.Integer(element, "theme") is { } theme)
-            colour = theme >= 0 && theme < _theme.Count ? _theme[theme] : null;
+        else if (Xlsx.Integer(element, "theme") is { } theme) colour = Theme(theme);
 
         if (colour is not { } found) return null;
 
@@ -78,7 +77,15 @@ internal sealed class XlsxPalette
         return Math.Abs(tint) < 0.0001 ? found : Tint(found, tint);
     }
 
-    private Colour? Indexed(int index)
+    /// <summary>The colour a theme slot names, or null when the index names none.</summary>
+    /// <remarks>
+    /// The slots are the SpreadsheetML order, not the scheme's own — see <c>ThemeSlots</c>.
+    /// </remarks>
+    public Colour? Theme(int index)
+        => index >= 0 && index < _theme.Count ? _theme[index] : null;
+
+    /// <summary>The colour an <c>indexed</c> value names, or null when it names none.</summary>
+    public Colour? Indexed(int index)
     {
         if (_indexed.TryGetValue(index, out Colour stated)) return stated;
 

@@ -54,7 +54,7 @@ public sealed class SheetIndentUnitTests
     public void AnIndentLevelIsThreeSpacesMeasuredToTheNearestTwip(double points, int levels)
     {
         XElement styleSheet = StyleSheet(points, levels);
-        SheetCellFormat format = XlsxCellFormats.Read(styleSheet, XlsxStyles.Read(styleSheet))
+        SheetCellFormat format = XlsxCellFormats.Read(styleSheet, XlsxStyles.Read(styleSheet), null)
             .Formats[0];
 
         SheetFace face = SheetFonts.For(format).ShouldNotBeNull(

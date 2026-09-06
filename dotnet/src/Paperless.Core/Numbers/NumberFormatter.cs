@@ -685,6 +685,16 @@ public static class NumberFormatter
         "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat",
     ];
 
+    /// <summary>
+    /// What <c>NNNN</c> puts after the day name.
+    /// </summary>
+    /// <remarks>
+    /// <c>LocaleDataWrapper::getLongDateDayOfWeekSep</c>, read out of the rendered page rather
+    /// than out of the locale data: both installed binaries draw <c>Sunday, </c> for <c>nnnn</c>
+    /// and <c>Sunday</c> for <c>aaaa</c> on the same serial.
+    /// </remarks>
+    private const string LongDayOfWeekSeparator = ", ";
+
     private static string RenderDateTime(
         NumberFormatSection section, double value, SpreadsheetDateSystem system)
     {
@@ -840,6 +850,15 @@ public static class NumberFormatter
             },
 
             'h' => Hour(when, twelveHour, count),
+
+            // The day-name keys. See NumberFormatSection.DayNameRun for how the count is
+            // spelled and for the calendar switch this does not reproduce.
+            'w' => count switch
+            {
+                3 => DayAbbreviations[(int)when.DayOfWeek],
+                4 => DayNames[(int)when.DayOfWeek],
+                _ => DayNames[(int)when.DayOfWeek] + LongDayOfWeekSeparator,
+            },
 
             's' => count <= 1
                 ? when.Second.ToString(CultureInfo.InvariantCulture)
