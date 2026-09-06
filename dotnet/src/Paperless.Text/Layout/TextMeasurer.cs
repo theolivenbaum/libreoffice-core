@@ -309,7 +309,10 @@ public sealed class LineFiller
         List<TextLine> lines = [];
         if (text.Length == 0)
         {
-            lines.Add(new TextLine(0, 0, 0, Length.Zero, EndsParagraph: true));
+            // Not zero. A paragraph with no text at all can still carry an as-character object — a
+            // logo on a line of its own is written that way by every reader but the OOXML one — and
+            // that line's width is what its alignment is measured against.
+            lines.Add(new TextLine(0, 0, 0, widthBetween(0, 0), EndsParagraph: true));
             return lines;
         }
 

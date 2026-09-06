@@ -242,6 +242,38 @@ public sealed class MeasuredParagraph
 
     private readonly bool _blanksAreTransparentToHeight;
 
+    /// <summary>
+    /// The width of the as-character objects standing at the very end of the text.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// An object is a <em>boundary</em> in the prefix table: it widens every prefix past the position it
+    /// occupies and none at or before it, which is what makes it sit between two characters rather than
+    /// replace one, and what lets a picture too wide for the room left on a line move to the next line
+    /// whole. The last boundary has no prefix past it, so an object there is worth nothing to every
+    /// width the table answers — and that is the commonest inline picture there is: a paragraph whose
+    /// entire content is a logo.
+    /// </para>
+    /// <para>
+    /// It is invisible in a DOCX and unmissable in every other format, because the readers disagree
+    /// about whether a picture is a character. OOXML puts a <c>U+0001</c> where one stands, so the
+    /// object sits at boundary 0 of a one-character paragraph and the table carries it; ODF, RTF and —
+    /// for a paragraph holding nothing else — WW8 put nothing there, so the object sits at boundary 0
+    /// of an empty paragraph, which <em>is</em> the last boundary. Measured on one right-aligned
+    /// picture-only paragraph written five ways by LibreOffice 26.2.4.2, the picture's left edge:
+    /// 394.55 in all five references, and ours 394.50 from the <c>.docx</c> against <b>540.00</b> from
+    /// the <c>.odt</c>, the <c>.doc</c>, the <c>.rtf</c> and the <c>.fodt</c> — the whole picture's
+    /// width out, drawn from the right margin rightwards. See <c>probes/words-aschar-band/</c>.
+    /// </para>
+    /// <para>
+    /// Writer has no such gap because it has no prefix table: an as-character fly is a
+    /// <c>SwFlyCntPortion</c> in the line and its width is the line's like any other portion's
+    /// (<c>sw/source/core/text/txtfly.cxx</c>). This is the one place the boundary model needs telling
+    /// that there is no next line.
+    /// </para>
+    /// </remarks>
+    private readonly long _trailingObjectsEmu;
+
     private MeasuredParagraph(
         string text,
         MeasuredRun[] runs,
@@ -258,6 +290,14 @@ public sealed class MeasuredParagraph
         ParagraphLevel = paragraphLevel;
         _objects = objects;
         _blanksAreTransparentToHeight = blanksAreTransparentToHeight;
+
+        long trailing = 0;
+        foreach (InlineObject one in objects)
+        {
+            if (one.Offset >= text.Length) trailing += one.Width.Emu;
+        }
+
+        _trailingObjectsEmu = trailing;
     }
 
     /// <summary>The paragraph's text.</summary>
@@ -654,11 +694,20 @@ public sealed class MeasuredParagraph
             : shaped.Scale(designUnits, emSize).Emu;
 
     /// <summary>The width of the characters between two indices.</summary>
+    /// <remarks>
+    /// A range reaching the end of the text also carries the objects standing at that last boundary —
+    /// see <see cref="_trailingObjectsEmu"/>. A range that <em>starts</em> there does not, so the empty
+    /// line a trailing manual break opens does not pay for the picture on the line above it.
+    /// </remarks>
     public Length WidthBetween(int start, int end)
-        => Length.FromEmu(At(end) - At(start));
+        => Length.FromEmu(At(end) - At(start) + (HoldsTrailingObjects(start, end) ? _trailingObjectsEmu : 0));
+
+    /// <summary>Whether a range carries the objects standing at the text's last boundary.</summary>
+    private bool HoldsTrailingObjects(int start, int end)
+        => _trailingObjectsEmu != 0 && end >= Text.Length && (start < Text.Length || Text.Length == 0);
 
     /// <summary>The whole paragraph's width.</summary>
-    public Length Width => Length.FromEmu(_prefixEmu[^1]);
+    public Length Width => Length.FromEmu(_prefixEmu[^1] + _trailingObjectsEmu);
 
     /// <summary>
     /// The natural line height and ascent for a range of the text.
