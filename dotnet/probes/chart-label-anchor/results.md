@@ -98,16 +98,57 @@ Liberation Sans at 10 pt:
 The deck row is worth keeping because it looks like a constraint and is not: 242.02 over any
 plausible label height exceeds ten, the clamp fires, and the deck cannot discriminate.
 
-**Why no constant was fitted.** A flat `1.206 em` satisfies all five measurements — 040 at 8, both
-sheet fixtures unchanged, the deck clamped — and so do several pixel-quantisation rules
-(rounding the ascent and descent to whole pixels at some device dpi, with or without the line
-gap), which is the shape of the divergence this project has already found twice under the name
-*the pixel em law*. The two faces involved are 1.2% apart in hhea line height and the whole window
-is 0.4% wide, so the corpus as it stands cannot separate a face-independent multiple from a
-quantised face metric. **That needs a swept probe — one chart, one auto axis, the frame's height
-varied continuously until the tick count drops — not a constant chosen to fit 040.** The existing
-divisor is at least principled and is pinned from both sides by the two sheet fixtures; nudging it
-on one document's evidence is the fudge factor the notes warn about.
+**Read those four brackets as ratios against the coordinate region, not as label heights.** They
+assume `nTotalAvailable` is the *inner* plot rectangle, and the probe below shows it is not: the
+coordinate region jumps by 5–11 pt exactly at the boundary, so it cannot be the quantity the
+estimate is taken on, while the outer `chart:plot-area` crosses it smoothly. The brackets still
+separate ours from the reference's — that comparison is between two numbers taken the same way on
+the same document — but the em figures in them are not LibreOffice's label height.
+
+### The swept probe was run, and it refutes every simple divisor including our own
+
+`chart-bar-sheet.fods` is a nine-kilobyte hand-authored flat sheet with one chart, so it
+parameterises cleanly. Its eight data cells were replaced with a range spanning 68…78 — the same
+shape as `040`'s secondary axis, so `N ≤ 8` gives `60 65 70 75 80` and `N ≥ 9` gives `62 64 … 80`,
+and the presence of the token `62` in `pdftotext` is a clean one-bit predicate for which side of
+the boundary a rendering is on. The chart frame's height was then bisected, thirteen halvings, to
+a frame resolution of 0.0034 cm, and the *outer diagram* rectangle read out of each boundary
+rendering's own flat export — `chart:plot-area`, which is `maRemainingSpace` and is smooth
+across the boundary where `chart:coordinate-region` jumps by 5–11 pt as the tick count
+changes.
+
+With the value axis given a style of its own, so that the category band and both axis titles stay
+at the default 10 pt and only the value labels move:
+
+| face | value-label size | frame at the N=8→9 boundary | plot-area height there |
+|---|---:|---|---:|
+| Liberation Sans | 10 pt | [6.93555, 6.93896] cm | 131.131 → 131.216 pt |
+| Liberation Sans | 24 pt | [12.26074, 12.26416] cm | 272.976 → 273.061 pt |
+| DejaVu Sans | 10 pt | [6.93555, 6.93896] cm | 131.131 → 131.216 pt |
+| DejaVu Sans | 24 pt | [12.76660, 12.77002] cm | 286.469 → 286.554 pt |
+
+**Two faces, identical at 10 pt to the last digit of the bisection, and 13.5 pt of plot-area apart
+at 24 pt.** Their hhea line heights differ by 1.23% at every size — 0.14 pt at 10 pt and 0.34 pt at
+24 pt — so the label height is *not* the line height, quantised or otherwise: a metric difference
+that vanishes at one size and is amplified fourfold at another is not a metric difference at all.
+Ours is the line height, which is why `040` comes out one interval long.
+
+Differencing the two sizes of each face gives what the divisor's *slope* would be if the rest of
+the composition held still — 1.126 em for Liberation Sans and 1.233 em for DejaVu Sans — but the
+two then imply different constants for the band below the axis (29.9 pt against 20.2 pt) when the
+band is the same in both, so the model is wrong and neither slope should be quoted as the answer.
+
+**The probe's own confound, named so the next one avoids it.** Raising the value-label size widens
+the left reservation, which narrows the plot, which can change how the category labels below it
+are arranged — and that band is inside the plot-area rectangle being measured. So the third
+variable was not held. **The probe that settles this has no category labels and no axis titles at
+all**, so that the only thing between the plot-area rectangle and the axis line is a constant, and
+it needs at least three sizes per face to separate a slope from an intercept.
+
+**Nothing was changed on this evidence.** A flat 1.206 em fits the five corpus observations that
+prompted the probe and is refuted by the probe itself; the existing divisor is at least principled
+and is pinned from both sides by two of the tree's own fixtures. A constant fitted to `040` here
+would be the fudge factor the notes warn about, arrived at by a longer route.
 
 ## 3 · `053`'s Grand Total is LibreOffice detaching the chart from the sheet, measured
 
