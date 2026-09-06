@@ -113,7 +113,7 @@ internal sealed class PptxShapeReader
         }
 
         if (uri == DrawingChart.ChartUri && ReadChart(data!, target)) return;
-        if (uri == PptxDiagram.Uri && ReadDiagram(data!, target)) return;
+        if (uri == DiagramParts.Uri && ReadDiagram(data!, target)) return;
 
         target.Children.Add(new ContentImage
         {
@@ -184,7 +184,7 @@ internal sealed class PptxShapeReader
     /// </para>
     /// <para>
     /// The data model is still the right source for extraction even now that
-    /// <see cref="PptxDiagram"/> reads the <em>baked</em> shape tree for rendering, and the two
+    /// <see cref="DiagramParts"/> reads the <em>baked</em> shape tree for rendering, and the two
     /// disagree on purpose. The baked tree is what the author sees, so it repeats a node's text
     /// wherever the layout drew it and adds text the layout generated; the data model is what the
     /// author typed, once each. An index wants the second.
@@ -192,11 +192,11 @@ internal sealed class PptxShapeReader
     /// </remarks>
     private bool ReadDiagram(XElement data, ContentNode target)
     {
-        if (PptxDiagram.DataModel(_file, _partName, data) is not { } model) return false;
+        if (DiagramParts.DataModel(_file.Diagrams, _partName, data) is not { } model) return false;
 
         int before = target.Children.Count;
-        foreach (XElement point in model.Element(XName.Get("ptLst", PptxDiagram.Uri))
-                                       ?.Elements(XName.Get("pt", PptxDiagram.Uri)) ?? [])
+        foreach (XElement point in model.Element(XName.Get("ptLst", DiagramParts.Uri))
+                                       ?.Elements(XName.Get("pt", DiagramParts.Uri)) ?? [])
         {
             // "doc" is the diagram itself, "pres" is a generated presentation node, and the two
             // transition types are the connectors between points. None of them carries text a
@@ -204,7 +204,7 @@ internal sealed class PptxShapeReader
             string? type = point.Attribute("type")?.Value;
             if (type is "doc" or "pres" or "parTrans" or "sibTrans") continue;
 
-            XElement? body = point.Element(XName.Get("t", PptxDiagram.Uri));
+            XElement? body = point.Element(XName.Get("t", DiagramParts.Uri));
             if (DrawingTextBody.IsEmpty(body)) continue;
 
             DrawingTextBody.Read(body!, target, new DrawingTextOptions

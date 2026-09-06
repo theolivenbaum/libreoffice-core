@@ -105,6 +105,16 @@ internal static class DocxFrames
         Length height = Emu(extent.Attribute("cy")?.Value);
         if (IsEmpty(width, height)) return [];
 
+        // A SmartArt diagram is a graphic frame rather than a shape, so it names its parts through
+        // relationships and arrives as a group of its own — one shape per node, already laid out.
+        // Before the group check, because the drawing holds no `wpg:wgp` to find: the group is
+        // synthesised from a part `DocxDiagram` resolves. See `DocxPictures.Diagram`.
+        if (pictures?.Diagram(placed, new DocSize(width, height), context.Theme) is { } diagram)
+        {
+            return Members(diagram, placed, anchor, new DocSize(width, height), content,
+                           anchorOffset, pictures, context);
+        }
+
         if (Group(placed) is { } group)
         {
             return Members(group, placed, anchor, new DocSize(width, height), content, anchorOffset,

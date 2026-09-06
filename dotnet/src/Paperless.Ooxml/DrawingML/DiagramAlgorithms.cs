@@ -1,6 +1,6 @@
 using Paperless.Core.Units;
 
-namespace Paperless.Presentations.Ooxml;
+namespace Paperless.Ooxml.DrawingML;
 
 /// <summary>
 /// The layout algorithms a <c>dgm:alg</c> names, ported one for one from
@@ -23,7 +23,7 @@ namespace Paperless.Presentations.Ooxml;
 /// for no gain.
 /// </para>
 /// </remarks>
-internal static class PptxDiagramAlgorithms
+internal static class DiagramAlgorithms
 {
     /// <summary>Sixtieths of a thousandth of a degree, DrawingML's rotation unit.</summary>
     private const int PerDegree = 60000;
@@ -65,17 +65,17 @@ internal static class PptxDiagramAlgorithms
                 Connector(atom, shape);
                 break;
             case "snake":
-                PptxDiagramGeometry.Snake(atom, shape, constraints);
+                DiagramLayoutGeometry.Snake(atom, shape, constraints);
                 break;
             case "cycle":
-                PptxDiagramGeometry.Cycle(atom, shape);
+                DiagramLayoutGeometry.Cycle(atom, shape);
                 break;
             case "hierRoot":
             case "hierChild":
-                PptxDiagramGeometry.Hierarchy(atom, shape);
+                DiagramLayoutGeometry.Hierarchy(atom, shape);
                 break;
             case "pyra":
-                PptxDiagramGeometry.Pyramid(shape);
+                DiagramLayoutGeometry.Pyramid(shape);
                 break;
             case "tx":
                 Text(atom, shape, constraints);

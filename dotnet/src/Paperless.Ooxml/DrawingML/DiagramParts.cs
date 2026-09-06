@@ -1,13 +1,10 @@
 using System.Xml.Linq;
-using Paperless.Containers.Ooxml;
-using Paperless.Ooxml;
-using Paperless.Ooxml.DrawingML;
 
-namespace Paperless.Presentations.Ooxml;
+namespace Paperless.Ooxml.DrawingML;
 
 /// <summary>
-/// Resolves a SmartArt diagram's parts, and turns its baked shape tree into one the ordinary
-/// PresentationML walkers can read.
+/// Resolves a SmartArt diagram's parts, and turns its baked shape tree into one an ordinary
+/// DrawingML shape walker can read.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -48,7 +45,7 @@ namespace Paperless.Presentations.Ooxml;
 /// organisation chart as nothing.
 /// </para>
 /// </remarks>
-internal static class PptxDiagram
+public static class DiagramParts
 {
     /// <summary>The <c>a:graphicData</c> URI that identifies a SmartArt diagram.</summary>
     public const string Uri = "http://schemas.openxmlformats.org/drawingml/2006/diagram";
@@ -71,20 +68,40 @@ internal static class PptxDiagram
     /// </param>
     public readonly record struct BakedDrawing(XElement ShapeTree, string PartName);
 
+    /// <summary>
+    /// The PresentationML name for a local name — the vocabulary both paths produce their shape
+    /// tree in, whichever family the package belongs to.
+    /// </summary>
+    /// <remarks>
+    /// A produced tree is PresentationML because that is what <c>dsp:</c> already is under another
+    /// namespace — see <see cref="Baked"/> — and not because the document is a deck. A
+    /// word-processing or spreadsheet consumer reads the same tree; it matches on local names, as
+    /// LibreOffice's own <c>PPTShapeGroupContext</c> substitution leaves it free to.
+    /// </remarks>
+    /// <param name="localName">The element's local name.</param>
+    /// <returns>The name in the PresentationML namespace.</returns>
+    internal static XName ShapeTreeName(string localName)
+        => XName.Get(localName, OoxmlNamespaces.PresentationML);
+
     /// <summary>The diagram's data model part, which holds the author's text.</summary>
-    public static XElement? DataModel(PptxFile file, string partName, XElement graphicData)
-        => Part(file, partName, graphicData, "dm");
+    /// <param name="source">The package, as the two lookups a diagram needs from one.</param>
+    /// <param name="partName">The part carrying the <c>dgm:relIds</c>, which resolves its ids.</param>
+    /// <param name="graphicData">The <c>a:graphicData</c> holding the <c>dgm:relIds</c>.</param>
+    public static XElement? DataModel(
+        DiagramPartSource source, string partName, XElement graphicData)
+        => Part(source, partName, graphicData, "dm");
 
     /// <summary>One of the four parts a <c>dgm:relIds</c> names, loaded, or null.</summary>
     private static XElement? Part(
-        PptxFile file, string partName, XElement graphicData, string attribute)
+        DiagramPartSource source, string partName, XElement graphicData, string attribute)
     {
+        ArgumentNullException.ThrowIfNull(source);
+        ArgumentNullException.ThrowIfNull(graphicData);
+
         string? id = graphicData.Element(XName.Get("relIds", Uri))
             ?.Attribute(XName.Get(attribute, OoxmlNamespaces.Relationships))?.Value;
 
-        return file.Relationship(partName, id) is { IsExternal: false } relationship
-            ? file.Load(relationship.Target)
-            : null;
+        return source.Target(partName, id) is { } target ? source.Load(target) : null;
     }
 
     /// <summary>
@@ -102,11 +119,11 @@ internal static class PptxDiagram
     /// The result is the same kind of tree the baked path produces, so both feed the ordinary
     /// slide layouter and a difference between the two is a difference in the evaluation rather
     /// than in the drawing. Returns null when the layout definition names an algorithm the
-    /// evaluator does not implement; see <see cref="PptxDiagramEvaluator"/> for why declining
+    /// evaluator does not implement; see <see cref="DiagramEvaluator"/> for why declining
     /// beats approximating.
     /// </para>
     /// </remarks>
-    /// <param name="file">The package.</param>
+    /// <param name="source">The package, as the two lookups a diagram needs from one.</param>
     /// <param name="partName">The part carrying the <c>dgm:relIds</c>, which resolves its ids.</param>
     /// <param name="graphicData">The <c>a:graphicData</c> holding the <c>dgm:relIds</c>.</param>
     /// <param name="themePart">The <c>a:theme</c> root, whose format scheme the styles index.</param>
@@ -114,7 +131,7 @@ internal static class PptxDiagram
     /// <param name="width">The frame's width in EMUs.</param>
     /// <param name="height">The frame's height in EMUs.</param>
     public static BakedDrawing? Evaluated(
-        PptxFile file,
+        DiagramPartSource source,
         string partName,
         XElement graphicData,
         XElement? themePart,
@@ -122,24 +139,24 @@ internal static class PptxDiagram
         int width,
         int height)
     {
-        if (DataModel(file, partName, graphicData) is not { } model) return null;
+        if (DataModel(source, partName, graphicData) is not { } model) return null;
 
         DiagramData data = DiagramData.Read(model);
 
-        XElement? definition = Part(file, partName, graphicData, "lo");
-        if (PptxDiagramEvaluator.Evaluate(data, definition, width, height) is not { } diagram)
+        XElement? definition = Part(source, partName, graphicData, "lo");
+        if (DiagramEvaluator.Evaluate(data, definition, width, height) is not { } diagram)
         {
             return null;
         }
 
-        PptxDiagramStyles styles = PptxDiagramStyles.Read(
-            Part(file, partName, graphicData, "qs"),
-            Part(file, partName, graphicData, "cs"),
+        DiagramStyles styles = DiagramStyles.Read(
+            Part(source, partName, graphicData, "qs"),
+            Part(source, partName, graphicData, "cs"),
             themePart,
             theme);
 
         XElement? background = model.Element(XName.Get("bg", Uri));
-        if (PptxDiagramShapeTree.Build(diagram, styles, background) is not { } tree) return null;
+        if (DiagramShapeTree.Build(diagram, styles, background) is not { } tree) return null;
 
         return new BakedDrawing(tree, partName);
     }
@@ -175,16 +192,17 @@ internal static class PptxDiagram
     /// decided.
     /// </para>
     /// </remarks>
-    public static BakedDrawing? Baked(PptxFile file, string partName, XElement graphicData)
+    public static BakedDrawing? Baked(
+        DiagramPartSource source, string partName, XElement graphicData)
     {
-        if (DataModel(file, partName, graphicData) is not { } model) return null;
+        if (DataModel(source, partName, graphicData) is not { } model) return null;
 
         foreach (XElement extension in model
                      .Descendants(XName.Get("dataModelExt", DrawingNamespace)))
         {
             string? id = extension.Attribute("relId")?.Value;
-            if (file.Relationship(partName, id) is not { IsExternal: false } relationship) continue;
-            if (file.Load(relationship.Target) is not { } drawing) continue;
+            if (source.Target(partName, id) is not { } target) continue;
+            if (source.Load(target) is not { } drawing) continue;
 
             XElement? tree = drawing.Element(XName.Get("spTree", DrawingNamespace));
             if (tree is null) continue;
@@ -193,7 +211,7 @@ internal static class PptxDiagram
             // treating it as one draws the diagram as nothing rather than falling through.
             if (!tree.Descendants(XName.Get("sp", DrawingNamespace)).Any()) continue;
 
-            return new BakedDrawing(Rename(tree), relationship.Target);
+            return new BakedDrawing(Rename(tree), target);
         }
 
         return null;
@@ -204,16 +222,16 @@ internal static class PptxDiagram
     /// everything else — which is all DrawingML — exactly as it was.
     /// </summary>
     /// <remarks>
-    /// A copy rather than a rename in place because <see cref="PptxFile.Load"/> caches parts and
-    /// hands the same tree to whoever asks next; mutating it would make the extraction walk and
-    /// the layout walk disagree about what namespace the file is in depending on their order.
+    /// A copy rather than a rename in place because a package caches its parts and hands the same
+    /// tree to whoever asks next; mutating it would make the extraction walk and the layout walk
+    /// disagree about what namespace the file is in depending on their order.
     /// </remarks>
     private static XElement Rename(XElement element)
     {
         if (element.Name.NamespaceName != DrawingNamespace) return new XElement(element);
 
         return new XElement(
-            Ppt.Name(element.Name.LocalName),
+            ShapeTreeName(element.Name.LocalName),
             element.Attributes().Where(a => !a.IsNamespaceDeclaration),
             element.Elements().Select(Rename));
     }

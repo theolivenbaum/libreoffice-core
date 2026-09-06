@@ -1,9 +1,7 @@
 using System.Globalization;
 using System.Xml.Linq;
-using Paperless.Ooxml;
-using Paperless.Ooxml.DrawingML;
 
-namespace Paperless.Presentations.Ooxml;
+namespace Paperless.Ooxml.DrawingML;
 
 /// <summary>
 /// Turns the evaluated diagram into the <c>p:spTree</c> the slide layouter already draws.
@@ -26,7 +24,7 @@ namespace Paperless.Presentations.Ooxml;
 /// <c>dsp:grpSp</c> among them.
 /// </para>
 /// </remarks>
-internal static class PptxDiagramShapeTree
+internal static class DiagramShapeTree
 {
     /// <summary>Sixtieths of a thousandth of a degree, DrawingML's rotation unit.</summary>
     private const int PerDegree = 60000;
@@ -36,9 +34,9 @@ internal static class PptxDiagramShapeTree
     /// <param name="styles">The quick style and colour transform.</param>
     /// <param name="background">The data model's <c>dgm:bg</c> fill, drawn behind everything.</param>
     public static XElement? Build(
-        DiagramShape diagram, PptxDiagramStyles styles, XElement? background)
+        DiagramShape diagram, DiagramStyles styles, XElement? background)
     {
-        XElement tree = new(Ppt.Name("spTree"));
+        XElement tree = new(DiagramParts.ShapeTreeName("spTree"));
         int id = 1;
 
         if (background is not null && background.Elements().Any())
@@ -67,7 +65,7 @@ internal static class PptxDiagramShapeTree
         DiagramShape shape,
         int originX,
         int originY,
-        PptxDiagramStyles styles,
+        DiagramStyles styles,
         XElement tree,
         ref int id)
     {
@@ -102,11 +100,11 @@ internal static class PptxDiagramShapeTree
         DiagramShape shape,
         int x,
         int y,
-        PptxDiagramStyles styles,
+        DiagramStyles styles,
         XElement? backgroundFill,
         ref int id)
     {
-        XElement properties = new(Ppt.Name("spPr"), Transform(shape, x, y));
+        XElement properties = new(DiagramParts.ShapeTreeName("spPr"), Transform(shape, x, y));
 
         if (shape.DrawnPreset is { Length: > 0 } preset)
         {
@@ -120,15 +118,15 @@ internal static class PptxDiagramShapeTree
         if (Line(shape, styles) is { } line) properties.Add(line);
 
         XElement result = new(
-            Ppt.Name("sp"),
+            DiagramParts.ShapeTreeName("sp"),
             new XElement(
-                Ppt.Name("nvSpPr"),
+                DiagramParts.ShapeTreeName("nvSpPr"),
                 new XElement(
-                    Ppt.Name("cNvPr"),
+                    DiagramParts.ShapeTreeName("cNvPr"),
                     new XAttribute("id", id.ToString(CultureInfo.InvariantCulture)),
                     new XAttribute("name", shape.InternalName)),
-                new XElement(Ppt.Name("cNvSpPr")),
-                new XElement(Ppt.Name("nvPr"))),
+                new XElement(DiagramParts.ShapeTreeName("cNvSpPr")),
+                new XElement(DiagramParts.ShapeTreeName("nvPr"))),
             properties);
 
         id++;
@@ -138,7 +136,7 @@ internal static class PptxDiagramShapeTree
             result.Add(style);
         }
 
-        if (shape.Text.Count != 0) result.Add(PptxDiagramText.Body(shape));
+        if (shape.Text.Count != 0) result.Add(DiagramText.Body(shape));
 
         return result;
     }
@@ -183,7 +181,7 @@ internal static class PptxDiagramShapeTree
     /// <c>getFillProperties()</c> assigned over it (<c>shape.cxx:2820-2834</c>).
     /// </remarks>
     private static XElement? Fill(
-        DiagramShape shape, PptxDiagramStyles styles, XElement? backgroundFill)
+        DiagramShape shape, DiagramStyles styles, XElement? backgroundFill)
     {
         XElement? source = backgroundFill ?? shape.ShapeProperties;
 
@@ -200,7 +198,7 @@ internal static class PptxDiagramShapeTree
     private static readonly string[] FillKinds =
         ["noFill", "solidFill", "gradFill", "blipFill", "pattFill", "grpFill"];
 
-    private static XElement? Line(DiagramShape shape, PptxDiagramStyles styles)
+    private static XElement? Line(DiagramShape shape, DiagramStyles styles)
     {
         if (Drawing.Child(shape.ShapeProperties, "ln") is { } stated) return new XElement(stated);
         if (shape.HideGeometry || shape.StyleLabel.Length == 0) return null;

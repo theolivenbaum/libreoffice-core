@@ -57,6 +57,7 @@ public sealed class DocxFile : IDisposable
         // and Word writes a w:clrSchemeMapping beside its compatibility options, so the two
         // halves of a resolvable theme arrive from different parts and are joined here.
         XElement? theme = LoadRelated("theme", "word/theme/theme1.xml");
+        ThemePart = theme;
         Theme = DrawingTheme
             .Read(theme)
             ?.WithMap(DrawingColourMap.Read(Word.Child(Settings, "clrSchemeMapping")));
@@ -121,6 +122,17 @@ public sealed class DocxFile : IDisposable
     /// one resolves to nothing rather than to a guess.
     /// </remarks>
     public DrawingTheme? Theme { get; }
+
+    /// <summary>
+    /// The <c>a:theme</c> root itself, or null when the document has no theme part.
+    /// </summary>
+    /// <remarks>
+    /// Beside <see cref="Theme"/> and <see cref="ShapeStyles"/> rather than replacing either,
+    /// because a SmartArt colour transform indexes the format scheme by position and resolves its
+    /// <c>phClr</c> against the colour scheme — so the one consumer that needs the part needs the
+    /// element and not a model of it. Nothing else reads it.
+    /// </remarks>
+    public XElement? ThemePart { get; }
 
     /// <summary>
     /// The theme's <c>a:fmtScheme</c> — the fill and line styles a shape's <c>wps:style</c>

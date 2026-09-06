@@ -1,7 +1,7 @@
 using System.Globalization;
 using System.Xml.Linq;
 
-namespace Paperless.Presentations.Ooxml;
+namespace Paperless.Ooxml.DrawingML;
 
 /// <summary>
 /// Runs a diagram's layout-atom program over its data model, producing the shape tree the
@@ -11,7 +11,7 @@ namespace Paperless.Presentations.Ooxml;
 /// <para>
 /// <strong>Why this exists at all.</strong> Every diagram a modern Office writes carries a
 /// <c>diagramDrawing</c> part holding the result already laid out, and reading that is both
-/// exact and cheap — so it is what <see cref="PptxDiagram.Baked"/> does. Office 2007 wrote none,
+/// exact and cheap — so it is what <see cref="DiagramParts.Baked"/> does. Office 2007 wrote none,
 /// because the drawing vocabulary's namespace is dated 2008 and the files predate it, and
 /// LibreOffice's own import fixtures have theirs removed by hand precisely so that this path is
 /// what gets tested. Measured over LibreOffice's <c>sd/qa/unit/data/pptx</c>: 66 decks carry a
@@ -38,7 +38,7 @@ namespace Paperless.Presentations.Ooxml;
 /// sweep that currently draw nothing honestly.
 /// </para>
 /// </remarks>
-internal sealed class PptxDiagramEvaluator
+internal sealed class DiagramEvaluator
 {
     /// <summary>Sixtieths of a thousandth of a degree, DrawingML's rotation unit.</summary>
     private const int PerDegree = 60000;
@@ -48,14 +48,14 @@ internal sealed class PptxDiagramEvaluator
     /// </summary>
     /// <remarks>
     /// <para>
-    /// <c>lin</c> and <c>composite</c> in <see cref="PptxDiagramAlgorithms"/> are the commonest by
+    /// <c>lin</c> and <c>composite</c> in <see cref="DiagramAlgorithms"/> are the commonest by
     /// a wide margin — 18 and 23 of the 37 decks in <c>sd/qa/unit/data/pptx</c> with no baked
     /// drawing name them — and they are also the two that carry the constraint machinery, which is
     /// why they came first and why everything else is a smaller increment on top.
     /// </para>
     /// <para>
     /// <c>snake</c>, <c>cycle</c>, <c>pyra</c>, <c>hierRoot</c> and <c>hierChild</c> are the
-    /// second half, in <see cref="PptxDiagramGeometry"/>. They place their children by geometry
+    /// second half, in <see cref="DiagramLayoutGeometry"/>. They place their children by geometry
     /// rather than by constraint, on constants that are LibreOffice's own choices rather than
     /// anything the file states, which is why they are ported line for line and not derived. With
     /// them, all 37 of those decks evaluate and every filled path agrees with LibreOffice's own
@@ -81,7 +81,7 @@ internal sealed class PptxDiagramEvaluator
         new(StringComparer.Ordinal);
     private readonly Dictionary<DiagramPoint, DiagramShape> _byPresentationPoint = [];
 
-    private PptxDiagramEvaluator(DiagramData data, DiagramLayoutNodeAtom root)
+    private DiagramEvaluator(DiagramData data, DiagramLayoutNodeAtom root)
     {
         _data = data;
         _root = root;
@@ -99,7 +99,7 @@ internal sealed class PptxDiagramEvaluator
         DiagramData data, XElement? definition, int width, int height)
     {
         if (data.Root is null) return null;
-        if (PptxDiagramLayout.Read(definition) is not { } root) return null;
+        if (DiagramLayout.Read(definition) is not { } root) return null;
         if (!Evaluable(root)) return null;
 
         DiagramShape frame = new()
@@ -110,7 +110,7 @@ internal sealed class PptxDiagramEvaluator
             Height = height,
         };
 
-        PptxDiagramEvaluator evaluator = new(data, root);
+        DiagramEvaluator evaluator = new(data, root);
         new CreationWalk(evaluator, data.Root, frame).Visit(root);
         new LayoutWalk(evaluator, data.Root).Visit(root);
 
@@ -154,9 +154,9 @@ internal sealed class PptxDiagramEvaluator
     /// being the same number is the whole trick that lets a program with no data in it produce
     /// one shape per node.
     /// </remarks>
-    private abstract class Walk(PptxDiagramEvaluator evaluator, DiagramPoint? current)
+    private abstract class Walk(DiagramEvaluator evaluator, DiagramPoint? current)
     {
-        protected readonly PptxDiagramEvaluator Evaluator = evaluator;
+        protected readonly DiagramEvaluator Evaluator = evaluator;
         protected DiagramPoint? Current = current;
         protected int Index;
         protected int Step = 1;
@@ -314,7 +314,7 @@ internal sealed class PptxDiagramEvaluator
 
     /// <summary>The first walk: one shape per layout node per iteration.</summary>
     private sealed class CreationWalk(
-        PptxDiagramEvaluator evaluator, DiagramPoint? current, DiagramShape parent)
+        DiagramEvaluator evaluator, DiagramPoint? current, DiagramShape parent)
         : Walk(evaluator, current)
     {
         private DiagramShape _parent = parent;
@@ -482,7 +482,7 @@ internal sealed class PptxDiagramEvaluator
     /// the walk and truncated back on the way out
     /// (<c>ShapeLayoutingVisitor::visit(LayoutNode)</c>, <c>layoutatomvisitors.cxx:213</c>).
     /// </remarks>
-    private sealed class LayoutWalk(PptxDiagramEvaluator evaluator, DiagramPoint? current)
+    private sealed class LayoutWalk(DiagramEvaluator evaluator, DiagramPoint? current)
         : Walk(evaluator, current)
     {
         private readonly List<DiagramConstraint> _constraints = [];
@@ -515,7 +515,7 @@ internal sealed class PptxDiagramEvaluator
             if (Current is null) return;
             if (!Evaluator._byPresentationPoint.TryGetValue(Current, out DiagramShape? shape)) return;
 
-            PptxDiagramAlgorithms.Apply(atom, shape, _constraints, _rules);
+            DiagramAlgorithms.Apply(atom, shape, _constraints, _rules);
         }
 
         protected override void VisitLayoutNode(DiagramLayoutNodeAtom atom)
