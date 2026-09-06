@@ -279,7 +279,16 @@ public static class DrawingChartPlot
             SecondaryValueFormat = FormatOf(axes.Secondary),
             SecondaryValueAxisTitle = AxisTitleText(Child(axes.Secondary, "title"), kind),
             DomainScale = ScaleOf(axes.Domain),
-            DomainFormat = FormatOf(axes.Domain),
+
+            // The horizontal axis a scatter group is measured against is normally the second
+            // c:valAx, and ChartAxes.Domain finds it there. A combination chart pairing a
+            // scatter group with an area or line one has only one c:valAx, so the X axis is the
+            // chart's c:catAx or c:dateAx and Domain is null — and the ticks along it were then
+            // written through General, printing a date column's serial numbers. The same
+            // `?? axes.Category` fallback is already what the axis text, its visibility and its
+            // labels take. The scale is deliberately not given the same fallback: it decides
+            // where the points sit and not only how a tick reads.
+            DomainFormat = FormatOf(axes.Domain ?? axes.Category),
             ValueAxisVisible = Shown(axes.Value),
             SecondaryAxisVisible = Shown(axes.Secondary),
             CategoryAxisVisible = Shown(axes.Domain ?? axes.Category),

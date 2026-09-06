@@ -16,13 +16,15 @@ namespace Paperless.Spreadsheets.Ooxml;
 /// <c>indexedColors</c> can answer the second. Reading it twice would be two chances to disagree.
 /// </remarks>
 /// <param name="Formats">The formats, indexed as <c>cellXfs</c> orders them.</param>
-/// <param name="Palette">The indexed colours, the workbook's overrides included.</param>
+/// <param name="Palette">
+/// The workbook's colours: its <c>indexedColors</c> overrides and its theme's colour scheme.
+/// </param>
 /// <param name="DefaultFont">
 /// The workbook's own default font, which is what a rich-text run's unstated properties fall back
 /// to. See <see cref="Apply"/>.
 /// </param>
 internal sealed record XlsxCellFormatTable(
-    IReadOnlyList<SheetCellFormat> Formats, Colour[] Palette, SheetCellFormat DefaultFont)
+    IReadOnlyList<SheetCellFormat> Formats, XlsxPalette Palette, SheetCellFormat DefaultFont)
 {
     /// <summary>
     /// Builds a rich-text run's format from what its <c>rPr</c> states.
@@ -114,16 +116,21 @@ internal static class XlsxCellFormats
     /// <summary>Reads the cell formats a workbook's <c>styleSheet</c> declares.</summary>
     /// <param name="styleSheet">The <c>styleSheet</c> root, or null when the part is missing.</param>
     /// <param name="styles">The already-read number formats, so a cell keeps its own.</param>
-    public static XlsxCellFormatTable Read(XElement? styleSheet, XlsxStyles styles)
+    /// <param name="theme">
+    /// The <c>theme</c> part's root, for the colour scheme a font's <c>color/@theme</c> indexes
+    /// into. Null falls back to black for every scheme slot, exactly as
+    /// <see cref="XlsxPalette"/> does for the fills and borders it already serves.
+    /// </param>
+    public static XlsxCellFormatTable Read(XElement? styleSheet, XlsxStyles styles, XElement? theme)
     {
         ArgumentNullException.ThrowIfNull(styles);
         if (styleSheet is null)
         {
             return new XlsxCellFormatTable(
-                [SheetCellFormat.Default], [.. DefaultPalette], SheetCellFormat.Default);
+                [SheetCellFormat.Default], XlsxPalette.Read(null, theme), SheetCellFormat.Default);
         }
 
-        Colour[] palette = ReadPalette(styleSheet);
+        XlsxPalette palette = XlsxPalette.Read(styleSheet, theme);
         List<Font> fonts =
         [
             .. Xlsx.Children(Xlsx.Child(styleSheet, "fonts"), "font")
@@ -168,9 +175,10 @@ internal static class XlsxCellFormats
     /// <param name="cellFormat">What the cell resolved to, for everything but the font.</param>
     /// <param name="defaultFont">The workbook's default font, which supplies what the run omits.</param>
     /// <param name="font">What the run states.</param>
-    /// <param name="palette">The workbook's indexed colours.</param>
+    /// <param name="palette">The workbook's colours.</param>
     public static SheetCellFormat Apply(
-        SheetCellFormat cellFormat, SheetCellFormat defaultFont, XlsxRunFont font, Colour[] palette)
+        SheetCellFormat cellFormat, SheetCellFormat defaultFont, XlsxRunFont font,
+        XlsxPalette palette)
     {
         ArgumentNullException.ThrowIfNull(cellFormat);
         ArgumentNullException.ThrowIfNull(defaultFont);
@@ -199,19 +207,18 @@ internal static class XlsxCellFormats
         };
     }
 
-    private static Colour? Resolve(XlsxRunColour? stated, Colour[] palette)
+    private static Colour? Resolve(XlsxRunColour? stated, XlsxPalette palette)
     {
         if (stated is not { } colour) return null;
 
-        Colour resolved;
+        Colour? resolved =
+            colour.Rgb is { } rgb ? Colour.FromRgb(rgb)
+            : colour.Indexed is { } indexed ? palette.Indexed(indexed)
+            : colour.Theme is { } theme ? palette.Theme(theme)
+            : null;
 
-        if (colour.Rgb is { } rgb) resolved = Colour.FromRgb(rgb);
-        else if (colour.Indexed is { } indexed)
-            resolved = indexed >= 0 && indexed < palette.Length ? palette[indexed] : Colour.Black;
-        else if (colour.Theme is { } theme) resolved = ThemeColour(theme);
-        else return null;
-
-        return colour.Tint != 0 ? Tint(resolved, colour.Tint) : resolved;
+        if (resolved is not { } found) return null;
+        return colour.Tint != 0 ? XlsxTint.Apply(found, colour.Tint) : found;
     }
 
     // ------------------------------------------------------------------------------ records
@@ -330,10 +337,12 @@ internal static class XlsxCellFormats
     /// <remarks>The other half of the same model — see <see cref="UnnamedFontFamily"/>.</remarks>
     private const double UnnamedFontPoints = 11.0;
 
-    private static Font ReadFont(XElement font, Colour[] palette)
+    private static Font ReadFont(XElement font, XlsxPalette palette)
     {
         double? points = Number(Xlsx.Child(font, "sz"), "val");
-        Colour colour = ColourOf(Xlsx.Child(font, "color"), palette, out bool stated);
+        Colour? found = palette.Read(Xlsx.Child(font, "color"));
+        Colour colour = found ?? Colour.Black;
+        bool stated = found is not null;
 
         return new Font(
             Xlsx.Attribute(Xlsx.Child(font, "name"), "val")
@@ -394,131 +403,6 @@ internal static class XlsxCellFormats
     private static bool Toggle(XElement? element)
         => element is not null && (Xlsx.Attribute(element, "val") is not { } value
                                    || value is not ("0" or "false"));
-
-    /// <summary>
-    /// A colour element, resolved as far as a workbook without its theme allows.
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// <c>rgb</c> is an eight-digit ARGB and is exact. <c>indexed</c> is the BIFF palette, which
-    /// the workbook may override in <c>colors/indexedColors</c>. <c>theme</c> needs
-    /// <c>theme1.xml</c>, which is not read yet: the standard Office palette is used instead,
-    /// which is right for every workbook that has not been re-themed and wrong by a hue for one
-    /// that has. <c>tint</c> lightens towards white or darkens towards black, and applies to all
-    /// three.
-    /// </para>
-    /// <para>
-    /// <c>auto="1"</c> is the window text colour, which is black on every printed page.
-    /// </para>
-    /// </remarks>
-    private static Colour ColourOf(XElement? element, Colour[] palette, out bool stated)
-    {
-        stated = false;
-        if (element is null) return Colour.Black;
-
-        Colour colour;
-
-        if (Xlsx.Attribute(element, "rgb") is { Length: >= 6 } rgb
-            && uint.TryParse(
-                rgb[^6..], NumberStyles.HexNumber, CultureInfo.InvariantCulture, out uint value))
-        {
-            colour = Colour.FromRgb(value);
-        }
-        else if (Xlsx.Integer(element, "indexed") is { } indexed)
-        {
-            colour = indexed >= 0 && indexed < palette.Length ? palette[indexed] : Colour.Black;
-        }
-        else if (Xlsx.Integer(element, "theme") is { } theme)
-        {
-            colour = ThemeColour(theme);
-        }
-        else
-        {
-            return Colour.Black;
-        }
-
-        stated = true;
-
-        if (Number(element, "tint") is { } tint && tint != 0) colour = Tint(colour, tint);
-        return colour;
-    }
-
-    /// <summary>
-    /// Lightens towards white for a positive tint and darkens towards black for a negative one.
-    /// </summary>
-    /// <remarks>
-    /// <see cref="XlsxTint"/> holds the transform. This used to apply the linear form — blending
-    /// each channel towards white — on the grounds that it is what LibreOffice's OOXML filter
-    /// does. That is not what it does for a <em>SpreadsheetML</em> tint: one <c>XlsColor</c>
-    /// serves fonts, fills and borders alike and every one of its setters calls
-    /// <c>addExcelTintTransformation</c> (<c>sc/source/filter/oox/stylesbuffer.cxx:255-279</c>),
-    /// which is a luminance modulation in HSL. The two agree closely on unsaturated colours,
-    /// which is why the difference went unnoticed here.
-    /// </remarks>
-    private static Colour Tint(Colour colour, double tint) => XlsxTint.Apply(colour, tint);
-
-    private static Colour[] ReadPalette(XElement styleSheet)
-    {
-        Colour[] palette = [.. DefaultPalette];
-
-        int at = 0;
-        foreach (XElement entry in Xlsx.Children(
-                     Xlsx.Child(Xlsx.Child(styleSheet, "colors"), "indexedColors"), "rgbColor"))
-        {
-            if (at >= palette.Length) break;
-            if (Xlsx.Attribute(entry, "rgb") is { Length: >= 6 } rgb
-                && uint.TryParse(
-                    rgb[^6..], NumberStyles.HexNumber, CultureInfo.InvariantCulture, out uint value))
-            {
-                palette[at] = Colour.FromRgb(value);
-            }
-            at++;
-        }
-
-        return palette;
-    }
-
-    /// <summary>
-    /// The standard Office theme's twelve colours, in <c>clrScheme</c> order.
-    /// </summary>
-    /// <remarks>
-    /// SpreadsheetML swaps the first four round relative to DrawingML — a <c>theme</c> index of 0
-    /// is the *light* background and 1 the dark text, where the theme part lists dark first
-    /// (<c>oox/source/drawingml/theme.cxx</c>, <c>getColorByToken</c>). Getting that pair the
-    /// wrong way round paints every default-coloured cell white on white.
-    /// </remarks>
-    private static Colour ThemeColour(int index) => index switch
-    {
-        0 => Colour.White,
-        1 => Colour.Black,
-        2 => Colour.FromRgb(0xE7E6E6),
-        3 => Colour.FromRgb(0x44546A),
-        4 => Colour.FromRgb(0x4472C4),
-        5 => Colour.FromRgb(0xED7D31),
-        6 => Colour.FromRgb(0xA5A5A5),
-        7 => Colour.FromRgb(0xFFC000),
-        8 => Colour.FromRgb(0x5B9BD5),
-        9 => Colour.FromRgb(0x70AD47),
-        10 => Colour.FromRgb(0x0563C1),
-        11 => Colour.FromRgb(0x954F72),
-        _ => Colour.Black,
-    };
-
-    /// <summary>The BIFF colour palette, which <c>indexed</c> selects from.</summary>
-    private static readonly Colour[] DefaultPalette =
-    [
-        .. new uint[]
-        {
-            0x000000, 0xFFFFFF, 0xFF0000, 0x00FF00, 0x0000FF, 0xFFFF00, 0xFF00FF, 0x00FFFF,
-            0x000000, 0xFFFFFF, 0xFF0000, 0x00FF00, 0x0000FF, 0xFFFF00, 0xFF00FF, 0x00FFFF,
-            0x800000, 0x008000, 0x000080, 0x808000, 0x800080, 0x008080, 0xC0C0C0, 0x808080,
-            0x9999FF, 0x993366, 0xFFFFCC, 0xCCFFFF, 0x660066, 0xFF8080, 0x0066CC, 0xCCCCFF,
-            0x000080, 0xFF00FF, 0xFFFF00, 0x00FFFF, 0x800080, 0x800000, 0x008080, 0x0000FF,
-            0x00CCFF, 0xCCFFFF, 0xCCFFCC, 0xFFFF99, 0x99CCFF, 0xFF99CC, 0xCC99FF, 0xFFCC99,
-            0x3366FF, 0x33CCCC, 0x99CC00, 0xFFCC00, 0xFF9900, 0xFF6600, 0x666699, 0x969696,
-            0x003366, 0x339966, 0x003300, 0x333300, 0x993300, 0x993366, 0x333399, 0x333333,
-        }.Select(Colour.FromRgb),
-    ];
 
     // ----------------------------------------------------------------------------- resolving
 

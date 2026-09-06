@@ -24,6 +24,7 @@ public sealed class XlsxStyles
     private readonly Dictionary<int, string> _customCodes = [];
     private readonly List<int> _cellFormatIds = [];
     private readonly Dictionary<int, NumberFormatCode> _parsed = [];
+    private int _defaultFormatId;
 
     private XlsxStyles()
     {
@@ -47,12 +48,57 @@ public sealed class XlsxStyles
 
         foreach (XElement xf in Xlsx.Children(Xlsx.Child(root, "cellXfs"), "xf"))
         {
-            // An xf without numFmtId inherits nothing meaningful for extraction: 0 is General,
-            // which is also what a cell with no style at all gets.
+            // An xf without numFmtId names General, which is also the schema's default.
             styles._cellFormatIds.Add(Xlsx.Integer(xf, "numFmtId") ?? 0);
         }
 
+        styles._defaultFormatId = DefaultFormatId(root);
         return styles;
+    }
+
+    /// <summary>
+    /// The number format a cell that states no <c>s</c> takes: the Default cell style's.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>It is not <c>cellXfs[0]</c>, and the difference is measurable.</strong> A cell
+    /// element states its format as <c>@s</c>, and LibreOffice reads an absent one as
+    /// <em>no XF at all</em> — <c>rAttribs.getInteger(XML_s, -1)</c>
+    /// (<c>sc/source/filter/oox/sheetdatacontext.cxx</c>:371), after which
+    /// <c>SheetDataBuffer::setCellFormat</c> returns immediately on a negative id
+    /// (<c>sheetdatabuffer.cxx</c>:721). What the cell then shows is whatever the sheet already
+    /// carries: the column's default pattern, the row's, or the document's Default cell style,
+    /// which is the <c>cellStyleXfs</c> entry the <c>Normal</c> <c>cellStyle</c> names.
+    /// </para>
+    /// <para>
+    /// Measured on a probe workbook whose <c>cellXfs[0]</c> and <c>cellStyleXfs[0]</c> carry
+    /// different formats (<c>dotnet/probes/numfmt-r68/make-default.py</c>): both 26.2.4.2 and
+    /// 24.2.7.2 draw the <em>cellStyleXfs</em> one for a cell with no <c>s</c> and the
+    /// <em>cellXfs</em> one for a cell that states <c>s="0"</c>. Every workbook in the corpus
+    /// happens to give the two the same id, so no corpus document can tell them apart — which is
+    /// exactly why the rule had to be probed rather than inferred.
+    /// </para>
+    /// </remarks>
+    private static int DefaultFormatId(XElement root)
+    {
+        List<int> styleFormatIds = [];
+        foreach (XElement xf in Xlsx.Children(Xlsx.Child(root, "cellStyleXfs"), "xf"))
+            styleFormatIds.Add(Xlsx.Integer(xf, "numFmtId") ?? 0);
+
+        if (styleFormatIds.Count == 0) return 0;
+
+        // `builtinId="0"` is the Normal style, which is the document's Default cell style; a
+        // workbook that names none falls back to the first entry, which is where every producer
+        // writes it.
+        int index = 0;
+        foreach (XElement style in Xlsx.Children(Xlsx.Child(root, "cellStyles"), "cellStyle"))
+        {
+            if (Xlsx.Integer(style, "builtinId") != 0) continue;
+            if (Xlsx.Integer(style, "xfId") is { } xfId) index = xfId;
+            break;
+        }
+
+        return index >= 0 && index < styleFormatIds.Count ? styleFormatIds[index] : 0;
     }
 
     /// <summary>
@@ -82,16 +128,23 @@ public sealed class XlsxStyles
     /// The number format a cell's <c>s</c> attribute selects.
     /// </summary>
     /// <remarks>
-    /// An index outside <c>cellXfs</c> falls back to <c>General</c> rather than throwing: a
-    /// style index that does not resolve is a broken file, not an unreadable one.
+    /// A cell that states no <c>s</c> — and one whose <c>s</c> is outside <c>cellXfs</c>, which
+    /// is a broken file rather than an unreadable one — takes the Default cell style. See
+    /// <see cref="Default"/>.
     /// </remarks>
     public NumberFormatCode FormatFor(int? styleIndex)
     {
         if (styleIndex is not { } index || index < 0 || index >= _cellFormatIds.Count)
-            return NumberFormatCode.General;
+            return Default;
 
         return FormatForId(_cellFormatIds[index]);
     }
+
+    /// <summary>
+    /// The format a cell takes when neither it, its row nor its column states one.
+    /// </summary>
+    /// <remarks>See <c>DefaultFormatId</c> for why this is not <c>cellXfs[0]</c>.</remarks>
+    public NumberFormatCode Default => FormatForId(_defaultFormatId);
 
     /// <summary>The format code a number-format id names, custom or built in.</summary>
     public NumberFormatCode FormatForId(int numberFormatId)
@@ -110,87 +163,12 @@ public sealed class XlsxStyles
     }
 
     /// <summary>
-    /// The format codes ids 0–49 stand for when the file does not spell them out.
+    /// The format codes ids 0–81 stand for when the file does not spell them out.
     /// </summary>
     /// <remarks>
-    /// <para>
-    /// These are implicit: a file may use id 14 without declaring a <c>numFmt</c> for it, so a
-    /// reader that only honours the declared ones shows every date as a serial number.
-    /// </para>
-    /// <para>
-    /// The date, time and currency entries are genuinely locale-dependent — LibreOffice keeps a
-    /// table per locale in <c>sc/source/filter/oox/numberformatsbuffer.cxx:436</c> and picks by
-    /// the workbook's locale — and the codes here are its <c>en_US</c> row
-    /// (<c>numberformatsbuffer.cxx:798</c>). A German workbook using id 14 therefore extracts
-    /// its dates as <c>M/D/YYYY</c> rather than <c>DD.MM.YYYY</c>. Fixing that needs locale
-    /// infrastructure Paperless does not yet have; it is recorded in this library's TODO.
-    /// </para>
+    /// <see cref="BuiltInNumberFormats"/> holds the table, shared with the BIFF reader. It used
+    /// to be duplicated here with a different answer for ids 14, 20, 22 and 37–40, so a
+    /// workbook's built-in format depended on which of the two readers opened it.
     /// </remarks>
-    private static string? BuiltinCode(int id) => id switch
-    {
-        0 => "General",
-        1 => "0",
-        2 => "0.00",
-        3 => "#,##0",
-        4 => "#,##0.00",
-        5 => "$#,##0_);($#,##0)",
-        6 => "$#,##0_);[RED]($#,##0)",
-        7 => "$#,##0.00_);($#,##0.00)",
-        8 => "$#,##0.00_);[RED]($#,##0.00)",
-        9 => "0%",
-        10 => "0.00%",
-        11 => "0.00E+00",
-        12 => "# ?/?",
-        13 => "# ??/??",
-        14 => "M/D/YYYY",
-        15 => "D-MMM-YY",
-        16 => "D-MMM",
-        17 => "MMM-YY",
-        18 => "h:mm AM/PM",
-        19 => "h:mm:ss AM/PM",
-        20 => "h:mm",
-        21 => "h:mm:ss",
-        22 => "M/D/YYYY h:mm",
-
-        // 23..36 and 50..81 are "international" aliases that reuse an earlier entry.
-        23 or 24 or 25 or 26 => "General",
-        27 or 28 or 29 or 30 or 31 or 36 => "M/D/YYYY",
-        32 or 33 or 34 or 35 => "h:mm:ss",
-
-        37 => "#,##0_);(#,##0)",
-        38 => "#,##0_);[RED](#,##0)",
-        39 => "#,##0.00_);(#,##0.00)",
-        40 => "#,##0.00_);[RED](#,##0.00)",
-        41 => "_(* #,##0_);_(* (#,##0);_(* \"-\"_);_(@_)",
-        42 => "_($* #,##0_);_($* (#,##0);_($* \"-\"_);_(@_)",
-        43 => "_(* #,##0.00_);_(* (#,##0.00);_(* \"-\"??_);_(@_)",
-        44 => "_($* #,##0.00_);_($* (#,##0.00);_($* \"-\"??_);_(@_)",
-        45 => "mm:ss",
-        46 => "[h]:mm:ss",
-        47 => "mm:ss.0",
-        48 => "##0.0E+0",
-        49 => "@",
-
-        >= 50 and <= 58 => "M/D/YYYY",
-        59 => "0",
-        60 => "0.00",
-        61 => "#,##0",
-        62 => "#,##0.00",
-        67 => "0%",
-        68 => "0.00%",
-        69 => "# ?/?",
-        70 => "# ??/??",
-        71 or 72 => "M/D/YYYY",
-        73 => "D-MMM-YY",
-        74 => "D-MMM",
-        75 => "MMM-YY",
-        76 => "h:mm",
-        77 => "h:mm:ss",
-        78 => "M/D/YYYY h:mm",
-        79 => "mm:ss",
-        80 => "[h]:mm:ss",
-        81 => "mm:ss.0",
-
-        _ => null,
-    };
+    private static string? BuiltinCode(int id) => BuiltInNumberFormats.Code(id);
 }

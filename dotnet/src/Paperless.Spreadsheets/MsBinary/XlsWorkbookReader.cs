@@ -913,7 +913,7 @@ internal sealed class XlsWorkbookReader
 
         string? code = _formatCodes.TryGetValue(index, out string? stated)
             ? stated
-            : BuiltInNumberFormats.Code(index);
+            : BuiltInNumberFormats.BiffCode(index);
 
         NumberFormatCode parsed = code is null ? NumberFormatCode.General : NumberFormatCode.Parse(code);
 
@@ -949,7 +949,7 @@ internal sealed class XlsWorkbookReader
 
         string? code = _formatCodes.TryGetValue(index, out string? stated)
             ? stated
-            : BuiltInNumberFormats.Code(index);
+            : BuiltInNumberFormats.BiffCode(index);
 
         if (code is null) return null;
 

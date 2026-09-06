@@ -286,6 +286,20 @@ public sealed class NumberFormatSection
                 continue;
             }
 
+            // The day-name keys, which are not letters of a date the way `d` and `m` are:
+            // `AAA`/`AAAA` are Excel's (East Asian in origin, and every producer writes them
+            // lower case), `NN`/`NNN`/`NNNN` are LibreOffice's own. They share one case in
+            // `zformat.cxx`:3983-4008 and the difference is short name against long, plus the
+            // locale's day-of-week separator on `NNNN` alone.
+            if (DayNameRun(code, i, out int nameLength, out int nameCount, out bool otherCalendar))
+            {
+                tokens.Add(FormatToken.DateTime('w', nameCount));
+                sawDateTime = true;
+                if (otherCalendar) unreproduced = true;
+                i += nameLength;
+                continue;
+            }
+
             if (IsDateTimeLetter(c))
             {
                 char lower = char.ToLowerInvariant(c);
@@ -328,6 +342,68 @@ public sealed class NumberFormatSection
     private static bool MatchesWord(string code, int index, string word)
         => index + word.Length <= code.Length
            && string.Compare(code, index, word, 0, word.Length, StringComparison.OrdinalIgnoreCase) == 0;
+
+    /// <summary>
+    /// Matches a day-name key at <paramref name="index"/> and says how it is written.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>The five keys do not pair up the way their lengths suggest, and the pairing was
+    /// measured rather than counted.</strong> <c>zformat.cxx</c>:3983-4004 puts <c>NN</c> with
+    /// <c>AAA</c> on <c>SHORT_DAY_NAME</c> and <c>NNN</c> with <c>AAAA</c> on
+    /// <c>LONG_DAY_NAME</c>, so <c>nnn</c> is a <em>long</em> name and not a short one; only
+    /// <c>NNNN</c> appends the locale's day-of-week separator (:4004,
+    /// <c>getLongDateDayOfWeekSep</c>). Both binaries draw <c>Sun</c>, <c>Sunday</c> and
+    /// <c>Sunday, </c> for the three. The count below is therefore 3 for a short name, 4 for a
+    /// long one and 5 for a long one with the separator.
+    /// </para>
+    /// <para>
+    /// Runs of one or two <c>a</c>, and a lone <c>n</c>, are not keywords and stay literal —
+    /// <c>sKeyword</c> holds only <c>AAA</c>, <c>AAAA</c>, <c>NN</c>, <c>NNN</c> and
+    /// <c>NNNN</c> (<c>svl/source/numbers/zforscan.cxx</c>:60-77).
+    /// </para>
+    /// <para>
+    /// <strong>An <c>A</c> key drags a calendar in with it and an <c>N</c> key does not.</strong>
+    /// <c>ImpIsOtherCalendar</c> (<c>zformat.cxx</c>:3453-3480) answers true for a subformat
+    /// holding <c>AAA</c>, <c>AAAA</c>, <c>EC</c>, <c>EEC</c>, <c>R</c>, <c>RR</c>, <c>G</c>,
+    /// <c>GG</c> or <c>GGG</c> — and for none of the <c>N</c> keys — after which
+    /// <c>SwitchToOtherCalendar</c> (:3486-3512) renders the month and day fields in the
+    /// <em>first non-Gregorian calendar the locale lists</em>, leaving the year Gregorian.
+    /// Measured on both installed binaries
+    /// (<c>dotnet/probes/numfmt-r68/make-codes.py</c>): under en-US that calendar is the Jewish
+    /// one, so serial 44794 — 21 August 2022, a Sunday — draws <c>05/24/22 Sunday</c> under
+    /// <c>mm/dd/yy aaaa</c> and <c>08/21/22 Sunday</c> under <c>mm/dd/yy nnn</c>. The day name
+    /// itself is exact either way; the date beside an <c>A</c> key is not, which is why only
+    /// those report <see cref="HasUnreproducedDirective"/>.
+    /// </para>
+    /// </remarks>
+    private static bool DayNameRun(
+        string code, int index, out int length, out int count, out bool otherCalendar)
+    {
+        length = 0;
+        count = 0;
+        otherCalendar = false;
+
+        char first = char.ToLowerInvariant(code[index]);
+        if (first is not ('a' or 'n')) return false;
+
+        int run = 0;
+        while (index + run < code.Length && char.ToLowerInvariant(code[index + run]) == first) run++;
+
+        // Longest key first, left to right, and the remainder of an over-long run is whatever
+        // it parses as next. Measured on both binaries: `aaaaa` draws `Sundaya` and `nnnnn`
+        // draws `Sunday, n`, so the scanner takes AAAA/NNNN and leaves the tail — not the other
+        // way round, which would draw `aSunday`.
+        int shortest = first == 'a' ? 3 : 2;
+        if (run < shortest) return false;
+
+        length = Math.Min(run, 4);
+        count = first == 'a'
+            ? length                                        // AAA short, AAAA long
+            : length switch { 2 => 3, 3 => 4, _ => 5 };     // NN short, NNN long, NNNN long+sep
+        otherCalendar = first == 'a';
+        return true;
+    }
 
     private static bool IsDateTimeLetter(char c)
         => char.ToLowerInvariant(c) is 'y' or 'm' or 'd' or 'h' or 's' or 'g' or 'e' or 'b';
@@ -401,7 +477,8 @@ public sealed class NumberFormatSection
 
             switch (token.Symbol)
             {
-                case 'y' or 'd' or 'g' or 'e' or 'b':
+                // 'w' is a day name, which is a date part even though it draws no digits.
+                case 'y' or 'd' or 'g' or 'e' or 'b' or 'w':
                     hasDate = true;
                     break;
                 case 'h' or 's':

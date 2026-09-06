@@ -68,7 +68,7 @@ public static class XlsxReader
             // The workbook's cell formats, read once. Only layout looks at them, and only the
             // fonts-and-alignment half of styles.xml is read here — the number formats extraction
             // needs are already resolved on file.Styles.
-            XlsxCellFormatTable cellFormats = XlsxCellFormats.Read(file.StyleSheet, file.Styles);
+            XlsxCellFormatTable cellFormats = XlsxCellFormats.Read(file.StyleSheet, file.Styles, file.ThemeRoot);
 
             // The workbook's theme, read once. A chart part that states an a:schemeClr needs it
             // and every other drawing does not, which is why it was missing: nothing in a
