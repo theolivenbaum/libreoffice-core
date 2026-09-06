@@ -183,7 +183,7 @@ public static class FontItemiser
         IGlyphFallbackResolver fallback, int codePoint, OpenTypeFace primary, bool isPiFace)
         => isPiFace
             ? fallback.SymbolFallbackFor(codePoint, primary.Weight, primary.IsItalic)
-            : fallback.FallbackFor(codePoint, primary.Weight, primary.IsItalic);
+            : fallback.FallbackFor(codePoint, primary.Weight, primary.IsItalic, primary);
 
     /// <param name="text">The text to check.</param>
     /// <param name="primary">The face the run asked for.</param>
