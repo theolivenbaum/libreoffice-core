@@ -248,3 +248,102 @@ mae 0.0201 / 0.0208 and ink +0.0056 / +0.0040.
 - **Ask LibreOffice what it computed.** Three of the findings above — the plot height in §2, the
   `local-table` in §3, the database range that shadows the sheet name — are one `--convert-to
   fods` each. None of them is inferable from a rendering.
+
+## 5 · The anchoring fix's reach over the whole corpus, and the gate
+
+Measured the way `CLAUDE.md` prescribes and not by grep: **all 947 manifest documents rendered
+twice**, once with a binary built from the base commit's `ChartLayout.cs` and once with the fix,
+`SOURCE_DATE_EPOCH` pinned on both passes so a printed date cannot move, and the two sets of PDFs
+compared byte for byte. 0 render failures on either pass.
+
+**15 of 947 documents change a byte. The other 932 are byte-identical and therefore cannot have
+moved a gate verdict**, which is what makes a targeted gate sound here rather than a shortcut.
+
+```
+001_Contextures_chart_sample_b089bc34.xlsx        058_Social_media_engagement_data.xlsx
+023_Waterfall_Chart_Template_for_Excel.xlsx       064_Small_business_cash_flow.xlsx
+029_Annual_budget_Use_this_template.xlsx          171128IPAP.pptx
+046_Cost_analysis_with_Pareto_chart.xlsx          8_P-Pavese_AIRBUS-ATB-journee-CRATB.pptx
+052_Manufacturing_output_chart.xlsx               Demick_JetBlue.pptx
+055_Project_timeline_with_milestones.xlsx         Intersil_Italy_CAN_Bus_Transceiver_Presentation_Final.pptx
+057_Simple_balance_sheet.xlsx                     Template Pilot Logbook JAR-FCL V3.0.xls
+                                                  southern-classic-kennesaw-state-university-final.pptx
+```
+
+The gate's three checks — page count, alphanumeric characters, unembedded fonts — recomputed on
+those fifteen against **both** references, before and after:
+
+**No verdict moves, on any of the fifteen, against either reference.** Page counts are unchanged
+throughout. Only two documents' character counts move at all, and both move *toward* the
+reference: `057_Simple_balance_sheet` 2231 → 2207 against 1877, and
+`Template Pilot Logbook JAR-FCL V3.0` 5761 → 5756 against 5643. Every other one is
+character-identical, which is what a fix that repositions labels without adding or removing any
+should be.
+
+Page mean absolute difference at 110 dpi, against both references, listing **every** page whose
+raster changed at all — the moved pages were found by hashing both sides' 72 dpi rasters, so none
+is missed and none of the 900-odd unchanged pages is scored:
+
+| document | vs | page | before → after | |
+|---|---|---|---|---|
+| `Demick_JetBlue.pptx` | 24.2 | 4, 5, 7 | 0.0781→0.0766, 0.0949→0.0946, 0.0862→0.0853 | better |
+| | 26.2 | 4, 5, 7 | 0.0748→0.0734, 0.0950→0.0946, 0.0891→0.0884 | better |
+| `001_Contextures_chart_sample` | 24.2 | 8 | 0.0089 → 0.0088 | better |
+| | 26.2 | 8 | incomparable — the two references paginate it 15 against 11 | — |
+| `023_Waterfall_Chart_Template` | 24.2 / 26.2 | 1 | 0.0246→0.0237, 0.0247→0.0238 | better |
+| `029_Annual_budget` | 24.2 / 26.2 | 2 | 0.0078→0.0073, 0.0071→0.0066 | better |
+| `046_Cost_analysis_with_Pareto_chart` | 24.2 / 26.2 | — | no page moved | — |
+| `052_Manufacturing_output_chart` | 24.2 / 26.2 | 1 | 0.0174→0.0171, 0.0177→0.0174 | better |
+| `055_Project_timeline_with_milestones` | 24.2 / 26.2 | 1 | 0.0160→0.0160, 0.0146→0.0146 | better |
+| `057_Simple_balance_sheet` | 24.2 / 26.2 | 3 | 0.0399→0.0399, 0.0398→0.0398 | better |
+| `058_Social_media_engagement_data` | 24.2 / 26.2 | 1 | 0.0280→0.0274, 0.0283→0.0278 | better |
+| `171128IPAP.pptx` | 24.2 / 26.2 | 35 | 0.0093→0.0083, 0.0086→0.0075 | better |
+| `8_P-Pavese_AIRBUS-ATB-journee-CRATB.pptx` | 24.2 / 26.2 | 16 | 0.0191→0.0187, 0.0185→0.0181 | better |
+| `Intersil_Italy_CAN_Bus_Transceiver…pptx` | 24.2 / 26.2 | 30 | 0.0980→0.0977, 0.0777→0.0775 | better |
+| `southern-classic-kennesaw-state…pptx` | 24.2 | 2, 9, 10 | 0.0378→0.0368, 0.0159→0.0143, 0.0350→0.0340 | better |
+| | 26.2 | 2, 9, 10 | 0.0360→0.0348, 0.0153→0.0137, 0.0242→0.0231 | better |
+| `Template Pilot Logbook JAR-FCL V3.0.xls` | 24.2 | 16, 17, 18 | 0.0345→0.0342, 0.0364→0.0359, 0.0215→0.0214 | better |
+| | 26.2 | 16, 17, 18 | 0.0342→0.0337, 0.0361→0.0352, 0.0215→0.0214 | better |
+| `064_Small_business_cash_flow` | 24.2 | 2, 4 | 0.0154→0.0150, 0.0135→0.0131 | better |
+| | 24.2 | **3** | **0.0026 → 0.0027** | **worse** |
+| | 26.2 | 2, 4 | 0.0182→0.0178, 0.0142→0.0138 | better |
+| | 26.2 | **3** | **0.0026 → 0.0027** | **worse** |
+
+**One page in one document is left worse, by 0.0001 of a grey level, and it is a page the
+reference does not draw the labels on at all.** `064_Small_business_cash_flow`'s chart is wider
+than its page, so it spills into a second column of pages; the reference's page 3 carries **no
+text of any kind** and ours carries seven rotated category labels, a clipped repeat of page 2's.
+Moving those seven left moved them into marginally worse agreement with a page that has nothing
+for them to agree with. Its reach is that one page, its magnitude is 0.0001, and the same document
+improves by 0.0007 overall on both references; the defect underneath it is the page-column spill,
+which is sheet pagination.
+
+**Every other page that moved moved closer to the reference, against both references.** `057`'s
+page 3 is the one where the improvement rounds to nothing at four places: its twenty labels are a
+small share of that page's ink, which is dominated by a chart frame we draw 681.6 × 494.4 pt
+against the reference's 614.7 × 474.9 — the chart sheet's own placement, which is sheet pagination
+and is left unfixed.
+
+`046_Cost_analysis_with_Pareto_chart` is worth its row: its bytes changed and no page's mean
+absolute difference did, at four decimal places. A label that moves within a region that is
+already dense costs nothing on this metric, which is the reason the byte diff and not the score is
+what defines the reach.
+
+### `064` is also the best witness in the corpus, because its reference draws the labels as text
+
+The outlining seen on `057` and `Demick` is not universal — `064_Small_business_cash_flow`'s
+26.2.4.2 rendering emits its seven rotated category labels as ordinary rotated text spans, so
+their positions can be read straight out with no clustering. On its page 2, the advance from one
+label's right-hand end to the next:
+
+| | advances, in points |
+|---|---|
+| 26.2.4.2 | 65.06  65.09  65.03  65.15  65.03 |
+| ours, before | 58.41  65.90  65.29  64.57  66.44 |
+| ours, after | **65.10  65.11  65.11  65.11  65.11** |
+
+The labels are `Beginning`, `Jan-xx`, `Feb-xx` … — one long name followed by six short ones, which
+is precisely the arrangement that separates the two anchorings, and the reference's advance is flat
+across it. Absolute positions land within 1.4 pt of the reference's throughout
+(`214.32 279.38 344.47 409.51 474.66 539.69` against
+`212.97 278.07 343.17 408.29 473.40 538.51`).
