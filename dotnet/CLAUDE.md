@@ -400,9 +400,11 @@ Three things this changes about how a round is run:
    that way produced three findings, two of them previously unrecorded (a missing custom bullet,
    and a hanging indent we invent where the reference has none). Done a fourth time in round 67 over
    the whole words track against 26.2.4.2 — 307 of the 312 gate-passing documents scoreable — it
-   produced three more, and the first of them is **an entire unimplemented feature**: `w:pgBorders`
-   appears nowhere in `dotnet/src`, **7 of the 272 corpus DOCX declare a real one**, two of those
-   seven are in the ink ranking's top ten, and every one of the seven passes the gate. The other
+   produced three more, and the first of them was **an entire unimplemented feature**: `w:pgBorders`
+   appeared nowhere in `dotnet/src`, **7 of the 272 corpus DOCX declare a real one**, two of those
+   seven are in the ink ranking's top ten, and every one of the seven passes the gate — because a
+   border adds no words and no pages, so no gate column can see one. Closed in the same round, and
+   the gate is `MATCH 314` before and after it, which is the whole argument for ranking on ink. The other
    two are a cover page's anchored artwork drawn one page late on `PES-Technical-Report-Template`
    (measured by sign: page 1 reads *ink missing from ours*, page 2 reads *ink we draw*, in the same
    regions) and a per-page pagination difference on `hdss-bulletin-issue-285` that is not a
