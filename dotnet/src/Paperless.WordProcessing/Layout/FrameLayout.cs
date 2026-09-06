@@ -784,12 +784,12 @@ public sealed class AnchoredObstacles(
 /// reaches the end margin. Top-and-bottom does both, which is what leaves the line with nowhere to go.
 /// </description></item>
 /// <item><description>
-/// <strong>A line whose box merely touches the frame's top edge is already affected.</strong>
-/// Measured: a frame anchored at the top of the second paragraph narrows the <em>last line of the
-/// first</em>, whose box bottom is exactly the frame's top. Writer's rectangles are inclusive
-/// (<c>SwRect::Bottom() == Top() + Height() - 1</c>) and the arithmetic around the fly portion adds a
-/// twip back, so the effective rectangle is one twip larger than its geometry on every side — which is
-/// also why text resumes 3402 rather than 3401 twips along from a frame 2268 twips wide at 1134.
+/// <strong>A line whose box merely touches the frame's top edge is not affected.</strong> Writer's
+/// rectangles are inclusive — <c>SwRect::Bottom() == Top() + Height() - 1</c> — so a frame at twip 2210
+/// and a line ending at 2210 do not overlap, and neither reference wraps that line once the tie is
+/// broken either way by a single twip. Only the <em>horizontal</em> edges gain a twip back from the
+/// arithmetic around the fly portion, which is why text resumes 3402 rather than 3401 twips along from
+/// a frame 2268 twips wide at 1134. See <see cref="FrameObstacles.Inflation"/>.
 /// </description></item>
 /// <item><description>
 /// <strong>The optimal wrap is decided per frame from the room on each side</strong>, per
@@ -801,13 +801,24 @@ public sealed class AnchoredObstacles(
 internal sealed class FrameObstacles : ILineObstacles
 {
     /// <summary>
-    /// How much larger than its geometry a frame's hole in the text is, on every side.
+    /// How much wider than its geometry a frame's hole in the text is, on each side.
     /// </summary>
     /// <remarks>
-    /// One twip, and it is not a fudge: Writer's rectangles are inclusive, so a fly at twip 1941 has
-    /// <c>Top() == 1941</c> and the line above it has <c>Bottom() == 1940</c>, and yet the two are treated
-    /// as meeting. Measured at both edges — the frame two paragraphs down narrows the line whose box ends
-    /// exactly where it begins, and text after a frame resumes one twip past its right edge.
+    /// <para>
+    /// One twip, and it is not a fudge: Writer's rectangles are inclusive, so a frame 2268 twips wide at
+    /// 1134 has <c>Right() == 3401</c> and the arithmetic around the fly portion adds a twip back, which
+    /// is why text resumes 3402 twips along rather than 3401.
+    /// </para>
+    /// <para>
+    /// <strong>Horizontally only.</strong> It used to be applied on all four sides, on the reading that a
+    /// line whose box bottom is exactly a frame's top is already obstructed. That reading is wrong against
+    /// 26.2.4.2 and the measurement is in
+    /// <c>probes/words-frame-parallel/results.md</c>: moving the frame six twips up makes the touching line
+    /// wrap in six of six documents, moving it six twips down leaves it alone in six of six, and at exact
+    /// equality the reference answers three each way — on the frame's <em>width</em>, its horizontal
+    /// position and its height, none of which can change the vertical relation. So the reference's rule
+    /// away from the boundary is a strict overlap, and on the boundary it has no rule at all.
+    /// </para>
     /// </remarks>
     private static readonly Length Inflation = Length.FromTwips(1);
 
@@ -920,9 +931,9 @@ internal sealed class FrameObstacles : ILineObstacles
     {
         DocRect area = new(
             obstacle.Area.X - Inflation,
-            obstacle.Area.Y - Inflation,
+            obstacle.Area.Y,
             obstacle.Area.Width + (Inflation * 2),
-            obstacle.Area.Height + (Inflation * 2));
+            obstacle.Area.Height);
 
         TextWrap wrap = obstacle.Wrap == TextWrap.Optimal
             ? Resolve(area, wantedLeft, wantedRight)

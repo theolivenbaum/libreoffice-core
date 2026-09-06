@@ -632,8 +632,14 @@ the thing under test.
 
 Three things about comparing it, all measured:
 
-- **The frame's top is exactly the anchor paragraph's top**, and the line *above* it is narrowed anyway. Its
-  box bottom and the frame's top edge coincide at 2210 twips, and LibreOffice treats that as an overlap.
+- **The frame's top used to be exactly the anchor paragraph's top, and it is now one hundredth of a
+  centimetre above it** — `svg:y="-0.01cm"` in the two ODF forms. At exactly equal, the line above and the
+  frame's top edge both at 2210 twips, LibreOffice has no rule: 26.2.4.2 narrows that line here, does not
+  narrow it in `frame-parallel`, and flips between the two on the frame's width, its horizontal position and
+  its height, none of which can move its top edge. Six twips of clearance either way is decided the same by
+  both binaries, six documents of six, so the frame was moved six twips up — the direction that keeps this
+  document narrowing the line, which is what it was written to show. See
+  `dotnet/probes/words-frame-parallel/results.md`.
 - **The DOCX comparison runs at three twips rather than two**, and the extra one is a difference rather than
   slack: LibreOffice resumes text 3404 twips along where the frame's own geometry ends at 3401. One twip is
   the inclusive rectangle every format shows; the other two come from the wrap margin its OOXML import
@@ -687,10 +693,13 @@ the end margin while `frame-wrap.fodt` passed throughout.
 `frame-parallel.{fodt,odt}` is the third, and it exists for the one thing a frame against a margin can never
 show: a 4 cm frame set 6.5 cm into a 17 cm measure with a `parallel` wrap leaves 6.5 cm free on *either*
 side, so every line it crosses has text left of it and text right of it. LibreOffice divides seven of the
-eighteen lines that way and starts each right-hand stretch at 354.50 pt. ODF only — LibreOffice's own DOCX
-export of the same document narrows one line fewer, because its OOXML import turns on
-`ADD_VERTICAL_FLY_OFFSETS` and that changes the rectangle `CalcFlyWidth` intersects. That is a compatibility
-flag rather than anything about the wrap, so the document is kept in the two forms that agree.
+eighteen lines that way and starts each right-hand stretch at 354.50 pt. Its frame is `svg:y="0.01cm"`, six
+twips below the anchor paragraph's top, for the reason given under `frame-wrap` above and in the opposite
+direction: this document is the one that shows a frame *clearing* the line above it. ODF only — LibreOffice's
+own DOCX export of the same document is not the same document, because it writes a `wp:posOffset` of 635 EMU,
+one twip, and that one twip is what makes it narrow one line fewer. That was recorded here as
+`ADD_VERTICAL_FLY_OFFSETS` changing the rectangle `CalcFlyWidth` intersects and it is refuted: the same DOCX
+rebuilt with the offset at zero narrows the line exactly as the ODF forms do.
 
 `frame-in-header.{fodt,odt}` and `frame-in-cell.{fodt,odt}` are for the anchors that are not in the body at
 all. The header one is the more useful of the two: its frame is 3 cm tall in a 1.5 cm header, so its

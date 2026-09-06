@@ -31,34 +31,26 @@ namespace Paperless.Fidelity.Tests;
 /// with 2 cm margins. A cascade in a document with several frames is far harder to attribute.
 /// </para>
 /// </remarks>
-// [reference moved 24.2.7.2 -> 26.2.4.2, measured, not closed] `TextFillsBothSidesOfAFrame…` fails on
-// `.odt` and `.fodt` because we divide line 4 — the last line of the paragraph *above* the frame, whose
-// box bottom is exactly the frame's top — and 26.2.4.2 does not. 24.2.7.2 did. The obvious fix is to
-// stop inflating the frame's rectangle vertically by the twip `FrameObstacles.Inflation` adds, and
-// **that is refuted**: it turns these two green and turns `EveryLineStartsWhereLibreOfficeStartsIt` on
-// `frame-wrap.odt`/`.fodt` red, because 26.2.4.2 *does* still move that document's touching line. Net
-// zero, and a rule contradicted by the corpus, so it was measured and reverted rather than shipped.
+// [closed 2026-09-06] `TextFillsBothSidesOfAFrame…` used to fail on `.odt` and `.fodt` on one line only
+// — line 4, the last line of the paragraph *above* the frame, whose box bottom is exactly the frame's
+// top. We divided it and 26.2.4.2 does not; 24.2.7.2 did. An earlier round found that 26.2.4.2's answer
+// there turns on the frame's *horizontal* position, flipping between 0.9 and 1.0 cm, and stopped, because
+// a threshold near 1 cm with no mechanism behind it is not shippable.
 //
-// What 26.2.4.2 actually does, from a sweep of the frame's `svg:y` and `svg:x` over both binaries with
-// everything else held (the frame's own drawn rectangle is identical in every one of these, top edge
-// 110.501 pt, and the line above ends at 110.499):
+// There is no threshold. **The reference has no rule at that tie at all**, and the measurement is in
+// `probes/words-frame-parallel/results.md`. Six documents, each rendered with the frame one hundredth of
+// a centimetre up, at zero, and one hundredth down: six of six wrap the touching line when the overlap is
+// six twips, none of six when the clearance is six twips, and three of six at exact equality. Over a
+// 3 × 7 grid of the frame's width and horizontal position, all at exact equality and all with the frame's
+// top drawn at 110.500 pt, the answer is not monotone in either — and at one grid point the frame's
+// *height* decides it (2 cm no, 3 cm yes, 5 cm no), which cannot move its top edge. It is a residue of
+// Writer's incremental layout, not geometry.
 //
-//   * `svg:y` one unit of 1/100 mm **up** — both versions divide the touching line.
-//   * `svg:y` one unit **down** — neither does.
-//   * `svg:y` exactly 0 — 24.2.7.2 divides it, 26.2.4.2 does not.
-//
-// So on the vertical axis the two differ on exact equality alone. But whether 26.2.4.2 leaves the
-// touching line alone turns on the frame's **horizontal** position, which no rectangle intersection can
-// explain — sweeping `svg:x` on `frame-wrap.fodt` with the vertical geometry unchanged:
-//
-//   * 0, 0.01, 0.2, 0.3, 0.5, 0.7, 0.9 cm — 26.2.4.2 moves the touching line, as 24.2.7.2 does.
-//   * 1, 1.9, 2.1, 3, 5, 6.5 cm — 26.2.4.2 leaves it at the margin; 24.2.7.2 still moves it.
-//
-// The flip is between 0.9 and 1.0 cm and it is not the wrap mode: `frame-parallel` re-cut with
-// `style:wrap="right"` behaves like `frame-parallel` (unaffected at 6.5 cm) and `frame-wrap` re-cut with
-// `style:wrap="parallel"` behaves like `frame-wrap` (affected at 0). A threshold near 1 cm with no
-// mechanism behind it is exactly the shape this project does not ship, so this stays open with the
-// measurement recorded. It is ours to follow and it is not a tolerance question.
+// So `FrameObstacles.Inflation` is horizontal only, which is the rule both binaries implement wherever the
+// geometry decides it, and the four ODF fixtures were moved one hundredth of a centimetre off the tie in
+// the direction each was written to show — `frame-wrap` up, so its frame really does overlap the line
+// above and still narrows it, `frame-parallel` down, so its frame really does clear it. All four now
+// render identically under 24.2.7.2 and 26.2.4.2, where before the two references disagreed.
 public sealed class FrameComparisonTests : IDisposable
 {
     /// <summary>How far a drawn pen may differ from LibreOffice's, in points.</summary>
@@ -379,11 +371,13 @@ public sealed class FrameComparisonTests : IDisposable
     /// where any text begins.
     /// </para>
     /// <para>
-    /// ODF only. LibreOffice's own DOCX export of the same document renders it differently in one place —
-    /// the last line of the paragraph above the frame is narrowed in the ODF forms and not in the DOCX —
-    /// because the OOXML import turns on <c>ADD_VERTICAL_FLY_OFFSETS</c>, which changes the rectangle
-    /// <c>CalcFlyWidth</c> intersects. That is a compatibility flag rather than anything about the wrap,
-    /// so the document is kept in the two forms that agree.
+    /// ODF only, because LibreOffice's own DOCX export of this document is not the same document: its
+    /// <c>wp:positionV/wp:posOffset</c> is 635 EMU, one twip, so the frame clears the line above where the
+    /// ODF frame touches it exactly. That was recorded here as <c>ADD_VERTICAL_FLY_OFFSETS</c> changing the
+    /// rectangle <c>CalcFlyWidth</c> intersects, and it is refuted: rebuilding the same DOCX with that
+    /// offset set to zero and nothing else changed makes 26.2.4.2 narrow the line, exactly as the ODF forms
+    /// do. The flag is still set by the OOXML import and still does other things; one twip of stated offset
+    /// is what separated these two renderings.
     /// </para>
     /// </remarks>
     [Theory]
