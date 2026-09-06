@@ -494,7 +494,7 @@ internal sealed partial class PptxSlideLayout
         if (depth >= MaxGroupDepth) return;
 
         XElement? graphic = Drawing.Child(Drawing.Child(frame, "graphic"), "graphicData");
-        if (Drawing.Attribute(graphic, "uri") != PptxDiagram.Uri) return;
+        if (Drawing.Attribute(graphic, "uri") != DiagramParts.Uri) return;
         if (PartOf(frame, slide) is not { } part) return;
 
         XElement? transform = Ppt.Child(frame, "xfrm");
@@ -505,9 +505,9 @@ internal sealed partial class PptxSlideLayout
         // baked tree is what the authoring application itself drew, so preferring it keeps a
         // modern file independent of the evaluator agreeing with PowerPoint; LibreOffice decides
         // the same way in one line — diagram.cxx:701, bCreate = getExtDrawings().empty().
-        if ((PptxDiagram.Baked(_file, part, graphic!)
-             ?? PptxDiagram.Evaluated(
-                 _file,
+        if ((DiagramParts.Baked(_file.Diagrams, part, graphic!)
+             ?? DiagramParts.Evaluated(
+                 _file.Diagrams,
                  part,
                  graphic!,
                  ThemePart(slide),

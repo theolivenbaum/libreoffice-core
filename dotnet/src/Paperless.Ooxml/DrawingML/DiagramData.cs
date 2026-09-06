@@ -1,7 +1,7 @@
 using System.Globalization;
 using System.Xml.Linq;
 
-namespace Paperless.Presentations.Ooxml;
+namespace Paperless.Ooxml.DrawingML;
 
 /// <summary>
 /// One <c>dgm:pt</c> of a diagram's data model: a node the author typed, or one the layout
@@ -196,16 +196,16 @@ internal sealed class DiagramData
     {
         DiagramData data = new();
 
-        XName pointList = XName.Get("ptLst", PptxDiagram.Uri);
-        XName point = XName.Get("pt", PptxDiagram.Uri);
+        XName pointList = XName.Get("ptLst", DiagramParts.Uri);
+        XName point = XName.Get("pt", DiagramParts.Uri);
 
         foreach (XElement element in model.Element(pointList)?.Elements(point) ?? [])
         {
             data._points.Add(ReadPoint(element));
         }
 
-        XName connectionList = XName.Get("cxnLst", PptxDiagram.Uri);
-        XName connection = XName.Get("cxn", PptxDiagram.Uri);
+        XName connectionList = XName.Get("cxnLst", DiagramParts.Uri);
+        XName connection = XName.Get("cxn", DiagramParts.Uri);
 
         foreach (XElement element in model.Element(connectionList)?.Elements(connection) ?? [])
         {
@@ -225,8 +225,8 @@ internal sealed class DiagramData
 
     private static DiagramPoint ReadPoint(XElement element)
     {
-        XElement? properties = element.Element(XName.Get("prSet", PptxDiagram.Uri));
-        XElement? variables = properties?.Element(XName.Get("presLayoutVars", PptxDiagram.Uri));
+        XElement? properties = element.Element(XName.Get("prSet", DiagramParts.Uri));
+        XElement? variables = properties?.Element(XName.Get("presLayoutVars", DiagramParts.Uri));
 
         return new DiagramPoint
         {
@@ -239,14 +239,14 @@ internal sealed class DiagramData
             CustomText = properties?.Attribute("custT")?.Value is "1" or "true",
             Direction = Value(variables, "dir") ?? "norm",
             HierarchyBranch = Value(variables, "hierBranch"),
-            ShapeProperties = element.Element(XName.Get("spPr", PptxDiagram.Uri)),
-            TextBody = element.Element(XName.Get("t", PptxDiagram.Uri)),
+            ShapeProperties = element.Element(XName.Get("spPr", DiagramParts.Uri)),
+            TextBody = element.Element(XName.Get("t", DiagramParts.Uri)),
         };
     }
 
     /// <summary>The <c>val</c> of a <c>dgm:presLayoutVars</c> child, or null when absent.</summary>
     private static string? Value(XElement? variables, string localName)
-        => variables?.Element(XName.Get(localName, PptxDiagram.Uri))?.Attribute("val")?.Value;
+        => variables?.Element(XName.Get(localName, DiagramParts.Uri))?.Attribute("val")?.Value;
 
     private static int Integer(XElement? element, string name, int whenAbsent = 0)
         => element?.Attribute(name)?.Value is { } text

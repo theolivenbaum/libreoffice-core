@@ -1,7 +1,7 @@
 using System.Globalization;
 using System.Xml.Linq;
 
-namespace Paperless.Presentations.Ooxml;
+namespace Paperless.Ooxml.DrawingML;
 
 /// <summary>
 /// One <c>dgm:constr</c>: an equation between two properties of two named layout nodes.
@@ -252,12 +252,12 @@ internal sealed class DiagramShapeAtom : DiagramAtom
 /// and <c>dgm:clrData</c>, which are the thumbnails the gallery shows and contain a complete
 /// second data model that would otherwise be mistaken for the real one.
 /// </remarks>
-internal static class PptxDiagramLayout
+internal static class DiagramLayout
 {
     /// <summary>Parses a <c>dgm:layoutDef</c>, returning its root layout node.</summary>
     public static DiagramLayoutNodeAtom? Read(XElement? definition)
     {
-        XElement? root = definition?.Element(XName.Get("layoutNode", PptxDiagram.Uri));
+        XElement? root = definition?.Element(XName.Get("layoutNode", DiagramParts.Uri));
         if (root is null) return null;
 
         DiagramLayoutNodeAtom node = new()
@@ -276,7 +276,7 @@ internal static class PptxDiagramLayout
     {
         foreach (XElement child in element.Elements())
         {
-            if (child.Name.NamespaceName != PptxDiagram.Uri) continue;
+            if (child.Name.NamespaceName != DiagramParts.Uri) continue;
 
             switch (child.Name.LocalName)
             {
@@ -304,7 +304,7 @@ internal static class PptxDiagramLayout
                         Type = child.Attribute("type")?.Value ?? "",
                     };
 
-                    foreach (XElement parameter in child.Elements(XName.Get("param", PptxDiagram.Uri)))
+                    foreach (XElement parameter in child.Elements(XName.Get("param", DiagramParts.Uri)))
                     {
                         string type = parameter.Attribute("type")?.Value ?? "";
                         string value = parameter.Attribute("val")?.Value ?? "";
@@ -337,7 +337,7 @@ internal static class PptxDiagramLayout
                         HideGeometry = hidden,
                         Rotation = (int)Number(child.Attribute("rot")?.Value),
                         ZOrderOffset = (int)Number(child.Attribute("zOrderOff")?.Value),
-                        Adjustments = child.Element(XName.Get("adjLst", PptxDiagram.Uri)),
+                        Adjustments = child.Element(XName.Get("adjLst", DiagramParts.Uri)),
                         Owner = owner,
                     };
 
@@ -395,7 +395,7 @@ internal static class PptxDiagramLayout
 
                 case "constrLst":
                 {
-                    foreach (XElement constraint in child.Elements(XName.Get("constr", PptxDiagram.Uri)))
+                    foreach (XElement constraint in child.Elements(XName.Get("constr", DiagramParts.Uri)))
                     {
                         atom.Add(new DiagramConstraintAtom
                         {
@@ -420,7 +420,7 @@ internal static class PptxDiagramLayout
 
                 case "ruleLst":
                 {
-                    foreach (XElement rule in child.Elements(XName.Get("rule", PptxDiagram.Uri)))
+                    foreach (XElement rule in child.Elements(XName.Get("rule", DiagramParts.Uri)))
                     {
                         atom.Add(new DiagramRuleAtom
                         {

@@ -296,6 +296,18 @@ that model parse XML and stay in `Paperless.Ooxml` and `Paperless.OpenDocument`.
 one layer up instead is what forced the ODF reader into `Paperless.Presentations`, where a
 spreadsheet could not reach it.
 
+**SmartArt is the third instance, and the first that moved *sideways* rather than down.** Ten
+files implementing DrawingML diagrams — the parts, the baked `dsp:spTree`, and a layout-atom
+evaluator — sat in `Paperless.Presentations` and were unreachable from a word-processing document,
+which drew an empty frame where the reference drew the diagram. Nine of the ten imported nothing
+above `Paperless.Ooxml`; the tenth needed two lookups from the package (*resolve a relationship id
+stated on a part*, *load a part by name*) and those became two delegates. They belong in
+`Paperless.Ooxml/DrawingML` and **not** in Core, by the second half of the same test: they parse
+markup and emit an element tree, so they are readers, and readers of OOXML that serve more than one
+family live one layer above Core rather than in it. Reach: 18 corpus documents carry a diagram —
+slides 15, words 3, sheets **0** — and all 38 of their data parts have a usable baked drawing, so
+the evaluator is not what the corpus needs. See `probes/words-diagram-01/results.md`.
+
 `Core/Numbers` came down for the same reason and by the same test, and it is worth stating as a
 rule rather than as a second exception. **The question is not "who uses it" but "what does it
 depend on".** The number-format engine — parsing `#,##0.00` and rendering a double through it —

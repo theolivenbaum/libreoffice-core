@@ -1,10 +1,8 @@
 using System.Globalization;
 using System.Xml.Linq;
 using Paperless.Core.Graphics;
-using Paperless.Ooxml;
-using Paperless.Ooxml.DrawingML;
 
-namespace Paperless.Presentations.Ooxml;
+namespace Paperless.Ooxml.DrawingML;
 
 /// <summary>
 /// The quick style and colour transform, resolved into the fill, line and text colour a node draws.
@@ -35,7 +33,7 @@ namespace Paperless.Presentations.Ooxml;
 /// the colour list's colour, and the general path exists for the other 334.
 /// </para>
 /// </remarks>
-internal sealed class PptxDiagramStyles
+internal sealed class DiagramStyles
 {
     /// <summary>One <c>dgm:styleLbl</c> of the quick style: four indices into the theme.</summary>
     private readonly record struct StyleReference(int Line, int Fill, string FontIndex);
@@ -56,23 +54,23 @@ internal sealed class PptxDiagramStyles
     private readonly List<XElement> _lineStyles = [];
     private readonly DrawingTheme? _theme;
 
-    private PptxDiagramStyles(DrawingTheme? theme) => _theme = theme;
+    private DiagramStyles(DrawingTheme? theme) => _theme = theme;
 
     /// <summary>Reads the two diagram parts and the theme's format scheme beside them.</summary>
     /// <param name="quickStyle">The <c>dgm:styleDef</c> root, or null.</param>
     /// <param name="colours">The <c>dgm:colorsDef</c> root, or null.</param>
     /// <param name="theme">The <c>a:theme</c> root, whose <c>a:fmtScheme</c> the indices name.</param>
     /// <param name="resolved">The theme as a colour model, for resolving the colour lists.</param>
-    public static PptxDiagramStyles Read(
+    public static DiagramStyles Read(
         XElement? quickStyle, XElement? colours, XElement? theme, DrawingTheme? resolved)
     {
-        PptxDiagramStyles styles = new(resolved);
+        DiagramStyles styles = new(resolved);
 
         foreach (XElement label in Labels(quickStyle))
         {
             if (label.Attribute("name")?.Value is not { } name) continue;
 
-            XElement? style = label.Element(XName.Get("style", PptxDiagram.Uri));
+            XElement? style = label.Element(XName.Get("style", DiagramParts.Uri));
             if (style is null) continue;
 
             styles._styles[name] = new StyleReference(
@@ -136,17 +134,17 @@ internal sealed class PptxDiagramStyles
 
         if (Placeholder(label, index, l => l.TextFill) is { } colour) font.Add(Literal(colour));
 
-        return new XElement(Ppt.Name("style"), font);
+        return new XElement(DiagramParts.ShapeTreeName("style"), font);
     }
 
     // ------------------------------------------------------------------ parts
 
     private static IEnumerable<XElement> Labels(XElement? root)
-        => root?.Elements(XName.Get("styleLbl", PptxDiagram.Uri)) ?? [];
+        => root?.Elements(XName.Get("styleLbl", DiagramParts.Uri)) ?? [];
 
     private static void Collect(XElement label, string localName, List<XElement> into)
     {
-        XElement? list = label.Element(XName.Get(localName, PptxDiagram.Uri));
+        XElement? list = label.Element(XName.Get(localName, DiagramParts.Uri));
         if (list is null) return;
 
         foreach (XElement colour in list.Elements())

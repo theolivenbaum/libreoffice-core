@@ -1,4 +1,4 @@
-namespace Paperless.Presentations.Ooxml;
+namespace Paperless.Ooxml.DrawingML;
 
 /// <summary>
 /// The four SmartArt layout algorithms that place their children by geometry rather than by
@@ -6,7 +6,7 @@ namespace Paperless.Presentations.Ooxml;
 /// </summary>
 /// <remarks>
 /// <para>
-/// They are kept apart from <see cref="PptxDiagramAlgorithms"/> because they are a different kind
+/// They are kept apart from <see cref="DiagramAlgorithms"/> because they are a different kind
 /// of thing. <c>composite</c> and <c>lin</c> read the layout definition's constraints and do what
 /// they say; these four largely ignore them and lay their children out on a grid, a circle, a
 /// tree or a stack using constants that are LibreOffice's own — a snake's rows are searched for
@@ -33,7 +33,7 @@ namespace Paperless.Presentations.Ooxml;
 /// <c>AlgAtom::layoutShape</c> (lines 1193 and 1262).
 /// </para>
 /// </remarks>
-internal static class PptxDiagramGeometry
+internal static class DiagramLayoutGeometry
 {
     /// <summary>Sixtieths of a thousandth of a degree, DrawingML's rotation unit.</summary>
     private const int PerDegree = 60000;

@@ -1,6 +1,6 @@
 using System.Xml.Linq;
 
-namespace Paperless.Presentations.Ooxml;
+namespace Paperless.Ooxml.DrawingML;
 
 /// <summary>One paragraph a presentation node took from a data node, and the level it took it at.</summary>
 /// <param name="Paragraph">The <c>a:p</c> as the data model states it.</param>

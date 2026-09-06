@@ -1,8 +1,7 @@
 using System.Globalization;
 using System.Xml.Linq;
-using Paperless.Ooxml.DrawingML;
 
-namespace Paperless.Presentations.Ooxml;
+namespace Paperless.Ooxml.DrawingML;
 
 /// <summary>
 /// Builds the <c>p:txBody</c> an evaluated node draws, from the paragraphs it gathered and the
@@ -23,7 +22,7 @@ namespace Paperless.Presentations.Ooxml;
 /// The indent is hard-coded with it: 285 750 EMU per level, which is a quarter inch, hanging.
 /// </para>
 /// </remarks>
-internal static class PptxDiagramText
+internal static class DiagramText
 {
     /// <summary>The indent one bullet level costs, in EMUs — a quarter of an inch.</summary>
     private const int BulletIndent = 285750;
@@ -31,7 +30,7 @@ internal static class PptxDiagramText
     /// <summary>Builds the text body.</summary>
     public static XElement Body(DiagramShape shape)
     {
-        XElement body = new(Ppt.Name("txBody"), BodyProperties(shape));
+        XElement body = new(DiagramParts.ShapeTreeName("txBody"), BodyProperties(shape));
 
         XElement? listStyle = Drawing.Child(shape.TextBodySource, "lstStyle");
         body.Add(listStyle is not null ? new XElement(listStyle) : new XElement(Drawing.Name("lstStyle")));
