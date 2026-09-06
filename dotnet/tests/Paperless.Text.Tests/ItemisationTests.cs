@@ -478,6 +478,77 @@ public class ItemisationTests
         runs[0].IsFallback.ShouldBeFalse();
     }
 
+    /// <summary>
+    /// The run's missing characters are asked about together, and the levels ask for the remainder.
+    /// </summary>
+    /// <remarks>
+    /// <c>OutputDevice::ImplGlyphFallbackLayout</c> gathers every unmapped code unit of the layout
+    /// into one string and hands it to <c>GetGlyphFallbackFont</c>, which passes it to fontconfig
+    /// as a single <c>FC_CHARSET</c>; the chosen face is then subtracted from the set and the next
+    /// level asks with what is left (<c>vcl/source/outdev/font.cxx</c>,
+    /// <c>vcl/unx/generic/font/fontconfig.cxx</c>:1229-1245). Asking once per character is a
+    /// different question and gets a different answer.
+    /// </remarks>
+    [Fact]
+    public void EveryMissingCharacterOfARunIsAskedAboutAtOnce()
+    {
+        OpenTypeFace? face = Carlito();
+        OpenTypeFace? answer = Installed("DejaVu Sans");
+        Assert.SkipWhen(face is null || answer is null, "see check-env.sh");
+
+        // Two Hebrew letters Carlito has not, with Latin between them so the run is cut twice.
+        RecordingFallback recording = new(answer!);
+        FontItemiser.Split("a\u05d0b\u05d1c", 0, 5, face!, recording);
+
+        // One request carrying both -- not two requests of one character each.
+        recording.Asked.Count.ShouldBe(1);
+        recording.Asked[0].ShouldBe([0x05D0, 0x05D1]);
+    }
+
+    /// <summary>A face that covers part of the set leaves the rest to the next level.</summary>
+    [Fact]
+    public void TheNextFallbackLevelAsksForWhatTheLastOneDidNotCover()
+    {
+        OpenTypeFace? face = Carlito();
+        OpenTypeFace? answer = Installed("DejaVu Sans");
+        Assert.SkipWhen(face is null || answer is null, "see check-env.sh");
+        Assert.SkipUnless(
+            answer!.HasGlyphFor(0x05D0) && !answer.HasGlyphFor(0x6C49),
+            "the installed DejaVu Sans does not have the coverage this distinguishes");
+
+        RecordingFallback recording = new(answer);
+        FontItemiser.Split("a\u05d0b\u6c49c", 0, 5, face!, recording);
+
+        recording.Asked.Count.ShouldBe(2);
+        recording.Asked[0].ShouldBe([0x05D0, 0x6C49]);
+        recording.Asked[1].ShouldBe([0x6C49]);
+    }
+
+    /// <summary>The one installed face of a family, or null when the machine has none.</summary>
+    private static OpenTypeFace? Installed(string family)
+    {
+        SystemFontResolver resolver = SystemFontResolver.Build();
+        return resolver.Index.Has(family)
+            ? resolver.LoadOpenType(resolver.Resolve(new FontRequest(family)))
+            : null;
+    }
+
+    /// <summary>A resolver that records the sets it was asked about and always answers one face.</summary>
+    private sealed class RecordingFallback(OpenTypeFace face) : IGlyphFallbackResolver
+    {
+        public List<int[]> Asked { get; } = [];
+
+        public OpenTypeFace? FallbackFor(int codePoint, int weight = 400, bool isItalic = false)
+            => face.HasGlyphFor(codePoint) ? face : null;
+
+        public OpenTypeFace? FallbackFor(
+            IReadOnlyList<int> codePoints, int weight, bool isItalic, OpenTypeFace? primary)
+        {
+            Asked.Add([.. codePoints]);
+            return codePoints.Any(face.HasGlyphFor) ? face : null;
+        }
+    }
+
     private sealed class FixedFallback(OpenTypeFace face) : IGlyphFallbackResolver
     {
         public OpenTypeFace? FallbackFor(int codePoint, int weight = 400, bool isItalic = false)

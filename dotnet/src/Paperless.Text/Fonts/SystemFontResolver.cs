@@ -268,7 +268,7 @@ public sealed class SystemFontResolver : IFontResolver, IGlyphFallbackResolver
     private readonly Dictionary<string, OpenTypeFace> _loaded = new(StringComparer.Ordinal);
     private readonly Dictionary<OpenTypeFace, string> _keys = new(ReferenceEqualityComparer.Instance);
     private readonly List<FontSubstitution> _substitutions = [];
-    private readonly Dictionary<(int CodePoint, int Weight, bool Italic, string Generic), OpenTypeFace?>
+    private readonly Dictionary<(string CodePoints, int Weight, bool Italic, string Generic), OpenTypeFace?>
         _fallbacks = [];
     private readonly Dictionary<string, string> _genericByFaceKey = new(StringComparer.Ordinal);
     private readonly List<GlyphFallback> _glyphFallbacks = [];
@@ -370,12 +370,46 @@ public sealed class SystemFontResolver : IFontResolver, IGlyphFallbackResolver
     /// </para>
     /// </remarks>
     public OpenTypeFace? FallbackFor(int codePoint, int weight, bool isItalic, OpenTypeFace? primary)
+        => FallbackFor([codePoint], weight, isItalic, primary);
+
+    /// <inheritdoc/>
+    /// <remarks>
+    /// <para>
+    /// <strong>The pattern carries the whole set at once, and that is a different question from the
+    /// same one asked character by character.</strong>
+    /// <c>OutputDevice::ImplGlyphFallbackLayout</c> gathers every code unit of the layout that came
+    /// back unmapped into one <c>OUString</c> and hands it to
+    /// <c>PhysicalFontCollection::GetGlyphFallbackFont</c>
+    /// (<c>vcl/source/outdev/font.cxx</c>), which passes it through to
+    /// <c>FontConfigManager::Substitute</c> as a single <c>FC_CHARSET</c>
+    /// (<c>vcl/unx/generic/font/fontconfig.cxx</c>:1092-1116). <c>FcCompareCharSet</c> scores by
+    /// <em>how many of the set the face is missing</em> and <c>PRI_CHARSET</c> is fontconfig's
+    /// highest priority, so a face covering more of the run's missing characters beats one that is
+    /// better placed on the family list and covers fewer.
+    /// </para>
+    /// <para>
+    /// The answer is then subtracted from the set — <c>Substitute</c> ends by rebuilding
+    /// <c>rMissingCodes</c> from the code points the chosen face's charset does <em>not</em> hold —
+    /// and the next fallback level asks again with what is left. So one run can reach several
+    /// fallback faces, and which characters each one draws depends on the others.
+    /// </para>
+    /// <para>
+    /// Ordering the levels is the caller's, because it is the caller that knows which characters a
+    /// run was missing; see <see cref="Itemisation.FontItemiser"/>.
+    /// </para>
+    /// </remarks>
+    public OpenTypeFace? FallbackFor(
+        IReadOnlyList<int> codePoints, int weight, bool isItalic, OpenTypeFace? primary)
     {
+        ArgumentNullException.ThrowIfNull(codePoints);
+        if (codePoints.Count == 0) return null;
+
         string generic = GenericForFallback(primary);
+        string key = string.Join('\u0000', codePoints);
 
         // Cached because a run of unsupported text asks the same question for every character, and
         // answering it means opening font files until one covers the character.
-        if (_fallbacks.TryGetValue((codePoint, weight, isItalic, generic), out OpenTypeFace? cached))
+        if (_fallbacks.TryGetValue((key, weight, isItalic, generic), out OpenTypeFace? cached))
         {
             return cached;
         }
@@ -384,17 +418,17 @@ public sealed class SystemFontResolver : IFontResolver, IGlyphFallbackResolver
 
         if (_preferences.IsConfigured)
         {
-            found = OnPreferenceList(codePoint, weight, isItalic, EmojiGeneric)
-                    ?? Preferred(codePoint, weight, isItalic, generic)
-                    ?? OnGenericList(codePoint, weight, isItalic);
+            found = OnPreferenceList(codePoints, weight, isItalic, EmojiGeneric)
+                    ?? Preferred(codePoints, weight, isItalic, generic)
+                    ?? OnGenericList(codePoints, weight, isItalic);
         }
         else
         {
-            found = OnGenericList(codePoint, weight, isItalic)
-                    ?? Preferred(codePoint, weight, isItalic, generic);
+            found = OnGenericList(codePoints, weight, isItalic)
+                    ?? Preferred(codePoints, weight, isItalic, generic);
         }
 
-        _fallbacks[(codePoint, weight, isItalic, generic)] = found;
+        _fallbacks[(key, weight, isItalic, generic)] = found;
         return found;
     }
 
@@ -426,13 +460,22 @@ public sealed class SystemFontResolver : IFontResolver, IGlyphFallbackResolver
     /// <summary>The generic whose preference list a code point with the Emoji property lands on.</summary>
     private const string EmojiGeneric = "emoji";
 
-    /// <summary>The first face on one generic's preference list that covers a character.</summary>
-    private OpenTypeFace? OnPreferenceList(int codePoint, int weight, bool isItalic, string generic)
+    /// <summary>The first face on one generic's preference list that covers every missing character.</summary>
+    /// <remarks>
+    /// <strong>Every one of them, not the first.</strong> <c>PRI_CHARSET</c> outranks every family
+    /// key, so a list member that covers only part of the set does not beat a face further down
+    /// that covers all of it — and this stage exists to short-circuit the full ranking, which it may
+    /// only do where it cannot be wrong. Where nothing on the list covers the whole set the search
+    /// falls through to <see cref="Preferred"/>, which relaxes the coverage requirement one
+    /// character at a time.
+    /// </remarks>
+    private OpenTypeFace? OnPreferenceList(
+        IReadOnlyList<int> codePoints, int weight, bool isItalic, string generic)
     {
         foreach (string family in _preferences.InOrderFor(generic))
         {
             if (_index.Best(family, weight, isItalic) is not { } candidate) continue;
-            if (Covers(candidate, codePoint) is { } face) return face;
+            if (CoversAll(candidate, codePoints) is { } face) return face;
         }
 
         return null;
@@ -451,23 +494,46 @@ public sealed class SystemFontResolver : IFontResolver, IGlyphFallbackResolver
     /// (<c>vcl/unx/generic/font/fontconfig.cxx</c>:362), and <c>FcFontSetMatch</c> keeps the first
     /// of equal scores.
     /// </remarks>
-    private OpenTypeFace? Preferred(int codePoint, int weight, bool isItalic, string generic)
-        => _index.Faces
+    /// <param name="codePoints">The characters the run's own face could not draw, in text order.</param>
+    /// <param name="weight">The weight to match, on the OpenType 1-1000 scale.</param>
+    /// <param name="isItalic">Whether an italic face is wanted.</param>
+    /// <param name="generic">The generic whose preference list ranks the candidates.</param>
+    private OpenTypeFace? Preferred(
+        IReadOnlyList<int> codePoints, int weight, bool isItalic, string generic)
+    {
+        List<InstalledFace> ordered = _index.Faces
             .OrderBy(face => _preferences.RankOf(face.FamilyName, generic))
             .ThenBy(face => _preferences.RankOf(face.FamilyName))
             .ThenBy(face => face.IsItalic == isItalic ? 0 : 1)
             .ThenBy(face => Math.Abs(face.Weight - weight))
             .ThenBy(face => face.FamilyName, StringComparer.Ordinal)
-            .Select(face => Covers(face, codePoint))
-            .FirstOrDefault(face => face is not null);
+            .ToList();
+
+        // `PRI_CHARSET` first, the family keys after it. The coverage requirement is relaxed one
+        // character at a time rather than every face being loaded and counted, so a single missing
+        // character -- which is nearly every call -- costs exactly what it did before the set
+        // existed.
+        for (int allowed = 0; allowed < codePoints.Count; allowed++)
+        {
+            foreach (InstalledFace candidate in ordered)
+            {
+                if (CoversAllBut(candidate, codePoints, allowed) is { } face) return face;
+            }
+        }
+
+        return null;
+    }
 
     /// <summary>The first face on LibreOffice's own generic glyph-fallback list that covers a character.</summary>
-    private OpenTypeFace? OnGenericList(int codePoint, int weight, bool isItalic)
+    private OpenTypeFace? OnGenericList(IReadOnlyList<int> codePoints, int weight, bool isItalic)
     {
-        foreach (string family in GlyphFallbackFamilies.InOrder)
+        for (int allowed = 0; allowed < codePoints.Count; allowed++)
         {
-            if (_index.Best(family, weight, isItalic) is not { } candidate) continue;
-            if (Covers(candidate, codePoint) is { } face) return face;
+            foreach (string family in GlyphFallbackFamilies.InOrder)
+            {
+                if (_index.Best(family, weight, isItalic) is not { } candidate) continue;
+                if (CoversAllBut(candidate, codePoints, allowed) is { } face) return face;
+            }
         }
 
         return null;
@@ -482,7 +548,7 @@ public sealed class SystemFontResolver : IFontResolver, IGlyphFallbackResolver
     /// (<c>vcl/unx/generic/font/fontsubst.cxx</c>:100-107).
     /// </remarks>
     public OpenTypeFace? SymbolFallbackFor(int codePoint, int weight = 400, bool isItalic = false)
-        => OnGenericList(codePoint, weight, isItalic);
+        => OnGenericList([codePoint], weight, isItalic);
 
     /// <summary>Records a fallback, resolved or not, for the caller comparing against a reference.</summary>
     public void RecordGlyphFallback(int codePoint, string? fromFamily, string? toFamily)
@@ -493,6 +559,35 @@ public sealed class SystemFontResolver : IFontResolver, IGlyphFallbackResolver
     {
         OpenTypeFace? face = LoadCached(candidate.FaceKey);
         return face is not null && face.HasGlyphFor(codePoint) ? face : null;
+    }
+
+    /// <summary>The face behind an installed entry when it covers every character, else null.</summary>
+    private OpenTypeFace? CoversAll(InstalledFace candidate, IReadOnlyList<int> codePoints)
+        => CoversAllBut(candidate, codePoints, 0);
+
+    /// <summary>
+    /// The face behind an installed entry when it is missing at most <paramref name="allowed"/> of
+    /// the characters, else null.
+    /// </summary>
+    /// <remarks>
+    /// <c>FcCompareCharSet</c> scores a font by <c>FcCharSetSubtractCount</c> — the size of the
+    /// pattern's charset minus the font's — so this is that score, tested against a budget rather
+    /// than compared, which is what lets the search stay lazy.
+    /// </remarks>
+    private OpenTypeFace? CoversAllBut(InstalledFace candidate, IReadOnlyList<int> codePoints, int allowed)
+    {
+        OpenTypeFace? face = LoadCached(candidate.FaceKey);
+        if (face is null) return null;
+
+        int missing = 0;
+        foreach (int codePoint in codePoints)
+        {
+            if (face.HasGlyphFor(codePoint)) continue;
+            if (++missing > allowed) return null;
+        }
+
+        // A face that covers none of them is not an answer, however generous the budget.
+        return missing < codePoints.Count ? face : null;
     }
 
     /// <summary>Loads a face by key through the resolver's own cache, or null when it cannot be read.</summary>

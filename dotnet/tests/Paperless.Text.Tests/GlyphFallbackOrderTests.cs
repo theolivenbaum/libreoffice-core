@@ -211,6 +211,36 @@ public class GlyphFallbackOrderTests
             ?.FamilyName.ShouldBe("FreeSerif");
     }
 
+    [Fact]
+    public void OneFaceIsSoughtForAllOfTheRunsMissingCharactersAtOnce()
+    {
+        // `ImplGlyphFallbackLayout` gathers the layout's unmapped code units into one string and
+        // `Substitute` puts every code point of it into a single FC_CHARSET, whose score —
+        // how many of the set the candidate is missing — is fontconfig's highest priority. So a
+        // face further down the family list wins if it covers more of the run.
+        SystemFontIndex index = Installed();
+        Assert.SkipWhen(
+            !index.Has("OpenSymbol") || !index.Has("DejaVu Sans"),
+            "the faces this compares are not installed; see check-env.sh");
+
+        using Tree tree = Tree.Create();
+        tree.Write("conf.d/60-latin.conf", Alias("sans-serif", "OpenSymbol", "DejaVu Sans"));
+
+        SystemFontResolver resolver = Resolver(index, tree.Root);
+
+        // OpenSymbol holds U+2713 and is first on the list, so on its own it answers.
+        resolver.FallbackFor([Tick], 400, false, primary: null)
+            ?.FamilyName.ShouldBe("OpenSymbol");
+
+        // It does not hold U+2011. Asked for both at once the answer is the face that covers both,
+        // although it is second on the same list.
+        resolver.FallbackFor([Tick, NonBreakingHyphen], 400, false, primary: null)
+            ?.FamilyName.ShouldBe("DejaVu Sans");
+    }
+
+    /// <summary>U+2713 CHECK MARK: OpenSymbol, DejaVu Sans and FreeSerif have it, Carlito does not.</summary>
+    private const int Tick = 0x2713;
+
     private static string Alias(string subject, params string[] preferred)
         => "<?xml version=\"1.0\"?><fontconfig><alias><family>" + subject + "</family><prefer>"
            + string.Concat(preferred.Select(f => $"<family>{f}</family>"))
