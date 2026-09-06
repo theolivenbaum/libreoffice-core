@@ -17,6 +17,21 @@ dotnet/probes/chart-text-metafile/reach.py	2026-09-06	current	24.2.7.2;26.2.4.2	
 dotnet/probes/chart-text-metafile/reach.tsv	2026-09-06	current	24.2.7.2;26.2.4.2	present	current	
 dotnet/probes/chart-text-metafile/results.md	2026-09-06	current	24.2.7.2;26.2.4.2	present	current	dotnet/CLAUDE.md;dotnet/src/Paperless.Presentations/Layout/SlideChart.cs;dotnet/src/Paperless.WordProcessing/Layout/FrameChart.cs;dotnet/tests/Paperless.Fidelity.Tests/SlideChartFaceComparisonTests.cs;dotnet/tests/Paperless.Presentations.Tests/SlideChartDeviceAdvanceTests.cs;dotnet/tests/Paperless.WordProcessing.Tests/FrameChartDeviceAdvanceTests.cs
 dotnet/probes/chart-text-metafile/textbox.tsv	2026-09-06	current	24.2.7.2;26.2.4.2	present	current	
+dotnet/probes/chart-vertical/corpus-after.tsv	2026-09-06	current	24.2.7.2;26.2.4.2	present	current	
+dotnet/probes/chart-vertical/corpus-before.tsv	2026-09-06	current	24.2.7.2;26.2.4.2	present	current	
+dotnet/probes/chart-vertical/corpus-ref262.tsv	2026-09-06	current	24.2.7.2;26.2.4.2	present	current	
+dotnet/probes/chart-vertical/corpus.py	2026-09-06	current	24.2.7.2;26.2.4.2	present	current	
+dotnet/probes/chart-vertical/facemetrics.py	2026-09-06	current	24.2.7.2;26.2.4.2	present	current	
+dotnet/probes/chart-vertical/ours-after.tsv	2026-09-06	current	24.2.7.2;26.2.4.2	present	current	
+dotnet/probes/chart-vertical/ours-before.tsv	2026-09-06	current	24.2.7.2;26.2.4.2	present	current	
+dotnet/probes/chart-vertical/ours.py	2026-09-06	current	24.2.7.2;26.2.4.2	present	current	
+dotnet/probes/chart-vertical/pitch.py	2026-09-06	current	24.2.7.2;26.2.4.2	present	current	
+dotnet/probes/chart-vertical/pitch.tsv	2026-09-06	current	24.2.7.2;26.2.4.2	present	current	
+dotnet/probes/chart-vertical/pitch.txt	2026-09-06	current	24.2.7.2;26.2.4.2	present	current	
+dotnet/probes/chart-vertical/results.md	2026-09-06	current	24.2.7.2;26.2.4.2	present	current	dotnet/CLAUDE.md;dotnet/src/Paperless.Text/Fonts/LineSpacing.cs;dotnet/src/Paperless.Presentations/Layout/SlideChart.cs;dotnet/src/Paperless.WordProcessing/Layout/FrameChart.cs;dotnet/tests/Paperless.Presentations.Tests/SlideChartDeviceMetricTests.cs;dotnet/tests/Paperless.WordProcessing.Tests/FrameChartDeviceMetricTests.cs
+dotnet/probes/chart-vertical/tickoffset.py	2026-09-06	current	24.2.7.2;26.2.4.2	present	current	
+dotnet/probes/chart-vertical/tickoffset.tsv	2026-09-06	current	24.2.7.2;26.2.4.2	present	current	
+dotnet/probes/chart-vertical/tickoffset.txt	2026-09-06	current	24.2.7.2;26.2.4.2	present	current	
 dotnet/probes/crop-wiring-01/prediction.md	2026-08-13	current	26.2.4.2	present	current	-
 dotnet/probes/crop-wiring-01/results.md	2026-08-13	current	26.2.4.2	present	current	-
 dotnet/probes/emptypage-01/results.md	2026-08-15	current	26.2.4.2	present	current	-

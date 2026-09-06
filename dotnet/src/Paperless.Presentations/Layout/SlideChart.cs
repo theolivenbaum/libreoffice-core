@@ -354,15 +354,34 @@ public static class SlideChart
         /// A one-line, one-run, un-inset, unwrapped body — what every chart label is.
         /// </summary>
         /// <remarks>
+        /// <para>
         /// <strong>A chart's text is measured by the face's own metrics, not by the em.</strong>
         /// The PPTX importer sets EditEngine's <c>FixedCellHeight</c> on every <em>slide shape's</em>
         /// text body (<c>oox/source/ppt/pptshapecontext.cxx:186</c>), which makes a line 1.2 em
         /// tall whatever face it is in — but a chart's labels are not slide shapes. They are made
         /// by <c>chart2</c>'s own view, which creates plain text shapes and sets no such flag, so
-        /// their line height is the face's ascent plus descent plus leading. For Liberation Sans
-        /// that is 1.1499 em against 1.2, which is 0.15 pt on a 10 pt label and 0.65 pt on a
-        /// 13 pt title — small individually, and the two accumulate into the top and bottom
-        /// insets that place the whole plot area.
+        /// their line height is the face's ascent and descent. For Liberation Sans that is
+        /// 1.1499 em against 1.2 before any device — small individually, and it accumulates into
+        /// the top and bottom insets that place the whole plot area.
+        /// </para>
+        /// <para>
+        /// <strong>…and those metrics come through <c>chart2</c>'s own 96 dpi device, which is the
+        /// vertical half of the same rule <see cref="OnChartDevice"/> applies horizontally.</strong>
+        /// <see cref="SlideTextBody.Device"/> is what carries it, so the height
+        /// <c>SlideTextLayout.Height</c> reserves and the baselines <c>SlideTextLayout.Place</c>
+        /// draws on are quantised by one device and cannot drift apart. A 96 dpi pixel is 0.75 pt,
+        /// so at 10 pt the device sets the em at <strong>13</strong> pixels and Liberation Sans
+        /// stacks at 11.254 pt where its design metrics give 11.499 — and at 11 pt, where the em
+        /// rounds <em>up</em> to 15, at 12.756 against 12.649. The external leading goes with the
+        /// grid, which is right for the same reason it is everywhere else: <c>IsAddExtLeading()</c>
+        /// is false in EditEngine and a chart label is an EditEngine text.
+        /// </para>
+        /// <para>
+        /// Measured on both reference binaries in <c>probes/chart-vertical/</c>: three faces ×
+        /// twelve sizes × two binaries × a deck and a Writer document, <strong>144 of 144</strong>
+        /// baseline-to-baseline distances within 0.019 pt of this rule, where scaling the face's
+        /// metrics exactly is out by up to 1.208 pt.
+        /// </para>
         /// </remarks>
         internal static SlideTextBody Body(
             string text, Length size, Colour colour, string? family, bool bold = false)
@@ -372,6 +391,7 @@ public static class SlideChart
             Wraps = false,
             Anchor = TextAnchor.Top,
             FontIndependentLineSpacing = false,
+            Device = MetricGrid.Chart,
             Paragraphs =
             [
                 new SlideParagraph(

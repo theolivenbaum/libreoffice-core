@@ -325,6 +325,27 @@ public readonly record struct MetricGrid(
     /// while 26.2.4.2 stacked it at 1.1219 em at 10 pt and 1.2241 at 15.89 — <b>chart2 does not use
     /// no device, it uses a different one</b>, and dropping the grid entirely was the defect.
     /// </para>
+    /// <para>
+    /// <b>And it is not a property of the newer binary.</b> Round 60's 39 pitches were measured on
+    /// one workbook against 26.2.4.2 alone. Re-measured on <b>three faces × twelve sizes × two
+    /// binaries × a deck and a Writer document</b> (<c>probes/chart-vertical/pitch.py</c>),
+    /// <b>144 of 144</b> baseline-to-baseline distances lie within 0.019 pt of this rule and the
+    /// two binaries agree with each other to <b>0.002 pt at every size</b> — so 24.2.7.2 quantises
+    /// the vertical exactly as 26.2.4.2 does, and the whole-pixel <em>position</em> snapping that
+    /// separates them horizontally has no vertical counterpart. Exact scaling is out by as much as
+    /// 1.208 pt over the same 144.
+    /// </para>
+    /// <para>
+    /// <b>The ascent is the other half and was measured on its own.</b> A value-axis label is
+    /// centred on its tick, so <c>tick − baseline</c> is <c>ascent − height/2</c>, and both the
+    /// tick and the baseline are stated outright in the reference's PDF —
+    /// <c>probes/chart-vertical/tickoffset.py</c> reads the tick off the path operators rather than
+    /// inferring it, so no constant has to be fitted. Against 24.2.7.2 the rule is right on
+    /// <b>72 of 72</b> with no free parameter, mean residual −0.0004 pt; against 26.2.4.2 on 72 of
+    /// 72 once one constant of <b>0.98 hundredths of a millimetre</b> is allowed, which is that
+    /// binary placing a label's block one map unit lower and is the only vertical difference
+    /// between the two. Exact scaling, given the same fitted constant, is right on 3 of 72.
+    /// </para>
     /// </remarks>
     public static MetricGrid Chart { get; } = new(96, false, MetricUnit.Mm100);
 

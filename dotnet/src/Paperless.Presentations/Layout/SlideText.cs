@@ -278,6 +278,30 @@ public sealed record SlideTextBody
     /// </para>
     /// </remarks>
     public bool FontIndependentLineSpacing { get; init; } = true;
+
+    /// <summary>
+    /// The reference device this body's vertical metrics are quantised through.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <see cref="MetricGrid.Presentation"/> for everything Impress lays out — the one
+    /// <c>VirtualDevice</c> <c>SdModule</c> makes at <c>RefDevMode::Dpi600</c> in 1/100 mm
+    /// (<c>sd/source/ui/app/sdmod.cxx</c>:83-85). It is a property of the body rather than a
+    /// constant in the layout because <b>not every text on a slide is laid out by Impress</b>: a
+    /// chart's labels are built by <c>chart2</c>'s own view on a <c>VirtualDevice</c> it creates
+    /// from <c>Application::GetDefaultDevice()</c>, which asks for no <c>RefDevMode</c> at all
+    /// and is therefore <b>96 dpi</b> — a pixel of 0.75 pt against Impress's 0.24. See
+    /// <see cref="MetricGrid.Chart"/>, and <c>SlideChart</c>, which is the only thing that sets
+    /// this to anything else.
+    /// </para>
+    /// <para>
+    /// It reaches the layout through the body so that the height a caller <em>measures</em> and
+    /// the baselines the layout <em>places</em> cannot come from two different devices: both
+    /// <c>SlideTextLayout.Height</c> and <c>SlideTextLayout.Place</c> take the body and nothing
+    /// else decides it.
+    /// </para>
+    /// </remarks>
+    public MetricGrid Device { get; init; } = MetricGrid.Presentation;
 }
 
 /// <summary>One paragraph of a shape's text.</summary>

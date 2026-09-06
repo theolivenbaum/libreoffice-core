@@ -119,6 +119,41 @@ format (Paperless reads), macro execution (never — Paperless only reports that
    within 0.7% of the design metric at every one of them; four chart frame widths give identical
    output, so no metafile scale is involved. `probes/chart-text-metafile/`.
 
+   **The same device decides every *vertical* metric, and that half was on the sheets track
+   alone.** A font instantiated at a whole number of device pixels answers a rounded ascent, a
+   rounded descent and therefore a rounded line height, so a chart's baseline pitch is
+   `round(asc/upem × hpx) + round(desc/upem × hpx)` device pixels of 0.75 pt, with `hpx =
+   round(size × 96/72)` and **no external leading** — `IsAddExtLeading()` is false in EditEngine
+   and a chart's label is an EditEngine text. Round 60 put `SheetBandText` on it; `SlideChart` and
+   `FrameChart` are now on it too, through `SlideTextBody.Device` and `ChartFace`'s own grid.
+   Measured over **three faces × twelve sizes × two binaries × a deck and a Writer document**:
+   144 of 144 baseline-to-baseline distances within **0.019 pt**, against as much as **1.208 pt**
+   for exact scaling. The ascent is measured separately, as a value-axis label's offset from its
+   own tick read off the PDF's path operators: `ascent − height/2` is right on **72 of 72 with no
+   free parameter** against 24.2.7.2, and on 72 of 72 against 26.2.4.2 once one constant is
+   allowed. `probes/chart-vertical/`.
+
+   **Two things about the vertical that the earlier rounds' figures did not cover.** (1) *The rule
+   is not a property of 26.2.4.2.* Round 60 measured it on one workbook against 26.2.4.2 alone;
+   **24.2.7.2 follows the identical vertical rule**, and the two binaries' pitches agree to
+   0.002 pt at every one of twelve sizes. (2) *24.2.7.2's whole-pixel snapping is horizontal
+   only.* Neither binary snaps a baseline; what separates them vertically is a single constant of
+   **one hundredth of a millimetre** — 0.028 pt — in where 26.2.4.2 places a label's block, and
+   that is the whole of it.
+
+   **The height and the ascent have to move together, and a single-line label hides it.** A label
+   is drawn at `blockCentre − height/2 + ascent`, so an error shared by the two cancels out of it:
+   that is why round 60's sheets defect stayed invisible until a label wrapped or was measured for
+   a fit. It is also a trap for a test — on Liberation Mono at 10 pt `chart2`'s device and
+   Impress's differ by 0.014 pt in that quantity and on Liberation Serif by 0.043, so a deck-level
+   assertion has to say which deck it is on and why.
+
+   **Nothing about how much text fits moved with it**, which was the risk worth measuring: on the
+   78 chart-bearing slides and words documents, 61 rendered differently and **0** changed a page
+   or slide count, the number of text runs drawn, or the number of turned ones — so no label
+   wrapped, none was thinned away, and no axis reached for `ChartAxisLabels.Resolve`'s 45 degree
+   rotation. 77 of the 78 match 26.2.4.2's page count, before and after.
+
    **Three things this file used to say about it are wrong and should not be re-derived.**
    (1) *"The seat is in the metafile a chart is drawn into and replayed from"* — there is no
    metafile. `ViewContactOfSdrOle2Obj` takes a chart's content as **primitives** straight from the
@@ -135,6 +170,11 @@ format (Paperless reads), macro execution (never — Paperless only reports that
    at every size. The 6.010 the fidelity test used to read there is 24.2.7.2 right-aligning the value
    axis' labels on their **design** widths while drawing them from the device's narrower array — it
    reserves 18.012 pt for `100` and draws 17.249. 26.2.4.2 uses one width for both, and so do we.
+
+   **And a chart's line height was never "the face's own ascent plus descent plus leading".**
+   `FrameChart` and `SlideChart.Measurer.Body` both said so — 1.1499 em for Liberation Sans — and
+   both halves are wrong: the leading is not in it, and the metrics go through a device, so it is
+   not a fixed fraction of the em at all. 1.1254 em at 10 pt and 1.1596 at 11.
 
    **Reach: 168 of 947 corpus documents carry a chart** — sheets 90, slides 68, words 10 — and 131
    of them are at 1% or worse, 111 at 2% or worse, at the sizes their charts declare. The 90 sheets

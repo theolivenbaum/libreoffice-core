@@ -120,7 +120,7 @@ public static partial class SlideTextLayout
             bool first = true;
             foreach (PlacedLine line in block.Lines)
             {
-                if (first) EmitMarker(placed, block, line, area.X, top, fonts);
+                if (first) EmitMarker(placed, block, line, area.X, top, fonts, body.Device);
 
                 Emit(placed, block, line, area.X, top, first);
                 first = false;
@@ -424,7 +424,8 @@ public static partial class SlideTextLayout
         PlacedLine line,
         Length areaLeft,
         Length top,
-        SlideFonts fonts)
+        SlideFonts fonts,
+        MetricGrid device)
     {
         if (Shaped(block.Paragraph, block.Scaling, fonts) is not
             { Face: { } face, Shaped: { } shaped } marked)
@@ -442,7 +443,7 @@ public static partial class SlideTextLayout
 
         if (marker.IsSymbol)
         {
-            LineMetrics metrics = LineSpacing.Resolve(face, MetricGrid.Presentation);
+            LineMetrics metrics = LineSpacing.Resolve(face, device);
             Length ascent = Rounded(metrics.ScaledAscent(size));
             Length descent = Rounded(metrics.ScaledDescent(size));
 
@@ -828,7 +829,7 @@ public static partial class SlideTextLayout
                 // draws 20.15 — half a point per line, measured on the wrapping cell of
                 // slide-table-grid.pptx, whose four reference baselines are 20.154 pt apart.
                 (Length ascent, Length metric) =
-                    FaceHeight(runs, styles, box.Line.Start, box.Line.VisibleEnd);
+                    FaceHeight(runs, styles, box.Line.Start, box.Line.VisibleEnd, body.Device);
 
                 Length faceHeight = metric > Length.Zero ? metric : box.Height;
                 // Through LineSpacingRule.Apply, whose whole-twip arithmetic this branch wants:
@@ -995,7 +996,7 @@ public static partial class SlideTextLayout
     /// </para>
     /// </remarks>
     private static (Length Ascent, Length Height) FaceHeight(
-        List<FormattedRun> runs, List<RunStyle> styles, int start, int end)
+        List<FormattedRun> runs, List<RunStyle> styles, int start, int end, MetricGrid device)
     {
         Length ascent = Length.Zero;
         Length height = Length.Zero;
@@ -1007,7 +1008,7 @@ public static partial class SlideTextLayout
             bool contains = start == end && run.Covers(start);
             if (!touches && !contains) continue;
 
-            LineMetrics metrics = LineSpacing.Resolve(run.Face, MetricGrid.Presentation);
+            LineMetrics metrics = LineSpacing.Resolve(run.Face, device);
             Length up = Rounded(metrics.ScaledAscent(run.EmSize));
             Length down = Rounded(metrics.ScaledDescent(run.EmSize));
 
