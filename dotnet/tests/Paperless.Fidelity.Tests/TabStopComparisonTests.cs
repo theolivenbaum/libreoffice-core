@@ -24,12 +24,25 @@ namespace Paperless.Fidelity.Tests;
 /// the position of a separator inside the stretch decides it.
 /// </para>
 /// </remarks>
-// [reference moved 24.2.7.2 -> 26.2.4.2] AListLabelsTabAdvancesToLibreOfficesStop fails on all
-// four formats, identically: word 4 ("than") starts at 117.571 pt in the reference against our
-// 117.442 pt, 0.129 pt. Same shape and same conclusion as PageDrawingComparisonTests — ours is
-// unmoved, the reference is not, and the shaper and rasteriser are shared. A real sub-point 26.2
-// layout change, ours to follow, mechanism not established. See `PageDrawingComparisonTests` for the
-// three further instruments this was measured in on 2026-09-05 and for what they say about the seat.
+// [2026-09-06, diagnosed, left failing on purpose] AListLabelsTabAdvancesToLibreOfficesStop fails
+// on all four formats and `EveryTabAdvancesToLibreOfficesStop` passes on all four, at the same
+// tolerance in the same file — and the pair is the cleanest control in the suite for what is
+// actually being measured.
+//
+// In `tabbed.docx` every stretch after a tab is its own text object with its own `Td`, so the
+// reference *states* each position: all three renderings agree at every word to the 0.100 pt pen
+// offset below. In `list-label-overrun.docx` the label overruns its stop, so the whole line is one
+// text object and every position after the first has to be reconstructed from the PDF's declared
+// widths — which LibreOffice writes as **truncated** integer thousandths of an em (every one of
+// this document's 26 is `floor(hmtx * 1000 / upem)`, mean deficit 0.482 thousandths). The three
+// renderings therefore drift apart word by word: between the two reference binaries alone, 0.000,
+// 0.011, 0.044, 0.066, 0.088, 0.099 pt.
+//
+// So this is not an advance divergence, and the paragraph above about the quantisation "not
+// accumulating here" is right about a stretch that starts at a stop and wrong about one that does
+// not. Measured through the reference's own `Td` pen, our laid-out widths agree with both binaries
+// to 0.011% over 5 faces x 6 units x up to 11 sizes; see `probes/advance-ppem/`. Left failing: only
+// writing our PDF with LibreOffice's truncated widths would close it.
 public sealed class TabStopComparisonTests : IDisposable
 {
     /// <summary>How far a drawn word may differ from LibreOffice's, in points.</summary>

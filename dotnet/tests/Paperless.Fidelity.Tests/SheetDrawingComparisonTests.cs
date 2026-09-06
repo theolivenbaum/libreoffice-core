@@ -41,6 +41,10 @@ namespace Paperless.Fidelity.Tests;
 // intent is "reduce cell's right edge by a full twip"; a full twip is 635 EMU and would give
 // `cellSize - 3`, so the magnitude the binary applies is not the one its own source describes.
 //
+// [2026-09-06] And it is not the advance divergence either — `CLAUDE.md` listed this method under
+// rule 3's reach and that was stale when it was written; rule 3 is now withdrawn outright. See
+// `probes/advance-ppem/results.md`.
+//
 // Classified as LibreOffice's rather than ours, and deliberately not reproduced. It fires on a
 // valid anchor — `colOff` equal to the cell extent is how a picture snapped to a column edge is
 // written — and shrinks the picture below the size its own `a:ext cx="1207080" cy="594360"`

@@ -54,8 +54,18 @@ namespace Paperless.Fidelity.Tests;
 // asserted that the *reference's* digit advance is the design metric, and under 26.2.4.2 it is not: the
 // face is still Liberation Mono — `pdffonts` reports one font, `BAAAAA+LiberationMono`, and
 // `AChartUnstatedTakesTheThemesMinorFace` still passes — but the reference draws its digits 5.839 pt
-// apart against 24.2.7.2's 6.010 and the face's own 6.004. It is the same divergence `CLAUDE.md`'s rule
-// 3 records, seen here at its cleanest, and it is not about the face. See the assertion's own remarks.
+// apart against 24.2.7.2's 6.010 and the face's own 6.004. It is not about the face.
+//
+// [2026-09-06] It is also **not** the text-advance divergence `CLAUDE.md`'s rule 3 used to record —
+// that rule is withdrawn, and this is a separate, unexplained defect that wants a round of its own.
+// The `TJ` adjustment here is 16 at *every* inter-glyph position on a monospaced face, which is 2.7%
+// of the advance: thirty times the thousandth-of-an-em quantisation that explains the Writer cases,
+// and far too large to be it. The chart's own `Tm` origins also move between the two binaries — the
+// value labels sit at 89.542 under 26.2.4.2 and 89.713 under 24.2.7.2 — where a Writer document's do
+// not move at all, so the chart text really is laid out differently by the two binaries. The shape of
+// the data is per-position and constant, not per-glyph and outline-dependent, so it cannot be outline
+// hinting; the seat is somewhere in the metafile a chart is drawn into and replayed from. See
+// `probes/advance-ppem/results.md`.
 public sealed partial class SlideChartFaceComparisonTests : IDisposable
 {
     /// <summary>One digit's advance in ten-point Liberation Mono, in points.</summary>
