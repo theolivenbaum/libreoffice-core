@@ -341,12 +341,14 @@ internal sealed class FrameResolution
                 //
                 // Both installed references agree on where the shape lands and it is not where either
                 // half of that sentence alone would put it: measured in
-                // `dotnet/probes/words-inline-effectextent/`, LibreOffice paints a shape's fill and
-                // outline at the outer top plus the top extent — 96.75 pt against 85.75 for a 10.8 pt
+                // `dotnet/probes/words-inline-effectextent/` and again in
+                // `dotnet/probes/words-inline-shape-ink/`, LibreOffice paints a shape's fill and
+                // outline at the outer top plus the top extent — 96.50 pt against 85.75 for a 10.8 pt
                 // extent — while laying the *text* of a shape carrying a `wps:txbx` out at the outer top
                 // regardless, its "INSIDE" run staying at 104.66 pt in both. That is its draw-shape and
-                // TextBox halves disagreeing rather than a rule; a frame here is one object and cannot be
-                // in two places, so it is placed where the reference puts the text and the ink it holds.
+                // TextBox halves disagreeing rather than a rule, and it cannot be met by one rectangle:
+                // the rectangle here is the *text's*, and `PlacedFrame.Ink` is the drawing's, offset
+                // below it by `PageFrame.InlineInkOffset`.
                 //
                 // A *turned* drawing is offset differently again — centred in its line box in both
                 // axes rather than moved by the extent's left edge — and both rules live on

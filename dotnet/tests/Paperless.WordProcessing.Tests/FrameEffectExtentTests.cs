@@ -309,6 +309,58 @@ public sealed class FrameEffectExtentTests
         frame.InlineOffset.Y.ShouldBe(Length.Zero);
     }
 
+    /// <summary>
+    /// A drawing's ink is painted below its text by the top extent, and by nothing when the extent
+    /// states only a bottom edge.
+    /// </summary>
+    /// <remarks>
+    /// The two halves of an inline drawing genuinely land in different places and this is the split:
+    /// <see cref="PlacedFrame.Area"/> is the text's rectangle and <see cref="PlacedFrame.Ink"/> the
+    /// drawing's. Measured in <c>dotnet/probes/words-inline-shape-ink/</c> on a 144 x 50.4 pt shape
+    /// between two 12 pt lines, both installed references identical: the fill band starts at
+    /// 85.75 pt with no extent, at 88.00 with <c>t="27432"</c>, at 93.00 with <c>91440</c> and at
+    /// 96.50 with <c>137160</c>, while a <c>b</c> edge of 137160 leaves it at 85.75 — and the
+    /// <c>INSIDE</c> run of a <c>wps:txbx</c> stays at 104.66 through all of them.
+    /// </remarks>
+    [Theory]
+    [InlineData(0, 0.0)]
+    [InlineData(27432, 2.15)]
+    [InlineData(91440, 7.2)]
+    [InlineData(137160, 10.8)]
+    public void TheInkIsPaintedBelowTheTextByTheTopExtent(int top, double points)
+    {
+        PageFrame frame = Inline($"""<wp:effectExtent l="0" t="{top}" r="0" b="137160"/>""");
+
+        frame.InlineInkOffset.ShouldBe(Length.FromPoints(points));
+
+        PlacedFrame placed = new(
+            frame,
+            new DocRect(Length.FromPoints(72), Length.FromPoints(100),
+                        frame.Size.Width, frame.Size.Height));
+
+        placed.Ink.X.ShouldBe(placed.Area.X);
+        placed.Ink.Y.ShouldBe(placed.Area.Y + Length.FromPoints(points));
+        placed.Ink.Width.ShouldBe(placed.Area.Width);
+        placed.Ink.Height.ShouldBe(placed.Area.Height);
+    }
+
+    /// <summary>A turned drawing's ink is not offset: its two rectangles are centred instead.</summary>
+    /// <remarks>
+    /// <see cref="PageFrame.InlineOffset"/> centres a turned drawing in its line box in both axes,
+    /// so adding the top extent on top of that would move it twice. The rotated fixtures in
+    /// <c>probes/words-inline-effectextent/</c> read the same line advance with and without an
+    /// extent, which is what says the turned branch is about the snap rectangle and not about this.
+    /// </remarks>
+    [Fact]
+    public void ATurnedDrawingTakesNoInkOffset()
+    {
+        PageFrame frame = Inline(
+            """<wp:effectExtent l="137160" t="137160" r="137160" b="137160"/>""",
+            rotation: 20 * 60000);
+
+        frame.InlineInkOffset.ShouldBe(Length.Zero);
+    }
+
     private static PageFrame Picture(string effectExtent, string effects = "")
     {
         XElement drawing = XElement.Parse(

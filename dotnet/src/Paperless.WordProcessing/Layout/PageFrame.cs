@@ -347,6 +347,26 @@ public sealed record PageFrame
     }
 
     /// <summary>
+    /// How far below <see cref="InlineOffset"/> the drawing's own ink is painted.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The vertical half of the effect extent, and it moves the <em>drawing</em> without moving the
+    /// text of a <c>wps:txbx</c> — which is why it is not folded into <see cref="InlineOffset"/>,
+    /// whose horizontal half moves both. <see cref="PlacedFrame.Ink"/> carries the measurement that
+    /// establishes the split.
+    /// </para>
+    /// <para>
+    /// Zero for a turned drawing, whose two rectangles are centred in one another instead
+    /// (<see cref="InlineOffset"/>), and zero for everything <see cref="EffectExtent"/> is empty
+    /// for — an anchored drawing, and a plain picture, which LibreOffice converts to a Writer
+    /// graphic object before the margin code can reach it.
+    /// </para>
+    /// </remarks>
+    public Length InlineInkOffset
+        => RotationDegrees == 0 ? EffectExtent.Top : Length.Zero;
+
+    /// <summary>
     /// The rectangle Word reserved on the line: the stated extent with Word's own width/height swap,
     /// grown by the effect extent.
     /// </summary>
@@ -931,6 +951,57 @@ public sealed record PageFrame
 /// A frame after it has been given a rectangle on a page.
 /// </summary>
 /// <param name="Frame">What was placed.</param>
-/// <param name="Area">Where it went, in page coordinates.</param>
+/// <param name="Area">Where its <em>text</em> went, in page coordinates.</param>
 /// <param name="Content">Its own text laid out inside that rectangle, or null when it has none.</param>
-public sealed record PlacedFrame(PageFrame Frame, DocRect Area, PlacedFlow? Content = null);
+/// <remarks>
+/// Two rectangles rather than one, because an inline drawing genuinely has two — see
+/// <see cref="Ink"/>. They are equal for every frame that states no top effect extent, which is
+/// nearly all of them.
+/// </remarks>
+public sealed record PlacedFrame(PageFrame Frame, DocRect Area, PlacedFlow? Content = null)
+{
+    /// <summary>
+    /// Where the frame's own drawing — its fill, its outline, its picture and its chart — is
+    /// painted, which is not always where its text is laid out.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A <c>wp:inline</c> drawing's line box is grown by <c>wp:effectExtent</c> on all four sides
+    /// and the drawing then sits <em>inside</em> that box. Across, the whole object moves by the
+    /// left edge and both halves follow it, so <see cref="PageFrame.InlineOffset"/> carries that in
+    /// the frame's own position. Down, the two halves of LibreOffice part company: the draw shape's
+    /// fill and outline are painted at the outer top <em>plus</em> the top extent, while a shape
+    /// carrying a <c>wps:txbx</c> lays its text out at the outer top regardless, because
+    /// <c>SwTextBoxHelper</c> never carries the offset
+    /// <c>SwAsCharAnchoredObjectPosition::CalcPosition</c> applied
+    /// (<c>sw/source/core/objectpositioning/ascharanchoredobjectposition.cxx</c>:129-133).
+    /// </para>
+    /// <para>
+    /// One rectangle cannot be in two places, which is why there are two. Measured in
+    /// <c>dotnet/probes/words-inline-shape-ink/</c> on a 144 x 50.4 pt inline drawing between two
+    /// 12 pt lines, both installed references identical on every row — the fill's own band top and
+    /// the <c>INSIDE</c> run of a text box, in PDF points from the page top:
+    /// </para>
+    /// <list type="table">
+    ///   <item><term>no extent</term><description>fill 85.75, <c>INSIDE</c> 104.66</description></item>
+    ///   <item><term><c>t</c> 27432 (2.16 pt)</term><description>fill <b>88.00</b></description></item>
+    ///   <item><term><c>t</c> 91440 (7.2 pt)</term><description>fill <b>93.00</b></description></item>
+    ///   <item><term><c>t</c> 137160 (10.8 pt)</term><description>fill <b>96.50</b>, <c>INSIDE</c> <b>104.66</b> — unmoved</description></item>
+    ///   <item><term><c>b</c> 137160</term><description>fill 85.75 — the bottom edge moves nothing</description></item>
+    /// </list>
+    /// <para>
+    /// It is the drawing and not the rectangle: an <c>ellipse</c> preset's curves move by the same
+    /// 10.75 pt, and so does a picture that keeps its shape by declaring an <c>a:effectLst</c>.
+    /// </para>
+    /// </remarks>
+    public DocRect Ink
+    {
+        get
+        {
+            Length down = Frame.InlineInkOffset;
+            return down == Length.Zero
+                ? Area
+                : new DocRect(Area.X, Area.Y + down, Area.Width, Area.Height);
+        }
+    }
+}

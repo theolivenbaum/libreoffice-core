@@ -261,12 +261,6 @@ internal static class DocxFrames
                 shapeProperties,
                 blocks,
                 new DocSize(width, height),
-
-                // A turned drawing's extent is not an offset — `PageFrame.InlineOffset` centres it
-                // instead — so the curves take none of it, and the frame's own turn carries them.
-                Rotation(shapeProperties) == 0
-                    ? EffectExtent(placed, anchor, shapeProperties)
-                    : Margins.Zero,
                 context.Theme);
 
         if (warp.IsWarped)
