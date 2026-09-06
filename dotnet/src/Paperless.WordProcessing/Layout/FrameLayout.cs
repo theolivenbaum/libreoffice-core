@@ -45,19 +45,27 @@ public static class FrameLayout
     /// True when the page is a right-hand one, which is the only thing the inside and outside alignments
     /// differ by.
     /// </param>
+    /// <param name="bodyArea">
+    /// The page's body rectangle as it was actually laid out — <see cref="LaidOutPage.BodyArea"/>, which
+    /// is <paramref name="geometry"/>'s text area with whatever a running head or foot that outgrew its
+    /// reserved room did to it. Only <see cref="FrameVerticalOrigin.PageMargin"/> uses it, and it
+    /// defaults to the stated text area, which is what the two are on a page whose furniture fits.
+    /// </param>
     public static DocRect Place(
         PageFrame frame,
         PageGeometry geometry,
         DocRect column,
         Length anchorTop,
         bool rightHandPage = true,
-        Length? anchorLineTop = null)
+        Length? anchorLineTop = null,
+        DocRect? bodyArea = null)
     {
         ArgumentNullException.ThrowIfNull(frame);
         ArgumentNullException.ThrowIfNull(geometry);
 
         DocRect page = new(Length.Zero, Length.Zero, geometry.Size.Width, geometry.Size.Height);
         DocRect text = geometry.TextArea;
+        DocRect body = bodyArea ?? text;
 
         DocRect horizontal = frame.HorizontalOrigin switch
         {
@@ -69,10 +77,37 @@ public static class FrameLayout
 
         Length lineTop = anchorLineTop ?? anchorTop;
 
+        // The margin-relative area runs from the *header frame's bottom to the footer frame's top*, not
+        // from `w:top` to `w:bottom`. `RelOrientation::PAGE_PRINT_AREA` takes the page's print area and
+        // then walks the page frame's lowers, subtracting each header frame's height from the area and
+        // adding it to the offset and subtracting each footer frame's height —
+        // `sw/source/core/objectpositioning/anchoredobjectposition.cxx`:336-361. Since Writer's DOCX
+        // import makes the page's own top margin `w:header` and gives the header frame `w:top - w:header`
+        // as a *dynamic* height (`dmapper/PropertyMap.cxx`:1148), the two coincide exactly while the
+        // running heads fit the room those margins reserve, and part company when one outgrows it — which
+        // is the same quantity `Paginator.PushedDownBy` and `PulledUpBy` already apply to the body, so
+        // the body's own rectangle is the answer.
+        //
+        // Measured in `dotnet/probes/words-margin-print-area/`, a 200 x 50 pt band centred vertically
+        // against the margin on A4 with `w:top` = `w:header` = 708 twips. Band centre, in points, both
+        // installed references identical on every row:
+        //
+        //   fixture       reference   body top   ours before
+        //   none            402.62      35.4       402.75
+        //   hdr-empty       409.38      48.9       402.75
+        //   hdr-3line       423.38      76.8       402.75
+        //   hdr-roomy       435.00     100.0       435.00     <- reserved room not exceeded
+        //   ftr-3line       400.25      35.4       402.75
+        //   hdr3-ftr3       421.00      76.8       402.75
+        //
+        // `hdr-roomy` is the control that says it is the *frame* and not the header's content: a header
+        // of one line inside a 64.6 pt reservation moves nothing. Horizontally there is no such rule —
+        // the header/footer walk in the horizontal case is guarded by `aRectFnSet.IsVert()`
+        // (the same file, :824), so it applies to a vertical writing mode only.
         DocRect vertical = frame.VerticalOrigin switch
         {
             FrameVerticalOrigin.Page => page,
-            FrameVerticalOrigin.PageMargin => text,
+            FrameVerticalOrigin.PageMargin => body,
             FrameVerticalOrigin.Line =>
                 new DocRect(column.X, lineTop, column.Width, text.Bottom - lineTop),
             _ => new DocRect(column.X, anchorTop, column.Width, text.Bottom - anchorTop),
@@ -234,7 +269,8 @@ internal sealed class FrameResolution
                     origin,
                     anchorTop,
                     rightHandPage: page.Number % 2 == 1,
-                    anchorLineTop: anchorLineTop);
+                    anchorLineTop: anchorLineTop,
+                    bodyArea: page.BodyArea);
 
                 frames++;
                 signature.Add(area.X.Emu);
@@ -311,9 +347,27 @@ internal sealed class FrameResolution
                 // regardless, its "INSIDE" run staying at 104.66 pt in both. That is its draw-shape and
                 // TextBox halves disagreeing rather than a rule; a frame here is one object and cannot be
                 // in two places, so it is placed where the reference puts the text and the ink it holds.
+                //
+                // A *turned* drawing is offset differently again — centred in its line box in both
+                // axes rather than moved by the extent's left edge — and both rules live on
+                // `PageFrame.InlineOffset`, which carries the measurements.
+                //
+                // **Horizontally there is no such disagreement, and the two edges are not symmetric.**
+                // `make-x-fixture.py` is the same fixture laid across a line as `LEFT` + drawing +
+                // `RIGHT`, and with a 10.8 pt *left* extent both halves of the object move right by it
+                // together: the fill's own column band goes 103.50 -> 114.25 pt and the `INSIDE` run of a
+                // `wps:txbx` goes 155.95 -> 166.75, on both installed references, while a 10.8 pt *top*
+                // extent moves neither of them by anything. So x takes the left extent and y does not
+                // take the top one — which is `SwAsCharAnchoredObjectPosition::CalcPosition`
+                // (`sw/source/core/objectpositioning/ascharanchoredobjectposition.cxx`:129-133) moving
+                // the anchor point by both spacings, with only the vertical one lost again by the
+                // TextBox half failing to follow.
+                DocPoint inside = frame.InlineOffset;
+
                 DocRect placedAt = new(
-                    area.X + line.Box.Left + PageDrawing.OffsetOnLine(paragraph, line, frame.AnchorOffset),
-                    area.Y + line.Baseline - (frame.InlineAscent ?? frame.InlineExtent.Height),
+                    area.X + line.Box.Left + PageDrawing.OffsetOnLine(paragraph, line, frame.AnchorOffset)
+                        + inside.X,
+                    area.Y + line.Baseline - (frame.InlineAscent ?? frame.InlineExtent.Height) + inside.Y,
                     frame.Size.Width,
                     frame.Size.Height);
 

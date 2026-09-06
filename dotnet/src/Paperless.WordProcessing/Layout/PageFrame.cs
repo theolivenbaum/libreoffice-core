@@ -257,12 +257,156 @@ public sealed record PageFrame
     public Margins EffectExtent { get; init; }
 
     /// <summary>
-    /// How much room the drawing takes on its line, which is <see cref="Size"/> grown by
-    /// <see cref="EffectExtent"/>.
+    /// How much room the drawing takes on its line: <see cref="Size"/> grown by
+    /// <see cref="EffectExtent"/>, and for a turned drawing the room its <em>turned</em> rectangle
+    /// needs as well.
     /// </summary>
-    public DocSize InlineExtent => new(
-        Size.Width + EffectExtent.Left + EffectExtent.Right,
-        Size.Height + EffectExtent.Top + EffectExtent.Bottom);
+    /// <remarks>
+    /// <para>
+    /// Upright, this is the box the file states grown by the four extent edges, and the drawing sits
+    /// at its top-left corner plus the left edge — see <see cref="InlineOffset"/>.
+    /// </para>
+    /// <para>
+    /// <strong>Turned, the same two rectangles are both still here and neither is the answer on its
+    /// own.</strong> LibreOffice keeps <em>both</em>: the object it lays out is the turned snap
+    /// rectangle, and the margins round it are the difference between that and the rectangle Word
+    /// reserved — <c>GraphicImport.cxx</c>:1055-1090, which takes Word's base rectangle, applies
+    /// Word's own width/height swap to it, expands it by the effect extent, and sets each margin to
+    /// the signed gap between that and the snap rectangle. The horizontal margins keep their sign and
+    /// the vertical ones are clamped at nought (<c>GraphicImport.cxx</c>:1245-1249, tdf#141880), so
+    /// the room taken comes out as
+    /// </para>
+    /// <list type="bullet">
+    ///   <item><description>across: Word's box, whatever the turn does to the drawing; and</description></item>
+    ///   <item><description>down: the larger of Word's box and the turned one.</description></item>
+    /// </list>
+    /// <para>
+    /// Measured in <c>dotnet/probes/words-inline-rotated-bbox/</c> on a 144 x 50.4 pt black
+    /// rectangle, both installed references identical. Room on the line, in points, against a
+    /// zero-degree control of 144.00 x 50.40:
+    /// </para>
+    /// <list type="table">
+    ///   <item><term>20 deg</term><description>144.00 x <b>96.60</b> — the turned height, Word's width</description></item>
+    ///   <item><term>20 deg, extent 137160</term><description><b>165.60</b> x 96.60 — the extent still grows the width</description></item>
+    ///   <item><term>45 deg</term><description><b>50.40</b> x <b>144.00</b> — the swap, and it beats the turned 137.46</description></item>
+    ///   <item><term>90 deg</term><description>50.40 x 144.00</description></item>
+    ///   <item><term>135 deg</term><description>144.00 x <b>137.46</b> — no swap at 135, so the turned height wins</description></item>
+    ///   <item><term>315 deg</term><description>144.00 x 137.46</description></item>
+    ///   <item><term>20 deg, 144 x 144</term><description>144.00 x <b>184.57</b></description></item>
+    /// </list>
+    /// <para>
+    /// The 45-degree row is the one that settles the shape of the rule: the turned box is
+    /// 137.46 square there, and both references take <b>144.00</b> — Word's swapped height — which
+    /// only a rule that keeps both rectangles can produce.
+    /// </para>
+    /// </remarks>
+    public DocSize InlineExtent
+    {
+        get
+        {
+            DocSize word = WordInlineBox;
+            if (RotationDegrees == 0) return word;
+
+            Length turned = TurnedSize.Height;
+            return new DocSize(word.Width, turned > word.Height ? turned : word.Height);
+        }
+    }
+
+    /// <summary>
+    /// Where the drawing's own rectangle sits inside <see cref="InlineExtent"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Upright it is the extent's <em>left</em> edge and no vertical offset at all, which is not
+    /// symmetrical and is measured: LibreOffice moves an as-character object by both its left and its
+    /// upper spacing (<c>SwAsCharAnchoredObjectPosition::CalcPosition</c>,
+    /// <c>sw/source/core/objectpositioning/ascharanchoredobjectposition.cxx</c>:129-133) and then
+    /// loses the vertical half again wherever the object is a shape carrying a <c>wps:txbx</c>, whose
+    /// TextBox does not follow its draw shape. See <c>FrameLayout.HangInline</c>.
+    /// </para>
+    /// <para>
+    /// Turned, it is a centring in both axes, because the margins that surround a turned object are
+    /// symmetrical by construction — each is half the gap between Word's box and the snap rectangle —
+    /// and the drawing's own rectangle shares its centre with that snap rectangle. Measured on the
+    /// same fixtures, the drawn rectangle's left edge in points against a line starting at 103.50:
+    /// 20 deg <b>99.25</b> (its 152.25 pt turned box centred in Word's 144), 45 deg <b>60.00</b>
+    /// (137.25 centred in the swapped 50.40, so it hangs into the margin), 135 deg <b>106.75</b>.
+    /// </para>
+    /// </remarks>
+    public DocPoint InlineOffset
+    {
+        get
+        {
+            if (RotationDegrees == 0) return new DocPoint(EffectExtent.Left, Length.Zero);
+
+            DocSize box = InlineExtent;
+            return new DocPoint(
+                (box.Width - Size.Width) / 2,
+                (box.Height - Size.Height) / 2);
+        }
+    }
+
+    /// <summary>
+    /// The rectangle Word reserved on the line: the stated extent with Word's own width/height swap,
+    /// grown by the effect extent.
+    /// </summary>
+    /// <remarks>
+    /// <c>lcl_doMSOWidthHeightSwap</c> (<c>GraphicImport.cxx</c>:533-548) swaps the two about the
+    /// rectangle's centre when the angle, truncated to whole degrees and taken modulo 180, lands in
+    /// <c>[45, 135)</c>. That half-open interval is the reason 45 degrees and 135 degrees behave
+    /// differently on an oblong, and the fixtures in <see cref="InlineExtent"/> show both.
+    /// </remarks>
+    private DocSize WordInlineBox
+    {
+        get
+        {
+            (Length width, Length height) = SwapsWidthAndHeight
+                ? (Size.Height, Size.Width)
+                : (Size.Width, Size.Height);
+
+            return new DocSize(
+                width + EffectExtent.Left + EffectExtent.Right,
+                height + EffectExtent.Top + EffectExtent.Bottom);
+        }
+    }
+
+    /// <summary>The bounding box of <see cref="Size"/> turned by <see cref="RotationDegrees"/>.</summary>
+    /// <remarks>
+    /// Snapped to the twip, which is the grid LibreOffice's own snap rectangle lives on.
+    /// </remarks>
+    private DocSize TurnedSize
+    {
+        get
+        {
+            double radians = RotationDegrees * Math.PI / 180.0;
+            double across = Math.Abs(Math.Cos(radians));
+            double down = Math.Abs(Math.Sin(radians));
+            double width = Size.Width.Emu;
+            double height = Size.Height.Emu;
+
+            return new DocSize(
+                Twips((width * across) + (height * down)),
+                Twips((width * down) + (height * across)));
+
+            static Length Twips(double emu)
+                => Length.FromTwips(Length.FromEmu((long)Math.Round(emu)).Twips);
+        }
+    }
+
+    /// <summary>Whether Word reserved the drawing's height across the line and its width down it.</summary>
+    private bool SwapsWidthAndHeight
+    {
+        get
+        {
+            if (RotationDegrees == 0) return false;
+
+            // Truncated to whole degrees and then taken modulo 180, both exactly as
+            // `(nMSOAngle / 60000) % 180` does on a `sal_Int32` — so a negative angle stays negative
+            // and never swaps, which is LibreOffice's behaviour rather than a simplification.
+            int degrees = (int)RotationDegrees % 180;
+            return degrees is >= 45 and < 135;
+        }
+    }
 
     /// <summary>Where the anchoring character sits in the paragraph's text, for a character anchor.</summary>
     public int AnchorOffset { get; init; }

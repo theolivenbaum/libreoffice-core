@@ -1,7 +1,11 @@
+using System.IO.Compression;
+using System.Text;
 using System.Xml.Linq;
+using Paperless.Core.Documents;
 using Paperless.Core.Geometry;
 using Paperless.Core.Units;
 using Paperless.WordProcessing.Layout;
+using Paperless.WordProcessing.Model;
 using Paperless.WordProcessing.Ooxml;
 using Shouldly;
 
@@ -224,30 +228,85 @@ public sealed class FrameEffectExtentTests
     }
 
     /// <summary>
-    /// A rotated drawing takes none of it, and the growth it does get is not the extent.
+    /// A turned drawing takes its line box from Word's reserved rectangle and its own turned one.
     /// </summary>
     /// <remarks>
     /// <para>
-    /// A rotation sends the import down the other branch of <c>nOOXAngle == 0</c>, which derives the
-    /// margins from the rotated snap rectangle. Worked through for a 20 degree, 144 x 50.4 pt drawing
-    /// those margins come out negative on both edges and clamp to zero at
-    /// <c>GraphicImport.cxx</c>:1248-1252.
+    /// A rotation sends the import down the other branch of <c>nOOXAngle == 0</c>
+    /// (<c>GraphicImport.cxx</c>:1055-1090), which keeps <em>both</em> rectangles: the object laid
+    /// out is the turned snap rectangle, and each margin round it is the signed gap between that and
+    /// the rectangle Word reserved — Word's own width/height swap applied to the stated extent, then
+    /// expanded by the effect extent. The horizontal margins keep their sign and the vertical ones
+    /// are clamped at nought (<c>GraphicImport.cxx</c>:1245-1249, tdf#141880), so the room taken is
+    /// Word's box across and the larger of the two down.
     /// </para>
     /// <para>
-    /// The measurement settles it rather than the arithmetic: that fixture grows its line by
-    /// <b>+46.25 pt</b> with a <c>137160</c> extent, and by <b>+46.25 pt</b> with no extent at all.
-    /// The growth is the rotated bounding box — which we do not yet size a rotated inline drawing by,
-    /// and which is a separate open defect — and none of it is the effect extent.
+    /// <strong>This asserted the opposite until 2026-09-06</strong> — that a turned drawing takes no
+    /// effect extent and no extra room at all — on the strength of a fixture that varied only the
+    /// vertical gap, where the turned height swallows the extent whole. Varying the width shows the
+    /// extent plainly: at 20 degrees a <c>137160</c> extent moves the same fixture's line advance from
+    /// <b>149.87 to 171.47 pt</b> on both references while the gap stays at 113.05 either way.
+    /// </para>
+    /// <para>
+    /// The figures are from <c>dotnet/probes/words-inline-rotated-bbox/</c>, a 144 × 50.4 pt black
+    /// rectangle, both installed references identical on every row.
     /// </para>
     /// </remarks>
-    [Fact]
-    public void ARotatedDrawingTakesNoEffectExtent()
+    [Theory]
+    [InlineData(20, 0, 144.00, 96.60)]     // no swap: Word's width, the turned height
+    [InlineData(20, 137160, 165.60, 96.60)] // the extent grows the width and is lost under the height
+    [InlineData(45, 0, 50.40, 144.00)]     // swapped, and 144 beats the turned 137.45
+    [InlineData(90, 0, 50.40, 144.00)]
+    [InlineData(135, 0, 144.00, 137.45)]   // no swap at 135, so the turned height wins
+    [InlineData(315, 0, 144.00, 137.45)]
+    public void ATurnedDrawingTakesItsTurnedBoundingBox(
+        int degrees, int emu, double width, double height)
     {
         PageFrame frame = Inline(
-            """<wp:effectExtent l="137160" t="137160" r="137160" b="137160"/>""", rotation: 1200000);
+            $"""<wp:effectExtent l="{emu}" t="{emu}" r="{emu}" b="{emu}"/>""",
+            rotation: degrees * 60000);
 
-        frame.EffectExtent.ShouldBe(Margins.Zero);
-        frame.InlineExtent.Height.ShouldBe(frame.Size.Height);
+        frame.InlineExtent.Width.ShouldBe(Length.FromPoints(width));
+        frame.InlineExtent.Height.ShouldBe(Length.FromPoints(height));
+    }
+
+    /// <summary>
+    /// A turned drawing is centred in its line box rather than moved by the extent's left edge.
+    /// </summary>
+    /// <remarks>
+    /// The margins round a turned object are symmetrical by construction — each is half the gap
+    /// between Word's box and the snap rectangle — so the drawing's own rectangle shares its centre
+    /// with the box. Measured on the same fixtures, the drawn rectangle's left edge in points on a
+    /// line starting at 103.50: 20 degrees <b>99.25</b>, 45 degrees <b>60.00</b> (which hangs into
+    /// the page margin), 135 degrees <b>106.75</b>. Those are the snap rectangle's edges; the offsets
+    /// asserted here are the drawing's own, which is the smaller rectangle inside it.
+    /// </remarks>
+    [Theory]
+    [InlineData(20, 0.00, 23.10)]
+    [InlineData(45, -46.80, 46.80)]
+    [InlineData(135, 0.00, 43.525)]
+    public void ATurnedDrawingIsCentredInItsLineBox(int degrees, double x, double y)
+    {
+        PageFrame frame = Inline("""<wp:effectExtent l="0" t="0" r="0" b="0"/>""",
+            rotation: degrees * 60000);
+
+        frame.InlineOffset.X.ShouldBe(Length.FromPoints(x));
+        frame.InlineOffset.Y.ShouldBe(Length.FromPoints(y));
+    }
+
+    /// <summary>An upright drawing is offset by the extent's left edge and by nothing downwards.</summary>
+    /// <remarks>
+    /// The other half of <see cref="PageFrame.InlineOffset"/>, and the asymmetry is measured rather
+    /// than reasoned about — see <c>FrameLayout.HangInline</c> and
+    /// <c>probes/words-inline-effectextent/make-x-fixture.py</c>.
+    /// </remarks>
+    [Fact]
+    public void AnUprightDrawingTakesTheLeftEdgeAndNoTopEdge()
+    {
+        PageFrame frame = Inline("""<wp:effectExtent l="137160" t="91440" r="27432" b="0"/>""");
+
+        frame.InlineOffset.X.ShouldBe(Length.FromPoints(10.8));
+        frame.InlineOffset.Y.ShouldBe(Length.Zero);
     }
 
     private static PageFrame Picture(string effectExtent, string effects = "")
