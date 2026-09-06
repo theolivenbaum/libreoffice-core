@@ -49,6 +49,22 @@ namespace Paperless.WordProcessing.Ooxml;
 /// <strong>It is inherited, and it is not a property of <see cref="FamilyName"/>.</strong>
 /// See <see cref="WordParagraphFormats.StatedClass"/> for the rule and the probe behind it.
 /// </param>
+/// <param name="AsianLanguage">
+/// <c>w:lang/@w:eastAsia</c>, the language of the East Asian font item, or null when nothing states
+/// one.
+/// </param>
+/// <param name="ComplexLanguage">
+/// <c>w:lang/@w:bidi</c>, the language of the complex-script font item, or null when nothing states
+/// one.
+/// </param>
+/// <param name="Hint">
+/// <c>w:rFonts/@w:hint</c>, which says which item an <em>ambiguous</em> character belongs to. See
+/// <see cref="WriterScripts.ForRun"/>.
+/// </param>
+/// <param name="Script">
+/// Which of the three character-font items this run's text is set from, western until a caller that
+/// has the text says otherwise. See <see cref="OnScript"/>.
+/// </param>
 public readonly record struct WordTextStyle(
     string? FamilyName,
     Length Size,
@@ -64,7 +80,11 @@ public readonly record struct WordTextStyle(
     bool AutoKerning = false,
     Length Tracking = default,
     int WidthPerCent = 100,
-    FontFamilyClass DeclaredClass = FontFamilyClass.Unknown)
+    FontFamilyClass DeclaredClass = FontFamilyClass.Unknown,
+    string? AsianLanguage = null,
+    string? ComplexLanguage = null,
+    WriterScriptHint Hint = WriterScriptHint.Automatic,
+    WriterScript Script = WriterScript.Western)
 {
     /// <summary>The key a face cache is keyed on: what actually decides which font file is loaded.</summary>
     /// <remarks>
@@ -74,31 +94,48 @@ public readonly record struct WordTextStyle(
     /// two different faces, and whichever run reached the cache first would decide for both.
     /// </para>
     /// <para>
-    /// So is the language, which reaches the fontconfig pattern as <c>FC_LANG</c>.
+    /// So are <see cref="Script"/> and the language it selects, for the same reason and a sharper
+    /// one: the item decides both the generic appended to the fontconfig pattern and its
+    /// <c>FC_LANG</c>, so the same family named in a western run and in an East Asian one is two
+    /// requests with two answers.
     /// </para>
     /// </remarks>
-    public (string? Family, int Weight, bool Italic, FontFamilyClass Class, string? Language) FaceKey
-        => (FamilyName, Weight, IsItalic, DeclaredClass, ItemLanguage);
+    public (string? Family, int Weight, bool Italic, FontFamilyClass Class, WriterScript Script,
+        string? Language) FaceKey
+        => (FamilyName, Weight, IsItalic, DeclaredClass, Script, ItemLanguage);
 
     /// <summary>
-    /// The language of the font item this run is set from, never null.
+    /// The language of the font item this run's script selects, never null.
     /// </summary>
     /// <remarks>
-    /// Writer's own default stands in where the document states none: <c>SwDoc::SwDoc</c> resolves
-    /// it through <c>MsLangId::resolveSystemLanguageByScriptType</c>, which answers
-    /// <c>LANGUAGE_ENGLISH_US</c> for the western item
+    /// Writer's three default language items stand in where the document states none:
+    /// <c>SwDoc::SwDoc</c> resolves them through
+    /// <c>MsLangId::resolveSystemLanguageByScriptType</c>, which answers <c>LANGUAGE_ENGLISH_US</c>,
+    /// <c>LANGUAGE_CHINESE_SIMPLIFIED</c> and <c>LANGUAGE_HINDI</c>
     /// (<c>sw/source/core/doc/docnew.cxx</c>:383-398,
-    /// <c>i18nlangtag/source/isolang/mslangid.cxx</c>:135-165).
+    /// <c>i18nlangtag/source/isolang/mslangid.cxx</c>:135-165). It is not a detail: it is what sends
+    /// a Hebrew character in a complex-script run to FreeSans rather than to DejaVu Sans.
     /// </remarks>
-    public string ItemLanguage => Language ?? "en-US";
+    public string ItemLanguage => Script switch
+    {
+        WriterScript.Asian => AsianLanguage ?? WriterScripts.DefaultLanguage(WriterScript.Asian),
+        WriterScript.Complex => ComplexLanguage ?? WriterScripts.DefaultLanguage(WriterScript.Complex),
+        _ => Language ?? WriterScripts.DefaultLanguage(WriterScript.Western),
+    };
+
+    /// <summary>The same style, told which font item the run's own text selects.</summary>
+    /// <param name="text">The run's text.</param>
+    public WordTextStyle OnScript(ReadOnlySpan<char> text)
+        => this with { Script = WriterScripts.ForRun(text, Hint) };
 
     /// <summary>
     /// The item this run's glyph fallback is asked under: a family, a class and a language.
     /// </summary>
     /// <remarks>
     /// <para>
-    /// Built here rather than at the resolver because it is a property of the <em>run</em> — see
-    /// <see cref="FontItem"/> for why it cannot be recovered from the face the run resolved to.
+    /// Built here rather than at the resolver because only the reader knows which of the three
+    /// items the run's script selects, and the class is the item's rather than the document's — see
+    /// <see cref="Layout.WordFallbackClass.ForScript"/>.
     /// </para>
     /// <para>
     /// <strong>A run naming no family at all states no item</strong>, and that is the same
@@ -113,7 +150,7 @@ public readonly record struct WordTextStyle(
             ? default
             : new FontItem(
                 FamilyName,
-                Layout.WordFallbackClass.ForDeclared(FamilyName, DeclaredClass),
+                Layout.WordFallbackClass.ForScript(FamilyName, DeclaredClass, Script),
                 ItemLanguage);
 }
 
@@ -619,7 +656,37 @@ internal static class WordParagraphFormats
             AutoKerningOf(kerning),
             TrackingOf(tracking),
             WidthOf(scale),
-            StatedClass(fonts, fontTable));
+            StatedClass(fonts, fontTable),
+            Word.Attribute(language.Element, "eastAsia"),
+            Word.Attribute(language.Element, "bidi"),
+            HintOf(fonts));
+    }
+
+    /// <summary>
+    /// What <c>w:rFonts/@w:hint</c> says an ambiguous character's script is, across the layers.
+    /// </summary>
+    /// <remarks>
+    /// The innermost layer that states one wins, as for every other <c>w:rFonts</c> attribute.
+    /// <c>DomainMapper::lcl_attribute</c> maps <c>eastAsia</c> onto
+    /// <c>ScriptHintType::ASIAN</c> and <c>cs</c> onto <c>COMPLEX</c>, and anything else — including
+    /// <c>default</c> — onto <c>AUTOMATIC</c>
+    /// (<c>sw/source/writerfilter/dmapper/DomainMapper.cxx</c>:969-988).
+    /// </remarks>
+    internal static WriterScriptHint HintOf(IReadOnlyList<XElement> layers)
+    {
+        if (layers is null) return WriterScriptHint.Automatic;
+
+        foreach (XElement fonts in layers)
+        {
+            switch (Word.Attribute(fonts, "hint"))
+            {
+                case "eastAsia": return WriterScriptHint.Asian;
+                case "cs": return WriterScriptHint.Complex;
+                case { Length: > 0 }: return WriterScriptHint.Automatic;
+            }
+        }
+
+        return WriterScriptHint.Automatic;
     }
 
     /// <summary>

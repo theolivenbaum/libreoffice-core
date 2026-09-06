@@ -268,9 +268,10 @@ public sealed class SystemFontResolver : IFontResolver, IGlyphFallbackResolver
     private readonly Dictionary<string, OpenTypeFace> _loaded = new(StringComparer.Ordinal);
     private readonly Dictionary<OpenTypeFace, string> _keys = new(ReferenceEqualityComparer.Instance);
     private readonly List<FontSubstitution> _substitutions = [];
-    private readonly Dictionary<(string CodePoints, int Weight, bool Italic, string Generic), OpenTypeFace?>
+    private readonly Dictionary<(string CodePoints, int Weight, bool Italic, string Generic, string Language), OpenTypeFace?>
         _fallbacks = [];
     private readonly Dictionary<string, string> _genericByFaceKey = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, string> _languageByFaceKey = new(StringComparer.Ordinal);
     private readonly List<GlyphFallback> _glyphFallbacks = [];
     private readonly FontconfigPreferences _preferences;
 
@@ -415,11 +416,13 @@ public sealed class SystemFontResolver : IFontResolver, IGlyphFallbackResolver
             ? GenericFor(new FontRequest(
                 item.FamilyName ?? string.Empty, DeclaredClass: item.DeclaredClass))
             : GenericForFallback(primary);
+        string language = (item.IsStated ? item.Language : LanguageForFallback(primary))
+                          ?? string.Empty;
         string key = string.Join('\u0000', codePoints);
 
         // Cached because a run of unsupported text asks the same question for every character, and
         // answering it means opening font files until one covers the character.
-        if (_fallbacks.TryGetValue((key, weight, isItalic, generic), out OpenTypeFace? cached))
+        if (_fallbacks.TryGetValue((key, weight, isItalic, generic, language), out OpenTypeFace? cached))
         {
             return cached;
         }
@@ -429,18 +432,31 @@ public sealed class SystemFontResolver : IFontResolver, IGlyphFallbackResolver
         if (_preferences.IsConfigured)
         {
             found = OnPreferenceList(codePoints, weight, isItalic, EmojiGeneric)
-                    ?? Preferred(codePoints, weight, isItalic, generic)
+                    ?? Preferred(codePoints, weight, isItalic, generic, language)
                     ?? OnGenericList(codePoints, weight, isItalic);
         }
         else
         {
             found = OnGenericList(codePoints, weight, isItalic)
-                    ?? Preferred(codePoints, weight, isItalic, generic);
+                    ?? Preferred(codePoints, weight, isItalic, generic, language);
         }
 
-        _fallbacks[(key, weight, isItalic, generic)] = found;
+        _fallbacks[(key, weight, isItalic, generic, language)] = found;
         return found;
     }
+
+    /// <summary>The language a pattern whose face is this one would carry as <c>FC_LANG</c>.</summary>
+    /// <remarks>
+    /// The same reverse lookup <see cref="GenericForFallback"/> makes and with the same first-writer
+    /// rule, because the two travel together: a run's font item supplies both, and a face this
+    /// resolver never chose carries neither.
+    /// </remarks>
+    private string? LanguageForFallback(OpenTypeFace? primary)
+        => primary is not null
+           && _keys.TryGetValue(primary, out string? faceKey)
+           && _languageByFaceKey.TryGetValue(faceKey, out string? language)
+            ? language
+            : null;
 
     /// <summary>fontconfig's generic family for a pattern whose face is this one.</summary>
     /// <remarks>
@@ -508,9 +524,17 @@ public sealed class SystemFontResolver : IFontResolver, IGlyphFallbackResolver
     /// <param name="weight">The weight to match, on the OpenType 1-1000 scale.</param>
     /// <param name="isItalic">Whether an italic face is wanted.</param>
     /// <param name="generic">The generic whose preference list ranks the candidates.</param>
+    /// <param name="language">
+    /// The font item's language, or empty for none. Ranked <em>above</em> the generic's preference
+    /// list, because <c>fcmatch.c</c> scores <c>PRI_LANG</c> above <c>PRI_FAMILY_WEAK</c> — which is
+    /// what makes a Hebrew character in a complex-script run answer FreeSans where the sans-serif
+    /// list on its own answers DejaVu Sans. See <see cref="FontLanguages"/>.
+    /// </param>
     private OpenTypeFace? Preferred(
-        IReadOnlyList<int> codePoints, int weight, bool isItalic, string generic)
+        IReadOnlyList<int> codePoints, int weight, bool isItalic, string generic, string language)
     {
+        int exemplar = FontLanguages.ExemplarOf(language);
+
         List<InstalledFace> ordered = _index.Faces
             .OrderBy(face => _preferences.RankOf(face.FamilyName, generic))
             .ThenBy(face => _preferences.RankOf(face.FamilyName))
@@ -519,15 +543,20 @@ public sealed class SystemFontResolver : IFontResolver, IGlyphFallbackResolver
             .ThenBy(face => face.FamilyName, StringComparer.Ordinal)
             .ToList();
 
-        // `PRI_CHARSET` first, the family keys after it. The coverage requirement is relaxed one
-        // character at a time rather than every face being loaded and counted, so a single missing
-        // character -- which is nearly every call -- costs exactly what it did before the set
-        // existed.
+        // `PRI_CHARSET` first, `PRI_LANG` second, the family keys last. The coverage requirement is
+        // relaxed one character at a time rather than every face being loaded and counted, so a
+        // single missing character -- which is nearly every call -- costs exactly what it did
+        // before the set existed.
         for (int allowed = 0; allowed < codePoints.Count; allowed++)
         {
-            foreach (InstalledFace candidate in ordered)
+            for (int pass = exemplar == FontLanguages.Neutral ? 1 : 0; pass < 2; pass++)
             {
-                if (CoversAllBut(candidate, codePoints, allowed) is { } face) return face;
+                foreach (InstalledFace candidate in ordered)
+                {
+                    if (pass == 0 && Covers(candidate, exemplar) is null) continue;
+
+                    if (CoversAllBut(candidate, codePoints, allowed) is { } face) return face;
+                }
             }
         }
 
@@ -968,6 +997,10 @@ public sealed class SystemFontResolver : IFontResolver, IGlyphFallbackResolver
         // face two differently-declared families both resolve to answers for the first of them,
         // which in a document is its body face.
         _genericByFaceKey.TryAdd(face.FaceKey, GenericFor(request));
+
+        // And the language, for the same reason and under the same first-writer rule: the two are
+        // the two halves of one pattern, and fontconfig ranks the language above the generic.
+        if (request.Language is { Length: > 0 } language) _languageByFaceKey.TryAdd(face.FaceKey, language);
 
         return new FontReference
         {

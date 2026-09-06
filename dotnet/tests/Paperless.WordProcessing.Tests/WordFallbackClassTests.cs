@@ -56,6 +56,30 @@ public sealed class WordFallbackClassTests
         WordFallbackClass.ForDeclared("Aptos", declared).ShouldBe(expected);
     }
 
+    [Theory]
+    [InlineData(FontFamilyClass.SansSerif)]
+    [InlineData(FontFamilyClass.Serif)]
+    [InlineData(FontFamilyClass.Unknown)]
+    public void OnlyTheWesternItemCarriesADeclaredClassAtAll(FontFamilyClass declared)
+    {
+        // `LN_CT_Fonts_ascii` inserts PROP_CHAR_FONT_FAMILY and `LN_CT_Fonts_eastAsia` and
+        // `LN_CT_Fonts_cs` insert the name alone
+        // (`sw/source/writerfilter/dmapper/DomainMapper.cxx`:436-508), so the CJK and CTL items keep
+        // the pool default's family type -- which `OutputDevice::GetDefaultFont` sets to
+        // FAMILY_SYSTEM for CJK_TEXT and CTL_TEXT, and which appends no generic at all. Measured on
+        // 26.2.4.2 (`probes/fonts-r65/gen-scriptitem.py`): a `w:hint="eastAsia"` run drawing U+2610
+        // answers Unifont and a complex-script run drawing U+05D0 answers FreeSans under *every*
+        // declared class, including the `swiss` that moves the western row.
+        WordFallbackClass.ForScript("Aptos", declared, WriterScript.Asian)
+            .ShouldBe(FontFamilyClass.Unknown);
+        WordFallbackClass.ForScript("Aptos", declared, WriterScript.Complex)
+            .ShouldBe(FontFamilyClass.Unknown);
+
+        // And the western item is unchanged, which is the control.
+        WordFallbackClass.ForScript("Aptos", declared, WriterScript.Western)
+            .ShouldBe(WordFallbackClass.ForDeclared("Aptos", declared));
+    }
+
     /// <summary>A run naming no family at all is not a run naming a family nobody has.</summary>
     /// <remarks>
     /// The discriminating case, and the one this fix got wrong on its first sweep: a declared class

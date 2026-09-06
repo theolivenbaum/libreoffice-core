@@ -86,7 +86,9 @@ public interface IFontResolver
 /// tie. A word-processing document that names no language still has three of them — Writer resolves
 /// <c>en-US</c>, <c>zh-CN</c> and <c>hi-IN</c> through
 /// <c>MsLangId::resolveSystemLanguageByScriptType</c> — which is why a Hebrew character in a
-/// complex-script run falls back to FreeSans here and not to DejaVu Sans.
+/// complex-script run falls back to FreeSans here and not to DejaVu Sans. See
+/// <see cref="FontLanguages"/> for what is modelled and <see cref="WriterScripts"/> for which item
+/// a run's text selects.
 /// </para>
 /// </param>
 public readonly record struct FontRequest(

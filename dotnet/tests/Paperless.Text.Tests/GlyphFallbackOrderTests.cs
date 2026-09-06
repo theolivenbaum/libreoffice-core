@@ -212,11 +212,46 @@ public class GlyphFallbackOrderTests
     }
 
     [Fact]
+    public void TheItemsLanguageOutranksTheGenericsPreferenceList()
+    {
+        // `FontConfigManager::Substitute` adds the item's language to the pattern as FC_LANG
+        // (`vcl/unx/generic/font/fontconfig.cxx`:1092, 1118-1119) and `fcmatch.c` scores PRI_LANG
+        // above PRI_FAMILY_WEAK, so among the faces covering the character the ones supporting the
+        // language come first. Measured on 26.2.4.2: a complex-script run draws U+05D0 in FreeSans,
+        // because Writer's default CTL language is Hindi and DejaVu Sans has no Devanagari.
+        SystemFontIndex index = Installed();
+        Assert.SkipWhen(
+            !index.Has("DejaVu Sans") || !index.Has("FreeSans"),
+            "the faces this compares are not installed; see check-env.sh");
+
+        using Tree tree = Tree.Create();
+        tree.Write("conf.d/60-latin.conf", Alias("sans-serif", "DejaVu Sans", "FreeSans"));
+
+        SystemFontResolver resolver = Resolver(index, tree.Root);
+
+        // Both cover U+2610 and DejaVu Sans is first on the only list in force, so the list alone
+        // answers DejaVu Sans.
+        resolver
+            .FallbackFor(
+                [Ballot], 400, false, primary: null,
+                new FontItem("Calibri", FontFamilyClass.Unknown, "en-US"))
+            ?.FamilyName.ShouldBe("DejaVu Sans");
+
+        // The same request under the complex-script item's own language answers the face that has
+        // Devanagari, although it is second on the list.
+        resolver
+            .FallbackFor(
+                [Ballot], 400, false, primary: null,
+                new FontItem("Calibri", FontFamilyClass.Unknown, "hi-IN"))
+            ?.FamilyName.ShouldBe("FreeSans");
+    }
+
+    [Fact]
     public void TheItemTravelsWithTheRunRatherThanWithTheFaceItChose()
     {
         // The generic used to be recorded against the face the request resolved to, first writer
         // winning. In a word-processing document the first request to reach a face is the paragraph
-        // mark's, so a run on a different font item silently took the paragraph's -- which is why
+        // mark's, so a run on a different font item silently took the paragraph's — which is why
         // every cell of `probes/fonts-r65/gen-scriptitem.py` answered as though the item did not
         // exist until the item was passed in.
         SystemFontIndex index = Installed();
@@ -269,6 +304,9 @@ public class GlyphFallbackOrderTests
         resolver.FallbackFor([Tick, NonBreakingHyphen], 400, false, primary: null, item)
             ?.FamilyName.ShouldBe("DejaVu Sans");
     }
+
+    /// <summary>U+2610 BALLOT BOX: DejaVu Sans and the Free faces have it; Carlito does not.</summary>
+    private const int Ballot = 0x2610;
 
     /// <summary>U+2713 CHECK MARK: OpenSymbol, DejaVu Sans and FreeSerif have it, Carlito does not.</summary>
     private const int Tick = 0x2713;
