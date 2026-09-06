@@ -268,6 +268,52 @@ public class ItemisationTests
     }
 
     /// <summary>
+    /// An object at the text's last boundary is still on the last line, because there is no next one.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The boundary rule above — "a range ending at the boundary does not pay for the object" — is right
+    /// everywhere but at the end of the text, where the range that would have paid for it does not exist.
+    /// A picture-only paragraph is exactly that case and is the commonest inline picture in the corpus: a
+    /// logo on a line of its own, which ODF, RTF and WW8 all write as an empty paragraph with an object at
+    /// boundary nought. Left at nought its line has no width, so a right-aligned or centred line has full
+    /// slack and the picture is drawn from the margin outwards — the whole of its own width too far over.
+    /// </para>
+    /// <para>
+    /// Both shapes are asserted because the readers disagree about whether a picture is a character: with
+    /// text before it (WW8 and ODF for a picture in a sentence) and with none at all.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void AnObjectAtTheTextsEndIsOnTheLastLine()
+    {
+        OpenTypeFace face = Carlito();
+        Length picture = Length.FromMillimetres(10);
+
+        const string Text = "before";
+        List<FormattedRun> runs = [new FormattedRun(0, Text.Length, face, Length.FromPoints(11))];
+
+        MeasuredParagraph plain = MeasuredParagraph.Measure(Text, runs);
+        MeasuredParagraph trailing = MeasuredParagraph.Measure(
+            Text, runs, objects: [new InlineObject(Text.Length, picture, picture)]);
+
+        trailing.Width.ShouldBe(plain.Width + picture);
+        trailing.WidthBetween(0, Text.Length).ShouldBe(plain.WidthBetween(0, Text.Length) + picture);
+
+        // And it belongs to the line that reaches the end, not to one that starts there — the empty line
+        // a trailing manual break opens must not pay for the picture on the line above it.
+        trailing.WidthBetween(Text.Length, Text.Length).ShouldBe(Length.Zero);
+
+        // A paragraph whose whole content is the picture: no text, one object, and the object is the
+        // line's entire width.
+        MeasuredParagraph alone = MeasuredParagraph.Measure(
+            string.Empty, [], objects: [new InlineObject(0, picture, picture)]);
+
+        alone.Width.ShouldBe(picture);
+        alone.WidthBetween(0, 0).ShouldBe(picture);
+    }
+
+    /// <summary>
     /// An inline object raises the line's ascent to its own height and nothing else.
     /// </summary>
     /// <remarks>

@@ -142,11 +142,35 @@ internal static class DocxDiagramPackage
         $"""
          <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
          <dgm:dataModel xmlns:dgm="{Dgm}" xmlns:a="{A}">
-           <dgm:ptLst/><dgm:cxnLst/><dgm:bg/><dgm:whole/>
+           <dgm:ptLst>
+             <dgm:pt modelId="doc" type="doc"><dgm:t><a:bodyPr/><a:lstStyle/><a:p><a:endParaRPr/></a:p></dgm:t></dgm:pt>
+             {Point("n0", null, "First node")}
+             {Point("n1", null, "Second node")}
+             {Point("n2", null, "Third node")}
+             {Point("p0", "pres", "Layout generated")}
+             {Point("s0", "sibTrans", "Connector")}
+           </dgm:ptLst>
+           <dgm:cxnLst/><dgm:bg/><dgm:whole/>
            <dgm:extLst><a:ext uri="{Dsp}">
              <dsp:dataModelExt xmlns:dsp="{Dsp}" relId="rId9"/>
            </a:ext></dgm:extLst>
          </dgm:dataModel>
+         """;
+
+    /// <summary>One <c>dgm:pt</c>, with the author's text in its <c>dgm:t</c> body.</summary>
+    /// <remarks>
+    /// <c>Third node</c> exists in the model and <em>not</em> in the baked drawing, and
+    /// <c>Layout generated</c> and <c>Connector</c> exist on point types no reader sees. Between
+    /// them they make the two possible sources — the data model and the baked shape tree —
+    /// distinguishable by their output rather than by inspection.
+    /// </remarks>
+    private static string Point(string id, string? type, string text) =>
+        $"""
+         <dgm:pt modelId="{id}"{(type is null ? "" : $" type=\"{type}\"")}>
+           <dgm:t><a:bodyPr/><a:lstStyle/>
+             <a:p><a:r><a:rPr lang="en-GB"/><a:t>{text}</a:t></a:r></a:p>
+           </dgm:t>
+         </dgm:pt>
          """;
 
     private static readonly string Layout =

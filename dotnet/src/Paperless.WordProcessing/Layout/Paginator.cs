@@ -1859,6 +1859,7 @@ public sealed class Paginator
                     pageFurniture, pageFurnitureSection, pageFurnitureGeometry, pageNumber,
                     first: pageIsSectionFirst),
                 noteArea,
+                isSectionFirst: pageIsSectionFirst,
                 Separator(noteArea, body)));
 
             // The sheet just written is the one the outgoing geometry belonged to; the next one is free to
@@ -2515,6 +2516,7 @@ public sealed class Paginator
         List<PlacedTable> tables,
         (PlacedFlow? Header, PlacedFlow? Footer) furniture,
         PlacedFlow? notes,
+        bool isSectionFirst,
         DocRect? separator = null)
         => new()
         {
@@ -2522,6 +2524,7 @@ public sealed class Paginator
             Number = number,
             Size = geometry.Size,
             BodyArea = geometry.TextArea,
+            Borders = BordersOn(geometry, isSectionFirst),
             ColumnCount = geometry.Columns,
             ColumnGap = geometry.ColumnGap,
             ColumnRuler = geometry.Ruler,
@@ -2534,17 +2537,30 @@ public sealed class Paginator
             NoteSeparator = separator,
         };
 
+    /// <summary>
+    /// The page border this page carries, resolved against <c>w:display</c>.
+    /// </summary>
+    /// <remarks>
+    /// Resolved here rather than at drawing time because this is the only layer that knows whether a
+    /// page is the first of its section, and <c>firstPage</c>/<c>notFirstPage</c> are the whole of
+    /// what the attribute can say.
+    /// </remarks>
+    private static PageBorders? BordersOn(PageGeometry geometry, bool isSectionFirst)
+        => geometry.Borders is { } borders && borders.AppearsOn(isSectionFirst) ? borders : null;
+
     private static LaidOutPage EmptyPage(
         int index,
         int number,
         PageGeometry geometry,
-        (PlacedFlow? Header, PlacedFlow? Footer) furniture)
+        (PlacedFlow? Header, PlacedFlow? Footer) furniture,
+        bool isSectionFirst = true)
         => new()
         {
             Index = index,
             Number = number,
             Size = geometry.Size,
             BodyArea = geometry.TextArea,
+            Borders = BordersOn(geometry, isSectionFirst),
             ColumnCount = geometry.Columns,
             ColumnGap = geometry.ColumnGap,
             ColumnRuler = geometry.Ruler,

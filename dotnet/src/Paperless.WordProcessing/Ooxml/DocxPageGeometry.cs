@@ -1,6 +1,8 @@
 using System.Globalization;
 using System.Xml.Linq;
 using Paperless.Core.Geometry;
+using Paperless.Core.Graphics;
+using Paperless.WordProcessing.Layout;
 using Paperless.Core.Units;
 using Paperless.WordProcessing.Model;
 
@@ -136,7 +138,96 @@ internal static class DocxPageGeometry
             IsRightToLeft = Word.IsOn(Word.Child(sectionProperties, "bidi")),
 
             HasMirroredMargins = Word.IsOn(Word.Child(settings, "mirrorMargins")),
+
+            Borders = Borders(Word.Child(sectionProperties, "pgBorders")),
         };
+    }
+
+    /// <summary>
+    /// The border drawn round the page, or null when the section declares none that draws.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>w:pgBorders</c> is the same four-sided shape as <c>w:pBdr</c> and <c>w:tblBorders</c> and
+    /// is read the same way — <c>w:sz</c> in eighths of a point through
+    /// <see cref="BorderRules"/> so that Word's style names and its width clamps are applied once,
+    /// and <c>w:color</c> through <see cref="WordThemeColour"/>. What is different is
+    /// <c>w:space</c>: on a paragraph border it is the gap between the line and the text, and here
+    /// it is the gap between the line and whatever <c>w:offsetFrom</c> names, which is the
+    /// <em>paper's edge</em> unless the attribute says <c>text</c>. Word states it in whole points
+    /// and clamps it to 31.
+    /// </para>
+    /// <para>
+    /// No theme is threaded in, so a border stating only <c>w:themeColor</c> falls back to black.
+    /// Nothing in the corpus does: all seven documents that declare a page border state
+    /// <c>w:color</c> outright.
+    /// </para>
+    /// </remarks>
+    private static PageBorders? Borders(XElement? pageBorders)
+    {
+        if (pageBorders is null) return null;
+
+        PageBorders borders = new()
+        {
+            Top = Side(Word.Child(pageBorders, "top")),
+            Left = Side(Word.Child(pageBorders, "left")),
+            Bottom = Side(Word.Child(pageBorders, "bottom")),
+            Right = Side(Word.Child(pageBorders, "right")),
+            OffsetFromText =
+                string.Equals(Word.Attribute(pageBorders, "offsetFrom"), "text", StringComparison.Ordinal),
+            HasShadow = AnyShadow(pageBorders),
+            Display = Word.Attribute(pageBorders, "display") switch
+            {
+                "firstPage" => PageBorderDisplay.FirstPage,
+                "notFirstPage" => PageBorderDisplay.NotFirstPage,
+                _ => PageBorderDisplay.AllPages,
+            },
+        };
+
+        return borders.Draws ? borders : null;
+    }
+
+    /// <summary>One side of a page border, or a side that draws nothing.</summary>
+    private static PageBorderSide Side(XElement? stated)
+    {
+        if (stated is null) return default;
+
+        string? val = Word.Attribute(stated, "val");
+        if (val is null or "none" or "nil") return default;
+
+        Length stateWidth =
+            Word.Integer(Word.Attribute(stated, "sz"), out int eighths) && eighths > 0
+                ? Length.FromPoints(eighths / 8.0)
+                : Length.FromPoints(0.5);
+
+        if (BorderRules.FromWord(BorderRules.WordStyleOf(val), stateWidth) is not { } rule)
+        {
+            return default;
+        }
+
+        Length space =
+            Word.Integer(Word.Attribute(stated, "space"), out int points) && points > 0
+                ? Length.FromPoints(Math.Min(points, 31))
+                : Length.Zero;
+
+        return new PageBorderSide(
+            rule.Width,
+            WordThemeColour.Read(stated, null, "color", "themeColor", "themeTint", "themeShade")
+                ?? Colour.Black,
+            space);
+    }
+
+    /// <summary>True when any side asks for the shadow, which Word draws round the whole box.</summary>
+    private static bool AnyShadow(XElement pageBorders)
+    {
+        foreach (string side in new[] { "top", "left", "bottom", "right" })
+        {
+            if (Word.Child(pageBorders, side) is not { } stated) continue;
+            string? shadow = Word.Attribute(stated, "shadow");
+            if (shadow is "1" or "true" or "on") return true;
+        }
+
+        return false;
     }
 
     /// <summary>
