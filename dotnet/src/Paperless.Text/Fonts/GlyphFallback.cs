@@ -65,6 +65,67 @@ public interface IGlyphFallbackResolver
         => FallbackFor(codePoint, weight, isItalic);
 
     /// <summary>
+    /// The same question asked for <em>all</em> of a run's missing characters at once.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>LibreOffice asks for one face covering the whole set, and that is not the same
+    /// question as asking about each character on its own.</strong>
+    /// <c>OutputDevice::ImplGlyphFallbackLayout</c> collects every code unit a layout could not map
+    /// into one string and hands it down as <c>rMissingCodes</c>
+    /// (<c>vcl/source/outdev/font.cxx</c>); <c>FontConfigManager::Substitute</c> puts every code
+    /// point of it into a single <c>FC_CHARSET</c>
+    /// (<c>vcl/unx/generic/font/fontconfig.cxx</c>:1092-1116); and <c>FcCompareCharSet</c> scores a
+    /// candidate by how many of the set it is <em>missing</em>, at <c>PRI_CHARSET</c> — fontconfig's
+    /// highest priority, above the family list and above the language. So a face that covers more of
+    /// the run wins over one that is better placed and covers less.
+    /// </para>
+    /// <para>
+    /// The chosen face is then subtracted from the set and the next fallback level asks again with
+    /// the remainder, which is why the answer for one character can depend on what else the run was
+    /// missing. Measured: <c>AAC-AD-No-2021-01…doc</c> draws <c>U+2011</c> in FreeSerif where a
+    /// one-character probe of the same request draws it in DejaVu Serif.
+    /// </para>
+    /// <para>
+    /// Defaulted to the single-character question over the first of the set, so an implementation
+    /// that does not model it stays valid and answers as it did.
+    /// </para>
+    /// </remarks>
+    /// <param name="codePoints">The characters the primary face has no glyph for, in text order.</param>
+    /// <param name="weight">The weight to match, on the OpenType 1-1000 scale.</param>
+    /// <param name="isItalic">Whether an italic face is wanted.</param>
+    /// <param name="primary">The face the run was set in, or null when the caller has none.</param>
+    OpenTypeFace? FallbackFor(
+        IReadOnlyList<int> codePoints, int weight, bool isItalic, OpenTypeFace? primary)
+        => codePoints is { Count: > 0 }
+            ? FallbackFor(codePoints[0], weight, isItalic, primary)
+            : null;
+
+    /// <summary>
+    /// The same question, told which of the run's font items the characters came from.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>The item is the pattern.</strong> Its family is the pattern's first
+    /// <c>FC_FAMILY</c>, its class decides the generic appended as the second, and its language is
+    /// the <c>FC_LANG</c> that outranks both — see <see cref="FontItem"/> for why it has to travel
+    /// with the run and cannot be recovered from the face.
+    /// </para>
+    /// <para>
+    /// Defaulted to the item-less question, so a caller with no script items to distinguish — a
+    /// slide, a sheet, a metafile — behaves exactly as it did.
+    /// </para>
+    /// </remarks>
+    /// <param name="codePoints">The characters the primary face has no glyph for, in text order.</param>
+    /// <param name="weight">The weight to match, on the OpenType 1-1000 scale.</param>
+    /// <param name="isItalic">Whether an italic face is wanted.</param>
+    /// <param name="primary">The face the run was set in, or null when the caller has none.</param>
+    /// <param name="item">The font item the run is set from, or default when the caller has none.</param>
+    OpenTypeFace? FallbackFor(
+        IReadOnlyList<int> codePoints, int weight, bool isItalic, OpenTypeFace? primary, FontItem item)
+        => FallbackFor(codePoints, weight, isItalic, primary);
+
+    /// <summary>
     /// The same question for a run set in a pi face, which fontconfig is never asked about.
     /// </summary>
     /// <remarks>

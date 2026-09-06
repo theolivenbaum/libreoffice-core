@@ -211,6 +211,111 @@ public class GlyphFallbackOrderTests
             ?.FamilyName.ShouldBe("FreeSerif");
     }
 
+    [Fact]
+    public void TheItemsLanguageOutranksTheGenericsPreferenceList()
+    {
+        // `FontConfigManager::Substitute` adds the item's language to the pattern as FC_LANG
+        // (`vcl/unx/generic/font/fontconfig.cxx`:1092, 1118-1119) and `fcmatch.c` scores PRI_LANG
+        // above PRI_FAMILY_WEAK, so among the faces covering the character the ones supporting the
+        // language come first. Measured on 26.2.4.2: a complex-script run draws U+05D0 in FreeSans,
+        // because Writer's default CTL language is Hindi and DejaVu Sans has no Devanagari.
+        SystemFontIndex index = Installed();
+        Assert.SkipWhen(
+            !index.Has("DejaVu Sans") || !index.Has("FreeSans"),
+            "the faces this compares are not installed; see check-env.sh");
+
+        using Tree tree = Tree.Create();
+        tree.Write("conf.d/60-latin.conf", Alias("sans-serif", "DejaVu Sans", "FreeSans"));
+
+        SystemFontResolver resolver = Resolver(index, tree.Root);
+
+        // Both cover U+2610 and DejaVu Sans is first on the only list in force, so the list alone
+        // answers DejaVu Sans.
+        resolver
+            .FallbackFor(
+                [Ballot], 400, false, primary: null,
+                new FontItem("Calibri", FontFamilyClass.Unknown, "en-US"))
+            ?.FamilyName.ShouldBe("DejaVu Sans");
+
+        // The same request under the complex-script item's own language answers the face that has
+        // Devanagari, although it is second on the list.
+        resolver
+            .FallbackFor(
+                [Ballot], 400, false, primary: null,
+                new FontItem("Calibri", FontFamilyClass.Unknown, "hi-IN"))
+            ?.FamilyName.ShouldBe("FreeSans");
+    }
+
+    [Fact]
+    public void TheItemTravelsWithTheRunRatherThanWithTheFaceItChose()
+    {
+        // The generic used to be recorded against the face the request resolved to, first writer
+        // winning. In a word-processing document the first request to reach a face is the paragraph
+        // mark's, so a run on a different font item silently took the paragraph's — which is why
+        // every cell of `probes/fonts-r65/gen-scriptitem.py` answered as though the item did not
+        // exist until the item was passed in.
+        SystemFontIndex index = Installed();
+        Assert.SkipWhen(
+            !index.Has("Carlito") || !index.Has("DejaVu Sans") || !index.Has("FreeSerif"),
+            "the faces this compares are not installed; see check-env.sh");
+
+        using Tree tree = Tree.Create();
+        tree.Write("conf.d/60-latin.conf", Conf(
+            Alias2("sans-serif", "DejaVu Sans"), Alias2("serif", "FreeSerif")));
+
+        SystemFontResolver resolver = Resolver(index, tree.Root);
+
+        // Resolve the face as a roman request first, which is what records `serif` against it.
+        OpenTypeFace carlito = Primary(resolver, "Calibri", FontFamilyClass.Serif);
+        resolver.FallbackFor(Tick, 400, false, carlito)?.FamilyName.ShouldBe("FreeSerif");
+
+        // The same face, asked under a swiss item, takes the swiss list.
+        resolver
+            .FallbackFor(
+                [Tick], 400, false, carlito,
+                new FontItem("Calibri", FontFamilyClass.SansSerif, "en-US"))
+            ?.FamilyName.ShouldBe("DejaVu Sans");
+    }
+
+    [Fact]
+    public void OneFaceIsSoughtForAllOfTheRunsMissingCharactersAtOnce()
+    {
+        // `ImplGlyphFallbackLayout` gathers the layout's unmapped code units into one string and
+        // `Substitute` puts every code point of it into a single FC_CHARSET, whose score —
+        // how many of the set the candidate is missing — is fontconfig's highest priority. So a
+        // face further down the family list wins if it covers more of the run.
+        SystemFontIndex index = Installed();
+        Assert.SkipWhen(
+            !index.Has("OpenSymbol") || !index.Has("DejaVu Sans"),
+            "the faces this compares are not installed; see check-env.sh");
+
+        using Tree tree = Tree.Create();
+        tree.Write("conf.d/60-latin.conf", Alias("sans-serif", "OpenSymbol", "DejaVu Sans"));
+
+        SystemFontResolver resolver = Resolver(index, tree.Root);
+        FontItem item = new("Calibri", FontFamilyClass.Unknown, "en-US");
+
+        // OpenSymbol holds U+2713 and is first on the list, so on its own it answers.
+        resolver.FallbackFor([Tick], 400, false, primary: null, item)
+            ?.FamilyName.ShouldBe("OpenSymbol");
+
+        // It does not hold U+2011. Asked for both at once the answer is the face that covers both,
+        // although it is second on the same list.
+        resolver.FallbackFor([Tick, NonBreakingHyphen], 400, false, primary: null, item)
+            ?.FamilyName.ShouldBe("DejaVu Sans");
+    }
+
+    /// <summary>U+2610 BALLOT BOX: DejaVu Sans and the Free faces have it; Carlito does not.</summary>
+    private const int Ballot = 0x2610;
+
+    /// <summary>U+2713 CHECK MARK: OpenSymbol, DejaVu Sans and FreeSerif have it, Carlito does not.</summary>
+    private const int Tick = 0x2713;
+
+    private static string Alias2(string subject, params string[] preferred)
+        => "<alias><family>" + subject + "</family><prefer>"
+           + string.Concat(preferred.Select(f => $"<family>{f}</family>"))
+           + "</prefer></alias>";
+
     private static string Alias(string subject, params string[] preferred)
         => "<?xml version=\"1.0\"?><fontconfig><alias><family>" + subject + "</family><prefer>"
            + string.Concat(preferred.Select(f => $"<family>{f}</family>"))

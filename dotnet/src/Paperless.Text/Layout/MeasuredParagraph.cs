@@ -78,6 +78,11 @@ namespace Paperless.Text.Layout;
 /// 1226 of the corpus's 1440 scaled runs.
 /// </para>
 /// </param>
+/// <param name="Item">
+/// The font item this run is set from, or default when the reader distinguishes none. It carries
+/// the family class and the language the glyph-fallback pattern is built with; see
+/// <see cref="Fonts.FontItem"/>.
+/// </param>
 public readonly record struct FormattedRun(
     int Start,
     int Length,
@@ -86,7 +91,8 @@ public readonly record struct FormattedRun(
     ShapingOptions Shaping = default,
     Length MetricEmSize = default,
     Length Tracking = default,
-    int WidthPerCent = 100)
+    int WidthPerCent = 100,
+    Fonts.FontItem Item = default)
 {
     /// <summary>One past the run's last character.</summary>
     public int End => Start + Length;
@@ -554,29 +560,44 @@ public sealed class MeasuredParagraph
     /// but the same <see cref="ShapingOptions"/> the caller passed, so a paragraph of Latin prose
     /// reaches HarfBuzz in the identical call it did before any of this existed. Anything else is
     /// split at every change of direction, script or face, and each piece is told which it is.
+    /// <para>
+    /// <strong>The faces are chosen over the whole run and the items are applied to the result, not
+    /// the other way about.</strong> Glyph fallback asks for one face covering <em>all</em> of a
+    /// run's missing characters at once — see <see cref="FontItemiser.Split"/> — so the answer
+    /// depends on which characters were in the request, and the drawing pass
+    /// (<c>PageDrawing.ByFace</c>) asks per run. Splitting by item first would ask a different
+    /// question here and let measurement and drawing pick different faces for the same character,
+    /// which is a line laid out at one width and painted at another.
+    /// </para>
     /// </remarks>
     private static List<FormattedRun> SubRuns(
         string text, FormattedRun run, List<TextItem> items, ItemisationOptions options)
     {
         List<FormattedRun> parts = [];
 
+        List<FaceRun> faces = FontItemiser.Split(
+            text, run.Start, run.Length, run.Face,
+            options.GlyphFallback, options.OnGlyphFallback, run.Item);
+
         foreach (TextItem item in items)
         {
-            int start = Math.Max(item.Start, run.Start);
-            int end = Math.Min(item.End, run.End);
-            if (end <= start) continue;
+            int from = Math.Max(item.Start, run.Start);
+            int to = Math.Min(item.End, run.End);
+            if (to <= from) continue;
 
-            foreach (FaceRun face in FontItemiser.Split(
-                         text, start, end - start, run.Face,
-                         options.GlyphFallback, options.OnGlyphFallback))
+            foreach (FaceRun face in faces)
             {
-                bool wholeRun = face.Start == run.Start && face.End == run.End;
+                int start = Math.Max(face.Start, from);
+                int end = Math.Min(face.End, to);
+                if (end <= start) continue;
+
+                bool wholeRun = start == run.Start && end == run.End;
                 bool plain = wholeRun && !item.IsRightToLeft && !face.IsFallback;
 
                 parts.Add(run with
                 {
-                    Start = face.Start,
-                    Length = face.Length,
+                    Start = start,
+                    Length = end - start,
                     Face = face.Face,
                     Shaping = plain
                         ? run.Shaping

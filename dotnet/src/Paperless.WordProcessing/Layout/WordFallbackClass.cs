@@ -101,6 +101,43 @@ internal static class WordFallbackClass
             : FontFamilyClass.Serif;
 
     /// <summary>
+    /// The same answer, told which of Writer's three character-font items the run is set from.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong><see cref="ForDeclared"/>'s roman default is the <em>western</em> item's, and a run
+    /// taken from the East Asian or complex-script item must not be given it.</strong> Writer keeps
+    /// <c>RES_CHRATR_FONT</c>, <c>RES_CHRATR_CJK_FONT</c> and <c>RES_CHRATR_CTL_FONT</c> side by
+    /// side and <c>SwScriptInfo::WhichFont</c> selects one per script item of the text
+    /// (<c>sw/source/core/text/porlay.cxx</c>:879-901). Only the western one ever carries a class
+    /// through the DOCX filter: <c>LN_CT_Fonts_ascii</c> inserts
+    /// <c>PROP_CHAR_FONT_FAMILY</c> and <c>LN_CT_Fonts_eastAsia</c> and <c>LN_CT_Fonts_cs</c> insert
+    /// the name alone (<c>sw/source/writerfilter/dmapper/DomainMapper.cxx</c>:436-508), so the other
+    /// two keep the pool default's family type — and <c>OutputDevice::GetDefaultFont</c> sets
+    /// <c>FAMILY_SYSTEM</c> for <c>CJK_TEXT</c> and <c>CTL_TEXT</c>, which appends no generic to the
+    /// fontconfig pattern at all (<c>vcl/source/outdev/font.cxx</c>,
+    /// <c>vcl/unx/generic/font/fontconfig.cxx</c>:1075-1088).
+    /// </para>
+    /// <para>
+    /// Measured on 26.2.4.2, one DOCX per cell with the face read out of the PDF
+    /// (<c>probes/fonts-r65/gen-scriptitem.py</c>): a <c>w:hint="eastAsia"</c> run drawing
+    /// <c>U+2610</c> answers <b>Unifont</b> and a complex-script run drawing <c>U+05D0</c> answers
+    /// <b>FreeSans</b> — under <em>every</em> declared class, including the <c>swiss</c> that moves
+    /// the western row from FreeSerif to DejaVu Sans. What separates those two answers from each
+    /// other is the item's <em>language</em> and not its class; see
+    /// <see cref="Ooxml.WordTextStyle.ItemLanguage"/>.
+    /// </para>
+    /// </remarks>
+    /// <param name="familyName">The family the run asks for, or null when it names none.</param>
+    /// <param name="declared">The class in force at the run, which only the western item reads.</param>
+    /// <param name="script">Which item the run's text selects.</param>
+    public static FontFamilyClass ForScript(
+        string? familyName, FontFamilyClass declared, Text.Fonts.WriterScript script)
+        => script == Text.Fonts.WriterScript.Western
+            ? ForDeclared(familyName, declared)
+            : FontFamilyClass.Unknown;
+
+    /// <summary>
     /// The class to hand <see cref="FontRequest"/> for a <c>.doc</c> run, whose <c>FFN</c> states one
     /// per font.
     /// </summary>

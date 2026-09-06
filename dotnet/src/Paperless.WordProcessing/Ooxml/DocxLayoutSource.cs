@@ -86,10 +86,10 @@ public sealed partial class DocxLayoutSource
 
     private readonly DrawingTheme? _theme;
     private readonly DrawingStyleMatrix? _shapeStyles;
-    private readonly Dictionary<(string? Family, int Weight, bool Italic, FontFamilyClass Class),
-        OpenTypeFace?> _faces = [];
-    private readonly Dictionary<(string? Family, int Weight, bool Italic, FontFamilyClass Class),
-        FontReference> _references = [];
+    private readonly Dictionary<(string? Family, int Weight, bool Italic, FontFamilyClass Class,
+        WriterScript Script, string? Language), OpenTypeFace?> _faces = [];
+    private readonly Dictionary<(string? Family, int Weight, bool Italic, FontFamilyClass Class,
+        WriterScript Script, string? Language), FontReference> _references = [];
 
     /// <summary>Creates a source over a document's styles and settings.</summary>
     /// <param name="styles">The document's styles, including its <c>w:docDefaults</c>.</param>
@@ -891,7 +891,7 @@ public sealed partial class DocxLayoutSource
 
         // The runs first, then the text they map: `Apply` rewrites both together, and the offsets it
         // preserves are the ones the notes and frames below were recorded against.
-        List<PageRun> runs = RunsOf(walker.Ranges, properties, body, face);
+        List<PageRun> runs = RunsOf(walker.Ranges, properties, body, face, walker.Text);
         string mapped = CaseMapping.Apply(walker.Text, runs);
 
         // A paragraph with nothing in it is its mark, so that is what sizes it; one with text is
@@ -932,6 +932,7 @@ public sealed partial class DocxLayoutSource
             // Word's "add space between Asian and Western text". See ScriptSpacing; the DOC reader
             // sets it for the same reason and the ODF one does not.
             AddsScriptSpace = true,
+            Item = text.FontItem,
             EmSize = text.Size,
             Language = text.Language,
             Shaping = new ShapingOptions(
@@ -1145,11 +1146,22 @@ public sealed partial class DocxLayoutSource
     /// its text is still part of the paragraph, and losing it would silently shorten the document.
     /// </para>
     /// </remarks>
+    /// <param name="ranges">The stretches of the paragraph and the run properties over each.</param>
+    /// <param name="paragraphProperties">The paragraph's <c>w:pPr</c>.</param>
+    /// <param name="paragraph">The paragraph mark's own style, which an unstyled run inherits.</param>
+    /// <param name="paragraphFace">The face the paragraph is set in, for a run whose own cannot load.</param>
+    /// <param name="text">
+    /// The paragraph's text, which the ranges index into. It is needed because a run's script
+    /// decides <em>which of Writer's three character-font items</em> the run is set from, and the
+    /// item carries its own family class and its own language — see
+    /// <see cref="WriterScripts.ForRun"/>.
+    /// </param>
     private List<PageRun> RunsOf(
         IReadOnlyList<StyledRange> ranges,
         XElement? paragraphProperties,
         WordTextStyle paragraph,
-        OpenTypeFace paragraphFace)
+        OpenTypeFace paragraphFace,
+        string text)
     {
         List<PageRun> runs = new(ranges.Count);
         bool varies = false;
@@ -1164,6 +1176,13 @@ public sealed partial class DocxLayoutSource
                     _fontTable, ignoreCharacterStyle: range.InIndexField);
 
             if (range.IsCitation) style = AsCitation(style);
+
+            // Which font item this run's text selects. A run of Latin prose selects the western one
+            // and nothing changes; a run of the ambiguous characters Word marks `w:hint="eastAsia"`
+            // selects the East Asian item, which carries neither the western item's roman default
+            // nor its language.
+            int from = Math.Clamp(range.Start, 0, text.Length);
+            style = style.OnScript(text.AsSpan(from, Math.Clamp(range.Length, 0, text.Length - from)));
 
             // A `w:sym` names its own face for one character, and it was resolved when the character was
             // chosen. Everything else about the run — its size, its colour, its escapement — still comes
@@ -1189,6 +1208,12 @@ public sealed partial class DocxLayoutSource
                 || size != paragraph.Size
                 || style.Colour != paragraph.Colour
                 || style.Language != paragraph.Language
+                // And the font item, which decides where a character this face cannot draw is
+                // looked for. Two runs can resolve to the *same* face off different items -- a
+                // `w:hint="eastAsia"` run naming the paragraph's own family is the shape -- so
+                // nothing above can see the difference, and folding them would leave the run
+                // asking under the paragraph mark's western item.
+                || style.FontItem != paragraph.FontItem
                 || rise != Length.Zero
                 // A case map has to survive the uniform-paragraph shortcut: it is the one property here
                 // that changes the *characters*, so dropping the runs would draw the text as stored.
@@ -1234,7 +1259,8 @@ public sealed partial class DocxLayoutSource
                 IsUnderlined: style.IsUnderlined,
                 IsStruckThrough: style.IsStruckThrough,
                 Tracking: style.Tracking,
-                WidthPerCent: style.WidthPerCent));
+                WidthPerCent: style.WidthPerCent,
+                Item: style.FontItem));
         }
 
         return varies ? runs : [];
@@ -2276,7 +2302,8 @@ public sealed partial class DocxLayoutSource
 
     private OpenTypeFace? Face(WordTextStyle text)
     {
-        (string? Family, int Weight, bool Italic, FontFamilyClass Class) key = text.FaceKey;
+        (string? Family, int Weight, bool Italic, FontFamilyClass Class, WriterScript Script,
+            string? Language) key = text.FaceKey;
         if (_faces.TryGetValue(key, out OpenTypeFace? cached)) return cached;
 
         OpenTypeFace? face = null;
@@ -2295,13 +2322,13 @@ public sealed partial class DocxLayoutSource
             // through this filter comes out DejaVu Serif where the same name through the ODF filter
             // comes out whatever fontconfig files it under. See `WordFallbackClass`, and
             // `probes/words-r54/font-fallback-rule.py` for the 98 files that measure it.
-            FontFamilyClass declared = WordFallbackClass.ForDeclared(
-                text.FamilyName, text.DeclaredClass);
+            FontFamilyClass declared = WordFallbackClass.ForScript(
+                text.FamilyName, text.DeclaredClass, text.Script);
 
             FontReference reference = _fonts.Resolve(
                 new FontRequest(
                     text.FamilyName ?? string.Empty, text.Weight, text.IsItalic,
-                    DeclaredClass: declared));
+                    DeclaredClass: declared, Language: text.ItemLanguage));
 
             face = _fonts.LoadOpenType(reference);
             _references[key] = reference;

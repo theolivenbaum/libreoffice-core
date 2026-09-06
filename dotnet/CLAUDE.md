@@ -181,10 +181,28 @@ format (Paperless reads), macro execution (never — Paperless only reports that
    documents were already right; the 78 slides and words ones are what this moved.
 
    **A single wrapped line short is amplified by section breaks into whole pages, and that is
-   why some documents are wildly out.** Worked through on `AWR OPS-AOC 044` (metrics-001, ours
-   12 pages against 15). *This used to be filed as the advance divergence arriving at corpus
-   scale, and that attribution is withdrawn with the rest of it: the wrap is real and its cause
-   is now unattributed.* A narrow table cell whose text wraps one line short makes its row shorter; a
+   why some documents are wildly out.** Worked through on `AWR OPS-AOC 044` (metrics-001, then
+   ours 12 pages against 15). *This used to be filed as the advance divergence arriving at
+   corpus scale, and that attribution is withdrawn with the rest of it.*
+
+   **`AWR OPS-AOC 044` no longer shows it, and the "12 against 15" has been quoted in briefs
+   after it stopped being true.** At `260611dae` it is **15 pages against the reference's 15**,
+   before and after the fonts round that re-measured it (`probes/fonts-r65`). The mechanism
+   below — a short wrap amplified by a `nextPage` break — is real and general and is kept for
+   that reason; the document that demonstrated it is not a witness for it any more, so
+   re-measure before working from it.
+
+   **What that document still shows is a `w:rFonts` family-code question, not a fallback one.**
+   It draws 103 `U+2610` in runs naming `MS Gothic`, which its own font table files `modern` —
+   a code `FontTable::lcl_sprm` maps to nothing
+   (`sw/source/writerfilter/dmapper/FontTable.cxx`:127-141, only `roman` and `swiss` are
+   mapped), so no `PROP_CHAR_FONT_FAMILY` is inserted and the class is whatever an ancestor set.
+   Its face-set distance from 26.2.4.2 is **2 both before and after** the fonts round, and a
+   probe reproducing the shape (`probes/fonts-r65/gen-awr.py`) answers FreeSerif on 26.2 exactly
+   as the tree does — so the disagreement is about which layer supplies the class in the real
+   file, and that is where whoever takes it next should start.
+
+   A narrow table cell whose text wraps one line short makes its row shorter; a
    shorter row lets one extra row onto the page; and the document's **ten `nextPage` section
    breaks** each convert that one-row overshoot into a full blank page, because the section ends
    wherever the overshoot has left it. Measured, full-width rules per page: **page 1 ours 11 to
@@ -772,6 +790,11 @@ Only `swiss` differs, which is the same switch as for family substitution — an
 as roman because Writer's own pool default is roman, so a word-processing document lands on the serif
 list unless its font table says otherwise.
 
+**That table is the *western* item's, and two of its rows are not.** `U+4E00` is an East Asian
+character and selects the CJK item whatever the class; the emoji rows are a language rule. Read the
+next section before using it: a character's own script decides which of Writer's three font items
+answers for it, and only the western one reads the declared class at all.
+
 **So `fc-match ":charset=XXXX"` is not the question LibreOffice asks.** Asked bare it answers DejaVu
 Sans for every one of the characters above, because `49-sansserif.conf` appends `sans-serif` to a
 pattern that named no generic — which is the *swiss* row, not the common one. `fc-match
@@ -835,21 +858,86 @@ distinct emoji) and `jobs-bulletin-51-22-december-2025.xlsx` (one) — and both 
 `vvsummit2022-Research-Roadmap…pptx`), where the reference draws `NotoSansArmenian-Regular` — a
 resolution difference, not a painting one.
 
-**The residual this did not close is the script-specific font item, and it reaches the corpus.**
-`U+05D0` א answers **FreeSans** and `U+0E01` ก answers **FreeSerif** under all six declared classes,
-and no generic's list explains either: a CTL run takes Writer's own CTL font item, which has its own
-family and its own class. The same thing happens on the CJK side and it is measurable on real
-documents — `150-5370-10H.docx` and `AWR OPS-AOC 044…docx` draw `U+2610` ☐ in runs whose font comes
-from `w:rFonts w:eastAsia="MS Gothic" w:hint="eastAsia"`, so 26.2.4.2 puts them on
-`RES_CHRATR_CJK_FONT` and answers **DejaVu Sans** where the western item's roman default answers
-FreeSerif. **So `WordFallbackClass.ForDeclared`'s roman default is the *western* item's, and a run
-taken from the `w:eastAsia` or `w:cs` slot must not be given it.** That is the next step and it is
-not a fallback-order question.
+**The residual this did not close is the script-specific font item, and the section below settles
+it.** The reading recorded here — that a CTL or CJK run takes an item with *its own family and its
+own class* — was wrong: the class never reaches those two items at all. What decides them is the
+item's own language.
 
-**And the pattern carries a *set* of characters, not one.** `rMissingCodes` is a string and every one
-of its code points goes into the `FcCharSet`, so the face LibreOffice picks has to cover all of them
-at once — which is why `AAC-AD-No-2021-01…doc` draws `U+2011` in FreeSerif where a one-character
-probe of the same request draws it in DejaVu Serif. We ask one code point at a time.
+### The script-specific font item decides it, and the deciding half is the *language*
+
+**Writer keeps three character-font items and selects one per script item of the text**, and only the
+western one behaves the way the two sections above describe. `SwScriptInfo::WhichFont` maps
+`i18n::ScriptType` onto `SwFontScript` (`sw/source/core/text/porlay.cxx`:879-901); a **weak**
+character — every symbol, dingbat, arrow and punctuation mark — takes the script of the text around
+it, or the one `w:rFonts/@w:hint` names, and nothing else can move it
+(`i18nutil/source/utility/scriptchangescanner.cxx`:246-268, `DomainMapper.cxx`:969-988).
+
+**The class never reaches the other two items at all.** `LN_CT_Fonts_ascii` inserts
+`PROP_CHAR_FONT_FAMILY`; `LN_CT_Fonts_eastAsia` and `LN_CT_Fonts_cs` insert the *name* and nothing
+else (`sw/source/writerfilter/dmapper/DomainMapper.cxx`:436-508). So the CJK and CTL items keep the
+pool default's family type, and `OutputDevice::GetDefaultFont` sets `FAMILY_SYSTEM` for `CJK_TEXT`
+and `CTL_TEXT` — *"don't care, but don't use font subst config later…"*
+(`vcl/source/outdev/font.cxx`) — which appends no generic to the pattern at all.
+
+**And each item carries its own language, which outranks the generic's preference list.**
+`SwDoc::SwDoc` resolves the document's three default languages through
+`MsLangId::resolveSystemLanguageByScriptType` (`sw/source/core/doc/docnew.cxx`:383-398), which
+answers `LANGUAGE_ENGLISH_US`, **`LANGUAGE_CHINESE_SIMPLIFIED`** and **`LANGUAGE_HINDI`**
+(`i18nlangtag/source/isolang/mslangid.cxx`:135-165). `Substitute` puts it in the pattern as
+`FC_LANG` (`fontconfig.cxx`:1092, 1118-1119) and `fcmatch.c` scores `PRI_LANG` above
+`PRI_FAMILY_WEAK`. `mapToFontConfigLangTag` then reduces the tag to what `FcGetLangs()` knows:
+`hi-IN` is not a member and `hi` is, `en-US` is not and `en` is, `zh-CN` **is**.
+
+Measured on 26.2.4.2, one DOCX per cell, faces read out of the PDFs
+(`probes/fonts-r65/gen-scriptitem.py`, 25 cells, **25/25** reproduced by the tree):
+
+| run | 26.2.4.2 draws | the pattern that explains it |
+|---|---|---|
+| western, `U+2610` | FreeSerif (DejaVu Sans under `swiss`) | `Calibri,serif:lang=en:charset=2610` |
+| `w:hint="eastAsia"`, `U+2610` or `U+2713` | **Unifont** | `Calibri:lang=zh-cn:charset=…` |
+| complex, `U+05D0`, or `w:hint="cs"` `U+2610` | **FreeSans** | `Calibri:lang=hi:charset=…` |
+| complex, `U+0E01` or `U+0627` | **FreeSerif** | `Calibri:lang=hi:charset=…` |
+| asian, `U+4E00` | WenQuanYi Zen Hei | `…:lang=zh-cn:charset=4e00` |
+
+**The declared class moves none of the CJK or CTL rows** — `roman`, `swiss` and no font table at all
+give the same answer — which is what the paragraph this replaces got wrong when it said those items
+have "their own family and their own class". They have their own *language*, and the class is simply
+absent.
+
+**A document that states `w:lang` overrides those defaults, and Word writes one into `docDefaults`
+for nearly every file.** `<w:lang w:val="en-US" w:eastAsia="en-US" w:bidi="ar-SA"/>` is what both
+`150-5370-10H.docx` and `AWR OPS-AOC 044…docx` carry, which is why their `w:hint="eastAsia"` runs
+answer **DejaVu Sans** and not the Unifont a document stating no language gets. Round 64 measured the
+answer and inferred the wrong cause from it.
+
+**A face's language support cannot be read from the configuration this tree parses** — fontconfig
+derives it from an orthography per language compiled into the library — so `FontLanguages` models it
+as coverage of one exemplar character of the language's script. Checked against `fc-list :lang=X`
+over 25 languages: **24 agree face for face**, and the twenty-fifth (Gurmukhi) names two fewer.
+Two exemplars are deliberately not the first letter of their alphabet, because the first letter does
+not discriminate: an accented Greek vowel excludes a face carrying only the mathematical Greek, and a
+simplified-only Chinese ideograph excludes a Japanese face carrying only the shared ones.
+
+**And the pattern carries a *set* of characters, not one.** `ImplGlyphFallbackLayout` gathers every
+unmapped code unit of a layout into one `OUString`; every code point of it goes into one `FcCharSet`;
+and `FcCompareCharSet` scores by *how many of the set the candidate is missing*, at `PRI_CHARSET` —
+fontconfig's highest priority, above both the family list and the language. The chosen face is then
+subtracted from the set and the next fallback level asks with the remainder
+(`vcl/source/outdev/font.cxx`, `fontconfig.cxx`:1229-1245). So a face further down the family list
+wins when it covers more of the run.
+
+**The generic must travel with the *run*, not be recorded against the face it resolved to.** Round 64
+recorded it against the face, first writer winning — and in a word-processing document the first
+request to reach a face is the paragraph mark's, so a run on any other item silently took the
+paragraph's. It hid the swiss row as well as the script items: `west-swiss-2713` answered FreeSerif
+until the item was passed in, because the mark's own Calibri had already claimed Carlito for `serif`.
+
+**That is also why round 64's stored 65/72 is 64/72.** Re-measured at `260611dae`, its own probe
+agrees on 64 cells: the residual is Hebrew under all six declared classes plus `swiss__2713` and
+`swiss__27A2`, and *not* the "Thai under swiss" it named — `swiss__0E01` agrees on both sides by the
+accident that the complex item's Hindi answer for Thai and the western serif list's answer are the
+same face. All three defects above are closed and both probes now agree 25/25 and 72/72; over round
+64's own fourteen movers the corpus face-set distance goes **19 → 16**, and 4 of the 947 move.
 
 ---
 
