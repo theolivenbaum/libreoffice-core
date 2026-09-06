@@ -712,6 +712,55 @@ fontconfig scores `PRI_LANG` above `PRI_FAMILY_WEAK`, so an emoji code point goe
 whatever generic the pattern named — `U+2714` answers Noto Color Emoji under all six classes although
 FreeSerif holds it and is on the serif list. `U+2713`, which the property excludes, does not.
 
+### A colour bitmap glyph is a Type 3 font, and `GlyphOutlines` was never in that path
+
+**The emoji row above is only useful if the face can be painted, and until round 65 it could not
+be.** Noto Color Emoji carries `CBDT`/`CBLC` and **neither `glyf` nor `CFF `**, so the PDF writer
+embedded a `glyf`-less TrueType program, announced it as one, and drew a blank at exactly the right
+advance; every gate the corpus harness has passed while it did. **A blank is worse for a reader
+than a wrong glyph**, so this is closed rather than recorded.
+
+**It was not `GlyphOutlines`.** That reader is `glyf`-only and is reached *only* by Fontwork
+(`Ooxml/DrawingML/FontworkFitting.cs`); text never touches it. The two seats were
+`PdfFontCatalogue`, which mis-described the program, and `SkiaDrawingSink.DrawOutlines`, which asks
+*Skia's* `SKFont.GetGlyphPath` and gets an empty path. Widening `GlyphOutlines` would have fixed
+nothing.
+
+**What LibreOffice writes, measured on 26.2.4.2's own PDF of a `U+2714` probe:** a
+`/Subtype/Type3` font with `/FontMatrix[0.001 0 0 0.001 0 0]`, a `/CharProcs` keyed by glyph, an
+`/Encoding /Differences` naming them, a `/ToUnicode`, **no font program**, and one char proc per
+glyph reading `1245.1171875 0 d0` then `q … cm /Im12 Do Q` over a `/DeviceRGB` image with an
+`/SMask`. `pdffonts` says *Type 3, Custom, emb yes, uni yes* and `pdftotext` gives the character
+back. Ours now writes that shape, the deflated colour plane byte-for-byte the same length, and the
+page's content stream is untouched — **the text layer is what keeps a colour glyph searchable, so
+the bitmap goes inside the font rather than beside the text as a picture.**
+
+**The placement is `round(pixels × upem / ppem)` per side, and rounding rather than truncation is
+measured, not assumed.** Noto is 2048 upem with one 109 ppem strike of 136 × 128 pixel glyphs at
+`bearingY 101`; the reference's three constants are `2555`, `2405` and `−507` design units, and
+2555.30 rounds down while 2404.99 rounds up. See `probes/colour-r65/results.md`.
+
+**`COLR`/`CPAL` is deferred and `sbix`/`SVG ` with it, because the census says so.** Of 150
+installed faces, 120 are `glyf`, 29 are `CFF `, **one** is `CBDT`/`CBLC` and **none** carries
+`COLR`, `sbix` or `SVG `. Nothing on this machine can render a page to measure a layer composition
+against. In its absence such a face is reported unpaintable and the fallback search moves to the
+next candidate, which draws a monochrome glyph — visible, and wrong, rather than absent.
+
+**That fall-through is the floor and it sits in `SystemFontResolver.Covers`**, which all three
+fallback stages go through. It changes no preference: a candidate is only ever skipped, never
+promoted, so the advance follows whichever face actually draws. It fires nowhere on this machine.
+**`CFF ` counts as paintable on purpose** — the rasteriser draws it and only the PDF writer declines
+to embed the program (`PdfFontCatalogue.IsCompactFontFormat`), so rejecting it here would move a
+line break to work around a writer.
+
+**The corpus reach is two documents and it predates the round that reported it.** Of 947,
+**two** draw a character landing on the colour face — `019_Free_Blood_Sugar_Chart…xlsx` (six
+distinct emoji) and `jobs-bulletin-51-22-december-2025.xlsx` (one) — and both appear in
+`probes/fonts-r64/faces-before.tsv` as well as `faces-after.tsv`, so `fonts-r64` created the
+*probe*'s blank and not the corpus's. **One** document reaches a `CFF ` face (Unifont, on
+`vvsummit2022-Research-Roadmap…pptx`), where the reference draws `NotoSansArmenian-Regular` — a
+resolution difference, not a painting one.
+
 **The residual this did not close is the script-specific font item, and it reaches the corpus.**
 `U+05D0` א answers **FreeSans** and `U+0E01` ก answers **FreeSerif** under all six declared classes,
 and no generic's list explains either: a CTL run takes Writer's own CTL font item, which has its own

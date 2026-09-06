@@ -489,10 +489,31 @@ public sealed class SystemFontResolver : IFontResolver, IGlyphFallbackResolver
         => _glyphFallbacks.Add(new GlyphFallback(codePoint, fromFamily, toFamily));
 
     /// <summary>The face behind an installed entry when it covers a character, else null.</summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>Covering the character is not enough; the face has to be able to draw it.</strong>
+    /// Every one of the three fallback stages — the emoji list, the request's own generic list and
+    /// LibreOffice's fixed list — asks its candidates through this one method, so putting the test
+    /// here makes an unpaintable candidate fall through to the next one everywhere at once, rather
+    /// than ending the search with a face that produces an empty run.
+    /// </para>
+    /// <para>
+    /// It is a floor and it deliberately changes no preference: the candidates are offered in
+    /// exactly the order they were, and one is only ever <em>skipped</em>, never promoted. So the
+    /// advance follows whichever face actually draws, because the face this returns is the face that
+    /// is measured, shaped and painted. See <see cref="GlyphPainting.CanPaint"/> for what counts as
+    /// paintable and what is deliberately left out of it.
+    /// </para>
+    /// <para>
+    /// Nothing installed here fires it: the one colour face on the machine is Noto Color Emoji, and
+    /// its <c>CBDT</c> strikes are read. It is the guard the round that made that face reachable did
+    /// not have.
+    /// </para>
+    /// </remarks>
     private OpenTypeFace? Covers(InstalledFace candidate, int codePoint)
     {
         OpenTypeFace? face = LoadCached(candidate.FaceKey);
-        return face is not null && face.HasGlyphFor(codePoint) ? face : null;
+        return face is not null && GlyphPainting.CanPaintCharacter(face, codePoint) ? face : null;
     }
 
     /// <summary>Loads a face by key through the resolver's own cache, or null when it cannot be read.</summary>
