@@ -56,32 +56,54 @@ namespace Paperless.Fidelity.Tests;
 // `AChartUnstatedTakesTheThemesMinorFace` still passes — but the reference draws its digits 5.839 pt
 // apart against 24.2.7.2's 6.010 and the face's own 6.004. It is not about the face.
 //
-// [2026-09-06] It is also **not** the text-advance divergence `CLAUDE.md`'s rule 3 used to record —
-// that rule is withdrawn, and this is a separate, unexplained defect that wants a round of its own.
-// The `TJ` adjustment here is 16 at *every* inter-glyph position on a monospaced face, which is 2.7%
-// of the advance: thirty times the thousandth-of-an-em quantisation that explains the Writer cases,
-// and far too large to be it. The chart's own `Tm` origins also move between the two binaries — the
-// value labels sit at 89.542 under 26.2.4.2 and 89.713 under 24.2.7.2 — where a Writer document's do
-// not move at all, so the chart text really is laid out differently by the two binaries. The shape of
-// the data is per-position and constant, not per-glyph and outline-dependent, so it cannot be outline
-// hinting; the seat is somewhere in the metafile a chart is drawn into and replayed from. See
-// `probes/advance-ppem/results.md`.
+// [2026-09-06] **Found, and it was ours.** A chart's text is not laid out by Impress: `chart2`'s view
+// builds it as plain text shapes on the `VirtualDevice` that `DrawModelWrapper` creates from
+// `Application::GetDefaultDevice()` with `MapUnit::Map100thMM`
+// (`chart2/source/view/main/DrawModelWrapper.cxx`:88-99), and that device is **96 dpi**
+// (`SvpSalGraphics::GetResolution`, `vcl/headless/svpgdi.cxx`:44). An `OutputDevice` instantiates a
+// font at a whole number of device pixels, so a 10 pt label is laid out at **13** pixels rather than
+// 13.333 and every advance in it is 2.5% narrow — 5.85 pt against the face's 6.004. `SlideChart` drew
+// the design metric; it now goes through `MetricGrid.Chart`, which is the rule `SheetBandText.ChartShape`
+// has applied to a workbook's charts since round 62 and which the slides and words tracks were left out
+// of. `probes/chart-text-metafile/` establishes it: the drawn advance follows `round(px96)/px96` over
+// twelve sizes in **both** reference binaries, residual at most 0.003, while the same string in an
+// ordinary slide text box on the same slide of the same deck stays within 0.7% of the design metric at
+// every one of them.
+//
+// So the earlier reading of this file — that 24.2.7.2 "sat on the design metric" and only 26.2.4.2
+// departed — was wrong, and the way it was wrong is worth keeping. 24.2.7.2 quantises the advance the
+// same way; what it *also* does is snap each glyph position to a whole 96 dpi pixel, so its gaps are 7
+// or 8 pixels where 26.2.4.2's are a flat 7.79, and it right-aligns these labels on their *design*
+// widths while drawing them from the device's narrower array. That inconsistency is what made
+// `pen("80") - pen("100")` read 6.010 there. 26.2.4.2 uses one width for both, which is why the same
+// difference reads 5.839 — and why ours, which also uses one width for both, now reads 5.839 too.
+//
+// The `TJ` adjustment of 16 at every inter-glyph position is that scale expressed in thousandths of an
+// em: 600 x (1 - 13/13.342) = 15.4. It is not the text-advance divergence `CLAUDE.md`'s rule 3 used to
+// record, and that rule stays withdrawn.
+
 public sealed partial class SlideChartFaceComparisonTests : IDisposable
 {
-    /// <summary>One digit's advance in ten-point Liberation Mono, in points.</summary>
+    /// <summary>
+    /// One digit's advance in ten-point Liberation Mono, as <c>chart2</c>'s device measures it.
+    /// </summary>
     /// <remarks>
-    /// 0.6009 em at the 10.01 pt the labels are drawn at. Liberation Sans' digit is 0.5560 em, or
-    /// 5.55 pt, so the two faces are 0.46 pt apart here — five times the tolerance below, and a
-    /// quantity neither renderer's plot rectangle can move.
+    /// The face's own digit is 0.6009 em, or 6.004 pt at the 10.005 pt these labels are drawn at.
+    /// A chart's 10 pt em is 13 whole pixels of a 96 dpi device rather than 13.342, so the advance
+    /// it measures is <c>6.004 x 13 / 13.342</c> = <b>5.85</b> pt. Both reference binaries and this
+    /// tree now draw it there; see the note above the class.
     /// </remarks>
-    private const double MonospacedDigitAdvance = 6.01;
+    private const double MonospacedDigitAdvance = 5.85;
 
-    /// <summary>The same digit's advance in ten-point Liberation Sans, in points.</summary>
+    /// <summary>The same digit's advance in ten-point Liberation Sans, on the same device.</summary>
     /// <remarks>
     /// The face this test exists to rule out — the fixed one <c>SlideChart</c> used for four rounds.
-    /// 0.5560 em at 10.01 pt.
+    /// 0.5560 em, 5.561 pt by the design metric and <b>5.42</b> through the same 13/13.342. The two
+    /// candidates are still 0.43 pt apart, four times the tolerance below, because the device's
+    /// scale is a property of the size and applies to either face equally: quantising the em cannot
+    /// turn one face into the other.
     /// </remarks>
-    private const double ProportionalDigitAdvance = 5.56;
+    private const double ProportionalDigitAdvance = 5.42;
 
     private readonly LibreOfficeRunner _libreOffice = new();
     private readonly string _workDirectory =
@@ -146,19 +168,18 @@ public sealed partial class SlideChartFaceComparisonTests : IDisposable
         // Ours against the literal first, so this tests Paperless rather than an agreement.
         ours.ShouldBe(MonospacedDigitAdvance, 0.1, "our digit advance");
 
-        // And the reference's against the two candidates rather than against the design metric, which
-        // it no longer draws. Under 24.2.7.2 it drew 6.010 — the face's own 0.6009 em at 10.005 pt, to
-        // a thousandth — and under 26.2.4.2 it draws 5.839, from a TJ array that shifts the pen 16/1000
-        // em at every inter-glyph position where 24.2.7.2 shifted it 76/1000 once. The face has not
-        // changed: `pdffonts` reports the single font `BAAAAA+LiberationMono` for both, and the deck's
-        // theme is what puts it there.
+        // And the reference's against the two candidates rather than against a literal, because the
+        // two reference binaries do not agree with each other here and neither is wrong about the
+        // face. 26.2.4.2 draws 5.839 — the device's advance, which is what we now draw. 24.2.7.2
+        // draws 6.010, because it right-aligns these labels on their design widths while drawing
+        // them from the device's narrower array; the face is the same in both, `pdffonts` reporting
+        // the single font `BAAAAA+LiberationMono` for each, and the deck's theme is what puts it
+        // there.
         //
-        // So the assertion is the one this test is for — the labels are set in the monospaced face and
-        // not the proportional one — stated as a comparison the reference's own device metrics cannot
-        // reach across. The two candidates are 0.45 pt apart and the reference sits 0.17 from one and
-        // 0.28 from the other. The residual is the advance divergence recorded in `CLAUDE.md`'s rule 3,
-        // which is a defect of ours and not of this test: we draw the unhinted design advance and the
-        // reference draws whatever its own device measures.
+        // Written as "nearer Mono than Sans" the assertion survives that disagreement and still
+        // does the job this test exists for: 5.839 is 0.011 from Mono and 0.419 from Sans, and
+        // 6.010 is 0.160 from Mono and 0.590 from Sans. Both readings are nearer by more than a
+        // factor of three, and no face substitution can produce that.
         Math.Abs(theirs - MonospacedDigitAdvance).ShouldBeLessThan(
             Math.Abs(theirs - ProportionalDigitAdvance),
             $"the reference's digit advance of {theirs:F3} pt is nearer Liberation Mono's "
