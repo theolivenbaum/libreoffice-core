@@ -253,6 +253,76 @@ both references and all eleven were `wps:wsp`; the corpus documents that broke w
 gate scored one of them `match` while it moved 1.5 points of first-page ink. Vary the *kind* of thing
 under test, not only its numbers.
 
+## Horizontally — and this is where the section above was wrong by omission
+
+*Measured 2026-09-06, same container, same two references, Paperless at `agent/draw-inline`.*
+
+Every fixture above varies `t` and `b` only. `make-x-fixture.py` varies `l` and `r`, on the same
+144 x 50.4 pt shape laid across a line as `LEFT` + drawing + `RIGHT` on a landscape page, and
+`measure-x.py` reads three things off it: the shape's own ink **columns** at 288 dpi, the x of the
+words either side of it, and — for the `tbx-*` fixtures, whose shape carries a `wps:txbx` — the box
+of the `INSIDE` run.
+
+In PDF points, both references, before this round's change:
+
+| fixture | who | inkL | inkR | adv | INSIDE x | INSIDE y |
+|---|---|---:|---:|---:|---:|---:|
+| `x-ee0` | 24.2 / 26.2 | 103.50 / 103.25 | 247.50 | 149.87 / 149.84 | — | — |
+| | ours | 103.75 | 247.75 | 150.00 | — | — |
+| `x-l-only` — `l=137160` | 24.2 / 26.2 | **114.25** | 258.25 | 160.67 / 160.64 | — | — |
+| | ours | **103.75** | 247.75 | 160.80 | — | — |
+| `x-r-only` — `r=137160` | 24.2 / 26.2 | 103.50 / 103.25 | 247.50 | 160.67 / 160.64 | — | — |
+| | ours | 103.75 | 247.75 | 160.80 | — | — |
+| `tbx-ee0` | 24.2 / 26.2 | 103.50 | 247.50 / 247.25 | 149.87 | 155.95 / 155.90 | 90.86 |
+| | ours | 103.75 | 247.75 | 150.00 | 156.00 | 90.81 |
+| `tbx-l-only` | 24.2 / 26.2 | **114.25** | 258.25 | 160.67 | **166.75** / 166.70 | 90.86 |
+| | ours | **103.75** | 247.75 | 160.80 | **156.00** | 90.81 |
+| `tbx-t-only` | 24.2 / 26.2 | 103.50 | 247.50 / 247.25 | 149.87 | **155.95** / 155.90 | **90.86** |
+| | ours | 103.75 | 247.75 | 150.00 | 156.00 | 90.81 |
+
+Four things it settles, and the third is the one the earlier round could not see:
+
+1. **The left extent moves the drawing; the right one does not.** `l` alone moves the ink band by
+   10.75 pt (10.8 rounded to the twip) and leaves the advance's own growth to `l+r` together, which
+   is what the earlier fixtures already showed vertically.
+2. **The advance was already right.** `adv` grows by `l+r` on both references and on ours, before
+   and after — the line-box half of the rule landed in the previous round and is untouched here.
+3. **Horizontally the draw shape and the TextBox agree, where vertically they do not.** `l` moves
+   the fill band *and* the `INSIDE` run by the same 10.8 pt. `t` moves **neither** — the run stays at
+   155.95 across and 90.86 down. So the asymmetry recorded above is specifically vertical, and
+   placing the frame at the outer corner on *both* axes was right on one and wrong on the other.
+4. **It is one line of LibreOffice.** `SwAsCharAnchoredObjectPosition::CalcPosition`
+   (`sw/source/core/objectpositioning/ascharanchoredobjectposition.cxx`:129-133) adjusts the anchor
+   point by `nLRSpaceLeft` and then by `nULSpaceUpper`; both moves happen, and only the vertical one
+   is lost again when `SwTextBoxHelper` fails to carry it to the TextBox fly.
+
+After moving the frame by `EffectExtent.Left` in `FrameLayout.HangInline`, every row above agrees
+with both references — `x-l-only` and `tbx-l-only` read `inkL` **114.50** against their 114.25, and
+`tbx-l-only`'s `INSIDE` reads **166.80** against 166.75, which is the same 0.25 pt raster quantum and
+0.05 pt text offset the zero-extent control already carried.
+
+### On the corpus document
+
+`verdict.py`, 150 dpi, against **both** references, on `WordArt_Shapes_Arrows_Catalog1.docx`:
+
+| | before | after |
+|---|---|---|
+| page 7 | `displaced-horizontal`, **dx −23 px** (11.04 pt), dy 0, ink −0.0, worst tile 0.2649 | **`match`**, dx 0 |
+| page 3 | `displaced-vertical`, worst tile **0.3289** | `displaced-vertical`, worst tile **0.0749** |
+| pages with a non-zero `dx` | several | **0 of 52** |
+| pages / words | 52 / 2468 | 52 / 2468 (references 52 / 2468) |
+
+The `dx` column is zero on every one of the 52 pages afterwards. What is left on the document is
+the *vertical* half — pages 23 onwards read `dy` of 1 to 16 px — and that is the draw-shape/TextBox
+disagreement above, not this.
+
+### The warped-body offset is now vertical only
+
+`DocxFontwork.Inset` moved a warped body's curves by `(effects.Left, effects.Top)`, because a warped
+body has no TextBox left and follows the draw shape. Its horizontal half is now in the frame's own
+position, so `Inset` shifts by `Top` alone; leaving both would have put a warped body 10.8 pt to the
+right of its own shape. Page 18, the warped page, is `match` against both references afterwards.
+
 ## Reproducing
 
 Three fixture generators, all read by the same `measure.py`:
@@ -263,7 +333,13 @@ python3 make-fixture.py         /abs/scratch/fx   # a wps:wsp shape in the body
 python3 make-picture-fixture.py /abs/scratch/px   # a pic:pic, plain / with effects / rotated
 python3 make-header-fixture.py  /abs/scratch/hx   # a shape in a header
 python3 measure.py /abs/scratch/fx /abs/scratch/out
+
+python3 make-x-fixture.py /abs/scratch/xfx        # the same shape with `l`/`r` varied
+python3 measure-x.py /abs/scratch/xfx /abs/scratch/xout
 ```
+
+`measure-x.py` is the horizontal reader: same three renderers, but it reports the ink **columns**
+rather than the rows, plus the x of `LEFT`, `RIGHT` and a text box's `INSIDE`.
 
 `make-picture-fixture.py` writes its own 8x8 PNG with `struct` and `zlib` rather than depending on an
 image library, so the fixture half runs in a bare container.

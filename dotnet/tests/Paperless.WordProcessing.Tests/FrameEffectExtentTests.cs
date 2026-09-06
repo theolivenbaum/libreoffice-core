@@ -1,7 +1,11 @@
+using System.IO.Compression;
+using System.Text;
 using System.Xml.Linq;
+using Paperless.Core.Documents;
 using Paperless.Core.Geometry;
 using Paperless.Core.Units;
 using Paperless.WordProcessing.Layout;
+using Paperless.WordProcessing.Model;
 using Paperless.WordProcessing.Ooxml;
 using Shouldly;
 
@@ -248,6 +252,138 @@ public sealed class FrameEffectExtentTests
 
         frame.EffectExtent.ShouldBe(Margins.Zero);
         frame.InlineExtent.Height.ShouldBe(frame.Size.Height);
+    }
+
+    /// <summary>
+    /// An inline drawing is placed at the outer left <em>plus</em> the left extent, and at the outer
+    /// top with no top extent at all.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The asymmetry is LibreOffice's, and it is measured rather than reasoned about.
+    /// <c>SwAsCharAnchoredObjectPosition::CalcPosition</c> moves the anchor point by both spacings —
+    /// <c>sw/source/core/objectpositioning/ascharanchoredobjectposition.cxx</c>:129-133,
+    /// <c>aAnchorPos.AdjustX(nLRSpaceLeft)</c> then <c>aAnchorPos.AdjustY(nULSpaceUpper)</c> — but a
+    /// shape carrying a <c>wps:txbx</c> is two objects in Writer, and only the vertical half of that
+    /// move is lost when its TextBox fails to follow its draw shape.
+    /// </para>
+    /// <para>
+    /// <c>probes/words-inline-effectextent/make-x-fixture.py</c> is the same fixture laid across a
+    /// line as <c>LEFT</c> + drawing + <c>RIGHT</c>. Both installed references, identical: a 10.8 pt
+    /// <em>left</em> extent moves the shape's own fill band from 103.50 to <b>114.25 pt</b> and the
+    /// <c>INSIDE</c> run of its text box from 155.95 to <b>166.75</b> — both halves, by the same
+    /// amount — while a 10.8 pt <em>top</em> extent moves neither of them by anything, leaving
+    /// <c>INSIDE</c> at 155.95 across and 90.86 down.
+    /// </para>
+    /// <para>
+    /// Before this the corpus catalogue's page 7 read <b>-23 px at 150 dpi</b>, 11.04 pt, against both
+    /// references with zero vertical shift and zero ink difference; after it, <b>0 px</b>.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void TheLeftExtentMovesTheDrawingAndTheTopExtentDoesNot()
+    {
+        DocRect none = PlacedInline("""<wp:effectExtent l="0" t="0" r="0" b="0"/>""");
+        DocRect left = PlacedInline("""<wp:effectExtent l="137160" t="0" r="0" b="0"/>""");
+        DocRect top = PlacedInline("""<wp:effectExtent l="0" t="137160" r="0" b="0"/>""");
+        DocRect right = PlacedInline("""<wp:effectExtent l="0" t="0" r="137160" b="0"/>""");
+
+        (left.X - none.X).ShouldBe(Length.FromPoints(10.8));
+        (top.Y - none.Y).ShouldBe(Length.Zero);
+        (top.X - none.X).ShouldBe(Length.Zero);
+        (right.X - none.X).ShouldBe(Length.Zero, "the right edge is room on the line, not a move");
+    }
+
+    /// <summary>Where one inline drawing lands on the first page of a one-paragraph document.</summary>
+    private static DocRect PlacedInline(string effectExtent)
+    {
+        string body = $"""
+            <w:p>
+              <w:r><w:rPr><w:sz w:val="24"/></w:rPr><w:t xml:space="preserve">LEFT </w:t></w:r>
+              <w:r><w:rPr><w:sz w:val="24"/></w:rPr>
+                <w:drawing>
+                  <wp:inline distT="0" distB="0" distL="0" distR="0">
+                    <wp:extent cx="1828800" cy="640080"/>
+                    {effectExtent}
+                    <wp:docPr id="1" name="probe"/>
+                    <a:graphic><a:graphicData uri="{Wps}"><wps:wsp>
+                      <wps:cNvSpPr/>
+                      <wps:spPr>
+                        <a:xfrm><a:off x="0" y="0"/><a:ext cx="1828800" cy="640080"/></a:xfrm>
+                        <a:prstGeom prst="rect"><a:avLst/></a:prstGeom>
+                        <a:solidFill><a:srgbClr val="000000"/></a:solidFill>
+                      </wps:spPr>
+                      <wps:bodyPr/>
+                    </wps:wsp></a:graphicData></a:graphic>
+                  </wp:inline>
+                </w:drawing>
+              </w:r>
+              <w:r><w:rPr><w:sz w:val="24"/></w:rPr><w:t xml:space="preserve"> RIGHT</w:t></w:r>
+            </w:p>
+            """;
+
+        using MemoryStream package = BuildPackage(body);
+        using DocumentSource source = DocumentSource.FromStream(package, "effect-extent.docx");
+        using IDocument document = new WordProcessingReader().Read(source);
+        WordProcessingPages pages = (WordProcessingPages)((IPaginatedDocument)document).Layout();
+
+        return pages.Pages[0].Frames
+            .Where(frame => frame.Frame.Anchor == FrameAnchor.AsCharacter)
+            .ShouldHaveSingleItem()
+            .Area;
+    }
+
+    private static MemoryStream BuildPackage(string body)
+    {
+        const string ContentTypes = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+              <Default Extension="rels"
+                       ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+              <Default Extension="xml" ContentType="application/xml"/>
+              <Override PartName="/word/document.xml"
+                        ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
+            </Types>
+            """;
+
+        const string RootRelationships = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+              <Relationship Id="rId1" Target="word/document.xml"
+                            Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument"/>
+            </Relationships>
+            """;
+
+        string document = $"""
+            <?xml version="1.0" encoding="UTF-8"?>
+            <w:document xmlns:w="{W}" xmlns:wp="{Wp}" xmlns:a="{A}" xmlns:wps="{Wps}">
+              <w:body>
+                {body}
+                <w:sectPr>
+                  <w:pgSz w:w="16838" w:h="11906" w:orient="landscape"/>
+                  <w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440"
+                           w:header="0" w:footer="0" w:gutter="0"/>
+                </w:sectPr>
+              </w:body>
+            </w:document>
+            """;
+
+        MemoryStream result = new();
+        using (ZipArchive archive = new(result, ZipArchiveMode.Create, leaveOpen: true))
+        {
+            Write(archive, "[Content_Types].xml", ContentTypes);
+            Write(archive, "_rels/.rels", RootRelationships);
+            Write(archive, "word/document.xml", document);
+        }
+
+        result.Position = 0;
+        return result;
+
+        static void Write(ZipArchive archive, string name, string content)
+        {
+            using Stream entry = archive.CreateEntry(name).Open();
+            entry.Write(Encoding.UTF8.GetBytes(content));
+        }
     }
 
     private static PageFrame Picture(string effectExtent, string effects = "")

@@ -126,11 +126,12 @@ internal static class DocxFontwork
     /// <remarks>
     /// <para>
     /// An as-character drawing's line box is grown by <c>wp:effectExtent</c> on all four sides, and
-    /// the two halves of LibreOffice disagree about where the object then sits inside it: a draw
-    /// shape's fill and outline are painted at the outer corner <em>plus</em> the extent, while a
-    /// shape carrying a <c>wps:txbx</c> lays its text out at the outer corner regardless. That is
-    /// measured in <c>dotnet/probes/words-inline-effectextent/</c> and <see cref="FrameLayout"/>
-    /// places every frame the second way, because an ordinary text box's ink <em>is</em> its text.
+    /// the two halves of LibreOffice disagree about where the object then sits inside it
+    /// <em>vertically</em>: a draw shape's fill and outline are painted at the outer top
+    /// <em>plus</em> the top extent, while a shape carrying a <c>wps:txbx</c> lays its text out at
+    /// the outer top regardless. That is measured in
+    /// <c>dotnet/probes/words-inline-effectextent/</c> and <see cref="FrameLayout"/> places every
+    /// frame the second way, because an ordinary text box's ink <em>is</em> its text.
     /// </para>
     /// <para>
     /// <strong>A warped body is the case where that choice is the wrong one</strong>: the importer
@@ -141,15 +142,18 @@ internal static class DocxFontwork
     /// which is the reference's rectangle to the pixel at 200 dpi.
     /// </para>
     /// <para>
-    /// The <em>horizontal</em> half of that disagreement looks like a defect on the text side as
-    /// well — the reference's unwarped gradient-text boxes on page 3 sit 10.8 pt to the right of
-    /// ours, the same extent — but that reaches every inline drawing in the corpus and is left
-    /// alone here rather than changed on the strength of one document.
+    /// <strong>Only the vertical half, since the horizontal one is now in the frame's own
+    /// position.</strong> There is no draw-shape/TextBox disagreement across the page — measured in
+    /// the same probe's <c>make-x-fixture.py</c>, a 10.8 pt left extent moves a shape's fill band and
+    /// its text box's text by the same 10.8 pt on both references — so <see cref="FrameLayout"/>
+    /// places every inline frame at the outer left plus the left extent, and shifting the curves by
+    /// it again here would put a warped body 10.8 pt to the right of everything else in its own
+    /// shape.
     /// </para>
     /// </remarks>
     private static GraphicsPath Inset(GraphicsPath outline, Margins effects)
     {
-        if (effects.Left == Length.Zero && effects.Top == Length.Zero) return outline;
+        if (effects.Top == Length.Zero) return outline;
 
         GraphicsPath moved = new();
         foreach (PathCommand command in outline.Commands)
@@ -168,7 +172,7 @@ internal static class DocxFontwork
 
         return moved;
 
-        DocPoint Shift(DocPoint point) => new(point.X + effects.Left, point.Y + effects.Top);
+        DocPoint Shift(DocPoint point) => new(point.X, point.Y + effects.Top);
     }
 
     /// <summary>The <c>prstTxWarp</c> a body states, or null when it states none or the identity.</summary>

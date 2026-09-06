@@ -311,8 +311,20 @@ internal sealed class FrameResolution
                 // regardless, its "INSIDE" run staying at 104.66 pt in both. That is its draw-shape and
                 // TextBox halves disagreeing rather than a rule; a frame here is one object and cannot be
                 // in two places, so it is placed where the reference puts the text and the ink it holds.
+                //
+                // **Horizontally there is no such disagreement, and the two edges are not symmetric.**
+                // `make-x-fixture.py` is the same fixture laid across a line as `LEFT` + drawing +
+                // `RIGHT`, and with a 10.8 pt *left* extent both halves of the object move right by it
+                // together: the fill's own column band goes 103.50 -> 114.25 pt and the `INSIDE` run of a
+                // `wps:txbx` goes 155.95 -> 166.75, on both installed references, while a 10.8 pt *top*
+                // extent moves neither of them by anything. So x takes the left extent and y does not
+                // take the top one — which is `SwAsCharAnchoredObjectPosition::CalcPosition`
+                // (`sw/source/core/objectpositioning/ascharanchoredobjectposition.cxx`:129-133) moving
+                // the anchor point by both spacings, with only the vertical one lost again by the
+                // TextBox half failing to follow.
                 DocRect placedAt = new(
-                    area.X + line.Box.Left + PageDrawing.OffsetOnLine(paragraph, line, frame.AnchorOffset),
+                    area.X + line.Box.Left + PageDrawing.OffsetOnLine(paragraph, line, frame.AnchorOffset)
+                        + frame.EffectExtent.Left,
                     area.Y + line.Baseline - (frame.InlineAscent ?? frame.InlineExtent.Height),
                     frame.Size.Width,
                     frame.Size.Height);
