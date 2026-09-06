@@ -1417,6 +1417,7 @@ public sealed partial class DocxLayoutSource
             BorderWidth = CheckBoxStroke,
             BorderInset = CheckBoxInset,
             IsCrossed = box.IsChecked,
+            IsTextPortion = true,
         };
     }
 

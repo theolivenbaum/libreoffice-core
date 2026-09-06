@@ -943,6 +943,20 @@ public sealed record PageFrame
     /// </remarks>
     public string? ChartFontFamily { get; init; }
 
+    /// <summary>
+    /// True when the frame is not a drawing at all, but a portion the text layer paints itself.
+    /// </summary>
+    /// <remarks>
+    /// One thing wears this: a form check box. Writer strokes it in
+    /// <c>SwTextPaintInfo::DrawCheckBox</c> (<c>sw/source/core/text/inftxt.cxx</c>) as part of painting
+    /// the line, and it never becomes an <c>SdrObject</c>; it is a <see cref="PageFrame"/> here only
+    /// because that is the vehicle this model has for something that takes room on a line and draws
+    /// geometry. The distinction is not cosmetic — everything that <em>does</em> go through the draw
+    /// layer inherits its inclusive rectangle, which is a twip taller than the object; see
+    /// <c>PageContent.InlineObjects</c>.
+    /// </remarks>
+    public bool IsTextPortion { get; init; }
+
     /// <summary>What the frame was called in the document, for diagnostics.</summary>
     public string? Name { get; init; }
 }

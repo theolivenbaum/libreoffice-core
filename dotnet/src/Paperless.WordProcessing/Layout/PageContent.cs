@@ -440,9 +440,57 @@ public sealed record PageParagraph : PageBlock
                 .Select(frame => new InlineObject(
                     frame.AnchorOffset,
                     frame.InlineExtent.Width,
-                    frame.InlineExtent.Height,
-                    frame.InlineAscent))]
+                    frame.InlineExtent.Height + ShapeLineTwip(frame),
+                    frame.InlineAscent ?? frame.InlineExtent.Height))]
             : [];
+
+    /// <summary>
+    /// The extra twip a <em>drawn shape</em> adds to the line it hangs on, below the baseline.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// An as-character picture and an as-character shape do not reach Writer's line the same way. A
+    /// picture is a fly holding a <c>SwNoTextFrame</c> and its size is its size; a shape is a draw
+    /// object, and a draw object's rectangle is inclusive — <c>SwRect::Bottom() == Top() + Height() - 1</c>
+    /// — so the line it hangs on comes out one twip taller than the shape.
+    /// </para>
+    /// <para>
+    /// Measured against 26.2.4.2 on two fixtures differing only in what their <c>a:graphicData</c> holds,
+    /// ten identical paragraphs of one inline object each, the pitch between the objects being the line
+    /// height (<c>probes/words-catalogue-bias/</c>):
+    /// </para>
+    /// <list type="bullet">
+    /// <item><description>
+    /// a <c>wps:wsp</c> shape of stated height <c>cy</c>: the reference's line is <c>cy + 1</c> twips and
+    /// ours was <c>cy</c>, at every one of twelve heights from 560 to 571 twips.
+    /// </description></item>
+    /// <item><description>
+    /// a <c>pic:pic</c> picture, the same sweep: <b>no difference at all</b>, six of six. So the twip is
+    /// the shape's, not every inline object's, and the picture is the control that says so.
+    /// </description></item>
+    /// </list>
+    /// <para>
+    /// Below the baseline rather than above it, which the same fixture settles: the <em>first</em> shape
+    /// on the page is drawn at the same place in both engines, 785.19 pt against 785.20, so the extra
+    /// twip is behind the object and not in front of it. That is why the ascent is resolved here to the
+    /// unpadded height rather than left to <c>InlineObject</c>'s default, which would otherwise take the
+    /// padded one and move the drawing down with it.
+    /// </para>
+    /// <para>
+    /// Its reach on the corpus is the catalogue this was found on,
+    /// <c>WordArt_Shapes_Arrows_Catalog1.docx</c>, whose rows are paragraphs of inline shapes: the twip
+    /// accumulates down each page, to 14.6 twips by the fifteenth row of page 48. That residual was
+    /// recorded by an earlier round as sub-point placement noise on the twip grid, and it is not noise:
+    /// over 466 paired drawing records the vertical offset runs <b>+418 / −11 / 0 37</b> with a mean of
+    /// +0.2059 pt, twenty-eight standard errors from zero, while the horizontal offset's mean is
+    /// +0.0009 pt.
+    /// </para>
+    /// </remarks>
+    private static Length ShapeLineTwip(PageFrame frame)
+        => frame.Image is not null || frame.Vector is not null || frame.Chart is not null
+            || frame.IsTextPortion
+            ? Length.Zero
+            : Length.FromTwips(1);
 
     /// <summary>True when an as-character frame is set in the paragraph's text.</summary>
     public bool HasInlineObjects
