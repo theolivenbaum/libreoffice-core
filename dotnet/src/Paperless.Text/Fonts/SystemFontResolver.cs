@@ -316,10 +316,35 @@ public sealed class SystemFontResolver : IFontResolver, IGlyphFallbackResolver
 
     /// <inheritdoc/>
     /// <remarks>
+    /// <para>
     /// LibreOffice's own list first (<c>ImplInitGenericGlyphFallback</c> in
     /// <c>vcl/source/font/PhysicalFontCollection.cxx</c>), then anything installed that covers the
     /// character. The order matters for more than tidiness: the face that draws a character decides
     /// its advance width, so two renderers that pick different faces break the line differently.
+    /// </para>
+    /// <para>
+    /// <strong>And that order is the reverse of LibreOffice's, which is an open defect with a
+    /// known seat.</strong> <c>PhysicalFontCollection::GetGlyphFallbackFont</c> calls the
+    /// fontconfig hook <em>first</em> and only reaches the generic list
+    /// <c>if (!pFallbackData)</c> (<c>vcl/source/font/PhysicalFontCollection.cxx</c>:283-291). So
+    /// where a character is covered both by something on the list and by something fontconfig
+    /// ranks higher, the reference draws fontconfig's answer and this draws the list's. The list
+    /// heads with <c>starsymbol, opensymbol</c>, which is what makes the disagreement visible:
+    /// OpenSymbol covers a good deal of punctuation and geometry that the text faces also cover.
+    /// </para>
+    /// <para>
+    /// Measured on 26.2.4.2: <c>Tax factsheet 2022 (1).pptx</c> has <c>a:buChar char="●"</c>
+    /// (<c>U+25CF</c>) bullets, the reference draws them in <b>DejaVu Sans</b> and we draw them in
+    /// <b>OpenSymbol</b> — both faces hold the character, and <c>fc-match ":charset=25cf"</c>
+    /// answers DejaVu Sans. It is the last surviving family swap on the slides track.
+    /// </para>
+    /// <para>
+    /// It is <em>not</em> fixed here, and deliberately: reversing the two stages moves every glyph
+    /// fallback on every track at once, and the second stage is a stand-in for fontconfig's
+    /// ordering rather than fontconfig itself. The half that could be closed narrowly has been —
+    /// see <see cref="SymbolFallbackFor"/>, which is the case where LibreOffice does not ask
+    /// fontconfig at all.
+    /// </para>
     /// </remarks>
     public OpenTypeFace? FallbackFor(int codePoint, int weight = 400, bool isItalic = false)
     {
