@@ -296,6 +296,17 @@ public sealed record ChartDataLabel
                     built.Append('\n');
                     break;
 
+                // A CELLRANGE that survives to here is one the reader could not resolve, and an
+                // unresolved one draws *nothing*. LibreOffice reaches that answer down both of
+                // its paths: with a c15:datalabelsRange present it takes the cached string for
+                // this point and substitutes the empty string where the cache has no entry
+                // (oaLabelText.value_or(""), seriesconverter.cxx:366-410), and with none present
+                // it leaves setDataLabelsRange false, whereupon VSeriesPlotter writes an empty
+                // string for the field (VSeriesPlotter.cxx:535-541). Neither path can reach the
+                // a:t, which is the localised placeholder "[CELLRANGE]" and never a value.
+                case ChartLabelField.CellRange:
+                    break;
+
                 default:
                     built.Append(part.Text);
                     break;

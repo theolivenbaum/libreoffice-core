@@ -157,16 +157,37 @@ public static class DrawingChartPlot
             groups.Count == 1 ? Flag(groups[0], "varyColors") : false,
             groups.Count == 1);
 
+        // The categories belong to the primary axes set, and to the *first group of it*, which is
+        // not always the first group in the part. `if (nAxesSetIdx == 0) aScaleData.Categories =
+        // rTypeGroups.front()->createCategorySequence()`
+        // (oox/source/drawingml/chart/axisconverter.cxx:282-290) — one set of categories per
+        // coordinate system, taken from whichever axes set was converted as index 0.
+        //
+        // Which set that is comes from plotareaconverter.cxx:466-468: normally the first type
+        // group's, but a *combined* chart — exactly two type groups of different kinds — puts the
+        // set whose value axis comes first in the plot area's own element order at index 0
+        // instead, whichever group wrote it. On 055_Project_timeline_with_milestones the
+        // c:barChart is written first and its invisible position series carries the thirteen
+        // milestone names, while the c:lineChart's c:dateAx pair is the primary one and carries
+        // the seventeen dates the reference draws — on the axis and as every data label's
+        // [CATEGORY NAME]. Three corpus chart parts in three documents are this shape;
+        // ChartAxes.IndexOf already answers 0 and 1 correctly for all fifteen parts that hold
+        // two axes sets at all. See probes/chart-secaxis/axesset-census.py.
+        bool primaryCategories = false;
+
         for (int at = 0; at < groups.Count; at++)
         {
-            (List<ChartSeries> read, string?[] labels, double?[] numbers) = ReadSeries(
-                groups[at], kinds[at], theme, axes.IndexOf(groups[at]), office2007, automatic,
-                ranges);
+            int axisIndex = axes.IndexOf(groups[at]);
 
-            if (categories.Length == 0 && labels.Length > 0)
+            (List<ChartSeries> read, string?[] labels, double?[] numbers) = ReadSeries(
+                groups[at], kinds[at], theme, axisIndex, office2007, automatic, ranges);
+
+            if (labels.Length > 0
+                && (categories.Length == 0 || (axisIndex == 0 && !primaryCategories)))
             {
                 categories = labels;
                 categoryValues = numbers;
+                primaryCategories = axisIndex == 0;
             }
 
             series.AddRange(read);
@@ -328,15 +349,16 @@ public static class DrawingChartPlot
                         ?? AutoText(chartSpace, 18.0, 120),
             AxisTitleSize = AxisTitleSizeOf(plotArea)
                             ?? AutoText(chartSpace, 10.0, 100),
-            IsTitleBold = BoldOf(Child(chart, "title")) ?? true,
-            IsAxisTitleBold = AxisTitleBoldOf(plotArea) ?? true,
+            IsTitleBold = BoldOf(Child(chart, "title")) ?? AutoWeight(chartSpace) ?? true,
+            IsAxisTitleBold = AxisTitleBoldOf(plotArea) ?? AutoWeight(chartSpace) ?? true,
             LabelSize = AxisLabelSizeOf(plotArea)
                         ?? AutoText(chartSpace, 10.0, 100),
 
             // The axes' own c:txPr, which states the weight of their *labels*. Unlike the two
-            // titles this defaults to regular, because the auto-text table leaves spOtherTexts
-            // regular — so an unstated weight and a stated b="0" mean the same thing here.
-            IsLabelBold = AxisLabelBoldOf(plotArea) ?? false,
+            // titles this falls back to regular, because the auto-text table leaves
+            // spOtherTexts regular — but the chart space's own c:txPr comes between the two,
+            // exactly as it does for the size. See AutoWeight.
+            IsLabelBold = AxisLabelBoldOf(plotArea) ?? AutoWeight(chartSpace) ?? false,
 
             // The five text colours. Each is read where its own object states it, and each falls
             // back to the chart style's own automatic text colour — tx1 below style 41 and lt1
@@ -357,7 +379,7 @@ public static class DrawingChartPlot
             // of it. Read from the legend element directly rather than through its descendants,
             // because a c:legendEntry carries a c:txPr of its own and precedes the legend's.
             LegendSize = SizeOf(Child(Child(chart, "legend"), "txPr")),
-            IsLegendBold = BoldOf(Child(Child(chart, "legend"), "txPr")),
+            IsLegendBold = BoldOf(Child(Child(chart, "legend"), "txPr")) ?? AutoWeight(chartSpace),
 
             // And the legend's own face, which FamilyOf's part-wide search gets wrong whenever
             // some *other* element of the part states one. See LegendFamilyOf.
@@ -366,7 +388,7 @@ public static class DrawingChartPlot
             // A series' c:dLbls/c:txPr, which is where a data label states its own size — not on
             // an axis. 20 of the corpus's 61 chart parts state one that differs from the axes'.
             DataLabelSize = DataLabelSizeOf(plotArea),
-            IsDataLabelBold = DataLabelBoldOf(plotArea),
+            IsDataLabelBold = DataLabelBoldOf(plotArea) ?? AutoWeight(chartSpace),
             TextFamily = FamilyOf(chartSpace, theme),
 
             // The main title's own face, when it names one. Read from c:title alone and left null
@@ -1746,7 +1768,10 @@ public static class DrawingChartPlot
         {
             if (part.Field == ChartLabelField.CellRange)
             {
-                rewritten.Add(part with { Text = resolved });
+                // Literal rather than CellRange, because the field is now answered: a part still
+                // carrying the field kind when the label is composed is one nothing resolved,
+                // and ChartDataLabel.Resolve draws that as nothing at all.
+                rewritten.Add(new ChartLabelPart(ChartLabelField.Literal, resolved));
                 changed = true;
             }
             else
@@ -2459,6 +2484,35 @@ public static class DrawingChartPlot
         => SizeOf(Child(chartSpace, "txPr")) is { } global
             ? global * (relative / 100.0)
             : Length.FromPoints(points);
+
+    /// <summary>
+    /// The weight the <em>chart space</em>'s own <c>c:txPr</c> states, or null when it states none.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>It sits between the auto-text table and the object's own statement, and it is the
+    /// same element <see cref="AutoText"/> already reads the size out of.</strong>
+    /// <c>TextFormatter</c> seeds its automatic properties from the table — a title bold, an axis
+    /// title bold, everything else regular — and then calls
+    /// <c>mxAutoText-&gt;assignUsed(*pTextProps)</c> with the chart space's own
+    /// <c>c:txPr</c>'s first paragraph's <c>a:defRPr</c>
+    /// (<c>oox/source/drawingml/chart/objectformatter.cxx</c>:906-929, the properties fetched by
+    /// <c>lclGetTextProperties</c>, <c>:897-901</c>, and the chart space's text body handed in at
+    /// <c>:950</c>). <c>assignUsed</c> copies every property the source <em>states</em>, so a
+    /// global <c>b</c> replaces the table's weight for every piece of the chart's text that does
+    /// not state one of its own — and a global <c>b="0"</c> makes an otherwise-bold title
+    /// regular just as a <c>b="1"</c> makes a regular axis label bold.
+    /// </para>
+    /// <para>
+    /// <strong>Reach: 17 chart parts in 8 corpus documents, and both directions occur.</strong>
+    /// Twelve parts in six documents state <c>b="0"</c> and five parts in two state
+    /// <c>b="1"</c>; <c>029_Annual_budget</c> is the witness for the second, where every axis
+    /// label, category label and data label on its three charts is drawn bold by the reference.
+    /// See <c>probes/chart-secaxis/results.md</c>.
+    /// </para>
+    /// </remarks>
+    /// <param name="chartSpace">The <c>c:chartSpace</c>, whose direct <c>c:txPr</c> is the global one.</param>
+    private static bool? AutoWeight(XElement chartSpace) => BoldOf(Child(chartSpace, "txPr"));
 
     /// <summary>
     /// Whether a titled element's text states a weight, and which — <c>@b</c> on the first

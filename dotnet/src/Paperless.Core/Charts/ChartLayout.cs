@@ -3539,8 +3539,15 @@ public static partial class ChartLayout
 
                 // A path rather than a ChartBox: a bar is a series mark and must paint over the
                 // grid. See ChartDrawing.Shapes.
+                //
+                // FillAt rather than Fill, because a bar's colour is a property of the point
+                // whenever the file says so. A pie's per-point fills were honoured from the
+                // start and a bar's were not, so a two-point column chart whose two c:dPt state
+                // two shades of one theme colour was drawn in one flat accent. FillAt falls back
+                // to the series' own colour for every point the file says nothing about, so a
+                // chart with no c:dPt is drawn exactly as before.
                 shapes.Add(new ChartShape(
-                    GraphicsPath.Rectangle(bounds), one.Fill, one.Line, one.LineWidth));
+                    GraphicsPath.Rectangle(bounds), one.FillAt(at), one.Line, one.LineWidth));
 
                 if (one.LabelAt(at) is { Draws: true } label)
                     AddBarLabel(plot, one, label, at, value, bounds, to >= from, columns, labels);
