@@ -437,8 +437,14 @@ internal static class SheetText
         bool struckThrough,
         ref Length offset)
     {
+        // What is actually drawn, which is not always what the cell holds: a legacy pi face that
+        // is not installed has its slots recoded into OpenSymbol's, and that has to happen before
+        // anything is itemised or measured — an OpenSymbol circled-times and a DejaVu Sans "Ä" are
+        // not the same picture and not the same width. Every index survives; see SheetSymbolText.
+        string drawn = SheetSymbolText.Recode(text, face);
+
         List<FaceRun> runs = FontItemiser.Split(
-            text, 0, text.Length, face.Face, SheetFonts.Fallback);
+            drawn, 0, drawn.Length, face.Face, SheetFonts.Fallback);
 
         foreach (FaceRun run in runs)
         {
@@ -454,13 +460,15 @@ internal static class SheetText
             // synthetic oblique. See IGlyphFallbackResolver.ReferenceFor(OpenTypeFace, bool).
             bool italic = face.Face.IsItalic || face.Reference.SyntheticOblique;
 
-            SheetFace drawn =
+            SheetFace drawnFace =
                 run.IsFallback && SheetFonts.ForFallback(run.Face, italic) is { } resolved
                     ? resolved
                     : face;
 
             segments.Add(Segment(
-                text.Substring(run.Start, run.Length), drawn, size, colour, offset,
+                drawn.Substring(run.Start, run.Length),
+                text.Substring(run.Start, run.Length),
+                drawnFace, size, colour, offset,
                 underline, struckThrough, out Length width));
             offset += width;
         }
@@ -498,11 +506,19 @@ internal static class SheetText
             : SheetDeviceUnits.SnapFontSize(Length.FromTwips(scaled.Twips * percent / 100));
     }
 
+    /// <summary>Shapes one stretch of one face.</summary>
+    /// <remarks>
+    /// <paramref name="drawn"/> and <paramref name="text"/> differ only for a recoded pi face, and
+    /// then only code point for code point — the shaper is given the slots OpenSymbol actually
+    /// holds while the segment keeps the characters the document does, so the cluster map still
+    /// indexes the text and the PDF's <c>ToUnicode</c> carries what the reference's carries.
+    /// See <see cref="SheetSymbolText"/>.
+    /// </remarks>
     private static SheetTextSegment Segment(
-        string text, SheetFace face, Length size, Colour? colour, Length offset,
+        string drawn, string text, SheetFace face, Length size, Colour? colour, Length offset,
         SheetUnderline underline, bool struckThrough, out Length width)
     {
-        ShapedText shaped = TextShaper.Default.Shape(face.Face, text, NoKerning);
+        ShapedText shaped = TextShaper.Default.Shape(face.Face, drawn, NoKerning);
 
         List<PositionedGlyph> glyphs = new(shaped.Glyphs.Count);
         List<int> clusters = new(shaped.Glyphs.Count);
