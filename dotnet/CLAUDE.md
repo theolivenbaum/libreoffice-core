@@ -963,13 +963,24 @@ python3 dotnet/probes/provenance-index.py          # rewrite the index
 python3 dotnet/probes/provenance-index.py --check  # exit 1 if stale
 ```
 
-**Do not regenerate it in this container — the clone is shallow and regeneration destroys the
-era column.** `provenance-index.py` derives `added` from `git log`, and this checkout has 962
-commits with no history before them, so a fresh run reports 583 rows and **zero** dated before
-the 2026-08-13 container move where the committed index has 215 `pre-container` rows. The era
-column is the whole point of the file: it is what tells a later round that a stored figure was
-measured against a reference bank that no longer exists. An index stale by a few new probe
-directories is much the lesser harm, so add rows by hand — as the rounds since have done.
+**Do not regenerate it in this container — it destroys the era column, and the reason is
+sharper than either guess.** `provenance-index.py` takes each file's `added` date from
+`git log --diff-filter=A`. Not from filesystem mtimes, and not defeated by missing history:
+this clone reaches back to 2026-07-29, which is *before* the boundary. What defeats it is that
+the probe tree entered this clone in **one bulk commit dated 2026-08-21** — `3418` of the
+A-records under `dotnet/probes` carry that single date, which is *after* the 2026-08-13
+boundary, so every row classifies `current` and the committed index's 215 `pre-container`
+rows collapse to zero.
+
+The era column is the whole point of the file: it is what tells a later round that a stored
+figure was measured against a reference bank that no longer exists. An index stale by a few
+probe directories is much the lesser harm, so **add rows by hand**.
+
+Three rounds have now run it, watched it rewrite hundreds of rows and reverted, each reporting
+a different mechanism (`git log` cannot see the dates; the column comes from mtimes). Both are
+wrong and the fix is the same either way: don't run it. Worth knowing if anyone rewrites the
+script — `added_dates` also uses `setdefault` over `git log`'s newest-first output, so a file
+added, deleted and re-added keeps its *newest* A-record, not the first one its comment claims.
 
 It deliberately does **not** stamp the probe files themselves. They are the record of what a
 round actually ran; rewriting them would falsify it, and a `#` header would break every
