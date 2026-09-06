@@ -334,6 +334,14 @@ single exact integer avoids the rounding drift that accumulates when converting 
 and must not pay for fonts, layout or a rasteriser — it costs a small fraction of
 rendering.
 
+**So making something *draw* does not make it *extract*, and the two want different answers.**
+Round 66 taught a DOCX to draw a SmartArt diagram and round 67 found `paperless extract` still
+blind to the same five nodes: the drawing path reads the baked `dsp:spTree` through a theme and
+a frame extent, and extraction may pay for none of that. It also wants the *data model* instead —
+the baked tree is what the author sees, so it repeats a node's text wherever the layout drew it,
+while the model is what the author typed, once each. An index wants the second. When a round
+closes a rendering gap, check the other path before calling the feature done.
+
 **One drawing IR, `IDrawingSink`.** Modelled on LibreOffice's `GDIMetaFile`/`MetaAction`
 display list and its `drawinglayer` primitives, because those are the two chokepoints all
 LibreOffice output passes through — so anything a supported document can express fits
@@ -374,12 +382,31 @@ whatever you already believed. A reviewer that has never seen the document and i
 to grep the repo is the only reader whose agreement is evidence. The `page-vision` skill has
 the brief to give it, the pixel-budget arithmetic that decides your dpi, and when to crop.
 
+**In this container there is no such reader, and the check is two calls rather than a guess.**
+An agent here has no `Task`/subagent tool; what it does have is
+`mcp__Claude_Code_Remote__create_session`, which spawns a *sibling session* — and that is not a
+substitute, for two independent reasons measured 2026-09-06. The sibling runs in its own
+`anthropic_cloud` container, so it cannot open `/home/user/...` and there is no way to hand it the
+composed PNG; and this session has no `list_events`, while `SendMessage` answers *"No agent named
+… is reachable"* and `get_session` returns the session record without its transcript — so even a
+sibling that could see the image could not report back. Four rounds have now said "no such tool",
+which was right. **Say so explicitly, treat your own readings as contaminated, and corroborate
+anything you lean on with arithmetic that does not depend on the reading.**
+
 Three things this changes about how a round is run:
 
 1. **Look before you theorise, and look at documents that PASS.** The failing set is picked
    over. Rank the *passing* documents by `|ink|%` and open the worst — the first three tried
    that way produced three findings, two of them previously unrecorded (a missing custom bullet,
-   and a hanging indent we invent where the reference has none).
+   and a hanging indent we invent where the reference has none). Done a fourth time in round 67 over
+   the whole words track against 26.2.4.2 — 307 of the 312 gate-passing documents scoreable — it
+   produced three more, and the first of them is **an entire unimplemented feature**: `w:pgBorders`
+   appears nowhere in `dotnet/src`, **7 of the 272 corpus DOCX declare a real one**, two of those
+   seven are in the ink ranking's top ten, and every one of the seven passes the gate. The other
+   two are a cover page's anchored artwork drawn one page late on `PES-Technical-Report-Template`
+   (measured by sign: page 1 reads *ink missing from ours*, page 2 reads *ink we draw*, in the same
+   regions) and a per-page pagination difference on `hdss-bulletin-issue-285` that is not a
+   one-way drift. See `probes/words-ink-r67/`.
 2. **Looking gives direction and kind; it does not give cause.** *"Every line breaks earlier in
    the reference, so our glyphs are narrower"* is a lead that no ink percentage contains. But an
    image cannot tell a picture bullet from a character bullet in a substituted symbol font.
@@ -609,6 +636,22 @@ mismatch**. So "459 of 534", the batch-size arithmetic below, and the per-track 
 in the version table further down are all pre-expansion and none of them is a denominator to
 score against. What survives is the *shape* — grouped by what is wrong, ordered by complexity
 within a group, `MANIFEST.tsv` as the undo — and that is why the prose is kept.
+
+**The corpus is seven extensions and holds no ODF, no RTF and no template at all.** Counted
+2026-09-06 from `MANIFEST.tsv`'s own `ext` column: **docx 272, pptx 251, xlsx 241, doc 66,
+xls 64, ppt 51, xlsm 2** — and nothing else. So `odt`, `ott`, `fodt`, `ods`, `odp`, `rtf`,
+`sxw`, `sxc`, `sxi`, `docm`, `dotx`, `pptm`, `potx`, `xltx`, `xlsb` and `csv` — most of the
+*Scope* list — have **zero corpus coverage**, and a claim of the form "N of 947 documents do
+X" is a claim about four OOXML formats and three MS binary ones.
+
+Two consequences that have each cost a round. **A reach census that finds nothing in ODF has
+found nothing about ODF**, only that the corpus contains none; the right instrument there is a
+hand-built or LibreOffice-converted document, and the write-up has to say which. And **a defect
+that only the OOXML readers happen to avoid is invisible to every corpus figure this project
+takes** — round 67's as-character alignment defect was wrong in ODF, RTF, WW8 and flat ODF and
+right in DOCX, so fixing it moved **10 of the words track's 338 renderings and no gate verdict at
+all**, every one of the ten a `.doc`, while a five-format probe of a single paragraph moved four of
+five by the picture's whole width. See `probes/words-aschar-band/`.
 
 **The corpus is no longer batched by complexity — it is grouped by what is wrong.** As of
 2026-08-14, with 459 of 534 passing, the old ordering had stopped earning its keep: the 75
