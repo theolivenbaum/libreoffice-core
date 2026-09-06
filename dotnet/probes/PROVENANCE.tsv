@@ -73,6 +73,10 @@ dotnet/probes/lineheight-01/slides-after.tsv	2026-08-15	current	26.2.4.2	present
 dotnet/probes/lineheight-01/slides-before.tsv	2026-08-15	current	26.2.4.2	present	current	-
 dotnet/probes/lineheight-01/words-after.tsv	2026-08-15	current	26.2.4.2	present	current	dotnet/TODO.batches.md
 dotnet/probes/lineheight-01/words-before.tsv	2026-08-15	current	26.2.4.2	present	current	-
+dotnet/probes/mismatch-classify-01/classification.tsv	2026-09-06	current	24.2.7.2;26.2.4.2	present	current	dotnet/probes/mismatch-classify-01/results.md;dotnet/tests/Paperless.Spreadsheets.Tests/SheetChartSheetPrintTests.cs
+dotnet/probes/mismatch-classify-01/screen26.tsv	2026-09-06	current	24.2.7.2;26.2.4.2	present	current	dotnet/probes/mismatch-classify-01/results.md
+dotnet/probes/mismatch-classify-01/sheets-after.tsv	2026-09-06	current	24.2.7.2	present	current	dotnet/probes/mismatch-classify-01/results.md
+dotnet/probes/mismatch-classify-01/the87.txt	2026-09-06	current	24.2.7.2	present	current	dotnet/probes/mismatch-classify-01/results.md
 dotnet/probes/mso-shape-type-presets.json	2026-08-09	pre-container	24.2.7.2	unverified	CITED-STALE	dotnet/TODO.batches.md
 dotnet/probes/nested-table-slice/README.md	2026-08-15	current	26.2.4.2	present	current	-
 dotnet/probes/refdev-01/prediction.md	2026-08-15	current	26.2.4.2	present	current	-
