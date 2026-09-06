@@ -2058,22 +2058,73 @@ public static partial class ChartLayout
                 continue;
             }
 
-            // A rotated label is placed by the centre of its rotated bounding box, because that is
-            // the only thing a glyph run — which carries an origin and advances, not a matrix —
-            // can be positioned by after the fact. Measured against LibreOffice's own PDF for
-            // bnc889755.pptx: its rotated labels' boxes are centred on the tick horizontally and
-            // start at the tick-to-text distance below the axis, which is exactly this.
+            // A rotated label is drawn through the centre of its rotated bounding box, because
+            // that is the only thing a glyph run — which carries an origin and advances, not a
+            // matrix — can be positioned by after the fact. Where that centre goes is
+            // LabelPositionHelper::correctPositionForRotation for a bottom axis,
+            // lcl_correctRotation_Bottom (chart2/source/view/main/LabelPositionHelper.cxx:241-282),
+            // and the whole of what it adds over "centred on the tick" is one term, gated on
+            // bRotateAroundCenter — which is m_bComplexCategories (VCartesianAxis.cxx:147-148) and
+            // therefore *false* for the simple category axis this branch draws.
             DocSize box = Shape(measurer, text, plot.LabelSize, plot.IsLabelBold);
             Length depth = box.Width * sine + box.Height * cosine;
 
             labels.Add(new ChartLabel(
                 text,
-                new DocPoint(x, top + depth / 2),
+                new DocPoint(x + box.Width * Lean(layout.Rotation) / 2.0, top + depth / 2),
                 ChartLabelAnchor.Centre,
                 plot.LabelSize,
                 plot.LabelColour,
                 layout.Rotation));
         }
+    }
+
+    /// <summary>
+    /// How far along its own baseline a rotated category label leans off its tick, as a multiple
+    /// of the label's unrotated width: 0 upright or on its side, ∓0.7071 at ±45°.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>A rotated category label hangs from its tick by a corner, not by its middle.</strong>
+    /// <c>lcl_correctRotation_Bottom</c> (<c>chart2/source/view/main/LabelPositionHelper.cxx:241-282</c>)
+    /// takes four branches over the angle and each of them carries exactly one term guarded by
+    /// <c>if( !bRotateAroundCenter )</c> — <c>-W·cos(a)/2</c>, <c>+W·sin(a-90°)/2</c>,
+    /// <c>-W·sin(270°-a)/2</c> and <c>+W·cos(360°-a)/2</c>. Written out, all four are the same
+    /// quantity: <c>-sign(sin a)·W·cos(a)/2</c>. Everything else in that function is common to
+    /// both modes, so the whole difference between LibreOffice's two anchorings is this one
+    /// horizontal lean, and <c>bRotateAroundCenter</c> is <c>m_bComplexCategories</c>
+    /// (<c>chart2/source/view/axes/VCartesianAxis.cxx:147-148</c>) — false for every simple
+    /// category axis.
+    /// </para>
+    /// <para>
+    /// <strong>What it is worth, measured on both references rather than read off the source.</strong>
+    /// <c>057_Simple_balance_sheet_Use_this_template_e2d4cbb2.xlsx</c>'s chart sheet turns twenty
+    /// category names of very unequal length to 45°, which separates the two anchorings by up to
+    /// 53 pt. 26.2.4.2 draws those labels as vector outlines rather than as text, so they have to
+    /// be read out of the PDF's paths and clustered — 309 paths in the band below the axis fall
+    /// into exactly twenty groups — and the group's right edge then advances by
+    /// <strong>28.67, 28.92, 29.14 … 28.73 pt</strong> from label to label against a category slot
+    /// of <strong>28.9465 pt</strong>. Constant, and equal to the pitch, over widths from 22 to
+    /// 141 pt. Ours advanced by <strong>11.47, 23.31, 21.45 … 53.51</strong> — that is
+    /// <c>W/2</c> each time, which is what centring on the tick gives and what left
+    /// <c>Goodwill</c> drawn through <c>Less accumulated depreciation</c>.
+    /// </para>
+    /// <para>
+    /// <strong>Why the overlap is the symptom.</strong> Two labels at 45° are strips whose
+    /// separation is measured perpendicular to their own baselines, at
+    /// <c>q = (x + y)/√2</c>. Corner-anchored, every corner sits at its own tick and the same
+    /// depth below the axis, so <c>q</c> advances by <c>slot/√2</c> — 22.7 pt here, against a
+    /// label 10.5 pt tall, and nothing can touch. Centred, <c>q</c> carries half the label's own
+    /// width as well: <c>Less accumulated depreciation</c> landed at <c>q</c> 565.1 and
+    /// <c>Goodwill</c>, three times shorter, at 562.4, which is the same strip.
+    /// </para>
+    /// </remarks>
+    /// <param name="rotation">The label's rotation in radians, anticlockwise.</param>
+    private static double Lean(double rotation)
+    {
+        double sine = Math.Sin(rotation);
+        double cosine = Math.Cos(rotation);
+        return sine >= 0.0 ? -cosine : cosine;
     }
 
     /// <summary>
