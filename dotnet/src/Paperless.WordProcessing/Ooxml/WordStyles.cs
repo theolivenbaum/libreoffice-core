@@ -284,6 +284,29 @@ public sealed class WordStyles
     /// <summary>The <c>w:rPr</c> from <c>w:docDefaults</c>, or null.</summary>
     public XElement? DefaultRunProperties { get; private set; }
 
+    /// <summary>
+    /// True when <c>w:docDefaults</c> declared a <c>w:rPrDefault</c> at all, however empty.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The run-side twin of <see cref="HasDefaultParagraphPropertiesElement"/>, and load-bearing for
+    /// the same reason: presence rather than content decides. A DOCX import starts at
+    /// <b>Calibri 11 pt</b> — <c>DomainMapper::DomainMapper</c>
+    /// (<c>sw/source/writerfilter/dmapper/DomainMapper.cxx</c>:182-193, tdf#108350), <em>"In Word
+    /// since version 2007, the default document font is Calibri 11 pt"</em> — and the moment a
+    /// <c>w:rPrDefault</c> is seen at all, <c>StyleSheetTable::applyDefaults(false)</c> resets the
+    /// document defaults to <b>Times New Roman 10 pt</b> and lays the file's own values over them
+    /// (<c>StyleSheetTable.cxx</c>:2161-2180 for the family, and the 10 pt at :341-350 where
+    /// <c>m_pDefaultCharProps</c> is constructed).
+    /// </para>
+    /// <para>
+    /// So an empty <c>&lt;w:rPrDefault/&gt;</c> and a missing one give different documents, and the
+    /// difference is a whole point of font size and a face whose line box is
+    /// 2500/2048 of the em against 2355/2048.
+    /// </para>
+    /// </remarks>
+    public bool HasDefaultRunPropertiesElement { get; private set; }
+
     /// <summary>The <c>w:pPr</c> from <c>w:docDefaults</c>, or null.</summary>
     public XElement? DefaultParagraphProperties { get; private set; }
 
@@ -336,7 +359,12 @@ public sealed class WordStyles
 
         if (Word.Child(root, "docDefaults") is { } docDefaults)
         {
-            DefaultRunProperties = Word.Child(Word.Child(docDefaults, "rPrDefault"), "rPr");
+            if (Word.Child(docDefaults, "rPrDefault") is { } runDefault)
+            {
+                HasDefaultRunPropertiesElement = true;
+                DefaultRunProperties = Word.Child(runDefault, "rPr");
+            }
+
             if (Word.Child(docDefaults, "pPrDefault") is { } paragraphDefault)
             {
                 HasDefaultParagraphPropertiesElement = true;

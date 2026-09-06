@@ -99,8 +99,8 @@ public sealed class CharacterSpacingTests
     private static Length DrawnAdvance(string text, int? spacing)
     {
         string runProperties = spacing is { } twips
-            ? $"<w:rPr><w:spacing w:val=\"{twips}\"/></w:rPr>"
-            : string.Empty;
+            ? $"<w:rPr>{Face}<w:spacing w:val=\"{twips}\"/></w:rPr>"
+            : $"<w:rPr>{Face}</w:rPr>";
 
         PageParagraph paragraph = Paragraph($"""
             <w:p>
@@ -117,6 +117,10 @@ public sealed class CharacterSpacingTests
 
         return collector.Advance;
     }
+
+    /// <summary>The face these widths are measured in, named so that nothing else can choose it.</summary>
+    private const string Face =
+        "<w:rFonts w:ascii=\"Liberation Serif\" w:hAnsi=\"Liberation Serif\"/><w:sz w:val=\"20\"/>";
 
     /// <summary>An A4 page, wide enough that the run is never broken.</summary>
     private static PageGeometry DrawGeometry { get; } = new()
@@ -272,9 +276,16 @@ public sealed class CharacterSpacingTests
 
     private static Length Width(string sentence, int? spacing)
     {
+        // The face and size are named rather than left to the package's own defaults, exactly as
+        // `Glyphs` above names Calibri, and for a sharper reason: this measures an *exact* width
+        // difference, so a face whose pair kerning the tracked run then suppresses puts that
+        // kerning into the answer. Liberation Serif at 10 pt is what a package declaring no
+        // `w:docDefaults/w:rPrDefault` resolved to here until `WordParagraphFormats` learned the
+        // importer's real default for that case — Calibri 11 pt — which kerns this sentence by
+        // 0.392 pt and made the difference 190.392 against 190.
         string runProperties = spacing is { } twips
-            ? $"<w:rPr><w:spacing w:val=\"{twips}\"/></w:rPr>"
-            : string.Empty;
+            ? $"<w:rPr>{Face}<w:spacing w:val=\"{twips}\"/></w:rPr>"
+            : $"<w:rPr>{Face}</w:rPr>";
 
         PageParagraph paragraph = Paragraph($"""
             <w:p>

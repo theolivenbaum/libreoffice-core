@@ -118,10 +118,42 @@ internal static class WordParagraphFormats
 {
     /// <summary>The em size used when nothing in the chain states one.</summary>
     /// <remarks>
-    /// Ten points, which is what Word's own <c>w:docDefaults</c> falls back to when a document omits
-    /// them — not the eleven or twelve a template usually sets.
+    /// Ten points, which is what <c>StyleSheetTable</c> puts in <c>m_pDefaultCharProps</c> before a
+    /// document's own <c>w:docDefaults</c> are laid over it
+    /// (<c>sw/source/writerfilter/dmapper/StyleSheetTable.cxx</c>:341-350, <em>"set font height
+    /// default to 10pt"</em>) — not the eleven or twelve a template usually sets. See
+    /// <see cref="NoDocDefaultsSize"/> for the one case where it is not this.
     /// </remarks>
     private static readonly Length DefaultSize = Length.FromPoints(10);
+
+    /// <summary>The em size for a package that declares no <c>w:rPrDefault</c> at all.</summary>
+    /// <remarks>
+    /// <para>
+    /// Eleven points in Calibri, which is a <em>different</em> default rather than a variant of
+    /// <see cref="DefaultSize"/>: a DOCX import begins at Calibri 11 pt
+    /// (<c>sw/source/writerfilter/dmapper/DomainMapper.cxx</c>:182-193, tdf#108350, <em>"In Word
+    /// since version 2007, the default document font is Calibri 11 pt. If a DOCX document doesn't
+    /// contain font information, we should assume the intended font to provide best layout
+    /// match."</em>) and is reset to Times New Roman 10 pt only when a <c>w:rPrDefault</c> element
+    /// is actually seen (<c>StyleSheetTable.cxx</c>:2161-2167). Presence decides, not content.
+    /// </para>
+    /// <para>
+    /// Measured in <c>dotnet/probes/words-empty-paragraph-height/</c> against both installed
+    /// references, which agree on every row. An empty paragraph between two 12 pt lines, the gap
+    /// between those lines: <b>27.25 pt</b> with no styles part, and 25.35, 26.00, 29.90 and 30.90
+    /// with a <c>w:rPrDefault</c> that is respectively empty, names Carlito, states
+    /// <c>w:sz w:val="28"</c>, and does both. Only the first row moved.
+    /// </para>
+    /// <para>
+    /// <b>No document in the words corpus reaches it</b> — all 272 of its DOCX-family files declare a
+    /// <c>w:rPrDefault</c>, so every one of them takes the Times New Roman 10 pt branch. Its witness
+    /// is a hand-built package, which is what the probe fixtures and several test fixtures here are.
+    /// </para>
+    /// </remarks>
+    private static readonly Length NoDocDefaultsSize = Length.FromPoints(11);
+
+    /// <summary>The family for the same case. See <see cref="NoDocDefaultsSize"/>.</summary>
+    private const string NoDocDefaultsFamily = "Calibri";
 
     /// <summary>The <c>auto</c> line rule's unit: a line is two hundred and forty of them.</summary>
     private const double LineUnitsPerLine = 240.0;
@@ -515,10 +547,14 @@ internal static class WordParagraphFormats
         WordProperty scale =
             styles.ResolveRunProperty("w", runProperties, styleId, characterStyleId, tableStyleRunProperties);
 
-        Length resolvedSize = HalfPoints(size.Element) ?? DefaultSize;
+        // A package that declares no `w:rPrDefault` keeps the importer's own Calibri 11 pt instead
+        // of the Times New Roman 10 pt every other document is reset to. See `NoDocDefaultsSize`.
+        bool docDefaults = styles.HasDefaultRunPropertiesElement;
+        Length resolvedSize =
+            HalfPoints(size.Element) ?? (docDefaults ? DefaultSize : NoDocDefaultsSize);
 
         return new WordTextStyle(
-            Family(fonts, theme?.Fonts),
+            Family(fonts, theme?.Fonts) ?? (docDefaults ? null : NoDocDefaultsFamily),
             resolvedSize,
             bold.IsOn ? 700 : 400,
             italic.IsOn,
