@@ -73,13 +73,30 @@ public interface IFontResolver
 /// name itself, and a pi face. See <c>SystemFontResolver.DeclaredGenericFor</c>.
 /// </para>
 /// </param>
+/// <param name="Language">
+/// The language of the font item this request came from, as a BCP 47 tag, or null when the caller
+/// carries none.
+/// <para>
+/// <strong>It is not decoration and it is not the <em>document's</em> language: it is the language
+/// of one of the three character-font items, and it outranks the declared class.</strong>
+/// <c>FontConfigManager::Substitute</c> adds it to the pattern as <c>FC_LANG</c>
+/// (<c>vcl/unx/generic/font/fontconfig.cxx</c>:1092, 1118-1119) and fontconfig scores
+/// <c>PRI_LANG</c> above <c>PRI_FAMILY_WEAK</c>, so among the faces covering a missing character
+/// the ones supporting the language come first and the generic's preference list only breaks the
+/// tie. A word-processing document that names no language still has three of them — Writer resolves
+/// <c>en-US</c>, <c>zh-CN</c> and <c>hi-IN</c> through
+/// <c>MsLangId::resolveSystemLanguageByScriptType</c> — which is why a Hebrew character in a
+/// complex-script run falls back to FreeSans here and not to DejaVu Sans.
+/// </para>
+/// </param>
 public readonly record struct FontRequest(
     string FamilyName,
     int Weight = 400,
     bool IsItalic = false,
     FontPitch Pitch = FontPitch.Unknown,
     string? EmbeddedFaceKey = null,
-    FontFamilyClass DeclaredClass = FontFamilyClass.Unknown);
+    FontFamilyClass DeclaredClass = FontFamilyClass.Unknown,
+    string? Language = null);
 
 /// <summary>
 /// The shape a document declares for one of the families it names, beside the name itself.

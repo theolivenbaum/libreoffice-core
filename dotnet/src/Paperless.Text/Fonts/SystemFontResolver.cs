@@ -400,11 +400,21 @@ public sealed class SystemFontResolver : IFontResolver, IGlyphFallbackResolver
     /// </remarks>
     public OpenTypeFace? FallbackFor(
         IReadOnlyList<int> codePoints, int weight, bool isItalic, OpenTypeFace? primary)
+        => FallbackFor(codePoints, weight, isItalic, primary, default);
+
+    /// <inheritdoc/>
+    public OpenTypeFace? FallbackFor(
+        IReadOnlyList<int> codePoints, int weight, bool isItalic, OpenTypeFace? primary, FontItem item)
     {
         ArgumentNullException.ThrowIfNull(codePoints);
         if (codePoints.Count == 0) return null;
 
-        string generic = GenericForFallback(primary);
+        // The run's own item where the caller has one, and the reverse lookup from the face where it
+        // has not: a slide or a sheet has no script items to choose between.
+        string generic = item.IsStated
+            ? GenericFor(new FontRequest(
+                item.FamilyName ?? string.Empty, DeclaredClass: item.DeclaredClass))
+            : GenericForFallback(primary);
         string key = string.Join('\u0000', codePoints);
 
         // Cached because a run of unsupported text asks the same question for every character, and

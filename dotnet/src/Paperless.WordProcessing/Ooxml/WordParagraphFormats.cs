@@ -68,12 +68,53 @@ public readonly record struct WordTextStyle(
 {
     /// <summary>The key a face cache is keyed on: what actually decides which font file is loaded.</summary>
     /// <remarks>
+    /// <para>
     /// <see cref="DeclaredClass"/> is part of it, and leaving it out is a cache collision rather than an
     /// omission: one family named under a <c>swiss</c> ancestor and under a <c>roman</c> one resolves to
     /// two different faces, and whichever run reached the cache first would decide for both.
+    /// </para>
+    /// <para>
+    /// So is the language, which reaches the fontconfig pattern as <c>FC_LANG</c>.
+    /// </para>
     /// </remarks>
-    public (string? Family, int Weight, bool Italic, FontFamilyClass Class) FaceKey
-        => (FamilyName, Weight, IsItalic, DeclaredClass);
+    public (string? Family, int Weight, bool Italic, FontFamilyClass Class, string? Language) FaceKey
+        => (FamilyName, Weight, IsItalic, DeclaredClass, ItemLanguage);
+
+    /// <summary>
+    /// The language of the font item this run is set from, never null.
+    /// </summary>
+    /// <remarks>
+    /// Writer's own default stands in where the document states none: <c>SwDoc::SwDoc</c> resolves
+    /// it through <c>MsLangId::resolveSystemLanguageByScriptType</c>, which answers
+    /// <c>LANGUAGE_ENGLISH_US</c> for the western item
+    /// (<c>sw/source/core/doc/docnew.cxx</c>:383-398,
+    /// <c>i18nlangtag/source/isolang/mslangid.cxx</c>:135-165).
+    /// </remarks>
+    public string ItemLanguage => Language ?? "en-US";
+
+    /// <summary>
+    /// The item this run's glyph fallback is asked under: a family, a class and a language.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Built here rather than at the resolver because it is a property of the <em>run</em> — see
+    /// <see cref="FontItem"/> for why it cannot be recovered from the face the run resolved to.
+    /// </para>
+    /// <para>
+    /// <strong>A run naming no family at all states no item</strong>, and that is the same
+    /// distinction <see cref="Layout.WordFallbackClass.ForDeclared"/> carries: "no font named" is
+    /// answered by <c>DefaultFonts</c> rather than by a fallback shape, and a pattern built round an
+    /// empty family would ask fontconfig about nothing. Such a run keeps the answer it has always
+    /// had — the generic the face it resolved to is filed under.
+    /// </para>
+    /// </remarks>
+    public FontItem FontItem
+        => string.IsNullOrWhiteSpace(FamilyName)
+            ? default
+            : new FontItem(
+                FamilyName,
+                Layout.WordFallbackClass.ForDeclared(FamilyName, DeclaredClass),
+                ItemLanguage);
 }
 
 /// <summary>

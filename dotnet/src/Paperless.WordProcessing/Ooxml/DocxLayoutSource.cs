@@ -86,10 +86,10 @@ public sealed partial class DocxLayoutSource
 
     private readonly DrawingTheme? _theme;
     private readonly DrawingStyleMatrix? _shapeStyles;
-    private readonly Dictionary<(string? Family, int Weight, bool Italic, FontFamilyClass Class),
-        OpenTypeFace?> _faces = [];
-    private readonly Dictionary<(string? Family, int Weight, bool Italic, FontFamilyClass Class),
-        FontReference> _references = [];
+    private readonly Dictionary<(string? Family, int Weight, bool Italic, FontFamilyClass Class,
+        string? Language), OpenTypeFace?> _faces = [];
+    private readonly Dictionary<(string? Family, int Weight, bool Italic, FontFamilyClass Class,
+        string? Language), FontReference> _references = [];
 
     /// <summary>Creates a source over a document's styles and settings.</summary>
     /// <param name="styles">The document's styles, including its <c>w:docDefaults</c>.</param>
@@ -932,6 +932,7 @@ public sealed partial class DocxLayoutSource
             // Word's "add space between Asian and Western text". See ScriptSpacing; the DOC reader
             // sets it for the same reason and the ODF one does not.
             AddsScriptSpace = true,
+            Item = text.FontItem,
             EmSize = text.Size,
             Language = text.Language,
             Shaping = new ShapingOptions(
@@ -1189,6 +1190,11 @@ public sealed partial class DocxLayoutSource
                 || size != paragraph.Size
                 || style.Colour != paragraph.Colour
                 || style.Language != paragraph.Language
+                // And the font item, which decides where a character this face cannot draw is
+                // looked for. Two runs can resolve to the *same* face off different items, so
+                // nothing above can see the difference, and folding them would leave the run asking
+                // under the paragraph mark's own.
+                || style.FontItem != paragraph.FontItem
                 || rise != Length.Zero
                 // A case map has to survive the uniform-paragraph shortcut: it is the one property here
                 // that changes the *characters*, so dropping the runs would draw the text as stored.
@@ -1234,7 +1240,8 @@ public sealed partial class DocxLayoutSource
                 IsUnderlined: style.IsUnderlined,
                 IsStruckThrough: style.IsStruckThrough,
                 Tracking: style.Tracking,
-                WidthPerCent: style.WidthPerCent));
+                WidthPerCent: style.WidthPerCent,
+                Item: style.FontItem));
         }
 
         return varies ? runs : [];
@@ -2276,7 +2283,8 @@ public sealed partial class DocxLayoutSource
 
     private OpenTypeFace? Face(WordTextStyle text)
     {
-        (string? Family, int Weight, bool Italic, FontFamilyClass Class) key = text.FaceKey;
+        (string? Family, int Weight, bool Italic, FontFamilyClass Class, string? Language) key =
+            text.FaceKey;
         if (_faces.TryGetValue(key, out OpenTypeFace? cached)) return cached;
 
         OpenTypeFace? face = null;
@@ -2301,7 +2309,7 @@ public sealed partial class DocxLayoutSource
             FontReference reference = _fonts.Resolve(
                 new FontRequest(
                     text.FamilyName ?? string.Empty, text.Weight, text.IsItalic,
-                    DeclaredClass: declared));
+                    DeclaredClass: declared, Language: text.ItemLanguage));
 
             face = _fonts.LoadOpenType(reference);
             _references[key] = reference;

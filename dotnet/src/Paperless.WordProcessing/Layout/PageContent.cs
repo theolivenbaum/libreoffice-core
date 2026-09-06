@@ -308,6 +308,17 @@ public sealed record PageParagraph : PageBlock
     public IGlyphFallbackResolver? Fallback { get; init; }
 
     /// <summary>
+    /// The font item the paragraph's own face was resolved from, for a paragraph with no runs.
+    /// </summary>
+    /// <remarks>
+    /// Beside <see cref="Fallback"/> and set by the same readers, because it is half of the same
+    /// question: the resolver answers <em>which face draws this character</em> and the item is what
+    /// the pattern it asks with is built from. A paragraph that has runs takes each run's own; see
+    /// <see cref="FontItem"/> for why it cannot be recovered from the face.
+    /// </remarks>
+    public FontItem Item { get; init; }
+
+    /// <summary>
     /// Whether a script change with East Asian text on one side opens Writer's extra gap.
     /// </summary>
     /// <remarks>
@@ -629,7 +640,7 @@ public sealed record PageParagraph : PageBlock
 
         if (runs.Count == 0)
         {
-            runs.Add(new FormattedRun(0, Text.Length, Face, EmSize, Shaping, Tracking: Tracking));
+            runs.Add(new FormattedRun(0, Text.Length, Face, EmSize, Shaping, Tracking: Tracking, Item: Item));
         }
 
         return MeasuredParagraph.Measure(
@@ -932,6 +943,11 @@ public sealed record PageNote
 /// tracking does not. See <see cref="FormattedRun.WidthPerCent"/> for why the factor is not the
 /// percentage.
 /// </param>
+/// <param name="Item">
+/// The font item this run is set from, or default when the reader distinguishes none. It carries
+/// the family class and the language the glyph-fallback pattern is built with; see
+/// <see cref="Paperless.Text.Fonts.FontItem"/>.
+/// </param>
 public readonly record struct PageRun(
     int Start,
     int Length,
@@ -947,7 +963,8 @@ public readonly record struct PageRun(
     bool IsUnderlined = false,
     bool IsStruckThrough = false,
     Length Tracking = default,
-    int WidthPerCent = 100)
+    int WidthPerCent = 100,
+    FontItem Item = default)
 {
     /// <summary>One past the run's last character.</summary>
     public int End => Start + Length;
@@ -999,8 +1016,13 @@ public readonly record struct PageRun(
     public bool IsHighlighted => Highlight.A != 0;
 
     /// <summary>The measurement half of this run.</summary>
+    /// <remarks>
+    /// <see cref="Item"/> is carried, and it has to be: it decides which face a character this one
+    /// cannot draw is looked for in, and measurement and drawing choosing different faces for the
+    /// same character is a line laid out at one width and painted at another.
+    /// </remarks>
     public FormattedRun ToFormattedRun()
-        => new(Start, Length, Face, EmSize, Shaping, MetricEmSize, Tracking, WidthPerCent);
+        => new(Start, Length, Face, EmSize, Shaping, MetricEmSize, Tracking, WidthPerCent, Item);
 
     /// <summary>
     /// True when two resolved fonts disagree about whether their glyphs are drawn leaning.

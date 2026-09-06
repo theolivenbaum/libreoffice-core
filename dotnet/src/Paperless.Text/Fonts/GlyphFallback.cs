@@ -101,6 +101,29 @@ public interface IGlyphFallbackResolver
             ? FallbackFor(codePoints[0], weight, isItalic, primary)
             : null;
 
+    /// <summary>
+    /// The same question, told which of the run's font items the characters came from.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>The item is the pattern.</strong> Its family is the pattern's first
+    /// <c>FC_FAMILY</c>, its class decides the generic appended as the second, and its language is
+    /// the <c>FC_LANG</c> that outranks both — see <see cref="FontItem"/> for why it has to travel
+    /// with the run and cannot be recovered from the face.
+    /// </para>
+    /// <para>
+    /// Defaulted to the item-less question, so a caller with no script items to distinguish — a
+    /// slide, a sheet, a metafile — behaves exactly as it did.
+    /// </para>
+    /// </remarks>
+    /// <param name="codePoints">The characters the primary face has no glyph for, in text order.</param>
+    /// <param name="weight">The weight to match, on the OpenType 1-1000 scale.</param>
+    /// <param name="isItalic">Whether an italic face is wanted.</param>
+    /// <param name="primary">The face the run was set in, or null when the caller has none.</param>
+    /// <param name="item">The font item the run is set from, or default when the caller has none.</param>
+    OpenTypeFace? FallbackFor(
+        IReadOnlyList<int> codePoints, int weight, bool isItalic, OpenTypeFace? primary, FontItem item)
+        => FallbackFor(codePoints, weight, isItalic, primary);
 
     /// <summary>
     /// The same question for a run set in a pi face, which fontconfig is never asked about.

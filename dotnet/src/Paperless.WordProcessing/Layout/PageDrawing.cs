@@ -1791,7 +1791,8 @@ public static class PageDrawing
                             paragraph.Font,
                             paragraph.Colour,
                             paragraph.Shaping,
-                            Tracking: paragraph.Tracking),
+                            Tracking: paragraph.Tracking,
+                            Item: paragraph.Item),
                     ])));
         }
 
@@ -1873,7 +1874,7 @@ public static class PageDrawing
         foreach (PageRun run in runs)
         {
             List<FaceRun> faces = FontItemiser.Split(
-                paragraph.Text, run.Start, run.Length, run.Face, fallback);
+                paragraph.Text, run.Start, run.Length, run.Face, fallback, item: run.Item);
 
             if (faces.Count == 1 && !faces[0].IsFallback)
             {

@@ -50,13 +50,19 @@ public static class FontItemiser
     /// <param name="primary">The face the run asked for.</param>
     /// <param name="fallback">Where to look when the primary face has no glyph, or null to not look.</param>
     /// <param name="report">Called once per contiguous stretch that needed a fallback, resolved or not.</param>
+    /// <param name="item">
+    /// The font item the run is set from, or default when the caller has none. See
+    /// <see cref="FontItem"/>: a word-processing run's script decides which of three items supplies
+    /// the family class and the language the fallback pattern carries.
+    /// </param>
     public static List<FaceRun> Split(
         ReadOnlySpan<char> text,
         int start,
         int length,
         OpenTypeFace primary,
         IGlyphFallbackResolver? fallback,
-        Action<GlyphFallback>? report = null)
+        Action<GlyphFallback>? report = null,
+        FontItem item = default)
     {
         ArgumentNullException.ThrowIfNull(primary);
 
@@ -78,7 +84,7 @@ public static class FontItemiser
 
         // The whole set first, because that is the question LibreOffice asks. See `Sought`.
         Dictionary<int, OpenTypeFace>? found =
-            isPiFace ? null : Resolved(text, start, length, primary, fallback);
+            isPiFace ? null : Resolved(text, start, length, primary, fallback, item);
         int runStart = start;
         OpenTypeFace runFace = primary;
         bool runIsFallback = false;
@@ -203,7 +209,7 @@ public static class FontItemiser
     /// </remarks>
     private static Dictionary<int, OpenTypeFace>? Resolved(
         ReadOnlySpan<char> text, int start, int length, OpenTypeFace primary,
-        IGlyphFallbackResolver fallback)
+        IGlyphFallbackResolver fallback, FontItem item)
     {
         List<int> missing = [];
         HashSet<int> seen = [];
@@ -234,7 +240,7 @@ public static class FontItemiser
 
         for (int level = 1; level <= MaxFallbackLevels && remaining.Count > 0; level++)
         {
-            if (fallback.FallbackFor(remaining, primary.Weight, primary.IsItalic, primary)
+            if (fallback.FallbackFor(remaining, primary.Weight, primary.IsItalic, primary, item)
                 is not { } face)
             {
                 break;

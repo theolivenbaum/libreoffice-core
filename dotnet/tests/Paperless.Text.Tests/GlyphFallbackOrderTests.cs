@@ -212,6 +212,37 @@ public class GlyphFallbackOrderTests
     }
 
     [Fact]
+    public void TheItemTravelsWithTheRunRatherThanWithTheFaceItChose()
+    {
+        // The generic used to be recorded against the face the request resolved to, first writer
+        // winning. In a word-processing document the first request to reach a face is the paragraph
+        // mark's, so a run on a different font item silently took the paragraph's -- which is why
+        // every cell of `probes/fonts-r65/gen-scriptitem.py` answered as though the item did not
+        // exist until the item was passed in.
+        SystemFontIndex index = Installed();
+        Assert.SkipWhen(
+            !index.Has("Carlito") || !index.Has("DejaVu Sans") || !index.Has("FreeSerif"),
+            "the faces this compares are not installed; see check-env.sh");
+
+        using Tree tree = Tree.Create();
+        tree.Write("conf.d/60-latin.conf", Conf(
+            Alias2("sans-serif", "DejaVu Sans"), Alias2("serif", "FreeSerif")));
+
+        SystemFontResolver resolver = Resolver(index, tree.Root);
+
+        // Resolve the face as a roman request first, which is what records `serif` against it.
+        OpenTypeFace carlito = Primary(resolver, "Calibri", FontFamilyClass.Serif);
+        resolver.FallbackFor(Tick, 400, false, carlito)?.FamilyName.ShouldBe("FreeSerif");
+
+        // The same face, asked under a swiss item, takes the swiss list.
+        resolver
+            .FallbackFor(
+                [Tick], 400, false, carlito,
+                new FontItem("Calibri", FontFamilyClass.SansSerif, "en-US"))
+            ?.FamilyName.ShouldBe("DejaVu Sans");
+    }
+
+    [Fact]
     public void OneFaceIsSoughtForAllOfTheRunsMissingCharactersAtOnce()
     {
         // `ImplGlyphFallbackLayout` gathers the layout's unmapped code units into one string and
@@ -227,19 +258,25 @@ public class GlyphFallbackOrderTests
         tree.Write("conf.d/60-latin.conf", Alias("sans-serif", "OpenSymbol", "DejaVu Sans"));
 
         SystemFontResolver resolver = Resolver(index, tree.Root);
+        FontItem item = new("Calibri", FontFamilyClass.Unknown, "en-US");
 
         // OpenSymbol holds U+2713 and is first on the list, so on its own it answers.
-        resolver.FallbackFor([Tick], 400, false, primary: null)
+        resolver.FallbackFor([Tick], 400, false, primary: null, item)
             ?.FamilyName.ShouldBe("OpenSymbol");
 
         // It does not hold U+2011. Asked for both at once the answer is the face that covers both,
         // although it is second on the same list.
-        resolver.FallbackFor([Tick, NonBreakingHyphen], 400, false, primary: null)
+        resolver.FallbackFor([Tick, NonBreakingHyphen], 400, false, primary: null, item)
             ?.FamilyName.ShouldBe("DejaVu Sans");
     }
 
     /// <summary>U+2713 CHECK MARK: OpenSymbol, DejaVu Sans and FreeSerif have it, Carlito does not.</summary>
     private const int Tick = 0x2713;
+
+    private static string Alias2(string subject, params string[] preferred)
+        => "<alias><family>" + subject + "</family><prefer>"
+           + string.Concat(preferred.Select(f => $"<family>{f}</family>"))
+           + "</prefer></alias>";
 
     private static string Alias(string subject, params string[] preferred)
         => "<?xml version=\"1.0\"?><fontconfig><alias><family>" + subject + "</family><prefer>"

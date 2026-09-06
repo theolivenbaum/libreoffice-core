@@ -78,6 +78,11 @@ namespace Paperless.Text.Layout;
 /// 1226 of the corpus's 1440 scaled runs.
 /// </para>
 /// </param>
+/// <param name="Item">
+/// The font item this run is set from, or default when the reader distinguishes none. It carries
+/// the family class and the language the glyph-fallback pattern is built with; see
+/// <see cref="Fonts.FontItem"/>.
+/// </param>
 public readonly record struct FormattedRun(
     int Start,
     int Length,
@@ -86,7 +91,8 @@ public readonly record struct FormattedRun(
     ShapingOptions Shaping = default,
     Length MetricEmSize = default,
     Length Tracking = default,
-    int WidthPerCent = 100)
+    int WidthPerCent = 100,
+    Fonts.FontItem Item = default)
 {
     /// <summary>One past the run's last character.</summary>
     public int End => Start + Length;
@@ -571,7 +577,7 @@ public sealed class MeasuredParagraph
 
         List<FaceRun> faces = FontItemiser.Split(
             text, run.Start, run.Length, run.Face,
-            options.GlyphFallback, options.OnGlyphFallback);
+            options.GlyphFallback, options.OnGlyphFallback, run.Item);
 
         foreach (TextItem item in items)
         {
