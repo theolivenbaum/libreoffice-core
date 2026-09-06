@@ -2542,11 +2542,14 @@ public sealed class Paginator
     /// </summary>
     /// <remarks>
     /// Resolved here rather than at drawing time because this is the only layer that knows whether a
-    /// page is the first of its section, and <c>firstPage</c>/<c>notFirstPage</c> are the whole of
-    /// what the attribute can say.
+    /// page is the first of its section — <c>firstPage</c>/<c>notFirstPage</c> are the whole of what
+    /// <c>w:display</c> can say — and the only one that holds the sheet and the text area together,
+    /// which is what <c>w:offsetFrom</c> chooses between.
     /// </remarks>
-    private static PageBorders? BordersOn(PageGeometry geometry, bool isSectionFirst)
-        => geometry.Borders is { } borders && borders.AppearsOn(isSectionFirst) ? borders : null;
+    private static PlacedPageBorder? BordersOn(PageGeometry geometry, bool isSectionFirst)
+        => geometry.Borders is { } borders && borders.AppearsOn(isSectionFirst)
+            ? borders.Place(geometry.Size, geometry.TextArea)
+            : null;
 
     private static LaidOutPage EmptyPage(
         int index,

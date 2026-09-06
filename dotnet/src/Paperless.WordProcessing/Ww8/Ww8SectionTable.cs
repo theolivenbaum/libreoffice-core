@@ -283,6 +283,12 @@ internal static class Ww8SectionTable
         SortedDictionary<int, Length> columnWidths = [];
         SortedDictionary<int, Length> columnSpacings = [];
 
+        // The section's four BRCs and the packed sprmSPgbProp that says what to do with them. Kept as
+        // the decoded structures rather than as a PageBorders because the WW9 form supersedes the WW8
+        // one side by side, and a section can state both.
+        Ww8Border?[] borderSides = new Ww8Border?[4];
+        int pageBorderProperties = 0;
+
         bool landscape = false;
         bool rightToLeft = false;
         bool titlePage = false;
@@ -367,6 +373,29 @@ internal static class Ww8SectionTable
                     titlePage = sprm.Byte != 0;
                     break;
 
+                // The page border, in either of its two forms. A WW9 BRC that is present overrides the
+                // WW8 one for the same side — `lcl_ReadBorders` reads the four 80s and then the four 9s
+                // over the top of them (`ww8par6.cxx`:1345-1364) — which falls out of taking them in
+                // sprm order only because Word writes the 80s first; assigning per side keeps it true
+                // whichever order they arrive in, since the 9 form is the one with the RGB colour.
+                case Sprms.BorderTop80:
+                case Sprms.BorderLeft80:
+                case Sprms.BorderBottom80:
+                case Sprms.BorderRight80:
+                    Assign(borderSides, sprm.Identifier - Sprms.BorderTop80, sprm, isVersion9: false);
+                    break;
+
+                case Sprms.BorderTop:
+                case Sprms.BorderLeft:
+                case Sprms.BorderBottom:
+                case Sprms.BorderRight:
+                    Assign(borderSides, sprm.Identifier - Sprms.BorderTop, sprm, isVersion9: true);
+                    break;
+
+                case Sprms.PageBorderProperties:
+                    pageBorderProperties = sprm.Word;
+                    break;
+
                 case Sprms.RestartsPageNumbering:
                     restartsNumbering = sprm.Byte != 0;
                     break;
@@ -416,6 +445,7 @@ internal static class Ww8SectionTable
                 ColumnRuler = Ruler(columns, evenlySpaced, columnWidths, columnSpacings),
                 IsLandscape = landscape,
                 IsRightToLeft = rightToLeft,
+                Borders = Borders(borderSides, pageBorderProperties),
             },
 
             Break = sectionBreak,
@@ -427,6 +457,78 @@ internal static class Ww8SectionTable
             PageNumberFormat = pageNumberFormat,
             HasDifferentFirstPage = titlePage,
         };
+    }
+
+    /// <summary>Records one side's <c>BRC</c>, in top, left, bottom, right order.</summary>
+    private static void Assign(Ww8Border?[] sides, int at, Ww8Sprm sprm, bool isVersion9)
+    {
+        if (at is < 0 or > 3) return;
+
+        // A WW9 sprm's operand is variable-length and begins with a count byte in some producers'
+        // files; `SetWW8_BRC` simply reinterprets from the start, so this does too.
+        if (Ww8DocumentReader.ReadBorder(sprm.Operand.Span, isVersion9) is { } border)
+        {
+            sides[at] = border;
+        }
+    }
+
+    /// <summary>
+    /// The page border the section's four <c>BRC</c>s and <c>sprmSPgbProp</c> come to.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>sprmSPgbProp</c> is three fields packed into one word, and only two of them do anything:
+    /// <c>pgbApplyTo</c> in bits 0-2, <c>pgbPageDepth</c> in bits 3-4 and <c>pgbOffsetFrom</c> in bits
+    /// 5-7 (<c>ww8par6.cxx</c>:1195-1199). <c>pgbOffsetFrom == 1</c> is "from the edge of the page",
+    /// which is the *default* spelling in DOCX and the non-default one here.
+    /// </para>
+    /// <para>
+    /// <c>pgbApplyTo</c> is read exactly as <c>wwSectionManager::InsertSegments</c> reads it, which is
+    /// as two independent flags rather than as an enumeration: <c>!(pgbApplyTo &amp; 1)</c> gives the
+    /// border to the section's ordinary pages and <c>!(pgbApplyTo &amp; 2)</c> to its first
+    /// (<c>ww8par.cxx</c>:4303-4306). So 0 is every page, 1 the first page, 2 every page but the first
+    /// — and <strong>3, which [MS-DOC] calls "the whole document", draws nothing at all</strong>,
+    /// because both flags are set. That is reproduced rather than corrected: it is what the reference
+    /// renders.
+    /// </para>
+    /// <para>
+    /// <c>pgbPageDepth</c> — in front of or behind the text — is <c>w:zOrder</c> by another name and
+    /// is ignored here for the same reason it is ignored in the DOCX reader: LibreOffice reads it into
+    /// <c>maSep.pgbPageDepth</c> and never uses the field, so honouring it would move us away from the
+    /// reference.
+    /// </para>
+    /// </remarks>
+    private static PageBorders? Borders(Ww8Border?[] sides, int properties)
+    {
+        int applyTo = properties & 0x0007;
+        if (applyTo is 3 or > 4) return null;
+
+        Ww8Border? right = sides[3];
+
+        PageBorders borders = new()
+        {
+            Top = sides[0]?.ResolvedPageSide ?? default,
+            Left = sides[1]?.ResolvedPageSide ?? default,
+            Bottom = sides[2]?.ResolvedPageSide ?? default,
+            Right = right?.ResolvedPageSide ?? default,
+            OffsetFromText = ((properties & 0x00E0) >> 5) != 1,
+
+            // The shadow is the right side's, with Word's own floor of sixteen twips — 0.8 pt — under
+            // it: `SetShadow` raises anything below 0x10 to 0x10 (`ww8par6.cxx`:1548-1562), which the
+            // OOXML path has no equivalent of.
+            Shadow = right is { HasShadow: true } shadowed && shadowed.Width > Length.Zero
+                ? Length.Max(shadowed.Width, Length.FromTwips(16))
+                : Length.Zero,
+
+            Display = applyTo switch
+            {
+                1 => PageBorderDisplay.FirstPage,
+                2 => PageBorderDisplay.NotFirstPage,
+                _ => PageBorderDisplay.AllPages,
+            },
+        };
+
+        return borders.Draws ? borders : null;
     }
 
     /// <summary>
@@ -566,5 +668,24 @@ internal static class Ww8SectionTable
         internal const ushort BottomMargin = 0x9024;
         internal const ushort Gutter = 0xB025;
         internal const ushort PageNumberStart = 0x7044;
+
+        /// <summary><c>sprmSBrcTop80</c>: the section's top page border, as a four-byte <c>BRC80</c>.</summary>
+        /// <remarks>
+        /// The four are consecutive — <c>0x702B</c> to <c>0x702E</c> — in top, left, bottom, right
+        /// order, which is what lets the reader index a side by subtracting this one.
+        /// </remarks>
+        internal const ushort BorderTop80 = 0x702B;
+        internal const ushort BorderLeft80 = 0x702C;
+        internal const ushort BorderBottom80 = 0x702D;
+        internal const ushort BorderRight80 = 0x702E;
+
+        /// <summary><c>sprmSPgbProp</c>: which pages the border applies to and what it is measured from.</summary>
+        internal const ushort PageBorderProperties = 0x522F;
+
+        /// <summary><c>sprmSBrcTop</c>: the same four in their WW9 form, with an RGB colour.</summary>
+        internal const ushort BorderTop = 0xD234;
+        internal const ushort BorderLeft = 0xD235;
+        internal const ushort BorderBottom = 0xD236;
+        internal const ushort BorderRight = 0xD237;
     }
 }

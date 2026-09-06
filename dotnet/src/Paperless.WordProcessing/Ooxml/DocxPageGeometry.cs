@@ -173,15 +173,28 @@ internal static class DocxPageGeometry
             Left = Side(Word.Child(pageBorders, "left")),
             Bottom = Side(Word.Child(pageBorders, "bottom")),
             Right = Side(Word.Child(pageBorders, "right")),
-            OffsetFromText =
-                string.Equals(Word.Attribute(pageBorders, "offsetFrom"), "text", StringComparison.Ordinal),
-            HasShadow = AnyShadow(pageBorders),
-            Display = Word.Attribute(pageBorders, "display") switch
-            {
-                "firstPage" => PageBorderDisplay.FirstPage,
-                "notFirstPage" => PageBorderDisplay.NotFirstPage,
-                _ => PageBorderDisplay.AllPages,
-            },
+            // `w:offsetFrom` absent means *text*, which is the opposite of the obvious reading and is
+            // measured: 26.2.4.2 draws a `w:pgBorders` with no `w:offsetFrom` at the text's own inset
+            // and not at `w:space` from the paper. The seat is `PageBordersHandler`'s constructor,
+            // which initialises `m_eOffsetFrom` to `BorderOffsetFrom::Text`
+            // (`sw/source/writerfilter/dmapper/PageBordersHandler.cxx`:34-38), while its `default:`
+            // arm for a *stated* value falls to `page`. All seven corpus documents state `page`, so
+            // this arm is reached only by a fixture — and by RTF, whose `\pgbrdropt` reaches dmapper
+            // through the same handler and states nothing at all for the text case.
+            OffsetFromText = Word.Attribute(pageBorders, "offsetFrom") is not { } offset
+                || !string.Equals(offset, "page", StringComparison.Ordinal),
+            Shadow = Shadow(Word.Child(pageBorders, "right")),
+            // `w:display` is deliberately not read. It reaches `PageBordersHandler::lcl_attribute`,
+            // which turns it into `m_eBorderApply` and hands that to
+            // `SectionPropertyMap::ApplyBorderToPageStyles` — whose signature names the parameter
+            // `BorderApply /*eBorderApply*/` and never touches it
+            // (`sw/source/writerfilter/dmapper/PropertyMap.cxx`:649-721). One page style per section
+            // carries the border, so every page of the section gets it. Measured as well as read: two
+            // four-page fixtures declaring `firstPage` and `notFirstPage` both render on 26.2.4.2 with
+            // the border on all four pages. **The DOC reader is not the same** — `pgbApplyTo` really
+            // is honoured there (`ww8par.cxx`:4303-4306) — so this stays a property of the model and
+            // is simply not stated by this reader.
+            Display = PageBorderDisplay.AllPages,
         };
 
         return borders.Draws ? borders : null;
@@ -217,17 +230,26 @@ internal static class DocxPageGeometry
             space);
     }
 
-    /// <summary>True when any side asks for the shadow, which Word draws round the whole box.</summary>
-    private static bool AnyShadow(XElement pageBorders)
+    /// <summary>
+    /// The shadow the border casts, from the <em>right</em> side alone.
+    /// </summary>
+    /// <remarks>
+    /// <c>w:shadow</c> is an attribute of each side and the shadow is a property of the whole box, so
+    /// a reader has to choose which side decides. Writer reads the right one and only the right one:
+    /// <c>SectionPropertyMap::ApplyBorderToPageStyles</c> tests
+    /// <c>m_bBorderShadows[BORDER_RIGHT]</c> and <c>PropertyMap::getShadowFromBorder</c> takes that
+    /// side's own <c>LineWidth</c> for the offset
+    /// (<c>sw/source/writerfilter/dmapper/PropertyMap.cxx</c>:715-734). Reading "any side asks for
+    /// it" agrees on every corpus document — all seven declare the same flag on all four sides — and
+    /// disagrees on a file that shadows one side only, which Word can write.
+    /// </remarks>
+    private static Length Shadow(XElement? right)
     {
-        foreach (string side in new[] { "top", "left", "bottom", "right" })
-        {
-            if (Word.Child(pageBorders, side) is not { } stated) continue;
-            string? shadow = Word.Attribute(stated, "shadow");
-            if (shadow is "1" or "true" or "on") return true;
-        }
+        if (right is null) return Length.Zero;
 
-        return false;
+        return Word.Attribute(right, "shadow") is "1" or "true" or "on"
+            ? Side(right).Width
+            : Length.Zero;
     }
 
     /// <summary>
