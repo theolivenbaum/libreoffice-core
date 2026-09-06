@@ -134,6 +134,19 @@ public static class SlideChart
         LineCap cap = LineCap.Butt)
         => new(Paint.Solid(colour), width, cap, LineJoin.Miter, DashPattern: dash);
 
+    /// <summary>Which edge of its block a broken label's lines line up on.</summary>
+    /// <remarks>
+    /// The anchor's own horizontal half: a value axis' labels hang from their right edge, a
+    /// legend entry from its left, and everything else is centred.
+    /// </remarks>
+    private static TextAlignment Adjust(ChartLabelAnchor anchor)
+        => anchor switch
+        {
+            ChartLabelAnchor.RightMiddle => TextAlignment.End,
+            ChartLabelAnchor.LeftMiddle => TextAlignment.Start,
+            _ => TextAlignment.Centre,
+        };
+
     /// <summary>
     /// Lays one chart label out and returns its glyph runs, placed on the slide.
     /// </summary>
@@ -151,13 +164,26 @@ public static class SlideChart
     /// origin is the difference between a title beside the axis and one off the left of the
     /// slide.
     /// </para>
+    /// <para>
+    /// <strong>A label the arrangement broke is as wide as its widest line, and until this said
+    /// so it was as wide as all of them joined.</strong> A wrapped label came here as one
+    /// paragraph holding a newline, and the anchor was worked out from a width that added the two
+    /// lines together — so a right-aligned one landed a whole line to the left of the axis it
+    /// hangs from. <c>SheetChart</c> and <c>FrameChart</c> have split on the newline and anchored
+    /// line by line since they were written; this is the third of the three catching up. It is
+    /// done here by giving the body one paragraph per line and letting the paragraph alignment
+    /// carry the anchor, which is what <c>changeTextAdjustment</c> does for the reference's own
+    /// label shapes (<c>chart2/source/view/main/LabelPositionHelper.cxx</c>).
+    /// </para>
     /// </remarks>
     private static PlacedText? Text(ChartLabel label, AffineTransform placement, SlideFonts fonts)
     {
         if (label.Text.Length == 0) return null;
 
-        DocSize measured =
-            new Measurer(fonts).Measure(label.Text, label.Size, label.Family, label.IsBold == true);
+        Measurer measurer = new(fonts);
+        string[] lines = label.Text.Split('\n');
+
+        DocSize measured = measurer.Measure(label.Text, label.Size, label.Family, label.IsBold == true);
         if (measured.Width <= Length.Zero) return null;
 
         // A non-square stretch leaves a residual horizontal factor the em cannot carry. The text
@@ -182,8 +208,11 @@ public static class SlideChart
             _ => new DocPoint(label.At.X - effective / 2, label.At.Y - box.Height / 2),
         };
 
-        SlideTextBody body =
-            Measurer.Body(label.Text, label.Size, label.Colour, label.Family, label.IsBold == true);
+        SlideTextBody body = lines.Length > 1
+            ? Measurer.Lines(
+                  lines, label.Size, label.Colour, label.Family, label.IsBold == true,
+                  Adjust(label.Anchor))
+            : Measurer.Body(label.Text, label.Size, label.Colour, label.Family, label.IsBold == true);
 
         AffineTransform transform = stretch == 1.0
             ? placement
@@ -214,7 +243,10 @@ public static class SlideChart
         }
         else
         {
-            area = new DocRect(corner.X / stretch, corner.Y, box.Width, box.Height);
+            area = new DocRect(
+                corner.X / stretch, corner.Y,
+                lines.Length > 1 ? measured.Width : box.Width,
+                box.Height);
         }
 
         List<PlacedGlyphRun> runs = OnChartDevice(
@@ -330,6 +362,24 @@ public static class SlideChart
             ArgumentNullException.ThrowIfNull(text);
             if (text.Length == 0) return new DocSize(Length.Zero, Length.Zero);
 
+            // A label the arrangement broke is as wide as its widest line and as deep as the sum
+            // of them — the same shape `ChartAxisLabels.Shape` reserves room for. Measuring the
+            // joined run instead adds the lines together, which is a width no label ever has.
+            if (text.AsSpan().IndexOf('\n') >= 0)
+            {
+                Length widest = Length.Zero;
+                Length deep = Length.Zero;
+
+                foreach (string line in text.Split('\n'))
+                {
+                    DocSize one = Measure(line, size, family, bold);
+                    if (one.Width > widest) widest = one.Width;
+                    deep += one.Height;
+                }
+
+                return new DocSize(widest, deep);
+            }
+
             SlideTextBody body = Body(text, size, Colour.Black, family, bold);
             Length height = SlideTextLayout.Height(body, Length.Zero, fonts);
 
@@ -409,5 +459,46 @@ public static class SlideChart
                     TextAlignment.Start),
             ],
         };
+
+        /// <summary>One paragraph per line, aligned on the edge the anchor names.</summary>
+        /// <remarks>
+        /// What a label the arrangement broke is drawn from. Each line is its own paragraph
+        /// because the body does not wrap — <see cref="Body"/> sets <c>Wraps = false</c>, which
+        /// is right for a chart label and means a newline inside one paragraph would be the only
+        /// thing breaking it — and because the alignment is what carries the anchor across all of
+        /// them at once.
+        /// </remarks>
+        internal static SlideTextBody Lines(
+            string[] lines,
+            Length size,
+            Colour colour,
+            string? family,
+            bool bold,
+            TextAlignment adjust)
+        {
+            SlideTextBody body =
+                Body(string.Concat(lines), size, colour, family, bold);
+
+            List<SlideParagraph> paragraphs = new(lines.Length);
+
+            foreach (string line in lines)
+            {
+                paragraphs.Add(new SlideParagraph(
+                    line,
+                    [
+                        new SlideTextRun(
+                            0,
+                            line.Length,
+                            string.IsNullOrWhiteSpace(family) ? ChartFace : family.Trim(),
+                            size,
+                            bold ? 700 : 400,
+                            false,
+                            colour),
+                    ],
+                    adjust));
+            }
+
+            return body with { Paragraphs = paragraphs };
+        }
     }
 }

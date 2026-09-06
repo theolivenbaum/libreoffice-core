@@ -176,6 +176,34 @@ format (Paperless reads), macro execution (never — Paperless only reports that
    both halves are wrong: the leading is not in it, and the metrics go through a device, so it is
    not a fixed fraction of the em at all. 1.1254 em at 10 pt and 1.1596 at 11.
 
+   **And the anisotropic scale a chart is sometimes drawn at is not a mystery: an embedded chart
+   is fitted to its own *drawn extent*, not to its page.**
+   `ViewContactOfSdrOle2Obj::createPrimitive2DSequenceWithParameters`
+   (`svx/source/sdr/contact/viewcontactofsdrole2obj.cxx`:88-116) takes the bounding range of every
+   primitive the chart's draw page produced — `aRetval.getB2DRange(...)`,
+   `svx/source/svdraw/charthelper.cxx`:96-100 — translates its minimum to the origin, scales it by
+   `1/width, 1/height`, and multiplies by the OLE object's own matrix. So whenever a chart's labels
+   overflow its page, the whole chart is squeezed until the overflow fits, by **two different
+   factors, one per axis**. That is the whole of "*the chart is scaled unequally*" recorded against
+   `tdf106217.pptx`, and it is general. Measured on `N2_E_Maestroni_Swarm_COP.pptx` page 7: the
+   chart's own background rectangle is drawn at 119.083–719.660 × 92.58–516.98 inside a frame of
+   0–720 × 92.57–540.0, which is **0.834135 across and 0.948534 down**, and its leftmost category
+   label starts at x = 0.02, or −142.7 pt in the chart's own coordinates. `ChartLayout.Place`
+   already composes at `plot.Space` and stretches onto the frame, carrying the residual `sx/sy` on
+   `ChartLabel.Stretch`; what it does not yet do is take the *drawn* extent as the rectangle it
+   stretches from. `probes/chart-layout/results.md` §0.
+
+   **`VDiagram::adjustInnerSize` is not reached by a chart stating `c:layoutTarget val="inner"`,
+   and a brief has already sent a round after it.** That target sets `PosSizeExcludeAxes`
+   (`DiagramWrapper.cxx`:816-823) and therefore `CreateShapeParam2D::mbUseFixedInnerSize`
+   (`ChartView.cxx`:946-980), and all four `adjustInnerSize` calls in
+   `impl_createDiagramAndContent` are guarded by `!rParam.mbUseFixedInnerSize` (`:559`, `:594`,
+   `:619`, `:690`), as is `reduceToMinimumSize()`. The one correction such a rectangle gets is in
+   the importer: `DiagramHelper::setDiagramPositioning`
+   (`chart2/source/tools/DiagramHelper.cxx`:434-476) clamps the four fractions to `[0, 1]` and then
+   moves the **position** — `aNewPos.Primary = 1.0 - aNewSize.Primary` — rather than shrinking the
+   size.
+
    **Reach: 168 of 947 corpus documents carry a chart** — sheets 90, slides 68, words 10 — and 131
    of them are at 1% or worse, 111 at 2% or worse, at the sizes their charts declare. The 90 sheets
    documents were already right; the 78 slides and words ones are what this moved.
