@@ -97,22 +97,38 @@ artefact. `Net sales 60,000.00 54000 54000.000006 -6000` → `60,000.00 54,000.0
 
 **Mechanism.** `NumberFormatSection.Parse`'s `IsDateTimeLetter` covers `y m d h s g e b` and not
 `a`, so the run fell through to the per-character literal branch. `AAA`/`AAAA` and LibreOffice's
-own `NN`/`NNN`/`NNNN` share one case in `svl/source/numbers/zformat.cxx`:3983-4008 —
-`SHORT_DAY_NAME` at three letters, `LONG_DAY_NAME` at four, plus
-`getLongDateDayOfWeekSep()` on `NNNN` alone (:4004). The keyword table is
-`zforscan.cxx`:60-77.
+own `NN`/`NNN`/`NNNN` share one case in `svl/source/numbers/zformat.cxx`:3983-4008, and the
+keyword table is `zforscan.cxx`:60-77.
 
-Two things the table does not tell you, both measured (`runs.xlsx`, both binaries agreeing):
+Three things that table does not tell you, all measured (`codes.xlsx`, `runs.xlsx`, `nnn.xlsx`,
+both binaries agreeing on every row):
 
+- **The lengths do not pair up.** `NN` goes with `AAA` on `SHORT_DAY_NAME` and **`NNN` with
+  `AAAA`** on `LONG_DAY_NAME`; only `NNNN` appends the locale's day-of-week separator (:4004).
+  So `nnn` is a *long* name. Both binaries draw `Sun`, `Sunday`, `Sunday, `. This was
+  implemented the obvious way first and the probe caught it.
 - **The scanner is greedy from the left.** `aaaaa` draws `Sundaya` and `nnnnn` draws
   `Sunday, n` — the longest key first and the tail after it, not `aSunday`.
-- **A day-name key switches the calendar.** `ImpIsOtherCalendar` (`zformat.cxx`:3453-3480)
-  answers true for a subformat holding `AAA`, `AAAA`, `EC`, `EEC`, `R`, `RR`, `G`, `GG` or
-  `GGG`, and `SwitchToOtherCalendar` (:3486-3512) then renders the **month and the day** in the
-  locale's first non-Gregorian calendar, leaving the year Gregorian. Under en-US that is the
-  Jewish calendar: serial 46194 — 21 June 2026 — draws `04/06/26 Sunday` under `mm/dd/yy aaaa`
-  and `Tammuz 06 2026 Sunday` under `mmmm dd yyyy aaaa`, against `06/21/26` under `mm/dd/yy`
-  alone. Both binaries.
+- **An `A` key switches the calendar and an `N` key does not.** `ImpIsOtherCalendar`
+  (`zformat.cxx`:3453-3480) answers true for a subformat holding `AAA`, `AAAA`, `EC`, `EEC`,
+  `R`, `RR`, `G`, `GG` or `GGG` — and for none of the `N` keys — after which
+  `SwitchToOtherCalendar` (:3486-3512) renders the **month and the day** in the locale's first
+  non-Gregorian calendar, leaving the year Gregorian. Under en-US that is the Jewish calendar:
+  serial 44794 draws `05/24/22 Sunday` under `mm/dd/yy aaaa` and `08/21/22 Sunday` under
+  `mm/dd/yy nnn`; serial 46194 — 21 June 2026 — draws `04/06/26 Sunday` and
+  `Tammuz 06 2026 Sunday` under `mmmm dd yyyy aaaa`, against `06/21/26` under `mm/dd/yy` alone.
+  Both binaries.
+
+**And the same keys reach ODF, where they were inert and are not any more.**
+`OdfNumberFormat` compiled `number:day-of-week` to `NNN` for a short one and `NNNN` for a long
+one, which drew literal letters while the keys were unimplemented and would have drawn a long
+name and a long-name-plus-comma the moment they were. It is `NN` and `NNN`:
+`SvXMLNumFormatContext::AddNfKeyword` rewrites an incoming `NNNN` to `NNN` and restores the
+separator only when the following `<number:text>` holds exactly it
+(`xmloff/source/style/xmlnumfi.cxx`:2037-2041 and :955-970). Measured with a hand-built flat ODS
+(`dow.fods`) through both binaries: short draws `Sun`, long draws `Sunday`, no trailing comma.
+The corpus holds no ODF, so this is unmeasurable there; the path that reaches it is a chart
+axis, since an ODF *cell* carries its display string and we use that.
 
 **Seat.** `NumberFormatSection.DayNameRun` and `NumberFormatter.DateField`'s `'w'` case.
 
@@ -120,10 +136,11 @@ Two things the table does not tell you, both measured (`runs.xlsx`, both binarie
 and a bare `n` run in none.
 
 **What is left.** The calendar switch is **not** reproduced — the day name is exact and the date
-beside it stays Gregorian. Implementing a Hebrew calendar for one corpus document is not worth
-it; instead the subformat now reports `HasUnreproducedDirective`, which is the mechanism the tree
-already uses for `[NatNum]`, `[DBNum]` and `[~buddhist]`, so a reader can raise a diagnostic
-rather than presenting a guess.
+beside an `A` key stays Gregorian. Implementing a Hebrew calendar for one corpus document is not
+worth it; instead a subformat carrying an `A` key reports `HasUnreproducedDirective`, which is
+the mechanism the tree already uses for `[NatNum]`, `[DBNum]` and `[~buddhist]`, so a reader can
+raise a diagnostic rather than presenting a guess. An `N` key does not switch the calendar and is
+reproduced exactly.
 
 **Before / after.** `08/21/22 aaaa` → `08/21/22 Sunday`. 26.2 prints `04/06/26 Sunday` on the
 same cell, and the remaining distance is the calendar plus 2c below.
@@ -208,6 +225,15 @@ opened it.
 **Seat.** `Paperless.Core/Numbers/BuiltInNumberFormats.cs` is now the en-US table and
 `XlsxStyles.BuiltinCode` delegates to it; there is one table.
 
+**One thing the two filters genuinely do not share, and merging them broke it for an hour.**
+The *locale row* is shared; the covered *set* of ids is not. Both BIFF tables say so in as many
+words — `// 5...8 contained in file` (`xlstyle.cxx`:826) and `// 41...44 contained in file`
+(:862) — and carry no entry for either run, while the OOXML tables state all eight
+(`numberformatsbuffer.cxx`:294-320, :802). The first cut of this change gave the BIFF reader all
+eight; `BuiltInNumberFormats.BiffCode` takes them back. 63-66 are built in on both sides with the
+same four codes. Corpus reach of the difference is **nil** — every BIFF workbook of the 947 that
+uses one of the eight writes its own `FORMAT` record for it.
+
 **Reach.** BIFF documents using a built-in id that their `FORMAT` records do not define, censused
 over all 947: **14 → 13 documents**, 15 → 2, 20 → 1, 22 → 1, 38 → 1, 40 → 1. So the day/month
 transposition reaches thirteen documents and the padded hour one. Ids 5–8 and 41–44 are stated by
@@ -274,6 +300,87 @@ almost certainly the same cause.
 
 ---
 
+## The sheets track, re-swept
+
+`batch-check.sh /home/user/sample-files 'sheets/*'` at `cef0cd958`, scored against the banked gate
+at `2f4709c08` with `score-sheets.py`, which refuses to print unless every banked path found a
+row. `sheets-after.tsv` is the result.
+
+```
+TOTAL 307   MATCH 260   MISMATCH 47   REF-CANNOT-RENDER 0
+banked      MATCH 257   MISMATCH 50
+```
+
+**Four verdicts moved and none moved backwards. Two of the four are this round's.**
+
+| document | banked | now | whose |
+|---|---|---|---|
+| `Template Pilot Logbook JAR-FCL V3.0.xls` | `words` | **`match`** | **this round** — defect 3 |
+| `042_Business_monthly_budget…xlsx` | `words` | **`match`** | **this round** — defect 1 |
+| `062_Run_chart_cb7476ea.xlsx` | `pages,words` | **`match`** | the chart-sheet round, already in this round's base |
+| `057_Simple_balance_sheet…xlsx` | `pages,words` | `words` | the same |
+
+**The banked gate is twenty commits behind this round's base, so a banked figure is not a
+"before".** Fifteen further rows moved their numbers without moving a verdict, and attributing
+them to this round would have been wrong for nine of the fifteen. The instrument that settles it
+is a binary built at the base commit: `git checkout 0fc357beb -- dotnet/src`, build
+`tools/Paperless.Cli` alone, render, then `git checkout HEAD -- dotnet/src`, `touch`, and
+`rm -rf` the four projects' `obj`/`bin` before rebuilding.
+
+| document | base `0fc357beb` | now | |
+|---|---:|---:|---|
+| `Liste-Zertifizierung-ChemKlimaschutzV-RPT.xls` | 8783 | **8638** | the reference's 8638 exactly |
+| `6f9e605c-fded-11e3…xls` | 32400 | **32397** | the reference's 32397 exactly |
+| `042_Business_monthly_budget…xlsx` | 1453 | **1567** | the reference's 1567 exactly |
+| `UASEventsNov2014-Aug2015.xls` | 323358 | 322292 | 1066 closer to the reference's 320886 |
+| `laufende-nip-vorhaben-hyland.xls` | 49179 | 49113 | +57 over the reference to −9 |
+| `Template Pilot Logbook JAR-FCL V3.0.xls` | 5504 | 5396 | verdict `words` → `match` |
+| `065_Weight_loss_tracker…xlsx` | 334 | 340 | `aaaa` → `Sunday`, and the chart's date labels |
+| `environment-edb…xls` | 235720 | 235512 | **see below** |
+| `capa-liste-nse-1.xls` | 128298 | 128296 | **see below** |
+| `List of EQS securities_0.xls` | 154907 | 154906 | the reference's count exactly |
+| the other **nine** rows | — | unchanged | not this round |
+
+**The two rows whose character count moved *away* from the reference are both improvements, and
+the character count is the wrong instrument for them.** On `environment-edb…xls` the change is
+`03-Jun-85` → `3-Jun-85` on 208 tokens — built-in 15, `D-MMM-YY` in en-US against `DD-MMM-YY` in
+the fallback table — and **all 208 of the gained tokens appear in the reference while none of the
+208 lost ones do**. `capa-liste-nse-1.xls` is the same in miniature: one `01/04/2021` becomes
+`4/1/2021`, which the reference draws and the old spelling did not. Splitting a sweep diff by
+*which tokens* rather than by *how many characters* is what tells those apart from a regression.
+
+Nine of the fifteen did not move at all under this round. The clearest is
+`18-02RD301_ILS_components_Master_9-13-18.xls`, which loses 626 numbers to `###` and gains 142
+U+2007 against the banked gate — that is the figure-space commit `8f87b8278`, four commits before
+this round's base, and reading it as a regression here would have sent a round after nothing.
+
+## What the gate cannot see: the theme colour
+
+The colour change moves no gate column at all — it adds no page, no word and no font. The right
+instrument is the drawn colour of each text span, and the right *before* is the banked gate's own
+`ours` PDF, because `XlsxCellFormats`, `XlsxPalette` and `XlsxTint` are byte-identical between
+`2f4709c08` and this round's base. `colourcheck.py` counts, per document, how many drawn
+characters carry a colour the 26.2.4.2 reference also uses.
+
+| document | before | after |
+|---|---:|---:|
+| `061_Regional_sales_chart` | 158/546 | **546/546** |
+| `089_Vintage_inventory_list` | 208/255 | **255/255** |
+| `052_Manufacturing_output_chart` | 272/576 | **576/576** |
+| `046_Cost_analysis_with_Pareto_chart` | 367/777 | **776/777** |
+| `083_Project_tracker` | 369/1072 | **1050/1072** |
+| `074_Idea_planner` | 201/643 | **624/643** |
+| `050_Financial_vision` | 278/467 | **457/467** |
+| `040_Blood_pressure_tracker` | 789/845 | **811/845** |
+| `070_Equipment_inventory_list` | 1215/1362 | **1239/1362** |
+| `053_Personal_asset_inventory` | 142/304 | **176/304** |
+| `063_Sales_pipeline` | 18/191 | **62/191** |
+| `058_Social_media_engagement_data` | 548/576 | 548/576 |
+| **total** | **4565/7614 = 60.0 %** | **7120/7614 = 93.5 %** |
+
+**Eleven improve, one is unchanged, none is worse.** The control that says this is ours rather
+than the version gap: the two reference binaries draw **identical colour sets on 12 of 12**.
+
 ## What this contradicts in the record
 
 1. **`dotnet/CLAUDE.md` and `NumberFormatCodeTests.TheBiffAndOoxmlBuiltInTablesDisagreeAndAreMeantTo`:
@@ -293,9 +400,24 @@ almost certainly the same cause.
    saying because the brief expected the harder thing and the reach census (102 documents) would
    have justified either.
 
+## Verification
+
+| | |
+|---|---|
+| `dotnet build Paperless.slnx -v q -nologo` | 0 warnings, 0 errors |
+| the ten non-fidelity projects, run individually and totalled by hand | **5890 passed, 0 failed, 0 skipped**, against a baseline of 5841 and 49 tests added here |
+| `Paperless.Fidelity.Tests` | **542 passed, 10 failed, 0 skipped** of 552 — the baseline exactly, and the same four classes: `PageDrawing` x4, `TabStop` x4, `SheetDrawing`, `JustificationShrink` |
+| sheets track | `TOTAL 307  MATCH 260  MISMATCH 47  REF-CANNOT-RENDER 0` |
+
+One document, `sectors-defense-and-aerospace.xlsx`, was rendered in the nine seconds the sweep
+overlapped a rebuild. Re-rendered afterwards it gives the same 449 pages and the same 139 439
+alphanumeric characters as the sweep's own copy, so the sweep stands; the three corrections made
+after it reach nothing in the corpus, and re-rendering all nineteen movers with the final binary
+reproduces the sweep's counts on 19 of 19.
+
 ## What is left
 
-- The Jewish-calendar month and day a day-name key drags in (1 document).
+- The Jewish-calendar month and day an `A` day-name key drags in (1 document).
 - The date scale a `c:dateAx` should give a scatter group's ticks (1 document).
 - `053`'s pivot-chart category set (1 document, not a formatting question).
 - `XlsxSheetFormats` still takes `cellXfs[0]` as the *rendering* sheet default — fonts and
