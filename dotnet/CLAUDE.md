@@ -858,6 +858,21 @@ down. **49 of the corpus's documents name a Narrow family** — sheets 25, words
 this is not a curiosity. On any of them, screen against `/usr/bin/soffice`, not against the tarball;
 the version rule the section above describes is not what separates them.
 
+**So move them aside too, and do not bundle a Narrow face to match.** They belong in the same
+`.duplicates-aside/` as the rest — the recipe's `mv` pattern does catch `Liberation*`, so a fresh
+run of it is enough; check afterwards that `ls $D/LiberationSansNarrow*` is empty, because these
+came back once already. *(Not moved as of 2026-09-06: three rounds were mid-measurement and
+changing the reference under them would have made their own before-and-after incomparable. Do it
+at the next quiet point and treat any 26.2 figure taken on one of the 49 before then as suspect.)*
+
+The reason **not** to answer this by bundling a narrow face is rule 3's own test, *ship only the
+faces the distro packages ship*: Liberation Sans Narrow is not in `fonts-liberation2`, it is the
+separate `fonts-liberation-sans-narrow` package, and nothing in this project's stated environment
+installs it. `Paperless.Text/Fonts/Bundled/` holds 28 faces and no Narrow, the system holds none,
+and both answer DejaVu Sans for *Arial Narrow* — so **we agree with a stock machine and the tarball
+is the outlier.** Bundling one would be the same mistake as the first cut of the bundle, which
+shipped TDF's fuller DejaVu and made us draw a real italic where the reference synthesises a lean.
+
 ### The two references differ in a *rule*, not only in their fonts, and it decides font fallback
 
 **24.2.7.2 lets the family name decide; 26.2.4.2 lets a declared family class beat it.**
