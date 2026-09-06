@@ -43,6 +43,32 @@ public static class NumberFormatter
     public const char FillMarker = '\u001B';
 
     /// <summary>
+    /// What a <c>?</c> digit placeholder writes when there is no digit for it: a figure space,
+    /// which is exactly as wide as a digit.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>cBlankDigit = 0x2007</c>, <c>svl/source/numbers/zformat.cxx:71</c> — "tdf#158890 use
+    /// figure space for '?'" — and it is reached from all three places an unfilled placeholder is
+    /// written: the integer run (<c>:4791</c>), the trailing decimals (<c>ImpNumberFill</c>,
+    /// <c>:4623</c>) and a fraction's denominator (<c>:4935</c>). The point of the placeholder is
+    /// that a column of <c># ??/??</c> lines up on its bar, and an ordinary blank is narrower than
+    /// a digit in every proportional face, so a space lines nothing up.
+    /// </para>
+    /// <para>
+    /// <strong>The two installed binaries disagree here, and this follows 26.2.4.2.</strong>
+    /// Measured on <c>probes/chart-cat-reverse/numfmt.xlsx</c>, sixteen cells over seven codes:
+    /// 26.2.4.2 writes <c>U+2007</c> for every unfilled <c>?</c> and 24.2.7.2 writes
+    /// <c>U+0020</c> for every one of them — the blanked numerator and denominator of a fraction
+    /// with no remainder included, where <c># ?/?</c> on 3 reads <c>3</c>, blank, figure space,
+    /// blank, figure space against four plain blanks. Every figure in
+    /// <c>NumberFormatterTests</c> used to be 24.2.7.2's answer and is 26.2.4.2's now, because
+    /// 26.2.4.2 is what this tree is screened against.
+    /// </para>
+    /// </remarks>
+    public const char BlankDigit = '\u2007';
+
+    /// <summary>
     /// Formats a number through a format code.
     /// </summary>
     /// <param name="code">The parsed format code.</param>
@@ -426,7 +452,7 @@ public static class NumberFormatter
 
                 case FormatTokenKind.Digits when i == numeratorIndex:
                     output.Append(numerator == 0
-                        ? new string(' ', token.Text.Length)
+                        ? Blanked(token.Text)
                         : FormatIntegerPart(token, numerator.ToString(CultureInfo.InvariantCulture)));
                     break;
 
@@ -437,7 +463,7 @@ public static class NumberFormatter
                 // "1/4 " rather than "1/ 4".
                 case FormatTokenKind.Digits when afterSlash:
                     output.Append(numerator == 0
-                        ? new string(' ', token.Text.Length)
+                        ? Blanked(token.Text)
                         : PadDenominator(token, denominator));
                     break;
 
@@ -448,8 +474,8 @@ public static class NumberFormatter
     }
 
     /// <summary>
-    /// Lays the denominator into its placeholder run, padding with spaces on the right where
-    /// the run is wider and the placeholder is <c>?</c>.
+    /// Lays the denominator into its placeholder run, padding on the right with
+    /// <see cref="BlankDigit"/> where the run is wider and the placeholder is <c>?</c>.
     /// </summary>
     private static string PadDenominator(FormatToken token, long denominator)
     {
@@ -467,8 +493,24 @@ public static class NumberFormatter
         }
 
         string body = zeros > 0 ? digits.PadLeft(digits.Length + zeros, '0') : digits;
-        return spaces > 0 ? body + new string(' ', spaces) : body;
+        return spaces > 0 ? body + new string(BlankDigit, spaces) : body;
     }
+
+    /// <summary>
+    /// A whole placeholder run written as blanks, which is what a fraction with no remainder
+    /// shows in place of its numerator and its denominator.
+    /// </summary>
+    /// <remarks>
+    /// Placeholder by placeholder rather than one repeated character: a <c>?</c> blanks to a
+    /// <see cref="BlankDigit"/> and a <c>0</c> or <c>#</c> to an ordinary space, so
+    /// <c># ?/?</c> on 3 comes out one figure space wide on each side of its blanked bar and
+    /// <c># 0/0</c> is left as it was. Measured on both binaries; see <see cref="BlankDigit"/>.
+    /// </remarks>
+    private static string Blanked(string placeholders)
+        => string.Create(placeholders.Length, placeholders, static (span, source) =>
+        {
+            for (int i = 0; i < source.Length; i++) span[i] = source[i] == '?' ? BlankDigit : ' ';
+        });
 
     /// <summary>
     /// The closest fraction with a denominator no larger than <paramref name="maximum"/>.
@@ -536,8 +578,8 @@ public static class NumberFormatter
     /// </summary>
     /// <remarks>
     /// The three placeholders differ only in what they do when there is no digit to show:
-    /// <c>0</c> writes a zero, <c>?</c> writes a space so that columns of fractions line up,
-    /// and <c>#</c> writes nothing. Digits beyond the run's width are never dropped — a format
+    /// <c>0</c> writes a zero, <c>?</c> writes a <see cref="BlankDigit"/> so that columns of
+    /// fractions line up on their bars, and <c>#</c> writes nothing. Digits beyond the run's width are never dropped — a format
     /// narrower than its value still shows the value.
     /// </remarks>
     private static string FormatIntegerPart(FormatToken token, string digits)
@@ -556,7 +598,7 @@ public static class NumberFormatter
         StringBuilder output = new();
         for (int i = 0; i < placeholders.Length - body.Length; i++)
         {
-            if (placeholders[i] == '?') output.Append(' ');
+            if (placeholders[i] == '?') output.Append(BlankDigit);
         }
         output.Append(body);
 
@@ -578,7 +620,7 @@ public static class NumberFormatter
                     output.Append(digit);
                     break;
                 case '?':
-                    output.Append(RemainingIsZero(digits, cursor) ? ' ' : digit);
+                    output.Append(RemainingIsZero(digits, cursor) ? BlankDigit : digit);
                     break;
                 default:
                     if (RemainingIsZero(digits, cursor)) return output.ToString();

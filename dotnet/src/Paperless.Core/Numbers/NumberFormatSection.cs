@@ -149,9 +149,16 @@ public sealed class NumberFormatSection
                     i += 2;
                     continue;
 
-                // "Reserve the width of the next character." There is no column to align to
-                // during extraction, so a single space stands in — dropping it entirely would
-                // run an accounting format's currency symbol into its digits.
+                // "Reserve the width of the next character." LibreOffice does not measure the
+                // character either: SvNumberformat::InsertBlanks
+                // (svl/source/numbers/zformat.cxx:89-104) inserts one, two or three ordinary
+                // spaces from a 96-entry table of coarse widths, so `_(` is one space and `_%`
+                // would be three. One space stands in for all of them here because every `_x` in
+                // the corpus is one of `(`, `)`, `-` and a blank — 2572 of them over the chart
+                // parts and workbook styles of 947 documents, and all four are 1 in that table,
+                // so the table has nothing to add and a wrong count would be invisible.
+                // Dropping the blank entirely is what runs an accounting format's currency symbol
+                // into its digits.
                 case '_':
                     tokens.Add(FormatToken.Literal(" "));
                     i += 2;
