@@ -261,7 +261,12 @@ internal static class DocxFrames
                 shapeProperties,
                 blocks,
                 new DocSize(width, height),
-                EffectExtent(placed, anchor, shapeProperties),
+
+                // A turned drawing's extent is not an offset — `PageFrame.InlineOffset` centres it
+                // instead — so the curves take none of it, and the frame's own turn carries them.
+                Rotation(shapeProperties) == 0
+                    ? EffectExtent(placed, anchor, shapeProperties)
+                    : Margins.Zero,
                 context.Theme);
 
         if (warp.IsWarped)
@@ -1206,8 +1211,11 @@ internal static class DocxFrames
     {
         if (anchor is not null) return Margins.Zero;
         if (Child(placed, "effectExtent") is not { } extent) return Margins.Zero;
-        if (Rotation(shapeProperties) != 0) return Margins.Zero;
-        if (IsPlainPicture(placed, shapeProperties)) return Margins.Zero;
+
+        // The picture rule is the *unrotated* branch's alone. A rotated picture is never converted to
+        // a Writer graphic object (fdo#70457), so it stays a shape and reaches the margin code like
+        // any other drawing.
+        if (Rotation(shapeProperties) == 0 && IsPlainPicture(placed, shapeProperties)) return Margins.Zero;
 
         return new Margins(
             Emu(extent.Attribute("l")?.Value),

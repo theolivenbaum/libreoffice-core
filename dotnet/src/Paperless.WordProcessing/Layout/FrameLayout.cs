@@ -348,6 +348,10 @@ internal sealed class FrameResolution
                 // TextBox halves disagreeing rather than a rule; a frame here is one object and cannot be
                 // in two places, so it is placed where the reference puts the text and the ink it holds.
                 //
+                // A *turned* drawing is offset differently again — centred in its line box in both
+                // axes rather than moved by the extent's left edge — and both rules live on
+                // `PageFrame.InlineOffset`, which carries the measurements.
+                //
                 // **Horizontally there is no such disagreement, and the two edges are not symmetric.**
                 // `make-x-fixture.py` is the same fixture laid across a line as `LEFT` + drawing +
                 // `RIGHT`, and with a 10.8 pt *left* extent both halves of the object move right by it
@@ -358,10 +362,12 @@ internal sealed class FrameResolution
                 // (`sw/source/core/objectpositioning/ascharanchoredobjectposition.cxx`:129-133) moving
                 // the anchor point by both spacings, with only the vertical one lost again by the
                 // TextBox half failing to follow.
+                DocPoint inside = frame.InlineOffset;
+
                 DocRect placedAt = new(
                     area.X + line.Box.Left + PageDrawing.OffsetOnLine(paragraph, line, frame.AnchorOffset)
-                        + frame.EffectExtent.Left,
-                    area.Y + line.Baseline - (frame.InlineAscent ?? frame.InlineExtent.Height),
+                        + inside.X,
+                    area.Y + line.Baseline - (frame.InlineAscent ?? frame.InlineExtent.Height) + inside.Y,
                     frame.Size.Width,
                     frame.Size.Height);
 

@@ -178,6 +178,14 @@ Three things it settles:
    fixture, before and after this change alike. Applying the plain extent there would have been
    curve-fitting towards a number produced by something else, so a rotation now skips it.
 
+   **Half of that is right and the conclusion "so a rotation skips the extent" is wrong**, and the
+   fixtures here could not have shown it: they vary the *gap*, and downwards the turned height is
+   the larger of the two rectangles and swallows the extent whole. Varying the width instead, the
+   same 20-degree fixture's line advance goes **149.87 to 171.47 pt** when a `137160` extent is added,
+   on both references, with the gap unchanged to the hundredth. The rule is in
+   `probes/words-inline-rotated-bbox/`, which supersedes this row: a turned drawing takes Word's
+   swapped-and-expanded box across and the larger of that and its turned box down.
+
 ### What that cost, and the correction it forces
 
 | document | page-1 one-sided ink vs 26.2, before | with the extent on pictures | with the rule |

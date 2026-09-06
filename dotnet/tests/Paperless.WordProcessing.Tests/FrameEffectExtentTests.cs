@@ -228,162 +228,85 @@ public sealed class FrameEffectExtentTests
     }
 
     /// <summary>
-    /// A rotated drawing takes none of it, and the growth it does get is not the extent.
+    /// A turned drawing takes its line box from Word's reserved rectangle and its own turned one.
     /// </summary>
     /// <remarks>
     /// <para>
-    /// A rotation sends the import down the other branch of <c>nOOXAngle == 0</c>, which derives the
-    /// margins from the rotated snap rectangle. Worked through for a 20 degree, 144 x 50.4 pt drawing
-    /// those margins come out negative on both edges and clamp to zero at
-    /// <c>GraphicImport.cxx</c>:1248-1252.
+    /// A rotation sends the import down the other branch of <c>nOOXAngle == 0</c>
+    /// (<c>GraphicImport.cxx</c>:1055-1090), which keeps <em>both</em> rectangles: the object laid
+    /// out is the turned snap rectangle, and each margin round it is the signed gap between that and
+    /// the rectangle Word reserved — Word's own width/height swap applied to the stated extent, then
+    /// expanded by the effect extent. The horizontal margins keep their sign and the vertical ones
+    /// are clamped at nought (<c>GraphicImport.cxx</c>:1245-1249, tdf#141880), so the room taken is
+    /// Word's box across and the larger of the two down.
     /// </para>
     /// <para>
-    /// The measurement settles it rather than the arithmetic: that fixture grows its line by
-    /// <b>+46.25 pt</b> with a <c>137160</c> extent, and by <b>+46.25 pt</b> with no extent at all.
-    /// The growth is the rotated bounding box — which we do not yet size a rotated inline drawing by,
-    /// and which is a separate open defect — and none of it is the effect extent.
+    /// <strong>This asserted the opposite until 2026-09-06</strong> — that a turned drawing takes no
+    /// effect extent and no extra room at all — on the strength of a fixture that varied only the
+    /// vertical gap, where the turned height swallows the extent whole. Varying the width shows the
+    /// extent plainly: at 20 degrees a <c>137160</c> extent moves the same fixture's line advance from
+    /// <b>149.87 to 171.47 pt</b> on both references while the gap stays at 113.05 either way.
+    /// </para>
+    /// <para>
+    /// The figures are from <c>dotnet/probes/words-inline-rotated-bbox/</c>, a 144 × 50.4 pt black
+    /// rectangle, both installed references identical on every row.
     /// </para>
     /// </remarks>
-    [Fact]
-    public void ARotatedDrawingTakesNoEffectExtent()
+    [Theory]
+    [InlineData(20, 0, 144.00, 96.60)]     // no swap: Word's width, the turned height
+    [InlineData(20, 137160, 165.60, 96.60)] // the extent grows the width and is lost under the height
+    [InlineData(45, 0, 50.40, 144.00)]     // swapped, and 144 beats the turned 137.45
+    [InlineData(90, 0, 50.40, 144.00)]
+    [InlineData(135, 0, 144.00, 137.45)]   // no swap at 135, so the turned height wins
+    [InlineData(315, 0, 144.00, 137.45)]
+    public void ATurnedDrawingTakesItsTurnedBoundingBox(
+        int degrees, int emu, double width, double height)
     {
         PageFrame frame = Inline(
-            """<wp:effectExtent l="137160" t="137160" r="137160" b="137160"/>""", rotation: 1200000);
+            $"""<wp:effectExtent l="{emu}" t="{emu}" r="{emu}" b="{emu}"/>""",
+            rotation: degrees * 60000);
 
-        frame.EffectExtent.ShouldBe(Margins.Zero);
-        frame.InlineExtent.Height.ShouldBe(frame.Size.Height);
+        frame.InlineExtent.Width.ShouldBe(Length.FromPoints(width));
+        frame.InlineExtent.Height.ShouldBe(Length.FromPoints(height));
     }
 
     /// <summary>
-    /// An inline drawing is placed at the outer left <em>plus</em> the left extent, and at the outer
-    /// top with no top extent at all.
+    /// A turned drawing is centred in its line box rather than moved by the extent's left edge.
     /// </summary>
     /// <remarks>
-    /// <para>
-    /// The asymmetry is LibreOffice's, and it is measured rather than reasoned about.
-    /// <c>SwAsCharAnchoredObjectPosition::CalcPosition</c> moves the anchor point by both spacings —
-    /// <c>sw/source/core/objectpositioning/ascharanchoredobjectposition.cxx</c>:129-133,
-    /// <c>aAnchorPos.AdjustX(nLRSpaceLeft)</c> then <c>aAnchorPos.AdjustY(nULSpaceUpper)</c> — but a
-    /// shape carrying a <c>wps:txbx</c> is two objects in Writer, and only the vertical half of that
-    /// move is lost when its TextBox fails to follow its draw shape.
-    /// </para>
-    /// <para>
-    /// <c>probes/words-inline-effectextent/make-x-fixture.py</c> is the same fixture laid across a
-    /// line as <c>LEFT</c> + drawing + <c>RIGHT</c>. Both installed references, identical: a 10.8 pt
-    /// <em>left</em> extent moves the shape's own fill band from 103.50 to <b>114.25 pt</b> and the
-    /// <c>INSIDE</c> run of its text box from 155.95 to <b>166.75</b> — both halves, by the same
-    /// amount — while a 10.8 pt <em>top</em> extent moves neither of them by anything, leaving
-    /// <c>INSIDE</c> at 155.95 across and 90.86 down.
-    /// </para>
-    /// <para>
-    /// Before this the corpus catalogue's page 7 read <b>-23 px at 150 dpi</b>, 11.04 pt, against both
-    /// references with zero vertical shift and zero ink difference; after it, <b>0 px</b>.
-    /// </para>
+    /// The margins round a turned object are symmetrical by construction — each is half the gap
+    /// between Word's box and the snap rectangle — so the drawing's own rectangle shares its centre
+    /// with the box. Measured on the same fixtures, the drawn rectangle's left edge in points on a
+    /// line starting at 103.50: 20 degrees <b>99.25</b>, 45 degrees <b>60.00</b> (which hangs into
+    /// the page margin), 135 degrees <b>106.75</b>. Those are the snap rectangle's edges; the offsets
+    /// asserted here are the drawing's own, which is the smaller rectangle inside it.
+    /// </remarks>
+    [Theory]
+    [InlineData(20, 0.00, 23.10)]
+    [InlineData(45, -46.80, 46.80)]
+    [InlineData(135, 0.00, 43.525)]
+    public void ATurnedDrawingIsCentredInItsLineBox(int degrees, double x, double y)
+    {
+        PageFrame frame = Inline("""<wp:effectExtent l="0" t="0" r="0" b="0"/>""",
+            rotation: degrees * 60000);
+
+        frame.InlineOffset.X.ShouldBe(Length.FromPoints(x));
+        frame.InlineOffset.Y.ShouldBe(Length.FromPoints(y));
+    }
+
+    /// <summary>An upright drawing is offset by the extent's left edge and by nothing downwards.</summary>
+    /// <remarks>
+    /// The other half of <see cref="PageFrame.InlineOffset"/>, and the asymmetry is measured rather
+    /// than reasoned about — see <c>FrameLayout.HangInline</c> and
+    /// <c>probes/words-inline-effectextent/make-x-fixture.py</c>.
     /// </remarks>
     [Fact]
-    public void TheLeftExtentMovesTheDrawingAndTheTopExtentDoesNot()
+    public void AnUprightDrawingTakesTheLeftEdgeAndNoTopEdge()
     {
-        DocRect none = PlacedInline("""<wp:effectExtent l="0" t="0" r="0" b="0"/>""");
-        DocRect left = PlacedInline("""<wp:effectExtent l="137160" t="0" r="0" b="0"/>""");
-        DocRect top = PlacedInline("""<wp:effectExtent l="0" t="137160" r="0" b="0"/>""");
-        DocRect right = PlacedInline("""<wp:effectExtent l="0" t="0" r="137160" b="0"/>""");
+        PageFrame frame = Inline("""<wp:effectExtent l="137160" t="91440" r="27432" b="0"/>""");
 
-        (left.X - none.X).ShouldBe(Length.FromPoints(10.8));
-        (top.Y - none.Y).ShouldBe(Length.Zero);
-        (top.X - none.X).ShouldBe(Length.Zero);
-        (right.X - none.X).ShouldBe(Length.Zero, "the right edge is room on the line, not a move");
-    }
-
-    /// <summary>Where one inline drawing lands on the first page of a one-paragraph document.</summary>
-    private static DocRect PlacedInline(string effectExtent)
-    {
-        string body = $"""
-            <w:p>
-              <w:r><w:rPr><w:sz w:val="24"/></w:rPr><w:t xml:space="preserve">LEFT </w:t></w:r>
-              <w:r><w:rPr><w:sz w:val="24"/></w:rPr>
-                <w:drawing>
-                  <wp:inline distT="0" distB="0" distL="0" distR="0">
-                    <wp:extent cx="1828800" cy="640080"/>
-                    {effectExtent}
-                    <wp:docPr id="1" name="probe"/>
-                    <a:graphic><a:graphicData uri="{Wps}"><wps:wsp>
-                      <wps:cNvSpPr/>
-                      <wps:spPr>
-                        <a:xfrm><a:off x="0" y="0"/><a:ext cx="1828800" cy="640080"/></a:xfrm>
-                        <a:prstGeom prst="rect"><a:avLst/></a:prstGeom>
-                        <a:solidFill><a:srgbClr val="000000"/></a:solidFill>
-                      </wps:spPr>
-                      <wps:bodyPr/>
-                    </wps:wsp></a:graphicData></a:graphic>
-                  </wp:inline>
-                </w:drawing>
-              </w:r>
-              <w:r><w:rPr><w:sz w:val="24"/></w:rPr><w:t xml:space="preserve"> RIGHT</w:t></w:r>
-            </w:p>
-            """;
-
-        using MemoryStream package = BuildPackage(body);
-        using DocumentSource source = DocumentSource.FromStream(package, "effect-extent.docx");
-        using IDocument document = new WordProcessingReader().Read(source);
-        WordProcessingPages pages = (WordProcessingPages)((IPaginatedDocument)document).Layout();
-
-        return pages.Pages[0].Frames
-            .Where(frame => frame.Frame.Anchor == FrameAnchor.AsCharacter)
-            .ShouldHaveSingleItem()
-            .Area;
-    }
-
-    private static MemoryStream BuildPackage(string body)
-    {
-        const string ContentTypes = """
-            <?xml version="1.0" encoding="UTF-8"?>
-            <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
-              <Default Extension="rels"
-                       ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
-              <Default Extension="xml" ContentType="application/xml"/>
-              <Override PartName="/word/document.xml"
-                        ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
-            </Types>
-            """;
-
-        const string RootRelationships = """
-            <?xml version="1.0" encoding="UTF-8"?>
-            <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
-              <Relationship Id="rId1" Target="word/document.xml"
-                            Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument"/>
-            </Relationships>
-            """;
-
-        string document = $"""
-            <?xml version="1.0" encoding="UTF-8"?>
-            <w:document xmlns:w="{W}" xmlns:wp="{Wp}" xmlns:a="{A}" xmlns:wps="{Wps}">
-              <w:body>
-                {body}
-                <w:sectPr>
-                  <w:pgSz w:w="16838" w:h="11906" w:orient="landscape"/>
-                  <w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440"
-                           w:header="0" w:footer="0" w:gutter="0"/>
-                </w:sectPr>
-              </w:body>
-            </w:document>
-            """;
-
-        MemoryStream result = new();
-        using (ZipArchive archive = new(result, ZipArchiveMode.Create, leaveOpen: true))
-        {
-            Write(archive, "[Content_Types].xml", ContentTypes);
-            Write(archive, "_rels/.rels", RootRelationships);
-            Write(archive, "word/document.xml", document);
-        }
-
-        result.Position = 0;
-        return result;
-
-        static void Write(ZipArchive archive, string name, string content)
-        {
-            using Stream entry = archive.CreateEntry(name).Open();
-            entry.Write(Encoding.UTF8.GetBytes(content));
-        }
+        frame.InlineOffset.X.ShouldBe(Length.FromPoints(10.8));
+        frame.InlineOffset.Y.ShouldBe(Length.Zero);
     }
 
     private static PageFrame Picture(string effectExtent, string effects = "")
