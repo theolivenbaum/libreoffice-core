@@ -54,11 +54,17 @@ public static class SlideDrawing
 
         if (shape.Fill is { } fill && FillReachesThePage(shape.Picture))
         {
-            Fill(shape.Outline, fill, sink);
+            Fill(shape.FillOutline, fill, sink);
+
+            // A preset's shading faces, in the order it states them. See `PlacedShape.ShadedParts`.
+            foreach (SlideShadedPart part in shape.ShadedParts)
+            {
+                Fill(part.Outline, Brightened(fill, part.Brightness), sink);
+            }
         }
 
         if (shape.Picture is { } picture) DrawPicture(shape, picture, sink);
-        if (shape.Line is { } line) sink.StrokePath(shape.Outline, line);
+        if (shape.Line is { } line) sink.StrokePath(shape.StrokeOutline, line);
 
         if (shape.Text is not { Runs.Count: > 0 } text) return;
 
@@ -230,16 +236,24 @@ public static class SlideDrawing
             {
                 if (silhouette)
                 {
-                    sink.FillPath(
-                        shape.Outline,
-                        shape.Fill is { } fill ? Recoloured(fill, shadow.Colour) : paint);
+                    Paint silhouettePaint =
+                        shape.Fill is { } fill ? Recoloured(fill, shadow.Colour) : paint;
+
+                    sink.FillPath(shape.FillOutline, silhouettePaint);
+
+                    // A shading face is part of the silhouette; its own brightness is not, because
+                    // a shadow is one colour.
+                    foreach (SlideShadedPart part in shape.ShadedParts)
+                    {
+                        sink.FillPath(part.Outline, silhouettePaint);
+                    }
                 }
 
                 if (picture) DrawPictureSilhouette(shape, shape.Picture!, shadow.Colour, sink);
 
                 if (shape.Line is { } line)
                 {
-                    sink.StrokePath(shape.Outline, line with { Paint = Recoloured(line.Paint, shadow.Colour) });
+                    sink.StrokePath(shape.StrokeOutline, line with { Paint = Recoloured(line.Paint, shadow.Colour) });
                 }
 
                 if (text) DrawShadowText(shape.Text!, paint, sink);
@@ -276,6 +290,36 @@ public static class SlideDrawing
     /// with the gradient's own alpha it is invisible, which is what the reference shows.
     /// </para>
     /// </remarks>
+    /// <summary>
+    /// A fill taken towards white or black, which is what a shaded subpath is drawn in.
+    /// </summary>
+    /// <remarks>
+    /// <c>EnhancedCustomShape2d::GetColorData</c> (<c>EnhancedCustomShape2d.cxx</c>:1084-1105):
+    /// a positive brightness blends towards white as <c>c(1−b) + 255b</c> and a negative one
+    /// scales as <c>c(1+b)</c>, both truncated. Only a solid fill is shaded — LibreOffice shades
+    /// the colour data of the object, and a gradient, hatch or bitmap face keeps the fill it has,
+    /// which is also what every corpus deck's shaded preset carries.
+    /// </remarks>
+    private static Paint Brightened(Paint paint, double brightness)
+    {
+        if (paint is not SolidPaint solid || brightness == 0.0) return paint;
+
+        static byte Blend(byte channel, double brightness) => (byte)Math.Clamp(
+            brightness >= 0.0
+                ? (int)((channel * (1.0 - brightness)) + (brightness * 255.0))
+                : (int)(channel * (1.0 + brightness)),
+            0,
+            255);
+
+        Colour colour = solid.Colour;
+
+        return Paint.Solid(new Colour(
+            Blend(colour.R, brightness),
+            Blend(colour.G, brightness),
+            Blend(colour.B, brightness),
+            colour.A));
+    }
+
     private static Paint Recoloured(Paint paint, Colour colour) => paint switch
     {
         SolidPaint solid => Paint.Solid(colour.WithAlpha(solid.Colour.A)),

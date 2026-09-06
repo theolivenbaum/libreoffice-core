@@ -637,7 +637,17 @@ internal sealed partial class PptxSlideLayout
         (GraphicsPath shaft, List<GraphicsPath> markers) =
             LineEnds.Apply(shape.Outline, stroke, shape.HeadEnd, shape.TailEnd);
 
-        shapes.Add(shape with { Outline = shaft });
+        // Whichever of the two painted paths *was* the whole outline follows it onto the shaft; a
+        // subpath split that made one of them a proper part of the outline is left alone, because
+        // shortening a shaft says nothing about which of a preset's subpaths are painted.
+        shapes.Add(shape with
+        {
+            Outline = shaft,
+            FillOutline =
+                ReferenceEquals(shape.FillOutline, shape.Outline) ? shaft : shape.FillOutline,
+            StrokeOutline =
+                ReferenceEquals(shape.StrokeOutline, shape.Outline) ? shaft : shape.StrokeOutline,
+        });
 
         // A marker is a filled polygon beside the shaft, so it becomes a shape of its own — with
         // the line's name, the line's paint, and no line of its own.
@@ -900,9 +910,14 @@ internal sealed partial class PptxSlideLayout
             ? null
             : CustomShapeGeometry.Custom(custom, local.Size);
 
-        GraphicsPath outline = ShapeTransform.Apply(
-            placement,
-            own?.Outline ?? SlidePresetGeometry.Outline(preset, local.Size, adjustment));
+        CustomShapeGeometry.Geometry resolved =
+            own ?? SlidePresetGeometry.Of(preset, local.Size, adjustment);
+
+        GraphicsPath outline = ShapeTransform.Apply(placement, resolved.Outline);
+
+        // What is filled, what is stroked and what is shaded, all of which a subpath states for
+        // itself. See `SlidePresetGeometry.Painted`.
+        PaintedGeometry painted = SlidePresetGeometry.Painted(resolved, placement, outline);
 
         FillContext fills = new(slide, theme.Colours, local.Size, placement);
         DocRect bounds = ShapeTransform.PlacedBounds(placement, local.Size);
@@ -947,6 +962,9 @@ internal sealed partial class PptxSlideLayout
         {
             Name = Name(shape),
             Outline = outline,
+            FillOutline = painted.Fill,
+            StrokeOutline = painted.Stroke,
+            ShadedParts = painted.ShadedParts,
             Bounds = bounds,
             Fill = ShapeFill(shape, properties, inherited, themedFill, fills, groupFill),
             Picture = Picture(shape, slide, bounds),
