@@ -1951,11 +1951,32 @@ internal sealed partial class PptxSlideLayout
         _ => LineCap.Butt,
     };
 
+    /// <summary>
+    /// How an <c>a:ln</c>'s corners are drawn; round when it says nothing, which is most of them.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>The default is round, not mitre.</strong> <c>LineProperties::pushToPropMap</c> sets
+    /// <c>ShapeProperty::LineJoint</c> only when the markup states one of the three children
+    /// (<c>oox/source/drawingml/lineproperties.cxx</c>:491-492), so an <c>a:ln</c> with none leaves
+    /// the draw layer's pool default, and <c>XLineJointItem</c>'s is <c>LineJoint_ROUND</c>
+    /// (<c>include/svx/xlinjoit.hxx</c>:35, <c>svx/source/svdraw/svdattr.cxx</c>:182). Even the
+    /// oox helper falls through to <c>ROUND</c> for a token it does not know
+    /// (<c>lineproperties.cxx</c>:220).
+    /// </para>
+    /// <para>
+    /// Measured rather than only cited: on a probe deck of nine presets each stating an
+    /// <c>a:ln</c> with no join child, 26.2.4.2 writes <c>1 j</c> on all eleven of its stroke
+    /// setups (<c>probes/slides-subpath-paint</c>). The Escher side is the other way round and is
+    /// left alone — <c>msdffimp.cxx</c>:1052 defaults <c>DFF_Prop_lineJoinStyle</c> to
+    /// <c>mso_lineJoinMiter</c> for every shape type but <c>mso_sptMin</c>.
+    /// </para>
+    /// </remarks>
     private static LineJoin Join(XElement line)
     {
-        if (Drawing.Child(line, "round") is not null) return LineJoin.Round;
         if (Drawing.Child(line, "bevel") is not null) return LineJoin.Bevel;
-        return LineJoin.Miter;
+        if (Drawing.Child(line, "miter") is not null) return LineJoin.Miter;
+        return LineJoin.Round;
     }
 
     private static string? Name(XElement shape)

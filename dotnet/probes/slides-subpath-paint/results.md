@@ -120,6 +120,39 @@ proper part of the outline alone.
 against 45 on the fixed one, because the arrowhead regression reached 36 documents of its own. The
 figures above are all from the fixed build; the byte-for-byte re-render is what separated them.
 
+## And a second finding from the same probe deck: the join default
+
+`0 J 1 j` against our `0 J 0 j` was carried as recorded-and-unverified. It is verified, and it is
+not in `Paperless.Rendering` where the note placed it — the PDF writer emits whatever
+`Stroke.Join` says. It is the DrawingML reader's default.
+
+Counting the operators in the two content streams of the probe deck, whose nine shapes each state
+an `a:ln` with a width, a colour and **no join child at all**:
+
+| | join setups | value | cap setups | value |
+|---|---:|---|---:|---|
+| 26.2.4.2 | 11 | **`1 j`** (round) | 11 | `0 J` (butt) |
+| ours, before | 9 | `0 j` (mitre) | 9 | `0 J` |
+| ours, after | 9 | **`1 j`** | 9 | `0 J` |
+
+The mechanism: `LineProperties::pushToPropMap` sets `ShapeProperty::LineJoint` **only** when the
+markup states one of the three children (`oox/source/drawingml/lineproperties.cxx`:491-492), so an
+`a:ln` with none leaves the draw layer's pool default — and `XLineJointItem`'s is
+`LineJoint_ROUND` (`include/svx/xlinjoit.hxx`:35, `svx/source/svdraw/svdattr.cxx`:182). The oox
+helper itself falls through to `ROUND` for a token it does not recognise (`lineproperties.cxx`:220).
+
+**The Escher side is the opposite and is left alone.** `SvxMSDffManager::ApplyLineAttributes`
+defaults `DFF_Prop_lineJoinStyle` to `mso_lineJoinMiter` for every shape type but `mso_sptMin`
+(`filter/source/msfilter/msdffimp.cxx`:1052-1061), which is what `PptSlideLayout.Join` already
+does. ODF is not touched either: `OdpSlideLayout` builds its `Stroke` without a join and would
+need its own probe.
+
+Reach, by the same render-twice method: **41 of the 142 sample renderings changed, every one of
+them a `.pptx`.** Direction, on the eight scored documents, is what a corner-geometry change
+should be — invisible to a 512-px diff: `7-Zulkefli` −0.02 and one of its major pages cleared,
+`vvsummit2022` +0.04, the other six unmoved, **+0.02 over 158 pages**. The evidence that it is
+right is the operator, not the raster.
+
 ## What is left
 
 - **`Paperless.WordProcessing` shades nothing.** `PageDrawing.Outlines` uses `FillOutline` and
@@ -131,5 +164,8 @@ figures above are all from the fixed build; the byte-for-byte re-render is what 
   fallback benefits from this round. The ODF vocabulary also has `H`, `I`, `J` and `K` for the four
   shades, which map onto the same four magnitudes.
 - **We fill with `f` where LibreOffice fills with `f*`** — visible in every record of the reference
-  dump above. Not touched here; a `custGeom` whose author wound an inner subpath the same way as
-  its outer one would differ, and no corpus document is known to.
+  dump above, which confirms the second of the two recorded-and-unverified items. Not changed
+  here: it agrees on every preset with a hole because the preset table winds the inner subpath the
+  other way, so the change would move ink only on a `custGeom` whose author did not, and no corpus
+  document is known to be one. Unlike the join, this one really is in `Paperless.Rendering` —
+  `PdfContentSink.cs`:241 already writes `f*` when asked, and no caller ever asks.
