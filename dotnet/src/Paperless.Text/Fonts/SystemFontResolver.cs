@@ -630,9 +630,20 @@ public sealed class SystemFontResolver : IFontResolver, IGlyphFallbackResolver
     /// the characters, else null.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// <c>FcCompareCharSet</c> scores a font by <c>FcCharSetSubtractCount</c> — the size of the
     /// pattern's charset minus the font's — so this is that score, tested against a budget rather
     /// than compared, which is what lets the search stay lazy.
+    /// </para>
+    /// <para>
+    /// <strong>A character the face cannot <em>paint</em> counts as missing, not as covered.</strong>
+    /// This is <see cref="Covers"/>'s guard applied to the set, and the two must agree: the round
+    /// that made the whole set one question and the round that added the guard landed against the
+    /// same base, and merging them textually left this path asking <c>HasGlyphFor</c> alone — which
+    /// is coverage, so a face that maps a character and keeps its shape in a table this renderer
+    /// does not read would end the search and draw a blank at the right advance. That is the defect
+    /// the guard exists to prevent, reintroduced on the path that had become the common one.
+    /// </para>
     /// </remarks>
     private OpenTypeFace? CoversAllBut(InstalledFace candidate, IReadOnlyList<int> codePoints, int allowed)
     {
@@ -642,7 +653,7 @@ public sealed class SystemFontResolver : IFontResolver, IGlyphFallbackResolver
         int missing = 0;
         foreach (int codePoint in codePoints)
         {
-            if (face.HasGlyphFor(codePoint)) continue;
+            if (GlyphPainting.CanPaintCharacter(face, codePoint)) continue;
             if (++missing > allowed) return null;
         }
 
