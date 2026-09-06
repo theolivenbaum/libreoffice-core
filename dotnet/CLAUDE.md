@@ -963,6 +963,14 @@ python3 dotnet/probes/provenance-index.py          # rewrite the index
 python3 dotnet/probes/provenance-index.py --check  # exit 1 if stale
 ```
 
+**Do not regenerate it in this container — the clone is shallow and regeneration destroys the
+era column.** `provenance-index.py` derives `added` from `git log`, and this checkout has 962
+commits with no history before them, so a fresh run reports 583 rows and **zero** dated before
+the 2026-08-13 container move where the committed index has 215 `pre-container` rows. The era
+column is the whole point of the file: it is what tells a later round that a stored figure was
+measured against a reference bank that no longer exists. An index stale by a few new probe
+directories is much the lesser harm, so add rows by hand — as the rounds since have done.
+
 It deliberately does **not** stamp the probe files themselves. They are the record of what a
 round actually ran; rewriting them would falsify it, and a `#` header would break every
 consumer that reads line 1 as the column names. A sidecar records provenance without touching
