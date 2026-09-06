@@ -32,6 +32,50 @@ public interface IGlyphFallbackResolver
     OpenTypeFace? FallbackFor(int codePoint, int weight = 400, bool isItalic = false);
 
     /// <summary>
+    /// The same question for a run set in a pi face, which fontconfig is never asked about.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>LibreOffice declines to ask fontconfig when the face in force is OpenSymbol, and
+    /// that is the whole of the difference.</strong>
+    /// <c>FcGlyphFallbackSubstitution::FindFontSubstitute</c> returns false outright for a
+    /// Microsoft-symbol-encoded pattern and again for OpenSymbol — "a unicode font, but it still
+    /// deserves to be treated as a symbol font"
+    /// (<c>vcl/unx/generic/font/fontsubst.cxx</c>:100-107). With the hook declining,
+    /// <c>PhysicalFontCollection::GetGlyphFallbackFont</c> falls to
+    /// <c>ImplInitGenericGlyphFallback</c>'s fixed list and nothing else
+    /// (<c>vcl/source/font/PhysicalFontCollection.cxx</c>:283-291), so a character no family on
+    /// that list covers is drawn as the pi face's own missing-glyph box rather than being sought
+    /// across everything installed.
+    /// </para>
+    /// <para>
+    /// It is a real difference and not a nicety, because the list is short and the machine is not.
+    /// Measured on 26.2.4.2: <c>23-session-2-pptx.pptx</c> recodes a Webdings <c>a</c> bullet to
+    /// <c>U+E340</c> (<c>aWebDingsTab</c>) and <c>FAAAIandtheArtandScienceofV&amp;Vfinal.pptx</c>
+    /// recodes one to <c>U+E63F</c>; OpenSymbol holds neither, nothing on the generic list holds
+    /// either, and the only installed faces that do are <c>Unifont CSUR</c> and
+    /// <c>Unifont Sample</c> — neither of which is on the list. The reference draws OpenSymbol's
+    /// box; we drew a Unifont glyph, 25 times on the first deck.
+    /// </para>
+    /// <para>
+    /// The list is still searched, which is what keeps the other half right: the same deck class
+    /// includes <c>FAA_Form_337.ppt</c>, whose five Monotype Sorts slots recode to
+    /// <c>U+2776</c>-<c>U+277A</c>, and <c>dejavusans</c> is on the generic list and holds all
+    /// five — so the reference draws them in DejaVu Sans and so do we.
+    /// </para>
+    /// <para>
+    /// Defaulted to the ordinary answer so an implementation that does not model the distinction
+    /// stays valid and behaves as it did. A wrapper that forwards <see cref="FallbackFor"/> must
+    /// forward this too, or the run it guards silently loses the rule.
+    /// </para>
+    /// </remarks>
+    /// <param name="codePoint">The character the pi face has no glyph for.</param>
+    /// <param name="weight">The weight to match, on the OpenType 1-1000 scale.</param>
+    /// <param name="isItalic">Whether an italic face is wanted.</param>
+    OpenTypeFace? SymbolFallbackFor(int codePoint, int weight = 400, bool isItalic = false)
+        => FallbackFor(codePoint, weight, isItalic);
+
+    /// <summary>
     /// The reference naming a face this resolver returned, or null when it did not return it.
     /// </summary>
     /// <remarks>

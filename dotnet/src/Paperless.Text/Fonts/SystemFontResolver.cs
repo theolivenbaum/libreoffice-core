@@ -364,6 +364,25 @@ public sealed class SystemFontResolver : IFontResolver, IGlyphFallbackResolver
         return found;
     }
 
+    /// <inheritdoc/>
+    /// <remarks>
+    /// LibreOffice's own list and nothing else. The interface's own remarks hold the mechanism and
+    /// the measurements; the implementation is the ordinary search with its second stage — the
+    /// stand-in for the fontconfig hook — left off, because that hook is exactly what
+    /// <c>FcGlyphFallbackSubstitution::FindFontSubstitute</c> declines to run for a pi face
+    /// (<c>vcl/unx/generic/font/fontsubst.cxx</c>:100-107).
+    /// </remarks>
+    public OpenTypeFace? SymbolFallbackFor(int codePoint, int weight = 400, bool isItalic = false)
+    {
+        foreach (string family in GlyphFallbackFamilies.InOrder)
+        {
+            if (_index.Best(family, weight, isItalic) is not { } candidate) continue;
+            if (Covers(candidate, codePoint) is { } face) return face;
+        }
+
+        return null;
+    }
+
     /// <summary>Records a fallback, resolved or not, for the caller comparing against a reference.</summary>
     public void RecordGlyphFallback(int codePoint, string? fromFamily, string? toFamily)
         => _glyphFallbacks.Add(new GlyphFallback(codePoint, fromFamily, toFamily));

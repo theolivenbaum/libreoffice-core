@@ -578,10 +578,18 @@ public static partial class SlideTextLayout
         // <b>DejaVu Sans</b> -- its page's /F1 -- while we drew five .notdefs and no marker at all.
         // The same holds for `Wingdings 2` slot 0xF4, which recodes to the Private Use U+E5CD that
         // no installed face has.
+        //
+        // Where it looks depends on the face it is looking from. A marker that landed on OpenSymbol
+        // is a pi face, and LibreOffice never hands one to fontconfig -- only to
+        // `ImplInitGenericGlyphFallback`'s fixed list, which is what still finds DejaVu Sans for the
+        // five slots above and what correctly finds *nothing* for a recode target no listed family
+        // holds. See `IGlyphFallbackResolver.SymbolFallbackFor`.
         if (First(text) is { } wanted
             && face is { } resolved
             && !resolved.HasGlyphFor(wanted)
-            && fonts.Fallback.FallbackFor(wanted, weight, italic) is { } substitute)
+            && (SymbolFontRecode.IsSubstituteFamily(resolved.FamilyName)
+                    ? fonts.Fallback.SymbolFallbackFor(wanted, weight, italic)
+                    : fonts.Fallback.FallbackFor(wanted, weight, italic)) is { } substitute)
         {
             face = substitute;
             reference = fonts.Fallback.ReferenceFor(substitute, italic) ?? reference;

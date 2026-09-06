@@ -69,6 +69,11 @@ public static class FontItemiser
             return runs;
         }
 
+        // A pi face is never handed to fontconfig, so a character it lacks is sought only on
+        // LibreOffice's own generic list -- see IGlyphFallbackResolver.SymbolFallbackFor, which
+        // holds the mechanism and the measurements. Decided once per run rather than per character.
+        bool isPiFace = SymbolFontRecode.IsSubstituteFamily(primary.FamilyName);
+
         int end = start + length;
         int runStart = start;
         OpenTypeFace runFace = primary;
@@ -104,7 +109,7 @@ public static class FontItemiser
                     face = runFace;
                     isFallback = runIsFallback;
                 }
-                else if (fallback.FallbackFor(codePoint, primary.Weight, primary.IsItalic) is { } found)
+                else if (Sought(fallback, codePoint, primary, isPiFace) is { } found)
                 {
                     face = found;
                     isFallback = true;
@@ -173,6 +178,13 @@ public static class FontItemiser
     /// it be taken only where it is equivalent.
     /// </para>
     /// </remarks>
+    /// <summary>Where a missing character is looked for, which depends on the face it is missing from.</summary>
+    private static OpenTypeFace? Sought(
+        IGlyphFallbackResolver fallback, int codePoint, OpenTypeFace primary, bool isPiFace)
+        => isPiFace
+            ? fallback.SymbolFallbackFor(codePoint, primary.Weight, primary.IsItalic)
+            : fallback.FallbackFor(codePoint, primary.Weight, primary.IsItalic);
+
     /// <param name="text">The text to check.</param>
     /// <param name="primary">The face the run asked for.</param>
     public static bool NeedsFallback(ReadOnlySpan<char> text, OpenTypeFace primary)
