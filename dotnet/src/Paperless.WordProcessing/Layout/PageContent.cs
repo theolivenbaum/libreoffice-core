@@ -1282,6 +1282,15 @@ public sealed record LaidOutPage
     /// <summary>The sheet's size.</summary>
     public required DocSize Size { get; init; }
 
+    /// <summary>The border drawn round this page, or null when it carries none.</summary>
+    /// <remarks>
+    /// Resolved against <c>w:display</c> by the paginator, which is the only layer that knows
+    /// whether a page is the first of its section. Page furniture rather than content: with
+    /// <c>w:offsetFrom="page"</c> it is measured from the paper's edge and does not touch
+    /// <see cref="BodyArea"/>.
+    /// </remarks>
+    public PageBorders? Borders { get; init; }
+
     /// <summary>Where body text goes, in page coordinates.</summary>
     /// <remarks>
     /// The whole text area, columns and the gaps between them included. A line's own coordinates are

@@ -118,8 +118,53 @@ the gate has never seen it.
 The one-bullet difference (d) is **not** settled: ours holds 354 words on page 1 to the reference's
 350, and 456 to 463 on page 2, so the border is drawn `offsetFrom="page"` at 15 pt from the paper
 edge and ought not to touch the text area at all. Whether LibreOffice shrinks the text area for it
-anyway is the measurement the next round should take first, because it decides whether drawing the
-border is a two-hour job or a pagination change.
+anyway is left open — it is a *pagination* question and this round did not need to answer it to
+draw the border.
+
+### And it is closed
+
+The border is now read and drawn, from geometry measured off 26.2.4.2's own content stream rather
+than derived from the specification: four `4.5 w` strokes at `0.2235 0.3961 0.2 RG` with
+centrelines at `space + width/2` from the near edges and the same *plus the shadow's own width*
+from the far ones, and the shadow as two black bars offset down and right by that width. The one
+thing that cannot be guessed is that **the shadow shrinks the box** rather than hanging off the
+paper.
+
+Ours against the reference, side by side on page 1 of `Case-Study-Heathrow-Airport.docx`:
+
+| | ours | ref26 |
+|---|---|---|
+| top stroke | `(15.00, 824.65)-(575.80, 824.65)` | `(15.00, 824.64)-(575.85, 824.64)` |
+| bottom | `(15.00, 21.75)-(575.80, 21.75)` | `(15.00, 21.69)-(575.85, 21.69)` |
+| left | `(17.25, 19.50)-(17.25, 826.90)` | `(17.25, 19.44)-(17.25, 826.89)` |
+| right | `(573.55, 19.50)-(573.55, 826.90)` | `(573.60, 19.44)-(573.60, 826.89)` |
+| shadow, bottom bar | `(19.50, 15.00)-(580.30, 19.50)` | `(19.40, 15.04)-(580.25, 19.49)` |
+| shadow, right bar | `(575.80, 15.00)-(580.30, 822.40)` | `(575.80, 19.44)-(580.25, 822.49)` |
+
+Every edge within a twentieth of a point; the right shadow bar runs 4.4 pt further down in ours,
+where it is behind the bottom bar and paints the same pixels.
+
+`|ink|%` against 26.2.4.2 over all seven, before and after:
+
+| document | before | after |
+|---|---:|---:|
+| `Case-Study-Heathrow-Airport.docx` | **14.70** | **2.58** |
+| `AFS-050-004-F2_0i.docx` | 10.82 | 8.23 |
+| `100_Business_Case_Template_Modern_Format.docx` | 1.63 | 0.64 |
+| `091_Business_Case_Template_Complete_Guide.docx` | 1.45 | 0.43 |
+| `092_Business_Case_Template_Convenient_Format.docx` | 1.27 | 0.19 |
+| `UAS-SGI_waiver_approval_request_form.docx` | 0.35 | 0.02 |
+| `OM template for non-complex NCC operators….docx` | — | — |
+| **total, six scoreable** | **30.22** | **12.09** |
+
+Page 1 of the witness goes **11.55 to 0.07**. The seventh paginates differently from 26.2 and
+`pdf-image-diff` rightly refuses it.
+
+**The gate does not move, which is the point.** Scored against `/home/user/gate-2f47/parity.tsv`
+with and without the border drawn, the words track is `MATCH 314 PAGES 20 PAGES,WORDS 2 WORDS 2`
+both times, with the same three rows differing from the bank. A border adds no words and no pages.
+68 sampled words documents that declare no border render **byte-identical** to the pre-change
+binary.
 
 ## 2. `PES-Technical-Report-Template_Jan_2019.docx`, pages 1 and 2 — the cover art is one page late
 
@@ -179,8 +224,9 @@ than 3 %.
 ## What this ranking is worth as a habit
 
 The gate calls all four of the documents above `match`, and three of the four are wrong in a way a
-reader would notice from across a room. **Page borders are an entire unimplemented feature reached
-by 7 corpus documents and no gate column can see any of it.**
+reader would notice from across a room. **Page borders were an entire unimplemented feature reached
+by 7 corpus documents and no gate column could see any of it.** It is closed in this round; the
+other two findings are named and left.
 
 ## Reproducing
 

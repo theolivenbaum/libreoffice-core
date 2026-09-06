@@ -7,6 +7,7 @@ using Paperless.Text.Itemisation;
 using Paperless.Text.Layout;
 using Paperless.Text.Shaping;
 using Paperless.Vector;
+using Paperless.WordProcessing.Model;
 
 namespace Paperless.WordProcessing.Layout;
 
@@ -71,6 +72,8 @@ public static class PageDrawing
         sink.BeginPage(page.Size);
         try
         {
+            DrawPageBorder(page, sink);
+
             foreach (PlacedFrame frame in Stacked(page.Frames, behind: true))
             {
                 DrawFrame(frame, sink);
@@ -96,6 +99,108 @@ public static class PageDrawing
             // next one nest inside it, turning one bad page into a broken document.
             sink.EndPage();
         }
+    }
+
+    /// <summary>
+    /// Draws the section's page border and its shadow, if it has one.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>This was not drawn at all until round 67</strong>, and no gate column could see it:
+    /// a border adds no words and no pages, so all seven corpus documents that declare one pass the
+    /// word gate while missing a 4.5 pt rectangle round the whole page.
+    /// <c>Case-Study-Heathrow-Airport.docx</c> is the witness — 11.55 of its 14.70 <c>|ink|%</c>
+    /// against 26.2.4.2 is this one rectangle, which put it at the head of the words track's
+    /// per-page ink ranking.
+    /// </para>
+    /// <para>
+    /// The geometry is measured off 26.2.4.2's own PDF of that document rather than derived from
+    /// the specification. A4 595.304 x 841.89, <c>w:sz="36"</c> (4.5 pt), <c>w:space="15"</c>,
+    /// <c>w:offsetFrom="page"</c>, <c>w:shadow="1"</c>:
+    /// </para>
+    /// <list type="bullet">
+    /// <item><description>
+    /// four strokes of <c>4.5 w</c> at <c>0.2235 0.3961 0.2 RG</c>, centrelines at 17.25 from the
+    /// left and top — that is <c>space + width/2</c> — and at 573.60 and 21.69, which are
+    /// <c>space + width/2</c> from the far edges <em>plus the shadow's own width</em>;
+    /// </description></item>
+    /// <item><description>
+    /// each stroke spanning the rectangle's full outer extent in its own direction, so the corners
+    /// overlap rather than mitre;
+    /// </description></item>
+    /// <item><description>
+    /// the shadow as two black rectangles offset down and right by its width —
+    /// <c>19.4 15.039 560.85 4.45 re f*</c> and <c>575.8 19.439 4.45 803.05 re f*</c>.
+    /// </description></item>
+    /// </list>
+    /// <para>
+    /// So the shadow <em>shrinks the box</em> rather than hanging off the paper, which is the one
+    /// thing about it that cannot be guessed. Its width is taken as the border's own; the reference
+    /// draws 4.45 against a stated 4.5, a twentieth of a point that no comparison resolves.
+    /// </para>
+    /// <para>
+    /// Drawn first, under everything including a behind-text frame. Word's <c>w:zOrder</c> can ask
+    /// for the border in front of the text and nothing in the corpus does; the seven documents that
+    /// declare a border all leave it at the default.
+    /// </para>
+    /// </remarks>
+    private static void DrawPageBorder(LaidOutPage page, IDrawingSink sink)
+    {
+        if (page.Borders is not { } borders) return;
+
+        // The box the sides stand on: inset from the paper by each side's own space, or from the
+        // text area when the section says `w:offsetFrom="text"`.
+        DocRect outer = borders.OffsetFromText
+            ? new DocRect(
+                page.BodyArea.X - borders.Left.Space,
+                page.BodyArea.Y - borders.Top.Space,
+                page.BodyArea.Width + borders.Left.Space + borders.Right.Space,
+                page.BodyArea.Height + borders.Top.Space + borders.Bottom.Space)
+            : new DocRect(
+                borders.Left.Space,
+                borders.Top.Space,
+                page.Size.Width - borders.Left.Space - borders.Right.Space,
+                page.Size.Height - borders.Top.Space - borders.Bottom.Space);
+
+        Length shadow = borders.HasShadow
+            ? Length.Max(borders.Right.Width, borders.Bottom.Width)
+            : Length.Zero;
+
+        if (shadow > Length.Zero)
+        {
+            outer = new DocRect(
+                outer.X, outer.Y,
+                Length.Max(Length.Zero, outer.Width - shadow),
+                Length.Max(Length.Zero, outer.Height - shadow));
+
+            Fill(new DocRect(outer.X + shadow, outer.Bottom, outer.Width, shadow), Colour.Black, sink);
+            Fill(new DocRect(outer.Right, outer.Y + shadow, shadow, outer.Height), Colour.Black, sink);
+        }
+
+        if (outer.Width <= Length.Zero || outer.Height <= Length.Zero) return;
+
+        StrokeSide(borders.Top, sink,
+            new DocPoint(outer.X, outer.Y + borders.Top.Width / 2),
+            new DocPoint(outer.Right, outer.Y + borders.Top.Width / 2));
+        StrokeSide(borders.Bottom, sink,
+            new DocPoint(outer.X, outer.Bottom - borders.Bottom.Width / 2),
+            new DocPoint(outer.Right, outer.Bottom - borders.Bottom.Width / 2));
+        StrokeSide(borders.Left, sink,
+            new DocPoint(outer.X + borders.Left.Width / 2, outer.Y),
+            new DocPoint(outer.X + borders.Left.Width / 2, outer.Bottom));
+        StrokeSide(borders.Right, sink,
+            new DocPoint(outer.Right - borders.Right.Width / 2, outer.Y),
+            new DocPoint(outer.Right - borders.Right.Width / 2, outer.Bottom));
+    }
+
+    /// <summary>One side of a page border, or nothing when the side draws none.</summary>
+    private static void StrokeSide(PageBorderSide side, IDrawingSink sink, DocPoint from, DocPoint to)
+    {
+        if (!side.Draws) return;
+
+        sink.StrokePath(
+            new GraphicsPath().MoveTo(from).LineTo(to),
+            new Stroke(Paint.Solid(side.Colour), side.Width));
     }
 
     /// <summary>
