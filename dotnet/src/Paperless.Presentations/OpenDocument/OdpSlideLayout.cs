@@ -371,7 +371,27 @@ internal sealed partial class OdpSlideLayout
         XElement? geometry = element.Element(XName.Get("enhanced-geometry", OdfNamespaces.Draw));
         CustomShapeGeometry.Geometry outline = Geometry(element, geometry, size);
 
+        // What is filled, what is stroked and what is shaded, all of which a subpath states for
+        // itself. Split before the mirror, because a subpath has to be mirrored too. Only the
+        // preset fallback reports subpaths today — `OdfEnhancedGeometry` skips the `F` and `S`
+        // commands — so a stated `draw:enhanced-path` is painted whole, exactly as before.
+        PaintedGeometry painted =
+            SlidePresetGeometry.Painted(outline, AffineTransform.Identity, outline.Outline);
+
         GraphicsPath local = Mirrored(outline.Outline, geometry, size);
+        GraphicsPath localFill = ReferenceEquals(painted.Fill, outline.Outline)
+            ? local
+            : Mirrored(painted.Fill, geometry, size);
+        GraphicsPath localStroke = ReferenceEquals(painted.Stroke, outline.Outline)
+            ? local
+            : Mirrored(painted.Stroke, geometry, size);
+        IReadOnlyList<SlideShadedPart> shaded =
+        [
+            .. painted.ShadedParts.Select(part => part with
+            {
+                Outline = ShapeTransform.Apply(placement, Mirrored(part.Outline, geometry, size)),
+            }),
+        ];
         IReadOnlyList<OdfStyleReference> cascade = StyleCascade(element);
         DocRect bounds = ShapeTransform.PlacedBounds(placement, size);
 
@@ -414,6 +434,9 @@ internal sealed partial class OdpSlideLayout
         {
             Name = Attribute(element, OdfNamespaces.Draw, "name"),
             Outline = ShapeTransform.Apply(placement, local),
+            FillOutline = ShapeTransform.Apply(placement, localFill),
+            StrokeOutline = ShapeTransform.Apply(placement, localStroke),
+            ShadedParts = shaded,
             Bounds = bounds,
             Fill = fill,
             Picture = Picture(element, bounds),
@@ -523,11 +546,7 @@ internal sealed partial class OdpSlideLayout
             return stated;
         }
 
-        string? preset = Preset(element, geometry);
-
-        return new CustomShapeGeometry.Geometry(
-            SlidePresetGeometry.Outline(preset, size),
-            SlidePresetGeometry.TextRectangle(preset, size));
+        return SlidePresetGeometry.Of(Preset(element, geometry), size);
     }
 
     /// <summary>

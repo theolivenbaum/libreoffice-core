@@ -6,6 +6,7 @@ using Paperless.Core.Numbering;
 using Paperless.Core.Units;
 using Paperless.MsBinary.Escher;
 using Paperless.MsBinary.Records;
+using Paperless.Ooxml.DrawingML;
 using Paperless.Presentations.Layout;
 using Paperless.Text.Layout;
 using Paperless.Vector;
@@ -935,18 +936,31 @@ internal sealed class PptSlideLayout
         // A shape's own vertex array outranks its type, because LibreOffice's exporter writes one
         // on nearly every shape and names no preset at all; falling through to the type would draw
         // a bounding rectangle for a triangle it had the exact path for.
-        GraphicsPath outline =
-            (PptCustomGeometry.Has(shape.Properties)
-                ? PptCustomGeometry.Outline(shape.Properties, local.Size)
-                : null)
-            ?? SlidePresetGeometry.Outline(preset, local.Size, Guides(adjustment));
+        GraphicsPath? own = PptCustomGeometry.Has(shape.Properties)
+            ? PptCustomGeometry.Outline(shape.Properties, local.Size)
+            : null;
+
+        CustomShapeGeometry.Geometry resolved = own is null
+            ? SlidePresetGeometry.Of(preset, local.Size, Guides(adjustment))
+            : new CustomShapeGeometry.Geometry(
+                own, new DocRect(Length.Zero, Length.Zero, local.Size.Width, local.Size.Height));
+
+        GraphicsPath outline = ShapeTransform.Apply(placement, resolved.Outline);
+
+        // What is filled, what is stroked and what is shaded, all of which a subpath states for
+        // itself. A shape drawing its own vertex array reports none, so it is painted whole,
+        // exactly as before.
+        PaintedGeometry painted = SlidePresetGeometry.Painted(resolved, placement, outline);
 
         DocRect bounds = ShapeTransform.PlacedBounds(placement, local.Size);
 
         return new PlacedShape
         {
             Name = shape.Name,
-            Outline = ShapeTransform.Apply(placement, outline),
+            Outline = outline,
+            FillOutline = painted.Fill,
+            StrokeOutline = painted.Stroke,
+            ShadedParts = painted.ShadedParts,
             Bounds = bounds,
             Fill = Fill(shape, context.Scheme, local, placement),
             Line = Line(shape, context.Scheme),
