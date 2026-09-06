@@ -682,6 +682,57 @@ catalogued under *overlap and clipping*, including the one carried as rendering 
 under both 24.2 and us, so where the references disagree with each other the document needs reading
 rather than scoring.
 
+### The same rule decides *glyph* fallback, and `fc-match` on a bare charset does not
+
+**`FontConfigManager::Substitute` is one function and the glyph-fallback hook goes through it too.**
+`FcGlyphFallbackSubstitution::FindFontSubstitute` calls it with the missing characters as an
+`FC_CHARSET` (`vcl/unx/generic/font/fontsubst.cxx`:173-184), so the declared class appends `serif` or
+`sans` to *that* pattern as well — and since `FC_CHARSET` outranks `FC_FAMILY`, the answer is **the
+first face on that one generic's `<prefer>` list that covers the character**. Measured on 26.2.4.2
+over six declared classes and thirteen characters (`probes/fonts-r64/gen-generic.py`, one DOCX per
+cell, faces read out of the PDFs):
+
+| character | roman / modern / script / decorative / undeclared | swiss |
+|---|---|---|
+| `U+2713` ✓ | **FreeSerif** (69-unifont's serif list) | **DejaVu Sans** (60-latin's sans-serif list) |
+| `U+2011` non-breaking hyphen | **DejaVu Serif** | **DejaVu Sans** |
+| `U+4E00` 一 | WenQuanYi Zen Hei | WenQuanYi Zen Hei |
+| `U+2714` ✔, `U+2611` ☑, `U+263A` ☺ | Noto Color Emoji | Noto Color Emoji |
+
+Only `swiss` differs, which is the same switch as for family substitution — and *undeclared* behaves
+as roman because Writer's own pool default is roman, so a word-processing document lands on the serif
+list unless its font table says otherwise.
+
+**So `fc-match ":charset=XXXX"` is not the question LibreOffice asks.** Asked bare it answers DejaVu
+Sans for every one of the characters above, because `49-sansserif.conf` appends `sans-serif` to a
+pattern that named no generic — which is the *swiss* row, not the common one. `fc-match
+"Calibri,serif:charset=2713"` answers FreeSerif and `fc-match "Calibri,sans:charset=2713"` answers
+DejaVu Sans; the bare form answers the second. A round has already been misled by this: the previous
+fonts round's probe read `fc-match ":charset=25cf"` and concluded DejaVu Sans, which was right only
+because its witness was a `.pptx`.
+
+**The emoji row is a language rule, not a family one.** `getExemplarLangTagForCodePoint` answers
+`und-zsye` for a character with the Unicode `Emoji` property (`fontconfig.cxx`:1026-1029) and
+fontconfig scores `PRI_LANG` above `PRI_FAMILY_WEAK`, so an emoji code point goes to the emoji face
+whatever generic the pattern named — `U+2714` answers Noto Color Emoji under all six classes although
+FreeSerif holds it and is on the serif list. `U+2713`, which the property excludes, does not.
+
+**The residual this did not close is the script-specific font item, and it reaches the corpus.**
+`U+05D0` א answers **FreeSans** and `U+0E01` ก answers **FreeSerif** under all six declared classes,
+and no generic's list explains either: a CTL run takes Writer's own CTL font item, which has its own
+family and its own class. The same thing happens on the CJK side and it is measurable on real
+documents — `150-5370-10H.docx` and `AWR OPS-AOC 044…docx` draw `U+2610` ☐ in runs whose font comes
+from `w:rFonts w:eastAsia="MS Gothic" w:hint="eastAsia"`, so 26.2.4.2 puts them on
+`RES_CHRATR_CJK_FONT` and answers **DejaVu Sans** where the western item's roman default answers
+FreeSerif. **So `WordFallbackClass.ForDeclared`'s roman default is the *western* item's, and a run
+taken from the `w:eastAsia` or `w:cs` slot must not be given it.** That is the next step and it is
+not a fallback-order question.
+
+**And the pattern carries a *set* of characters, not one.** `rMissingCodes` is a string and every one
+of its code points goes into the `FcCharSet`, so the face LibreOffice picks has to cover all of them
+at once — which is why `AAC-AD-No-2021-01…doc` draws `U+2011` in FreeSerif where a one-character
+probe of the same request draws it in DejaVu Serif. We ask one code point at a time.
+
 ---
 
 **The reference binary is `26.2.4.2`, not the `24.2.7.2` every stored figure was measured
