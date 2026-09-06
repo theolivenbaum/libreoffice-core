@@ -462,6 +462,57 @@ public sealed class SystemFontResolver : IFontResolver, IGlyphFallbackResolver
     private static readonly string[] MonoFallbacks =
         ["dejavusansmono", "liberationmono", "couriernew", "freemono", "notosansmono"];
 
+    /// <summary>The faces a family fontconfig files under <c>math</c> resolves to.</summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>The maths generic is not a shape and cannot be served by one.</strong>
+    /// <c>45-generic.conf</c> files <c>Cambria Math</c> and six siblings under <c>math</c>, and
+    /// then — in the same file — prepends <c>lang=und-zmth</c> to any pattern whose family is
+    /// <c>math</c>. So the match is decided by which installed face declares the *mathematical
+    /// orthography*, which no shape fallback can express.
+    /// </para>
+    /// <para>
+    /// The head of the list is <c>60-generic.conf</c>'s own <c>math</c> preference order, verbatim
+    /// and in its order. Behind it sits the orthography carrier, which on a stock Debian or Ubuntu
+    /// is GNU FreeFont's <c>FreeSerif</c>: <c>fc-list :lang=und-zmth</c> answers it and nothing
+    /// else here. Behind that the sans-serif fallbacks, because a machine with neither a maths
+    /// face nor FreeFont has nothing to satisfy the lang test and the pattern falls all the way
+    /// through to the configuration's overall default — which is the case the earlier
+    /// "Cambria Math draws in DejaVu Sans" measurement was taken in.
+    /// </para>
+    /// <para>
+    /// Measured on 26.2.4.2 over the four corpus documents that name <c>Cambria Math</c> —
+    /// <c>DRX-Ascend System Course Description.docx</c>,
+    /// <c>075_Storyboard_Template_Fillable_Format…docx</c>,
+    /// <c>084_Printable_Graph_Paper_Template…docx</c> and
+    /// <c>AAC-AD-No-2021-01-Boeing-737-8-and-737-9-MAX.doc</c>. All four use it for a handful of
+    /// characters (a <c>U+2010</c> hyphen, in DRX-Ascend's case, seven times); the reference draws
+    /// every one of them in <c>FreeSerif</c> and we drew them in <c>DejaVuSerif</c>.
+    /// </para>
+    /// </remarks>
+    private static readonly string[] MathFallbacks =
+        ["xitsmath", "stixtwomath", "cambriamath", "latinmodernmath",
+         "minionmath", "lucidamath", "asanamath"];
+
+    /// <summary>The face that declares the mathematical orthography where no maths font does.</summary>
+    /// <remarks>
+    /// <para>
+    /// GNU FreeFont's roman: <c>fc-list :lang=und-zmth</c> answers <c>FreeSerif.ttf</c> and nothing
+    /// else on a stock Debian or Ubuntu, and <em>only its regular file</em> — <c>FreeSerifBold</c>
+    /// does not declare the orthography.
+    /// </para>
+    /// <para>
+    /// <strong>Which is why it is taken at regular weight and upright whatever was asked
+    /// for.</strong> fontconfig ranks a language requirement above weight and slant, so a pattern
+    /// carrying <c>und-zmth</c> can only be satisfied by the one file that declares it. Measured:
+    /// <c>fc-match "Cambria Math:bold"</c> answers FreeSerif <em>Regular</em> where
+    /// <c>fc-match "FreeSerif:bold"</c> answers FreeSerif Bold, and 26.2.4.2 draws
+    /// <c>075_Storyboard_Template_Fillable_Format…docx</c>'s title — a 48 pt <c>w:b</c> run in
+    /// Cambria Math — in FreeSerif regular.
+    /// </para>
+    /// </remarks>
+    private const string MathOrthographyFace = "freeserif";
+
     /// <summary>The faces to try for a request that names no family at all.</summary>
     /// <remarks>
     /// A blank family name is not a family nobody has installed — it is a document expressing no
@@ -518,6 +569,14 @@ public sealed class SystemFontResolver : IFontResolver, IGlyphFallbackResolver
         // The requested family, if it is here.
         if (_index.Best(request.FamilyName, request.Weight, request.IsItalic) is { } exact)
             return Reference(request, exact, requested: request.FamilyName);
+
+        // A family fontconfig files under `math` is answered by the orthography, not by a shape,
+        // and that beats the document's own declaration. See MathFace.
+        if (MathFace(request) is { } maths)
+        {
+            Record(request, maths);
+            return Reference(request, maths, requested: request.FamilyName);
+        }
 
         // What the *document* declared about the family, when it declared something acted on.
         //
@@ -903,6 +962,51 @@ public sealed class SystemFontResolver : IFontResolver, IGlyphFallbackResolver
             FontFamilyClass.SansSerif => SansFallbacks,
             _ => null,
         };
+    }
+
+    /// <summary>
+    /// The face a family fontconfig files under <c>math</c> resolves to, or null when it files it
+    /// under something else.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>The maths generic is answered by a language, not by a shape, and that is why it
+    /// cannot go through <see cref="DeclaredGenericFor"/>.</strong> <c>45-generic.conf</c> files
+    /// <c>Cambria Math</c> and six siblings under <c>math</c> and then prepends
+    /// <c>lang=und-zmth</c> to any pattern whose family is <c>math</c>. fontconfig ranks a
+    /// language requirement above weight and slant and above the generic a caller appended, so the
+    /// answer is the same whatever the document declared and whatever weight it asked for:
+    /// <c>fc-match "Cambria Math"</c>, <c>"Cambria Math,serif"</c>, <c>"Cambria Math,sans"</c> and
+    /// <c>"Cambria Math:bold"</c> all answer FreeSerif <em>Regular</em> here.
+    /// </para>
+    /// <para>
+    /// Three tiers, in fontconfig's own order. <see cref="MathFallbacks"/> is
+    /// <c>60-generic.conf</c>'s <c>math</c> preference list verbatim, taken at the requested weight
+    /// because a real maths family has faces to choose between; then
+    /// <see cref="MathOrthographyFace"/>, pinned to regular because only its regular file declares
+    /// the orthography; then nothing, so a machine with neither falls through to the ordinary path
+    /// and lands on the configuration's overall default, which is what
+    /// <c>Cambria Math draws in DejaVu Sans</c> was measured on.
+    /// </para>
+    /// <para>
+    /// Measured on 26.2.4.2, faces read out of the PDFs: the four corpus documents naming
+    /// <c>Cambria Math</c> — <c>DRX-Ascend System Course Description.docx</c>,
+    /// <c>075_Storyboard_Template_Fillable_Format…docx</c>,
+    /// <c>084_Printable_Graph_Paper_Template…docx</c> and
+    /// <c>AAC-AD-No-2021-01-Boeing-737-8-and-737-9-MAX.doc</c> — are drawn in FreeSerif by the
+    /// reference and were drawn in DejaVu Serif here.
+    /// </para>
+    /// </remarks>
+    private InstalledFace? MathFace(FontRequest request)
+    {
+        if (_preferences.GenericNameOf(request.FamilyName) != "math") return null;
+
+        foreach (string candidate in MathFallbacks)
+        {
+            if (_index.Best(candidate, request.Weight, request.IsItalic) is { } maths) return maths;
+        }
+
+        return _index.Best(MathOrthographyFace, weight: 400, italic: false);
     }
 
     /// <summary>
