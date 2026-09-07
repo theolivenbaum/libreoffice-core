@@ -752,6 +752,47 @@ right in DOCX, so fixing it moved **10 of the words track's 338 renderings and n
 all**, every one of the ten a `.doc`, while a five-format probe of a single paragraph moved four of
 five by the picture's whole width. See `probes/words-aschar-band/`.
 
+**There is now a converted ODF corpus and it is where those censuses belong.**
+`/home/user/corpus-odf/` holds 26.2.4.2's own `--convert-to` of the whole corpus — **1285 files:
+odt 338, rtf 338, ods 307, odp 302** — so both renderers read identical bytes and every divergence
+on it is ours. Its `.odp`
+column is 302 documents, banked as `probes/odf-gate-01/rows.tsv` and re-rendered fresh by
+`probes/odp-master-r70/ref.tsv`, which reproduced it 302 of 302 on pages and glyphs. **Reuse the
+reference half rather than re-rendering it** whenever the diff under test is confined to
+`dotnet/src`, which cannot reach `soffice`; a round costs about four minutes of our half instead
+of forty of both.
+
+**What that column found in two rounds is that the ODF readers were years behind the OOXML ones
+on things no corpus figure could ever have shown.** It opened at 120 of 302 with a master page
+drawn nowhere; it is **285 of 302** after the master's running objects, `style:shrink-to-fit` and
+`loext:shadow-blur`. Two rules from it are general enough to carry:
+
+- **An ODF attribute LibreOffice's own exporter writes is very often not in the namespace the
+  specification puts it in, and the ODF-namespace spelling then appears in no real file at all.**
+  Three instances are now in the tree and they were each found by a different round the hard way:
+  `drawooo:display` for `draw:display` (`OdpSlideLayout.IsPrinted`, 887 occurrences and not one
+  `draw:` spelling), `loext:shadow-blur` for `draw:shadow-blur` (`sdpropls.cxx`:169; 1252 non-zero
+  occurrences in 120 of the 302, and **zero** `draw:shadow-blur` anywhere), and
+  `chartext:coordinate-region` (`OdfNamespaces.ChartExtension`). **Grep the corpus for both
+  spellings before implementing an ODF attribute**, and read `sdpropls.cxx`'s `GMAPV` rows, which
+  name the namespace each property is exported in.
+- **A property that ODF states two ways has to be read both ways, because the merge is what
+  disambiguates it.** `drawing::TextFitToSizeType` is mapped from *both* `draw:fit-to-size` and
+  `style:shrink-to-fit` with `MID_FLAG_MERGE_PROPERTY` (`sdpropls.cxx`:143-144), the second
+  existing only because an ODF 1.1 consumer reads `draw:fit-to-size="true"` as *stretch*. So
+  LibreOffice writes an autofitted shape as `draw:fit-to-size="false" style:shrink-to-fit="true"`,
+  and a reader consulting the first attribute alone concludes it does not autofit. `SlideAutofit`
+  had been a full port since round 52 and the ODF path reached none of it; the attribute appears
+  **3515 times in all 302** of the column, and wiring it moved the gate 259 → 283.
+
+**And a shadow's blur radius decides whether the shadow's *text* is real text**, which is the
+sharpest example this project has of a one-attribute defect that no gate column can see and that
+`|ink|%` cannot either: LibreOffice rasterises a blurred shadow
+(`drawinglayer/source/primitive2d/shadowprimitive2d.cxx`:91-140) so its PDF holds a picture with
+no words, while a hard shadow stays vector and its words are real and extractable. Reading the
+radius wrong puts a second offset copy of every shadowed shape's text into the text layer —
+visible in `pdftotext -bbox` as pairs a shadow-offset apart, and nowhere else.
+
 **The corpus is no longer batched by complexity — it is grouped by what is wrong.** As of
 2026-08-14, with 459 of 534 passing, the old ordering had stopped earning its keep: the 75
 remaining failures were scattered across sixty batches, so a session taking "the next batch"
