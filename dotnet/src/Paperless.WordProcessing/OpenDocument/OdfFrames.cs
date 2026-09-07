@@ -130,12 +130,13 @@ internal static class OdfFrames
 
         OdfGraphicStyle style = Placed(GraphicStyle(styles, StyleName(element)), outer);
 
-        XElement? box = element.Element(XName.Get("text-box", OdfNamespaces.Draw))
-                        ?? ShapeTextBody(element);
+        XElement? textBox = element.Element(XName.Get("text-box", OdfNamespaces.Draw));
+        XElement? box = textBox ?? ShapeTextBody(element);
 
         // svg:height is optional and a frame written without one grows to its text. Read after the
         // box, because the box is what says how tall an unstated height starts out.
-        if ((Measure(element, "height") ?? AutoHeight(box)) is not { } frameHeight) return null;
+        Length? stated = Measure(element, "height");
+        if ((stated ?? AutoHeight(box)) is not { } frameHeight) return null;
 
         XElement? image = element.Element(XName.Get("image", OdfNamespaces.Draw));
         FramePicture picture =
@@ -163,6 +164,7 @@ internal static class OdfFrames
             Fill = style.Fill,
             BorderColour = style.BorderColour,
             BorderWidth = style.BorderWidth,
+            GrowsToContent = GrowsToContent(textBox, stated),
             IsImage = image is not null && chart is null,
             Image = picture.Raster,
             Vector = picture.Vector,
@@ -206,6 +208,40 @@ internal static class OdfFrames
                    OdfValue.ParseLength(box.Attribute(XName.Get("min-height", OdfNamespaces.FoCompatible))?.Value))
                ?? Core.Units.Length.Zero;
     }
+
+    /// <summary>
+    /// Whether the frame's height is a <em>floor</em> that its own text grows past, rather than the
+    /// height it keeps.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Writer keeps three height kinds on a fly — <c>SwFrameSize::Fixed</c>, <c>Minimum</c> and
+    /// <c>Variable</c> — and only the first keeps the stated number. ODF states the choice by which
+    /// attribute carries the length: <c>fo:min-height</c> on the <c>draw:text-box</c> sets
+    /// <c>bMinHeight</c> and therefore <c>SizeType::MIN</c>, and <c>svg:height</c> on the
+    /// <c>draw:frame</c> sets <c>SizeType::FIX</c>
+    /// (<c>xmloff/source/text/XMLTextFrameContext.cxx</c>:997-1010 and :655-661). Both write the
+    /// <em>same</em> variable, the box's attributes first and the frame's second (:1113-1116), so a
+    /// frame stating both keeps <c>svg:height</c> as the floor and still grows — which no document in
+    /// the converted corpus does, but which is the rule rather than a simplification.
+    /// </para>
+    /// <para>
+    /// A frame that states neither is neither: the <c>SizeType</c> is left at the text frame's own
+    /// default, which is <c>Variable</c> — grow to the content with no floor at all. That is the same
+    /// behaviour as a floor of nought, which is what <see cref="AutoHeight"/> already answers, so the
+    /// two cases need not be told apart here.
+    /// </para>
+    /// <para>
+    /// Only a <c>draw:text-box</c> counts. A <c>draw:custom-shape</c> or a <c>draw:rect</c> holding
+    /// paragraphs is an <c>SdrTextObj</c> rather than a fly, and how a drawing shape fits itself to its
+    /// text is a different rule with a different seat — see the remarks on
+    /// <see cref="ShapeTextBody"/>.
+    /// </para>
+    /// </remarks>
+    private static bool GrowsToContent(XElement? textBox, Length? statedHeight)
+        => textBox is not null
+           && (statedHeight is null
+               || textBox.Attribute(XName.Get("min-height", OdfNamespaces.FoCompatible)) is not null);
 
     /// <summary>
     /// Where <c>draw:transform</c> puts a shape that states no <c>svg:x</c> or <c>svg:y</c>.

@@ -256,6 +256,72 @@ public static class FrameLayout
 
         return x;
     }
+
+    /// <summary>
+    /// The frame as tall as its own text, for a frame whose stated height is only a floor.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <see cref="PageFrame.GrowsToContent"/> carries the rule and its citations; this is the
+    /// arithmetic, in <c>SwFlyFrame::Format</c>'s own order
+    /// (<c>sw/source/core/layout/fly.cxx</c>:1549-1570): the content height, raised to the stated
+    /// minimum less the insets, raised again to <c>MINFLY</c>, and the insets added back. Doing the
+    /// two clamps in the other order would let a frame with a large inset and no content come out
+    /// shorter than <c>MINFLY</c>.
+    /// </para>
+    /// <para>
+    /// <strong>This runs before <see cref="Place"/>, and needs to.</strong> The round that first
+    /// placed an ODF frame supposed that growing one would mean inverting the order of the two,
+    /// because a frame's rectangle is what its content is laid out in. It does not:
+    /// <see cref="Place"/> is a pure function of the frame's <em>size</em> and the page and anchor
+    /// geometry, and what the content's own layout needs is the frame's <em>width</em>, which every
+    /// format states outright. So the height can be measured in a pass that runs first, and only a
+    /// rule where placement fed back into measurement would need the inversion.
+    /// </para>
+    /// <para>
+    /// <strong>The inset taken is <see cref="PageFrame.Padding"/> alone, where Writer's <c>nUL</c> is
+    /// the padding <em>plus</em> the border width plus the shadow space.</strong> That is deliberate
+    /// and it is consistency rather than an approximation of the rule: <c>FrameResolution.Content</c>
+    /// insets a frame's text by the padding and nothing else, so taking a wider inset here would
+    /// leave the frame taller than the text it was measured from. Of the 59 growing frames in the
+    /// 338 converted <c>.odt</c>, 53 declare <c>fo:border="none"</c> and the other five declare
+    /// 0.06 pt or 0.74 pt, so the whole of what this leaves out is under a point and a half, on
+    /// five frames.
+    /// </para>
+    /// </remarks>
+    /// <param name="frame">The frame as the reader gave it.</param>
+    /// <param name="collapsesSpacing">See <see cref="FlowLayouter.LayOut"/>.</param>
+    /// <param name="addsCellLineSpacing">See <see cref="PaginationOptions.AddsCellLineSpacing"/>.</param>
+    /// <returns>The frame, grown, or exactly the frame given when it does not grow.</returns>
+    public static PageFrame Grown(
+        PageFrame frame, bool collapsesSpacing = false, bool addsCellLineSpacing = false)
+    {
+        ArgumentNullException.ThrowIfNull(frame);
+        if (!frame.GrowsToContent) return frame;
+
+        Length insets = frame.Padding.Top + frame.Padding.Bottom;
+        Length width = frame.Size.Width - frame.Padding.Left - frame.Padding.Right;
+
+        Length inside = frame.Blocks.Count == 0 || width <= Length.Zero
+            ? Length.Zero
+            : FlowLayouter.HeightOf(
+                frame.Blocks, width, 0, collapsesSpacing, addsCellLineSpacing);
+
+        inside = Length.Max(inside, frame.Size.Height - insets);
+        inside = Length.Max(inside, MinimumFlyHeight);
+
+        Length height = inside + insets;
+
+        return height == frame.Size.Height
+            ? frame
+            : frame with { Size = new DocSize(frame.Size.Width, height) };
+    }
+
+    /// <summary>
+    /// The floor under every fly's print area: <c>MINFLY</c>, 23 twips
+    /// (<c>sw/inc/swtypes.hxx</c>:59, <em>"Minimal size for FlyFrames"</em>).
+    /// </summary>
+    private static readonly Length MinimumFlyHeight = Length.FromTwips(23);
 }
 
 /// <summary>
@@ -362,6 +428,22 @@ internal sealed class FrameResolution
         List<long> signature = [];
         int frames = 0;
 
+        // A frame whose stated height is only a floor is made as tall as its own text before anything
+        // is placed, and the answer is memoised because the same frame is asked for once per pass and
+        // measuring one costs a whole layout of its blocks. By identity, since two frames of equal
+        // value are still two frames.
+        Dictionary<PageFrame, PageFrame> grown = new(ReferenceEqualityComparer.Instance);
+
+        PageFrame Sized(PageFrame frame)
+        {
+            if (!frame.GrowsToContent) return frame;
+            if (grown.TryGetValue(frame, out PageFrame? already)) return already;
+
+            PageFrame sized = FrameLayout.Grown(frame, collapsesSpacing, addsCellLineSpacing);
+            grown[frame] = sized;
+            return sized;
+        }
+
         // One paragraph's frames, given the rectangle its origins are measured in and where its own top
         // ended up. Shared by the body's blocks and by the flows, which differ only in how those two are
         // arrived at — the body's from a placed line, a flow's from the flow's own area.
@@ -376,12 +458,14 @@ internal sealed class FrameResolution
             PageGeometry geometry = sections[
                 Math.Clamp(page.SectionIndex, 0, sections.Count - 1)].Section.Page;
 
-            foreach (PageFrame frame in paragraph.Frames)
+            foreach (PageFrame stated in paragraph.Frames)
             {
                 // An as-character frame is not placed against an origin at all — it hangs on a line, at
                 // the position its anchor character occupies. That needs the line rather than the
                 // paragraph, so it is done by the walk below.
-                if (frame.Anchor == FrameAnchor.AsCharacter) continue;
+                if (stated.Anchor == FrameAnchor.AsCharacter) continue;
+
+                PageFrame frame = Sized(stated);
 
                 DocRect area = FrameLayout.Place(
                     frame,
@@ -439,10 +523,12 @@ internal sealed class FrameResolution
         void HangInline(
             PageParagraph paragraph, int pageIndex, DocRect area, PlacedLine line)
         {
-            foreach (PageFrame frame in paragraph.Frames)
+            foreach (PageFrame stated in paragraph.Frames)
             {
-                if (frame.Anchor != FrameAnchor.AsCharacter) continue;
-                if (frame.AnchorOffset < line.Box.Line.Start) continue;
+                if (stated.Anchor != FrameAnchor.AsCharacter) continue;
+                if (stated.AnchorOffset < line.Box.Line.Start) continue;
+
+                PageFrame frame = Sized(stated);
 
                 // One past the last character belongs to the *next* line, except on the last line of
                 // the paragraph, where there is no next one. That is not an edge case worth skipping:

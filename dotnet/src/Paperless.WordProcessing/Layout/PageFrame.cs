@@ -492,6 +492,52 @@ public sealed record PageFrame
     public bool HasFixedHeight { get; init; }
 
     /// <summary>
+    /// True when <see cref="DocSize.Height"/> of <see cref="Size"/> is a <em>floor</em> the frame's own
+    /// text grows past, rather than the height the frame keeps.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Writer's <c>SwFrameSize::Minimum</c>, and the exact opposite end of
+    /// <see cref="HasFixedHeight"/>: a fixed frame formats only the lines that fit and never lays the
+    /// rest out, and a minimum one is made as tall as everything it holds. Neither is the default —
+    /// a frame that says nothing keeps the height the file states and draws whatever overflows past
+    /// its bottom edge, which is what every format did before this existed and is still what a
+    /// running head does.
+    /// </para>
+    /// <para>
+    /// <strong>The rule is <c>SwFlyFrame::Format</c></strong>
+    /// (<c>sw/source/core/layout/fly.cxx</c>:1549-1608), and it is three clamps in one order:
+    /// <c>nRemaining</c> starts as <c>CalcContentHeight</c> — the sum of the fly's lower frames'
+    /// heights (<c>fly.cxx</c>:3538-3588) — is raised to <c>nMinHeight − nUL</c> when the frame is
+    /// shorter than its stated minimum, is raised again to <c>MINFLY</c> (23 twips,
+    /// <c>sw/inc/swtypes.hxx</c>:59), and the frame's height is then <c>nRemaining + nUL</c>. So
+    /// <em>the stated minimum is the whole frame's height, insets included</em>, while the content
+    /// height is the print area's.
+    /// </para>
+    /// <para>
+    /// <c>nUL</c> is <c>CalcTopLine() + CalcBottomLine()</c>, which is each edge's padding plus its
+    /// border width plus its shadow space (<c>SwBorderAttrs::CalcTopLine_</c>,
+    /// <c>sw/source/core/layout/frmtool.cxx</c>:2474-2486, over
+    /// <c>SvxBoxItem::CalcLineSpace</c>, <c>editeng/source/items/frmitems.cxx</c>:3717-3755).
+    /// <see cref="FrameLayout"/> uses <see cref="Padding"/> alone for it, because that is exactly what
+    /// it insets a frame's text by; see the remarks there for what that costs.
+    /// </para>
+    /// <para>
+    /// <strong>Measured on 26.2.4.2</strong> over sixteen authored frames,
+    /// <c>dotnet/probes/odt-frame-r75/</c>, by how far the frame pushes the body paragraph below it:
+    /// two 12 pt lines give 27.6 pt and four give 55.2; a 12 pt space-<em>before</em> on each of two
+    /// paragraphs adds 24 and on each of four adds 48, so every one of them counts <em>including the
+    /// first</em>; a 12 pt space-<em>after</em> on each of two adds 12 and on each of four adds 36, so
+    /// the <em>last</em> paragraph's is dropped. That asymmetry is Writer's, not an artefact: a text
+    /// frame's own area carries its upper space, and its lower space is only ever realised as the
+    /// upper space of whatever follows it (<c>SwFlowFrame::CalcUpperSpace</c>), which for the last
+    /// frame in a fly is nothing. It is why the measure here is
+    /// <see cref="FlowLayouter.Extent"/> and not <see cref="PlacedFlow.Advance"/>.
+    /// </para>
+    /// </remarks>
+    public bool GrowsToContent { get; init; }
+
+    /// <summary>
     /// True when the frame is painted <em>behind</em> the document's text rather than over it.
     /// </summary>
     /// <remarks>
