@@ -563,12 +563,6 @@ public sealed class RtfDocument : IWordProcessingDocument, IPaginatedDocument
     private static readonly Core.Geometry.Margins DefaultShapeWrapDistance = new(
         DefaultWrapTwips, DefaultWrapTwips, DefaultWrapTwips, DefaultWrapTwips);
 
-    /// <summary>The wrap <c>\shpwr</c> and <c>\shpwrk</c> together ask for.</summary>
-    /// <remarks>
-    /// Two words for one answer: the first says what kind of hole the text leaves and the second which
-    /// side of it the text may use. Only the kinds that leave a hole consult the side, since "through" and
-    /// "top and bottom" have no sides to choose between.
-    /// </remarks>
     /// <summary>
     /// What <c>\shpwr</c> and <c>\shpwrk</c> say a shape does to the text around it.
     /// </summary>
@@ -588,6 +582,11 @@ public sealed class RtfDocument : IWordProcessingDocument, IPaginatedDocument
     /// Measured on a probe of one 4000-twip box in a 12240-twip page against 26.2.4.2, one file per
     /// value: the reference puts the first line at x = 72.1 pt for 1, 3 and 5 and at 272.1 for 2 and 4,
     /// and starts it 60 pt lower for 1 alone. See <c>dotnet/probes/rtf-shape-r73/results.md</c>.
+    /// </para>
+    /// <para>
+    /// Two words for one answer: the first says what kind of hole the text leaves and the second which
+    /// side of it the text may use. Only the kinds that leave a hole consult the side, since a through
+    /// shape and a top-and-bottom one have no sides to choose between.
     /// </para>
     /// </remarks>
     private static TextWrap WrapOf(RtfLayoutFrame frame) => frame.Wrap switch
