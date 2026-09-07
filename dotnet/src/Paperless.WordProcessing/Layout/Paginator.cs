@@ -411,23 +411,46 @@ public sealed record PaginationOptions
 /// header appears on most pages of a section, and laying it out again for each would shape its text over
 /// and over for an answer that cannot change.
 /// </param>
-/// <param name="RestartsNumberingAtFirstPageBreak">
-/// True when the section's <see cref="WritingSection.RestartPageNumberAt"/> takes effect at the first hard
-/// page break <em>inside</em> the section rather than where the section begins.
+/// <param name="StatesOwnFurniture">
+/// True when the section names a header or a footer of its own rather than inheriting every slot from
+/// the section above it.
 /// <para>
-/// A continuous section becomes a Writer text section, which has nowhere to hang a number offset: a page
-/// number lives on a page descriptor and <c>InsertSegments</c> gives a continuous section none. The one
-/// exception it makes for itself is a continuous section that states a running head of its own — it builds
-/// a descriptor after all, then walks the section's nodes for the first that carries a hard page break and
-/// hangs the descriptor, number offset and all, on <em>that</em> node
-/// (<c>sw/source/filter/ww8/ww8par.cxx</c>:4516-4559). A section with no such break restores the previous
-/// descriptor and the restart is dropped entirely.
+/// Meaningless except on a continuous section, and on one it decides everything: a continuous section
+/// has no page of its own and so no page descriptor of its own, and the only thing that makes either
+/// reader build one for it is furniture it states itself. Having built one, both readers hang it —
+/// paper, margins, running head, numbering format and number offset together — on the first hard page
+/// break <em>inside</em> the section, and drop the whole descriptor when there is none.
+/// <c>SectionPropertyMap::CloseSectionGroup</c> guards its search on
+/// <c>!m_bDefaultHeaderLinkToPrevious</c> and its five siblings
+/// (<c>sw/source/writerfilter/dmapper/PropertyMap.cxx</c>:1746-1801); <c>wwSectionManager</c> guards
+/// the same search on <c>HasOwnHeaderFooter</c> and puts the previous descriptor back when it fails
+/// (<c>sw/source/filter/ww8/ww8par.cxx</c>:4515-4560). See
+/// <see cref="ContinuousPageDescriptors"/>, which applies the whole of that rule, and which this flag
+/// exists to feed.
+/// </para>
+/// </param>
+/// <param name="SideMarginsAreASectionIndent">
+/// True when the reader has already turned a continuous section's left and right margins into an
+/// indent on the text section, so that they survive the page descriptor being dropped.
+/// <para>
+/// <strong>The two Word readers genuinely differ here and the difference is measurable.</strong>
+/// <c>wwSectionManager::InsertSection</c> puts <c>section.left − page.left</c> and its right-hand
+/// twin on the section format as an <c>SvxLRSpaceItem</c>
+/// (<c>sw/source/filter/ww8/ww8par6.cxx</c>:758-770), unconditionally, for every continuous section
+/// that becomes a text section — so a <c>.doc</c>'s continuous section keeps its own side margins
+/// however its vertical ones and its furniture turn out. writerfilter's
+/// <c>SectionPropertyMap::ApplySectionProperties</c> sets a writing mode and an endnote flag and
+/// nothing else (<c>dmapper/PropertyMap.cxx</c>:792-812), so a DOCX's or RTF's side margins are on
+/// the page style alone and die with it. Measured on the synthetic
+/// <c>ContinuousSectionGeometryTests</c> builds: 26.2.4.2 leaves page two of a DOCX whose continuous
+/// section states a one-inch left margin at the first section's <strong>36.1 pt</strong>.
 /// </para>
 /// </param>
 public sealed record PaginatedSection(
     WritingSection Section,
     PageFurnitureSet? Furniture = null,
-    bool RestartsNumberingAtFirstPageBreak = false);
+    bool StatesOwnFurniture = false,
+    bool SideMarginsAreASectionIndent = false);
 
 /// <summary>
 /// Fills pages: lay out a paragraph, put what fits on the page, carry the rest over.
@@ -577,8 +600,15 @@ public sealed class Paginator
 
         Blocks = null;
 
+        // A continuous section's page properties are settled before anything is laid out, because the
+        // answer is a property of the document rather than of where the pages happen to fall: a
+        // continuous section that cannot hang its descriptor on a hard page break does not have one at
+        // all, and wears the section above's paper, margins and running head instead. See
+        // ContinuousPageDescriptors for the rule and for what it explains.
         List<PaginatedSection> withFrames =
-            sections.Count > 0 ? [.. sections] : [new PaginatedSection(new WritingSection())];
+            sections.Count > 0
+                ? [.. ContinuousPageDescriptors.Resolve(sections, blocks)]
+                : [new PaginatedSection(new WritingSection())];
 
         List<LaidOutPage> pages = Fill(blocks, withFrames, startingNumber);
 
@@ -864,7 +894,7 @@ public sealed class Paginator
 
         // A continuous section's page-number restart, waiting for the first hard page break inside the
         // section to hang itself on. Null where there is nothing waiting, which is every other section —
-        // see PaginatedSection.RestartsNumberingAtFirstPageBreak for why a continuous section's restart
+        // see PaginatedSection.StatesOwnFurniture for why a continuous section's restart
         // cannot take effect where the section begins. Cleared at the next section break: the descriptor
         // Writer builds is only offered to the nodes of the section that built it, so a restart that
         // reaches the section's end unclaimed is dropped rather than carried forward.
@@ -1218,10 +1248,10 @@ public sealed class Paginator
 
                 // A continuous section that states a running head of its own carries its restart forward to
                 // the first hard page break inside it instead of applying it here — see
-                // PaginatedSection.RestartsNumberingAtFirstPageBreak. Every other break settles the number
+                // PaginatedSection.StatesOwnFurniture. Every other break settles the number
                 // now, and clears anything an earlier section left waiting.
                 bool defers = kind == SectionBreak.Continuous
-                              && resolved[blockSection].RestartsNumberingAtFirstPageBreak
+                              && resolved[blockSection].StatesOwnFurniture
                               && geometry.RestartPageNumberAt is not null;
 
                 deferredRestart = defers ? geometry.RestartPageNumberAt : null;
@@ -1772,7 +1802,7 @@ public sealed class Paginator
 
         // Claims a continuous section's waiting restart for the page a hard break has just started, which
         // is where Writer hangs the descriptor it built for such a section — see
-        // PaginatedSection.RestartsNumberingAtFirstPageBreak. Only the first break inside the section
+        // PaginatedSection.StatesOwnFurniture. Only the first break inside the section
         // claims it, and only a break that actually started a page: in a multi-column section EmitPage may
         // have moved to the next column, and a column is not a page to hang a number on.
         void TakeDeferredRestart(int pagesBefore)
