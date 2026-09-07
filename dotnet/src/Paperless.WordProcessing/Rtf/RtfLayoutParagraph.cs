@@ -173,9 +173,11 @@ public readonly record struct RtfLayoutParagraph(
 /// <param name="Right">Its right edge.</param>
 /// <param name="Bottom">Its bottom edge.</param>
 /// <param name="Wrap">
-/// <c>\shpwr</c>: 1 around, 2 tight, 3 through, 4 top and bottom, 5 none. The numbering is not the order
-/// the concepts are usually listed in, and 3 and 5 are the pair that invite a swap — 3 leaves a
-/// rectangular hole the text flows through the middle of, and 5 is the one that ignores the shape.
+/// <c>\shpwr</c>, kept as the file's own number because the reading of it belongs with the layout.
+/// LibreOffice's dispatch (<c>rtfdispatchvalue.cxx</c>:1222-1247) is what this project is measured
+/// against and it is not the specification's list: <b>1 puts no text beside the shape at all</b>, 2 and
+/// 4 put text on both sides, and <b>3 and 5 are both <em>through</em></b>. See
+/// <c>RtfReader.WrapOf</c>, which carries the probe.
 /// </param>
 /// <param name="WrapSide"><c>\shpwrk</c>: 0 both sides, 1 left, 2 right, 3 the larger side.</param>
 /// <param name="HorizontalOrigin">Which <c>\shpbx*</c> word was seen, or null for none.</param>
@@ -212,6 +214,34 @@ public sealed record RtfLayoutFrame(
 
     /// <summary>The picture the frame holds, or nothing when it holds none.</summary>
     public FramePicture Picture { get; init; }
+
+    /// <summary>
+    /// The inset between the shape's edge and its own text.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Escher's <c>dxTextLeft</c>, <c>dyTextTop</c>, <c>dxTextRight</c> and <c>dyTextBottom</c>, which
+    /// <c>RTFSdrImport::resolve</c> divides by 360 to get 1/100 mm and hands to the frame's four
+    /// <c>*BorderDistance</c> properties (<c>rtfsdrimport.cxx</c>:600-625).
+    /// </para>
+    /// <para>
+    /// <b>The default is not zero.</b> A shape that states none of the four keeps
+    /// <c>getTextFrameDefaults</c>'s (<c>rtfsdrimport.cxx</c>:111-124) <c>91440 / 360</c> = 254 across
+    /// and <c>45720 / 360</c> = 127 down — 0.1 inch and 0.05 inch — so a reader that supplies nothing
+    /// puts a shape's first line 7.2 pt to the left of where the reference draws it and gives every
+    /// line 14.4 pt more room than the reference has. Measured on a wrapping probe against 26.2.4.2.
+    /// </para>
+    /// </remarks>
+    public Core.Geometry.Margins TextInset { get; init; } = DefaultTextInset;
+
+    /// <summary>
+    /// <c>getTextFrameDefaults</c>' four border distances, which are what a shape stating none gets.
+    /// </summary>
+    public static Core.Geometry.Margins DefaultTextInset { get; } = new(
+        Core.Units.Length.FromMm100(254),
+        Core.Units.Length.FromMm100(127),
+        Core.Units.Length.FromMm100(254),
+        Core.Units.Length.FromMm100(127));
 }
 
 /// <summary>

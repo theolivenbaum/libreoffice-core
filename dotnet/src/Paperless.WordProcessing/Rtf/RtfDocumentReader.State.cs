@@ -1538,8 +1538,18 @@ public sealed partial class RtfDocumentReader
 
         public int Bottom { get; private set; }
 
-        /// <summary>Around by default, which is what a shape stating no <c>\shpwr</c> gets.</summary>
-        public int Wrap { get; private set; } = 1;
+        /// <summary>
+        /// The <c>\shpwr</c> value, or 0 for a shape that stated none.
+        /// </summary>
+        /// <remarks>
+        /// Zero is not one of RTF's five, and it has to be distinguishable from them: LibreOffice
+        /// leaves an unstated wrap at its <c>WrapTextMode_MAKE_FIXED_SIZE</c> sentinel and never sets
+        /// <c>Surround</c> at all (<c>rtfsdrimport.cxx</c>:1091), so the shape keeps the fly default —
+        /// which is <em>parallel</em>, measured on a probe stating no <c>\shpwr</c> at all against
+        /// 26.2.4.2. Defaulting the field to 1 instead made an unstated shape take the one value that
+        /// puts no text beside it.
+        /// </remarks>
+        public int Wrap { get; private set; }
 
         public int WrapSide { get; private set; }
 
@@ -1564,14 +1574,31 @@ public sealed partial class RtfDocumentReader
         public Core.Geometry.Margins WrapDistance { get; private set; }
 
         /// <summary>
+        /// The inset between the shape's edge and its own text — see
+        /// <see cref="RtfLayoutFrame.TextInset"/>, which records why the default is not zero.
+        /// </summary>
+        public Core.Geometry.Margins TextInset { get; private set; } = RtfLayoutFrame.DefaultTextInset;
+
+        /// <summary>
         /// One <c>{\sp}</c> property, of the handful that decide where a shape goes.
         /// </summary>
         /// <remarks>
-        /// The values are Escher's, so the distances are EMUs and the two <c>posrel</c> properties are
-        /// small enumerations: 0 is the margin, 1 the page, 2 the column or paragraph, and 3 the character
-        /// or line. They are what <c>\shpbxignore</c> defers to, and LibreOffice's own export writes that
-        /// pair on every shape — so a reader that only understood <c>\shpbx*</c> would find no origin at
-        /// all on a file LibreOffice wrote.
+        /// <para>
+        /// The values are Escher's, so the distances are EMUs. They are what <c>\shpbxignore</c> defers
+        /// to, and LibreOffice's own export writes the <c>posrel</c> pair on every shape — so a reader
+        /// that only understood <c>\shpbx*</c> would find no origin at all on a file LibreOffice wrote.
+        /// </para>
+        /// <para>
+        /// <b>Only 1 means anything, and it means the page.</b> <c>RTFSdrImport::resolve</c> has a case
+        /// for that value alone (<c>rtfsdrimport.cxx</c>:696-717) and leaves every other value at the
+        /// <c>RelOrientation::FRAME</c> the text frame was created with
+        /// (<c>getTextFrameDefaults</c>, the same file:111-124) — which is the anchor's own frame, so
+        /// horizontally the body column and vertically the anchor paragraph. Reading 0 as the page
+        /// margin, which is what the enumeration's own names invite, is therefore wrong twice over: the
+        /// import does not map it, and 0 and 3 are measured to place a shape identically. Nine
+        /// horizontal probes — the property absent and every value 0 to 7 — and five vertical ones
+        /// against 26.2.4.2: 1 is the page and the other eight are the frame, on both axes.
+        /// </para>
         /// </remarks>
         public void SetProperty(string name, string value)
         {
@@ -1600,21 +1627,23 @@ public sealed partial class RtfDocumentReader
                     WrapDistance = WrapDistance with { Bottom = distance };
                     StatesWrapDistance = true;
                     break;
+                case "dxTextLeft":
+                    TextInset = TextInset with { Left = Core.Units.Length.FromMm100(number / 360) };
+                    break;
+                case "dyTextTop":
+                    TextInset = TextInset with { Top = Core.Units.Length.FromMm100(number / 360) };
+                    break;
+                case "dxTextRight":
+                    TextInset = TextInset with { Right = Core.Units.Length.FromMm100(number / 360) };
+                    break;
+                case "dyTextBottom":
+                    TextInset = TextInset with { Bottom = Core.Units.Length.FromMm100(number / 360) };
+                    break;
                 case "posrelh":
-                    HorizontalOrigin ??= number switch
-                    {
-                        0 => "shpbxmargin",
-                        1 => "shpbxpage",
-                        _ => "shpbxcolumn",
-                    };
+                    HorizontalOrigin ??= number == 1 ? "shpbxpage" : "shpbxcolumn";
                     break;
                 case "posrelv":
-                    VerticalOrigin ??= number switch
-                    {
-                        0 => "shpbymargin",
-                        1 => "shpbypage",
-                        _ => "shpbypara",
-                    };
+                    VerticalOrigin ??= number == 1 ? "shpbypage" : "shpbypara";
                     break;
                 default:
                     break;
@@ -1657,6 +1686,7 @@ public sealed partial class RtfDocumentReader
                 StatesWrapDistance ? WrapDistance : null)
             {
                 Picture = Picture,
+                TextInset = TextInset,
             };
     }
 
