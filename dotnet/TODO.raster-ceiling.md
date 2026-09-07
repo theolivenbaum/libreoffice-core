@@ -1116,6 +1116,26 @@ is on a row already listed for its raster ceiling: 122 fills against our 36 turn
 `dotnet/probes/odp-chart-r72/classify.py` is the per-page instrument; unlike the census script
 above it needs no banked reference bytes, only a rendered pair.
 
+### And the ordinary raster ceiling reaches the converted `.odp` column too
+
+Three of the thirteen `.odp` rows still failing the gate are the plain first mechanism — the
+reference rasterises an embedded object and we replay its metafile as real text — confirmed page
+by page with `classify.py` and recorded with their per-page evidence in
+`dotnet/probes/odp-chart-r72/remainder.tsv`. They are **not** in the flagged-pages table above,
+which is keyed on the original corpus' own paths and produced by a generator that never sees
+`/home/user/corpus-odf`:
+
+| Document | Pages | ours − ref |
+|---|---|---:|
+| `slides/ceiling-001/odp/OnTrac_StarCertificationProgram-3Day.odp` | 9, 10 | +293, +1183 |
+| `slides/ceiling-002/odp/16 - UTM - (NASA).odp` | 7, 29 | +592, +548 |
+| `slides/ceiling-002/odp/8_P-Pavese_AIRBUS-ATB-journee-CRATB.odp` | 5, 6 | +234, +269 |
+
+All three are the `.odp` twins of documents this file already carries, which is the useful part:
+**a ceiling survives LibreOffice's own conversion**, so the ODF column inherits the corpus'
+ceilings rather than having its own. Check this file before working an `.odp` word-count failure
+as well as a `.docx` one.
+
 ## `8_P-Pavese…pptx` in full — a worked example where the ceiling exceeds the gap
 
 Kept here because the shape of it is the lesson, and because the next reader must not file its
