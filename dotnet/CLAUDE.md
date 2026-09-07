@@ -882,9 +882,15 @@ the version rule the section above describes is not what separates them.
 **So move them aside too, and do not bundle a Narrow face to match.** They belong in the same
 `.duplicates-aside/` as the rest — the recipe's `mv` pattern does catch `Liberation*`, so a fresh
 run of it is enough; check afterwards that `ls $D/LiberationSansNarrow*` is empty, because these
-came back once already. *(Not moved as of 2026-09-06: three rounds were mid-measurement and
-changing the reference under them would have made their own before-and-after incomparable. Do it
-at the next quiet point and treat any 26.2 figure taken on one of the 49 before then as suspect.)*
+came back once already.
+
+***Done 2026-09-07.*** All four are in `.duplicates-aside/`, which now holds 38 faces, and 71
+remain in the directory. Confirmed on the witness: 26.2.4.2 renders
+`omrIMInterpretiveGuideLine.doc` in **DejaVu Sans and Liberation Sans**, with no narrow face
+anywhere — *Arial* still reaching Liberation Sans, which is right, and *Arial Narrow* now reaching
+DejaVu Sans, which is what the system and Paperless both answer. **Any 26.2 figure taken on one of
+the 49 Narrow-naming documents before this date is suspect**, and that includes every ODF/RTF gate
+row in `probes/odf-gate-01/`.
 
 The reason **not** to answer this by bundling a narrow face is rule 3's own test, *ship only the
 faces the distro packages ship*: Liberation Sans Narrow is not in `fonts-liberation2`, it is the
