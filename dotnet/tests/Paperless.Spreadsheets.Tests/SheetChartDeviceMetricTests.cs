@@ -125,11 +125,27 @@ public sealed class SheetChartDeviceMetricTests
     /// A chart's line is not a cell's line, and both differ from a drawing shape's.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// Three devices and three answers at the same size in the same face: <c>chart2</c>'s 96 dpi,
-    /// Calc's 720 dpi output device, and — for a drawing shape's text — the ungridded arithmetic
-    /// chart text used before round 60, which is kept under its own name because it is
-    /// <b>unmeasured</b> rather than because it is believed. This pins that they are three
-    /// separate answers, so that a future change to one cannot silently take the others with it.
+    /// Calc's 720 dpi output device, and — for a drawing shape's text — the face's own
+    /// <c>ascent + descent</c> on no device at all. This pins that they are three separate
+    /// answers, so that a future change to one cannot silently take the others with it.
+    /// </para>
+    /// <para>
+    /// <strong>The shape answer was <c>11.50</c> for Arial until round 69 and that was the external
+    /// leading, which an EditEngine line does not carry.</strong> The value here is measured:
+    /// <c>probes/shape-lineheight-01/</c> renders sixteen wrapping text boxes — four faces × four
+    /// sizes on one unscaled sheet — through 26.2.4.2 and reads the baseline pitch off the
+    /// reference's own text origins. Over 19 boxes <c>ascent + descent</c> is right to a mean of
+    /// 0.008 pt, carrying the leading is out by a mean of 0.237 and by 1.02 pt at 24 pt, and
+    /// putting the metrics through Calc's own 720 dpi grid is out by 0.035.
+    /// </para>
+    /// <para>
+    /// <strong>Arial is in this assertion and Calibri cannot replace it.</strong> Carlito's
+    /// <c>hhea</c> line gap is zero, so its shape height is 12.21 under either rule and it cannot
+    /// tell them apart; Liberation Sans' is 67/2048, which is the 0.33 pt that separates 11.17 from
+    /// 11.50. That is why the defect survived four rounds of Carlito workbooks.
+    /// </para>
     /// </remarks>
     [Fact]
     public void TheChartCellAndShapeMetricsAreThreeSeparateAnswers()
@@ -141,7 +157,10 @@ public sealed class SheetChartDeviceMetricTests
         SheetBandText.ShapeLineHeightAt(size, "Calibri").Points.ShouldBe(12.21, 0.02);
 
         SheetBandText.ChartLineHeightAt(size, "Arial").Points.ShouldBe(11.25, 0.05);
-        SheetBandText.ShapeLineHeightAt(size, "Arial").Points.ShouldBe(11.50, 0.02);
+        // 11.17 and not 11.50: Liberation Sans' 67/2048 of external leading is 0.327 pt at ten
+        // point, and the tolerance is a fifteenth of it, so a change that quietly restores the
+        // leading cannot pass this.
+        SheetBandText.ShapeLineHeightAt(size, "Arial").Points.ShouldBe(11.17, 0.02);
     }
 
     /// <summary>The whole-pixel em a 96 dpi device sets, by stated size.</summary>

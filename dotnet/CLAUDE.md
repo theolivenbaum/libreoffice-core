@@ -1389,6 +1389,81 @@ The largest single movers were `sectors-defense-and-aerospace.xlsx` (reference 2
 pages), `CIS_Debian_Linux_8_Benchmark_v1.0.0.xls` (109 → 88), `A_320.doc` (150 → 118) and
 `grants-2005.xls` (220 → 201).
 
+### A banked gate *does* exist here, and the paragraph above is out of date
+
+As of 2026-09-06 `/home/user/gate-2f47/` holds the whole-corpus gate at `2f4709c08` — `ref/` and
+`ours/` with **947 PDFs each**, `rows.tsv` and `parity.tsv`. So the *"there is nothing to reuse"*
+above is true only of `/c/sandbox/workdir/refpdfs-*`. Round 69 re-scored the sheets track in
+**14 minutes** off it, rendering our half alone; `probes/overflow-r69/sweep-ours.sh` is that
+script. It is sound whenever the diff under test cannot touch `soffice`, which a change confined
+to `dotnet/src` cannot, and it applies the gate's own verdict rule to exactly the reference bytes
+the scoreboard was built from. Check the bank before budgeting for a reference render.
+
+### A Calc drawing shape's text and a Calc *cell's* are three different rulers, and two of them were guesses
+
+Three facts landed in round 69, all on the sheets track, all measured against 26.2.4.2.
+
+**A centred print block is centred whether or not it fits.** `ScPrintFunc::PrintPage` writes
+`nLeftSpace += ( aPageRect.GetWidth() - nDataWidth ) / 2` and `nTopSpace` the same way, with no
+clamp on either sign (`sc/source/ui/view/printfun.cxx`:2165 and :2188) — so a block wider than
+the paper hangs off **both** edges and the reference loses text at the left margin as well as at
+the right. Guarding that addition on a positive remainder, which `SpreadsheetPages.BodyOrigin`
+did, turns centring into left-alignment on exactly the sheets where the flag shows most.
+`048_Expense_trends_budget`'s one-column `tips` sheet sat **167.3 pt** right of 26.2.4.2's on
+every one of page 1's nineteen lines. **73 of the corpus's 243 xlsx-family workbooks** state a
+centring flag. The case is reachable only because a *single* column cannot be split across page
+columns; several columns wider than the page paginate instead.
+
+**A bare `U+000A` inside an `a:t` is a paragraph break, not a character.** Every importer hands
+its string to the EditEngine, and `ImpEditEngine::ImpInsertText`
+(`editeng/source/editeng/impedit2.cxx`:2864-2983) normalises the line ends and calls
+`ImpInsertParaBreak` at each separator, with `// Start == End => empty line` for two in a row.
+Shaping it instead loses a whole line of height, which on a `vertOverflow="clip"` body stops the
+clip firing at all — so *a lost paragraph* and *text that should have been clipped* are one
+cause and not two. 19 of the corpus's 615 worksheet shape text bodies, in 9 documents.
+
+**And `horzOverflow` is not the horizontal sibling of that clip: nothing reads it.**
+`TextBodyPropertiesContext` stores it as a string (`textbodypropertiescontext.cxx`:83), which is
+put in a grab bag (`shape.cxx`:2189) and re-exported (`drawingml.cxx`:4141, 4379). Those three
+are the only uses in the tree and all three are writes. Only `vertOverflow` sets a property.
+And the corpus could not witness one anyway: **516 worksheet bodies in 34 documents state
+`horzOverflow` and every one of them also states `vertOverflow`**, so there is no document
+where the horizontal attribute could decide anything the vertical one does not. Do not send a
+round after it.
+
+**A shape's line height is `ascent + descent` with no external leading and no device**, and
+`SheetBandText.ShapeLineHeightAt` carried the leading for nine rounds. Measured on a probe of
+sixteen wrapping text boxes — four faces × four sizes, no print scale — against 26.2.4.2 over 19
+of them: `ascent + descent` is right to a mean of **0.008 pt**, carrying the leading is out by
+**0.237 pt** and by **1.02 pt at 24 pt**, and putting the metrics through Calc's own 720 dpi grid
+is out by 0.035 and wrong in both directions. So the device is not the missing half here — a
+drawing object is formatted against the model's reference device, `RefDevMode::MSO1` at 8640 dpi
+(`sc/source/core/data/documen8.cxx`:182-193), which is no grid at these sizes — and
+`IsAddExtLeading()` being false in EditEngine is.
+
+**Why that survived nine rounds is the line-gap trap this file already records once**, in the
+"39/39 exact CJK fit measured on a face whose line gap is zero" case below. Carlito's `hhea` line
+gap is zero and DejaVu Sans' is zero, so the two candidate laws agree *exactly* on them;
+Liberation Sans' is 67/2048 and Liberation Serif's 87/2048. Every workbook the sheet-shape path
+was built against resolved to Carlito. **A vertical-metric law tested only on Carlito has not
+been tested.** `probes/overflow-r69/`.
+
+### A worksheet shape's fill and outline are not read at all, and the gate cannot see it
+
+`SheetDrawing.Fill` and `.Stroke` exist and are set from exactly one place — `XlsxNoteCaptions`,
+for shown cell comments. Every `xdr:sp` on every worksheet is drawn as bare text over whatever is
+under it. Censused whole-corpus (`probes/overflow-r69/census.py shapebox`): **644 worksheet
+shapes in 49 documents**, of which 421 declare an `a:solidFill`, 205 an `a:ln/a:solidFill` and
+**583 an `xdr:style`** — a theme `fillRef`/`lnRef` and nothing else. Of the 626 explicit colour
+references, **332 are `schemeClr`**, so over half the work is theme-colour resolution before any
+of it is drawing. The presets are 28 distinct shapes including `star5`, `heart`, `cloud` and
+`irregularSeal1`, so the rectangle `SheetPageGraphics` strokes for a note caption is the wrong
+outline for 438 of the 644; `CustomShapeGeometry` already answers `FillOutline` and
+`StrokeOutline` for them.
+
+No gate column can see any of it — a fill and an outline add no glyphs and no pages — which is
+the `w:pgBorders` shape again and the argument for ranking on ink.
+
 ### Stored evidence decays silently, and the prose knows it while the data does not
 
 Three cases surfaced in a single day: a `words-after.tsv` carrying numbers from a sweep that

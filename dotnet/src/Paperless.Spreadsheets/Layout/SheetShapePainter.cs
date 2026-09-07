@@ -42,6 +42,33 @@ namespace Paperless.Spreadsheets.Layout;
 /// than its own shape, and a text box that narrow is not a case the corpus has.
 /// </para>
 /// <para>
+/// <strong>A line separator inside one <c>a:t</c> ends the paragraph.</strong> DrawingML has
+/// <c>a:br</c> for a break, but an authoring tool may also put a bare <c>U+000A</c> in the run's
+/// own characters, and LibreOffice never sees it as a character: every importer hands its string
+/// to the EditEngine, and <c>ImpEditEngine::ImpInsertText</c> normalises the line ends to LF
+/// (<c>convertLineEnd</c>), walks the string from separator to separator and calls
+/// <c>ImpInsertParaBreak</c> at each one, with <c>// Start == End =&gt; empty line</c> for two in a
+/// row (<c>editeng/source/editeng/impedit2.cxx</c>:2864-2983). So <c>…of Excel.\n\nIf the
+/// shape…</c> is three paragraphs, the middle one empty, and it is a line <em>taller</em> than the
+/// same characters run together. Shaping the separator instead — which this did — drops it to a
+/// zero-width glyph and joins the sentences into <c>Excel.If</c>.
+/// </para>
+/// <para>
+/// That is what decides whether the clip below fires at all, which is why the two belong in one
+/// note: on <c>070_Equipment_inventory_list…xlsx</c>'s three slicer placeholders the notice is
+/// six line slots with the break and five without, the boxes hold five, and 26.2.4.2 therefore
+/// drops the last line of each while we drew all of it. Reading it as a lost paragraph
+/// <em>and</em> a lost clip counts one cause twice.
+/// </para>
+/// <para>
+/// <strong><c>horzOverflow</c> is not the horizontal sibling of that clip; nothing reads it.</strong>
+/// <c>TextBodyPropertiesContext</c> stores the attribute as a string
+/// (<c>oox/source/drawingml/textbodypropertiescontext.cxx</c>:83) which is put in a grab bag for
+/// round-tripping (<c>oox/source/drawingml/shape.cxx</c>:2189) and re-exported
+/// (<c>oox/source/export/drawingml.cxx</c>:4141, 4379) and never consulted by any layout. Only
+/// <c>vertOverflow</c> sets a property — <c>PROP_TextClipVerticalOverflow</c>, <c>:85-97</c>.
+/// </para>
+/// <para>
 /// <strong>A body stating <c>vertOverflow="clip"</c> loses the lines that do not fit</strong>, and
 /// loses them rather than merely hiding them — see
 /// <see cref="SheetShapeText.ClipsVerticalOverflow"/>. Measured on
@@ -203,29 +230,83 @@ internal static class SheetShapePainter
             string body = paragraph.Text;
             Format[] formats = Formats(paragraph, body.Length, scale);
 
-            if (body.Length == 0)
+            foreach ((int from, int to) in Blocks(body))
             {
-                Format blank = Blank(paragraph, scale);
-                lines.Add(new Line(
-                    [],
-                    Length.Zero,
-                    SheetBandText.AscentAt(blank.Size, blank.Family, blank.Bold),
-                    SheetBandText.ShapeLineHeightAt(blank.Size, blank.Family, blank.Bold),
-                    paragraph.Alignment));
-                continue;
-            }
+                if (to <= from)
+                {
+                    Format blank = At(formats, from) ?? Blank(paragraph, scale);
+                    lines.Add(new Line(
+                        [],
+                        Length.Zero,
+                        SheetBandText.AscentAt(blank.Size, blank.Family, blank.Bold),
+                        SheetBandText.ShapeLineHeightAt(blank.Size, blank.Family, blank.Bold),
+                        paragraph.Alignment));
+                    continue;
+                }
 
-            foreach ((int start, int end) in Wrap(body, formats, available, text.Wraps))
-            {
-                Line line = Compose(body, formats, start, end, paragraph.Alignment);
-                lines.Add(line);
-                if (line.Pieces.Count > 0) anyInk = true;
+                foreach ((int start, int end) in Wrap(body, formats, from, to, available, text.Wraps))
+                {
+                    Line line = Compose(body, formats, start, end, paragraph.Alignment);
+                    lines.Add(line);
+                    if (line.Pieces.Count > 0) anyInk = true;
+                }
             }
         }
 
         // Nothing shaped means no face resolved, and a column of blank advances is not worth
         // walking: the caller draws nothing rather than reserving room for it.
         return anyInk ? lines : [];
+    }
+
+    /// <summary>
+    /// The character ranges the paragraph's own line separators cut it into.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// One range per paragraph the EditEngine would end up holding, in its own order:
+    /// <c>ImpInsertText</c> inserts the text up to the next separator, and inserts a paragraph
+    /// break whenever the separator was not the end of the string
+    /// (<c>editeng/source/editeng/impedit2.cxx</c>:2980-2982). A body holding no separator is one
+    /// range and an empty body is one empty range, so a paragraph that never had one behaves
+    /// exactly as it did.
+    /// </para>
+    /// <para>
+    /// <c>CR LF</c> and a bare <c>CR</c> are separators as well, because
+    /// <c>convertLineEnd(rStr, LINEEND_LF)</c> runs first and turns both into one <c>LF</c>
+    /// (<c>:2865</c>). Ranges rather than strings, for the reason
+    /// <see cref="Wrap(string, Format[], int, int, Length, bool)"/> gives: every character keeps
+    /// the format its run gave it, and splitting into strings would lose that correspondence.
+    /// </para>
+    /// </remarks>
+    private static List<(int From, int To)> Blocks(string body)
+    {
+        List<(int From, int To)> blocks = [];
+        int from = 0;
+
+        for (int i = 0; i < body.Length; i++)
+        {
+            if (body[i] is not ('\n' or '\r')) continue;
+
+            blocks.Add((from, i));
+            if (body[i] == '\r' && i + 1 < body.Length && body[i + 1] == '\n') i++;
+            from = i + 1;
+        }
+
+        blocks.Add((from, body.Length));
+        return blocks;
+    }
+
+    /// <summary>The format at one position, or null where the paragraph has no characters.</summary>
+    /// <remarks>
+    /// An empty block sits <em>on</em> its own separator, so the format there is the one the run
+    /// carrying the separator states — which is what a blank paragraph should reserve its line at,
+    /// and the same rule <c>a:endParaRPr</c> states for a paragraph that never had any characters.
+    /// A block starting past the end is the trailing separator's, and takes the last format.
+    /// </remarks>
+    private static Format? At(Format[] formats, int index)
+    {
+        if (formats.Length == 0) return null;
+        return formats[index < formats.Length ? index : ^1];
     }
 
     /// <summary>The format of every character of the paragraph, with the zoom already in it.</summary>
@@ -270,26 +351,34 @@ internal static class SheetShapePainter
     }
 
     /// <summary>
-    /// Breaks one paragraph into the character ranges its lines cover.
+    /// Breaks one of <see cref="Blocks"/>' ranges into the character ranges its lines cover.
     /// </summary>
     /// <remarks>
     /// Words are separated by single spaces, so a line is a contiguous range of the paragraph and
     /// every character keeps the format its run gave it. Splitting into strings and rejoining them
-    /// would lose that correspondence, which is the whole reason the ranges are carried instead.
+    /// would lose that correspondence, which is the whole reason the ranges are carried instead —
+    /// and the same reason the block arrives as <paramref name="from"/> and <paramref name="to"/>
+    /// into the paragraph's own text rather than as a substring of it.
     /// </remarks>
+    /// <param name="body">The whole paragraph's characters.</param>
+    /// <param name="formats">The format of each of them.</param>
+    /// <param name="from">Where this block starts in <paramref name="body"/>.</param>
+    /// <param name="to">Where it ends, exclusive.</param>
+    /// <param name="available">The width a line may occupy.</param>
+    /// <param name="wraps">False for a body stating <c>wrap="none"</c>.</param>
     private static List<(int Start, int End)> Wrap(
-        string body, Format[] formats, Length available, bool wraps)
+        string body, Format[] formats, int from, int to, Length available, bool wraps)
     {
-        if (!wraps) return [(0, body.Length)];
+        if (!wraps) return [(from, to)];
 
         List<(int Start, int End)> words = [];
-        int from = 0;
-        for (int i = 0; i <= body.Length; i++)
+        int at = from;
+        for (int i = from; i <= to; i++)
         {
-            if (i == body.Length || body[i] == ' ')
+            if (i == to || body[i] == ' ')
             {
-                words.Add((from, i));
-                from = i + 1;
+                words.Add((at, i));
+                at = i + 1;
             }
         }
 
