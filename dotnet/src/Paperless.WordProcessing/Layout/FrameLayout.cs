@@ -183,9 +183,13 @@ public static class FrameLayout
     /// <para>
     /// The one escape is <c>SwAnchoredObject::IsDraggingOffPageAllowed</c>
     /// (<c>sw/source/core/layout/anchoredobject.cxx</c>:790-801), which needs
-    /// <c>DisableOffPagePositioning</c> — an ODF settings flag defaulting to false
-    /// (<c>DocumentSettingManager.cxx</c>:100) that no DOC or DOCX import sets. So it does not arise
-    /// for the formats this reader reads.
+    /// <c>DisableOffPagePositioning</c> <em>and</em> a wrap-through object.
+    /// <b>This used to say that no DOC or DOCX import sets that flag, and it is set for two of the
+    /// four formats:</b> <c>sw/source/writerfilter/filter/WriterFilter.cxx</c>:333 sets it for every
+    /// writerfilter import, one line below the <c>DoNotCaptureDrawObjsOnPage</c> the paragraph above
+    /// cites, so it is live for DOCX and RTF and absent from WW8 and ODF. It fires on none of the
+    /// twenty-one RTF probes in <c>dotnet/probes/rtf-shape-r73/</c>, two of which are wrap-through,
+    /// so what makes it inert there is not yet established.
     /// </para>
     /// <para>
     /// Measured on <c>words/done-013/doc/omrIMInterpretiveGuideLine.doc</c> against 26.2.4.2 with the
