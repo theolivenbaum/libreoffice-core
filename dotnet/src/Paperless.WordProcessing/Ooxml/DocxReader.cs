@@ -334,6 +334,12 @@ public sealed class OoxmlWordDocument : IWordProcessingDocument, IPaginatedDocum
 
         PaginationOptions pagination = PaginationOptions.Word with
         {
+            // `WriterFilter.cxx`:332 sets `DoNotCaptureDrawObjsOnPage` for every writerfilter import,
+            // and a DOCX is one — so an anchored object here is not pulled back inside the page the
+            // way a `.doc`'s or an ODF document's is. See
+            // `PaginationOptions.CapturesAnchoredObjectsOnPage`.
+            CapturesAnchoredObjectsOnPage = false,
+
             // LibreOffice's PARA_SPACE_MAX means the two spacings *add*; when it is off the larger
             // wins, which is Word's behaviour. Its OOXML exporter writes
             // w:doNotUseHTMLParagraphAutoSpacing exactly when the flag is on (docxexport.cxx), so

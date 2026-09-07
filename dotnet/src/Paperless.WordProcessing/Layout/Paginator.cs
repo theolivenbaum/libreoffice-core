@@ -39,6 +39,40 @@ public sealed record PaginationOptions
     };
 
     /// <summary>
+    /// Whether a content-anchored frame is pulled back inside the page it is on.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Writer's <c>DoNotCaptureDrawObjsOnPage</c>, read the other way round.
+    /// <c>SwAnchoredObjectPosition</c>'s constructor sets <c>mbDoNotCaptureAnchoredObj</c> from that
+    /// flag together with two per-object conditions
+    /// (<c>sw/source/core/objectpositioning/anchoredobjectposition.cxx</c>:122-144), and
+    /// <c>AdjustVertRelPos</c> then skips <c>ImplAdjustVertRelPos</c> entirely while it holds
+    /// (<c>sw/source/core/inc/anchoredobjectposition.hxx</c>:185-201). With the flag off — which is the
+    /// document default (<c>DocumentSettingManager.cxx</c>:100) — every content-anchored object is
+    /// captured.
+    /// </para>
+    /// <para>
+    /// <b>Which importers set it is the whole of the distinction.</b>
+    /// <c>sw/source/writerfilter/filter/WriterFilter.cxx</c>:332 sets it <c>true</c> for every
+    /// writerfilter import, which is DOCX <em>and</em> RTF; the WW8 binary filter does not set it at
+    /// all, and the ODF one sets it only for a document written before SO8
+    /// (<c>sw/source/filter/xml/xmlimp.cxx</c>:1554-1557).
+    /// </para>
+    /// <para>
+    /// So this is on in <see cref="Default"/> and in <see cref="Word"/> — a <c>.doc</c> and an ODF
+    /// document are both captured — and the DOCX and RTF readers turn it off. The two per-object
+    /// conditions the C++ also applies (<em>a fly is exempt only when it is wrap-through and not a
+    /// textbox</em>, and <em>only when it does not follow the text flow</em>) are deliberately not
+    /// modelled: they would only make a DOCX frame captured where this leaves it alone, which is where
+    /// the tree already was. Measured over the words track, turning the capture on for DOCX as well
+    /// moves 28 renderings and costs 1.73 of <c>|ink|%</c> on
+    /// <c>050_Visual_Product_Roadmap_Template_Yellow_and_Blue_Theme</c> alone.
+    /// </para>
+    /// </remarks>
+    public bool CapturesAnchoredObjectsOnPage { get; init; } = true;
+
+    /// <summary>
     /// Whether a page-anchored fly may hang below the body into the bottom margin and the footer area
     /// rather than being split there.
     /// </summary>
@@ -595,7 +629,8 @@ public sealed class Paginator
         // reached through the flow it landed in, which exists only once a page has been filled. Scanning
         // the blocks instead returned early on exactly those documents and left their frames unplaced.
         FrameResolution resolution = FrameResolution.Of(
-            blocks, withFrames, pages, _options.CollapsesSpacing, _options.AddsCellLineSpacing);
+            blocks, withFrames, pages, _options.CollapsesSpacing, _options.AddsCellLineSpacing,
+            _options.CapturesAnchoredObjectsOnPage);
         if (resolution.IsEmpty) return Numbered(pages, blocks);
 
         for (int pass = 0; pass < MaxFramePasses; pass++)
@@ -614,7 +649,8 @@ public sealed class Paginator
             }
 
             FrameResolution settled = FrameResolution.Of(
-                blocks, withFrames, next, _options.CollapsesSpacing, _options.AddsCellLineSpacing);
+                blocks, withFrames, next, _options.CollapsesSpacing, _options.AddsCellLineSpacing,
+                _options.CapturesAnchoredObjectsOnPage);
             pages = next;
 
             bool converged = settled.SameAs(resolution);
