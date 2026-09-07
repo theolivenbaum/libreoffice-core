@@ -31,6 +31,7 @@ public sealed partial class RtfDocumentReader
 
     private int _fieldResultDepth = -1;
     private int _fieldResultOffset;
+    private int _fieldResultLayoutOffset;
     private WritingPosition? _fieldResultStart;
     private string? _fieldInstruction;
 
@@ -175,12 +176,33 @@ public sealed partial class RtfDocumentReader
     {
         _fieldResultDepth = _groupDepth;
         _fieldResultOffset = OffsetIn(CurrentFlow);
+        _fieldResultLayoutOffset = CurrentFlow.LayoutLength;
         _fieldResultStart = Here();
     }
 
     /// <summary>Records the field once its <c>\fldrslt</c> group has closed.</summary>
+    /// <remarks>
+    /// A <c>PAGE</c> or <c>NUMPAGES</c> result is additionally recorded as a span over the paragraph's
+    /// layout text, because those two are the fields whose cached result is wrong on every page but one
+    /// — see <see cref="Layout.PageFields"/>. Everything else keeps the cache, which is what a reference
+    /// renderer draws.
+    /// </remarks>
     private void EndFieldResult()
     {
+        if (FieldInstructions.PageFieldOf(_fieldInstruction) is { } page)
+        {
+            // A negative length is the one case to drop: a `\par` inside the result group flushed the
+            // paragraph and reset `LayoutLength` to nought, so the offset taken at `\fldrslt` now
+            // indexes a string that no longer exists. `ResetParagraphState` is static and cannot clear
+            // the offset itself, so the comparison stands in for it.
+            int length = CurrentFlow.LayoutLength - _fieldResultLayoutOffset;
+            if (length >= 0)
+            {
+                CurrentFlow.PendingPageFields.Add(new Layout.PageFieldSpan(
+                    _fieldResultLayoutOffset, length, page.Kind, page.Format));
+            }
+        }
+
         _marks.AddField(
             _fieldInstruction,
             SliceIn(CurrentFlow, _fieldResultOffset, OffsetIn(CurrentFlow)),

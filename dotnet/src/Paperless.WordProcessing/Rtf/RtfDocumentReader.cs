@@ -740,11 +740,29 @@ public sealed partial class RtfDocumentReader
             // ---- paragraph and character state
             case "pard":
                 state.ResetParagraph();
+
                 // Table membership is paragraph formatting, so \pard clears it and the \intbl and
                 // \itap that follow re-state it. Without the reset a paragraph after a table stays
                 // in it, and the table never closes.
-                CurrentFlow.InTable = false;
-                CurrentFlow.TableLevelIndex = 0;
+                //
+                // But only for a \pard the *body* wrote. Membership lives on the flow rather than on
+                // the group, so unlike everything else `ResetParagraph` touches it does not come back
+                // when the group closes — and a `{\listtext\pard\plain \tab}` label, which is how
+                // Word writes the rendered `1.` of every numbered item, therefore took the paragraph
+                // holding it out of its own cell. LibreOffice states the rule outright at
+                // `rtfdispatchflag.cxx`:588: "\pard is allowed between \cell and \row, but in that
+                // case it should not reset the fact that we're inside a table." Its oracle agrees —
+                // 26.2.4.2 draws a row whose first cell carries such a label as one row.
+                //
+                // Gated on the destination, which is the same gate `EndCell` and `EndRow` already use
+                // for the same reason: a control word written inside a label, a field instruction or a
+                // note is not the body's statement about the body's table.
+                if (state.Destination is RtfDestination.Body)
+                {
+                    CurrentFlow.InTable = false;
+                    CurrentFlow.TableLevelIndex = 0;
+                }
+
                 return;
             case "plain":
                 state.ResetCharacter();
@@ -889,6 +907,55 @@ public sealed partial class RtfDocumentReader
             case "trleft":
                 DefinitionTarget(CurrentFlow).RowLeftEdge = token.Parameter ?? 0;
                 return;
+
+            // ---- positioned ("wrapped") tables. Every one of these words makes the row's table a fly,
+            // because every one of them writes into `w:tblpPr` in LibreOffice's own importer — including
+            // the four \tdfrmtxt* distances, which state no position at all. Mirrored rather than
+            // narrowed: `DocxLayoutSource` asks exactly "is there a tblpPr", so narrowing here would make
+            // the two readers of one document disagree. It cannot bite on the corpus either way — of the
+            // 22 720 row definitions in the 328 converted RTF, **1135 state a real position and not one
+            // states a \tdfrmtxt* distance without one** (`probes/rtf-gate-r71/census.py`).
+            case "tpvpg" or "tpvmrg" or "tpvpara":
+                Position(CurrentFlow).VerticalAnchor = token.Name switch
+                {
+                    "tpvpg" => FrameVerticalOrigin.Page,
+                    "tpvmrg" => FrameVerticalOrigin.PageMargin,
+                    _ => FrameVerticalOrigin.Paragraph,
+                };
+                return;
+            case "tphpg" or "tphmrg" or "tphcol":
+                Position(CurrentFlow).HorizontalAnchorIsPage = token.Name is "tphpg";
+                return;
+            case "tposxc" or "tposxr":
+                // Only these two. `\tposxl`, `\tposxi` and `\tposxo` are tokenised by LibreOffice and
+                // then dispatched nowhere (`rtfdispatchflag.cxx`:82-101 names centre and right and no
+                // other), so they reach no `w:tblpXSpec` and no `w:tblpPr` — reading them here would
+                // both invent an alignment the reference does not apply and turn a table into a fly
+                // that the reference leaves in the flow. None of the three occurs in the corpus.
+                Position(CurrentFlow).HorizontalSpec = token.Name is "tposxc"
+                    ? FrameHorizontalAlignment.Centre
+                    : FrameHorizontalAlignment.Right;
+                return;
+            case "tposy":
+                Position(CurrentFlow).VerticalOffset = token.Parameter ?? 0;
+                return;
+            case "tdfrmtxtBottom":
+                Position(CurrentFlow).BottomFromText = token.Parameter ?? 0;
+                return;
+            // The rest of what does reach `w:tblpPr`, and is not read past that. `\tposx` is the
+            // horizontal distance, which `PageTable` takes from the row's own `\trleft`; `\tposyc` and
+            // `\tposyb` name a vertical edge, which is `w:tblpYSpec` and which neither reader honours;
+            // and `\tdfrmtxtTop`, `Left` and `Right` are distances the flow keeps beside a fly it cannot
+            // wrap into. Consumed rather than dropped, because writing a `tblpPr` is the whole of what
+            // makes the row's table a fly and each of these five writes one.
+            case "tposx" or "tposyc" or "tposyb"
+              or "tdfrmtxtTop" or "tdfrmtxtLeft" or "tdfrmtxtRight":
+                _ = Position(CurrentFlow);
+                return;
+            // `\tposnegx`, `\tposnegy`, `\tposyt`, `\tposyil`, `\tposyin` and `\tposyout` are
+            // deliberately absent: LibreOffice's tokeniser recognises all six and its dispatchers handle
+            // none of them, so each is dropped and none makes a table positioned. Not one occurs in the
+            // corpus's 22 720 row definitions (`probes/rtf-gate-r71/census.py`).
             case "trgaph":
                 // Half the gap between two cells, so it is the padding on each side of one. RTF's oldest
                 // spelling of cell padding and the one LibreOffice writes.
@@ -971,6 +1038,30 @@ public sealed partial class RtfDocumentReader
             case "clvertalb":
                 DefinitionTarget(CurrentFlow).PendingCellAlignment = Layout.VerticalTextAlignment.Bottom;
                 return;
+
+            // The cell's text flow. LibreOffice's tokeniser turns these five straight into
+            // `w:textDirection` (`rtfdispatchflag.cxx`:483-508), and `CellTextDirection` already holds
+            // the three answers dmapper reduces its six values to — so a turned cell is read here
+            // exactly as the DOCX spelling of the same document reads it. Without this a `\cltxbtlr`
+            // label is laid out upright in a cell as narrow as one glyph, which breaks it a character
+            // per line; 186 `\cltxbtlr` in 11 of the corpus's converted RTF, and 3 `\cltxtbrl` in one.
+            case "cltxbtlr":
+                DefinitionTarget(CurrentFlow).PendingCellTextDirection =
+                    Layout.CellTextDirection.BottomToTopLeftToRight;
+                return;
+            case "cltxtbrl" or "cltxtbrlv":
+                // Folded onto one answer by dmapper, not by us: `tbRl` and `tbRlV` both become
+                // `WritingMode2::TB_RL` in `DomainMapperTableManager.cxx`:325-350.
+                DefinitionTarget(CurrentFlow).PendingCellTextDirection =
+                    Layout.CellTextDirection.TopToBottomRightToLeft;
+                return;
+            case "cltxlrtb" or "cltxlrtbv":
+                // Upright, and stated explicitly to beat a direction set earlier in the same
+                // declaration — `\cltxlrtbv` because dmapper ignores `lrTbV` outright.
+                DefinitionTarget(CurrentFlow).PendingCellTextDirection =
+                    Layout.CellTextDirection.LeftToRight;
+                return;
+
             case "clmgf":
                 DefinitionTarget(CurrentFlow).PendingCellMergesFirst = true;
                 return;

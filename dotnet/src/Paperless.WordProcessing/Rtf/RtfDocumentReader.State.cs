@@ -459,6 +459,17 @@ public sealed partial class RtfDocumentReader
         /// </remarks>
         public List<RtfLayoutFrame> PendingFrames { get; } = [];
 
+        /// <summary>
+        /// The <c>PAGE</c> and <c>NUMPAGES</c> results in the paragraph being read, as spans over its
+        /// <em>layout</em> text.
+        /// </summary>
+        /// <remarks>
+        /// Over the layout text rather than the extracted text, because the two are not the same string:
+        /// a note's citation is prefixed to the first and not to the second. <see cref="Layout.PageFields"/>
+        /// rewrites the layout text and nothing else.
+        /// </remarks>
+        public List<Layout.PageFieldSpan> PendingPageFields { get; } = [];
+
         /// <summary>A shape's own text, collected while its <c>{\shptxt}</c> flow is open.</summary>
         public Staged? FrameBlocks { get; init; }
 
@@ -553,6 +564,9 @@ public sealed partial class RtfDocumentReader
         /// <summary>The vertical alignment <c>\clvertal*</c> stated for the cell being declared.</summary>
         public Layout.VerticalTextAlignment PendingCellAlignment { get; set; }
 
+        /// <summary>The text flow <c>\cltx*</c> stated for the cell being declared.</summary>
+        public Layout.CellTextDirection PendingCellTextDirection { get; set; }
+
         /// <summary>The <c>\clcbpat</c> colour index for the cell being declared, or null for none.</summary>
         public int? PendingCellShading { get; set; }
 
@@ -580,6 +594,17 @@ public sealed partial class RtfDocumentReader
         /// <summary><c>\trhdr</c>: the row repeats as a header at the top of every page.</summary>
         public bool RowIsHeader { get; set; }
 
+        /// <summary>
+        /// The row definition's <c>\tblpPr</c> half — the six control-word families that make a row
+        /// part of a <em>positioned</em> table, or null when the definition stated none.
+        /// </summary>
+        /// <remarks>
+        /// Null rather than a flag on the level, because "was one of these words seen for this row"
+        /// is the whole of the question <see cref="Layout.PageTable.IsPositioned"/> asks, and a row
+        /// definition is restated from scratch at every <c>\trowd</c>.
+        /// </remarks>
+        public RowPosition? RowPositioned { get; set; }
+
         /// <summary><c>\trkeep</c>: the row's content may not be broken across a page.</summary>
         /// <remarks>
         /// Named for keeping rather than for splitting because that is what the control word says, and
@@ -587,6 +612,46 @@ public sealed partial class RtfDocumentReader
         /// <c>LN_CT_TrPrBase_cantSplit</c> (<c>rtftok/rtfdispatchflag.cxx</c>).
         /// </remarks>
         public bool RowIsKeptTogether { get; set; }
+    }
+
+    /// <summary>
+    /// Where a row definition said its table goes, when it said anything at all.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// RTF's <em>Positioned Wrapped Tables</em> vocabulary, which LibreOffice's tokeniser turns
+    /// straight into OOXML's <c>w:tblpPr</c> — <c>\tpvpg</c> is <c>vertAnchor="page"</c>,
+    /// <c>\tphmrg</c> is <c>horzAnchor="margin"</c>, <c>\tposxc</c> is <c>tblpXSpec="center"</c>,
+    /// <c>\tposy</c> is <c>tblpY</c> (<c>sw/source/writerfilter/rtftok/rtfdispatchflag.cxx</c>:39-115
+    /// and <c>rtfdispatchvalue.cxx</c>:1802-1837). So the two readers of the two spellings of one
+    /// document reach <see cref="Layout.PageTable"/> by the same route and must agree there.
+    /// </para>
+    /// <para>
+    /// Stated per <em>row</em> in RTF and per <em>table</em> in OOXML, and every producer restates it
+    /// identically on every row of the table; the first row's is what the table takes, exactly as
+    /// <c>\trleft</c> is.
+    /// </para>
+    /// </remarks>
+    private sealed class RowPosition
+    {
+        /// <summary><c>\tpvpg</c>, <c>\tpvmrg</c>, <c>\tpvpara</c>; null when none was stated.</summary>
+        public Layout.FrameVerticalOrigin? VerticalAnchor { get; set; }
+
+        /// <summary>
+        /// True for <c>\tphpg</c> — the one horizontal anchor whose rectangle is the sheet rather than
+        /// the text area, which <see cref="Layout.PageTable.HorizontalPosition"/> cannot express and so
+        /// suppresses, as the DOCX reader does for <c>horzAnchor="page"</c>.
+        /// </summary>
+        public bool HorizontalAnchorIsPage { get; set; }
+
+        /// <summary><c>\tposxc</c> and <c>\tposxr</c> and friends; null when the row stated a distance.</summary>
+        public Layout.FrameHorizontalAlignment? HorizontalSpec { get; set; }
+
+        /// <summary><c>\tposy</c>, in twips, measured from <see cref="VerticalAnchor"/>.</summary>
+        public int VerticalOffset { get; set; }
+
+        /// <summary><c>\tdfrmtxtBottom</c>, in twips: the gap the flow keeps below the fly.</summary>
+        public int BottomFromText { get; set; }
     }
 
     /// <summary>A cell's declaration from <c>\cellx</c> and the merge flags before it.</summary>
@@ -605,6 +670,7 @@ public sealed partial class RtfDocumentReader
     /// <param name="VerticalAlignment">Where the cell's text sits inside its row.</param>
     /// <param name="ShadingColourIndex">Its <c>\clcbpat</c> colour index, or null for none.</param>
     /// <param name="Borders">Its four borders, in left, right, top, bottom order.</param>
+    /// <param name="TextDirection">Which way its text runs — the <c>\cltx*</c> family.</param>
     private readonly record struct CellDefinition(
         int RightEdge,
         bool MergesFirst,
@@ -614,7 +680,8 @@ public sealed partial class RtfDocumentReader
         int?[]? Padding = null,
         Layout.VerticalTextAlignment VerticalAlignment = Layout.VerticalTextAlignment.Top,
         int? ShadingColourIndex = null,
-        (int Twips, int? ColourIndex, bool IsNone)[]? Borders = null);
+        (int Twips, int? ColourIndex, bool IsNone)[]? Borders = null,
+        Layout.CellTextDirection TextDirection = Layout.CellTextDirection.LeftToRight);
 
     private sealed class CellDraft
     {
@@ -646,6 +713,9 @@ public sealed partial class RtfDocumentReader
 
         /// <summary>Where its text sits when the row is taller than its content.</summary>
         public Layout.VerticalTextAlignment VerticalAlignment { get; set; }
+
+        /// <summary>Which way its text runs; upright for almost every cell.</summary>
+        public Layout.CellTextDirection TextDirection { get; set; }
 
         public List<ContentNode> Content { get; } = [];
 
@@ -681,6 +751,12 @@ public sealed partial class RtfDocumentReader
         /// The row's declared height in twips, from <c>\trrh</c>; zero for none, negative for an exact height.
         /// </summary>
         public int Height { get; init; }
+
+        /// <summary>
+        /// Where the row's table is placed, when the definition made it a positioned one — see
+        /// <see cref="RowPosition"/>. Null for an ordinary table in the flow.
+        /// </summary>
+        public RowPosition? Position { get; init; }
 
         public List<CellDraft> Cells { get; } = [];
     }
@@ -1108,6 +1184,8 @@ public sealed partial class RtfDocumentReader
         // deliberately leaves out. Prefixing it here rather than in the text builder is what keeps the two
         // apart; the runs already recorded shift along by its length.
         List<RtfLayoutRun> runs = [.. flow.LayoutRuns];
+        List<Layout.PageFieldSpan>? fields =
+            flow.PendingPageFields.Count == 0 ? null : [.. flow.PendingPageFields];
 
         if (flow.LayoutPrefix is { Length: > 0 } prefix)
         {
@@ -1116,6 +1194,12 @@ public sealed partial class RtfDocumentReader
             for (int i = 0; i < runs.Count; i++)
             {
                 runs[i] = runs[i] with { Start = runs[i].Start + prefix.Length };
+            }
+
+            // The field spans shift with the runs: they index the same string.
+            for (int i = 0; i < (fields?.Count ?? 0); i++)
+            {
+                fields![i] = fields[i] with { Start = fields[i].Start + prefix.Length };
             }
 
             runs.Insert(0, CitationRun(state, 0, prefix.Length));
@@ -1170,6 +1254,7 @@ public sealed partial class RtfDocumentReader
             _sectionIndex,
             flow.PendingNotes.Count == 0 ? null : [.. flow.PendingNotes],
             flow.PendingFrames.Count == 0 ? null : [.. flow.PendingFrames],
+            fields,
             // Trimmed, because the group holds the tab that follows the label as well as the label —
             // and an outline level that shows no number writes the group with nothing but that tab,
             // which trims to nothing rather than to a label made of whitespace.
@@ -1347,6 +1432,7 @@ public sealed partial class RtfDocumentReader
         flow.LayoutLength = 0;
         flow.PendingNotes.Clear();
         flow.PendingFrames.Clear();
+        flow.PendingPageFields.Clear();
         flow.PendingRuns.Clear();
         flow.PendingImages.Clear();
         flow.ListMarker.Clear();

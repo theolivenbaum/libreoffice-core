@@ -82,6 +82,7 @@ public sealed partial class RtfDocumentReader
         table.RowIsKeptTogether = false;
         table.RowHalfGap = null;
         table.RowHeight = 0;
+        table.RowPositioned = null;
         Array.Clear(table.RowPadding);
         ClearPendingCellFlags(table);
     }
@@ -89,6 +90,22 @@ public sealed partial class RtfDocumentReader
     /// <summary>The level a row-definition control word applies to.</summary>
     private static TableLevel DefinitionTarget(Flow flow)
         => LevelAt(flow, Math.Max(1, flow.DefinitionLevel));
+
+    /// <summary>
+    /// The <c>\tblpPr</c> the row definition is building, created by the first control word that
+    /// needs one.
+    /// </summary>
+    /// <remarks>
+    /// Created on demand rather than always, because its existence <em>is</em> the answer to
+    /// <see cref="Layout.PageTable.IsPositioned"/> — the same question <c>DocxLayoutSource</c> puts to
+    /// <c>w:tblpPr</c>, and the same one LibreOffice's RTF tokeniser answers by calling
+    /// <c>putNestedAttribute(..., LN_CT_TblPrBase_tblpPr, ...)</c> for every word in the family.
+    /// </remarks>
+    private static RowPosition Position(Flow flow)
+    {
+        TableLevel table = DefinitionTarget(flow);
+        return table.RowPositioned ??= new RowPosition();
+    }
 
     private static void AddCellDefinition(Flow flow, int? rightEdge)
     {
@@ -109,7 +126,8 @@ public sealed partial class RtfDocumentReader
             [.. table.PendingCellPadding],
             table.PendingCellAlignment,
             table.PendingCellShading,
-            [.. table.PendingCellBorders]));
+            [.. table.PendingCellBorders],
+            table.PendingCellTextDirection));
         ClearPendingCellFlags(table);
     }
 
@@ -200,6 +218,7 @@ public sealed partial class RtfDocumentReader
         table.PendingCellVerticalFirst = false;
         table.PendingCellVerticalMerged = false;
         table.PendingCellAlignment = VerticalTextAlignment.Top;
+        table.PendingCellTextDirection = CellTextDirection.LeftToRight;
         table.PendingCellShading = null;
         table.PendingBorderSide = null;
         Array.Clear(table.PendingCellBorders);
@@ -304,6 +323,7 @@ public sealed partial class RtfDocumentReader
             IsHeader = table.RowIsHeader,
             IsKeptTogether = table.RowIsKeptTogether,
             Height = table.RowHeight,
+            Position = table.RowPositioned,
         };
         row.Cells.AddRange(table.RowCells);
         table.TableRows.Add(row);
@@ -332,6 +352,7 @@ public sealed partial class RtfDocumentReader
             table.RowCells[index].ContinuesMergeAbove = definition.VerticalMerged;
             table.RowCells[index].Padding = PaddingOf(definition, table);
             table.RowCells[index].VerticalAlignment = definition.VerticalAlignment;
+            table.RowCells[index].TextDirection = definition.TextDirection;
             table.RowCells[index].Shading = ColourAt(definition.ShadingColourIndex);
             table.RowCells[index].Borders = BordersOf(definition);
         }
@@ -585,7 +606,8 @@ public sealed partial class RtfDocumentReader
                     cell.VerticalAlignment,
                     [.. cell.LayoutBlocks],
                     cell.Shading,
-                    cell.Borders));
+                    cell.Borders,
+                    cell.TextDirection));
             }
 
             layoutRows.Add(new RtfLayoutRow(
@@ -600,13 +622,25 @@ public sealed partial class RtfDocumentReader
             ? layoutRows[0].Cells[0].Borders.Left.Width
             : Length.Zero;
 
+        // Stated per row and read from the first, exactly as `\trleft` is: RTF has no table-level
+        // scope to put it in, and every producer restates the identical block on every row.
+        RowPosition? position = rows.Count > 0 ? rows[0].Position : null;
+
         return new RtfLayoutTable(
             widths,
             layoutRows,
             rows.TakeWhile(r => r.IsHeader).Count(),
             stated + (border / 2),
             _sectionIndex,
-            fit);
+            fit,
+            IsPositioned: position is not null,
+            VerticalOrigin: position?.VerticalAnchor ?? FrameVerticalOrigin.Paragraph,
+            VerticalOffset: Length.FromTwips(position?.VerticalOffset ?? 0),
+            // A table anchored to the *page* names a rectangle `PageTable` has not got, so it keeps the
+            // placement its indent gives it rather than being centred against the wrong one — the same
+            // exception `DocxLayoutSource.HorizontalPositionOf` makes for `horzAnchor="page"`.
+            HorizontalPosition: position is { HorizontalAnchorIsPage: false } ? position.HorizontalSpec : null,
+            LowerSpacing: Length.FromTwips(position?.BottomFromText ?? 0));
     }
 
     private static void ResolveVerticalMerges(List<RowDraft> rows)

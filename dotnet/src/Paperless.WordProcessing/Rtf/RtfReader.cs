@@ -224,6 +224,7 @@ public sealed class RtfDocument : IWordProcessingDocument, IPaginatedDocument
                     RowSpan = cell.RowSpan,
                     Padding = cell.Padding,
                     VerticalAlignment = cell.VerticalAlignment,
+                    TextDirection = cell.TextDirection,
                     Shading = cell.Shading,
                     Borders = cell.Borders,
                 });
@@ -247,6 +248,11 @@ public sealed class RtfDocument : IWordProcessingDocument, IPaginatedDocument
             Rows = rows,
             HeaderRowCount = table.HeaderRowCount,
             LeftIndent = table.LeftIndent,
+            HorizontalPosition = table.HorizontalPosition,
+            IsPositioned = table.IsPositioned,
+            VerticalOffset = table.VerticalOffset,
+            VerticalOrigin = table.VerticalOrigin,
+            LowerSpacing = table.LowerSpacing,
             JoinsBordersLikeWord = true,
             MinHeightIncludesInsets = true,
         };
@@ -366,6 +372,7 @@ public sealed class RtfDocument : IWordProcessingDocument, IPaginatedDocument
                 Runs = runs,
                 Notes = NotesOf(fonts, paragraph.Notes),
                 Frames = FramesOf(fonts, paragraph.Frames),
+                Fields = paragraph.PageFields ?? [],
             });
         }
 
