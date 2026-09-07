@@ -99,3 +99,23 @@ paragraph styles and compare the sum against the measured 17.2 and 19.2.
 - Hyperlink underlines are absent from ours (`0335fab9` p6), though the link colour is right.
 - The reference breaks a long URL mid-token at any character; we break only at `-` and `/`, so our
   URL lines end short (`0335fab9` p6).
+
+## Finding 3: hyperlink underlines are not drawn at all
+
+Two readers, on unrelated documents, reported the link colour as correct and the underline as
+absent. Confirmed **in the PDF's own marks rather than in a raster**, which is the rule this
+repository already carries about believing an "it is absent" reading -- counting fills under
+2.5 pt tall and over 20 pt wide:
+
+| page | ours | reference |
+|---|---:|---:|
+| `0335fab9` p6 | **0** | 9 |
+| `medicines_bulletin` p1 | **0** | 8 |
+
+So the underline is genuinely not emitted; it is not a mark the compositor threw away.
+
+## The count that makes this worth acting on
+
+Four of the five blind readers reported Finding 2 independently, and two of five reported
+Finding 3 independently, none having seen another's report, the document's name, or any figure
+from the gate.
