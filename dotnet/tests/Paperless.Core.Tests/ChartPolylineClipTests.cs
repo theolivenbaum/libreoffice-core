@@ -71,7 +71,7 @@ public sealed class ChartPolylineClipTests
     /// <summary>A polyline wholly inside its rectangle is handed back untouched.</summary>
     /// <remarks>
     /// The bounding-box short circuit of <c>Clipping::clipPolygonAtRectangle</c>
-    /// (<c>chart2/source/view/main/Clipping.cxx</c>:350-358). It is what makes clipping free for
+    /// (<c>chart2/source/view/main/Clipping.cxx</c>:350-365). It is what makes clipping free for
     /// every chart that already fitted, and it is why only two of the corpus' 176 chart-bearing
     /// documents moved when this landed.
     /// </remarks>

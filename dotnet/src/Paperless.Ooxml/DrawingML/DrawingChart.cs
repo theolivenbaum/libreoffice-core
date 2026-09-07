@@ -503,6 +503,42 @@ public static class DrawingChart
         return Math.Clamp(declared, 0, MaxPointCount);
     }
 
+    /// <summary>
+    /// Whether the chart plots only the cells its sheet actually shows.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>c:plotVisOnly</c>, which the importer turns into the diagram's
+    /// <c>IncludeHiddenCells</c> inverted
+    /// (<c>oox/source/drawingml/chart/chartspaceconverter.cxx</c>:264), and which
+    /// <c>ScChart2DataSequence::BuildDataCache</c> then reads per cell
+    /// (<c>sc/source/ui/unoobj/chart2uno.cxx</c>:2636-2646): a cell in a hidden row or column is
+    /// dropped from the sequence rather than blanked.
+    /// </para>
+    /// <para>
+    /// <strong>Its default is the Office generation, not <see langword="true"/>.</strong>
+    /// <c>rAttribs.getBool(XML_val, !bMSO2007Document)</c>
+    /// (<c>oox/source/drawingml/chart/chartspacefragment.cxx</c>:130-131) with the same
+    /// fallback in the model's own constructor (<c>chartspacemodel.cxx</c>:30) — so a 2007
+    /// package that states nothing plots hidden cells and a later one does not.
+    /// </para>
+    /// <para>
+    /// Only a spreadsheet reader can act on this: the presentation and word-processing paths
+    /// have no sheet to hide anything in and read the cached points regardless.
+    /// </para>
+    /// </remarks>
+    /// <param name="chartSpace">The <c>c:chartSpace</c> or its <c>c:chart</c>.</param>
+    /// <param name="office2007">Whether Office 2007 wrote the package.</param>
+    public static bool PlotsVisibleCellsOnly(XElement? chartSpace, bool office2007 = false)
+    {
+        if (chartSpace is null) return !office2007;
+
+        XElement? chart = Is(chartSpace, "chart") ? chartSpace : Child(chartSpace, "chart");
+        XElement? stated = Child(chart, "plotVisOnly");
+
+        return stated is null ? !office2007 : Drawing.Flag(stated, "val") ?? !office2007;
+    }
+
     private static int Index(XElement point) => Drawing.Number(point, "idx") ?? -1;
 
     private static XName Name(string localName)

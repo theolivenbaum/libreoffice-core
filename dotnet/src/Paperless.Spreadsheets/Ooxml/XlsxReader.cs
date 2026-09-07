@@ -118,7 +118,7 @@ public static class XlsxReader
                 // after the front layer (`printfun.cxx:1704-1713`), so the captions go last and
                 // cover whatever they overlap.
                 SheetDrawings drawings = XlsxDrawings.Read(
-                    file.Package, entry.PartName, theme, themeFonts, ranges.Resolve);
+                    file.Package, entry.PartName, theme, themeFonts, ranges);
 
                 // The legacy VML drawing beside it, which holds the camera-tool pictures and OLE
                 // previews Calc draws and the DrawingML part does not reach — its `a14` twin is
@@ -159,7 +159,7 @@ public static class XlsxReader
                 // sheet section holds exactly one table, and a chart is another one. The ODS
                 // path puts it in the same place.
                 foreach (ContentSection chart in XlsxCharts.Read(
-                             file.Package, entry.PartName, ranges.Resolve))
+                             file.Package, entry.PartName, ranges))
                     content.Children.Add(chart);
             }
 

@@ -36,10 +36,11 @@ internal static class XlsxCharts
     /// <param name="sheetPartName">The worksheet part the drawing hangs off.</param>
     /// <param name="ranges">
     /// Resolves a sequence's <c>c:f</c> against the workbook's cells, so that the table this
-    /// yields holds the same points the picture is drawn from. See <see cref="ChartRangeResolver"/>.
+    /// yields holds the same points the picture is drawn from. See <see cref="ChartRangeResolver"/>
+    /// and <see cref="XlsxChartRanges.Resolver"/>, which binds one chart's <c>c:plotVisOnly</c>.
     /// </param>
     public static IEnumerable<ContentSection> Read(
-        IPackage package, string? sheetPartName, ChartRangeResolver? ranges = null)
+        IPackage package, string? sheetPartName, XlsxChartRanges? ranges = null)
     {
         ArgumentNullException.ThrowIfNull(package);
         if (sheetPartName is null || package is not OpcPackage opc) yield break;
@@ -82,7 +83,13 @@ internal static class XlsxCharts
                     chartSpace = OoxmlXml.TryLoad(content, out _);
 
                 if (chartSpace is null) continue;
-                if (DrawingChart.Read(chartSpace, ranges, office2007) is { } section)
+
+                // Bound per chart, not per workbook: c:plotVisOnly decides whether a hidden
+                // row's cells are chart data, and it is stated on the chart part.
+                ChartRangeResolver? resolver = ranges?.Resolver(
+                    DrawingChart.PlotsVisibleCellsOnly(chartSpace, office2007));
+
+                if (DrawingChart.Read(chartSpace, resolver, office2007) is { } section)
                     yield return section;
             }
         }
