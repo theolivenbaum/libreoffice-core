@@ -667,7 +667,8 @@ internal sealed class SheetPageDrawing(SheetLayout sheet, SheetPagePlacement pla
                          && !sheet.IsMerged(row, column),
         column => SheetDeviceUnits.Snap(sheet.Grid.Columns.PrintedSizeAt(column)) * _scale,
         band.Left,
-        band.Right);
+        band.Right,
+        sheet.CellBreaksStartLines);
 
     /// <summary>Which band a placed column belongs to, by where it sits on the paper.</summary>
     /// <remarks>

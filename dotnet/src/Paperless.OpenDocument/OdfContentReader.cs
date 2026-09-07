@@ -67,6 +67,9 @@ public sealed partial class OdfContentReader
     private bool _atBlockStart = true;
     private bool _lastWasSpace;
 
+    // True while the walk is inside a spreadsheet cell whose text Calc takes verbatim.
+    private bool _cellVerbatim;
+
     /// <summary>
     /// Receives the bookmarks, change marks and fields the walk steps over, when a caller wants them.
     /// </summary>
@@ -75,6 +78,38 @@ public sealed partial class OdfContentReader
     /// and only the word-processing reader has anywhere to put a bookmark's range.
     /// </remarks>
     public IOdfMarkSink? Marks { get; set; }
+
+    /// <summary>
+    /// Whether a table cell's own text is taken exactly as written rather than collapsed.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>Calc does not collapse white space inside a cell's <c>text:p</c>, and Writer
+    /// and Impress do.</strong> ODF's text content model is shared, but the importer is not:
+    /// a spreadsheet cell's paragraphs are read by Calc's own filter rather than by
+    /// <c>xmloff</c>'s text import, and <c>ScXMLCellTextParaContext::characters</c> appends
+    /// the characters it is handed with no normalisation at all
+    /// (<c>sc/source/filter/xml/celltextparacontext.cxx</c>:36-39).
+    /// </para>
+    /// <para>
+    /// The consequence that shows is the <em>newline</em>. A cell holding a raw <c>U+000A</c>
+    /// inside its <c>text:p</c> — which is how LibreOffice's own exporter carries a multi-line
+    /// cell that came in from a binary or SpreadsheetML workbook, without a single
+    /// <c>text:line-break</c> in the file — is multi-line text, and
+    /// <c>ScXMLTableRowCellContext::PushParagraphEnd</c> hands it to the EditEngine for exactly
+    /// that reason: <c>ScStringUtil::isMultiline</c> is a search for <c>\n</c> or <c>\r</c>
+    /// (<c>sc/source/core/tool/stringutil.cxx</c>:426-429) and it is one of the two conditions
+    /// that turn a string cell into an edit cell
+    /// (<c>sc/source/filter/xml/xmlcelli.cxx</c>:625-629). Collapsing it to a space throws
+    /// away every line of such a cell after the first.
+    /// </para>
+    /// <para>
+    /// Only the cell's own text takes this route. A drawing anchored in the cell holds
+    /// <em>shape</em> text, which Calc imports through <c>xmloff</c> like any other shape, so
+    /// the flag is cleared for the duration of that walk.
+    /// </para>
+    /// </remarks>
+    public bool CellTextIsVerbatim { get; set; }
 
     private readonly List<int> _listCounters = [];
     private OdfListStyle? _currentListStyle;
@@ -434,6 +469,15 @@ public sealed partial class OdfContentReader
     private void AppendCollapsed(ContentParagraph paragraph, string text, string? hyperlink)
     {
         if (text.Length == 0) return;
+
+        // A spreadsheet cell's text is not collapsed at all; see CellTextIsVerbatim.
+        if (_cellVerbatim)
+        {
+            Emit(paragraph, text, hyperlink);
+            _atBlockStart = false;
+            _lastWasSpace = text[^1] is ' ' or '\t' or '\r' or '\n';
+            return;
+        }
 
         StringBuilder collapsed = new(text.Length);
         foreach (char character in text)
@@ -826,6 +870,7 @@ public sealed partial class OdfContentReader
     private readonly record struct ReadingState(
         bool AtBlockStart,
         bool LastWasSpace,
+        bool CellVerbatim,
         int ListLevel,
         OdfListStyle? ListStyle,
         string PendingText,
@@ -840,7 +885,7 @@ public sealed partial class OdfContentReader
     private ReadingState SuspendReading()
     {
         ReadingState state = new(
-            _atBlockStart, _lastWasSpace, _listLevel, _currentListStyle,
+            _atBlockStart, _lastWasSpace, _cellVerbatim, _listLevel, _currentListStyle,
             _pendingText.ToString(), _pendingFormat, _pendingHyperlink, _pendingStyleName);
 
         _pendingText.Clear();
@@ -849,6 +894,7 @@ public sealed partial class OdfContentReader
         _pendingStyleName = null;
         _listLevel = 0;
         _currentListStyle = null;
+        _cellVerbatim = false;
         return state;
     }
 
@@ -856,6 +902,7 @@ public sealed partial class OdfContentReader
     {
         _atBlockStart = state.AtBlockStart;
         _lastWasSpace = state.LastWasSpace;
+        _cellVerbatim = state.CellVerbatim;
         _listLevel = state.ListLevel;
         _currentListStyle = state.ListStyle;
         _pendingText.Clear();

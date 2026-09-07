@@ -2424,23 +2424,50 @@ Not yet, and why:
   `probes/ods-band-r75/results.md` has the 73 authored probes, which reproduce 26.2.4.2 to a
   worst error of 0.23 pt.
 
-- **A sheet's `draw:frame` is not read when it states `draw:transform` instead of
-  `svg:x`/`svg:y`.** That is how LibreOffice writes a turned or skewed picture, and `OdsDrawings`
-  parses no transform at all, so such a frame does not exist for us. It costs three things at
-  once, which is why it reads as a *text* defect: the picture's ink; the print area, because
-  `ScDocument::GetPrintArea` unions the drawing layer's bounding box into the cells' extent
-  (`sc/source/core/data/documen2.cxx`:644-666) and `SheetDrawingArea` already implements that
-  union; and the empty-page test, because a page whose only content is a picture must not be
-  dropped, which `SheetEmptyPages` already implements.
+- ~~**A sheet's `draw:frame` is not read when it states `draw:transform` instead of
+  `svg:x`/`svg:y`.**~~ **Done, and the transform was the second gate rather than the first.**
+  `OdsDrawings` walked a cell's own `draw:frame` children only, and **72 of `SIL_TDB648.ods`'s 74
+  frames are inside a `draw:g`** — so a grouped frame stating a plain `svg:x` was missed too and
+  the transform never came into it. Two wrappers stand between a cell and its pictures and
+  neither has a rectangle of its own: `draw:g`, and `draw:a`, which is ODF's spelling for *this
+  shape is a hyperlink*. Censused over the 307 converted `.ods`: **89 frames inside a `draw:g` in
+  3 documents and 33 inside a `draw:a` in 13**, of 504.
 
-  `SIL_TDB648.ods` is the witness and it was filed as a cell-overflow document: 74 `draw:frame`,
-  **72** of them transform-only, 60 pages against the reference's 88, and the reference's 15
-  text-free pages of 88 against our 5 of 60. Its page 1 is identical on both sides, long
-  overflowing strings included, so overflow is not what is wrong with it. Reach is **5 of the
-  307 converted `.ods` and 81 frames of 504**, 72 of the 81 in that one file
-  (`probes/ods-band-r75/framecensus.py`). `WordProcessing/OpenDocument/OdfFrames.cs`:211-243
-  takes the `translate(...)` out of such a transform for a Writer frame and
-  `OdpSlideLayout`:747-843 parses the whole matrix; the sheet reader has neither.
+  A turned frame's rectangle is the axis-aligned **bounding box** of the transform applied to its
+  own `svg:width` × `svg:height`, because that is what both of Calc's page-deciding questions ask
+  for — `ScDrawLayer::GetPrintArea` (`sc/source/core/data/drwlayer.cxx`:1400-1424) and
+  `ScDocument::HasAnyDraw` (`documen9.cxx`:382-404) both go through `GetCurrentBoundRect` — and
+  the picture's own size and angle ride inside it as a `SheetDrawingPart`, which is the shape the
+  SpreadsheetML reader already builds for a grouped, turned watermark. `OdfTransform` is the
+  parser, moved down into `Paperless.OpenDocument` from `OdpSlideLayout` so that both families
+  read the attribute once. `SIL_TDB648.ods` **60 → 92 pages against 88**.
+  `probes/ods-page-r77/results.md` §2.
+
+  **What is still not read is every other `draw:` element.** 380 `draw:custom-shape`, 148
+  `draw:a`, 78 `draw:control`, 31 `draw:connector` and 17 `draw:line` sit directly in cells of
+  that column and the reader looks for `draw:frame` alone — no fill, no outline, no text. It is
+  the ODF twin of *a worksheet shape's fill and outline are not read at all*, and no gate column
+  can see it.
+
+- **An ODF sheet's automatic row heights are recalculated for its first 200 rows only, and this
+  tree recalculates every one of them.** `ScXMLTableRowContext` excludes a block ending past row
+  200 from the recalc ranges whenever its style carries a stored height *and* the optimal flag —
+  `if (nCurrentRow > 200 && ptmpStyle && !ptmpStyle->FindProperty(CTF_SC_ROWHEIGHT))` then
+  `rRecalcRanges.at(nSheet).maRanges.setFalse(nFirstRow, nCurrentRow)`,
+  `sc/source/filter/xml/xmlrowi.cxx`:218-243, *"recalc only the first 200 row in case of optimal
+  document loading"*. The test fires for exactly such a style because
+  `ScXMLRowImportPropertyMapper::finished` removes `CTF_SC_ROWHEIGHT` from one that states both,
+  passing the height through as the optimal one (`xmlstyli.cxx`:245-258).
+
+  It is what makes the natural companion to `SheetLayout.CellBreaksStartLines` wrong: a
+  non-wrapping multi-paragraph cell **is** measured at its paragraphs' height by
+  `ScColumn::GetNeededSize` (`column2.cxx`:487-491, 519), so a four-row probe gets all three
+  lines from 26.2.4.2 — and `Capability_List_9-14-2022_Dallas_Combined-Aircraft_Manuf_unsorted.ods`,
+  whose fifteen identical cells sit far past row 200, keeps its stored 14.23 pt and draws the
+  second line over the row beneath. Giving those rows the paragraphs' height took that document
+  from the reference's 147 pages to 150. **The two rules have to land together or not at all**;
+  `SheetVerbatimCellTextTests.TheParagraphsAreDrawnALineApartAndTheRowKeepsItsHeight` pins both
+  halves and names the figure to assert when they do.
 
 - **A cell's first printed row sits about a point lower than the reference's.** Measured on the
   band probes: with no band at all, 26.2.4.2 puts the first row's *text* 0.97 pt **above** the
@@ -3428,9 +3455,17 @@ Not yet, and why:
   A rectangle that misses the paper is dropped rather than drawn off the edge. Measured on
   `Air_Boss_Master_List.xlsx`, whose note box is anchored in column E and straddles the column
   break: its right half is on LibreOffice's page 3 and was on none of ours, 514 words against 527.
-- **A rotated picture is not expressible.** `IDrawingSink.DrawImage` takes a rectangle rather than
-  a matrix, so `xdr:spPr/a:xfrm/@rot` and ODF's `draw:transform` are read past. Recorded rather
-  than fixed: four agents are building against that IR at once.
+- ~~**A rotated picture is not expressible.**~~ **Half true, and the half that is not is the one
+  this said.** `IDrawingSink.DrawImage` does take a rectangle rather than a matrix, but
+  `SheetPageGraphics.DrawParts` turns the sink itself, so a `SheetDrawingPart` carrying `Degrees`
+  is drawn turned — ours emits `0.866 0.5 -0.5 0.866 … cm` for a 30° ODF frame and lands within
+  0.02 pt of 26.2.4.2 on `sheet-grouped-frames.fods`. ODF's `draw:transform` is read
+  (`OdfTransform`); `xdr:spPr/a:xfrm/@rot` on a *picture* still is not.
+
+  Worth knowing before comparing content streams: **the reference turns the pixels rather than
+  the pen.** 26.2.4.2 places that picture with an axis-aligned `160.696 0 0 134.362 … cm` over a
+  bitmap it has already rotated into the bounding box. Same ink, same box, different
+  representation.
 - **A crop is not applied.** SpreadsheetML states one as `a:srcRect` fractions and ODF as
   `fo:clip`. The drawing model has clipping and no crop, so the shape is a larger destination
   rectangle clipped to the frame's outline rather than a new IR primitive.

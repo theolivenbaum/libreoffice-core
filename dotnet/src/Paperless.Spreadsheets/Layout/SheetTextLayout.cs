@@ -22,12 +22,17 @@ namespace Paperless.Spreadsheets.Layout;
 /// The left edge of the block of columns being printed, scaled — Calc's <c>mnScrX</c>.
 /// </param>
 /// <param name="BlockRight">Its right edge, Calc's <c>mnScrX + mnScrW</c>.</param>
+/// <param name="BreaksStartLines">
+/// Whether a hard break starts a line in a cell that does not wrap. An importer's decision rather
+/// than a cell's; see <see cref="SheetLayout.CellBreaksStartLines"/>.
+/// </param>
 internal readonly record struct SheetTextContext(
     double Scale,
     Func<int, int, bool> IsAvailable,
     Func<int, Length> ColumnWidth,
     Length BlockLeft = default,
-    Length BlockRight = default);
+    Length BlockRight = default,
+    bool BreaksStartLines = false);
 
 /// <summary>One cell as it is about to be drawn.</summary>
 /// <param name="Text">The text the number format produced.</param>
@@ -101,6 +106,17 @@ internal static class SheetTextLayout
 
     /// <summary>What a numeric cell that will not fit draws instead of its number.</summary>
     private const string HashText = "###";
+
+    /// <summary>
+    /// The measure a cell that does not wrap is broken against: wide enough that only a hard
+    /// break can end a line.
+    /// </summary>
+    /// <remarks>
+    /// A metre and a half, which no cell's text approaches and which leaves the length arithmetic
+    /// far from overflow. Calc reaches the same place by giving such a cell a paper it can never
+    /// fill rather than by turning the breaker off.
+    /// </remarks>
+    private static readonly Length UnboundedWidth = Length.FromPoints(4096);
 
     /// <summary>
     /// The colour a hyperlink cell's text is painted in, whatever the file says it is.
@@ -632,10 +648,18 @@ internal static class SheetTextLayout
         // three times as tall, which moves every row under it. The seat is that Calc replaces the
         // *engine text* with the hash string after the paper has been decided
         // (`output2.cxx:3605`, `:3849`, `:4070`), so there is nothing left to break.
+        // A cell that does not wrap still breaks at its own paragraphs when the importer made
+        // several of them, and then it breaks at those alone: the paper it is formatted against is
+        // unbounded across, so nothing is ever broken for width. See
+        // <see cref="SheetLayout.CellBreaksStartLines"/> for which importer does that and why.
+        bool splitsAtBreaks = !breaks && !hashed && context.BreaksStartLines
+                              && !cell.IsField && HoldsHardBreak(text);
+
         List<int> paragraphStarts = [0];
-        List<SheetTextRun> lines = breaks && !hashed
+        List<SheetTextRun> lines = (breaks && !hashed) || splitsAtBreaks
             ? Wrap(
-                text, portions, face, size, scale, available, ShapeRange, percent,
+                text, portions, face, size, scale,
+                splitsAtBreaks ? UnboundedWidth : available, ShapeRange, percent,
                 out paragraphStarts, cell.IsField)
             : [run];
         if (lines.Count == 0) return new Placement([]);
