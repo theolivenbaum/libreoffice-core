@@ -32,7 +32,16 @@ namespace Paperless.WordProcessing.Tests;
 /// <para>
 /// <see cref="PaginationOptions.CapturesAnchoredObjectsOnPage"/> carries which formats do this and
 /// why; the short of it is that <c>WriterFilter.cxx</c>:332 sets
-/// <c>DoNotCaptureDrawObjsOnPage</c> for DOCX and RTF and no other importer does.
+/// <c>DoNotCaptureDrawObjsOnPage</c> for DOCX and RTF and no other importer does — and that the RTF
+/// reader turns the capture back on anyway, because its shapes are Writer <em>flies</em> rather than
+/// drawing objects and a fly is clipped onto its page by a route that flag does not reach. See
+/// <see cref="RtfShapePlacementTests"/>.
+/// </para>
+/// <para>
+/// <b>The horizontal half is the same rule and the same guard.</b>
+/// <c>SwAnchoredObjectPosition::ImplAdjustHoriRelPos</c> (the same file, :674-721) corrects the right
+/// edge first and the left afterwards, so a frame wider than the page ends flush with the <em>left</em>
+/// — the mirror of the vertical order, because the second correction is the one that survives.
 /// </para>
 /// </remarks>
 public sealed class FrameCapturedOnPageTests
@@ -104,7 +113,54 @@ public sealed class FrameCapturedOnPageTests
         Place(frame, anchorTop: 100).Y.ShouldBe(Length.Zero);
     }
 
-    /// <summary>With capture off — a DOCX or an RTF — nothing is moved at all.</summary>
+    /// <summary>A frame past the page's right edge is pulled left until its right rests on it.</summary>
+    [Fact]
+    public void AFrameBeyondThePageIsPulledLeftToItsRightEdge()
+    {
+        PageFrame frame = Frame(FrameAnchor.Paragraph, height: 36) with
+        {
+            HorizontalOffset = Length.FromPoints(200),
+        };
+
+        // The column starts at 72 pt, so 200 pt past it is 272 and the 486 pt frame would end at 758
+        // on a 612 pt page. Its right edge comes back to 612 and its left to 126.
+        Place(frame, anchorTop: 100).X.ShouldBe(Length.FromPoints(126));
+    }
+
+    /// <summary>A negative offset that would take a frame off the left edge is pushed back to it.</summary>
+    [Fact]
+    public void AFrameLeftOfThePageIsPushedRightToItsLeftEdge()
+    {
+        PageFrame frame = Frame(FrameAnchor.Paragraph, height: 36) with
+        {
+            HorizontalOffset = Length.FromPoints(-200),
+        };
+
+        Place(frame, anchorTop: 100).X.ShouldBe(Length.Zero);
+    }
+
+    /// <summary>
+    /// A frame wider than the page ends flush with its <em>left</em>, which is the order of the two
+    /// corrections and the mirror of the vertical case.
+    /// </summary>
+    [Fact]
+    public void AFrameWiderThanThePageIsFlushWithItsLeft()
+    {
+        PageFrame frame = Frame(FrameAnchor.Paragraph, height: 36) with
+        {
+            Size = new DocSize(Length.FromPoints(700), Length.FromPoints(36)),
+        };
+
+        Place(frame, anchorTop: 100).X.ShouldBe(Length.Zero);
+    }
+
+    /// <summary>A frame that fits across the page is left where its offset put it.</summary>
+    [Fact]
+    public void AFrameInsideThePageIsNotMovedAcrossIt()
+        => Place(Frame(FrameAnchor.Paragraph, height: 36), anchorTop: 100)
+            .X.ShouldBe(Length.FromPoints(72));
+
+    /// <summary>With capture off — a DOCX — nothing is moved in either direction.</summary>
     [Fact]
     public void AFormatThatDoesNotCaptureLeavesTheFrameWhereItIs()
     {
@@ -115,6 +171,17 @@ public sealed class FrameCapturedOnPageTests
                 Length.FromPoints(666.45),
                 capturesOnPage: false)
             .Y.ShouldBe(Length.FromPoints(767.35));
+
+        FrameLayout.Place(
+                Frame(FrameAnchor.Paragraph, height: 36) with
+                {
+                    HorizontalOffset = Length.FromPoints(200),
+                },
+                Page,
+                Page.TextArea,
+                Length.FromPoints(100),
+                capturesOnPage: false)
+            .X.ShouldBe(Length.FromPoints(272));
     }
 
     /// <summary>The witness's own frame: 486 x 36 pt at a stated 100.90 pt below its anchor.</summary>

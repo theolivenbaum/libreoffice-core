@@ -145,9 +145,12 @@ public static class FrameLayout
             _ => vertical.Y + frame.VerticalOffset,
         };
 
+        Length placedX = x + frame.GroupOffset.X;
+        Length placedY = y + frame.GroupOffset.Y;
+
         return new DocRect(
-            x + frame.GroupOffset.X,
-            capturesOnPage ? CapturedOnPage(frame, page, y + frame.GroupOffset.Y) : y + frame.GroupOffset.Y,
+            capturesOnPage ? CapturedOnPageAcross(frame, page, placedX) : placedX,
+            capturesOnPage ? CapturedOnPage(frame, page, placedY) : placedY,
             frame.Size.Width,
             frame.Size.Height);
     }
@@ -180,9 +183,13 @@ public static class FrameLayout
     /// <para>
     /// The one escape is <c>SwAnchoredObject::IsDraggingOffPageAllowed</c>
     /// (<c>sw/source/core/layout/anchoredobject.cxx</c>:790-801), which needs
-    /// <c>DisableOffPagePositioning</c> — an ODF settings flag defaulting to false
-    /// (<c>DocumentSettingManager.cxx</c>:100) that no DOC or DOCX import sets. So it does not arise
-    /// for the formats this reader reads.
+    /// <c>DisableOffPagePositioning</c> <em>and</em> a wrap-through object.
+    /// <b>This used to say that no DOC or DOCX import sets that flag, and it is set for two of the
+    /// four formats:</b> <c>sw/source/writerfilter/filter/WriterFilter.cxx</c>:333 sets it for every
+    /// writerfilter import, one line below the <c>DoNotCaptureDrawObjsOnPage</c> the paragraph above
+    /// cites, so it is live for DOCX and RTF and absent from WW8 and ODF. It fires on none of the
+    /// twenty-one RTF probes in <c>dotnet/probes/rtf-shape-r73/</c>, two of which are wrap-through,
+    /// so what makes it inert there is not yet established.
     /// </para>
     /// <para>
     /// Measured on <c>words/done-013/doc/omrIMInterpretiveGuideLine.doc</c> against 26.2.4.2 with the
@@ -207,6 +214,47 @@ public static class FrameLayout
         if (y < page.Y) y = page.Y;
 
         return y;
+    }
+
+    /// <summary>
+    /// The same capture across the page, which is the other half of the same rule.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>SwAnchoredObjectPosition::ImplAdjustHoriRelPos</c>
+    /// (<c>sw/source/core/objectpositioning/anchoredobjectposition.cxx</c>:674-721) — <em>"adjust
+    /// calculated horizontal in order to keep object inside 'page' alignment layout frame"</em> — sits
+    /// beside <c>ImplAdjustVertRelPos</c> and is reached through the same
+    /// <c>mbDoNotCaptureAnchoredObj</c> guard (<c>anchoredobjectposition.hxx</c>:268-273). It applies
+    /// the two corrections in the same order: the right edge first, so a frame wider than the page ends
+    /// flush with the left and overflows the right.
+    /// </para>
+    /// <para>
+    /// A fly gets the same treatment a second time from <c>SwFlyFreeFrame::CheckClip</c>
+    /// (<c>sw/source/core/layout/flylay.cxx</c>:471-545), which moves it left until its right edge
+    /// rests on the clip rectangle's and never past that rectangle's own left.
+    /// </para>
+    /// <para>
+    /// <b>The area is the page, not its text area.</b> Measured against 26.2.4.2 on fifteen one-shape
+    /// RTF probes — five <c>\shpwr</c> values × <em>fits</em>, <em>overflows right</em>,
+    /// <em>overflows left</em> — on A4 with a 3139-twip left margin: a 10723-twip box offered
+    /// 3730 twips is drawn at <b>1183</b>, which is <c>paperw − width</c> to the twip, and a box offered
+    /// −861 is drawn at <b>0</b>. A box that begins entirely off the sheet is moved too. See
+    /// <c>dotnet/probes/rtf-shape-r73/results.md</c>.
+    /// </para>
+    /// </remarks>
+    /// <param name="frame">The frame, for its anchor and its width.</param>
+    /// <param name="page">The page rectangle, which is the area a frame is captured in.</param>
+    /// <param name="x">The position the origin and the offset gave it.</param>
+    private static Length CapturedOnPageAcross(PageFrame frame, DocRect page, Length x)
+    {
+        if (frame.Anchor is not (FrameAnchor.Paragraph or FrameAnchor.Character)) return x;
+
+        Length width = frame.Size.Width;
+        if (x + width > page.Right) x = page.Right - width;
+        if (x < page.X) x = page.X;
+
+        return x;
     }
 }
 

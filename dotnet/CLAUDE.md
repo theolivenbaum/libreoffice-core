@@ -549,6 +549,11 @@ Three things this changes about how a round is run:
      `DoNotCaptureDrawObjsOnPage` for every writerfilter import, DOCX *and* RTF, and the WW8 and ODF
      filters do not. Clamping every format instead moves 30 renderings against 3 and takes several
      DOCX shape templates away from the reference. `probes/words-apo-capture-r70/`.
+     ***And RTF is captured anyway, which the flag does not decide.*** Round 73 measured 26.2.4.2
+     clamping an RTF `{\shp}` onto the page in both axes on 21 of 21 probes, because such a shape is
+     a Writer *fly* rather than a drawing object and a fly is clipped by `SwFlyFreeFrame::CheckClip`.
+     The RTF reader now turns the capture on and `FrameLayout` has the horizontal half of it; DOCX is
+     untouched. See *An RTF shape is a Writer fly* below.
    - **`w:titlePg` with a header (or footer) declared and no `first` one still costs the first page an
      empty one's height** — one empty paragraph in the document's `header`- (`footer`-) named
      paragraph style, drawn as nothing. `SectionPropertyMap::CloseSectionGroup` sets
@@ -1622,6 +1627,65 @@ gap is zero and DejaVu Sans' is zero, so the two candidate laws agree *exactly* 
 Liberation Sans' is 67/2048 and Liberation Serif's 87/2048. Every workbook the sheet-shape path
 was built against resolved to Carlito. **A vertical-metric law tested only on Carlito has not
 been tested.** `probes/overflow-r69/`.
+
+### An RTF shape is a Writer *fly*, and four readings of one followed from getting that wrong
+
+Round 73's four defects are one fact and its consequences, and the fact is in the importer rather
+than in the layout: `RTFSdrImport::createShape` turns every top-level `shapeType` 1 (rectangle) or
+202 (text box) into a **`com.sun.star.text.TextFrame`**
+(`sw/source/writerfilter/rtftok/rtfsdrimport.cxx`:323-334), not into a drawing object. Everything
+below follows from that, and each was read the other way here for as long as the reader has had
+shapes. `probes/rtf-shape-r73/results.md`; `.rtf` gate **216 → 239 of 328**, original words track
+not one column of one row moved.
+
+- **It is captured on its page in both axes**, so `DoNotCaptureDrawObjsOnPage` does not exempt it:
+  a fly is clipped by `SwFlyFreeFrame::CheckClip` (`sw/source/core/layout/flylay.cxx`:471-545),
+  which that flag does not reach. Measured on 21 probes — five `\shpwr` values × {fits, overflows
+  right, overflows left}, plus one that begins entirely off the sheet and the vertical pair: the
+  clamp is `paperw − width` and `paperh − height` against the **page**, right edge first then left,
+  with no exception for wrap-through and none for a shape carrying no text. `FrameLayout` had only
+  the vertical half of it; `ImplAdjustHoriRelPos`
+  (`sw/source/core/objectpositioning/anchoredobjectposition.cxx`:674-721) is the other half and
+  sits under the same guard.
+- **`posrelh` and `posrelv` have a case for the value 1 and no other** (`rtfsdrimport.cxx`:696-717);
+  everything else keeps the `RelOrientation::FRAME` `getTextFrameDefaults` (:111-124) gave the
+  frame, which is the body column across and the anchor paragraph down. So **0 is not the page
+  margin** although MS-ODRAW's names invite it, and 0 and 3 place a shape identically — nine
+  horizontal probes and five vertical ones, on a page whose margin, body area and indented column
+  are three different origins. The corpus states `posrelh` 3 3536 times, 2 201 times, 1 33 times and
+  **0 not once**, so that correction has no reach; the useful half is that *the brief's premise was
+  wrong* — this tree already agreed with 26.2.4.2 on nine of nine before the round began.
+- **Its text is inset by 0.1 inch across and 0.05 inch down when the shape states nothing**, from
+  the same `getTextFrameDefaults`; `dxTextLeft` and its three siblings are EMUs over 360
+  (:600-625). Zero and absent are two different answers, exactly as they are for the wrap distance.
+- **`\shpwr`'s numbering is `rtfdispatchvalue.cxx`:1222-1247 and not the specification's prose.**
+  1 is `WrapTextMode_NONE` — no text beside the shape at all — 2 and 4 are `PARALLEL`, and **3 and
+  5 are both `THROUGH`**. Three of the five were read wrongly, and 3 is the expensive one: **1341
+  occurrences in 178 of the 338 converted `.rtf`**, each narrowing every line beside it. An
+  unstated `\shpwr` is the fly default, which is parallel; the field defaulted to 1.
+
+**And a table inside `{\shptxt}` was dropped whole**, which is a different seat and the larger
+half of the text loss. `FinishTable` named three destinations for a finished table — the body, a
+note, a running head — and not the frame, while `RecordLayoutParagraph` beside it named all four.
+LibreOffice's export writes a Writer text frame's content verbatim, so a boxed table is
+`{\shptxt\trowd…\cellx…\intbl…\row}`: **20 such groups in 11 of the 338 `.rtf`**, and
+`043_Visual_Product_Roadmap` drew 6 of the reference's 184 words.
+
+**The instrument that found all five is the previous round's**, `paperless extract` against our
+own rendering: every one of these documents reported the reference's character count *exactly*
+while drawing a fraction of it, because extraction walks the content tree and the drawing path is
+where the loss is. Use it before looking at a pixel.
+
+**One hypothesis about the `.rtf` column's pagination is refuted and should not be re-derived.**
+*"The reference keeps a table row whole where we split it."* It does not: a twenty-file synthetic
+(`probes/rtf-shape-r73/rowsplit.py`) walks a three-line row across a page boundary and **both
+renderers split it in the same place at all twenty**. The two disagree on two files only, where the
+reference breaks the page and we fit one more row on it — a one-row capacity difference whose sign
+is the wrong way round to explain `Annex-10`'s 169 pages against 148 at 189432 glyphs against
+189432. What that document does show is that **our page *N*+1 holds the reference's page *N*** for
+long stretches, so the excess is inserted at page boundaries rather than accumulated; that eight of
+our 169 pages carry fewer than 12 lines against none of the reference's 148; and that our body
+starts 12 pt higher on every page although the document declares no `{\header}` group at all.
 
 ### A worksheet shape's fill and outline are not read at all, and the gate cannot see it
 

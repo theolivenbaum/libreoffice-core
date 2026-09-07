@@ -181,9 +181,21 @@ public sealed class RtfDocument : IWordProcessingDocument, IPaginatedDocument
 
         PaginationOptions pagination = PaginationOptions.Word with
         {
-            // RTF goes through writerfilter exactly as DOCX does, so it takes the same
-            // `DoNotCaptureDrawObjsOnPage` — see `PaginationOptions.CapturesAnchoredObjectsOnPage`.
-            CapturesAnchoredObjectsOnPage = false,
+            // RTF goes through writerfilter exactly as DOCX does and so takes the same
+            // `DoNotCaptureDrawObjsOnPage` — but its shapes are captured anyway, and the reason is
+            // that they are not drawing objects. `RTFSdrImport::createShape`
+            // (`sw/source/writerfilter/rtftok/rtfsdrimport.cxx`:323-334) turns every top-level
+            // `shapeType` 1 or 202 into a `com.sun.star.text.TextFrame` — a Writer *fly* — and a fly
+            // is clipped onto its page by `SwFlyFreeFrame::CheckClip`
+            // (`sw/source/core/layout/flylay.cxx`:471-545), which that flag does not reach.
+            //
+            // Measured against 26.2.4.2 over 21 one-shape probes: the reference captures the shape's
+            // text on all five `\shpwr` values, in both axes, with or without `{\shptxt}`, and
+            // whether the frame merely overhangs the sheet or begins entirely off it. The
+            // `IsDraggingOffPageAllowed` escape (`sw/source/core/layout/anchoredobject.cxx`:790-801)
+            // fires on none of them, although two of the five are wrap-through.
+            // `dotnet/probes/rtf-shape-r73/results.md`.
+            CapturesAnchoredObjectsOnPage = true,
             CollapsesSpacing = !_addsParagraphSpacing,
             MaxPages = options?.MaxPages is > 0 ? options.MaxPages : PaginationOptions.Word.MaxPages,
         };
@@ -516,6 +528,7 @@ public sealed class RtfDocument : IWordProcessingDocument, IPaginatedDocument
                 VerticalAlignment = FrameVerticalAlignment.Offset,
                 VerticalOffset = Core.Units.Length.FromTwips(frame.Top),
                 Spacing = frame.WrapDistance ?? DefaultShapeWrapDistance,
+                Padding = blocks.Count == 0 ? default : frame.TextInset,
                 IsImage = blocks.Count == 0,
                 Image = frame.Picture.Raster,
                 Vector = frame.Picture.Vector,
@@ -550,16 +563,36 @@ public sealed class RtfDocument : IWordProcessingDocument, IPaginatedDocument
     private static readonly Core.Geometry.Margins DefaultShapeWrapDistance = new(
         DefaultWrapTwips, DefaultWrapTwips, DefaultWrapTwips, DefaultWrapTwips);
 
-    /// <summary>The wrap <c>\shpwr</c> and <c>\shpwrk</c> together ask for.</summary>
+    /// <summary>
+    /// What <c>\shpwr</c> and <c>\shpwrk</c> say a shape does to the text around it.
+    /// </summary>
     /// <remarks>
+    /// <para>
+    /// <b>The numbering is LibreOffice's dispatch table, not the specification's prose</b> —
+    /// <c>sw/source/writerfilter/rtftok/rtfdispatchvalue.cxx</c>:1222-1247, which is the only reading
+    /// of these five values that this project can be measured against. 1 is
+    /// <c>WrapTextMode_NONE</c>, which is Writer's <em>no text beside it</em> and so this reader's
+    /// <see cref="TextWrap.TopAndBottom"/>; 2 and 4 are <c>PARALLEL</c>, 4 additionally marking the
+    /// wrap tight; <b>3 and 5 are both <c>THROUGH</c></b>, 3 additionally setting <c>wrapNone</c>.
+    /// </para>
+    /// <para>
+    /// Three of the five were read wrongly here for as long as the reader has had shapes, and 3 is the
+    /// expensive one: <c>\shpwr3</c> occurs <b>1341 times in 178 of the converted corpus's 338
+    /// <c>.rtf</c></b>, and reading a through shape as an obstacle narrows every line beside it.
+    /// Measured on a probe of one 4000-twip box in a 12240-twip page against 26.2.4.2, one file per
+    /// value: the reference puts the first line at x = 72.1 pt for 1, 3 and 5 and at 272.1 for 2 and 4,
+    /// and starts it 60 pt lower for 1 alone. See <c>dotnet/probes/rtf-shape-r73/results.md</c>.
+    /// </para>
+    /// <para>
     /// Two words for one answer: the first says what kind of hole the text leaves and the second which
-    /// side of it the text may use. Only the kinds that leave a hole consult the side, since "through" and
-    /// "top and bottom" have no sides to choose between.
+    /// side of it the text may use. Only the kinds that leave a hole consult the side, since a through
+    /// shape and a top-and-bottom one have no sides to choose between.
+    /// </para>
     /// </remarks>
     private static TextWrap WrapOf(RtfLayoutFrame frame) => frame.Wrap switch
     {
-        4 => TextWrap.TopAndBottom,
-        5 => TextWrap.Through,
+        1 => TextWrap.TopAndBottom,
+        3 or 5 => TextWrap.Through,
         _ => frame.WrapSide switch
         {
             1 => TextWrap.Left,
