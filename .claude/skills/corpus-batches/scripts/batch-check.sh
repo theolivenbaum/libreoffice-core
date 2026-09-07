@@ -83,6 +83,19 @@ fi
 }
 echo "measuring $CLI" >&2
 
+# Which soffice is the reference. `$REF_SOFFICE` wins; otherwise whatever is on PATH.
+#
+# ANNOUNCED, because taking it from PATH silently is a trap this script fell into itself. The
+# calibration target is /opt/libreoffice26.2 and the image also carries 24.2.7.2 at /usr/bin/soffice,
+# so a sweep launched without PATH pointed at the target measures the wrong reference and produces a
+# table that looks entirely normal and is not comparable to any round's figures. One whole-corpus
+# sweep -- 1285 documents, about three hours -- was scored against 24.2.7.2 that way and thrown out.
+# The version is printed rather than the path alone, because the path does not say which build it is.
+REF="${REF_SOFFICE:-soffice}"
+command -v "$REF" >/dev/null || { echo "no soffice at $REF" >&2; exit 1; }
+echo "reference $(command -v "$REF") -- $("$REF" --version 2>/dev/null | head -1)" >&2
+
+
 mkdir -p "$OUT/ours" "$OUT/ref"
 : > "$OUT/rows.tsv"
 
@@ -227,11 +240,11 @@ one() {  # one <index>
     o="$OUT/ours/$id.pdf"; r="$OUT/ref/$id.pdf"
 
     rm -rf "${OUT:?}/t$idx"; mkdir -p "$OUT/t$idx"
-    timeout 240 "$CLI" render "$f" --format pdf --outdir "$OUT/t$idx" >/dev/null 2>&1
+    timeout -k 30 240 "$CLI" render "$f" --format pdf --outdir "$OUT/t$idx" >/dev/null 2>&1
     [ -f "$OUT/t$idx/$stem.pdf" ] && mv -f "$OUT/t$idx/$stem.pdf" "$o"
 
     rm -rf "$OUT/t$idx"; mkdir -p "$OUT/t$idx"
-    timeout 240 soffice -env:UserInstallation="file://$prof" \
+    timeout -k 30 240 "$REF" -env:UserInstallation="file://$prof" \
       --headless --convert-to pdf --outdir "$OUT/t$idx" "$f" >/dev/null 2>&1
     [ -f "$OUT/t$idx/$stem.pdf" ] && mv -f "$OUT/t$idx/$stem.pdf" "$r"
 

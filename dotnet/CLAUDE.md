@@ -1102,6 +1102,39 @@ soffice --version                       # LibreOffice 24.2.7.2 420(Build:2)
 /opt/libreoffice26.2/program/soffice --version
 ```
 
+**Knowing this is not enough — a sweep takes the reference from `PATH` and says nothing.** Round 75
+read the paragraph above, launched a 1285-document sweep of the converted corpus without pointing
+`PATH` at the tarball, and got a table that looked entirely normal: `.odp` 285 of 302, `.ods` 188,
+`.odt` 260, `.rtf` 238. It was scored against 24.2.7.2 and is not comparable to any figure a round
+has quoted, all of which are against 26.2.4.2. Three hours, discarded. **The wrong reference does
+not fail; it answers a different question fluently.**
+
+`batch-check.sh` no longer takes it silently. It resolves `$REF_SOFFICE`, falling back to `PATH`,
+and prints the resolved path *and version* beside the `measuring <CLI>` line, so the run announces
+which of the two it is:
+
+```sh
+REF_SOFFICE=/opt/libreoffice26.2/program/soffice \
+  .claude/skills/corpus-batches/scripts/batch-check.sh <root> '*' <outdir> 3
+# measuring .../Paperless.Cli
+# reference /opt/libreoffice26.2/program/soffice -- LibreOffice 26.2.4.2 0229ac93...
+```
+
+Read that second line before you read the table. A stored sweep that does not record it cannot be
+attributed to a reference at all.
+
+**And `timeout 240 soffice` never bounded `soffice`.** `soffice` execs `oosplash`, which *ignores
+SIGTERM*, and GNU `timeout` without `-k` sends SIGTERM once and then waits forever. On
+`sheets/done-016/ods/STC_WebList.ods` the reference render hung for **87 minutes** with its
+`soffice.bin` child defunct and `oosplash` refusing to reap it, holding one of three workers; the
+other two had already drained their share, so the sweep would never have finished and looked merely
+slow the whole time. Both render lines now use `timeout -k 30 240`. If a sweep stops appending
+rows, look for an `oosplash` older than the timeout before assuming contention:
+
+```sh
+ps -eo pid,etimes,args | grep [o]osplash | awk '$2 > 300'
+```
+
 **A divergence from the gate is therefore not automatically a defect**, and one round has already
 been spent finding that out. The seven `Printable_Graph_Paper_Template` documents sat at 32-to-51
 first-page ink on a row pitch a fraction of a point out; we match 26.2.4.2's pitch **to the twip**
