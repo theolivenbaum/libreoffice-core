@@ -290,17 +290,50 @@ internal static class OdfPageGeometry
     ///     <c>fo:min-height</c> makes the height <em>dynamic</em>. LibreOffice maps it to
     ///     <c>HeaderIsDynamicHeight</c> (<c>xmloff/source/style/PageMasterImportPropMapper.cxx</c>)
     ///     and then sizes the frame to its content, so the declared value is not a floor in practice —
-    ///     a header declaring 6 mm around one 12 pt line renders 4.9 mm tall. The spacing is added on
-    ///     top of that.
+    ///     a header declaring 6 mm around one 12 pt line renders 4.9 mm tall.
     ///   </item>
     /// </list>
     /// <para>
     /// The dynamic case therefore needs the header's content laid out to be exact, which cannot happen
-    /// before the page it sits on is known. The declared minimum plus the spacing is used instead — the
-    /// same approximation LibreOffice's own DOC exporter falls back to, and which its comment calls
+    /// before the page it sits on is known. The declared minimum is used instead — the same
+    /// approximation LibreOffice's own DOC exporter falls back to, and which its comment calls
     /// "totally nonoptimum, but the best we can do"
-    /// (<c>sw/source/filter/ww8/writerwordglue.cxx</c>). It errs towards leaving too much room, so text
-    /// starts slightly low rather than overlapping the header.
+    /// (<c>sw/source/filter/ww8/writerwordglue.cxx</c>).
+    /// </para>
+    /// <para>
+    /// <strong>Whether the spacing is then added on top of the minimum is
+    /// <c>style:dynamic-spacing</c>'s to say, and Writer writes it on.</strong> It maps to
+    /// <c>SwHeaderAndFooterEatSpacingItem</c> (<c>sw/source/core/bastyp/init.cxx</c>:434) and the
+    /// header <em>eats</em> the gap: <c>SwHeadFootFrame::FormatPrt</c> starts the print area's minimum
+    /// at <c>fo:min-height</c> less both spacings, then gives back out of the spacing exactly what the
+    /// content overruns that by (<c>sw/source/core/layout/hffrm.cxx</c>:116-170). Rendering the pair of
+    /// readings against 26.2.4.2 and measuring the first body line reduces both to one formula:
+    /// </para>
+    /// <code>
+    /// total = max(min-height, content + (dynamic-spacing ? 0 : gap))
+    /// </code>
+    /// <para>
+    /// — verified over sixteen shapes, among them a 1 cm minimum under a 1 cm gap (28.35 pt with the
+    /// flag, 41.80 without) and a 2 cm minimum under a 3 cm gap (56.70 against 98.50). So the declared
+    /// minimum <em>includes</em> the gap when the flag is set, and a header whose content fits occupies
+    /// the minimum and not one twip more. That branch is therefore exact here, and it is the one that
+    /// matters: Writer writes the attribute on everything it exports and writes it <c>true</c>.
+    /// </para>
+    /// <para>
+    /// The unflagged branch keeps the older <c>minimum + gap</c> and is still an approximation — the
+    /// formula wants the content, which cannot be had before the page the header sits on is known, and
+    /// <c>minimum + gap</c> overshoots it by the difference between the two whenever the minimum alone
+    /// would have covered the content (56.70 against the reference's 41.80 on the first shape above).
+    /// Left alone deliberately: one header style in the 338 converted <c>.odt</c> says <c>false</c> and
+    /// one omits the attribute, so no measurement here reaches it, and erring high leaves text below a
+    /// header rather than through it.
+    /// </para>
+    /// <para>
+    /// Reading the flag at all is the difference between a body that starts where the file says and one
+    /// pushed down by the whole gap on every page. 152 of the 338 <c>.odt</c> of the converted corpus
+    /// declare a dynamic-height header or footer with the flag on and a gap worth more than half a
+    /// point; the gaps run to 89 pt, which on a letter page is four lines of text and a page every
+    /// fifteen.
     /// </para>
     /// </remarks>
     private static Length FurnitureExtent(OdfPropertySet? properties)
@@ -316,8 +349,36 @@ internal static class OdfPageGeometry
             OdfValue.ParseLength(properties.Get(OdfNamespaces.FoCompatible, "min-height")))
             ?? Core.Units.Length.Zero;
 
-        return declared + FurnitureSpacing(properties);
+        return EatsSpacing(properties) ? declared : declared + FurnitureSpacing(properties);
     }
+
+    /// <summary>
+    /// True when the furniture absorbs the gap below it rather than adding it to its own height.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The attribute has to be there and has to say so. <c>xmloff</c> maps it to the MAYBEVOID
+    /// property <c>HeaderDynamicSpacing</c> (<c>xmloff/source/style/PageMasterStyleMap.cxx</c>:195,
+    /// :251; <c>sw/source/core/unocore/unomap1.cxx</c>:513, :546), so an absent attribute sets nothing
+    /// and the item keeps its pool default — and that default is <em>off</em>:
+    /// <c>SwHeaderAndFooterEatSpacingItem</c>'s constructor takes <c>bPrt = false</c>
+    /// (<c>sw/inc/hfspacingitem.hxx</c>:30-31) and the pool entry uses it
+    /// (<c>sw/source/core/bastyp/init.cxx</c>:434).
+    /// </para>
+    /// <para>
+    /// In practice Writer writes the attribute on everything it exports and writes it <c>true</c>: of
+    /// the 543 header and footer styles that carry a properties child at all in the 338 converted
+    /// <c>.odt</c>, 542 state the attribute, 541 of those
+    /// say <c>true</c> and one says <c>false</c>. The absent case is therefore the rare one, and
+    /// reading it as off is both what the item does and the older behaviour, so a file that says
+    /// nothing does not move.
+    /// </para>
+    /// </remarks>
+    private static bool EatsSpacing(OdfPropertySet properties)
+        => string.Equals(
+            properties.Get(OdfNamespaces.Style, "dynamic-spacing"),
+            "true",
+            StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// True when the furniture states a height rather than a floor, so it does not grow with its content.
