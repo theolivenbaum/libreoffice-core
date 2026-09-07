@@ -195,6 +195,17 @@ public sealed partial class RtfDocumentReader
         public bool StyleSheetIsCharacter { get; set; }
         public int? StyleSheetBasedOn { get; set; }
 
+        /// <summary>
+        /// The control words a <c>{\stylesheet}</c> entry has stated, while one is being read.
+        /// </summary>
+        /// <remarks>
+        /// Null outside the stylesheet, and a fresh set for every entry — see <see cref="Clone"/>.
+        /// It exists because a style is written as the difference from its <c>\sbasedon</c> parent
+        /// and RTF's toggles cannot say "unstated": <c>\b0</c> and an absent <c>\b</c> leave the
+        /// same group state, and only one of the two may beat a bold parent style.
+        /// </remarks>
+        public HashSet<string>? StyleSheetStated { get; set; }
+
         /// <summary>Text collected by a group whose destination is not document content.</summary>
         public StringBuilder Collected { get; } = new();
 
@@ -284,6 +295,11 @@ public sealed partial class RtfDocumentReader
             LanguageId = LanguageId,
             CharacterStyleId = CharacterStyleId,
             ParagraphStyleId = ParagraphStyleId,
+
+            // A fresh set rather than the parent's: each {\sN ...;} entry states its own
+            // properties, and sharing one set would make every entry look as though it had
+            // stated whatever an earlier one did.
+            StyleSheetStated = StyleSheetStated is null ? null : [],
             OutlineLevel = OutlineLevel,
             ListId = ListId,
             ListLevel = ListLevel,
@@ -1844,13 +1860,128 @@ public sealed partial class RtfDocumentReader
         }
     }
 
+    /// <summary>
+    /// Records one <c>{\stylesheet}</c> entry: its name, its <c>\sbasedon</c> parent, and the
+    /// formatting it states.
+    /// </summary>
+    /// <remarks>
+    /// The formatting is read off the entry's own group state, filtered by which control words the
+    /// entry actually wrote — see <see cref="GroupState.StyleSheetStated"/>. A style states the
+    /// <em>difference</em> from its parent, so the filter is what keeps an unstated property from
+    /// overwriting an inherited one with the group state's default.
+    /// </remarks>
     private void RecordStyle(GroupState state, int id)
     {
         string name = state.Collected.ToString().TrimEnd(';').Trim();
         if (name.Length == 0) return;
 
         _styles.Add(id, new RtfStyle(
-            name, state.StyleSheetBasedOn, state.OutlineLevel, state.StyleSheetIsCharacter));
+            name, state.StyleSheetBasedOn, state.OutlineLevel, state.StyleSheetIsCharacter,
+            FormattingOf(state)));
+    }
+
+    /// <summary>The formatting one stylesheet entry stated, as its group saw it.</summary>
+    private static RtfStyleFormatting FormattingOf(GroupState state)
+    {
+        HashSet<string>? said = state.StyleSheetStated;
+        if (said is null || said.Count == 0) return RtfStyleFormatting.Empty;
+
+        bool Said(params string[] words)
+        {
+            foreach (string word in words) if (said.Contains(word)) return true;
+            return false;
+        }
+
+        return new RtfStyleFormatting
+        {
+            FontIndex = Said("f") ? state.FontIndex : null,
+            FontSizeHalfPoints = Said("fs") ? state.FontSizeHalfPoints : null,
+            Bold = Said("b") ? state.Bold : null,
+            Italic = Said("i") ? state.Italic : null,
+            Underline = Said(
+                "ul", "uld", "uldash", "uldashd", "uldashdd", "uldb", "ulhwave", "ulldash",
+                "ulth", "ulthd", "ulthdash", "ulthdashd", "ulthdashdd", "ulthldash",
+                "ululdbwave", "ulw", "ulwave", "ulnone") ? state.Underline : null,
+            Strike = Said("strike", "striked") ? state.Strike : null,
+            Capitals = Said("caps") ? state.Capitals : null,
+            SmallCapitals = Said("scaps") ? state.SmallCapitals : null,
+            ForegroundColourIndex = Said("cf") ? state.ForegroundColourIndex : null,
+            LanguageId = Said("lang", "langnp") ? state.LanguageId : null,
+        };
+    }
+
+    /// <summary>
+    /// Selects a paragraph style: the one it replaces stops contributing, and this one's character
+    /// formatting becomes the base the paragraph's own control words then override.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// RTF writes <c>\sN</c> before the direct formatting that refines it — LibreOffice's export
+    /// writes <c>\pard\plain \s24\li85\lin85\intbl…</c> and Word's does the same — so applying
+    /// the style where the <c>\s</c> appears gives the precedence LibreOffice reaches by merging
+    /// the two at paragraph end (<c>RTFDocumentImpl::getProperties</c>,
+    /// <c>sw/source/writerfilter/rtftok/rtfdocumentimpl.cxx</c>:534-637, whose own comment is
+    /// <em>"Take paragraph style into account for character properties as well, as paragraph style
+    /// may contain character properties"</em> at :616-618).
+    /// </para>
+    /// <para>
+    /// A style <em>replaces</em> its predecessor rather than piling onto it, which is why the old
+    /// one is withdrawn first: <c>\pard</c> selects style zero
+    /// (<c>rtfdispatchflag.cxx</c>:600-614, <em>"By default the style with index 0 is applied"</em>)
+    /// and the <c>\sN</c> immediately after it selects another.
+    /// </para>
+    /// </remarks>
+    private void SelectParagraphStyle(GroupState state, int id)
+    {
+        Withdraw(state, _styles.FormattingOf(state.ParagraphStyleId));
+        state.ParagraphStyleId = id;
+        Apply(state, _styles.FormattingOf(id));
+    }
+
+    /// <summary>
+    /// Puts the paragraph style's character formatting back after <c>\plain</c>.
+    /// </summary>
+    /// <remarks>
+    /// The style sits under the direct formatting rather than beside it, so clearing the direct
+    /// half exposes the style's again.
+    /// </remarks>
+    private void ReapplyStyleCharacters(GroupState state)
+        => Apply(state, _styles.FormattingOf(state.ParagraphStyleId));
+
+    private static void Apply(GroupState state, RtfStyleFormatting f)
+    {
+        if (f.IsEmpty) return;
+
+        if (f.FontIndex is { } font) state.FontIndex = font;
+        if (f.FontSizeHalfPoints is { } size) state.FontSizeHalfPoints = size;
+        if (f.Bold is { } bold) state.Bold = bold;
+        if (f.Italic is { } italic) state.Italic = italic;
+        if (f.Underline is { } underline) state.Underline = underline;
+        if (f.Strike is { } strike) state.Strike = strike;
+        if (f.Capitals is { } capitals) state.Capitals = capitals;
+        if (f.SmallCapitals is { } smallCapitals) state.SmallCapitals = smallCapitals;
+        if (f.ForegroundColourIndex is { } colour) state.ForegroundColourIndex = colour;
+        if (f.LanguageId is { } language) state.LanguageId = language;
+    }
+
+    /// <summary>
+    /// Undoes what a paragraph style contributed, returning each property it set to the value a
+    /// bare <c>\pard\plain</c> leaves.
+    /// </summary>
+    private void Withdraw(GroupState state, RtfStyleFormatting f)
+    {
+        if (f.IsEmpty) return;
+
+        if (f.FontIndex is not null) state.FontIndex = _defaultFontIndex;
+        if (f.FontSizeHalfPoints is not null) state.FontSizeHalfPoints = null;
+        if (f.Bold is not null) state.Bold = false;
+        if (f.Italic is not null) state.Italic = false;
+        if (f.Underline is not null) state.Underline = false;
+        if (f.Strike is not null) state.Strike = false;
+        if (f.Capitals is not null) state.Capitals = false;
+        if (f.SmallCapitals is not null) state.SmallCapitals = false;
+        if (f.ForegroundColourIndex is not null) state.ForegroundColourIndex = null;
+        if (f.LanguageId is not null) state.LanguageId = 0;
     }
 
 }
