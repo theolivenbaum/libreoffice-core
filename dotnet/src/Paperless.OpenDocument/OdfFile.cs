@@ -124,6 +124,33 @@ public sealed class OdfFile : IDisposable
     /// <summary>Opens a part of the package by name, or null when absent or flat XML.</summary>
     public Stream? OpenPart(string partName) => _package?.GetPart(partName)?.Open();
 
+    /// <summary>Records a problem found while reading the document.</summary>
+    /// <remarks>
+    /// <para>
+    /// The family readers above this one repair what they can and skip what they cannot, and the
+    /// skip has to be visible to a caller — rule 5 of the working notes. They cannot reach
+    /// <see cref="Diagnostics"/> to add to it, so this is the one way in, mirroring
+    /// <c>PptxFile.Report</c> on the other side of the tree.
+    /// </para>
+    /// <para>
+    /// It has to be usable <em>after</em> the document has been read, because some of what a
+    /// reader can only find out lazily happens during layout: an embedded font part is opened
+    /// when a run first asks for that family, which is long after <c>OdfReader.Read</c> returned.
+    /// That is why <see cref="Diagnostics"/> is the live list and <c>OdfDocument</c> hands it
+    /// straight through.
+    /// </para>
+    /// </remarks>
+    /// <param name="diagnostic">What was found.</param>
+    public void Report(Diagnostic diagnostic) => _diagnostics.Add(diagnostic);
+
+    /// <summary>The live list behind <see cref="Diagnostics"/>, for the reader to append to.</summary>
+    /// <remarks>
+    /// Handed to <c>OdfContentReader</c> so that everything a document collects — opening it,
+    /// reading its styles, walking its body, and anything a layout finds later — is one list
+    /// rather than a snapshot and a remainder.
+    /// </remarks>
+    internal List<Diagnostic> DiagnosticList => _diagnostics;
+
     /// <inheritdoc/>
     public void Dispose() => _package?.Dispose();
 

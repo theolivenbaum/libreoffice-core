@@ -99,11 +99,22 @@ public sealed class OdfFontFace
 {
     internal OdfFontFace(XElement element)
     {
+        Element = element;
         Name = element.Attribute(XName.Get("name", OdfNamespaces.Style))?.Value ?? string.Empty;
         FontFamily = element.Attribute(XName.Get("font-family", OdfNamespaces.SvgCompatible))?.Value;
         GenericFamily = element.Attribute(XName.Get("font-family-generic", OdfNamespaces.Style))?.Value;
         Pitch = element.Attribute(XName.Get("font-pitch", OdfNamespaces.Style))?.Value;
     }
+
+    /// <summary>The declaration as written.</summary>
+    /// <remarks>
+    /// Kept because the attributes above are not all of it: a document that embeds its own faces
+    /// carries them under <c>svg:font-face-src/svg:font-face-uri</c> children of this element,
+    /// and a reader that wants them needs the element rather than a copy of four strings. The
+    /// tree is retained by <c>OdfFile</c> for the document's lifetime either way, so this costs
+    /// a reference and no memory.
+    /// </remarks>
+    public XElement Element { get; }
 
     /// <summary>The name <c>style:font-name</c> refers to.</summary>
     public string Name { get; }

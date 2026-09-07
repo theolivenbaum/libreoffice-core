@@ -911,9 +911,10 @@ of forty of both.
 **What that column found in three rounds is that the ODF readers were years behind the OOXML ones
 on things no corpus figure could ever have shown.** It opened at 120 of 302 with a master page
 drawn nowhere; it reached 285 of 302 on the master's running objects, `style:shrink-to-fit` and
-`loext:shadow-blur`, and is **289 of 302** after the chart reader's axis resolution,
-`draw:text-rotate-angle` and `text:line-break` (`probes/odp-chart-r72`). Two rules from it are
-general enough to carry:
+`loext:shadow-blur`, reached 289 of 302 on the chart reader's axis resolution,
+`draw:text-rotate-angle` and `text:line-break` (`probes/odp-chart-r72`), and is **295 of 302**
+after an ODF document's own embedded fonts and an empty paragraph's height
+(`probes/odp-embed-r79`). Two rules from it are general enough to carry:
 
 - **An ODF attribute LibreOffice's own exporter writes is very often not in the namespace the
   specification puts it in, and the ODF-namespace spelling then appears in no real file at all.**
@@ -980,6 +981,67 @@ general enough to carry:
   the cause was found, because all three shared the defect. LibreOffice's own exporter always
   names `Frame`, so no real document is affected; **every hand-built `draw:frame` probe must name
   a parent style**, and the same trap is waiting in `.odp` and `.ods`.
+
+**An ODF document's own embedded fonts were never loaded, and the seat is `svg:font-face-uri`.**
+A `style:font-face` that carries a face holds one `svg:font-face-uri` per style under an
+`svg:font-face-src`, naming a package part through `xlink:href` or carrying the bytes as an
+`office:binary-data` child; `XMLFontStyleContextFontFaceUri::endFastElement`
+(`xmloff/source/style/XMLFontStylesContext.cxx`:250-277) picks the container off
+`svg:font-face-format` and hands the stream to `addEmbeddedFont`. Three details decide whether a
+reader reproduces it. **The style is read out of the face**, because that `SetAttribute`
+(`:230-237`) handles `xlink:href` and nothing else — LibreOffice's own export writes
+`loext:font-style` and `loext:font-weight` on every one of them and the importer reads neither.
+**The face is registered under its own typographic family**, name 16 → name 1 → PostScript name
+(`vcl/source/font/TrueTypeFont.cxx`:140-145), falling back to the document's `svg:font-family`
+only when the face carries none (`embeddedfontsmanager.cxx`:355-362, tdf#172647). And **an
+external URL is not fetched** (`:305`). Reach **6 of 302 `.odp`, zero `.odt`, zero `.ods`** — the
+corpus's embedding all arrives through LibreOffice's own ODF export of a `.pptx`. `pdffonts` over
+the six goes from 2 of 6 face sets matching 26.2.4.2 to **6 of 6**. `OdfEmbeddedFonts`; the deck
+reader's `PptxEmbeddedFonts` was already the same shape and is the model.
+
+**And the half of that which was not in an ODF reader at all: a zero-length `hdmx` makes
+`hb_subset_or_fail` fail, and a failed subset is a face this tree names and does not embed.**
+`FontSubsetter` named the tables it *dropped* — GSUB, GPOS, GDEF. LibreOffice inverts the drop
+set and keeps fourteen tags (`PhysicalFontFace::CreateFontSubset`,
+`vcl/source/font/PhysicalFontFace.cxx`:546-562, *"Keep only tables needed for PDF embedding, drop
+everything else"*), and that is not a weight measure: the four `Font_Verdana_*.ttf` inside
+`Sean Monogue.odp` carry `hdmx` and `VDMX` at length **zero**, and subsetting returns null on all
+four as they stand and succeeds on all four with `hdmx` alone removed — not `VDMX`, not `LTSH`.
+The symptom is a PDF that draws the reader's own substitute for a family the document carried,
+and **the only gate column that can see it is `unembedded`**. Naming the keepers is now what this
+tree does too.
+
+**An empty ODF paragraph is as tall as its own empty `text:span`, not as the shape's default.**
+LibreOffice writes an empty line as `<text:p><text:span text:style-name="T15"/></text:p>` and
+EditEngine measures it from the character attributes at the paragraph's own position
+(`editeng/source/editeng/impedit3.cxx`:1896-1902), so the excess a reader sees is
+`1.2 × (default − span)` **per empty paragraph** — 19.2 pt on a 16 pt span in a 32 pt
+placeholder. That is the whole of round 78's *"inter-paragraph spacing too large by a constant"*,
+and **all three causes that reading left open are refuted**: nothing is added, no margins are
+summed that the reference collapses, and no shrink-to-fit is involved. Which span, where there
+are several, is **the last one entered** — not the largest and not the outermost. The control
+that hides it is a *bare* `<text:p/>`, which does take the shape's default and on which both
+renderers already agreed. Measured over ten one-attribute variants of one slide, 10 of 10 exact.
+
+**A `text:a` in slide text is an EditEngine *field*, and that explains two things an image
+cannot.** The `EE_FEATURE_FIELD` branch sizes its portion straight from `QuickGetTextSize`
+(`impedit3.cxx`:1100-1104) and, unlike the ordinary text branch at `:1256-1259`, never applies
+the fixed cell height — so a line holding a hyperlink is `1.0 em` tall where its neighbours are
+`1.2 em`. And an over-long field is broken at **cell boundaries** through
+`nextCharacters(…, SKIPCELL, …)` into an `ExtraPortionInfo::lineBreaksList` (`:1131-1200`), which
+is a break opportunity at *every character*. So *"the reference breaks a long URL mid-token"* is
+not a URL rule or a hyphenation rule; it is what a field does. Established by variant — stripping
+the `<text:a>` elements and keeping their text makes 26.2.4.2 draw every pitch at 1.2 em.
+**Reach 485 in 107 of the 302 `.odp`, and left**: it needs a portion kind in `SlideTextLayout`.
+
+**`style:font-independent-line-spacing` is honoured only on the shape's `draw:text-style-name`
+paragraph style.** The flag is EditEngine-wide (`SetFixedCellHeight`), so it belongs to the
+shape's text and not to a paragraph inside it: the same four-slide probe with the attribute on
+the paragraphs' own `text:style-name` comes back from 26.2.4.2 at ascent + descent, and moved to
+the frame's text style at 1.2 em. This tree reads it from either place and is therefore more
+permissive; no corpus document distinguishes them, because the exporter writes it on both. **A
+hand-built `.odp` probe that puts it on the paragraph style is measuring the wrong law** — that
+cost the first cut of `odp-empty-paragraph.fodp`.
 
 **And a shadow's blur radius decides whether the shadow's *text* is real text**, which is the
 sharpest example this project has of a one-attribute defect that no gate column can see and that

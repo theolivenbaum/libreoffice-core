@@ -345,13 +345,16 @@ internal static class OdfTextBody
     {
         StringBuilder text = new();
         List<SlideTextRun> runs = [];
+        IReadOnlyList<OdfStyleReference>? lastSpan = null;
 
-        Collect(file, paragraph, cascade, text, runs, fields);
+        Collect(file, paragraph, cascade, text, runs, fields, ref lastSpan);
 
         if (runs.Count == 0)
         {
-            // An empty paragraph is still a line, as tall as the text that would go on it.
-            runs.Add(Run(file, cascade, 0, 0));
+            // An empty paragraph is still a line, and it is as tall as the text that *would* go
+            // on it -- which is the formatting of its last empty `text:span`, not the
+            // paragraph's own. See `EmptyLineCascade` for the measurement.
+            runs.Add(Run(file, lastSpan ?? cascade, 0, 0));
         }
 
         return new SlideParagraph(
@@ -380,7 +383,8 @@ internal static class OdfTextBody
         IReadOnlyList<OdfStyleReference> cascade,
         StringBuilder text,
         List<SlideTextRun> runs,
-        OdpRunningObjects? fields)
+        OdpRunningObjects? fields,
+        ref IReadOnlyList<OdfStyleReference>? lastSpan)
     {
         foreach (XNode node in element.Nodes())
         {
@@ -413,15 +417,21 @@ internal static class OdfTextBody
             switch (child.Name.LocalName)
             {
                 case "span":
-                    Collect(
-                        file,
-                        child,
-                        [.. cascade, new OdfStyleReference(
+                    IReadOnlyList<OdfStyleReference> nested =
+                    [
+                        .. cascade,
+                        new OdfStyleReference(
                             child.Attribute(XName.Get("style-name", OdfNamespaces.Text))?.Value,
-                            OdfStyleFamily.Text)],
-                        text,
-                        runs,
-                        fields);
+                            OdfStyleFamily.Text),
+                    ];
+
+                    // Recorded whether or not the span carries any text, because an empty one
+                    // still sizes the line: see `EmptyLineCascade`. Recorded *before* the
+                    // descent, so that the winner is the last span entered in document order --
+                    // the innermost of a nest, and the later of two siblings. Both were
+                    // measured; the nest is the one an "outermost" or "largest" rule gets wrong.
+                    lastSpan = nested;
+                    Collect(file, child, nested, text, runs, fields, ref lastSpan);
                     break;
 
                 // The slide's own number. The element's content is the placeholder the file
@@ -454,7 +464,7 @@ internal static class OdfTextBody
 
                 default:
                     // A field, a bookmark, a note anchor: whatever text it carries is its own.
-                    Collect(file, child, cascade, text, runs, fields);
+                    Collect(file, child, cascade, text, runs, fields, ref lastSpan);
                     break;
             }
         }
@@ -496,6 +506,37 @@ internal static class OdfTextBody
         return select is null or "current";
     }
 
+    /// <summary>
+    /// Why an empty paragraph's line is measured against its last <c>text:span</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// LibreOffice's export writes an empty line as <c>&lt;text:p&gt;&lt;text:span
+    /// text:style-name="T15"/&gt;&lt;/text:p&gt;</c> — a span carrying the character formatting
+    /// and no characters — and EditEngine measures such a line from the character attributes at
+    /// the paragraph's own position: <c>ImpEditEngine::CreateLines</c> builds a dummy portion
+    /// from <c>SeekCursor(rParaPortion.GetNode(), 0, aTmpFont)</c> and gives it
+    /// <c>ImplCalculateFontIndependentLineSpacing(aTmpFont.GetFontHeight())</c>
+    /// (<c>editeng/source/editeng/impedit3.cxx</c>:1896-1902), so the empty span's own size is
+    /// what sets the height.
+    /// </para>
+    /// <para>
+    /// Reading the paragraph's cascade instead gives the shape's <em>default</em> size, which on
+    /// a presentation placeholder is far larger than the run it stands in for. Measured on
+    /// <c>0335fab9-79f0-4944-b92c-f223837ca2d8.odp</c> against 26.2.4.2, one 16 pt empty span
+    /// between two 16 pt paragraphs: the reference advances 23.19 pt over it and we advanced
+    /// 42.41, because the placeholder's default is 32 pt and 1.2 × (32 − 16) is 19.2 — the
+    /// "constant excess on every inter-paragraph gap" that a visual reading of that slide
+    /// reported. A <em>bare</em> <c>&lt;text:p/&gt;</c> with no span at all does take the
+    /// paragraph's default, and both renderers agree on it at 42.41.
+    /// </para>
+    /// <para>
+    /// The span that wins is the last one <em>entered</em>, not the largest and not the
+    /// outermost: over four one-attribute variants of the same slide, 26.2.4.2 answers 8 pt for
+    /// a 40 pt span followed by an 8 pt one, 40 pt for the reverse order, and 8 pt for an 8 pt
+    /// span nested inside a 40 pt one. See <c>probes/odp-embed-r79/</c>.
+    /// </para>
+    /// </remarks>
     private static SlideTextRun Run(
         OdfFile file, IReadOnlyList<OdfStyleReference> cascade, int start, int length)
     {
@@ -509,6 +550,14 @@ internal static class OdfTextBody
             format.IsBold ? 700 : 400,
             format.IsItalic,
             format.Colour ?? Colour.Black,
+            // `style:text-underline-style` and `style:text-line-through-style`, which
+            // `OdfTextFormat` has resolved since it was written and which nothing passed on: a
+            // slide's hyperlinks came out the right colour with no rule under them. ODF states
+            // the decoration explicitly on the link's own text style -- LibreOffice's export
+            // writes `style:text-underline-style="solid"` beside `fo:color` -- so there is no
+            // implicit "a hyperlink is underlined" rule here as there is in DrawingML.
+            IsUnderlined: format.IsUnderlined,
+            IsStruckThrough: format.IsStruckThrough,
             Escapement: Escaped(format.Position));
     }
 
