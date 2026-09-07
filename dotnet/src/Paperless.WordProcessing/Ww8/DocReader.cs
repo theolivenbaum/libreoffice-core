@@ -246,7 +246,8 @@ public sealed class Ww8Document : IWordProcessingDocument, IPaginatedDocument
         for (int i = 0; i < Sections.Count; i++)
         {
             PageFurnitureSet? furniture = Furniture(fonts, i, carry);
-            sections.Add(new PaginatedSection(Sections[i], furniture, carry.StatesOwnFurniture));
+            sections.Add(new PaginatedSection(
+                Sections[i], furniture, carry.StatesOwnFurniture, SideMarginsAreASectionIndent: true));
         }
 
         return new WordProcessingPages(

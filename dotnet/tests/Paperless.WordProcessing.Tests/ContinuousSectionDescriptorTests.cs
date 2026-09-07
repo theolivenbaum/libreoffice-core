@@ -152,6 +152,66 @@ public sealed class ContinuousSectionDescriptorTests
         resolved[1].Section.Page.Margins.Top.ShouldBe(FirstGeometry.Margins.Top);
     }
 
+    /// <summary>
+    /// A <c>.doc</c>'s continuous section keeps its own side margins, and only those.
+    /// </summary>
+    /// <remarks>
+    /// The one place the two Word readers diverge, and it is in the C++ rather than in a guess:
+    /// <c>wwSectionManager::InsertSection</c> puts <c>section.left − page.left</c> on the text section
+    /// as an <c>SvxLRSpaceItem</c> (<c>ww8par6.cxx</c>:758-770), so it is not on the descriptor and
+    /// does not fall with it; writerfilter's <c>ApplySectionProperties</c> sets no indent at all
+    /// (<c>dmapper/PropertyMap.cxx</c>:792-812). Getting this wrong cost
+    /// <c>644730BRI0mna000BOX361539B00public0.doc</c> a page — 4 against 26.2.4.2's 5 — by pulling
+    /// pages 2 to 5 from a 72 pt left margin to the cover section's 30 pt.
+    /// </remarks>
+    [Fact]
+    public void AWw8SectionsSideMarginsSurviveTheDescriptorAndItsVerticalOnesDoNot()
+    {
+        PageGeometry stated = SecondGeometry with
+        {
+            Margins = SecondGeometry.Margins with { Left = Length.FromTwips(4320) },
+        };
+
+        IReadOnlyList<PaginatedSection> resolved = ContinuousPageDescriptors.Resolve(
+            [
+                new PaginatedSection(new WritingSection { Page = FirstGeometry }),
+                new PaginatedSection(
+                    new WritingSection { Page = stated, Break = SectionBreak.Continuous },
+                    Furniture: null,
+                    StatesOwnFurniture: false,
+                    SideMarginsAreASectionIndent: true),
+            ],
+            []);
+
+        resolved[1].Section.Page.Margins.Left.ShouldBe(Length.FromTwips(4320));
+        resolved[1].Section.Page.Margins.Top.ShouldBe(FirstGeometry.Margins.Top);
+    }
+
+    /// <summary>A DOCX's do not, because they are on the page style and nowhere else.</summary>
+    /// <remarks>
+    /// Measured: 26.2.4.2 leaves page two of the synthetic
+    /// <see cref="ContinuousSectionGeometryTests"/> builds at the first section's 36.1 pt although
+    /// the continuous section states a one-inch left margin.
+    /// </remarks>
+    [Fact]
+    public void ADocxSectionsSideMarginsFallWithTheDescriptor()
+    {
+        PageGeometry stated = SecondGeometry with
+        {
+            Margins = SecondGeometry.Margins with { Left = Length.FromTwips(4320) },
+        };
+
+        IReadOnlyList<PaginatedSection> resolved = ContinuousPageDescriptors.Resolve(
+            [
+                new PaginatedSection(new WritingSection { Page = FirstGeometry }),
+                new PaginatedSection(
+                    new WritingSection { Page = stated, Break = SectionBreak.Continuous }),
+            ],
+            []);
+
+        resolved[1].Section.Page.Margins.Left.ShouldBe(FirstGeometry.Margins.Left);
+    }
+
     /// <summary>A section that is not continuous keeps everything it states.</summary>
     /// <remarks>
     /// The control on all of the above: the rule is about the break type and nothing else, and a

@@ -121,12 +121,24 @@ public static class ContinuousPageDescriptors
         WritingSection from = previous.Section;
         WritingSection own = section.Section;
 
+        PageMargins margins = from.Page.Margins;
+
+        // The WW8 reader has already made these an indent on the text section, which is not part of
+        // the descriptor and so does not fall with it. See PaginatedSection.SideMarginsAreASectionIndent
+        // for the two file:line citations and the measurement that separates the readers.
+        if (section.SideMarginsAreASectionIndent)
+        {
+            margins = margins with { Left = own.Page.Margins.Left, Right = own.Page.Margins.Right };
+        }
+
         return section with
         {
             Section = own with
             {
                 Page = from.Page with
                 {
+                    Margins = margins,
+                    Gutter = own.Page.Gutter,
                     Columns = own.Page.Columns,
                     ColumnGap = own.Page.ColumnGap,
                     ColumnRuler = own.Page.ColumnRuler,

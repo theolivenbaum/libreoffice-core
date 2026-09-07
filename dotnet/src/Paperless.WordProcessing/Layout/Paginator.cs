@@ -429,10 +429,28 @@ public sealed record PaginationOptions
 /// exists to feed.
 /// </para>
 /// </param>
+/// <param name="SideMarginsAreASectionIndent">
+/// True when the reader has already turned a continuous section's left and right margins into an
+/// indent on the text section, so that they survive the page descriptor being dropped.
+/// <para>
+/// <strong>The two Word readers genuinely differ here and the difference is measurable.</strong>
+/// <c>wwSectionManager::InsertSection</c> puts <c>section.left − page.left</c> and its right-hand
+/// twin on the section format as an <c>SvxLRSpaceItem</c>
+/// (<c>sw/source/filter/ww8/ww8par6.cxx</c>:758-770), unconditionally, for every continuous section
+/// that becomes a text section — so a <c>.doc</c>'s continuous section keeps its own side margins
+/// however its vertical ones and its furniture turn out. writerfilter's
+/// <c>SectionPropertyMap::ApplySectionProperties</c> sets a writing mode and an endnote flag and
+/// nothing else (<c>dmapper/PropertyMap.cxx</c>:792-812), so a DOCX's or RTF's side margins are on
+/// the page style alone and die with it. Measured on the synthetic
+/// <c>ContinuousSectionGeometryTests</c> builds: 26.2.4.2 leaves page two of a DOCX whose continuous
+/// section states a one-inch left margin at the first section's <strong>36.1 pt</strong>.
+/// </para>
+/// </param>
 public sealed record PaginatedSection(
     WritingSection Section,
     PageFurnitureSet? Furniture = null,
-    bool StatesOwnFurniture = false);
+    bool StatesOwnFurniture = false,
+    bool SideMarginsAreASectionIndent = false);
 
 /// <summary>
 /// Fills pages: lay out a paragraph, put what fits on the page, carry the rest over.
