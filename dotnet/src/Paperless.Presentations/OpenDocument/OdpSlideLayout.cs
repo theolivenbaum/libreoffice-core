@@ -662,6 +662,22 @@ internal sealed partial class OdpSlideLayout
     /// opaque; <c>draw:shadow-color</c> defaults to the grey a binary file's shadow takes when
     /// it states none.
     /// </para>
+    /// <para>
+    /// <strong>The blur radius is the fifth attribute and it is not in the <c>draw</c>
+    /// namespace.</strong> <c>PROP_ShadowBlur</c> is mapped at
+    /// <c>xmloff/source/draw/sdpropls.cxx</c>:169 to <c>XML_NAMESPACE_LO_EXT</c> and to nothing
+    /// else, so a reader that looks for <c>draw:shadow-blur</c> finds the attribute nowhere and
+    /// concludes every shadow is hard-edged. It matters far more than a radius usually would,
+    /// because <see cref="SlideShadow.CarriesText"/> keys on it: LibreOffice rasterises a blurred
+    /// shadow (<c>shadowprimitive2d.cxx</c>:91-140) and its PDF holds a picture with
+    /// <em>no text</em>, while a hard shadow stays vector and its text is real. Read without the
+    /// extension namespace, every blurred shadow in the file put a second, offset copy of its
+    /// shape's words into the text layer. <strong>1252 non-zero <c>loext:shadow-blur</c> in 120
+    /// of the converted corpus's 302 <c>.odp</c>, and not one <c>draw:shadow-blur</c>
+    /// anywhere</strong> — the same trap <see cref="IsPrinted"/> records for
+    /// <c>drawooo:display</c> and <c>OdfNamespaces.ChartExtension</c> for
+    /// <c>coordinate-region</c>.
+    /// </para>
     /// </remarks>
     private SlideShadow? Shadow(IReadOnlyList<OdfStyleReference> cascade)
     {
@@ -683,8 +699,16 @@ internal sealed partial class OdpSlideLayout
             y,
             colour.WithAlpha(255),
             Math.Clamp(opacity, 0, 1),
-            Graphic(cascade, OdfNamespaces.Draw, "shadow-blur").AsLength() ?? Core.Units.Length.Zero);
+            Blur(cascade));
     }
+
+    /// <summary>
+    /// A shadow's blur radius, from whichever namespace the file spells it in.
+    /// </summary>
+    private Core.Units.Length Blur(IReadOnlyList<OdfStyleReference> cascade)
+        => Graphic(cascade, OdfNamespaces.LoExt, "shadow-blur").AsLength()
+           ?? Graphic(cascade, OdfNamespaces.Draw, "shadow-blur").AsLength()
+           ?? Core.Units.Length.Zero;
 
     /// <summary>
     /// A shape's outline and text rectangle: its own <c>draw:enhanced-path</c> first.
