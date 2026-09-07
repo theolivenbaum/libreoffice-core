@@ -36,7 +36,8 @@ public sealed class SheetCellFormats
         SheetBlockIndex blocks,
         Dictionary<int, int> rows,
         Dictionary<int, int> columns,
-        int sheet)
+        int sheet,
+        int lastAllocatedColumn)
     {
         _pool = pool;
         _cells = cells;
@@ -44,11 +45,85 @@ public sealed class SheetCellFormats
         _rows = rows;
         _columns = columns;
         _sheet = sheet;
+        LastAllocatedColumn = lastAllocatedColumn;
     }
 
     /// <summary>A sheet whose every cell is in the default format.</summary>
     public static SheetCellFormats Empty { get; } =
-        new([SheetCellFormat.Default], [], new SheetBlockIndex(), [], [], 0);
+        new([SheetCellFormat.Default], [], new SheetBlockIndex(), [], [], 0, -1);
+
+    /// <summary>
+    /// The last column the sheet <em>materialises</em>, or -1 when it materialises none.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Not the same question as how far the data or the print area reaches, and Calc asks both.
+    /// <c>ScTable::aCol</c> holds only the columns that have been allocated, and a column is
+    /// allocated by anything applying a pattern to it — a cell that states a format and holds no
+    /// value allocates one exactly as a cell holding a value does. That matters because
+    /// <c>GetOptimalHeightsInColumn</c> (<c>sc/source/core/data/table1.cxx:88-127</c>) walks
+    /// <em>every allocated column</em> rather than the print area's, and a column with no pattern
+    /// at a row contributes the sheet's default pattern's arithmetic height there. So one
+    /// formatted blank cell, anywhere, makes the default font's row height a floor for every row
+    /// of the sheet.
+    /// </para>
+    /// <para>
+    /// <strong>A format that runs to the sheet's last column allocates nothing</strong>, which is
+    /// what keeps this from being 16383 on every file Calc has written:
+    /// <c>ScTable::ApplyPatternArea</c> takes <c>maxCol = max(nStartCol, aCol.size()) - 1</c> and
+    /// puts the remainder in <c>aDefaultColData</c>
+    /// (<c>sc/source/core/data/table2.cxx:2980-2999</c>). Every <c>.ods</c> Calc writes pads each
+    /// row with a <c>table:table-cell table:style-name="Default"</c> repeated to column 16383, and
+    /// that run is exactly the case the clause excludes.
+    /// </para>
+    /// <para>
+    /// A whole-column default — ODF's <c>table:default-cell-style-name</c>, SpreadsheetML's
+    /// <c>&lt;col style&gt;</c> — is deliberately <em>not</em> counted, although a bounded one does
+    /// allocate in Calc. The store keeps column defaults per column and cannot tell a bounded run
+    /// from one written to the sheet's last column, so counting them would widen every file that
+    /// states a trailing column style by sixteen thousand columns. The under-approximation is the
+    /// safe direction: it can only leave the answer where it already was.
+    /// </para>
+    /// </remarks>
+    public int LastAllocatedColumn { get; }
+
+    /// <summary>
+    /// Every stated format inside a block, as one column interval per row rather than per cell.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="CellsIn"/> unfolds a rectangle column by column, which is what a caller wanting
+    /// each cell's <em>format</em> needs. A caller asking only <em>which columns a row states
+    /// anything for</em> does not need the unfolding, and paying for it is what makes the question
+    /// unaskable over a wide span: a padded sheet's rectangle is sixteen thousand columns wide.
+    /// </remarks>
+    /// <param name="firstRow">The first row, inclusive.</param>
+    /// <param name="lastRow">The last row, inclusive.</param>
+    /// <param name="firstColumn">The first column, inclusive.</param>
+    /// <param name="lastColumn">The last column, inclusive.</param>
+    public IEnumerable<(int Row, int FirstColumn, int LastColumn)> StatedSpans(
+        int firstRow, int lastRow, int firstColumn, int lastColumn)
+    {
+        foreach (((int row, int column), int _) in _cells)
+        {
+            if (row < firstRow || row > lastRow) continue;
+            if (column < firstColumn || column > lastColumn) continue;
+            yield return (row, column, column);
+        }
+
+        foreach (SheetFormatBlock block in _blocks.Blocks)
+        {
+            int first = Math.Max(block.FirstColumn, firstColumn);
+            int last = Math.Min(block.LastColumn, lastColumn);
+            if (last < first) continue;
+
+            for (int row = Math.Max(block.FirstRow, firstRow);
+                 row <= Math.Min(block.LastRow, lastRow);
+                 row++)
+            {
+                yield return (row, first, last);
+            }
+        }
+    }
 
     /// <summary>The format a cell is drawn in.</summary>
     /// <param name="row">The zero-based row.</param>
@@ -247,7 +322,29 @@ public sealed class SheetCellFormats
             if (IsEmpty) return Empty;
 
             _blocks.Seal();
-            return new SheetCellFormats(_pool, _cells, _blocks, _rows, _columns, _sheet);
+            return new SheetCellFormats(
+                _pool, _cells, _blocks, _rows, _columns, _sheet, LastAllocated());
+        }
+
+        /// <inheritdoc cref="SheetCellFormats.LastAllocatedColumn"/>
+        private int LastAllocated()
+        {
+            int last = -1;
+            foreach (((int _, int column), int _index) in _cells) last = Math.Max(last, column);
+
+            foreach (SheetFormatBlock block in _blocks.Blocks)
+            {
+                // `ApplyPatternArea`'s own clause: a range ending at the sheet's last column
+                // allocates only the columns before it that already existed, so the run itself
+                // materialises nothing past where it starts.
+                last = Math.Max(
+                    last,
+                    block.LastColumn >= SheetAddress.MaxColumn
+                        ? block.FirstColumn - 1
+                        : block.LastColumn);
+            }
+
+            return last;
         }
     }
 }

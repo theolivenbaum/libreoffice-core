@@ -237,13 +237,20 @@ internal static class SheetOptimalRowHeights
         SheetCellFormats formats = sheet.Formats;
         int minimum = (int)grid.OptimalMinimumRowHeight.Twips;
 
+        // The columns a row is measured across are the *allocated* ones and not the print area's:
+        // `GetOptimalHeightsInColumn` walks `aCol` (`table1.cxx:88-127`), so a column a formatted
+        // blank cell brought into existence is measured for every row of the sheet even though no
+        // page ever reaches it. See `SheetCellFormats.LastAllocatedColumn`.
+        int measuredLastColumn = Math.Max(lastColumn, formats.LastAllocatedColumn);
+
         // The columns a cell states nothing about resolve to the column's format, then to the
         // sheet's. Neither depends on the row, so both are folded once rather than per row.
         int baseline = AttributeHeight(formats.SheetDefault, minimum);
-        foreach (SheetCellFormat column in formats.ColumnDefaults(firstColumn, lastColumn))
+        foreach (SheetCellFormat column in formats.ColumnDefaults(firstColumn, measuredLastColumn))
             baseline = Math.Max(baseline, AttributeHeight(column, minimum));
 
-        Dictionary<int, RowState> rows = CollectRows(sheet, formats, range, grid.Columns, minimum);
+        Dictionary<int, RowState> rows =
+            CollectRows(sheet, formats, range, grid.Columns, minimum, measuredLastColumn);
 
         SheetAxis axis = grid.Rows;
         Dictionary<int, int> changes = [];
@@ -376,10 +383,9 @@ internal static class SheetOptimalRowHeights
 
     private static Dictionary<int, RowState> CollectRows(
         SheetLayout sheet, SheetCellFormats formats, SheetRange range, SheetAxis columns,
-        int minimum)
+        int minimum, int measuredLastColumn)
     {
         Dictionary<int, RowState> rows = [];
-        Dictionary<int, int> stated = [];
 
         // `bStdAllowed` (`column2.cxx:925`) is the cell's *orientation* being Standard, not its
         // angle being zero — so a cell turned by anything other than a quarter turn still writes
@@ -411,14 +417,13 @@ internal static class SheetOptimalRowHeights
             if (IsExcludedByMerge(merges, row, column)) continue;
 
             Contribute(row, format);
-            stated[row] = stated.GetValueOrDefault(row) + 1;
         }
 
-        int width = range.LastColumn - range.FirstColumn + 1;
-        foreach ((int row, int count) in stated)
+        foreach (int row in RowsStatingEveryColumn(
+                     formats, merges, range.FirstColumn, measuredLastColumn, range.LastRow))
         {
-            if (count < width) continue;
-            rows[row] = rows[row] with { CoversEveryColumn = true };
+            rows.TryGetValue(row, out RowState covered);
+            rows[row] = covered with { CoversEveryColumn = true };
         }
 
         for (int row = 0; row <= range.LastRow; row++)
@@ -878,6 +883,79 @@ internal static class SheetOptimalRowHeights
             bool anchor = row == merge.FirstRow && column == merge.FirstColumn;
             if (anchor && merge.FirstRow == merge.LastRow) continue;
             return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// The rows that state a format for every column of a span, so nothing in them falls through
+    /// to a column or sheet default.
+    /// </summary>
+    /// <remarks>
+    /// Asked as intervals rather than as a count of cells, because the span reaches every
+    /// allocated column and a repeated rectangle covering most of them must not be unfolded to
+    /// answer it. A row's intervals are merged in place; a row Calc would find one uncovered
+    /// column in is one whose default pattern's arithmetic height is a floor for it.
+    /// </remarks>
+    private static IEnumerable<int> RowsStatingEveryColumn(
+        SheetCellFormats formats, IReadOnlyList<SheetRange> merges,
+        int firstColumn, int lastColumn, int lastRow)
+    {
+        if (lastColumn < firstColumn) yield break;
+
+        Dictionary<int, List<(int First, int Last)>> spans = [];
+        foreach ((int row, int first, int last)
+                 in formats.StatedSpans(0, lastRow, firstColumn, lastColumn))
+        {
+            if (!spans.TryGetValue(row, out List<(int, int)>? runs)) spans[row] = runs = [];
+            runs.Add((first, last));
+        }
+
+        foreach ((int row, List<(int First, int Last)> runs) in spans)
+        {
+            runs.Sort(static (left, right) => left.First.CompareTo(right.First));
+
+            int reached = firstColumn - 1;
+            foreach ((int first, int last) in runs)
+            {
+                if (first > reached + 1) break;
+                reached = Math.Max(reached, last);
+            }
+
+            if (reached >= lastColumn && !IsMergeCoveredInSpan(merges, row, firstColumn, lastColumn))
+                yield return row;
+        }
+    }
+
+    /// <summary>
+    /// Whether any column of a span is one a merge takes out of the row-height walk.
+    /// </summary>
+    /// <remarks>
+    /// Kept deliberately, and it is <em>not</em> what Calc does. A pattern a merge covers is
+    /// skipped whole by <c>ScColumn::GetOptimalHeight</c> (`column2.cxx`:917-925) — neither its own
+    /// height nor the default's is written from that column — so a row whose remaining columns all
+    /// state a format is, in Calc's terms, covered. Treating it that way is *shorter*, and measured
+    /// over the original corpus it takes `093_Volunteer_Sign_Up_Sheet_Template_Customizable_Format`
+    /// from 2 pages to 1 against 26.2.4.2's 2. That workbook is 81 merges over 139 rows, and
+    /// something else in how a merged row is measured is evidently leaning on the taller answer, so
+    /// the conservative reading is kept until that is found: a merge-covered column keeps the
+    /// sheet default in play exactly as it did before this walk replaced the cell count.
+    /// </remarks>
+    private static bool IsMergeCoveredInSpan(
+        IReadOnlyList<SheetRange> merges, int row, int firstColumn, int lastColumn)
+    {
+        foreach (SheetRange merge in merges)
+        {
+            if (row < merge.FirstRow || row > merge.LastRow) continue;
+            if (merge.LastColumn < firstColumn || merge.FirstColumn > lastColumn) continue;
+
+            for (int column = Math.Max(merge.FirstColumn, firstColumn);
+                 column <= Math.Min(merge.LastColumn, lastColumn);
+                 column++)
+            {
+                if (IsExcludedByMerge(merges, row, column)) return true;
+            }
         }
 
         return false;
