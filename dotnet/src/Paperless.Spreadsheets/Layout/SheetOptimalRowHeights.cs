@@ -399,11 +399,12 @@ internal static class SheetOptimalRowHeights
 
         IReadOnlyList<SheetRange> merges = sheet.MergedRanges;
 
-        foreach ((int row, int column, SheetCellFormat format) in formats.Cells)
+        // Bounded by the range rather than filtered down to it, because a repeated element is
+        // held as a rectangle and unfolding one whole would be the sheet's full extent. See
+        // SheetCellFormats.CellsIn.
+        foreach ((int row, int column, SheetCellFormat format)
+                 in formats.CellsIn(range with { FirstRow = 0 }))
         {
-            if (row < 0 || row > range.LastRow) continue;
-            if (column < range.FirstColumn || column > range.LastColumn) continue;
-
             // Calc skips a cell that a merge covers and a merge anchor that spans rows, and takes
             // only the anchor of a purely horizontal one — `ScColumn::GetOptimalHeight`,
             // `sc/source/core/data/column2.cxx:917-925`.

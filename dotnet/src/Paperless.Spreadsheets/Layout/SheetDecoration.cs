@@ -199,6 +199,7 @@ public sealed class SheetFormatting
     private readonly List<SheetCellDecoration> _palette = [SheetCellDecoration.None];
     private readonly Dictionary<SheetCellDecoration, int> _byFormat = new() { [SheetCellDecoration.None] = 0 };
     private readonly Dictionary<(int Row, int Column), int> _cells = [];
+    private readonly SheetBlockIndex _blocks = new();
     private readonly Dictionary<int, int> _rows = [];
     private readonly List<(int First, int Last, int Format)> _columns = [];
     private readonly Dictionary<(int Row, int Column), Colour> _conditional = [];
@@ -213,8 +214,8 @@ public sealed class SheetFormatting
     /// Checked before a page walks its cells, so a plain sheet pays one boolean rather than one
     /// dictionary lookup per cell per page.
     /// </remarks>
-    public bool IsEmpty => _palette.Count == 1 && _cells.Count == 0 && _rows.Count == 0
-                           && _columns.Count == 0 && _conditional.Count == 0;
+    public bool IsEmpty => _palette.Count == 1 && _cells.Count == 0 && _blocks.IsEmpty
+                           && _rows.Count == 0 && _columns.Count == 0 && _conditional.Count == 0;
 
     /// <summary>Interns a format and returns the handle the setters take.</summary>
     /// <param name="format">The format to intern.</param>
@@ -255,6 +256,36 @@ public sealed class SheetFormatting
         if (row < 0 || column < 0) return;
         if (format <= 0 && !_hasDefaults) return;
         _cells[(row, column)] = Math.Max(0, format);
+    }
+
+    /// <summary>
+    /// Sets the format a whole rectangle of cells states, without materialising them.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// What ODF's two repeat counts describe between them, and Calc records exactly this: the
+    /// importer clamps each to the sheet's own bounds and hands the styles helper one
+    /// <c>ScRange</c> (<c>sc/source/filter/xml/xmlcelli.cxx</c>:1368-1377), merged per style name
+    /// into an <c>ScRangeList</c> and applied over ranges. Expanding it instead is the difference
+    /// between one entry and the 16381 × 1048567 cells a Calc-written sheet's padding declares.
+    /// </para>
+    /// <para>
+    /// A zero handle is kept on the same terms as <see cref="SetCell"/>: once anything wider has
+    /// been set it means "these cells state a style and it paints nothing".
+    /// </para>
+    /// </remarks>
+    /// <param name="firstRow">The first row, inclusive.</param>
+    /// <param name="lastRow">The last row, inclusive.</param>
+    /// <param name="firstColumn">The first column, inclusive.</param>
+    /// <param name="lastColumn">The last column, inclusive.</param>
+    /// <param name="format">A handle from <see cref="Intern"/>, or zero for "explicitly plain".</param>
+    public void SetCells(int firstRow, int lastRow, int firstColumn, int lastColumn, int format)
+    {
+        if (firstRow < 0 || firstColumn < 0) return;
+        if (lastRow < firstRow || lastColumn < firstColumn) return;
+        if (format <= 0 && !_hasDefaults) return;
+
+        _blocks.Add(firstRow, lastRow, firstColumn, lastColumn, Math.Max(0, format));
     }
 
     /// <summary>Sets the format a whole row applies to the cells that state none.</summary>
@@ -338,6 +369,29 @@ public sealed class SheetFormatting
         }
     }
 
+    /// <summary>
+    /// The rectangles that state a format, as the file's repeat counts wrote them.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="Cells"/> answers only what was written one cell at a time; a repeat is kept
+    /// whole, and <see cref="SheetDecorationArea"/> wants it that way — Calc's own attribute
+    /// store is a list of runs and its print-area scan measures the runs' lengths, so a
+    /// rectangle is the shape that scan needs rather than a shape it has to rebuild.
+    /// </remarks>
+    internal IEnumerable<(int FirstRow, int LastRow, int FirstColumn, int LastColumn, SheetCellDecoration Format)>
+        CellBlocks
+    {
+        get
+        {
+            foreach (SheetFormatBlock block in _blocks.Blocks)
+            {
+                yield return (
+                    block.FirstRow, block.LastRow, block.FirstColumn, block.LastColumn,
+                    _palette[block.Index]);
+            }
+        }
+    }
+
     /// <summary>The rows that state a format of their own.</summary>
     /// <inheritdoc cref="Cells"/>
     internal IEnumerable<(int Row, SheetCellDecoration Format)> Rows
@@ -402,6 +456,11 @@ public sealed class SheetFormatting
     private SheetCellDecoration Stated(int row, int column)
     {
         if (_cells.TryGetValue((row, column), out int cell)) return _palette[cell];
+
+        // The repeats, kept as rectangles. A real workbook states thousands of them, so the
+        // store groups them by row range and this is a binary search rather than a scan.
+        if (_blocks.At(row, column) is { } block) return _palette[block];
+
         if (_rows.TryGetValue(row, out int inRow)) return _palette[inRow];
 
         // Walked backwards so a later run wins an overlap, which is what both formats need:
