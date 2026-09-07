@@ -3515,6 +3515,23 @@ public static partial class ChartLayout
                     to = scale.Fraction(value);
                 }
 
+                // A bar is clipped to the axis' own range, and one entirely outside it is not
+                // drawn at all — nor is its data label, because the reference gives up on the
+                // point before it reaches one. `PlottingPositionHelper::clipYRange`
+                // (chart2/source/view/inc/PlottingPositionHelper.hxx:401-415) is called by
+                // `BarChart::createShapes` (chart2/source/view/charttypes/BarChart.cxx:789)
+                // before any geometry is computed, and it both rejects and clamps.
+                //
+                // A stacked chart is what makes this visible rather than cosmetic. A Gantt is
+                // written as a stack of an invisible "start" series and a visible "duration"
+                // one, with the value axis given an explicit `c:min` at the first date — so the
+                // start segment runs from serial zero, which on N2_E_Maestroni_Swarm_COP.pptx
+                // page 7 is 41600 days and 192 386 points left of the plot. Unclipped, every
+                // bar on that chart is drawn from there.
+                if (Math.Max(from, to) < 0.0 || Math.Min(from, to) > 1.0) continue;
+                from = Math.Clamp(from, 0.0, 1.0);
+                to = Math.Clamp(to, 0.0, 1.0);
+
                 // The slot the bar sits in, as a fraction of the plot area's long side.
                 double slotStart = (double)at / categories
                     + (outer / 2.0 + index * (1.0 + inner)) * slotFraction;
