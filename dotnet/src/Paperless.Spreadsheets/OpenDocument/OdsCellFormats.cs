@@ -127,40 +127,55 @@ internal static class OdsCellFormats
 
         private void ReadRows(XElement table)
         {
-            int row = 0;
+            long row = 0;
             foreach (XElement element in Descend(table, "table-row"))
             {
                 int repeat = Repeat(element, "number-rows-repeated");
                 int rowStyle = Intern(Attribute(element, "default-cell-style-name"));
 
-                // A row repeated a million times is the sheet's padding, not a million formatted
-                // rows: reading its cells once and stamping them across the sheet would
-                // materialise the whole grid. Only the first is recorded, which is what the
-                // extraction path does with the same attribute.
-                int span = Math.Min(repeat, MaxRepeat);
+                // Clamped to the sheet's own last row rather than dropped or ignored, which is
+                // what `ScXMLTableRowContext` does with the same attribute:
+                // `min(declared, GetSheetLimits().GetMaxRowCount())`
+                // (`sc/source/filter/xml/xmlrowi.cxx`:73-82).
+                long lastRow = Math.Min(row + repeat - 1, SheetAddress.MaxRow);
 
-                for (int at = 0; at < span && row < SheetAddress.MaxRow; at++, row++)
+                if (row <= lastRow)
                 {
-                    _builder.SetRow(row, rowStyle);
                     _rowDefault = rowStyle;
-                    ReadCells(element, row);
+
+                    // A row default is one entry per row, so a row repeated a million times would
+                    // be a million of them. The cap is what it was before the run became a block.
+                    if (rowStyle != 0)
+                    {
+                        long last = Math.Min(lastRow, row + MaxRepeat - 1);
+                        for (long at = row; at <= last; at++) _builder.SetRow((int)at, rowStyle);
+                    }
+
+                    // Read once for the whole run: re-reading the element per repeated row is
+                    // what made a padded sheet cost rows times columns.
+                    ReadCells(element, (int)row, (int)lastRow);
                 }
 
-                if (repeat > span) row += repeat - span;
+                row = Math.Min(row + repeat, SheetAddress.MaxRow + 1L);
             }
         }
 
-        private void ReadCells(XElement rowElement, int row)
+        private void ReadCells(XElement rowElement, int firstRow, int lastRow)
         {
-            int column = 0;
+            long column = 0;
             foreach (XElement cell in rowElement.Elements())
             {
                 if (cell.Name.NamespaceName != OdfNamespaces.Table) continue;
                 if (cell.Name.LocalName is not ("table-cell" or "covered-table-cell")) continue;
+                if (column > SheetAddress.MaxColumn) break;
 
                 string? styleName = Attribute(cell, "style-name");
                 int repeat = Repeat(cell, "number-columns-repeated");
                 int index = Intern(styleName);
+
+                // The same clamp on the other axis: `min(GetMaxColCount(), max(declared, 1))`,
+                // `sc/source/filter/xml/xmlcelli.cxx`:186-195.
+                long lastColumn = Math.Min(column + repeat - 1, SheetAddress.MaxColumn);
 
                 // Padding, skipped whole. A row is written out to the sheet's full width with one
                 // repeated empty cell naming the default style, and expanding that run records
@@ -177,15 +192,45 @@ internal static class OdsCellFormats
                     continue;
                 }
 
-                int span = Math.Min(repeat, MaxRepeat);
-                for (int at = 0; at < span && column < SheetAddress.MaxColumn; at++, column++)
+                // Inside the columns a column default reaches, what a cell inherits differs from
+                // one column to the next, so the run is cut into the stretches that agree; past
+                // the last of them it is the same for all of them and the rest is one block.
+                long singly = Math.Min(lastColumn, _lastColumnDefault);
+                for (long at = column; at <= singly;)
                 {
-                    // Only where it says something the cell would not inherit; see InheritedIndex.
-                    if (index != InheritedIndex(column)) _builder.SetCell(row, column, index);
-                    ReadSpans(cell, row, column, Effective(index, column));
+                    bool differs = index != InheritedIndex((int)at);
+                    long end = at;
+                    while (end < singly && (index != InheritedIndex((int)end + 1)) == differs) end++;
+                    if (differs) Record(firstRow, lastRow, (int)at, (int)end, index);
+                    at = end + 1;
                 }
 
-                if (repeat > span) column += repeat - span;
+                long block = Math.Max(column, _lastColumnDefault + 1L);
+                if (block <= lastColumn && index != (_rowDefault != 0 ? _rowDefault : _sheetDefault))
+                    Record(firstRow, lastRow, (int)block, (int)lastColumn, index);
+
+                // Rich text is per cell and cannot be a block — a portion is an offset into one
+                // cell's own text. A repeated cell carrying spans is not something Calc writes, so
+                // the expansion is bounded by a budget over the whole rectangle rather than
+                // modelled. The test is hoisted out of the loops because it walks the cell's
+                // descendants and the loops can run to the budget.
+                if (cell.HasElements && HasSpan(cell))
+                {
+                    long budget = MaxRepeat;
+                    for (long line = firstRow; line <= lastRow && budget > 0; line++)
+                    {
+                        for (long at = column; at <= lastColumn && budget > 0; at++, budget--)
+                            ReadSpans(cell, (int)line, (int)at, Effective(index, (int)at));
+                    }
+                }
+
+                column += repeat;
+            }
+
+            void Record(int first, int last, int firstCol, int lastCol, int format)
+            {
+                if (first == last && firstCol == lastCol) _builder.SetCell(first, firstCol, format);
+                else _builder.SetCells(first, last, firstCol, lastCol, format);
             }
         }
 

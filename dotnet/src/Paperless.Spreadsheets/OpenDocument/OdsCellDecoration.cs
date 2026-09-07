@@ -29,14 +29,14 @@ namespace Paperless.Spreadsheets.OpenDocument;
 internal static class OdsCellDecoration
 {
     /// <summary>
-    /// How far one repeated cell or row is expanded before it is treated as padding.
+    /// How many rows of a repeat state a row default of their own.
     /// </summary>
     /// <remarks>
     /// ODF pads a sheet to its full width and height with repeat counts, so a
     /// <c>table:table-cell</c> carrying <c>table:number-columns-repeated="16384"</c> is
-    /// ordinary and a row repeated a million times is too. Nearly all of them name the default
-    /// style and intern to nothing, so this never fires on a file Calc wrote; it exists so that
-    /// one that pads with a <em>styled</em> cell cannot materialise sixteen billion entries.
+    /// ordinary and a row repeated a million times is too. The cells of such a repeat are kept
+    /// as one rectangle and cost nothing per row; a row <em>default</em> is one entry per row,
+    /// so that half is still bounded.
     /// </remarks>
     private const int MaxRepeat = 4096;
 
@@ -95,36 +95,49 @@ internal static class OdsCellDecoration
 
         void ReadRow(XElement element)
         {
-            int first = row;
+            long first = row;
             int repeat = Math.Max(1, Repeated(element, "number-rows-repeated"));
-            row += repeat;
 
-            int lastRow = Math.Min(row, first + MaxRepeat);
+            // Clamped to the sheet's own last row, which is what `ScXMLTableRowContext` does
+            // with the same attribute (`sc/source/filter/xml/xmlrowi.cxx`:73-82). A repeat that
+            // runs past the sheet's bounds is honoured up to them, not ignored.
+            long lastRow = Math.Min(first + repeat - 1, SheetAddress.MaxRow);
+            row = (int)Math.Min(first + repeat, SheetAddress.MaxRow + 1L);
+
+            if (first > lastRow) return;
 
             int rowFormat = Handle(Attribute(element, "default-cell-style-name"));
             if (rowFormat >= 0)
             {
-                for (int at = first; at < lastRow; at++) formatting.SetRow(at, rowFormat);
+                long last = Math.Min(lastRow, first + MaxRepeat - 1);
+                for (long at = first; at <= last; at++) formatting.SetRow((int)at, rowFormat);
             }
 
-            int column2 = 0;
+            long column2 = 0;
             foreach (XElement cell in element.Elements())
             {
                 if (cell.Name != TableCell && cell.Name != CoveredCell) continue;
+                if (column2 > SheetAddress.MaxColumn) break;
 
                 int span = Math.Max(1, Repeated(cell, "number-columns-repeated"));
+                long lastColumn = Math.Min(column2 + span - 1, SheetAddress.MaxColumn);
                 int format = Handle(Attribute(cell, "style-name"));
 
                 // Zero is applied and only absence is skipped: a cell naming a style that paints
                 // nothing has to cancel its column's fill, which is exactly what Calc writes as
                 // table:style-name="Default".
+                //
+                // The rectangle is recorded as a rectangle. Calc records the same one as a single
+                // `ScRange` (`sc/source/filter/xml/xmlcelli.cxx`:1368-1377) and stores it as a run
+                // of an `ScAttrArray`, so a sheet padded to its full extent costs one entry per
+                // repeat rather than one per cell.
                 if (format >= 0)
                 {
-                    for (int offset = 0; offset < Math.Min(span, MaxRepeat); offset++)
-                    {
-                        for (int line = first; line < lastRow; line++)
-                            formatting.SetCell(line, column2 + offset, format);
-                    }
+                    if (first == lastRow && column2 == lastColumn)
+                        formatting.SetCell((int)first, (int)column2, format);
+                    else
+                        formatting.SetCells(
+                            (int)first, (int)lastRow, (int)column2, (int)lastColumn, format);
                 }
 
                 column2 += span;

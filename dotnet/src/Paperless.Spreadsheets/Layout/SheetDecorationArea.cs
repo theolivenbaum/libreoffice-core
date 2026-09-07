@@ -111,13 +111,38 @@ internal static class SheetDecorationArea
         // The whole column, unfiltered: Calc's `IsVisibleAttrEqual` asks about rows 0 to MaxRow
         // and not about the scan's window, and the run walk below starts at the run *containing*
         // the column's last data row rather than at the first entry below it.
-        Dictionary<int, SortedList<int, SheetCellDecoration>> whole = [];
+        Dictionary<int, SortedList<int, SheetCellDecoration>> points = [];
         foreach ((int row, int column, SheetCellDecoration format) in formatting.Cells)
         {
             if (row < 0 || column < 0) continue;
-            if (!whole.TryGetValue(column, out SortedList<int, SheetCellDecoration>? all))
-                whole[column] = all = [];
+            if (!points.TryGetValue(column, out SortedList<int, SheetCellDecoration>? all))
+                points[column] = all = [];
             all[row] = format;
+        }
+
+        // A repeat is held as a rectangle rather than as its cells, and it reaches this scan as
+        // one. That is the shape the scan wants in any case: Calc measures the *length* of each
+        // run of visually equal rows, so a block of a million identical ones is one measurement
+        // rather than a million entries to re-derive it from.
+        List<(int FirstRow, int LastRow, int FirstColumn, int LastColumn, SheetCellDecoration Format)>
+            blocks = [];
+        int blockAllocated = -1;
+        foreach ((int blockFirstRow, int blockLastRow, int blockFirstColumn, int blockLastColumn,
+                  SheetCellDecoration blockFormat) in formatting.CellBlocks)
+        {
+            if (blockFirstRow < 0 || blockFirstColumn < 0) continue;
+            if (blockLastRow < blockFirstRow || blockLastColumn < blockFirstColumn) continue;
+
+            blocks.Add((blockFirstRow, blockLastRow, blockFirstColumn, blockLastColumn, blockFormat));
+
+            // The same clause `AllocatedLastColumn` reads for a column run: a range that stops
+            // short of the sheet's last column materialises the whole of it, and one that reaches
+            // it materialises nothing past where it starts (`ScTable::ApplyPatternArea`,
+            // `sc/source/core/data/table2.cxx:2988-2998`). A sheet's padding always reaches it.
+            int reaches = blockLastColumn < SheetAddress.MaxColumn
+                ? blockLastColumn
+                : blockFirstColumn - 1;
+            if (reaches > blockAllocated) blockAllocated = reaches;
         }
 
         SortedList<int, SheetCellDecoration> rowDefaults = [];
@@ -129,6 +154,15 @@ internal static class SheetDecorationArea
             if (row > lastData) wholeRows[row] = format;
         }
 
+        int lastRow = lastData;
+        int lastColumn = used.IsValid ? used.LastColumn : -1;
+        int allocated = Math.Max(
+            allocatedLastColumn,
+            Math.Max(LastStatedColumn(lastDataColumn, points), blockAllocated));
+
+        Dictionary<int, List<(int Start, int End, SheetCellDecoration Format)>> whole =
+            Spans(points, blocks, allocated);
+
         // A column with no entries of its own is the same scan for every column sharing a
         // background, and a sheet can carry thousands of them.
         Dictionary<(SheetCellDecoration Base, int Start), int?> byBase = [];
@@ -137,7 +171,7 @@ internal static class SheetDecorationArea
         {
             int start = StartOf(column, lastData, lastDataRowByColumn);
             SheetCellDecoration background = formatting.ColumnDefault(column);
-            whole.TryGetValue(column, out SortedList<int, SheetCellDecoration>? cells);
+            whole.TryGetValue(column, out List<(int Start, int End, SheetCellDecoration Format)>? cells);
 
             if (cells is not null) return LastVisible(Runs(cells, rowDefaults, background), start);
 
@@ -147,11 +181,6 @@ internal static class SheetDecorationArea
             byBase[(background, start)] = answer;
             return answer;
         }
-
-        int lastRow = lastData;
-        int lastColumn = used.IsValid ? used.LastColumn : -1;
-        int allocated = Math.Max(
-            allocatedLastColumn, LastStatedColumn(lastDataColumn, whole));
 
         for (int column = 0; column <= allocated; column++)
         {
@@ -164,7 +193,11 @@ internal static class SheetDecorationArea
             if (column > lastColumn) lastColumn = column;
         }
 
-        if (LastVisible(Runs(wholeRows, [], SheetCellDecoration.None), lastData) is { } byRow
+        List<(int Start, int End, SheetCellDecoration Format)> belowData = [];
+        for (int at = 0; at < wholeRows.Count; at++)
+            belowData.Add((wholeRows.Keys[at], wholeRows.Keys[at], wholeRows.Values[at]));
+
+        if (LastVisible(Runs(belowData, [], SheetCellDecoration.None), lastData) is { } byRow
             && byRow > lastRow)
         {
             lastRow = byRow;
@@ -226,7 +259,7 @@ internal static class SheetDecorationArea
     private static int StopAtEqualColumns(
         int lastColumn,
         int lastDataColumn,
-        Dictionary<int, SortedList<int, SheetCellDecoration>> whole,
+        Dictionary<int, List<(int Start, int End, SheetCellDecoration Format)>> whole,
         SheetFormatting formatting,
         Func<int, int?> scan)
     {
@@ -261,22 +294,22 @@ internal static class SheetDecorationArea
     /// <c>&lt;col style&gt;</c> that paints and the other does not.
     /// </remarks>
     private static bool SameColumn(
-        Dictionary<int, SortedList<int, SheetCellDecoration>> whole,
+        Dictionary<int, List<(int Start, int End, SheetCellDecoration Format)>> whole,
         SheetFormatting formatting,
         int left,
         int right)
     {
         if (formatting.ColumnDefault(left) != formatting.ColumnDefault(right)) return false;
 
-        whole.TryGetValue(left, out SortedList<int, SheetCellDecoration>? a);
-        whole.TryGetValue(right, out SortedList<int, SheetCellDecoration>? b);
+        whole.TryGetValue(left, out List<(int Start, int End, SheetCellDecoration Format)>? a);
+        whole.TryGetValue(right, out List<(int Start, int End, SheetCellDecoration Format)>? b);
 
         if (a is null || b is null) return a is null && b is null;
         if (a.Count != b.Count) return false;
 
         for (int at = 0; at < a.Count; at++)
         {
-            if (a.Keys[at] != b.Keys[at] || a.Values[at] != b.Values[at]) return false;
+            if (a[at] != b[at]) return false;
         }
 
         return true;
@@ -332,6 +365,69 @@ internal static class SheetDecorationArea
         return Math.Min(last, SheetAddress.MaxColumn);
     }
 
+    /// <summary>
+    /// One sheet's stated formats as a span list per column: the cells written one at a time,
+    /// and the rectangles a repeat count wrote, folded into one sorted, disjoint list.
+    /// </summary>
+    /// <remarks>
+    /// Spans rather than rows, because a rectangle is what ODF states and what Calc stores. The
+    /// producers write disjoint runs — each cell element of each row element covers its own
+    /// columns of its own rows — so the clip below is a guard rather than a rule, and where it
+    /// does fire the span written first keeps the overlap.
+    /// </remarks>
+    /// <param name="points">The cells stated one at a time, keyed by column then row.</param>
+    /// <param name="blocks">The rectangles, in the order the file wrote them.</param>
+    /// <param name="allocated">The last column the scan will look at; blocks stop there.</param>
+    private static Dictionary<int, List<(int Start, int End, SheetCellDecoration Format)>> Spans(
+        Dictionary<int, SortedList<int, SheetCellDecoration>> points,
+        List<(int FirstRow, int LastRow, int FirstColumn, int LastColumn, SheetCellDecoration Format)> blocks,
+        int allocated)
+    {
+        Dictionary<int, List<(int Start, int End, SheetCellDecoration Format)>> whole = [];
+
+        foreach ((int column, SortedList<int, SheetCellDecoration> rows) in points)
+        {
+            List<(int Start, int End, SheetCellDecoration Format)> spans = new(rows.Count);
+            for (int at = 0; at < rows.Count; at++) spans.Add((rows.Keys[at], rows.Keys[at], rows.Values[at]));
+            whole[column] = spans;
+        }
+
+        foreach ((int firstRow, int lastRow, int firstColumn, int lastColumn, SheetCellDecoration format)
+                 in blocks)
+        {
+            int last = Math.Min(lastColumn, allocated);
+            for (int column = firstColumn; column <= last; column++)
+            {
+                if (!whole.TryGetValue(column, out List<(int Start, int End, SheetCellDecoration Format)>? spans))
+                    whole[column] = spans = [];
+                spans.Add((firstRow, lastRow, format));
+            }
+        }
+
+        foreach (List<(int Start, int End, SheetCellDecoration Format)> spans in whole.Values)
+        {
+            if (spans.Count < 2) continue;
+
+            spans.Sort(static (left, right) => left.Start.CompareTo(right.Start));
+
+            int keep = 0;
+            int reached = int.MinValue;
+            for (int at = 0; at < spans.Count; at++)
+            {
+                (int start, int end, SheetCellDecoration format) = spans[at];
+                if (start <= reached) start = reached + 1;
+                if (start > end) continue;
+
+                spans[keep++] = (start, end, format);
+                reached = end;
+            }
+
+            spans.RemoveRange(keep, spans.Count - keep);
+        }
+
+        return whole;
+    }
+
     /// <summary>The last column anything states a format for, or the last holding data.</summary>
     private static int LastStatedColumn(
         int lastDataColumn, Dictionary<int, SortedList<int, SheetCellDecoration>> whole)
@@ -354,11 +450,11 @@ internal static class SheetDecorationArea
     /// the column's background fills every row no cell and no row format states, and the runs it
     /// is cut into by the ones that do are what the scan measures.
     /// </remarks>
-    /// <param name="cells">The rows this column states a format for, or null when it states none.</param>
+    /// <param name="cells">The spans this column states a format for, or null when it states none.</param>
     /// <param name="rowDefaults">The rows the whole sheet states a format for.</param>
     /// <param name="background">What the column itself states, or the sheet's own default.</param>
     private static List<(int Start, int End, SheetCellDecoration Format)> Runs(
-        SortedList<int, SheetCellDecoration>? cells,
+        List<(int Start, int End, SheetCellDecoration Format)>? cells,
         SortedList<int, SheetCellDecoration> rowDefaults,
         SheetCellDecoration background)
     {
@@ -378,35 +474,40 @@ internal static class SheetDecorationArea
         int cellAt = 0;
         int rowAt = 0;
 
-        while (true)
+        while (at <= SheetAddress.MaxRow)
         {
-            while (cells is not null && cellAt < cells.Count && cells.Keys[cellAt] < at) cellAt++;
+            while (cells is not null && cellAt < cells.Count && cells[cellAt].End < at) cellAt++;
             while (rowAt < rowDefaults.Count && rowDefaults.Keys[rowAt] < at) rowAt++;
 
-            int next = int.MaxValue;
-            if (cells is not null && cellAt < cells.Count) next = cells.Keys[cellAt];
-            if (rowAt < rowDefaults.Count && rowDefaults.Keys[rowAt] < next)
-                next = rowDefaults.Keys[rowAt];
+            int nextCell = cells is not null && cellAt < cells.Count
+                ? Math.Max(cells[cellAt].Start, at)
+                : int.MaxValue;
+            int nextRow = rowAt < rowDefaults.Count ? rowDefaults.Keys[rowAt] : int.MaxValue;
 
-            if (next == int.MaxValue)
+            if (nextCell == int.MaxValue && nextRow == int.MaxValue)
             {
                 Add(at, SheetAddress.MaxRow, background);
                 return runs;
             }
 
-            Add(at, next - 1, background);
-
             // A cell's own format beats its row's, which beats its column's — the order
-            // SheetFormatting.At resolves in and the order all three formats write.
-            Add(
-                next,
-                next,
-                cells is not null && cellAt < cells.Count && cells.Keys[cellAt] == next
-                    ? cells.Values[cellAt]
-                    : rowDefaults[next]);
-
-            at = next + 1;
+            // SheetFormatting.At resolves in and the order all three formats write. A span wins
+            // every row it covers, so a row default inside one never surfaces.
+            if (nextCell <= nextRow)
+            {
+                Add(at, nextCell - 1, background);
+                Add(nextCell, cells![cellAt].End, cells[cellAt].Format);
+                at = cells[cellAt].End + 1;
+            }
+            else
+            {
+                Add(at, nextRow - 1, background);
+                Add(nextRow, nextRow, rowDefaults.Values[rowAt]);
+                at = nextRow + 1;
+            }
         }
+
+        return runs;
     }
 
     /// <summary>
