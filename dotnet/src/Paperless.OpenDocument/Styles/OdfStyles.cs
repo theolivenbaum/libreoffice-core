@@ -327,6 +327,75 @@ public sealed class OdfStyles : IOdfStyleResolver
     }
 
     /// <summary>
+    /// Resolves one property that ODF spells two or more ways, deciding the <em>level</em> before
+    /// the spelling.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Two spellings that LibreOffice maps to one item cannot be resolved one at a time, because
+    /// resolving each through the whole parent chain lets an outer style's spelling beat an inner
+    /// style's. The family is the case that matters: <c>style:font-name</c> names an
+    /// <c>office:font-face-decls</c> entry and <c>fo:font-family</c> names a family, and both are
+    /// imported into <c>CharFontName</c> — <c>style:font-name</c> through
+    /// <c>XMLTextImportPropertyMapper::handleSpecialItem</c>'s <c>CTF_FONTNAME</c> branch, which
+    /// hands the declaration to <c>XMLFontStylesContext::FillProperties</c> and fills the
+    /// <c>CTF_FONTFAMILYNAME</c> slot beside it (<c>xmloff/source/text/txtimppr.cxx</c>:58-101).
+    /// One slot, so a child that states either one shadows whatever its parent stated.
+    /// </para>
+    /// <para>
+    /// Reading them independently is not a subtle error. LibreOffice writes <c>fo:font-family</c>
+    /// on the named styles it exports and <c>style:font-name</c> alone on many of the automatic
+    /// ones, so the outer spelling wins nearly everywhere it is asked the wrong way: on the
+    /// converted ODF corpus <strong>290 of 307 <c>.ods</c> and 109 of 338 <c>.odt</c></strong>
+    /// hold at least one style where the two spellings sit at different levels, 16 687 and 2419
+    /// styles between them.
+    /// </para>
+    /// </remarks>
+    /// <param name="styleName">The style to resolve from.</param>
+    /// <param name="family">Its family.</param>
+    /// <param name="kind">Which property set to look in.</param>
+    /// <param name="candidates">
+    /// The spellings, in the order one style's own properties should be preferred in.
+    /// </param>
+    /// <param name="matched">
+    /// The index in <paramref name="candidates"/> that answered, or -1 when none did.
+    /// </param>
+    public OdfProperty ResolveWithoutDefaults(
+        string? styleName,
+        OdfStyleFamily family,
+        OdfPropertyKind kind,
+        IReadOnlyList<(string Namespace, string Name)> candidates,
+        out int matched)
+    {
+        ArgumentNullException.ThrowIfNull(candidates);
+
+        OdfStyle? current = Find(styleName, family);
+        HashSet<string> visited = new(StringComparer.Ordinal);
+
+        for (int depth = 0; current is not null && depth < MaxParentChainDepth; depth++)
+        {
+            for (int candidate = 0; candidate < candidates.Count; candidate++)
+            {
+                (string propertyNamespace, string propertyName) = candidates[candidate];
+                if (current.GetOwnProperty(kind, propertyNamespace, propertyName) is not { } value)
+                    continue;
+
+                matched = candidate;
+                return new OdfProperty(
+                    value,
+                    depth == 0 ? OdfPropertyOrigin.SetHere : OdfPropertyOrigin.Inherited,
+                    current.Name);
+            }
+
+            if (!visited.Add(current.Name)) break;
+            current = Find(current.ParentStyleName, family);
+        }
+
+        matched = -1;
+        return OdfProperty.Unset;
+    }
+
+    /// <summary>
     /// Resolves a property from the family defaults alone.
     /// </summary>
     /// <remarks>

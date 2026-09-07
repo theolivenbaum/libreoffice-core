@@ -332,15 +332,19 @@ internal static class OdfParagraphFormats
         {
             OdfStyleReference at = cascade[i];
 
-            if (Unquote(Own(styles, at, OdfNamespaces.FoCompatible, "font-family").Value)
-                is { } direct)
-            {
-                return direct;
-            }
+            // Both spellings in one walk, so the level decides before the spelling *inside* a
+            // parent chain as well as across the cascade. Asking for them one at a time let a
+            // parent style's `fo:font-family` beat its child's `style:font-name` — the shape
+            // LibreOffice writes whenever an automatic style names a face and the named style it
+            // inherits from states a family.
+            OdfProperty found = styles.ResolveWithoutDefaults(
+                at.Name, at.Family, OdfPropertyKind.Text, FontSpellings, out int matched);
 
-            if (Own(styles, at, OdfNamespaces.Style, "font-name").Value is { } declared)
+            if (found.HasValue)
             {
-                return FamilyOfDeclaration(styles, declared);
+                return matched == 1
+                    ? FamilyOfDeclaration(styles, found.Value!)
+                    : Unquote(found.Value);
             }
         }
 
@@ -354,6 +358,19 @@ internal static class OdfParagraphFormats
             ? FamilyOfDeclaration(styles, name)
             : null;
     }
+
+    /// <summary>The two spellings of a face, in the order one style's own attributes settle.</summary>
+    /// <remarks>
+    /// <c>fo:font-family</c> first: a style stating both is settled by attribute order, and
+    /// LibreOffice writes <c>style:font-name</c> before it, so the <c>fo:</c> value is the second
+    /// write into <c>CTF_FONTFAMILYNAME</c> and the one that stands
+    /// (<c>xmloff/source/text/txtimppr.cxx</c>:58-101).
+    /// </remarks>
+    private static readonly (string Namespace, string Name)[] FontSpellings =
+    [
+        (OdfNamespaces.FoCompatible, "font-family"),
+        (OdfNamespaces.Style, "font-name"),
+    ];
 
     private static string? FamilyOfDeclaration(OdfStyles styles, string declared)
         => styles.FontFaces.TryGetValue(declared, out OdfFontFace? face)

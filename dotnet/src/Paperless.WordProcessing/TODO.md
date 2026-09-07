@@ -1987,6 +1987,35 @@ is read and verified, so what remains is the filling of pages rather than the me
 
 ## Known deviations, measured
 
+- **A `draw:frame` with no `svg:height` is placed but not grown, and the two halves of finishing it
+  are separable.** The frame takes its `fo:min-height` floor and its text is drawn past the bottom,
+  so nothing is pushed down and no page is begun. A blind reading of
+  `Case-Study-Heathrow-Airport.odt`'s pair says exactly that: the body layout is right — every
+  paragraph wraps at the same word and landmark baselines differ by 2 to 3 px over a whole page —
+  and the last two bullets are drawn *outside* the bottom page border, one of them clipped by the
+  edge of the sheet.
+
+  **Growing it does not need `FrameLayout`'s order inverted**, which is what the round that placed
+  the frame supposed. `FrameLayout.Place` is a pure function of the frame's stated size and the page
+  and anchor geometry, and the content's own layout needs the frame's *width*, which the file
+  states, and nothing else — so the height can be measured in a pass that runs before `Place`. The
+  order that would have to invert is one where placement feeds back into measurement, and it does
+  not.
+
+  **What the largest witness needs is a different thing.** `Case-Study-Heathrow-Airport.odt` is one
+  `text:p` holding one `draw:frame` that is the whole three-page document — 1 page and 2052
+  alphanumeric characters against 3 pages and 6461 — and that frame carries
+  `loext:may-break-between-pages="true"`. Growing it makes it three pages tall on page one; what
+  the reference does is *split* it, which is `SwFlyFrame::IsFlySplitAllowed`
+  (`sw/source/core/layout/fly.cxx`:689-730) and the fly-splitting layout behind it. Censused over
+  the converted ODF corpus (`probes/odf-rowpitch-r72/framecensus.py`): **51 of the 58 height-less
+  `draw:frame` in the 338 `.odt` declare it**, in 43 of the 49 documents that hold one — though
+  declaring it is not the same as needing it, since a frame that fits its page never splits.
+
+  So: growth alone is a small change that will push body text down on the documents whose frame
+  fits, and do nothing for the ones whose frame does not. Splitting is architectural. Neither is
+  implemented.
+
 - Two of LibreOffice's numbers are reproduced by construction rather than derived, and both are recorded
   here so a future comparison does not mistake them for bugs:
   - Its PDF export adds **two twips** to every pen position horizontally and nothing vertically. With left
