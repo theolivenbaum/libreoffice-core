@@ -740,11 +740,29 @@ public sealed partial class RtfDocumentReader
             // ---- paragraph and character state
             case "pard":
                 state.ResetParagraph();
+
                 // Table membership is paragraph formatting, so \pard clears it and the \intbl and
                 // \itap that follow re-state it. Without the reset a paragraph after a table stays
                 // in it, and the table never closes.
-                CurrentFlow.InTable = false;
-                CurrentFlow.TableLevelIndex = 0;
+                //
+                // But only for a \pard the *body* wrote. Membership lives on the flow rather than on
+                // the group, so unlike everything else `ResetParagraph` touches it does not come back
+                // when the group closes — and a `{\listtext\pard\plain \tab}` label, which is how
+                // Word writes the rendered `1.` of every numbered item, therefore took the paragraph
+                // holding it out of its own cell. LibreOffice states the rule outright at
+                // `rtfdispatchflag.cxx`:588: "\pard is allowed between \cell and \row, but in that
+                // case it should not reset the fact that we're inside a table." Its oracle agrees —
+                // 26.2.4.2 draws a row whose first cell carries such a label as one row.
+                //
+                // Gated on the destination, which is the same gate `EndCell` and `EndRow` already use
+                // for the same reason: a control word written inside a label, a field instruction or a
+                // note is not the body's statement about the body's table.
+                if (state.Destination is RtfDestination.Body)
+                {
+                    CurrentFlow.InTable = false;
+                    CurrentFlow.TableLevelIndex = 0;
+                }
+
                 return;
             case "plain":
                 state.ResetCharacter();
