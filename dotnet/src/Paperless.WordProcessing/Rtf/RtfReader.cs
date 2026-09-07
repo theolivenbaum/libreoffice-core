@@ -363,6 +363,7 @@ public sealed class RtfDocument : IWordProcessingDocument, IPaginatedDocument
                 Runs = runs,
                 Notes = NotesOf(fonts, paragraph.Notes),
                 Frames = FramesOf(fonts, paragraph.Frames),
+                Fields = paragraph.PageFields ?? [],
             });
         }
 

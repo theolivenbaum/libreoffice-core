@@ -459,6 +459,17 @@ public sealed partial class RtfDocumentReader
         /// </remarks>
         public List<RtfLayoutFrame> PendingFrames { get; } = [];
 
+        /// <summary>
+        /// The <c>PAGE</c> and <c>NUMPAGES</c> results in the paragraph being read, as spans over its
+        /// <em>layout</em> text.
+        /// </summary>
+        /// <remarks>
+        /// Over the layout text rather than the extracted text, because the two are not the same string:
+        /// a note's citation is prefixed to the first and not to the second. <see cref="Layout.PageFields"/>
+        /// rewrites the layout text and nothing else.
+        /// </remarks>
+        public List<Layout.PageFieldSpan> PendingPageFields { get; } = [];
+
         /// <summary>A shape's own text, collected while its <c>{\shptxt}</c> flow is open.</summary>
         public Staged? FrameBlocks { get; init; }
 
@@ -1108,6 +1119,8 @@ public sealed partial class RtfDocumentReader
         // deliberately leaves out. Prefixing it here rather than in the text builder is what keeps the two
         // apart; the runs already recorded shift along by its length.
         List<RtfLayoutRun> runs = [.. flow.LayoutRuns];
+        List<Layout.PageFieldSpan>? fields =
+            flow.PendingPageFields.Count == 0 ? null : [.. flow.PendingPageFields];
 
         if (flow.LayoutPrefix is { Length: > 0 } prefix)
         {
@@ -1116,6 +1129,12 @@ public sealed partial class RtfDocumentReader
             for (int i = 0; i < runs.Count; i++)
             {
                 runs[i] = runs[i] with { Start = runs[i].Start + prefix.Length };
+            }
+
+            // The field spans shift with the runs: they index the same string.
+            for (int i = 0; i < (fields?.Count ?? 0); i++)
+            {
+                fields![i] = fields[i] with { Start = fields[i].Start + prefix.Length };
             }
 
             runs.Insert(0, CitationRun(state, 0, prefix.Length));
@@ -1170,6 +1189,7 @@ public sealed partial class RtfDocumentReader
             _sectionIndex,
             flow.PendingNotes.Count == 0 ? null : [.. flow.PendingNotes],
             flow.PendingFrames.Count == 0 ? null : [.. flow.PendingFrames],
+            fields,
             // Trimmed, because the group holds the tab that follows the label as well as the label —
             // and an outline level that shows no number writes the group with nothing but that tab,
             // which trims to nothing rather than to a label made of whitespace.
@@ -1347,6 +1367,7 @@ public sealed partial class RtfDocumentReader
         flow.LayoutLength = 0;
         flow.PendingNotes.Clear();
         flow.PendingFrames.Clear();
+        flow.PendingPageFields.Clear();
         flow.PendingRuns.Clear();
         flow.PendingImages.Clear();
         flow.ListMarker.Clear();

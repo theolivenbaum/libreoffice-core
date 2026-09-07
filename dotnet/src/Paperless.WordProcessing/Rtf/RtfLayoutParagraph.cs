@@ -108,6 +108,16 @@ public readonly record struct RtfLayoutRun(
 /// <param name="SectionIndex">Which of the document's sections the paragraph sits in.</param>
 /// <param name="Notes">The notes anchored in the paragraph's text, or null when it cites none.</param>
 /// <param name="Frames">The floating frames anchored in it, or null when it anchors none.</param>
+/// <param name="PageFields">
+/// The <c>PAGE</c> and <c>NUMPAGES</c> results in <paramref name="Text"/>, or null when it holds none.
+/// <para>
+/// Recorded rather than left at the producer's cached value for the reason
+/// <see cref="Layout.PageFields"/> gives at length: the cached result is right on one page of the
+/// document and wrong on every other, so a footer reading <c>Page 9</c> is drawn on all nine pages. All
+/// three other word-processing readers have recorded them since round 45 and this one did not, which is
+/// why an RTF running head printed one number throughout.
+/// </para>
+/// </param>
 /// <param name="ListMarker">
 /// The label this item draws, or null when it draws none.
 /// <para>
@@ -135,6 +145,7 @@ public readonly record struct RtfLayoutParagraph(
     int SectionIndex = 0,
     IReadOnlyList<RtfLayoutNote>? Notes = null,
     IReadOnlyList<RtfLayoutFrame>? Frames = null,
+    IReadOnlyList<Layout.PageFieldSpan>? PageFields = null,
     string? ListMarker = null,
     bool AutoKerning = false);
 
