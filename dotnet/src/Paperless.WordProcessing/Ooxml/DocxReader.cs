@@ -418,11 +418,12 @@ public sealed class OoxmlWordDocument : IWordProcessingDocument, IPaginatedDocum
 
         for (int i = 0; i < Sections.Count; i++)
         {
-            sections.Add(new PaginatedSection(
-                Sections[i],
-                i < properties.Count
-                    ? Furniture(source, properties[i], headers, footers)
-                    : null));
+            bool statesOwn = false;
+            PageFurnitureSet? furniture = i < properties.Count
+                ? Furniture(source, properties[i], headers, footers, out statesOwn)
+                : null;
+
+            sections.Add(new PaginatedSection(Sections[i], furniture, statesOwn));
         }
 
         return sections;
@@ -451,12 +452,23 @@ public sealed class OoxmlWordDocument : IWordProcessingDocument, IPaginatedDocum
     /// section names replaces what was there, and one it does not name is inherited.
     /// </param>
     /// <param name="footers">The footers in force, by the same rule.</param>
+    /// <param name="statesOwnFurniture">
+    /// Set true when the <c>w:sectPr</c> names a reference of its own for any slot, which is the
+    /// negation of writerfilter's six <c>m_b*LinkToPrevious</c> flags and the whole of what decides
+    /// whether a continuous section gets a page descriptor at all — see
+    /// <see cref="Layout.ContinuousPageDescriptors"/>. A reference naming an empty part still counts:
+    /// "link to previous" is the absence of a reference, and the importer clears the flag in
+    /// <c>PopPageHeaderFooter</c> for every reference it reads.
+    /// </param>
     private PageFurnitureSet? Furniture(
         DocxLayoutSource source,
         XElement sectionProperties,
         FurnitureCarry headers,
-        FurnitureCarry footers)
+        FurnitureCarry footers,
+        out bool statesOwnFurniture)
     {
+        statesOwnFurniture = false;
+
         // Before this section names anything of its own, drop the slots the section above cannot pass
         // down — see <see cref="FurnitureCarry"/> for which those are and how the rule was measured.
         headers.DropUninheritable();
@@ -468,6 +480,8 @@ public sealed class OoxmlWordDocument : IWordProcessingDocument, IPaginatedDocum
             if (!isHeader && !Word.Is(reference, "footerReference")) continue;
 
             if (SlotOf(Word.Attribute(reference, "type")) is not { } slot) continue;
+
+            statesOwnFurniture = true;
             string? relationshipId = Word.RelationshipId(reference);
             if (_file.LoadHeaderOrFooter(relationshipId) is not { } part) continue;
 

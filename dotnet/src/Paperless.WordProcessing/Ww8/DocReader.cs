@@ -246,7 +246,7 @@ public sealed class Ww8Document : IWordProcessingDocument, IPaginatedDocument
         for (int i = 0; i < Sections.Count; i++)
         {
             PageFurnitureSet? furniture = Furniture(fonts, i, carry);
-            sections.Add(new PaginatedSection(Sections[i], furniture, carry.OwnFurnitureOnContinuous));
+            sections.Add(new PaginatedSection(Sections[i], furniture, carry.StatesOwnFurniture));
         }
 
         return new WordProcessingPages(
@@ -350,7 +350,7 @@ public sealed class Ww8Document : IWordProcessingDocument, IPaginatedDocument
             StoryLength(stated, 0) >= 2 || StoryLength(stated, 1) >= 2
             || StoryLength(stated, 2) >= 2 || StoryLength(stated, 3) >= 2;
 
-        carry.OwnFurnitureOnContinuous = continuous && ownFurniture;
+        carry.StatesOwnFurniture = ownFurniture;
 
         if (continuous && !ownFurniture)
         {
@@ -534,7 +534,7 @@ public sealed class Ww8Document : IWordProcessingDocument, IPaginatedDocument
         /// the only one where <c>InsertSegments</c> builds a page descriptor for a continuous section — and
         /// therefore the only one where such a section has anywhere to put a page-number restart.
         /// </summary>
-        public bool OwnFurnitureOnContinuous { get; set; }
+        public bool StatesOwnFurniture { get; set; }
     }
 
     /// <summary>

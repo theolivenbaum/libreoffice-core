@@ -194,7 +194,8 @@ public sealed class RtfDocument : IWordProcessingDocument, IPaginatedDocument
             paginator.Paginate(
                 blocks,
                 [.. Sections.Select((section, index) =>
-                    new PaginatedSection(section, Furniture(fonts, index)))]),
+                    new PaginatedSection(
+                        section, Furniture(fonts, index), StatesOwnFurniture(index)))]),
             paginator.Blocks ?? blocks);
     }
 
@@ -267,6 +268,32 @@ public sealed class RtfDocument : IWordProcessingDocument, IPaginatedDocument
     /// lookup — and, more to the point, resolves to the identical face object, which is what lets the
     /// measurement caches downstream see them as one font.
     /// </remarks>
+    /// <summary>
+    /// True when the section wrote a header or footer group of its own rather than leaving the one in
+    /// force alone.
+    /// </summary>
+    /// <remarks>
+    /// RTF reaches writerfilter's dmapper exactly as DOCX does, so a continuous section's page
+    /// descriptor lives or dies by the same rule and this is what decides it — see
+    /// <see cref="Layout.ContinuousPageDescriptors"/>. The record is the layout dictionaries' own keys:
+    /// a slot is entered against the section whose <c>\header</c>, <c>\footerl</c> and so on wrote it,
+    /// and a section that wrote none has no key at all.
+    /// </remarks>
+    private bool StatesOwnFurniture(int section)
+    {
+        foreach ((int Section, Model.PageFurnitureSlot Slot) key in _headerLayout.Keys)
+        {
+            if (key.Section == section) return true;
+        }
+
+        foreach ((int Section, Model.PageFurnitureSlot Slot) key in _footerLayout.Keys)
+        {
+            if (key.Section == section) return true;
+        }
+
+        return false;
+    }
+
     private PageFurnitureSet? Furniture(LayoutFonts fonts, int section)
     {
         Dictionary<Model.PageFurnitureSlot, IReadOnlyList<PageBlock>> headers = [];
