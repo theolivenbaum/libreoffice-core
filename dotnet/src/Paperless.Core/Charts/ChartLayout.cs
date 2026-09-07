@@ -3105,6 +3105,16 @@ public static partial class ChartLayout
     /// spacing them evenly instead is right whenever the X values happen to be evenly spaced and
     /// wrong in proportion to how unevenly they are not.
     /// </para>
+    /// <para>
+    /// <strong>The stroke is the part of the polyline that falls inside the plot, and a point
+    /// outside it gets no marker and no data label.</strong> chart2 clips the series polygon at
+    /// the axis' own range before it makes a shape of it — see <see cref="ChartClipping"/> — and
+    /// <c>AreaChart::createShapes</c> skips a point <c>isLogicVisible</c> rejects before any
+    /// symbol, error bar or label is created (<c>AreaChart.cxx</c>:715, 760-761). This drew the
+    /// whole polyline instead, so a series with a stated axis minimum ran off the chart and off
+    /// the page: on <c>171128IPAP.pptx</c> slide 38, x = −866.50 … 758.03 against 26.2.4.2's
+    /// 119.54 … 615.49 on a 720 pt page.
+    /// </para>
     /// </remarks>
     private static void AddLines(
         ChartPlot plot,
@@ -3120,8 +3130,8 @@ public static partial class ChartLayout
 
         foreach (ChartSeries series in plot.Series)
         {
-            GraphicsPath path = new();
-            bool open = false;
+            List<List<DocPoint>> runs = [];
+            List<DocPoint>? run = null;
             List<(DocPoint At, int Index, double Value)> points = [];
 
             int count = domain is not null && series.XValues is { } xs
@@ -3135,17 +3145,34 @@ public static partial class ChartLayout
                     || !double.IsFinite(value)
                     || AcrossAt(plot, series, domain, at, categories) is not { } across)
                 {
-                    open = false;
+                    run = null;
                     continue;
                 }
 
                 DocPoint point = Point(area, across, scale.Fraction(value), columns);
-                points.Add((point, at, value));
 
-                if (open) path.LineTo(point);
-                else path.MoveTo(point);
+                // Only a visible point carries a mark of its own. An invisible one still holds
+                // its place in the polyline, whose clipped remains are what gets drawn.
+                if (ChartClipping.Contains(area, point)) points.Add((point, at, value));
 
-                open = true;
+                if (run is null)
+                {
+                    run = [];
+                    runs.Add(run);
+                }
+
+                run.Add(point);
+            }
+
+            GraphicsPath path = new();
+
+            foreach (List<DocPoint> whole in runs)
+            {
+                foreach (IReadOnlyList<DocPoint> piece in ChartClipping.ClipPolyline(whole, area))
+                {
+                    path.MoveTo(piece[0]);
+                    for (int at = 1; at < piece.Count; at++) path.LineTo(piece[at]);
+                }
             }
 
             // Stroked in the series' fill when it states no line of its own, because that is what

@@ -67,14 +67,16 @@ internal static class XlsxDrawings
     /// Resolves a chart sequence's <c>c:f</c> against the workbook's own cells. This is the whole
     /// difference between Calc's chart data provider and the base one — see
     /// <see cref="ChartRangeResolver"/> — and it is a parameter because only a spreadsheet reader
-    /// has a workbook to resolve in.
+    /// has a workbook to resolve in. The workbook's resolver rather than one delegate, because
+    /// each chart binds its own <c>c:plotVisOnly</c> — see
+    /// <see cref="XlsxChartRanges.Resolver"/>.
     /// </param>
     public static SheetDrawings Read(
         IPackage package,
         string? sheetPartName,
         DrawingTheme? theme = null,
         DrawingFontScheme? fonts = null,
-        ChartRangeResolver? ranges = null)
+        XlsxChartRanges? ranges = null)
     {
         ArgumentNullException.ThrowIfNull(package);
         if (sheetPartName is null || package is not OpcPackage opc) return SheetDrawings.Empty;
@@ -131,7 +133,7 @@ internal static class XlsxDrawings
         Dictionary<string, OpcXml.Relationship> images,
         DrawingTheme? theme,
         DrawingFontScheme? fonts,
-        ChartRangeResolver? ranges)
+        XlsxChartRanges? ranges)
     {
         XElement? picture = Child(anchor, DrawingNamespace, "pic");
         XElement? frame = Child(anchor, DrawingNamespace, "graphicFrame");
@@ -321,7 +323,7 @@ internal static class XlsxDrawings
         OpcPackage package,
         Dictionary<string, OpcXml.Relationship> parts,
         DrawingTheme? theme,
-        ChartRangeResolver? ranges)
+        XlsxChartRanges? ranges)
     {
         string? id = Attribute(
             Child(data, OoxmlNamespaces.DrawingMLChart, "chart"),
@@ -337,8 +339,14 @@ internal static class XlsxDrawings
             ? null
             // `automaticChartAreaLine`: the grey D9D9D9 default chart-area border is skipped only
             // under the Impress filter (objectformatter.cxx:838-848, tdf#150176), and this is Calc.
+            // A hidden row or column is not chart data unless the chart says otherwise, and
+            // that is a property of the chart part rather than of the workbook — so the
+            // resolver is bound here, once the chart's own c:plotVisOnly is in hand. See
+            // XlsxChartHiddenCells.
             : DrawingChartPlot.Read(
-                chartSpace, theme, OoxmlMetadata.IsOffice2007(package), styles: null, ranges,
+                chartSpace, theme, OoxmlMetadata.IsOffice2007(package), styles: null,
+                ranges?.Resolver(DrawingChart.PlotsVisibleCellsOnly(
+                    chartSpace, OoxmlMetadata.IsOffice2007(package))),
                 automaticChartAreaLine: true);
     }
 
