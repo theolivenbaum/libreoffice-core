@@ -889,8 +889,12 @@ remain in the directory. Confirmed on the witness: 26.2.4.2 renders
 `omrIMInterpretiveGuideLine.doc` in **DejaVu Sans and Liberation Sans**, with no narrow face
 anywhere — *Arial* still reaching Liberation Sans, which is right, and *Arial Narrow* now reaching
 DejaVu Sans, which is what the system and Paperless both answer. **Any 26.2 figure taken on one of
-the 49 Narrow-naming documents before this date is suspect**, and that includes every ODF/RTF gate
-row in `probes/odf-gate-01/`.
+the 49 Narrow-naming documents before this date is suspect** — but *only* those 49, and the blast
+radius is smaller than it sounds. Measured immediately afterwards on the `.odp` column of
+`probes/odf-gate-01/`: a freshly rendered reference reproduces the banked reference **302 of 302**
+on pages and glyphs, and our half at the same commit reproduces the banked verdict 302 of 302. So
+**re-render the Narrow-naming documents you actually work on and leave the rest of the bank
+standing** rather than discarding it.
 
 The reason **not** to answer this by bundling a narrow face is rule 3's own test, *ship only the
 faces the distro packages ship*: Liberation Sans Narrow is not in `fonts-liberation2`, it is the
