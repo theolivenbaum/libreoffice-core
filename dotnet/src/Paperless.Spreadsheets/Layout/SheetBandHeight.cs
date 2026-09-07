@@ -175,6 +175,207 @@ internal static class SheetBandHeight
     }
 
     /// <summary>
+    /// The band a header or footer prints in when the file states Calc's two terms directly,
+    /// which is what ODF does: <c>max(minHeight, textHeight + distance)</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// This is <c>ScPrintFunc::UpdateHFHeight</c> with nothing composed away, because ODF needs
+    /// nothing composed. <c>rParam.nHeight = nMaxHeight + rParam.nDistance</c> and then
+    /// <c>if (rParam.nHeight &lt; rParam.nManHeight) rParam.nHeight = rParam.nManHeight</c>
+    /// (<c>sc/source/ui/view/printfun.cxx:838</c> and <c>:848-849</c>). A page layout's
+    /// <c>fo:min-height</c> is <c>nManHeight</c> — it reaches <c>ATTR_PAGE_SIZE</c>, which
+    /// <c>lcl_FillHFParam</c> copies into <c>nManHeight</c> (<c>printfun.cxx:666</c>,
+    /// <c>:683</c>) — and the header's own <c>fo:margin-bottom</c> (the footer's
+    /// <c>fo:margin-top</c>) is <c>nDistance</c>, read from <c>ATTR_ULSPACE</c> at
+    /// <c>printfun.cxx:898</c> and <c>:913</c>.
+    /// </para>
+    /// <para>
+    /// <strong><c>OdsPrintSetup</c> read the declared height alone</strong>, on the
+    /// reasoning that the gap is already inside it. That is true only while <c>text + gap</c>
+    /// stays under the declared height, and an <c>.ods</c> converted from a workbook carries the
+    /// workbook's own header margin as the gap, so the pair is routinely a 21.26 pt band with a
+    /// 25.99 pt gap — a gap larger than the whole band, which 13 of the 307 converted
+    /// <c>.ods</c> declare outright. Measured against 26.2.4.2 over 51 authored probes
+    /// (<c>probes/ods-band-r75/</c>): six gaps from 0 to 2 cm move the first printed row point
+    /// for point once the sum passes the declared height and not at all before it, and seven
+    /// declared heights move it point for point once they pass the sum.
+    /// </para>
+    /// <para>
+    /// <strong>The text term has a floor, and the floor is one line of the workbook's own
+    /// default cell font.</strong> Calc measures all three areas of all three page variants and
+    /// takes the greatest (<c>printfun.cxx:817-836</c>), and an area holding nothing is still an
+    /// <c>EditTextObject</c> of one empty paragraph rather than a null pointer — <c>TextHeight</c>
+    /// returns zero only for a null one (<c>printfun.cxx:777-785</c>) — so a header whose single
+    /// line is smaller than a plain cell of that workbook is sized by the empty areas beside it.
+    /// Measured on sixteen probes crossing four default sizes with four header sizes: a 6 pt
+    /// header in a 20 pt workbook takes the 20 pt line, in a 14 pt workbook the 14 pt line, and
+    /// in a 6 pt workbook its own; and two 6 pt lines in a 20 pt workbook still take one 20 pt
+    /// line, which is what says the floor is the band's rather than each line's.
+    /// </para>
+    /// <para>
+    /// The distance is <em>not</em> added when the minimum wins, and the difference shows in
+    /// where the text sits rather than in the band: the text is centred in
+    /// <c>nHeight - nDistance</c> whichever term won (<c>PrintHF</c>,
+    /// <c>printfun.cxx:1876-1912</c>), which the seven <c>min_*</c> probes reproduce to 0.01 pt.
+    /// </para>
+    /// </remarks>
+    /// <param name="minHeight">The declared height, Calc's <c>nManHeight</c>.</param>
+    /// <param name="distance">The gap between the band's text and the sheet, <c>nDistance</c>.</param>
+    /// <param name="defaultFont">
+    /// The workbook's own default cell font, which is what an area naming none is set in and what
+    /// an empty area is measured in.
+    /// </param>
+    /// <param name="bands">
+    /// The band as each page variant states it — the shared one, and the left- and first-page
+    /// ones where the master distinguishes them. Calc maximises over all of them.
+    /// </param>
+    public static Length Dynamic(
+        Length minHeight,
+        Length distance,
+        SheetDefaultFont? defaultFont,
+        params SheetHeaderFooter?[] bands)
+    {
+        ArgumentNullException.ThrowIfNull(bands);
+
+        SheetDefaultFont font = defaultFont ?? SheetDefaultFont.Calc;
+
+        Length text = Length.Zero;
+        foreach (SheetHeaderFooter? band in bands)
+        {
+            if (band is not null) text = Length.Max(text, TextHeight(band, font));
+        }
+
+        return text > Length.Zero ? Length.Max(minHeight, text + distance) : minHeight;
+    }
+
+    /// <summary>
+    /// How tall a band's text lays out: the tallest of its three areas, an empty area counting
+    /// as one line of the default font.
+    /// </summary>
+    /// <remarks>
+    /// The three areas share one rectangle and are each drawn into it separately, so the band
+    /// is the greatest of the three and never their sum — <c>UpdateHFHeight</c>'s nine-way
+    /// <c>std::max</c> (<c>sc/source/ui/view/printfun.cxx:817-836</c>). Nothing wraps here, for
+    /// the same reason <see cref="Measure"/> does not: Calc gives the EditEngine the band's own
+    /// paper width and a real header is one short line per area.
+    /// </remarks>
+    /// <param name="band">The three areas and their segments.</param>
+    /// <param name="defaultFont">The workbook's default cell font.</param>
+    public static Length TextHeight(SheetHeaderFooter band, SheetDefaultFont? defaultFont)
+    {
+        ArgumentNullException.ThrowIfNull(band);
+
+        SheetDefaultFont font = defaultFont ?? SheetDefaultFont.Calc;
+        SheetHeaderContext context = new();
+
+        Length height = Length.Zero;
+        foreach (SheetHeaderPart part in (SheetHeaderPart[])[band.Left, band.Centre, band.Right])
+        {
+            // An empty area is one empty paragraph, not nothing: `LineHeight` answers the
+            // default font's line for a line carrying no pieces, which is exactly that.
+            Length own = part.IsEmpty
+                ? LineHeight([], 1.0, font)
+                : PartHeight(part, context, 1.0, font);
+
+            height = Length.Max(height, own);
+        }
+
+        return height;
+    }
+
+    /// <summary>How tall one part of a band is: the sum of its lines.</summary>
+    /// <param name="part">The area.</param>
+    /// <param name="context">What the fields resolve to on this page.</param>
+    /// <param name="zoom">The print scale the band is drawn at.</param>
+    /// <param name="bandFont">The face a piece naming none is drawn in.</param>
+    public static Length PartHeight(
+        SheetHeaderPart part, SheetHeaderContext context, double zoom, SheetDefaultFont bandFont)
+    {
+        ArgumentNullException.ThrowIfNull(part);
+        if (part.IsEmpty) return Length.Zero;
+
+        Length height = Length.Zero;
+        foreach (IReadOnlyList<SheetHeaderPiece> line in part.Lines(context))
+            height += LineHeight(line, zoom, bandFont);
+
+        return height;
+    }
+
+    /// <summary>How tall one line of a band is: the tallest of the pieces on it.</summary>
+    /// <remarks>
+    /// An empty line — a bare break, which a footer written as <c>&amp;RPage &amp;P\n\nrest</c>
+    /// contains — still takes a line, at the band font's own height. So does an area holding
+    /// nothing at all, which is what makes this the floor
+    /// <see cref="TextHeight(SheetHeaderFooter, SheetDefaultFont?)"/> uses.
+    /// </remarks>
+    /// <param name="line">The pieces on the line.</param>
+    /// <param name="zoom">The print scale the band is drawn at.</param>
+    /// <param name="bandFont">The face a piece naming none is drawn in.</param>
+    public static Length LineHeight(
+        IReadOnlyList<SheetHeaderPiece> line, double zoom, SheetDefaultFont bandFont)
+    {
+        ArgumentNullException.ThrowIfNull(line);
+        ArgumentNullException.ThrowIfNull(bandFont);
+
+        Length height = Length.Zero;
+        foreach (SheetHeaderPiece piece in line)
+        {
+            SheetBandFace face = FaceOf(piece, bandFont);
+            height = Length.Max(
+                height,
+                SheetBandText.LineHeightAt(
+                    SizeOf(piece, zoom, bandFont), face.Family, face.Bold, face.Italic));
+        }
+
+        return height > Length.Zero
+            ? height
+            : SheetBandText.LineHeightAt(
+                bandFont.Size * zoom,
+                bandFont.Family,
+                bandFont.Weight >= BoldWeight,
+                bandFont.IsItalic);
+    }
+
+    /// <summary>The em size one piece of a band is drawn at, the page's zoom applied.</summary>
+    /// <remarks>
+    /// The fallback is the <em>workbook's</em> default cell font and not a fixed ten point — see
+    /// <see cref="SheetPrintSetup.BandFont"/>, which carries the measurement.
+    /// </remarks>
+    /// <param name="piece">The piece.</param>
+    /// <param name="zoom">The print scale the band is drawn at.</param>
+    /// <param name="bandFont">The face a piece naming none is drawn in.</param>
+    public static Length SizeOf(SheetHeaderPiece piece, double zoom, SheetDefaultFont bandFont)
+    {
+        ArgumentNullException.ThrowIfNull(bandFont);
+        return (piece.Size ?? bandFont.Size) * zoom;
+    }
+
+    /// <summary>The family one piece of a band is drawn in.</summary>
+    /// <remarks>
+    /// The piece's own <c>&amp;"Family,Style"</c> if it states one, and the workbook's default
+    /// cell family otherwise. A null answer means the furniture's own face, which is what
+    /// <see cref="SheetBandText"/> resolves for a workbook that names nothing.
+    /// </remarks>
+    /// <param name="piece">The piece.</param>
+    /// <param name="bandFont">The face a piece naming none is drawn in.</param>
+    public static SheetBandFace FaceOf(SheetHeaderPiece piece, SheetDefaultFont bandFont)
+    {
+        ArgumentNullException.ThrowIfNull(bandFont);
+        return new SheetBandFace(
+            piece.Family ?? bandFont.Family,
+            piece.Bold ?? bandFont.Weight >= BoldWeight,
+            piece.Italic ?? bandFont.IsItalic);
+    }
+
+    /// <summary>The weight at which a workbook's default font makes its band bold.</summary>
+    /// <remarks>
+    /// Six hundred, the CSS threshold, and it never has to discriminate on this corpus: both
+    /// Excel readers write 400 or 700 and nothing between.
+    /// </remarks>
+    private const int BoldWeight = 600;
+
+    /// <summary>
     /// Walks the code string and totals both heights: the filters' nominal one and the laid-out
     /// one Calc re-measures at print time.
     /// </summary>

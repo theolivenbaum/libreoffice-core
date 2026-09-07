@@ -2394,36 +2394,61 @@ Deliberate deviations from the port, both narrow:
 
 Not yet, and why:
 
-- **A header or footer taller than its declared height is under-measured, and "a header of
-  several lines" is not the case that matters.** Calc's band is
-  `max(nManHeight, maxTextHeight + nDistance)` — `nHeight = nMaxHeight + rParam.nDistance`, then
-  `if (nHeight < nManHeight) nHeight = nManHeight` (`UpdateHFHeight`,
-  `sc/source/ui/view/printfun.cxx`:838-850). ODF states both terms directly:
-  `fo:min-height` is `nManHeight` and the header's `fo:margin-bottom` (the footer's
-  `fo:margin-top`) is `nDistance`. `OdsPrintSetup.BandHeight` reads the first alone, on the
-  reasoning that the gap is already inside the declared height — which is true only while
-  `text + gap` stays under it.
+- ~~**A header or footer taller than its declared height is under-measured.**~~ **Done, and the
+  brief this round inherited was right about the rule and wrong about two things around it.**
+  `SheetBandHeight.Dynamic` is `max(fo:min-height, textHeight + gap)` — Calc's
+  `rParam.nHeight = nMaxHeight + rParam.nDistance` floored at `nManHeight` (`UpdateHFHeight`,
+  `sc/source/ui/view/printfun.cxx`:838 and :848-849), with `fo:min-height` reaching `nManHeight`
+  through `ATTR_PAGE_SIZE` (`lcl_FillHFParam`, :666 and :683) and the header's
+  `fo:margin-bottom` reaching `nDistance` through `ATTR_ULSPACE` (:898, :913).
 
-  **It very often does not, and the term that varies is the gap rather than the text.** An `.ods`
-  Calc converted from a workbook carries the workbook's own header margin, so the pair is
-  routinely `fo:min-height="0.2953in"` (21.26 pt) with `fo:margin-bottom="0.361in"` (25.99 pt) —
-  a gap larger than the whole declared band. Censused over `/home/user/corpus-odf`
-  (`probes/odf-rowpitch-r72/hfcensus.py`, counting one line as 11.5 pt): **58 of the 307 `.ods`
-  declare a band smaller than one line plus its gap**, the worst by 17.68 pt.
+  **The text term has a floor and the floor is one line of the workbook's own default cell
+  font**, because an area holding nothing is still an `EditTextObject` of one empty paragraph
+  rather than a null pointer — `TextHeight` returns zero only for a null one (:777-785) — and
+  `UpdateHFHeight` maximises over all nine areas (:817-836). A 6 pt header in a 20 pt workbook
+  takes the 20 pt line; two 6 pt lines in one still take one 20 pt line, which is what says the
+  floor is the band's and not each line's.
 
-  Measured on `activespecs.ods`, whose sheet is `qryDocCntrl` and whose header is that sheet's
-  name: 26.2.4.2 puts the header at the 36 pt top margin and the first cell row at 72.69, a band
-  of **36.69 pt** against the declared 21.26. We start the body at 57.27 and therefore fit three
-  more rows on every page — **254 pages against 266**. `PA_Delaware`, `fy2010-aip-grants`,
-  `fy2011-aip-grants`, `fy20-may20-sep20`, `Hazard Analysis Template` and
-  `2025_Active_Civil_Airmen_Statistics_FINAL` all show the same sign, and the last of those is the
-  one document the allocated-column row-height fix pushed one page too far.
+  **`svg:height` is the fixed case and must not grow**: the two spellings are one property with
+  two special items, `svg:height` filling `HeaderIsDynamicHeight` with false and `fo:min-height`
+  with true (`xmloff/source/style/PageMasterImportPropMapper.cxx`:324-330), that property is
+  `ATTR_PAGE_DYNAMIC` (`sc/source/ui/unoobj/styleuno.cxx`:341-343), and `UpdateHFHeight` returns
+  before it measures anything when the flag is off (:793).
 
-  The blast radius of fixing it is bounded by the `max`: on the other 249 the declared height
-  already wins and nothing moves. What it needs is the band's own text height, which is
-  `SheetPageDecoration.TextHeight`'s question and not the reader's — so the seat is the layout,
-  not `OdsPrintSetup`. A one-line estimate from the band font's metrics would do for all 58, and
-  the number to fit it against is the 10.70 pt of text that `activespecs`' 36.69 − 25.99 leaves.
+  Two things the brief had wrong. **The seat is the reader, not the layout** — the reason given
+  for putting it in the layout was that "the readers do not have the header font's metrics", and
+  all three of the other readers have called `SheetBandHeight`, which calls
+  `SheetBandText.LineHeightAt`, since round 56. And **the band's own text was not readable at
+  all**: `OdsCellDecoration.ReadBand` dropped every `text:span`'s formatting, so an ODF band was
+  sized *and drawn* in one size and one face whatever the file said. Both are fixed;
+  `probes/ods-band-r75/results.md` has the 73 authored probes, which reproduce 26.2.4.2 to a
+  worst error of 0.23 pt.
+
+- **A sheet's `draw:frame` is not read when it states `draw:transform` instead of
+  `svg:x`/`svg:y`.** That is how LibreOffice writes a turned or skewed picture, and `OdsDrawings`
+  parses no transform at all, so such a frame does not exist for us. It costs three things at
+  once, which is why it reads as a *text* defect: the picture's ink; the print area, because
+  `ScDocument::GetPrintArea` unions the drawing layer's bounding box into the cells' extent
+  (`sc/source/core/data/documen2.cxx`:644-666) and `SheetDrawingArea` already implements that
+  union; and the empty-page test, because a page whose only content is a picture must not be
+  dropped, which `SheetEmptyPages` already implements.
+
+  `SIL_TDB648.ods` is the witness and it was filed as a cell-overflow document: 74 `draw:frame`,
+  **72** of them transform-only, 60 pages against the reference's 88, and the reference's 15
+  text-free pages of 88 against our 5 of 60. Its page 1 is identical on both sides, long
+  overflowing strings included, so overflow is not what is wrong with it. Reach is **5 of the
+  307 converted `.ods` and 81 frames of 504**, 72 of the 81 in that one file
+  (`probes/ods-band-r75/framecensus.py`). `WordProcessing/OpenDocument/OdfFrames.cs`:211-243
+  takes the `translate(...)` out of such a transform for a Writer frame and
+  `OdpSlideLayout`:747-843 parses the whole matrix; the sheet reader has neither.
+
+- **A cell's first printed row sits about a point lower than the reference's.** Measured on the
+  band probes: with no band at all, 26.2.4.2 puts the first row's *text* 0.97 pt **above** the
+  body's top edge and this tree puts it 0.02 pt below, on a 2 cm top margin and a 0.5 cm row. It
+  is constant across every probe of both families, so it cancels out of a band measurement taken
+  as a *shift* — which is what made the previous round's `activespecs` figure a point out —
+  and it is worth about a point of body height on every page.
+
 - **The paper size default is locale-dependent and A4 is assumed.** Calc's is
   `SvxPaperInfo::GetDefaultPaperSize()`, which is Letter in an American locale; the same missing
   locale infrastructure that keeps the two built-in number-format tables apart is what keeps this

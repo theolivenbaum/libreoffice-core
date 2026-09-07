@@ -44,6 +44,35 @@ internal static class OdsCellFormats
         return reader.Read(table);
     }
 
+    /// <summary>
+    /// The workbook's default cell font: the <c>Default</c> cell style's own family and size.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// It is what a header or footer naming no face of its own is set in, and what an
+    /// <em>empty</em> header area is measured as — <c>ScPrintFunc::MakeEditEngine</c> fills the
+    /// band's EditEngine defaults from <c>getDefaultCellAttribute</c>
+    /// (<c>sc/source/ui/view/printfun.cxx:1765-1772</c>). The other three readers have passed
+    /// this to <see cref="SheetBandHeight"/> since round 56; the ODF one had nowhere to pass it
+    /// to, because it read the band's declared height and never measured its text.
+    /// </para>
+    /// <para>
+    /// Resolved through the same <see cref="Reader"/> a cell goes through, rather than by reading
+    /// the style's attributes here, so that the two spellings of a face — <c>style:font-name</c>
+    /// and <c>fo:font-family</c>, one item — are settled by level before they are settled by
+    /// spelling. A converted workbook states the first on its automatic styles and both on
+    /// <c>Default</c>, so reading them independently answers the wrong one.
+    /// </para>
+    /// </remarks>
+    /// <param name="styles">The document's styles.</param>
+    public static SheetDefaultFont DefaultFont(OdfStyles styles)
+    {
+        ArgumentNullException.ThrowIfNull(styles);
+
+        Reader reader = new(styles);
+        return reader.DefaultFont();
+    }
+
     private sealed class Reader(OdfStyles styles)
     {
         private readonly Dictionary<string, SheetCellFormat> _resolved = new(StringComparer.Ordinal);
@@ -493,6 +522,19 @@ internal static class OdsCellFormats
             int index = cellIndex != 0 ? cellIndex : InheritedIndex(column);
 
             return _pool.GetValueOrDefault(index, SheetCellFormat.Default);
+        }
+
+        /// <summary>The <c>Default</c> cell style's font, as a band's default.</summary>
+        public SheetDefaultFont DefaultFont()
+        {
+            SheetCellFormat format = Resolve(DefaultCellStyleName);
+
+            return new SheetDefaultFont(
+                format.FontFamily,
+                format.FontSize,
+                format.FontWeight,
+                format.IsItalic,
+                format.DeclaredFontClass);
         }
 
         private SheetCellFormat Resolve(string styleName)
