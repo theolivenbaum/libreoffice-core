@@ -67,9 +67,11 @@ internal sealed partial class OdpSlideLayout
         OdfMasterPage? master = _file.Styles.FindMasterPage(
             Attribute(page, OdfNamespaces.Draw, "master-page-name"));
 
+        OdpRunningObjects fields = OdpRunningObjects.ForPage(_file.Styles, page, index);
+
         List<PlacedShape> shapes = [];
-        InheritedShapes(page, master, shapes);
-        Walk(page, AffineTransform.Identity, shapes, depth: 0);
+        InheritedShapes(page, master, shapes, fields);
+        Walk(page, AffineTransform.Identity, shapes, depth: 0, fields);
 
         DocSize size = SlideSize(master);
 
@@ -99,15 +101,25 @@ internal sealed partial class OdpSlideLayout
     /// the gate's own floor, and a further 49 have it as one of their components.
     /// </para>
     /// <para>
-    /// <strong>Presentation objects are excluded and background objects are not.</strong> A frame
-    /// carrying <c>presentation:class</c> is a placeholder — the master's own "Click to edit
-    /// Master title style" prompt, or its header, footer, date-time and page-number frames — and
-    /// Impress draws none of those from the master: the slide's matching placeholder supplies the
-    /// text, and the header/footer family is governed by the page's own <c>presentation:display-*</c>
-    /// declarations rather than by the master's prompt. Everything else on the master — a logo, a
-    /// strapline, a rule, a background picture — is a background object and is drawn. This is the
-    /// same split <c>PptxSlideLayout.InheritedShapes</c> makes, and it has to be, because an
-    /// Impress master page <em>is</em> a PPTX master and a PPTX layout merged into one.
+    /// <strong>Presentation objects are excluded and background objects are not — with one
+    /// family of exceptions, which is the whole of <see cref="OdpRunningObjects"/>.</strong> A
+    /// frame carrying <c>presentation:class</c> is a placeholder, and Impress draws a master's
+    /// title, outline, subtitle, notes body and page thumbnail nowhere but on the master itself:
+    /// the slide's matching placeholder supplies the text. Everything else on the master — a
+    /// logo, a strapline, a rule, a background picture — is a background object and is drawn.
+    /// This is the same split <c>PptxSlideLayout.InheritedShapes</c> makes, and it has to be,
+    /// because an Impress master page <em>is</em> a PPTX master and a PPTX layout merged into
+    /// one.
+    /// </para>
+    /// <para>
+    /// The exception is the <em>running objects</em> — header, footer, date-time and slide
+    /// number. Those four <strong>are</strong> drawn from the master, on exactly the slides whose
+    /// own drawing-page style switches each one on, and the earlier form of this remark had that
+    /// backwards: it read the page's <c>presentation:display-*</c> declarations as governing the
+    /// slide's own copy of the frame, when what they govern is the <em>master's</em>. Reaching
+    /// only the slides that happen to carry a copy of their own left 23 of the converted corpus's
+    /// 302 <c>.odp</c> short by some 16 300 characters. <see cref="OdpRunningObjects"/> carries
+    /// the mechanism and the citations.
     /// </para>
     /// <para>
     /// <strong>A master shape parked off the page needs no rule.</strong> The template family that
@@ -128,7 +140,8 @@ internal sealed partial class OdpSlideLayout
     /// and not as a master one. Absent means visible.
     /// </para>
     /// </remarks>
-    private void InheritedShapes(XElement page, OdfMasterPage? master, List<PlacedShape> shapes)
+    private void InheritedShapes(
+        XElement page, OdfMasterPage? master, List<PlacedShape> shapes, OdpRunningObjects fields)
     {
         if (master is null || master.Shapes.Count == 0) return;
 
@@ -141,7 +154,7 @@ internal sealed partial class OdpSlideLayout
 
         if (visible.HasValue && !visible.Is("true")) return;
 
-        Walk(master.Element, AffineTransform.Identity, shapes, depth: 0, background: true);
+        Walk(master.Element, AffineTransform.Identity, shapes, depth: 0, fields, background: true);
     }
 
     /// <summary>
@@ -172,8 +185,11 @@ internal sealed partial class OdpSlideLayout
     /// moved them the wrong way.
     /// </para>
     /// <para>
-    /// Nothing is needed for the master's own copies either: they carry <c>presentation:class</c>
-    /// and <see cref="InheritedShapes"/> already excludes every class-bearing shape on a master.
+    /// <strong>The master's own copies are a different question and the answer there is yes.</strong>
+    /// That is exactly what <c>bSubContentProcessing</c> guards, and it is
+    /// <see cref="OdpRunningObjects"/> — so the same four declarations decide nothing for the
+    /// slide's frame and everything for the master's. Do not read the two as one rule; a round
+    /// that did implemented the suppression on the wrong side and had to withdraw it.
     /// </para>
     /// </remarks>
     /// <summary>
@@ -305,6 +321,7 @@ internal sealed partial class OdpSlideLayout
         AffineTransform space,
         List<PlacedShape> shapes,
         int depth,
+        OdpRunningObjects fields,
         bool background = false)
     {
         foreach (XElement element in parent.Elements())
@@ -312,7 +329,9 @@ internal sealed partial class OdpSlideLayout
             if (element.Name.NamespaceName != OdfNamespaces.Draw) continue;
 
             if (background
-                && element.Attribute(XName.Get("class", OdfNamespaces.Presentation)) is not null)
+                && element.Attribute(XName.Get("class", OdfNamespaces.Presentation))
+                    is { Value: { } presentationClass }
+                && !fields.Inherits(presentationClass))
             {
                 continue;
             }
@@ -325,12 +344,12 @@ internal sealed partial class OdpSlideLayout
                     // A group states no coordinate space of its own in ODF, so descending is a
                     // plain recursion; only a draw:transform on the group changes anything, and
                     // LibreOffice writes none.
-                    Walk(element, Space(element, space), shapes, depth + 1, background);
+                    Walk(element, Space(element, space), shapes, depth + 1, fields, background);
                     break;
 
                 case "frame"
                     when element.Element(XName.Get("table", OdfNamespaces.Table)) is { } table:
-                    shapes.AddRange(Table(element, table, space));
+                    shapes.AddRange(Table(element, table, space, fields));
                     break;
 
                 // A frame holding an embedded chart draws the chart rather than the frame. It is
@@ -348,7 +367,7 @@ internal sealed partial class OdpSlideLayout
                 case "frame":
                 case "polygon":
                 case "line":
-                    if (Shape(element, space) is { } placed) shapes.Add(placed);
+                    if (Shape(element, space, fields) is { } placed) shapes.Add(placed);
                     break;
 
                 // draw:page-thumbnail is a live preview of another slide, not a picture, and
@@ -418,7 +437,8 @@ internal sealed partial class OdpSlideLayout
     /// so the frame's own shape is not placed at all when it holds a table.
     /// </para>
     /// </remarks>
-    private List<PlacedShape> Table(XElement frame, XElement table, AffineTransform space)
+    private List<PlacedShape> Table(
+        XElement frame, XElement table, AffineTransform space, OdpRunningObjects fields)
     {
         DocSize size = new(
             Measure(frame, OdfNamespaces.SvgCompatible, "width"),
@@ -430,7 +450,7 @@ internal sealed partial class OdpSlideLayout
             OdfTableGeometry.Read(_file, table),
             size,
             AffineTransform.Concat(Placement(frame), space),
-            cell => CellBody(cell),
+            cell => CellBody(cell, fields),
             _fonts,
             Attribute(frame, OdfNamespaces.Draw, "name"));
     }
@@ -476,7 +496,7 @@ internal sealed partial class OdpSlideLayout
     /// the second in both cases. probes/slides-r55/odp-cell-baseline.py]
     /// </para>
     /// </remarks>
-    private SlideTextBody? CellBody(DrawingTableCellBox cell)
+    private SlideTextBody? CellBody(DrawingTableCellBox cell, OdpRunningObjects fields)
     {
         if (cell.TextBody is not { } element) return null;
 
@@ -487,7 +507,7 @@ internal sealed partial class OdpSlideLayout
         ];
 
         SlideTextBody body = OdfTextBody.Read(
-            _file, element.Descendants(XName.Get("p", OdfNamespaces.Text)), cascade);
+            _file, element.Descendants(XName.Get("p", OdfNamespaces.Text)), cascade, fields);
 
         if (body.Paragraphs.Count == 0) return null;
 
@@ -504,7 +524,7 @@ internal sealed partial class OdpSlideLayout
         };
     }
 
-    private PlacedShape? Shape(XElement element, AffineTransform space)
+    private PlacedShape? Shape(XElement element, AffineTransform space, OdpRunningObjects fields)
     {
         DocSize size = new(
             Measure(element, OdfNamespaces.SvgCompatible, "width"),
@@ -564,7 +584,7 @@ internal sealed partial class OdpSlideLayout
         // property, while `lcl_copyCharPropsToShape` (`oox/source/drawingml/shape.cxx:721-905`) is
         // what puts a DrawingML run's fill onto the shape in the first place. On a deck LibreOffice
         // converted from `pptx`, the `draw:fill-color` it wrote *is* that copied run colour.
-        if (Warped(element, geometry, size, cascade) is { } warped)
+        if (Warped(element, geometry, size, cascade, fields) is { } warped)
         {
             return new PlacedShape
             {
@@ -587,7 +607,7 @@ internal sealed partial class OdpSlideLayout
             Fill = fill,
             Picture = Picture(element, bounds),
             Line = Line(cascade),
-            Text = Text(element, outline.TextRectangle, placement, cascade),
+            Text = Text(element, outline.TextRectangle, placement, cascade, fields),
             Shadow = Shadow(cascade),
         };
     }
@@ -605,12 +625,13 @@ internal sealed partial class OdpSlideLayout
         XElement element,
         XElement? geometry,
         DocSize size,
-        IReadOnlyList<OdfStyleReference> cascade)
+        IReadOnlyList<OdfStyleReference> cascade,
+        OdpRunningObjects fields)
     {
         if (OdfFontwork.Read(geometry) is not { } warp) return null;
 
         SlideTextBody body = OdfTextBody.Read(
-            _file, Paragraphs(element), [.. cascade, TextStyle(element)]);
+            _file, Paragraphs(element), [.. cascade, TextStyle(element)], fields);
 
         if (body.Paragraphs.Count == 0) return null;
 
@@ -641,6 +662,22 @@ internal sealed partial class OdpSlideLayout
     /// opaque; <c>draw:shadow-color</c> defaults to the grey a binary file's shadow takes when
     /// it states none.
     /// </para>
+    /// <para>
+    /// <strong>The blur radius is the fifth attribute and it is not in the <c>draw</c>
+    /// namespace.</strong> <c>PROP_ShadowBlur</c> is mapped at
+    /// <c>xmloff/source/draw/sdpropls.cxx</c>:169 to <c>XML_NAMESPACE_LO_EXT</c> and to nothing
+    /// else, so a reader that looks for <c>draw:shadow-blur</c> finds the attribute nowhere and
+    /// concludes every shadow is hard-edged. It matters far more than a radius usually would,
+    /// because <see cref="SlideShadow.CarriesText"/> keys on it: LibreOffice rasterises a blurred
+    /// shadow (<c>shadowprimitive2d.cxx</c>:91-140) and its PDF holds a picture with
+    /// <em>no text</em>, while a hard shadow stays vector and its text is real. Read without the
+    /// extension namespace, every blurred shadow in the file put a second, offset copy of its
+    /// shape's words into the text layer. <strong>1252 non-zero <c>loext:shadow-blur</c> in 120
+    /// of the converted corpus's 302 <c>.odp</c>, and not one <c>draw:shadow-blur</c>
+    /// anywhere</strong> — the same trap <see cref="IsPrinted"/> records for
+    /// <c>drawooo:display</c> and <c>OdfNamespaces.ChartExtension</c> for
+    /// <c>coordinate-region</c>.
+    /// </para>
     /// </remarks>
     private SlideShadow? Shadow(IReadOnlyList<OdfStyleReference> cascade)
     {
@@ -662,8 +699,16 @@ internal sealed partial class OdpSlideLayout
             y,
             colour.WithAlpha(255),
             Math.Clamp(opacity, 0, 1),
-            Graphic(cascade, OdfNamespaces.Draw, "shadow-blur").AsLength() ?? Core.Units.Length.Zero);
+            Blur(cascade));
     }
+
+    /// <summary>
+    /// A shadow's blur radius, from whichever namespace the file spells it in.
+    /// </summary>
+    private Core.Units.Length Blur(IReadOnlyList<OdfStyleReference> cascade)
+        => Graphic(cascade, OdfNamespaces.LoExt, "shadow-blur").AsLength()
+           ?? Graphic(cascade, OdfNamespaces.Draw, "shadow-blur").AsLength()
+           ?? Core.Units.Length.Zero;
 
     /// <summary>
     /// A shape's outline and text rectangle: its own <c>draw:enhanced-path</c> first.
@@ -1155,10 +1200,11 @@ internal sealed partial class OdpSlideLayout
         XElement element,
         DocRect rectangle,
         AffineTransform placement,
-        IReadOnlyList<OdfStyleReference> cascade)
+        IReadOnlyList<OdfStyleReference> cascade,
+        OdpRunningObjects fields)
     {
         SlideTextBody body = OdfTextBody.Read(
-            _file, Paragraphs(element), [.. cascade, TextStyle(element)]);
+            _file, Paragraphs(element), [.. cascade, TextStyle(element)], fields);
         if (body.Paragraphs.Count == 0) return null;
 
         bool upright = placement.A == 1 && placement.B == 0 && placement.C == 0 && placement.D == 1;

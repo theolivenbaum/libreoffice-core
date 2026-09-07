@@ -140,13 +140,52 @@ public class SlideDropShadowTests
     /// plus smask, and its extractable word count is unchanged at 1256. Drawing the shadow's text
     /// under blur would add words to every such deck.
     /// </remarks>
-    [Fact]
-    public void OnlyAnUnblurredShadowCarriesTheShapesText()
+    [Theory]
+    [InlineData(Deck)]
+    [InlineData(OdfDeck)]
+    public void OnlyAnUnblurredShadowCarriesTheShapesText(string deck)
     {
-        Shadow(Deck, "Angled").CarriesText
+        Shadow(deck, "Angled").CarriesText
             .ShouldBeTrue("blurRad=\"0\", so the reference keeps it vector");
-        Shadow(Deck, "Themed").CarriesText
+        Shadow(deck, "Themed").CarriesText
             .ShouldBeFalse("blurRad=\"40000\", so the reference rasterises it");
+    }
+
+    /// <summary>
+    /// The blur radius that decides it is <c>loext:shadow-blur</c>, in the extension namespace.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The other four shadow attributes are <c>draw:</c> and this one is not:
+    /// <c>PROP_ShadowBlur</c> is mapped to <c>XML_NAMESPACE_LO_EXT</c> and to nothing else
+    /// (<c>xmloff/source/draw/sdpropls.cxx</c>:169). A reader looking for
+    /// <c>draw:shadow-blur</c> therefore finds the attribute nowhere, reads every shadow as
+    /// hard-edged, and — by the rule directly above — puts a second offset copy of every
+    /// shadowed shape's words into the text layer.
+    /// </para>
+    /// <para>
+    /// The reach is not marginal: <strong>1252 non-zero <c>loext:shadow-blur</c> in 120 of the
+    /// converted corpus's 302 <c>.odp</c></strong>, against <strong>zero</strong>
+    /// <c>draw:shadow-blur</c> anywhere in it.
+    /// <c>010_3-Group_Hierarchy_for_PowerPoint_and_Google_Slides</c> is the smallest witness: 715
+    /// characters against the reference's 715 once the namespace is read, and 895 before, the
+    /// extra 180 being nine "Lorem Ipsum" drawn twice 2.098 pt apart in both axes.
+    /// </para>
+    /// <para>
+    /// This is the third instance of one trap. <c>OdpSlideLayout.IsPrinted</c> records
+    /// <c>drawooo:display</c>, which LibreOffice's exporter also writes only in an extension
+    /// namespace, and <c>OdfNamespaces.ChartExtension</c> records <c>coordinate-region</c>. In
+    /// each the ODF-namespace spelling is what a specification reader looks for and appears in no
+    /// file the reference binary writes.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void AnOdfShadowsBlurIsReadFromTheExtensionNamespace()
+    {
+        Shadow(OdfDeck, "Themed").Blur.ShouldBeGreaterThan(
+            Length.Zero, "loext:shadow-blur=\"0.111cm\"");
+        Shadow(OdfDeck, "Angled").Blur.ShouldBe(
+            Length.Zero, "loext:shadow-blur=\"0cm\"");
     }
 
     /// <summary>

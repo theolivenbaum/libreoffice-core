@@ -39,10 +39,16 @@ internal static class OdfTextBody
     /// <param name="shapeCascade">
     /// The shape's own style references, which the paragraph and run styles sit inside.
     /// </param>
+    /// <param name="fields">
+    /// What the slide this text is drawn on answers for a header, footer, date-time or
+    /// slide-number field. Null leaves every field showing the characters the file stores
+    /// against it, which is what a document with no page to resolve against can say.
+    /// </param>
     public static SlideTextBody Read(
         OdfFile file,
         IEnumerable<XElement> paragraphs,
-        IReadOnlyList<OdfStyleReference> shapeCascade)
+        IReadOnlyList<OdfStyleReference> shapeCascade,
+        OdpRunningObjects? fields = null)
     {
         ArgumentNullException.ThrowIfNull(file);
         ArgumentNullException.ThrowIfNull(paragraphs);
@@ -70,7 +76,7 @@ internal static class OdfTextBody
                 fontIndependent = true;
             }
 
-            SlideParagraph read1 = Paragraph(file, paragraph, cascade);
+            SlideParagraph read1 = Paragraph(file, paragraph, cascade, fields);
 
             read.Add(Label(file, paragraph, level) is { } label
                 ? read1 with
@@ -87,6 +93,7 @@ internal static class OdfTextBody
             Paragraphs = read,
             Insets = Insets(file, shapeCascade),
             Anchor = Anchor(file, shapeCascade),
+            AutoFit = Shrinks(file, shapeCascade),
             FontIndependentLineSpacing = fontIndependent,
         };
     }
@@ -276,6 +283,50 @@ internal static class OdfTextBody
                .AsLength()
            ?? Length.Zero;
 
+    /// <summary>
+    /// Whether the shape shrinks its text until it fits — Impress's <em>autofit</em>, and
+    /// <see cref="SlideTextBody.AutoFit"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>ODF spells one property two ways and they have to be read together.</strong>
+    /// <c>drawing::TextFitToSizeType</c> has four values and <c>sdpropls.cxx</c>:143-144 maps
+    /// <em>both</em> <c>draw:fit-to-size</c> and <c>style:shrink-to-fit</c> onto it with
+    /// <c>MID_FLAG_MERGE_PROPERTY</c>: <c>draw:fit-to-size</c> carries
+    /// <c>false</c> / <c>true</c> (proportional) / <c>all</c> (all lines) /
+    /// <c>shrink-to-fit</c> (autofit) through <c>pXML_FitToSize_Enum</c> (:677-684), and
+    /// <c>style:shrink-to-fit</c> carries the autofit bit alone through
+    /// <c>pXML_ShrinkToFit_Enum</c> (:686-693). The second exists because the first is ODF 1.2's
+    /// spelling and older consumers read <c>true</c> as <em>stretch</em>; LibreOffice therefore
+    /// writes <c>draw:fit-to-size="false" style:shrink-to-fit="true"</c> for an autofitted shape,
+    /// and a reader that consults only the first concludes the shape does not autofit.
+    /// </para>
+    /// <para>
+    /// Which is what happened here: <c>SlideAutofit</c> has been a full port of
+    /// <c>autoFitTextForCompatibility</c> since round 52 and the ODF path reached none of it. It
+    /// is not a rare attribute — <c>style:shrink-to-fit="true"</c> appears <strong>3515 times,
+    /// in all 302</strong> of the converted corpus's <c>.odp</c>.
+    /// </para>
+    /// <para>
+    /// Only the autofit value is honoured. <c>PROPORTIONAL</c> and <c>ALLLINES</c> — Impress's
+    /// <em>fit to frame</em>, which stretches the glyphs rather than choosing a smaller size —
+    /// are a different transform and are not modelled on any of the three presentation readers;
+    /// the corpus states neither, all 25 525 of its <c>draw:fit-to-size</c> saying
+    /// <c>false</c>.
+    /// </para>
+    /// </remarks>
+    private static bool Shrinks(OdfFile file, IReadOnlyList<OdfStyleReference> cascade)
+    {
+        if (file.Styles.ResolveProperty(
+                cascade, OdfPropertyKind.Graphic, OdfNamespaces.Style, "shrink-to-fit").Is("true"))
+        {
+            return true;
+        }
+
+        return file.Styles.ResolveProperty(
+            cascade, OdfPropertyKind.Graphic, OdfNamespaces.Draw, "fit-to-size").Is("shrink-to-fit");
+    }
+
     private static TextAnchor Anchor(OdfFile file, IReadOnlyList<OdfStyleReference> cascade)
     {
         OdfProperty alignment = file.Styles.ResolveProperty(
@@ -287,12 +338,15 @@ internal static class OdfTextBody
     }
 
     private static SlideParagraph Paragraph(
-        OdfFile file, XElement paragraph, IReadOnlyList<OdfStyleReference> cascade)
+        OdfFile file,
+        XElement paragraph,
+        IReadOnlyList<OdfStyleReference> cascade,
+        OdpRunningObjects? fields)
     {
         StringBuilder text = new();
         List<SlideTextRun> runs = [];
 
-        Collect(file, paragraph, cascade, text, runs);
+        Collect(file, paragraph, cascade, text, runs, fields);
 
         if (runs.Count == 0)
         {
@@ -325,7 +379,8 @@ internal static class OdfTextBody
         XElement element,
         IReadOnlyList<OdfStyleReference> cascade,
         StringBuilder text,
-        List<SlideTextRun> runs)
+        List<SlideTextRun> runs,
+        OdpRunningObjects? fields)
     {
         foreach (XNode node in element.Nodes())
         {
@@ -339,6 +394,20 @@ internal static class OdfTextBody
             }
 
             if (node is not XElement child) continue;
+
+            if (child.Name.NamespaceName == OdfNamespaces.Presentation)
+            {
+                // A running object's field. Its element is empty in the file: what it draws is
+                // the declaration the *slide* names, so nothing here can be read off the frame.
+                if (Field(child.Name.LocalName, fields) is { Length: > 0 } declared)
+                {
+                    runs.Add(Run(file, cascade, text.Length, declared.Length));
+                    text.Append(declared);
+                }
+
+                continue;
+            }
+
             if (child.Name.NamespaceName != OdfNamespaces.Text) continue;
 
             switch (child.Name.LocalName)
@@ -351,7 +420,16 @@ internal static class OdfTextBody
                             child.Attribute(XName.Get("style-name", OdfNamespaces.Text))?.Value,
                             OdfStyleFamily.Text)],
                         text,
-                        runs);
+                        runs,
+                        fields);
+                    break;
+
+                // The slide's own number. The element's content is the placeholder the file
+                // stores against it -- LibreOffice writes the literal string `<number>` -- so
+                // drawing that content is drawing the placeholder rather than the field.
+                case "page-number" when fields is not null && Current(child):
+                    runs.Add(Run(file, cascade, text.Length, fields.PageNumber.Length));
+                    text.Append(fields.PageNumber);
                     break;
 
                 case "s":
@@ -376,10 +454,46 @@ internal static class OdfTextBody
 
                 default:
                     // A field, a bookmark, a note anchor: whatever text it carries is its own.
-                    Collect(file, child, cascade, text, runs);
+                    Collect(file, child, cascade, text, runs, fields);
                     break;
             }
         }
+    }
+
+    /// <summary>
+    /// What a <c>presentation:header</c>, <c>-footer</c> or <c>-date-time</c> field draws on
+    /// this slide, or null when it draws nothing.
+    /// </summary>
+    /// <remarks>
+    /// These three elements are always empty in the file. The text is the document-level
+    /// declaration the slide names through <c>presentation:use-footer-name</c> and its siblings —
+    /// <c>SdXMLGenericPageContext::endFastElement</c> (<c>xmloff/source/draw/ximppage.cxx</c>:301-360)
+    /// copies it onto the page, and <c>SdModule::CalcFieldValueHdl</c>
+    /// (<c>sd/source/ui/app/sdmod2.cxx</c>:374-425) is what reads it back for the field. A slide
+    /// naming no declaration leaves the field empty, which is why a master's footer can be present
+    /// on a page and still draw nothing.
+    /// </remarks>
+    private static string? Field(string name, OdpRunningObjects? fields) => name switch
+    {
+        "header" => fields?.Header,
+        "footer" => fields?.Footer,
+        "date-time" => fields?.DateTime,
+        _ => null,
+    };
+
+    /// <summary>
+    /// Whether a <c>text:page-number</c> asks for the page it is on rather than its neighbour.
+    /// </summary>
+    /// <remarks>
+    /// <c>text:select-page</c> takes <c>previous</c>, <c>current</c> and <c>next</c>, and absent
+    /// is <c>current</c>. Only the current page is substituted here: the other two are a
+    /// word-processing construct that no presentation LibreOffice writes uses, and drawing the
+    /// stored placeholder for them is at least visibly a placeholder.
+    /// </remarks>
+    private static bool Current(XElement field)
+    {
+        string? select = field.Attribute(XName.Get("select-page", OdfNamespaces.Text))?.Value;
+        return select is null or "current";
     }
 
     private static SlideTextRun Run(
