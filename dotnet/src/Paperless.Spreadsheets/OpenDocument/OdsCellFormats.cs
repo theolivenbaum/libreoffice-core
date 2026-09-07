@@ -400,9 +400,8 @@ internal static class OdsCellFormats
         /// </remarks>
         private SheetCellFormat TextStyle(SheetCellFormat cellFormat, string styleName)
         {
-            string? faceName = Span(styleName, "font-name", OdfNamespaces.Style);
-            string? stated = Span(styleName, "font-family", OdfNamespaces.FoCompatible);
-            string? family = stated ?? FontFaceFamily(faceName);
+            (string? family, FontFamilyClass declared) =
+                FontIdentity(styleName, OdfStyleFamily.Text);
 
             Length? size = Measure(Span(styleName, "font-size", OdfNamespaces.FoCompatible));
             string? weight = Span(styleName, "font-weight", OdfNamespaces.FoCompatible);
@@ -412,9 +411,7 @@ internal static class OdsCellFormats
             return cellFormat with
             {
                 FontFamily = family ?? cellFormat.FontFamily,
-                DeclaredFontClass = family is null
-                    ? cellFormat.DeclaredFontClass
-                    : stated is not null ? FontFamilyClass.Unknown : FontFaceClass(faceName),
+                DeclaredFontClass = family is null ? cellFormat.DeclaredFontClass : declared,
                 FontSize = size ?? cellFormat.FontSize,
                 FontWeight = weight is null ? cellFormat.FontWeight : Weight(weight),
                 IsItalic = posture is null
@@ -500,15 +497,13 @@ internal static class OdsCellFormats
 
         private SheetCellFormat Resolve(string styleName)
         {
-            string? faceName = Text(styleName, "font-name");
-            string? stated = Text(styleName, "font-family");
-            string? family = stated ?? FontFaceFamily(faceName);
+            (string? family, FontFamilyClass declared) =
+                FontIdentity(styleName, OdfStyleFamily.TableCell);
 
             return new SheetCellFormat
             {
                 FontFamily = family,
-                DeclaredFontClass =
-                    stated is not null ? FontFamilyClass.Unknown : FontFaceClass(faceName),
+                DeclaredFontClass = declared,
                 FontSize = Points(Text(styleName, "font-size")) ?? Length.FromPoints(10),
                 FontWeight = Weight(Text(styleName, "font-weight")),
                 IsItalic = Text(styleName, "font-style") is "italic" or "oblique",
@@ -655,6 +650,59 @@ internal static class OdsCellFormats
 
             return Math.Clamp(folded, -90, 90);
         }
+
+        /// <summary>
+        /// The face a style asks for, deciding the level of the parent chain before the spelling.
+        /// </summary>
+        /// <remarks>
+        /// <c>style:font-name</c> and <c>fo:font-family</c> are two spellings of one item, so an
+        /// ancestor stating the second must not beat a child stating the first. See
+        /// <see cref="OdfStyles.ResolveWithoutDefaults(string, OdfStyleFamily, OdfPropertyKind,
+        /// IReadOnlyList{ValueTuple{string, string}}, out int)"/>, which is where the whole of the
+        /// reasoning is. Every automatic cell style an <c>.ods</c> converted from a workbook
+        /// carries states <c>style:font-name</c> and no <c>fo:font-family</c>, while the
+        /// <c>Default</c> cell style it inherits from states both — so reading them independently
+        /// draws every such sheet in the document default's face rather than the cell's.
+        /// </remarks>
+        private (string? Family, FontFamilyClass Declared) FontIdentity(
+            string styleName, OdfStyleFamily family)
+        {
+            OdfProperty found = styles.ResolveWithoutDefaults(
+                styleName, family, OdfPropertyKind.Text, FontSpellings, out int matched);
+
+            if (!found.HasValue)
+            {
+                found = styles.ResolveFromDefaults(
+                    family, OdfPropertyKind.Text, OdfNamespaces.FoCompatible, "font-family");
+                matched = 0;
+
+                if (!found.HasValue)
+                {
+                    found = styles.ResolveFromDefaults(
+                        family, OdfPropertyKind.Text, OdfNamespaces.Style, "font-name");
+                    matched = 1;
+                }
+            }
+
+            if (!found.HasValue) return (null, FontFamilyClass.Unknown);
+
+            return matched == 1
+                ? (FontFaceFamily(found.Value), FontFaceClass(found.Value))
+                : (found.Value, FontFamilyClass.Unknown);
+        }
+
+        /// <summary>The two spellings of a face, in the order one style's own attributes settle.</summary>
+        /// <remarks>
+        /// <c>fo:font-family</c> first, because a style stating both is settled by attribute order
+        /// and LibreOffice's export writes <c>style:font-name</c> before it — the second write into
+        /// <c>CTF_FONTFAMILYNAME</c> is the one that stands. What this pair changes is only which
+        /// <em>level</em> answers; where one style states both, the answer is what it always was.
+        /// </remarks>
+        private static readonly (string Namespace, string Name)[] FontSpellings =
+        [
+            (OdfNamespaces.FoCompatible, "font-family"),
+            (OdfNamespaces.Style, "font-name"),
+        ];
 
         private string? FontFaceFamily(string? name)
             => name is not null && styles.FontFaces.TryGetValue(name, out OdfFontFace? face)
