@@ -1156,6 +1156,25 @@ D=/opt/libreoffice26.2/share/fonts/truetype
 mkdir -p $D/.duplicates-aside && mv $D/{Carlito,Caladea,Liberation,DejaVu}*.ttf $D/.duplicates-aside/
 # And the Latin Noto, which duplicates nothing installed and is the worse trap of the two:
 mkdir -p $D/.noto-aside && mv $D/Noto{Sans,Serif}-*.ttf $D/.noto-aside/
+# And, as of 2026-09-07, the eight DejaVu Condensed faces -- the FIFTH confound:
+mkdir -p $D/.condensed-aside && mv $D/DejaVu*Condensed*.ttf $D/.condensed-aside/
+fc-cache -f
+
+**The fifth one is the sharpest, because almost nobody asks for it by name.** The tarball ships
+eight `DejaVu*Condensed` faces and this system has **none** of them installed (`fc-list | grep -c
+'DejaVu.*Condensed'` = 0), so the reference could reach a face we cannot. Found by round 77 while
+measuring the `.rtf` column: its reach is **39 of 336 `.rtf` and 130 documents across the converted
+corpus** -- and **33 of those 39 name no condensed family at all**. They are being chosen as a
+*fallback*, which is why four rounds of font work never noticed them: a confound you can find by
+grepping the corpus for a family name is the easy kind, and this is the other kind. Same shape as
+the `LiberationSansNarrow` confound, wider.
+
+**What moving them aside invalidates.** Every figure taken before 2026-09-07 was measured with them
+present, including `probes/odf-gate-r76/` and `probes/orig-gate-r76/`, whose `results.md` both say
+"all four tarball confounds moved aside" and now mean four of five. Those sweeps remain valid as the
+measurements they were; they are simply not reproducible in this container any more. **Do not move a
+font while a round is live** -- every round measures against a reference bank taken with the fonts
+as they stood, and changing them mid-flight silently rewrites the control.
 ```
 
 **Move the Latin Noto aside too, and leave the script-specific Noto in place.** The line above
