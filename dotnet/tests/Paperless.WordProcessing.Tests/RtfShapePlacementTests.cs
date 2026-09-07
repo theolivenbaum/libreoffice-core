@@ -211,9 +211,38 @@ public sealed class RtfShapePlacementTests
         area.Y.ShouldBe(Length.FromTwips(1440 + 1000));
     }
 
+    /// <summary>
+    /// A table inside <c>{\shptxt}</c> is the shape's content, not something to drop.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// LibreOffice's RTF export writes a Writer text frame's content verbatim, so a boxed table comes
+    /// back as <c>{\shptxt\trowd…\cellx…\intbl…\row}</c> — and the paragraphs inside it are
+    /// <c>\intbl</c>, so they go to the cell being built rather than to the frame's paragraph list.
+    /// <c>FinishTable</c> then had nowhere to put the finished table, because its list of destinations
+    /// named the body, a note and the furniture and not the frame, so the whole table went out with
+    /// nothing left in its place.
+    /// </para>
+    /// <para>
+    /// Six of the converted corpus's <c>.rtf</c> carry one — <c>043_Visual_Product_Roadmap</c> has four
+    /// and drew 6 of the reference's 184 words, <c>019_Project_Timeline</c> five and drew 16 of 98 —
+    /// and it is invisible to extraction, which walks the content tree and reads every cell.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void ATableInsideAShapeIsTheShapesOwnContent()
+    {
+        PageFrame frame = Frame(
+            wrap: 2,
+            text: @"\trowd\cellx3000\cellx6000\pard\intbl ALPHA\cell\pard\intbl BETA\cell\row");
+
+        PageTable table = frame.Blocks.OfType<PageTable>().ShouldHaveSingleItem();
+        table.Rows.ShouldHaveSingleItem().Cells.Count.ShouldBe(2);
+    }
+
     /// <summary>The frame the one shape of a probe file produced, before it is placed.</summary>
-    private static PageFrame Frame(int? wrap, string properties = "")
-        => Pages(wrap, properties, 591, 1000, 5591, 1600)
+    private static PageFrame Frame(int? wrap, string properties = "", string? text = null)
+        => Pages(wrap, properties, 591, 1000, 5591, 1600, text)
             .Paragraphs.SelectMany(paragraph => paragraph.Frames)
             .ShouldHaveSingleItem();
 
@@ -227,7 +256,7 @@ public sealed class RtfShapePlacementTests
     /// One shape on an A4 page with a 3139-twip left margin, which is the witness's own geometry.
     /// </summary>
     private static WordProcessingPages Pages(
-        int? wrap, string properties, int left, int top, int right, int bottom)
+        int? wrap, string properties, int left, int top, int right, int bottom, string? text = null)
     {
         string rtf =
             @"{\rtf1\ansi\deff0{\fonttbl{\f0\froman Liberation Serif;}}"
@@ -239,7 +268,7 @@ public sealed class RtfShapePlacementTests
             + @"\shpbxignore\shpbyignore\shpz1"
             + @"{\sp{\sn shapeType}{\sv 1}}"
             + properties
-            + @"{\shptxt\pard\plain\f0\fs20 ZZQ\par}}}"
+            + @"{\shptxt" + (text ?? @"\pard\plain\f0\fs20 ZZQ\par") + "}}}"
             + @"\par}";
 
         using DocumentSource source = DocumentSource.FromStream(

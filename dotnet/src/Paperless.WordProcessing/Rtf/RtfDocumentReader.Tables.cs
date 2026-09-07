@@ -396,9 +396,16 @@ public sealed partial class RtfDocumentReader
         // The layout copy, taken before the rows are cleared. The outermost level goes into the flow's own
         // block list; a deeper one goes into whichever cell of the enclosing level is open, which is exactly
         // where a nested table belongs — a cell's content is a flow, and a flow holds blocks.
+        //
+        // `FrameBlocks` is in that list because a shape's `{\shptxt}` can hold a whole table, and
+        // LibreOffice's own RTF export is where they come from: it writes a Writer text frame's content
+        // verbatim, so a boxed table comes back as `{\shptxt\trowd…\cellx…\intbl…\row}`. Omitting it
+        // here — while `RecordLayoutParagraph` had it — dropped the table and kept nothing in its place,
+        // which is why six of the converted corpus's documents drew their two body paragraphs and none of
+        // the fifty rows inside their shapes.
         Staged? outer = ReferenceEquals(flow, _flows[0])
             ? _layoutBlocks
-            : flow.NoteBlocks ?? FurnitureList(flow);
+            : flow.NoteBlocks ?? flow.FrameBlocks ?? FurnitureList(flow);
 
         if (outer is not null && LayoutTableOf(table.TableRows, isNested: level > 1) is { } laid)
         {
