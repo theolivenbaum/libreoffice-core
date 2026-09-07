@@ -598,13 +598,22 @@ public static class OdfChartPlot
     /// </summary>
     /// <remarks>
     /// <para>
-    /// ODF states three of the four and defaults the fourth. <c>chart:text-overlap</c> and
-    /// <c>chart:label-arrangement</c> are chart properties; the rotation is
-    /// <c>style:rotation-angle</c> on the axis' <em>text</em> properties, in whole degrees
-    /// anticlockwise, which is the direction ODF and this model already agree on and OOXML does
-    /// not. Line breaking has no ODF attribute at all, so it stays at chart2's own model default
-    /// of false (<c>Axis.cxx:239</c>) — which is the opposite of what OOXML's importer sets, and
-    /// it is why an ODF axis can reach the rotation path without a label having to wrap first.
+    /// ODF states all four. <c>chart:text-overlap</c> and <c>chart:label-arrangement</c> are
+    /// chart properties; the rotation is <c>style:rotation-angle</c> on the axis' <em>text</em>
+    /// properties, in whole degrees anticlockwise, which is the direction ODF and this model
+    /// already agree on and OOXML does not.
+    /// </para>
+    /// <para>
+    /// <strong>Line breaking is <c>text:line-break</c>, in the <c>text</c> namespace, and this
+    /// used to say ODF had no attribute for it at all.</strong> It is mapped to
+    /// <c>PROP_TextBreak</c> at <c>xmloff/source/chart/PropertyMaps.cxx</c>:188 and becomes
+    /// <c>AxisLabelProperties::m_bLineBreakAllowed</c>. Missing it is not a detail: while line
+    /// breaking is on, <c>canAutoAdjustLabelPlacement</c> refuses outright
+    /// (<c>chart2/source/view/axes/VCartesianAxis.cxx</c>:544-545), so an axis whose labels
+    /// collide <em>wraps</em> them rather than turning them 45°. Read as false, every crowded ODF
+    /// category axis reached the rotation instead. It appears <strong>379 times in 92 of the
+    /// converted corpus's 302 <c>.odp</c></strong> — 160 <c>true</c> in 60 documents and 219
+    /// <c>false</c> in 65 — so it decides something on nearly a third of the column.
     /// </para>
     /// <para>
     /// The arrangement defaults to <c>ChartAxisArrangeOrderType_AUTO</c> (<c>Axis.cxx:242</c>),
@@ -621,7 +630,11 @@ public static class OdfChartPlot
         return new ChartAxisText(
             degrees * Math.PI / 180.0,
             OverlapAllowed: styles.Flag(style, "text-overlap") ?? false,
-            LineBreakAllowed: false,
+
+            // text:line-break, not chart:line-break: the attribute is in the text namespace
+            // (PropertyMaps.cxx:188). chart2's own model default is false (Axis.cxx:239), which
+            // is what an axis stating nothing gets.
+            LineBreakAllowed: styles.Flag(style, "line-break", OdfNamespaces.Text) ?? false,
             Stagger: styles.Text(style, "label-arrangement") switch
             {
                 "side-by-side" => ChartLabelStagger.SideBySide,

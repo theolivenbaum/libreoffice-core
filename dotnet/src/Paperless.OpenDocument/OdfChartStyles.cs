@@ -117,9 +117,18 @@ public sealed class OdfChartStyles
             Attribute(Properties(name, "chart-properties"), OdfNamespaces.Chart, property));
 
     /// <summary>A boolean chart property, such as <c>chart:stacked</c>.</summary>
-    public bool? Flag(string? name, string property)
+    /// <param name="name">The style's name.</param>
+    /// <param name="property">The attribute's local name.</param>
+    /// <param name="ns">
+    /// The attribute's namespace, which is the <c>chart</c> one for all but a handful.
+    /// <c>text:line-break</c> is the one this parameter exists for: it lives on a
+    /// <c>style:chart-properties</c> like its neighbours and is mapped in the <em>text</em>
+    /// namespace (<c>xmloff/source/chart/PropertyMaps.cxx</c>:188), so looking for
+    /// <c>chart:line-break</c> finds it in no file at all.
+    /// </param>
+    public bool? Flag(string? name, string property, string? ns = null)
         => OdfValue.ParseBoolean(
-            Attribute(Properties(name, "chart-properties"), OdfNamespaces.Chart, property));
+            Attribute(Properties(name, "chart-properties"), ns ?? OdfNamespaces.Chart, property));
 
     /// <summary>
     /// Whether the plot area's bars run horizontally.
