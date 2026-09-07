@@ -1322,3 +1322,29 @@ below:" and the caption was 60 pt against the reference's 236.6 and is now **236
 does not move — the rest of its 80/82 is elsewhere, in the Appendix forms — so the gate shows this
 as a pure loss and the rendering shows it as a pure gain. Reverting it would put the figure back to
 nothing.
+
+## The same ceiling on the `.rtf` column, and it has the sign of the paragraph above
+
+Four rows of the converted corpus's `.rtf` column
+(`/home/user/corpus-odf/words/chartset-001/rtf/`) fail the gate on text alone with the page
+counts agreeing at 1/1, and they are this class rather than a defect:
+
+| document | ref glyphs | ours | ref images | ours |
+|---|---:|---:|---:|---:|
+| `clustered-column-result.rtf` | 253 | 389 | 1 | 1 |
+| `clustered-column-template.rtf` | 121 | 200 | 1 | 1 |
+| `pie-chart-result.rtf` | 157 | 234 | 1 | 3 |
+| `pie-chart-template.rtf` | 57 | 73 | 1 | 3 |
+
+Each carries **two `{\pict}` and no `{\shp}`**: LibreOffice's own RTF export writes the chart as
+`{\*\shppict{\pict\wmetafile8 …}}{\nonshppict{\pict\pngblip …}}`, two representations of one
+picture. It reads the metafile and **rasterises it**, so its PDF holds a picture with the chart's
+own labels inside it and nothing in the text layer; we play the metafile and its text records stay
+real text.
+
+The excess is exactly the chart's furniture and nothing else — on
+`clustered-column-result` it is `Production in 2015`, `… 2016`, `… 2017` and the six category
+names, and on `pie-chart-result` the six names plus `30% 16% 8% 6% 5% 35%`. **No word the
+reference draws is missing from ours** on any of the four.
+
+Ours is the better output. Do not work these rows.
