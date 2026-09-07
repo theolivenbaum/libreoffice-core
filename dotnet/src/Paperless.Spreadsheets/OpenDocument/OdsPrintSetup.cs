@@ -80,6 +80,18 @@ internal static class OdsPrintSetup
 
         SheetPrintSetup setup = SheetPrintSetup.Default;
 
+        // The band's own text has to be read before its height can be, because the height is
+        // `max(declared, text + gap)` — see `Band` below. Calc maximises over the shared band and
+        // the left- and first-page ones, so all three are read where the master distinguishes
+        // them (`UpdateHFHeight`, sc/source/ui/view/printfun.cxx:817-836).
+        SheetDefaultFont bandFont = OdsCellFormats.DefaultFont(file.Styles);
+        SheetHeaderFooter? header = OdsCellDecoration.ReadBand(file.Styles, Displayed(master?.Header));
+        SheetHeaderFooter? footer = OdsCellDecoration.ReadBand(file.Styles, Displayed(master?.Footer));
+        SheetHeaderFooter? leftHeader = OdsCellDecoration.ReadBand(file.Styles, Displayed(master?.LeftHeader));
+        SheetHeaderFooter? leftFooter = OdsCellDecoration.ReadBand(file.Styles, Displayed(master?.LeftFooter));
+        SheetHeaderFooter? firstHeader = OdsCellDecoration.ReadBand(file.Styles, Displayed(master?.FirstHeader));
+        SheetHeaderFooter? firstFooter = OdsCellDecoration.ReadBand(file.Styles, Displayed(master?.FirstFooter));
+
         Length? width = Measure(page, OdfNamespaces.FoCompatible, "page-width");
         Length? height = Measure(page, OdfNamespaces.FoCompatible, "page-height");
         if (width is { } w && height is { } h && w > Length.Zero && h > Length.Zero)
@@ -103,8 +115,12 @@ internal static class OdsPrintSetup
             RightMargin = Margin(page, "margin-right") ?? setup.RightMargin,
             TopMargin = Margin(page, "margin-top") ?? setup.TopMargin,
             BottomMargin = Margin(page, "margin-bottom") ?? setup.BottomMargin,
-            HeaderHeight = BandHeight(layout?.HeaderProperties, master?.Header),
-            FooterHeight = BandHeight(layout?.FooterProperties, master?.Footer),
+            HeaderHeight = BandHeight(
+                layout?.HeaderProperties, master?.Header, "margin-bottom", bandFont,
+                header, leftHeader, firstHeader),
+            FooterHeight = BandHeight(
+                layout?.FooterProperties, master?.Footer, "margin-top", bandFont,
+                footer, leftFooter, firstFooter),
             HeaderGap = BandGap(layout?.HeaderProperties, master?.Header, "margin-bottom"),
             FooterGap = BandGap(layout?.FooterProperties, master?.Footer, "margin-top"),
             HeaderLeftMargin = BandMargin(layout?.HeaderProperties, page, "margin-left"),
@@ -117,8 +133,9 @@ internal static class OdsPrintSetup
                 : PagePrintOrder.DownThenAcross,
             HeaderText = Displayed(master?.Header)?.Value,
             FooterText = Displayed(master?.Footer)?.Value,
-            Header = OdsCellDecoration.ReadBand(Displayed(master?.Header)),
-            Footer = OdsCellDecoration.ReadBand(Displayed(master?.Footer)),
+            Header = header,
+            Footer = footer,
+            BandFont = bandFont,
             PrintsGrid = prints.Contains("grid"),
             PrintsHeadings = prints.Contains("headers"),
             CentresHorizontally = centring is "horizontal" or "both",
@@ -140,34 +157,72 @@ internal static class OdsPrintSetup
     /// </summary>
     /// <remarks>
     /// <para>
-    /// The declared height <em>alone</em>, because the gap to the body is already inside it.
-    /// Calc's <c>aHdr.nHeight</c> comes straight from <c>ATTR_PAGE_SIZE</c> — the declared
-    /// height — and <c>aHdr.nDistance</c> is subtracted from it to get the rectangle the text is
-    /// laid out in (<c>lcl_FillHFParam</c>, <c>printfun.cxx:664</c>, and <c>PrintHF</c>,
-    /// <c>printfun.cxx:1808</c>). Adding the gap on top double-counts it.
+    /// <c>max(fo:min-height, textHeight + gap)</c>, which is Calc's own
+    /// <c>max(nManHeight, nMaxHeight + nDistance)</c> stated in ODF's own attributes —
+    /// <c>ScPrintFunc::UpdateHFHeight</c>, <c>sc/source/ui/view/printfun.cxx:838</c> and
+    /// <c>:848-849</c>. <see cref="SheetBandHeight.Dynamic"/> carries the rule, the citations for
+    /// each of its three terms, and the probe family that establishes the floor on the text.
     /// </para>
     /// <para>
-    /// Measured, that is a quarter of a centimetre — 7.09 pt — on every page of every file
-    /// LibreOffice writes, since it writes <c>fo:min-height="0.75cm"</c> with
-    /// <c>fo:margin-bottom="0.25cm"</c>. On <c>sheet-decor-ods.ods</c> LibreOffice puts the top
-    /// of the first printed row 21.11 pt below the top margin, not 28.35 pt.
+    /// <strong>This read the declared height alone for eight rounds</strong>, on the reasoning
+    /// that the gap is already inside it. It is — <c>aHdr.nDistance</c> is subtracted from
+    /// <c>aHdr.nHeight</c> to get the rectangle the text is laid out in (<c>PrintHF</c>,
+    /// <c>printfun.cxx:1807</c>) — but only after <c>UpdateHFHeight</c> has grown the band to
+    /// hold both. An <c>.ods</c> Calc converted from a workbook carries the workbook's own header
+    /// margin as the gap, so the pair is routinely <c>fo:min-height="0.2953in"</c> (21.26 pt)
+    /// with <c>fo:margin-bottom="0.361in"</c> (25.99 pt) — a gap larger than the whole declared
+    /// band. Censused over the 307 converted <c>.ods</c> (<c>probes/ods-band-r75/hfcensus.py</c>):
+    /// <strong>13</strong> declare a band whose gap alone exceeds it, which must grow whatever
+    /// its text is, and <strong>79</strong> declare one under <c>gap + one 11.5 pt line</c>, which
+    /// grows for any ordinary one-line header. On <c>activespecs.ods</c> that is 37.66 pt of band
+    /// against the 21.25 read here, which is 16.4 pt of body on every one of 266 pages.
     /// </para>
     /// <para>
-    /// The dynamic case is the one this still under-measures. <c>UpdateHFHeight</c> recomputes
-    /// the band from the header's own text and takes the larger of that and the declared height
-    /// (<c>printfun.cxx:846-856</c>), so a header whose single line is taller than the declared
-    /// band grows it — measured at 18.13 pt against a declared 17.1 pt on
-    /// <c>sheet-decor-xlsx.xlsx</c>, a difference of one point. Reproducing it needs the header
-    /// font's metrics here, which the readers do not have; it is recorded in the module's TODO.
+    /// <strong><c>svg:height</c> is the fixed case and must not grow.</strong> The two spellings
+    /// are one property with two special items: <c>svg:height</c> fills
+    /// <c>HeaderIsDynamicHeight</c> with false and <c>fo:min-height</c> with true
+    /// (<c>XMLPageMasterPropSetMapper</c>'s <c>finished</c>,
+    /// <c>xmloff/source/style/PageMasterImportPropMapper.cxx:324-330</c>), that property is
+    /// <c>ATTR_PAGE_DYNAMIC</c> (<c>sc/source/ui/unoobj/styleuno.cxx:341-343</c>), and
+    /// <c>UpdateHFHeight</c> returns before it measures anything when the flag is off
+    /// (<c>printfun.cxx:793</c>). Measured on three <c>svg:height</c> probes at 0.2, 0.75 and
+    /// 1.5 cm with a 0.25 cm gap: the band is the declared height at all three, where the same
+    /// heights written as <c>fo:min-height</c> grow two of them.
+    /// </para>
+    /// <para>
+    /// <see cref="SheetPrintSetup.HeaderIsDynamic"/> stays false either way, and that is
+    /// deliberate rather than an omission. What that flag decides here is whether the text
+    /// rectangle is clamped to the text, which is a shortcut for "a dynamic band has
+    /// <c>nDif == 0</c>" — true only while the text term wins. Once the band is
+    /// <c>max(declared, text + gap)</c> the rectangle <see cref="SheetPrintSetup.HeaderHeight"/>
+    /// less <see cref="SheetPrintSetup.HeaderGap"/> already <em>is</em> <c>PrintHF</c>'s paper
+    /// height, and the text is centred in it whichever term won. Seven probes varying only
+    /// <c>fo:min-height</c> put the reference's header ink at
+    /// <c>top + (declared - gap - text) / 2</c> to 0.01 pt.
     /// </para>
     /// </remarks>
-    private static Length BandHeight(OdfPropertySet? properties, XElement? content)
+    /// <param name="properties">The <c>style:header-footer-properties</c> for the band.</param>
+    /// <param name="content">The master page's band, for whether it is displayed at all.</param>
+    /// <param name="gap">Which margin is the gap: the header's bottom, the footer's top.</param>
+    /// <param name="bandFont">The workbook's default cell font.</param>
+    /// <param name="bands">The band as the shared, left and first page states it.</param>
+    private static Length BandHeight(
+        OdfPropertySet? properties,
+        XElement? content,
+        string gap,
+        SheetDefaultFont bandFont,
+        params SheetHeaderFooter?[] bands)
     {
         if (properties is null || !IsDisplayed(content)) return Length.Zero;
 
-        return Measure(properties, OdfNamespaces.SvgCompatible, "height")
-               ?? Measure(properties, OdfNamespaces.FoCompatible, "min-height")
-               ?? Length.Zero;
+        if (Measure(properties, OdfNamespaces.SvgCompatible, "height") is { } fixedHeight)
+            return fixedHeight;
+
+        return SheetBandHeight.Dynamic(
+            Measure(properties, OdfNamespaces.FoCompatible, "min-height") ?? Length.Zero,
+            Measure(properties, OdfNamespaces.FoCompatible, gap) ?? Length.Zero,
+            bandFont,
+            bands);
     }
 
     /// <summary>The gap inside the band between its text and the body.</summary>

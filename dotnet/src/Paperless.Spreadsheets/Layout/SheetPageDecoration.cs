@@ -30,7 +30,7 @@ internal readonly record struct PlacedRow(int Row, Length Y, Length Height)
 /// font, and the band's own <c>&amp;"Family,Style"</c>, <c>&amp;B</c> and <c>&amp;I</c> codes —
 /// and every one of the four calls that lays a run out needs all three. Passing them as a triple
 /// rather than as three parameters keeps the resolution in one place
-/// (<see cref="SheetPageDecoration"/>'s <c>FaceOf</c>) rather than at each call.
+/// (<see cref="SheetBandHeight.FaceOf"/>) rather than at each call.
 /// </remarks>
 /// <param name="Family">The family name, or null for the application's own default.</param>
 /// <param name="Bold">Whether the bold face is wanted.</param>
@@ -552,7 +552,8 @@ internal sealed class SheetPageDecoration(SheetLayout sheet, SheetPagePlacement 
         // line 3.35 pt above it, which is half the difference between the two.
         Length bandText = Length.Zero;
         foreach (SheetHeaderPart part in (SheetHeaderPart[])[band.Left, band.Centre, band.Right])
-            bandText = Length.Max(bandText, TextHeight(part, context, zoom, bandFont));
+            bandText = Length.Max(
+                bandText, SheetBandHeight.PartHeight(part, context, zoom, bandFont));
 
         if (bandText <= Length.Zero) return;
 
@@ -574,8 +575,8 @@ internal sealed class SheetPageDecoration(SheetLayout sheet, SheetPagePlacement 
         // it 54 pt lower, and then the clip below deleted it.
         //
         // **All three of those figures have to be in one space and two of them were not.**
-        // `bandText` is the text at the print scale — `SizeOf` multiplies every em size by the
-        // zoom — while `height` is the band as the file states it, unscaled. Calc has no such
+        // `bandText` is the text at the print scale — `SheetBandHeight.SizeOf` multiplies every
+        // em size by the zoom — while `height` is the band as the file states it, unscaled. Calc has no such
         // split: `PrintHF` does its whole arithmetic in *logical* twips and lets the map mode
         // apply the zoom to all of it at once (`printfun.cxx:1867`, `:2645`), so `nDif` is
         // `(paperHeight - textHeight)` logical and reaches the paper as
@@ -669,7 +670,7 @@ internal sealed class SheetPageDecoration(SheetLayout sheet, SheetPagePlacement 
 
             Length text = Length.Zero;
             foreach (IReadOnlyList<SheetHeaderPiece> line in lines)
-                text += LineHeight(line, zoom, bandFont);
+                text += SheetBandHeight.LineHeight(line, zoom, bandFont);
 
             Length spare = drawn - text;
             Length pen = bandTop + (spare > Length.Zero ? spare / 2 : Length.Zero);
@@ -686,7 +687,7 @@ internal sealed class SheetPageDecoration(SheetLayout sheet, SheetPagePlacement 
 
             foreach (IReadOnlyList<SheetHeaderPiece> line in lines)
             {
-                Length lineHeight = LineHeight(line, zoom, bandFont);
+                Length lineHeight = SheetBandHeight.LineHeight(line, zoom, bandFont);
                 if (line.Count == 0)
                 {
                     pen += lineHeight;
@@ -697,8 +698,8 @@ internal sealed class SheetPageDecoration(SheetLayout sheet, SheetPagePlacement 
                 List<(BandRun Run, Length Size, SheetBandFace Face)> runs = [];
                 foreach (SheetHeaderPiece piece in line)
                 {
-                    Length size = SizeOf(piece, zoom, bandFont);
-                    SheetBandFace face = FaceOf(piece, bandFont);
+                    Length size = SheetBandHeight.SizeOf(piece, zoom, bandFont);
+                    SheetBandFace face = SheetBandHeight.FaceOf(piece, bandFont);
                     if (SheetBandText.Shape(piece.Text, size, face.Family, face.Bold, face.Italic)
                         is not { } run)
                     {
@@ -822,76 +823,19 @@ internal sealed class SheetPageDecoration(SheetLayout sheet, SheetPagePlacement 
            .LineTo(new DocPoint(rect.X, rect.Bottom))
            .Close();
 
-    /// <summary>How tall one part of a band is: the sum of its lines.</summary>
-    private static Length TextHeight(
-        SheetHeaderPart part, SheetHeaderContext context, double zoom, SheetDefaultFont bandFont)
-    {
-        if (part.IsEmpty) return Length.Zero;
-
-        Length height = Length.Zero;
-        foreach (IReadOnlyList<SheetHeaderPiece> line in part.Lines(context))
-            height += LineHeight(line, zoom, bandFont);
-
-        return height;
-    }
-
-    /// <summary>The em size one piece of a band is drawn at, the page's zoom applied.</summary>
+    /// <summary>
+    /// How tall one part of a band is, how tall one of its lines is, and what face and size a
+    /// piece is drawn at, all of which live in <see cref="SheetBandHeight"/>.
+    /// </summary>
     /// <remarks>
-    /// The fallback is the <em>workbook's</em> default cell font and not a fixed ten point — see
-    /// <see cref="SheetPrintSetup.BandFont"/>, which carries the measurement. This read
-    /// <c>SheetBandText.DefaultSize</c> until round 56, which made every band in the corpus
-    /// 10 pt whatever its workbook said, while <see cref="SheetBandHeight"/> — the file that
-    /// decides how tall the same band is — had always used the workbook's own.
+    /// They moved there because the band's <em>height</em> and its <em>drawing</em> ask the same
+    /// question and must not answer it twice: <c>ScPrintFunc::UpdateHFHeight</c> measures the
+    /// areas to size the band and <c>ScPrintFunc::PrintHF</c> measures them again to centre the
+    /// text in it, from one EditEngine with one set of defaults
+    /// (<c>sc/source/ui/view/printfun.cxx:817-836</c>, <c>:1876-1912</c>). While the ODF reader
+    /// took the declared height alone there was no caller for the first half, and the drawing
+    /// path was the only one measuring anything.
     /// </remarks>
-    private static Length SizeOf(SheetHeaderPiece piece, double zoom, SheetDefaultFont bandFont)
-        => (piece.Size ?? bandFont.Size) * zoom;
-
-    /// <summary>The family one piece of a band is drawn in.</summary>
-    /// <remarks>
-    /// The piece's own <c>&amp;"Family,Style"</c> if it states one, and the workbook's default
-    /// cell family otherwise. A null answer means the furniture's own face, which is what
-    /// <see cref="SheetBandText"/> resolves for a workbook that names nothing.
-    /// </remarks>
-    private static SheetBandFace FaceOf(SheetHeaderPiece piece, SheetDefaultFont bandFont)
-        => new(
-            piece.Family ?? bandFont.Family,
-            piece.Bold ?? bandFont.Weight >= BoldWeight,
-            piece.Italic ?? bandFont.IsItalic);
-
-    /// <summary>The weight at which a workbook's default font makes its band bold.</summary>
-    /// <remarks>
-    /// Six hundred, the CSS threshold, and it never has to discriminate on this corpus: both
-    /// Excel readers write 400 or 700 and nothing between.
-    /// </remarks>
-    private const int BoldWeight = 600;
-
-    /// <summary>How tall one line of a band is: the tallest of the pieces on it.</summary>
-    /// <remarks>
-    /// An empty line — a bare break, which a footer written as <c>&amp;RPage &amp;P\n\nrest</c>
-    /// contains — still takes a line, at the sheet's default height.
-    /// </remarks>
-    private static Length LineHeight(
-        IReadOnlyList<SheetHeaderPiece> line, double zoom, SheetDefaultFont bandFont)
-    {
-        Length height = Length.Zero;
-        foreach (SheetHeaderPiece piece in line)
-        {
-            SheetBandFace face = FaceOf(piece, bandFont);
-            height = Length.Max(
-                height,
-                SheetBandText.LineHeightAt(
-                    SizeOf(piece, zoom, bandFont), face.Family, face.Bold, face.Italic));
-        }
-
-        return height > Length.Zero
-            ? height
-            : SheetBandText.LineHeightAt(
-                bandFont.Size * zoom,
-                bandFont.Family,
-                bandFont.Weight >= BoldWeight,
-                bandFont.IsItalic);
-    }
-
     /// <summary>One stroke of a border, with its ends extended to meet what it crosses.</summary>
     /// <remarks>
     /// <para>
