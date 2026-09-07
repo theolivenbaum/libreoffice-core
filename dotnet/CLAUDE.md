@@ -193,6 +193,67 @@ format (Paperless reads), macro execution (never — Paperless only reports that
    `ChartLabel.Stretch`; what it does not yet do is take the *drawn* extent as the rectangle it
    stretches from. `probes/chart-layout/results.md` §0.
 
+   ***Done, and the vertical half of it is confirmed to 0.24%.*** `ChartLayout.DrawnExtent` is that
+   rectangle and `Stretch` now subtracts its origin, which may be negative. On the same page 7 this
+   tree draws the chart's background at 1.847–720 × 92.572–518.002, which is **0.95084 down**
+   against the reference's 0.948534, with no free parameter. **The horizontal half cannot be
+   confirmed there and the reason is not the fit**: 26.2.4.2 draws that chart's category labels on
+   *one line each* and we wrap them into the band, so ours overflow by 1.86 pt where the
+   reference's overflow by 142.7 — while the plot rectangle itself agrees exactly, 127.65 pt in the
+   chart's own coordinates on both sides. The seat of the wrap is
+   `VCartesianAxis::createTextShapes`:888-905, where the first label after the first that breaks
+   **inside a word** sets `m_bLineBreakAllowed = false` and restarts the axis with breaking off;
+   `probes/chart-layout` §2 refuted one of that test's two arms (a line *starting* with
+   punctuation) and the other — an over-long word — is what this document needs. `ChartAxisLabels.Wraps`
+   models it and answers false here.
+
+   **Three things had to be true before the fit could be, and two of them were defects of their
+   own.** (1) *A bar is clipped to its value axis' range* — `clipYRange`
+   (`PlottingPositionHelper.hxx`:401-415), called by `BarChart::createShapes` (`:789`) before any
+   geometry and `continue`d on, so a rejected point gets no data label either. A Gantt is a stack of
+   an invisible "start" series over an explicit `c:min`, so page 7's 55 bars were each drawn from
+   serial zero — **192 386 points** left of the plot, read out of the PDF. (2) *A label with no ink
+   has no rectangle*: `DocRect.Empty` is the point (0, 0), and one empty value-axis label fitted
+   `048_Expense_trends_budget` at `sy = 0.6561`. (3) *A series mark contributes only what falls
+   inside the plot*, because every plotter clips its polygon first
+   (`Clipping::clipPolygonAtRectangle`, `AreaChart.cxx`:318 and eight more). **We do not clip a
+   polyline yet** — on `171128IPAP.pptx` one runs 932 pt left of a 576 pt chart page — so
+   `DrawnExtent` intersects a shape's extent with the plot rather than trusting it. Clipping the
+   geometry itself is left.
+
+   **Reach and cost, measured rather than censused**: of the 176 chart-bearing documents, **24
+   renderings move** and the other 152 do not change by a byte; 13 improve against 26.2.4.2, 8
+   worsen, 3 are level, and the sum of their means goes 157.46 → 154.45. **No gate verdict moves in
+   either direction**, checked by scoring each mover with a binary built at the round's base as
+   well. The eight that worsen are one class and worth knowing before the next round: **the fit
+   makes our own label-arrangement errors visible as a global squeeze instead of as local
+   overflow** — where our labels leave the chart's page and the reference's do not, we shrink and it
+   does not. `probes/chart-fit/results.md`.
+
+   **The category axis stands where it crosses, and that was ours.** `c:catAx/c:crosses
+   val="autoZero"` is *value zero on the crossing axis* — `m_pfMainLinePositionAtOtherAxis = 0.0`,
+   `VAxisProperties.cxx`:224-225 — clamped into the value range by `get2DAxisMainLine`
+   (`:1253-1256`), and under the default `nextTo` the labels take that same line
+   (`getLabelLineIntersectionValue`, `:1103-1113`) and therefore take **no band** off the plot. On
+   `Demick_JetBlue.pptx` page 5 26.2.4.2 draws the plot to y = 401.56 with its axis at 374.83, its
+   own `$-` gridline; we drew the plot to 376.18 with the axis on that edge and now draw 405.62 and
+   378.40. Reach 6 documents. The clamp is what keeps it there: an all-positive chart is unmoved.
+
+   **`055_Project_timeline`'s date-axis maximum is `TODAY()` and not a scale question at all.** Its
+   DATE column is twelve volatile `DATE(YEAR(TODAY()),m,d)`; substituting `2023` makes 26.2.4.2 draw
+   this tree's exact axis and `2026` reproduces the reference. The stated `c:majorUnit val="10"` is
+   honoured throughout and the apparent 30-day step is the label *rhythm*, which `createTextShapes`
+   raises until the labels stop overlapping — the same document at 6 pt draws 57 labels 20 days
+   apart and at 24 pt draws 19 at 60. It is the volatile-formula class this file already records,
+   and the same dates are wrong in the sheet's own cells. `probes/chart-datemax/results.md`.
+
+   **And an instrument warning that cost this round a false finding: PyMuPDF reports a rotated
+   span's *axis-aligned* box.** A 45° label comes back as a square, which reads exactly like an
+   unrotated label far too wide for its slot — 26 of them at 32.62 pt on a 19.27 pt pitch, which
+   looked like a whole missing arrangement and was not. The discriminator is the line's own `dir`
+   vector, `(0.7071, −0.7071)` here, and instrumenting the layout confirmed it had been returning
+   `rot = 0.785` all along.
+
    **`VDiagram::adjustInnerSize` is not reached by a chart stating `c:layoutTarget val="inner"`,
    and a brief has already sent a round after it.** That target sets `PosSizeExcludeAxes`
    (`DiagramWrapper.cxx`:816-823) and therefore `CreateShapeParam2D::mbUseFixedInnerSize`
