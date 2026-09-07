@@ -93,6 +93,7 @@ internal static class OdfTextBody
             Paragraphs = read,
             Insets = Insets(file, shapeCascade),
             Anchor = Anchor(file, shapeCascade),
+            AutoFit = Shrinks(file, shapeCascade),
             FontIndependentLineSpacing = fontIndependent,
         };
     }
@@ -281,6 +282,50 @@ internal static class OdfTextBody
                cascade, OdfPropertyKind.Graphic, OdfNamespaces.FoCompatible, name)
                .AsLength()
            ?? Length.Zero;
+
+    /// <summary>
+    /// Whether the shape shrinks its text until it fits — Impress's <em>autofit</em>, and
+    /// <see cref="SlideTextBody.AutoFit"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>ODF spells one property two ways and they have to be read together.</strong>
+    /// <c>drawing::TextFitToSizeType</c> has four values and <c>sdpropls.cxx</c>:143-144 maps
+    /// <em>both</em> <c>draw:fit-to-size</c> and <c>style:shrink-to-fit</c> onto it with
+    /// <c>MID_FLAG_MERGE_PROPERTY</c>: <c>draw:fit-to-size</c> carries
+    /// <c>false</c> / <c>true</c> (proportional) / <c>all</c> (all lines) /
+    /// <c>shrink-to-fit</c> (autofit) through <c>pXML_FitToSize_Enum</c> (:677-684), and
+    /// <c>style:shrink-to-fit</c> carries the autofit bit alone through
+    /// <c>pXML_ShrinkToFit_Enum</c> (:686-693). The second exists because the first is ODF 1.2's
+    /// spelling and older consumers read <c>true</c> as <em>stretch</em>; LibreOffice therefore
+    /// writes <c>draw:fit-to-size="false" style:shrink-to-fit="true"</c> for an autofitted shape,
+    /// and a reader that consults only the first concludes the shape does not autofit.
+    /// </para>
+    /// <para>
+    /// Which is what happened here: <c>SlideAutofit</c> has been a full port of
+    /// <c>autoFitTextForCompatibility</c> since round 52 and the ODF path reached none of it. It
+    /// is not a rare attribute — <c>style:shrink-to-fit="true"</c> appears <strong>3515 times,
+    /// in all 302</strong> of the converted corpus's <c>.odp</c>.
+    /// </para>
+    /// <para>
+    /// Only the autofit value is honoured. <c>PROPORTIONAL</c> and <c>ALLLINES</c> — Impress's
+    /// <em>fit to frame</em>, which stretches the glyphs rather than choosing a smaller size —
+    /// are a different transform and are not modelled on any of the three presentation readers;
+    /// the corpus states neither, all 25 525 of its <c>draw:fit-to-size</c> saying
+    /// <c>false</c>.
+    /// </para>
+    /// </remarks>
+    private static bool Shrinks(OdfFile file, IReadOnlyList<OdfStyleReference> cascade)
+    {
+        if (file.Styles.ResolveProperty(
+                cascade, OdfPropertyKind.Graphic, OdfNamespaces.Style, "shrink-to-fit").Is("true"))
+        {
+            return true;
+        }
+
+        return file.Styles.ResolveProperty(
+            cascade, OdfPropertyKind.Graphic, OdfNamespaces.Draw, "fit-to-size").Is("shrink-to-fit");
+    }
 
     private static TextAnchor Anchor(OdfFile file, IReadOnlyList<OdfStyleReference> cascade)
     {
