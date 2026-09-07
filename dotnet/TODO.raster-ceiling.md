@@ -1036,6 +1036,106 @@ page. Rare in what has been swept, and worth keeping the script for, because it 
 a sweep that already exists and no other instrument the project points at a word-count failure
 can see this class at all.
 
+### The rule this section asked for, established 2026-09-07: it is a SHEAR, not a rotation
+
+The paragraph above leaves *"which rotated text LibreOffice outlines and which it emits as
+per-glyph shows"* unestablished. It is now established, on a thirteen-variant probe of one corpus
+document, and it is **not the angle**.
+
+**A text run is outlined when it is both turned off a right angle *and* inside a chart that had
+to be fitted anisotropically. Both halves are necessary; neither is sufficient.**
+
+`dotnet/probes/odp-chart-r72/variants.py` builds one-attribute variants of
+`038_Competitive_Advantage_Card…odp`'s embedded chart and renders each through 26.2.4.2. The
+`textlines` column counts spans PyMuPDF finds in the label band and always includes the two
+legend keys, so **2 means no label was drawn as text at all**; `fills` counts glyph-sized filled
+paths there; `legend` is the *unrotated* legend key's width and font size, which is the anisotropy
+witness.
+
+| variant | textlines | fills | legend | |
+|---|---:|---:|---|---|
+| `base` — five long names, auto 45° | 2 | **66** | 59.37, **13.94** | outlined |
+| `oc15` — one name shortened, `style:rotation-angle="15"` | 5 | 2 | 59.35, 14.00 | turned, still text |
+| `oc30` — the same at 30° | 7 | 2 | 59.35, 14.00 | turned, still text |
+| `oc45` — the same at 45° | 2 | **66** | 59.37, **13.94** | outlined |
+| `oc60` — the same at 60° | 2 | **61** | 59.38, **13.96** | outlined |
+| `oc90`, `oc270` | 2 | 2 | 59.25, **13.87** | text, drawn elsewhere |
+| `short45` — names `A`…`E`, `style:rotation-angle="45"` | 7 | 3 | 59.35, 14.00 | turned, still text |
+
+`short45` against `oc45` is the discriminator: same angle, same file, and the short labels stay
+text. What separates them is whether the labels overflow the chart's own page — because **an
+embedded chart is fitted to its own drawn extent by two factors, one per axis**
+(`ViewContactOfSdrOle2Obj::createPrimitive2DSequenceWithParameters`,
+`svx/source/sdr/contact/viewcontactofsdrole2obj.cxx`:88-116), so overflowing labels squeeze the
+whole chart. The legend column measures it without any rotation in the way: **14.00 pt in every
+variant whose labels fit and 13.94 to 13.87 in every variant whose labels overflow**, at an
+unchanged width of 59.35 to 59.38 — 1.00034 across against 0.99571 down on `base`, a 0.46%
+anisotropy.
+
+An anisotropic scale composed with a rotation that is not a right angle decomposes to a **shear**,
+and that is what the renderer refuses
+(`VclProcessor2D::RenderTextSimpleOrDecoratedPortionPrimitive2D`,
+`drawinglayer/source/processor2d/vclprocessor2d.cxx`:126-141):
+
+```cpp
+// Acceptance is restricted to no shearing and positive scaling in X and Y (no font mirroring
+// for VCL)
+aLocalTransform.decompose(aFontScaling, aTranslate, fRotate, fShearX);
+// tdf#95581: Assume tiny shears are rounding artefacts or whatever and can be ignored,
+// especially if the effect is less than a pixel.
+if (std::abs(aFontScaling.getY() * fShearX) < 1)
+```
+
+Everything that guard rejects falls through to the primitive's own decomposition, which for text
+is filled polygons. That accounts for all thirteen rows: no anisotropy at 15°, 30° and on the
+short labels, so no shear; anisotropy but a right angle at 90° and 270°, so still no shear;
+anisotropy *and* 45° or 60°, so a shear of about 1.8 against the guard's 1.
+
+**Two consequences worth carrying.**
+
+1. **The condition is a property of the chart's fit, not of the label.** A document can outline
+   one chart's turned labels and draw another chart's turned labels as text on the same page,
+   which is exactly what `8_P-Pavese…` page 16 does — and the "internal control" the section
+   above rests on (the reference's *horizontal* labels stay text) is therefore weaker evidence
+   than it looks. The real control is a turned label that stays text.
+2. **The class is bigger than the four documents recorded above**, and it is now attested in ODF
+   as well as OOXML. Two more `.odp` rows are it — see `probes/odp-chart-r72/remainder.tsv` —
+   and one of them, `038_Competitive_Advantage_Card…odp`, was carried by the previous round as an
+   ODF *chart reader* defect on the grounds that "the reference draws none". It draws all of them,
+   as 75 filled paths per page, and our arrangement agrees with its to **1.6 pt over 246**.
+
+### Two `.odp` rows join the list, and one of them is a `.pptx` row's twin
+
+| Document | Pages | evidence |
+|---|---|---|
+| `slides/chartset-008/odp/038_Competitive_Advantage_Card_for_PowerPoint_and_Google_Slides_373720f6.odp` | 1, 2 | 75 glyph-sized `#595959` fills on the reference against our five 45° text lines, +68 each. Both pages hold the same chart twice. |
+| `slides/ceiling-002/odp/Demick_JetBlue.odp` | 4, 5, 7 | 170, 210 and 156 fills against our 23, 27 and 23 turned lines — **the same three pages this file already records for `Demick_JetBlue.pptx`**, so the ODF conversion reproduces it. Its pages 6 and 8 are a −90 deficit of ours and the two cancel, which is the net-delta blind spot again. |
+
+`slides/ceiling-002/odp/8_P-Pavese_AIRBUS-ATB-journee-CRATB.odp` page 16 is the third instance and
+is on a row already listed for its raster ceiling: 122 fills against our 36 turned lines.
+`dotnet/probes/odp-chart-r72/classify.py` is the per-page instrument; unlike the census script
+above it needs no banked reference bytes, only a rendered pair.
+
+### And the ordinary raster ceiling reaches the converted `.odp` column too
+
+Three of the thirteen `.odp` rows still failing the gate are the plain first mechanism — the
+reference rasterises an embedded object and we replay its metafile as real text — confirmed page
+by page with `classify.py` and recorded with their per-page evidence in
+`dotnet/probes/odp-chart-r72/remainder.tsv`. They are **not** in the flagged-pages table above,
+which is keyed on the original corpus' own paths and produced by a generator that never sees
+`/home/user/corpus-odf`:
+
+| Document | Pages | ours − ref |
+|---|---|---:|
+| `slides/ceiling-001/odp/OnTrac_StarCertificationProgram-3Day.odp` | 9, 10 | +293, +1183 |
+| `slides/ceiling-002/odp/16 - UTM - (NASA).odp` | 7, 29 | +592, +548 |
+| `slides/ceiling-002/odp/8_P-Pavese_AIRBUS-ATB-journee-CRATB.odp` | 5, 6 | +234, +269 |
+
+All three are the `.odp` twins of documents this file already carries, which is the useful part:
+**a ceiling survives LibreOffice's own conversion**, so the ODF column inherits the corpus'
+ceilings rather than having its own. Check this file before working an `.odp` word-count failure
+as well as a `.docx` one.
+
 ## `8_P-Pavese…pptx` in full — a worked example where the ceiling exceeds the gap
 
 Kept here because the shape of it is the lesson, and because the next reader must not file its

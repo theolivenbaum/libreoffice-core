@@ -207,6 +207,16 @@ format (Paperless reads), macro execution (never — Paperless only reports that
    punctuation) and the other — an over-long word — is what this document needs. `ChartAxisLabels.Wraps`
    models it and answers false here.
 
+   ***The ODF twin of that document closed on a different attribute, and the `.pptx` is untouched.***
+   `N2_E_Maestroni_Swarm_COP.odp` went from 340 alphanumeric characters clear of 26.2.4.2 to **84**
+   when `OdfChartPlot` was taught to read **`text:line-break`**, which it had been passing as false
+   for every axis: `canAutoAdjustLabelPlacement` refuses while line breaking is on
+   (`VCartesianAxis.cxx`:544-545), so an ODF axis whose labels collided was turning them 45° where
+   the reference wraps them. That says nothing about the OOXML side — `.pptx` already reads
+   `a:bodyPr` and the `.pptx` row does not move — but it does say that **the wrap question and the
+   fit question are separable, and the ODF half of it was a reader defect rather than a layout
+   one.** `probes/odp-chart-r72/results.md` §3.3.
+
    **Three things had to be true before the fit could be, and two of them were defects of their
    own.** (1) *A bar is clipped to its value axis' range* — `clipYRange`
    (`PlottingPositionHelper.hxx`:401-415), called by `BarChart::createShapes` (`:789`) before any
@@ -253,6 +263,22 @@ format (Paperless reads), macro execution (never — Paperless only reports that
    looked like a whole missing arrangement and was not. The discriminator is the line's own `dir`
    vector, `(0.7071, −0.7071)` here, and instrumenting the layout confirmed it had been returning
    `rot = 0.785` all along.
+
+   ***And the `dir` vector answers a second question the same instrument cannot: whether the
+   reference drew that label as text at all.*** A turned chart label the reference *outlines* is
+   absent from `get_text` entirely, so a `dir` census over both sides reads as *we invented a whole
+   arrangement*. It is the opposite: our arrangement agrees and only the representation differs.
+   **The rule is a shear, not a rotation** — a run is outlined when it is both turned off a right
+   angle and inside a chart the fit had to squeeze anisotropically, because
+   `VclProcessor2D::RenderTextSimpleOrDecoratedPortionPrimitive2D`
+   (`drawinglayer/source/processor2d/vclprocessor2d.cxx`:126-141) accepts a text primitive only
+   while `abs(fontScaling.getY() * fShearX) < 1` and decomposes everything else to filled polygons.
+   Established on thirteen one-attribute variants of one chart in
+   `probes/odp-chart-r72/variants.py`; the discriminator is a 45° label whose text is *short enough
+   to fit*, which stays text. Count the reference's glyph-sized filled paths before calling a
+   turned label missing — `probes/odp-chart-r72/classify.py` does it — and see
+   `TODO.raster-ceiling.md`, whose *the reference outlines its glyphs* section asked for exactly
+   this rule and did not have it.
 
    **`VDiagram::adjustInnerSize` is not reached by a chart stating `c:layoutTarget val="inner"`,
    and a brief has already sent a round after it.** That target sets `PosSizeExcludeAxes`
@@ -828,20 +854,31 @@ reference half rather than re-rendering it** whenever the diff under test is con
 `dotnet/src`, which cannot reach `soffice`; a round costs about four minutes of our half instead
 of forty of both.
 
-**What that column found in two rounds is that the ODF readers were years behind the OOXML ones
+**What that column found in three rounds is that the ODF readers were years behind the OOXML ones
 on things no corpus figure could ever have shown.** It opened at 120 of 302 with a master page
-drawn nowhere; it is **285 of 302** after the master's running objects, `style:shrink-to-fit` and
-`loext:shadow-blur`. Two rules from it are general enough to carry:
+drawn nowhere; it reached 285 of 302 on the master's running objects, `style:shrink-to-fit` and
+`loext:shadow-blur`, and is **289 of 302** after the chart reader's axis resolution,
+`draw:text-rotate-angle` and `text:line-break` (`probes/odp-chart-r72`). Two rules from it are
+general enough to carry:
 
 - **An ODF attribute LibreOffice's own exporter writes is very often not in the namespace the
   specification puts it in, and the ODF-namespace spelling then appears in no real file at all.**
-  Three instances are now in the tree and they were each found by a different round the hard way:
+  Four instances are now in the tree and they were each found by a different round the hard way:
   `drawooo:display` for `draw:display` (`OdpSlideLayout.IsPrinted`, 887 occurrences and not one
   `draw:` spelling), `loext:shadow-blur` for `draw:shadow-blur` (`sdpropls.cxx`:169; 1252 non-zero
-  occurrences in 120 of the 302, and **zero** `draw:shadow-blur` anywhere), and
-  `chartext:coordinate-region` (`OdfNamespaces.ChartExtension`). **Grep the corpus for both
-  spellings before implementing an ODF attribute**, and read `sdpropls.cxx`'s `GMAPV` rows, which
-  name the namespace each property is exported in.
+  occurrences in 120 of the 302, and **zero** `draw:shadow-blur` anywhere),
+  `chartext:coordinate-region` (`OdfNamespaces.ChartExtension`), and **`text:line-break`** for an
+  axis' line breaking (`xmloff/source/chart/PropertyMaps.cxx`:188 maps `PROP_TextBreak` under
+  `XML_NAMESPACE_TEXT`; 379 statements in 92 of the 302). **Grep the corpus for both
+  spellings before implementing an ODF attribute**, and read `sdpropls.cxx`'s `GMAPV` rows and
+  `xmloff/source/chart/PropertyMaps.cxx`'s, which name the namespace each property is exported in.
+
+  **The fourth is the one to remember, because it wears a different disguise.** The first three
+  look like a wrong prefix; this one looked like an attribute that does not exist —
+  `OdfChartPlot.AxisTextOf` carried *"line breaking has no ODF attribute at all"* for three rounds
+  and hard-coded false. It sits on a `style:chart-properties` between two `chart:` attributes, so
+  nothing about the element it is on suggests a second namespace. **"ODF states no such thing" is
+  a claim about a namespace, and it needs the same two greps as any other.**
 - **A property that ODF states two ways has to be read both ways, because the merge is what
   disambiguates it.** `drawing::TextFitToSizeType` is mapped from *both* `draw:fit-to-size` and
   `style:shrink-to-fit` with `MID_FLAG_MERGE_PROPERTY` (`sdpropls.cxx`:143-144), the second
@@ -863,6 +900,18 @@ drawn nowhere; it is **285 of 302** after the master's running objects, `style:s
   least one style where the two sit at different levels. It draws every such sheet in the document
   default's face, and a narrower face wraps fewer lines, which shortens every measured row height on
   it. `probes/odf-rowpitch-r72/`.
+- **An ODF axis' index is its position among the axes of its own dimension, and nothing states
+  it.** `SchXMLAxisContext` counts how many axes of the same `chart:dimension` have already been
+  read (`xmloff/source/chart/SchXMLAxisContext.cxx`:266-274), so the first `chart:dimension="y"`
+  is the primary value axis and the second the secondary, and the same rule picks the category
+  axis. `OdfChartPlot` *assigned* the category axis on every x axis rather than defaulting it, and
+  LibreOffice writes a combination chart's `secondary-x` — carrying `chart:visible="false"` —
+  **after** the primary, so a chart's category labels were read off an axis that is not drawn.
+  A series names its y axis by `chart:name` through `chart:attached-axis` and belongs to the
+  secondary exactly when that axis' index is above zero (`SchXMLSeries2Context.cxx`:333-345,
+  :388-394). It is the same shape of defect the BIFF round found in `XlsChartBuilder`'s single
+  `_valueScale`, and it bites for the same reason: **the file writes the primary first, so taking
+  the last one read is wrong in exactly the files that have two.**
 
 **And a shadow's blur radius decides whether the shadow's *text* is real text**, which is the
 sharpest example this project has of a one-attribute defect that no gate column can see and that

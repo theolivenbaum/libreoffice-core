@@ -180,4 +180,62 @@ public class OdfChartPlotTests
         plot.CategoryAxisVisible.ShouldBeFalse();
         plot.ValueAxisVisible.ShouldBeTrue();
     }
+
+    /// <summary>
+    /// An axis' line breaking is <c>text:line-break</c>, in the <em>text</em> namespace.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// It sits on a <c>style:chart-properties</c> beside its <c>chart:</c> neighbours and is
+    /// mapped as <c>PROP_TextBreak</c> under <c>XML_NAMESPACE_TEXT</c>
+    /// (<c>xmloff/source/chart/PropertyMaps.cxx</c>:188), so a reader looking for
+    /// <c>chart:line-break</c> finds it in no file at all — the same trap
+    /// <c>OdpSlideLayout.IsPrinted</c> records for <c>drawooo:display</c> and
+    /// <c>OdfNamespaces.ChartExtension</c> for <c>coordinate-region</c>.
+    /// </para>
+    /// <para>
+    /// It is not a detail of spacing. <c>canAutoAdjustLabelPlacement</c> refuses outright while
+    /// line breaking is on (<c>chart2/source/view/axes/VCartesianAxis.cxx</c>:544-545), so an
+    /// axis whose labels collide <em>wraps</em> them instead of turning them 45°. Read as false,
+    /// every crowded ODF category axis took the rotation. 379 statements in 92 of the converted
+    /// corpus's 302 <c>.odp</c>; on <c>8_P-Pavese_AIRBUS-ATB-journee-CRATB.odp</c> page 16 the
+    /// nine hour-range labels go from turned to upright and land within 0.94 pt of 26.2.4.2's,
+    /// and <c>N2_E_Maestroni_Swarm_COP.odp</c> goes from 340 alphanumeric characters clear of
+    /// the reference to 84.
+    /// </para>
+    /// </remarks>
+    [Theory]
+    [InlineData("true", true)]
+    [InlineData("false", false)]
+    public void LineBreakingIsStatedInTheTextNamespace(string stated, bool expected)
+    {
+        XElement document = XElement.Parse(Document(
+            string.Empty,
+            styles:
+            $"""
+             <style:style style:name="ax" style:family="chart">
+               <style:chart-properties text:line-break="{stated}"/>
+             </style:style>
+             """));
+
+        XElement chart = document.Descendants(XName.Get("chart", Chart)).Single();
+        XElement axis = chart.Descendants(XName.Get("axis", Chart))
+            .Single(element => element.Attribute(XName.Get("dimension", Chart))?.Value == "x");
+
+        axis.SetAttributeValue(XName.Get("style-name", Chart), "ax");
+
+        ChartPlot plot = OdfChartPlot.Read(chart, new OdfChartStyles(document))!;
+
+        plot.CategoryAxisText.LineBreakAllowed.ShouldBe(expected);
+    }
+
+    /// <summary>An axis stating nothing takes chart2's own default, which is no line breaking.</summary>
+    /// <remarks><c>Axis.cxx</c>:239 — <c>TextBreak</c> is false in the model's own defaults.</remarks>
+    [Fact]
+    public void AnAxisStatingNothingDoesNotBreakItsLabels()
+    {
+        ChartPlot plot = Read(string.Empty);
+
+        plot.CategoryAxisText.LineBreakAllowed.ShouldBeFalse();
+    }
 }

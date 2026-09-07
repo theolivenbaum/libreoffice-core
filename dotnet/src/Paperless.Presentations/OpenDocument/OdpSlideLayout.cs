@@ -607,7 +607,7 @@ internal sealed partial class OdpSlideLayout
             Fill = fill,
             Picture = Picture(element, bounds),
             Line = Line(cascade),
-            Text = Text(element, outline.TextRectangle, placement, cascade, fields),
+            Text = Text(element, geometry, outline.TextRectangle, placement, cascade, fields),
             Shadow = Shadow(cascade),
         };
     }
@@ -1198,6 +1198,7 @@ internal sealed partial class OdpSlideLayout
 
     private PlacedText? Text(
         XElement element,
+        XElement? geometry,
         DocRect rectangle,
         AffineTransform placement,
         IReadOnlyList<OdfStyleReference> cascade,
@@ -1207,16 +1208,82 @@ internal sealed partial class OdpSlideLayout
             _file, Paragraphs(element), [.. cascade, TextStyle(element)], fields);
         if (body.Paragraphs.Count == 0) return null;
 
-        bool upright = placement.A == 1 && placement.B == 0 && placement.C == 0 && placement.D == 1;
+        double turn = TextRotation(geometry);
 
+        bool upright = turn == 0.0
+                       && placement.A == 1 && placement.B == 0
+                       && placement.C == 0 && placement.D == 1;
+
+        // The box the text is laid out in is the shape's text rectangle as it stands, turned or
+        // not. <strong>A quarter turn does not swap its two dimensions</strong>, which is the
+        // reading this cost a measurement to get right: the padding does the swapping. LibreOffice
+        // writes a turned shape's insets in the text's *own* orientation, so
+        // `schematicplaymar21.odp`'s 2.469 cm by 29.821 cm body carries fo:padding-left="-13.52cm"
+        // and fo:padding-top="13.701cm" — and `SdrTextObj::AdjustRectToTextDistance`
+        // (svx/source/svdraw/svdotext.cxx:577-618, called from
+        // SdrObjCustomShape::TakeTextAnchorRect at svdoashp.cxx:2628-2643) adds them to the
+        // anchor rectangle before `TakeTextRect` takes its width as the wrapping limit. 63.15 pt
+        // plus 383.3 plus 387.0 is 833.45, which is the width 26.2.4.2 wraps that body at, to a
+        // twentieth of a point.
         DocRect area = upright
             ? new DocRect(ShapeTransform.Apply(placement, rectangle.Origin), rectangle.Size)
-            : rectangle;
+            : new DocRect(DocPoint.Origin, rectangle.Size);
 
         List<PlacedGlyphRun> runs = SlideTextLayout.Place(body, area, _fonts);
         if (runs.Count == 0) return null;
 
-        return new PlacedText(runs, upright ? AffineTransform.Identity : placement);
+        if (upright) return new PlacedText(runs, AffineTransform.Identity);
+
+        // Turn the laid-out box about the text rectangle's centre and then place the shape, which
+        // is the order `ViewContactOfSdrObjCustomShape` composes them in: the text box is rotated
+        // by the extra angle inside the shape's own space and the shape's matrix is applied after
+        // it (svx/source/sdr/contact/viewcontactofsdrobjcustomshape.cxx:171-191).
+        AffineTransform inside = AffineTransform.Concat(
+            AffineTransform.Concat(
+                AffineTransform.Translation(
+                    -rectangle.Width.Emu / 2.0, -rectangle.Height.Emu / 2.0),
+                Rotation(turn)),
+            AffineTransform.Translation(
+                rectangle.X.Emu + (rectangle.Width.Emu / 2.0),
+                rectangle.Y.Emu + (rectangle.Height.Emu / 2.0)));
+
+        return new PlacedText(runs, AffineTransform.Concat(inside, placement));
+    }
+
+    /// <summary>
+    /// The angle a custom shape turns its own text through, in radians, ODF's sense.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>draw:text-rotate-angle</c> on the <c>draw:enhanced-geometry</c>, in whole degrees and
+    /// anticlockwise exactly as <c>draw:transform</c>'s own <c>rotate</c> is. It becomes the
+    /// geometry item's <c>TextRotateAngle</c> (<c>xmloff/source/draw/ximpcustomshape.cxx</c>:917),
+    /// which <c>SdrObjCustomShape::GetExtraTextRotation</c> (<c>svx/source/svdraw/svdoashp.cxx</c>
+    /// :486-514) answers and <c>ViewContactOfSdrObjCustomShape</c> applies to the text box before
+    /// the shape's own rotation.
+    /// </para>
+    /// <para>
+    /// <strong>It is what a converted deck states instead of turning the text itself.</strong>
+    /// LibreOffice writes a shape whose text runs across a tall narrow box as a tall narrow shape
+    /// turned a quarter turn with its text turned the other way, so a reader that applies the
+    /// shape's rotation and not the text's draws every such body on its side and wraps it at the
+    /// shape's *width*. Reach on the converted corpus: 38 statements in 7 documents — 90 in three
+    /// decks and ±180 in four more, all of them written by 26.2.4.2's own exporter.
+    /// </para>
+    /// </remarks>
+    private static double TextRotation(XElement? geometry)
+    {
+        string? stated = Attribute(geometry, OdfNamespaces.Draw, "text-rotate-angle");
+        if (stated is null) return 0.0;
+
+        if (!double.TryParse(stated, NumberStyles.Float, CultureInfo.InvariantCulture,
+                out double degrees))
+        {
+            return 0.0;
+        }
+
+        degrees %= 360.0;
+        return degrees == 0.0 ? 0.0 : degrees * Math.PI / 180.0;
     }
 
     /// <summary>
