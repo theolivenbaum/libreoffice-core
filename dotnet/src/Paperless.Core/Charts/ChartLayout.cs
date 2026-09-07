@@ -586,19 +586,21 @@ public static partial class ChartLayout
         // face it is drawn in cannot come apart. See ChartPlot.TextFamily.
         ChartText text = new(measurer, plot.TextFamily);
 
-        // A chart with a coordinate space of its own is composed at its own size and the whole
-        // picture is then stretched into the frame. See Stretch.
-        if (plot.Space is not { } space
-            || space.Width <= Length.Zero
-            || space.Height <= Length.Zero
-            || (space.Width == frame.Width && space.Height == frame.Height))
-        {
-            return InWeight(InFamily(Compose(plot, frame, text), plot.TextFamily), plot.IsLabelBold);
-        }
+        // A chart with a coordinate space of its own is composed at its own size; one without is
+        // composed at the frame's. Either way the composition is then fitted onto the frame by
+        // its own drawn extent rather than by the page it was composed on. See Stretch and
+        // DrawnExtent.
+        DocRect own = plot.Space is { } space
+                      && space.Width > Length.Zero
+                      && space.Height > Length.Zero
+            ? new DocRect(Length.Zero, Length.Zero, space.Width, space.Height)
+            : frame;
 
-        DocRect own = new(Length.Zero, Length.Zero, space.Width, space.Height);
+        ChartDrawing composed = Compose(plot, own, text);
+        DocRect drawn = DrawnExtent(composed, own, text, plot.IsLabelBold);
+
         return InWeight(
-            InFamily(Stretch(Compose(plot, own, text), own, frame), plot.TextFamily),
+            InFamily(Stretch(composed, drawn, frame), plot.TextFamily),
             plot.IsLabelBold);
     }
 
@@ -674,19 +676,30 @@ public static partial class ChartLayout
     /// it, which is what this did at first, draws every word of a stretched chart
     /// <c>sx/sy</c> too wide against a reference that is exact.
     /// </para>
+    /// <para>
+    /// <strong><paramref name="from"/> is the chart's <em>drawn</em> extent and may lie outside
+    /// the page it was composed on</strong>, which is why its origin is subtracted rather than
+    /// assumed to be zero. That is
+    /// <c>createTranslateB2DHomMatrix(-aChartContentRange.getMinX(), -…getMinY())</c> in
+    /// <c>ViewContactOfSdrOle2Obj::createPrimitive2DSequenceWithParameters</c>
+    /// (<c>svx/source/sdr/contact/viewcontactofsdrole2obj.cxx</c>:88-116). See
+    /// <see cref="DrawnExtent"/>.
+    /// </para>
     /// </remarks>
     private static ChartDrawing Stretch(ChartDrawing drawing, DocRect from, DocRect frame)
     {
+        if (from.Width <= Length.Zero || from.Height <= Length.Zero) return drawing;
+
         double sx = (double)frame.Width.Emu / from.Width.Emu;
         double sy = (double)frame.Height.Emu / from.Height.Emu;
 
         DocPoint At(DocPoint point)
-            => new(frame.X + point.X * sx, frame.Y + point.Y * sy);
+            => new(frame.X + (point.X - from.X) * sx, frame.Y + (point.Y - from.Y) * sy);
 
         DocRect Box(DocRect rectangle)
             => new(
-                frame.X + rectangle.X * sx,
-                frame.Y + rectangle.Y * sy,
+                frame.X + (rectangle.X - from.X) * sx,
+                frame.Y + (rectangle.Y - from.Y) * sy,
                 rectangle.Width * sx,
                 rectangle.Height * sy);
 
@@ -740,6 +753,301 @@ public static partial class ChartLayout
             return moved;
         }
     }
+
+    /// <summary>
+    /// The bounding rectangle of everything the chart drew, which is what it is fitted by.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>An embedded chart is fitted to its own drawn extent, not to its page.</strong>
+    /// <c>ViewContactOfSdrOle2Obj::createPrimitive2DSequenceWithParameters</c>
+    /// (<c>svx/source/sdr/contact/viewcontactofsdrole2obj.cxx</c>:88-116) asks
+    /// <c>ChartHelper::tryToGetChartContentAsPrimitive2DSequence</c> for the chart's primitives
+    /// <em>and</em> for <c>aRetval.getB2DRange(…)</c>, the bounding box of every one of them
+    /// (<c>svx/source/svdraw/charthelper.cxx</c>:96-100); it then translates that range's minimum
+    /// to the origin, scales it by <c>1/width, 1/height</c> and multiplies by the OLE object's
+    /// own matrix. So a chart whose labels overflow its page is squeezed until the overflow fits,
+    /// by <em>two different factors, one per axis</em> — which is the whole of
+    /// "<c>tdf106217.pptx</c> is scaled unequally", and it is general rather than anything
+    /// special about that deck.
+    /// </para>
+    /// <para>
+    /// <strong>The page rectangle is always part of it</strong>, so the fit can only ever shrink.
+    /// <c>formatPage</c> (<c>chart2/source/view/main/ChartView.cxx</c>:1295-1312) creates a
+    /// rectangle at <c>(0, 0)</c> of the whole page size on every chart, whatever the page's fill
+    /// is, and a hidden shape still contributes its range — so the content range contains the
+    /// page by construction.
+    /// </para>
+    /// <para>
+    /// <strong>Measured on <c>N2_E_Maestroni_Swarm_COP.pptx</c> page 7.</strong> 26.2.4.2 draws
+    /// the chart's own background rectangle at <c>119.083 … 719.660</c> by
+    /// <c>92.58 … 516.983</c> inside a graphic frame of <c>0 … 720</c> by
+    /// <c>92.57 … 540.0</c> — <strong>0.834135 across and 0.948534 down</strong> — and its
+    /// leftmost category label starts at <c>x = 0.02</c>, which is
+    /// <c>(0.02 − 119.083) / 0.834135 = −142.7</c> in the chart's own coordinates. The content
+    /// range really does begin 142.7 pt left of the chart page, because that axis' labels are
+    /// drawn on one line each and are longer than the band the manual layout left them.
+    /// </para>
+    /// </remarks>
+    /// <param name="drawing">The composition, in the coordinates it was composed in.</param>
+    /// <param name="page">The chart's page — the rectangle it was composed on.</param>
+    /// <param name="measurer">Measures a label, to give it a rectangle.</param>
+    /// <param name="bold">The chart's label weight, for a label that states none of its own.</param>
+    private static DocRect DrawnExtent(
+        ChartDrawing drawing, DocRect page, ChartText measurer, bool bold)
+    {
+        Length left = page.Left;
+        Length top = page.Top;
+        Length right = page.Right;
+        Length bottom = page.Bottom;
+
+        void TakePoint(DocPoint point)
+        {
+            left = Length.Min(left, point.X);
+            top = Length.Min(top, point.Y);
+            right = Length.Max(right, point.X);
+            bottom = Length.Max(bottom, point.Y);
+        }
+
+        void Take(DocRect rectangle)
+        {
+            TakePoint(rectangle.Origin);
+            TakePoint(new DocPoint(rectangle.Right, rectangle.Bottom));
+        }
+
+        foreach (ChartBox box in drawing.Boxes) Take(box.Bounds);
+
+        foreach (ChartLine line in drawing.Lines)
+        {
+            TakePoint(line.From);
+            TakePoint(line.To);
+        }
+
+        // A shape with no commands and a label with no text have no extent at all, and taking
+        // `DocRect.Empty` for one is taking the point (0, 0) — which drags the chart's extent to
+        // its own origin and squeezes the whole picture for nothing. Measured on
+        // `048_Expense_trends_budget`, where one empty value-axis label took a chart whose
+        // content fits its page down to `sy = 0.6561`.
+        //
+        // A series mark contributes only what falls inside the plot, because that is all the
+        // reference's own range holds: every plotter clips its polygon to the scaled logic
+        // rectangle before it makes a shape of it — `Clipping::clipPolygonAtRectangle` at
+        // `AreaChart.cxx`:318, 336, 343, 359, 445, `NetChart.cxx`:138, 144, 213,
+        // `BarChart.cxx`:533 and `VSeriesPlotter.cxx`:1423 for a regression curve — and a marker
+        // is only created for a point `isLogicVisible` answers true for. We do not yet clip the
+        // geometry itself, so taking a polyline's own extent here would let a line drawn off the
+        // plot decide the whole chart's scale: on `171128IPAP.pptx` one series runs 932 pt left
+        // of a 576 pt chart page, which fits the chart at `sx = 0.3546` where 26.2.4.2 does not
+        // fit it at all.
+        foreach (ChartShape shape in drawing.Shapes)
+        {
+            if (PathExtent(shape.Path) is { } extent && Inside(extent, drawing.PlotArea) is { } part)
+                Take(part);
+        }
+
+        foreach (ChartLabel label in drawing.Labels)
+        {
+            if (LabelExtent(label, measurer, bold) is { } extent) Take(extent);
+        }
+
+        return new DocRect(left, top, right - left, bottom - top);
+    }
+
+    /// <summary>The part of a rectangle that falls inside another, or null when none does.</summary>
+    private static DocRect? Inside(DocRect rectangle, DocRect bounds)
+    {
+        if (bounds.Width <= Length.Zero || bounds.Height <= Length.Zero) return rectangle;
+
+        Length left = Length.Max(rectangle.Left, bounds.Left);
+        Length top = Length.Max(rectangle.Top, bounds.Top);
+        Length right = Length.Min(rectangle.Right, bounds.Right);
+        Length bottom = Length.Min(rectangle.Bottom, bounds.Bottom);
+
+        return right < left || bottom < top
+            ? null
+            : new DocRect(left, top, right - left, bottom - top);
+    }
+
+    /// <summary>The rectangle one label occupies, before the chart is fitted onto its frame.</summary>
+    /// <remarks>
+    /// The same geometry the three renderers place a label with — the anchor decides which corner
+    /// of the measured block sits at <see cref="ChartLabel.At"/>, and a rotated label is placed by
+    /// its own centre. Measured without the padding a renderer adds for a safe re-wrap, because
+    /// what LibreOffice's range holds is the text's own extent.
+    /// </remarks>
+    private static DocRect? LabelExtent(ChartLabel label, ChartText measurer, bool bold)
+    {
+        if (label.Text.Length == 0) return null;
+
+        DocSize block = Block(measurer.For(label.Family), label.Text, label.Size, label.IsBold ?? bold);
+        if (block.Width <= Length.Zero && block.Height <= Length.Zero) return null;
+        double stretch = double.IsFinite(label.Stretch) && label.Stretch > 0.0 ? label.Stretch : 1.0;
+        Length width = block.Width * stretch;
+        Length height = block.Height;
+
+        if (label.Rotation != 0.0)
+        {
+            double cos = Math.Abs(Math.Cos(label.Rotation));
+            double sin = Math.Abs(Math.Sin(label.Rotation));
+            Length across = (width * cos + height * sin) / 2.0;
+            Length down = (width * sin + height * cos) / 2.0;
+
+            return new DocRect(
+                label.At.X - across, label.At.Y - down, across * 2.0, down * 2.0);
+        }
+
+        DocPoint corner = label.Anchor switch
+        {
+            ChartLabelAnchor.CentreTop => new DocPoint(label.At.X - width / 2.0, label.At.Y),
+            ChartLabelAnchor.CentreBottom =>
+                new DocPoint(label.At.X - width / 2.0, label.At.Y - height),
+            ChartLabelAnchor.RightMiddle =>
+                new DocPoint(label.At.X - width, label.At.Y - height / 2.0),
+            ChartLabelAnchor.LeftMiddle => new DocPoint(label.At.X, label.At.Y - height / 2.0),
+            _ => new DocPoint(label.At.X - width / 2.0, label.At.Y - height / 2.0),
+        };
+
+        return new DocRect(corner, new DocSize(width, height));
+    }
+
+    /// <summary>How much room an already-broken label takes: the widest line, all the heights.</summary>
+    /// <remarks>
+    /// <see cref="MeasureLines"/>'s counterpart for text that has already been through the
+    /// arrangement: it splits on the newlines a wrapped label carries rather than looking for new
+    /// ones, so measuring a composed label cannot re-break it.
+    /// </remarks>
+    private static DocSize Block(ChartText measurer, string text, Length size, bool bold)
+    {
+        if (!text.Contains('\n', StringComparison.Ordinal))
+            return measurer.Measure(text, size, bold);
+
+        Length width = Length.Zero;
+        Length height = Length.Zero;
+
+        foreach (string line in text.Split('\n'))
+        {
+            DocSize one = measurer.Measure(line, size, bold);
+            width = Length.Max(width, one.Width);
+            height += one.Height;
+        }
+
+        return new DocSize(width, height);
+    }
+
+    /// <summary>A path's bounding rectangle, with a curve's true extremes rather than its hull.</summary>
+    /// <remarks>
+    /// <c>basegfx</c> expands a polygon's range by the bezier segment's own extremum positions
+    /// rather than by its control points
+    /// (<c>basegfx/source/polygon/b2dpolygon.cxx</c>:501-545), and the difference is not
+    /// cosmetic: a quarter-circle's control points stand 14% of the radius outside the arc, so a
+    /// pie touching the wall of its plot would push the chart's extent past the page and shrink
+    /// the whole picture for nothing.
+    /// </remarks>
+    private static DocRect? PathExtent(GraphicsPath path)
+    {
+        bool any = false;
+        Length left = Length.Zero;
+        Length top = Length.Zero;
+        Length right = Length.Zero;
+        Length bottom = Length.Zero;
+
+        void TakeX(Length x)
+        {
+            left = any ? Length.Min(left, x) : x;
+            right = any ? Length.Max(right, x) : x;
+        }
+
+        void TakeY(Length y)
+        {
+            top = any ? Length.Min(top, y) : y;
+            bottom = any ? Length.Max(bottom, y) : y;
+        }
+
+        void Take(DocPoint point)
+        {
+            TakeX(point.X);
+            TakeY(point.Y);
+            any = true;
+        }
+
+        DocPoint current = DocPoint.Origin;
+
+        foreach (PathCommand command in path.Commands)
+        {
+            switch (command.Verb)
+            {
+                case PathVerb.MoveTo:
+                case PathVerb.LineTo:
+                    Take(command.Point);
+                    current = command.Point;
+                    break;
+
+                case PathVerb.CubicTo:
+                    Take(current);
+                    Take(command.Point);
+                    TakeCurve(
+                        current.X, command.Control1.X, command.Control2.X, command.Point.X, TakeX);
+                    TakeCurve(
+                        current.Y, command.Control1.Y, command.Control2.Y, command.Point.Y, TakeY);
+                    current = command.Point;
+                    break;
+
+                default:
+                    break;
+            }
+        }
+
+        return any ? new DocRect(left, top, right - left, bottom - top) : null;
+    }
+
+    /// <summary>
+    /// Hands each interior extremum of one cubic coordinate to a caller that records it.
+    /// </summary>
+    /// <remarks>
+    /// The roots in <c>(0, 1)</c> of the derivative of the Bernstein form, which is the quadratic
+    /// <c>3(−a + 3b − 3c + d)t² + 6(a − 2b + c)t + 3(b − a)</c>. The degenerate cases are the
+    /// ones worth naming: a zero leading coefficient is a linear derivative with one root, and a
+    /// negative discriminant means the coordinate is monotonic and the end points are the whole
+    /// of it.
+    /// </remarks>
+    private static void TakeCurve(
+        Length a, Length b, Length c, Length d, Action<Length> take)
+    {
+        double p0 = a.Emu, p1 = b.Emu, p2 = c.Emu, p3 = d.Emu;
+        double quadratic = -p0 + 3.0 * p1 - 3.0 * p2 + p3;
+        double linear = 2.0 * (p0 - 2.0 * p1 + p2);
+        double constant = p1 - p0;
+
+        foreach (double t in Roots(quadratic, linear, constant))
+        {
+            if (!(t > 0.0) || !(t < 1.0)) continue;
+
+            double u = 1.0 - t;
+            double value = u * u * u * p0
+                + 3.0 * u * u * t * p1
+                + 3.0 * u * t * t * p2
+                + t * t * t * p3;
+
+            take(Length.FromEmu((long)Math.Round(value)));
+        }
+
+        static IEnumerable<double> Roots(double quadratic, double linear, double constant)
+        {
+            if (Math.Abs(quadratic) < 1e-12)
+            {
+                if (Math.Abs(linear) >= 1e-12) yield return -constant / linear;
+                yield break;
+            }
+
+            double discriminant = linear * linear - 4.0 * quadratic * constant;
+            if (discriminant < 0.0) yield break;
+
+            double root = Math.Sqrt(discriminant);
+            yield return (-linear + root) / (2.0 * quadratic);
+            yield return (-linear - root) / (2.0 * quadratic);
+        }
+    }
+
 
     /// <summary>Back to front, which is the order a combination chart's groups are painted in.</summary>
     private static readonly ChartPlotKind[] DrawingOrder =
@@ -938,7 +1246,7 @@ public static partial class ChartLayout
 
             if (domain is { } across) AddDomainAxis(plot, area, across, columns, lines, labels);
             else AddCategoryAxis(
-                    plot, area, categories, columns, arranged, measurer, lines, labels);
+                    plot, area, scale, categories, columns, arranged, measurer, lines, labels);
 
             AddDataTable(plot, frame, area, categories, columns, measurer, lines, labels);
         }
@@ -1567,6 +1875,23 @@ public static partial class ChartLayout
                         ? layout.Reserved
                         : labelHeight;
 
+        // A category label that hangs from a line *inside* the plot takes no band off it.
+        // `VDiagram::adjustInnerSize` shrinks the inner rectangle by how far the drawn labels
+        // overflow the available one (`chart2/source/view/diagram/VDiagram.cxx`:661-669), and
+        // labels drawn inside overflow nothing. Only a strictly interior line changes anything:
+        // at an edge — which is where the clamp puts it for every chart whose values are all of
+        // one sign — the band is the one the axis has always taken. Measured on
+        // `Demick_JetBlue.pptx` page 5, where 26.2.4.2's plot runs to y = 401.56 with the axis
+        // line and its labels at y = 374.83 inside it, and ours stopped at 376.18 with the
+        // labels below at 383.
+        double labelsAlong = CategoryLabelsAt(plot, scale);
+        if (categoryLabels && labelsAlong > 0.0 && labelsAlong < 1.0)
+        {
+            categoryLabel = Length.Zero;
+            categoryHeight = Length.Zero;
+            categorySpace = Length.Zero;
+        }
+
         if (columns)
         {
             // The room the value labels take is on the side they are drawn on, which is the side
@@ -1689,6 +2014,56 @@ public static partial class ChartLayout
 
         return atLogicalMaximum != plot.CategoriesReversed;
     }
+
+    /// <summary>
+    /// Where along the value axis the <em>category</em> axis' own line stands, 0 at the plot's
+    /// bottom (or left) and 1 at its top (or right).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>VCartesianAxis::getAxisIntersectionValue</c>
+    /// (<c>chart2/source/view/axes/VCartesianAxis.cxx</c>:1092-1101) answers
+    /// <c>m_pfMainLinePositionAtOtherAxis</c> when the axis states a crossing, and
+    /// <c>AxisProperties::initAxisPositioning</c> sets that to the stated value for
+    /// <c>ChartAxisPosition_VALUE</c> and to <strong>zero</strong> for
+    /// <c>ChartAxisPosition_ZERO</c> (<c>VAxisProperties.cxx</c>:214-225), which is what
+    /// <c>c:crosses val="autoZero"</c> — the default — maps to. <c>get2DAxisMainLine</c> then
+    /// clamps it into the crossing axis' range (<c>:1253-1256</c>).
+    /// </para>
+    /// <para>
+    /// <strong>So a chart whose values span zero draws its category axis inside the plot</strong>,
+    /// and one whose values are all of a sign draws it along an edge exactly as before — the
+    /// clamp is what makes this safe to apply to every chart rather than to the ones a file
+    /// marks.
+    /// </para>
+    /// </remarks>
+    private static double CategoryAxisAt(ChartPlot plot, ChartScaleResult scale)
+    {
+        double along = plot.CategoryAxisCrossing switch
+        {
+            ChartAxisCrossing.Minimum => scale.Fraction(scale.Minimum),
+            ChartAxisCrossing.Maximum => scale.Fraction(scale.Maximum),
+            _ when plot.CategoryCrossesAt is { } stated => scale.Fraction(stated),
+            _ => scale.Fraction(0.0),
+        };
+
+        return double.IsFinite(along) ? Math.Clamp(along, 0.0, 1.0) : 0.0;
+    }
+
+    /// <summary>Where the category axis' <em>labels</em> hang from, on the same scale.</summary>
+    /// <remarks>
+    /// <c>getLabelLineIntersectionValue</c> (<c>VCartesianAxis.cxx</c>:1103-1113): the two outside
+    /// positions answer the crossing axis' minimum and maximum outright and <c>nextTo</c> falls
+    /// through to the axis line's own value, so a file can send the labels to an edge while the
+    /// line stays where it crosses.
+    /// </remarks>
+    private static double CategoryLabelsAt(ChartPlot plot, ChartScaleResult scale)
+        => plot.CategoryLabelPosition switch
+        {
+            ChartValueLabelPosition.Low => scale.Fraction(scale.Minimum),
+            ChartValueLabelPosition.High => scale.Fraction(scale.Maximum),
+            _ => CategoryAxisAt(plot, scale),
+        };
 
     /// <summary>The value axis: its line, its ticks, its gridlines and its labels.</summary>
     /// <remarks>
@@ -1998,6 +2373,7 @@ public static partial class ChartLayout
     private static void AddCategoryAxis(
         ChartPlot plot,
         DocRect area,
+        ChartScaleResult scale,
         int categories,
         bool columns,
         ChartAxisLabelLayout? arranged,
@@ -2009,16 +2385,26 @@ public static partial class ChartLayout
         Length inner = InnerTick(plot.CategoryTicks);
         ChartGrid stroke = plot.CategoryAxisLine;
 
+        // The axis' line stands where it crosses the value axis and its labels hang from their
+        // own line, which is usually the same one. Both are clamped into the plot, so a chart
+        // whose values are all of a sign is drawn exactly as it was before. See CategoryAxisAt.
+        Length axisAt = columns
+            ? area.Bottom - area.Height * CategoryAxisAt(plot, scale)
+            : area.Left + area.Width * CategoryAxisAt(plot, scale);
+        Length labelAt = columns
+            ? area.Bottom - area.Height * CategoryLabelsAt(plot, scale)
+            : area.Left + area.Width * CategoryLabelsAt(plot, scale);
+
         if (plot.CategoryAxisVisible)
         {
             lines.Add(columns
                 ? new ChartLine(
-                    new DocPoint(area.Left, area.Bottom),
-                    new DocPoint(area.Right, area.Bottom),
+                    new DocPoint(area.Left, axisAt),
+                    new DocPoint(area.Right, axisAt),
                     stroke.Colour, stroke.Width, stroke.Dash)
                 : new ChartLine(
-                    new DocPoint(area.Left, area.Top),
-                    new DocPoint(area.Left, area.Bottom),
+                    new DocPoint(axisAt, area.Top),
+                    new DocPoint(axisAt, area.Bottom),
                     stroke.Colour, stroke.Width, stroke.Dash));
         }
 
@@ -2076,8 +2462,8 @@ public static partial class ChartLayout
                 if (plot.CategoryAxisVisible && outer + inner > Length.Zero)
                 {
                     lines.Add(new ChartLine(
-                        new DocPoint(x, area.Bottom - inner),
-                        new DocPoint(x, area.Bottom + outer),
+                        new DocPoint(x, axisAt - inner),
+                        new DocPoint(x, axisAt + outer),
                         stroke.Colour, stroke.Width, stroke.Dash));
                 }
             }
@@ -2095,8 +2481,8 @@ public static partial class ChartLayout
                 if (plot.CategoryAxisVisible && outer + inner > Length.Zero)
                 {
                     lines.Add(new ChartLine(
-                        new DocPoint(area.Left - outer, y),
-                        new DocPoint(area.Left + inner, y),
+                        new DocPoint(axisAt - outer, y),
+                        new DocPoint(axisAt + inner, y),
                         stroke.Colour, stroke.Width, stroke.Dash));
                 }
             }
@@ -2171,7 +2557,7 @@ public static partial class ChartLayout
                 labels.Add(new ChartLabel(
                     text,
                     new DocPoint(
-                        area.Left - outer - LabelSpacing,
+                        labelAt - outer - LabelSpacing,
                         area.Bottom - area.Height * centre),
                     ChartLabelAnchor.RightMiddle,
                     plot.LabelSize,
@@ -2181,7 +2567,7 @@ public static partial class ChartLayout
             }
 
             Length x = area.Left + area.Width * centre;
-            Length top = area.Bottom + outer + LabelSpacing;
+            Length top = labelAt + outer + LabelSpacing;
 
             // The second row of a staggered axis sits one row below the first.
             if (layout.Staggered && at / rhythm % 2 == 1) top += layout.Reserved / 2;
@@ -3514,6 +3900,23 @@ public static partial class ChartLayout
                     from = baseline;
                     to = scale.Fraction(value);
                 }
+
+                // A bar is clipped to the axis' own range, and one entirely outside it is not
+                // drawn at all — nor is its data label, because the reference gives up on the
+                // point before it reaches one. `PlottingPositionHelper::clipYRange`
+                // (chart2/source/view/inc/PlottingPositionHelper.hxx:401-415) is called by
+                // `BarChart::createShapes` (chart2/source/view/charttypes/BarChart.cxx:789)
+                // before any geometry is computed, and it both rejects and clamps.
+                //
+                // A stacked chart is what makes this visible rather than cosmetic. A Gantt is
+                // written as a stack of an invisible "start" series and a visible "duration"
+                // one, with the value axis given an explicit `c:min` at the first date — so the
+                // start segment runs from serial zero, which on N2_E_Maestroni_Swarm_COP.pptx
+                // page 7 is 41600 days and 192 386 points left of the plot. Unclipped, every
+                // bar on that chart is drawn from there.
+                if (Math.Max(from, to) < 0.0 || Math.Min(from, to) > 1.0) continue;
+                from = Math.Clamp(from, 0.0, 1.0);
+                to = Math.Clamp(to, 0.0, 1.0);
 
                 // The slot the bar sits in, as a fraction of the plot area's long side.
                 double slotStart = (double)at / categories
