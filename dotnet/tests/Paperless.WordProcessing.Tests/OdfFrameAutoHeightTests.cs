@@ -23,12 +23,19 @@ namespace Paperless.WordProcessing.Tests;
 /// reference's 316, <c>part-147_approval list_20230119</c> 114 against 3570.
 /// </para>
 /// <para>
-/// <strong>What this does not yet do is grow the frame.</strong> The frame takes its floor as its
-/// height and its text is drawn past the bottom, so the text is present and placed but the frame
-/// reserves no room for it: body text is not pushed down and the page count stays short where the
-/// frame is tall. <c>Case-Study-Heathrow-Airport</c> is the shape of what remains — 8 characters
-/// became 2052 of the reference's 6461, on 1 page against 3. Growing it needs the content laid out
-/// before the frame is placed, which is the opposite of the order <c>FrameLayout</c> runs in.
+/// <strong>Growing the frame is a separate rule and it is now implemented</strong> — see
+/// <see cref="OdtFrameGrowthTests"/> and <see cref="Layout.PageFrame.GrowsToContent"/>. It did not
+/// need <c>FrameLayout</c>'s order inverted, which is what the round that placed the frame
+/// supposed: <c>FrameLayout.Place</c> is a pure function of the frame's stated size and the page
+/// and anchor geometry, and the content's own layout needs only the frame's <em>width</em>, which
+/// the file states — so the height is measured in a pass that runs first.
+/// </para>
+/// <para>
+/// This fixture is <em>not</em> a growth witness, and deliberately so: its <c>fr1</c> is an
+/// automatic graphic style with no parent, which LibreOffice imports as a drawing shape rather
+/// than as a Writer text frame (<c>xmloff/source/text/XMLTextFrameContext.cxx</c>:1374-1394,
+/// <em>"#i51726#"</em>, and :1500-1507), and a shape fits itself to its text by a different rule.
+/// What it pins is that such a frame is read and placed at all.
 /// </para>
 /// </remarks>
 public sealed class OdfFrameAutoHeightTests

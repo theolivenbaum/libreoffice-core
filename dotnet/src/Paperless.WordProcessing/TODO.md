@@ -1987,34 +1987,69 @@ is read and verified, so what remains is the filling of pages rather than the me
 
 ## Known deviations, measured
 
-- **A `draw:frame` with no `svg:height` is placed but not grown, and the two halves of finishing it
-  are separable.** The frame takes its `fo:min-height` floor and its text is drawn past the bottom,
-  so nothing is pushed down and no page is begun. A blind reading of
-  `Case-Study-Heathrow-Airport.odt`'s pair says exactly that: the body layout is right — every
-  paragraph wraps at the same word and landmark baselines differ by 2 to 3 px over a whole page —
-  and the last two bullets are drawn *outside* the bottom page border, one of them clipped by the
-  edge of the sheet.
+- **[DONE, one half] A `draw:frame` whose stated height is a *floor* is grown to its own text.**
+  ODF states Writer's three fly height kinds by which attribute carries the length:
+  `fo:min-height` on the `draw:text-box` sets `bMinHeight` and therefore `SizeType::MIN`, and
+  `svg:height` on the `draw:frame` sets `SizeType::FIX`
+  (`xmloff/source/text/XMLTextFrameContext.cxx`:997-1010 and :655-661). **Both write the same
+  variable and the box's attributes are read first** (:1113-1116), so a frame stating both keeps
+  `svg:height` as the floor and still grows — no corpus document does, but that is the rule rather
+  than the corpus's coincidence, and it is why `GrowsToContent` asks about the box rather than
+  about the absence of a height.
 
-  **Growing it does not need `FrameLayout`'s order inverted**, which is what the round that placed
-  the frame supposed. `FrameLayout.Place` is a pure function of the frame's stated size and the page
-  and anchor geometry, and the content's own layout needs the frame's *width*, which the file
-  states, and nothing else — so the height can be measured in a pass that runs before `Place`. The
-  order that would have to invert is one where placement feeds back into measurement, and it does
-  not.
+  The arithmetic is `SwFlyFrame::Format` (`sw/source/core/layout/fly.cxx`:1549-1570) in its own
+  order: the content height, raised to the stated minimum less the insets, raised again to
+  `MINFLY` (23 twips, `sw/inc/swtypes.hxx`:59), and the insets added back — so **the stated
+  minimum is a floor for the whole frame, insets included**. Measured over eighteen one-attribute
+  probes against 26.2.4.2 (`probes/odt-frame-r75/`): the content measure is the **ink extent**
+  and not the advance, because a text frame's area carries its own upper space and its lower space
+  is only ever realised as the upper space of what follows it — so **every paragraph's
+  space-before counts, the first included, and the last paragraph's space-after does not**.
 
-  **What the largest witness needs is a different thing.** `Case-Study-Heathrow-Airport.odt` is one
-  `text:p` holding one `draw:frame` that is the whole three-page document — 1 page and 2052
-  alphanumeric characters against 3 pages and 6461 — and that frame carries
-  `loext:may-break-between-pages="true"`. Growing it makes it three pages tall on page one; what
-  the reference does is *split* it, which is `SwFlyFrame::IsFlySplitAllowed`
-  (`sw/source/core/layout/fly.cxx`:689-730) and the fly-splitting layout behind it. Censused over
-  the converted ODF corpus (`probes/odf-rowpitch-r72/framecensus.py`): **51 of the 58 height-less
-  `draw:frame` in the 338 `.odt` declare it**, in 43 of the 49 documents that hold one — though
-  declaring it is not the same as needing it, since a frame that fits its page never splits.
+  `.odt` **261 → 264 of 338** at `0e54dba0a`, 12 renderings moved, four verdicts gained and one
+  lost; the original words track is byte-identical on all 338. The lost row is
+  `047_Visual_Product_Roadmap_Template_Professional_Layout`, and it is not this rule's defect:
+  its frame holds a table whose first column is `loext:writing-mode="bt-lr"`, which we draw one
+  glyph per line, so the cell and therefore the frame come out far too tall. 13 of the 338
+  converted `.odt` state a vertical writing mode, 92 occurrences.
 
-  So: growth alone is a small change that will push body text down on the documents whose frame
-  fits, and do nothing for the ones whose frame does not. Splitting is architectural. Neither is
-  implemented.
+  **The probes had to name a parent style before they measured anything.** A `draw:frame` whose
+  `draw:style-name` names an automatic graphic style with *no parent* is imported as a drawing
+  shape rather than a Writer fly (`XMLTextFrameContext.cxx`:1374-1394, *"#i51726#"*, and
+  :1500-1507), and a shape ignores `fo:min-height` outright — which reads exactly like the
+  reference ignoring the attribute. LibreOffice's own exporter always names `Frame`.
+
+- [ ] **The other half is fly splitting, and it is worth 13 rows.** A frame taller than the room
+      left on its page draws its tail off the sheet. Measured with `paperless extract` against the
+      render over the 50 documents holding a growing frame
+      (`probes/odt-frame-r75/overflow.tsv`): **13 of the 50 draw materially less than they hold**,
+      every one of them a currently failing row — `ESPN-R - MCF - RA - Ed1` draws 43028 of the
+      58948 it holds against the reference's 65952, `Case-Study-Heathrow-Airport` 2159 of 6445
+      against 6461.
+
+      What the reference does is *split* the fly, and the two behaviours are one attribute apart.
+      Measured on 60 paragraphs in a paragraph-anchored frame on A4: with
+      `loext:may-break-between-pages="true"` the fly is cut at the body's bottom, 52 lines on page
+      one and 8 on page two, and the body resumes below the second fragment; with it false the fly
+      stays whole, runs from y 14.36 to 828.56 on an 841.89 pt sheet — captured onto the *page*
+      rather than the body — and the whole body moves to page two. The seat is
+      `SwFlyFrame::IsFlySplitAllowed` (`fly.cxx`:689-737), the deadline is `GetFlyAnchorBottom`
+      (`fly.cxx`:114-162) read at `Format`:1576-1596, and the continuation is a `SwFlowFrame`
+      follow chain (`SwFrame::GetNextFlyLeaf`, `flycnt.cxx`:1576). `IsFlySplitAllowed` is
+      consulted from 46 places in `sw/source/core`.
+
+      **Two of the three pieces are local and the third is the reason this is architectural.**
+      Reading the flag and its refusals is local to `OdfFrames`/`PageFrame`; cutting the flow at a
+      deadline is the rule `FlowLayouter.Truncated` already implements. What is not local is
+      putting the continuation on the following pages: in this engine a page exists because a
+      *block* overflowed onto it — `Paginator.EmitPage` is reached only from the block loop — and
+      a fly's obstacles are keyed by the page its **anchor paragraph starts on**, built per block
+      index from `obstaclesByPage[placement.Index]` and consulted in that one page's coordinates.
+      A paragraph that spills onto page N+1 never sees page N+1's obstacles, and a fly fragment on
+      a page no body text has reached has nothing to obstruct. **The seat is
+      `FrameResolution.ObstaclesFor(int block)` and `Paginator._obstacles`**: the obstacle set has
+      to become per *page*, consulted for whichever page each line lands on. That is a change to
+      the line filler's contract, on the track whose gate is page counts.
 
 - Two of LibreOffice's numbers are reproduced by construction rather than derived, and both are recorded
   here so a future comparison does not mistake them for bugs:

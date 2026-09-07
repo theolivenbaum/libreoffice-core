@@ -912,6 +912,20 @@ general enough to carry:
   :388-394). It is the same shape of defect the BIFF round found in `XlsChartBuilder`'s single
   `_valueScale`, and it bites for the same reason: **the file writes the primary first, so taking
   the last one read is wrong in exactly the files that have two.**
+- **A `draw:frame` whose automatic graphic style has no *parent* is a drawing shape, not a Writer
+  text frame — and an authored ODF probe that forgets to name one measures the wrong object.**
+  `XMLTextFrameContext`'s constructor sets `m_HasAutomaticStyleWithoutParentStyle`
+  (`xmloff/source/text/XMLTextFrameContext.cxx`:1374-1394, *"New distinguish attribute between
+  Writer objects and Draw objects is: Draw objects have an automatic style without a parent style
+  (#i51726#)"*) and `createFastChildContext` then hands the element to
+  `XMLShapeImportHelper::CreateFrameChildContext` (:1500-1507) instead of building a
+  `com.sun.star.text.TextFrame`. A shape fits itself to its text by a different rule and ignores
+  `fo:min-height` outright. Round 75 wrote sixteen probes without a parent style, watched
+  26.2.4.2 draw `fo:min-height="3in"` on a two-line box as **27.65 pt**, and confirmed that wrong
+  conclusion three ways — flat ODF, the same file zipped, and a patched corpus document — before
+  the cause was found, because all three shared the defect. LibreOffice's own exporter always
+  names `Frame`, so no real document is affected; **every hand-built `draw:frame` probe must name
+  a parent style**, and the same trap is waiting in `.odp` and `.ods`.
 
 **And a shadow's blur radius decides whether the shadow's *text* is real text**, which is the
 sharpest example this project has of a one-attribute defect that no gate column can see and that
