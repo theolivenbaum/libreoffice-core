@@ -64,6 +64,19 @@ public static class OdfNamespaces
     /// </remarks>
     public const string ChartExtension = "http://openoffice.org/2010/chart";
 
+    /// <summary>The <c>drawooo</c> namespace, LibreOffice's drawing extensions.</summary>
+    /// <remarks>
+    /// <strong><c>draw:display</c> is written here and read from both spellings</strong>, exactly
+    /// as <see cref="ChartExtension"/>'s <c>coordinate-region</c> is. The exporter always emits
+    /// the extension form — <c>XML_NAMESPACE_DRAW_EXT</c>,
+    /// <c>xmloff/source/draw/shapeexport.cxx</c>:816 — and the importer accepts either
+    /// (<c>ximpshap.cxx</c>:840-841). Counted over the 302 <c>.odp</c> of the converted corpus:
+    /// <strong>887 occurrences in 49 documents, every one of them <c>drawooo:display</c></strong>
+    /// and none in the standard namespace, so a reader that looks only at <c>draw:display</c>
+    /// finds nothing at all and concludes the attribute is not used.
+    /// </remarks>
+    public const string DrawExtension = "http://openoffice.org/2010/draw";
+
     /// <summary>The <c>form</c> namespace, holding control definitions.</summary>
     public const string Form = "urn:oasis:names:tc:opendocument:xmlns:form:1.0";
 

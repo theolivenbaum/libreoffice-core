@@ -68,6 +68,7 @@ internal sealed partial class OdpSlideLayout
             Attribute(page, OdfNamespaces.Draw, "master-page-name"));
 
         List<PlacedShape> shapes = [];
+        InheritedShapes(page, master, shapes);
         Walk(page, AffineTransform.Identity, shapes, depth: 0);
 
         DocSize size = SlideSize(master);
@@ -83,6 +84,98 @@ internal sealed partial class OdpSlideLayout
         };
     }
 
+    /// <summary>
+    /// The master page's own shapes, drawn beneath the slide's.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>An ODF master page is drawn under every slide that names it, and this reader drew
+    /// none of it for nine rounds.</strong> The corpus could not see the gap — the slides track
+    /// held no ODF presentation at all until the whole corpus was converted through 26.2.4.2 —
+    /// and the OOXML path has done the same thing since round 40
+    /// (<see cref="Ooxml.PptxSlideLayout"/>'s <c>InheritedShapes</c>), so the two readers gave the
+    /// same deck different pages. Measured on the converted corpus, this is the largest single
+    /// cause in the `.odp` column: 102 of the 182 non-matching rows are explained by it to within
+    /// the gate's own floor, and a further 49 have it as one of their components.
+    /// </para>
+    /// <para>
+    /// <strong>Presentation objects are excluded and background objects are not.</strong> A frame
+    /// carrying <c>presentation:class</c> is a placeholder — the master's own "Click to edit
+    /// Master title style" prompt, or its header, footer, date-time and page-number frames — and
+    /// Impress draws none of those from the master: the slide's matching placeholder supplies the
+    /// text, and the header/footer family is governed by the page's own <c>presentation:display-*</c>
+    /// declarations rather than by the master's prompt. Everything else on the master — a logo, a
+    /// strapline, a rule, a background picture — is a background object and is drawn. This is the
+    /// same split <c>PptxSlideLayout.InheritedShapes</c> makes, and it has to be, because an
+    /// Impress master page <em>is</em> a PPTX master and a PPTX layout merged into one.
+    /// </para>
+    /// <para>
+    /// <strong>A master shape parked off the page needs no rule.</strong> The template family that
+    /// makes this measurable carries three such shapes on every master — a copyright line 0.28 cm
+    /// below the sheet, a credit group at negative <c>svg:x</c>, and an instruction block 0.8 cm
+    /// past the right edge — and 26.2.4.2 emits none of their text into its PDF. Neither do we:
+    /// the media box is the cull, exactly as it is on the OOXML side, so the reference and this
+    /// reader agree on which of a master's shapes reach the page without either of them deciding
+    /// it. Reading the layer or the position as a visibility rule and implementing one would be
+    /// the <c>slide-sections.pptx</c> mistake in ODF spelling.
+    /// </para>
+    /// <para>
+    /// <c>presentation:background-objects-visible</c> is the one real switch, and it is a property
+    /// of the <em>slide's</em> drawing-page style rather than an attribute on the page — the same
+    /// shape as <see cref="IsHidden"/>, and resolved the same way. LibreOffice stores it as the
+    /// <c>backgroundobjects</c> bit of the slide's master-page visible-layer set
+    /// (<c>sd/source/ui/unoidl/unopage.cxx</c>:794-809), which is why it reads as a page property
+    /// and not as a master one. Absent means visible.
+    /// </para>
+    /// </remarks>
+    private void InheritedShapes(XElement page, OdfMasterPage? master, List<PlacedShape> shapes)
+    {
+        if (master is null || master.Shapes.Count == 0) return;
+
+        OdfProperty visible = _file.Styles.ResolveProperty(
+            Attribute(page, OdfNamespaces.Draw, "style-name"),
+            OdfStyleFamily.DrawingPage,
+            OdfPropertyKind.DrawingPage,
+            OdfNamespaces.Presentation,
+            "background-objects-visible");
+
+        if (visible.HasValue && !visible.Is("true")) return;
+
+        Walk(master.Element, AffineTransform.Identity, shapes, depth: 0, background: true);
+    }
+
+    /// <summary>
+    /// <strong>A slide's own header, footer, date-time and page-number frames are drawn as they
+    /// stand, and <c>presentation:display-*</c> does not suppress them.</strong>
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// This is written down because it is a plausible rule that a round implemented, measured and
+    /// withdrew. The reasoning that led to it: <c>SdPage::checkVisibility</c> answers a
+    /// footer/header/date-time/slide-number text object from the visualised page's
+    /// <c>HeaderFooterSettings</c> (<c>sd/source/core/sdpage.cxx</c>:2957-2984), ODF states those
+    /// settings as <c>presentation:display-header</c>, <c>-footer</c>, <c>-date-time</c> and
+    /// <c>-page-number</c> on the page's drawing-page style, and across the converted corpus's 302
+    /// <c>.odp</c> <strong>all 1630 slide-level frames of those four kinds state one explicitly and
+    /// every single one states <c>false</c></strong> — 464 footer, 781 page-number, 385 date-time,
+    /// no header, and not one <c>true</c> anywhere. It reads like a switch nobody has honoured.
+    /// </para>
+    /// <para>
+    /// <strong>It is not.</strong> That branch of <c>checkVisibility</c> is guarded by
+    /// <c>bSubContentProcessing</c> — it fires while the <em>master's</em> content is being drawn
+    /// as a slide's background, which is the only place those settings decide anything. A slide's
+    /// own copy of the frame is an ordinary shape by then. Measured two ways before the rule was
+    /// withdrawn: 26.2.4.2 draws the footer of a page stating <c>display-footer="false"</c> in
+    /// <c>odp-master-background.fodp</c>, and of the 42 corpus documents that would have been
+    /// affected <strong>24 already match</strong> without the suppression while the largest of the
+    /// rest is 2318 glyphs <em>short</em> of the reference rather than long. Suppressing would have
+    /// moved them the wrong way.
+    /// </para>
+    /// <para>
+    /// Nothing is needed for the master's own copies either: they carry <c>presentation:class</c>
+    /// and <see cref="InheritedShapes"/> already excludes every class-bearing shape on a master.
+    /// </para>
+    /// </remarks>
     /// <summary>
     /// The slide's size, from the master page's <c>style:page-layout</c>.
     /// </summary>
@@ -205,11 +298,26 @@ internal sealed partial class OdpSlideLayout
             style, OdfStyleFamily.DrawingPage, OdfPropertyKind.DrawingPage,
             OdfNamespaces.Draw, name);
 
-    private void Walk(XElement parent, AffineTransform space, List<PlacedShape> shapes, int depth)
+    // `background` is true while walking a master page, where every `presentation:class` frame is
+    // a presentation object and none of them is drawn on a slide. See InheritedShapes.
+    private void Walk(
+        XElement parent,
+        AffineTransform space,
+        List<PlacedShape> shapes,
+        int depth,
+        bool background = false)
     {
         foreach (XElement element in parent.Elements())
         {
             if (element.Name.NamespaceName != OdfNamespaces.Draw) continue;
+
+            if (background
+                && element.Attribute(XName.Get("class", OdfNamespaces.Presentation)) is not null)
+            {
+                continue;
+            }
+
+            if (!IsPrinted(element)) continue;
 
             switch (element.Name.LocalName)
             {
@@ -217,7 +325,7 @@ internal sealed partial class OdpSlideLayout
                     // A group states no coordinate space of its own in ODF, so descending is a
                     // plain recursion; only a draw:transform on the group changes anything, and
                     // LibreOffice writes none.
-                    Walk(element, Space(element, space), shapes, depth + 1);
+                    Walk(element, Space(element, space), shapes, depth + 1, background);
                     break;
 
                 case "frame"
@@ -249,6 +357,44 @@ internal sealed partial class OdpSlideLayout
                     break;
             }
         }
+    }
+
+    /// <summary>
+    /// Whether a shape reaches paper, from <c>draw:display</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The attribute has four values and they set <em>two</em> flags:
+    /// <c>Visible = always | screen</c> and <c>Printable = always | printer</c>
+    /// (<c>xmloff/source/draw/ximpshap.cxx</c>:840-844, mirrored on export at
+    /// <c>shapeexport.cxx</c>:805-816). Rendering a slide to PDF is printing, so the flag that
+    /// decides here is <c>Printable</c> — a shape marked <c>none</c> or <c>screen</c> is laid out
+    /// by Impress and drawn nowhere we can see.
+    /// </para>
+    /// <para>
+    /// <strong>It is not a curiosity of hand-written files: it is how PowerPoint's master
+    /// placeholders survive a round trip.</strong> LibreOffice's own ODP export writes a
+    /// PPTX master's <c>Slide Number</c>, <c>Footer</c> and <c>Date</c> placeholders out as
+    /// ordinary <c>draw:custom-shape</c> carrying their prompt text and
+    /// <c>drawooo:display="none"</c>, because Impress can hold only one presentation object of
+    /// each kind per master. Read without the attribute they are ordinary background objects, so
+    /// a reader that starts drawing master shapes starts drawing <c>&lt;#&gt; Footer Date</c>
+    /// under every slide of the deck. That is exactly what happened here: teaching this reader
+    /// master pages moved 122 of the converted corpus's 302 <c>.odp</c> to <c>match</c> and moved
+    /// <strong>four</strong> the other way, and all four were this.
+    /// </para>
+    /// <para>
+    /// 887 occurrences in 49 of the 302, 885 of them on a master page — see
+    /// <see cref="OdfNamespaces.DrawExtension"/> for why only the extension spelling appears.
+    /// </para>
+    /// </remarks>
+    private static bool IsPrinted(XElement element)
+    {
+        string? display =
+            element.Attribute(XName.Get("display", OdfNamespaces.DrawExtension))?.Value
+            ?? element.Attribute(XName.Get("display", OdfNamespaces.Draw))?.Value;
+
+        return display is null or "always" or "printer";
     }
 
     private static AffineTransform Space(XElement group, AffineTransform space)
