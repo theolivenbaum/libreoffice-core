@@ -320,6 +320,10 @@ public sealed record RtfLayoutRow(
 /// <param name="Blocks">The blocks inside it, in order — paragraphs, and any table nested in it.</param>
 /// <param name="Shading">The colour behind its text, or null when it is not shaded.</param>
 /// <param name="Borders">Its four borders.</param>
+/// <param name="TextDirection">
+/// Which way its text runs — RTF's <c>\cltxbtlr</c> and its siblings, which LibreOffice's tokeniser
+/// turns into <c>w:textDirection</c> (<c>rtfdispatchflag.cxx</c>:483-508).
+/// </param>
 public sealed record RtfLayoutCell(
     int Column,
     int ColumnSpan,
@@ -328,4 +332,5 @@ public sealed record RtfLayoutCell(
     Layout.VerticalTextAlignment VerticalAlignment,
     IReadOnlyList<RtfLayoutBlock> Blocks,
     Colour? Shading = null,
-    Layout.CellBorders Borders = default);
+    Layout.CellBorders Borders = default,
+    Layout.CellTextDirection TextDirection = Layout.CellTextDirection.LeftToRight);

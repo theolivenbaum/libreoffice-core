@@ -971,6 +971,30 @@ public sealed partial class RtfDocumentReader
             case "clvertalb":
                 DefinitionTarget(CurrentFlow).PendingCellAlignment = Layout.VerticalTextAlignment.Bottom;
                 return;
+
+            // The cell's text flow. LibreOffice's tokeniser turns these five straight into
+            // `w:textDirection` (`rtfdispatchflag.cxx`:483-508), and `CellTextDirection` already holds
+            // the three answers dmapper reduces its six values to — so a turned cell is read here
+            // exactly as the DOCX spelling of the same document reads it. Without this a `\cltxbtlr`
+            // label is laid out upright in a cell as narrow as one glyph, which breaks it a character
+            // per line; 186 `\cltxbtlr` in 11 of the corpus's converted RTF, and 3 `\cltxtbrl` in one.
+            case "cltxbtlr":
+                DefinitionTarget(CurrentFlow).PendingCellTextDirection =
+                    Layout.CellTextDirection.BottomToTopLeftToRight;
+                return;
+            case "cltxtbrl" or "cltxtbrlv":
+                // Folded onto one answer by dmapper, not by us: `tbRl` and `tbRlV` both become
+                // `WritingMode2::TB_RL` in `DomainMapperTableManager.cxx`:325-350.
+                DefinitionTarget(CurrentFlow).PendingCellTextDirection =
+                    Layout.CellTextDirection.TopToBottomRightToLeft;
+                return;
+            case "cltxlrtb" or "cltxlrtbv":
+                // Upright, and stated explicitly to beat a direction set earlier in the same
+                // declaration — `\cltxlrtbv` because dmapper ignores `lrTbV` outright.
+                DefinitionTarget(CurrentFlow).PendingCellTextDirection =
+                    Layout.CellTextDirection.LeftToRight;
+                return;
+
             case "clmgf":
                 DefinitionTarget(CurrentFlow).PendingCellMergesFirst = true;
                 return;

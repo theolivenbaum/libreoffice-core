@@ -564,6 +564,9 @@ public sealed partial class RtfDocumentReader
         /// <summary>The vertical alignment <c>\clvertal*</c> stated for the cell being declared.</summary>
         public Layout.VerticalTextAlignment PendingCellAlignment { get; set; }
 
+        /// <summary>The text flow <c>\cltx*</c> stated for the cell being declared.</summary>
+        public Layout.CellTextDirection PendingCellTextDirection { get; set; }
+
         /// <summary>The <c>\clcbpat</c> colour index for the cell being declared, or null for none.</summary>
         public int? PendingCellShading { get; set; }
 
@@ -616,6 +619,7 @@ public sealed partial class RtfDocumentReader
     /// <param name="VerticalAlignment">Where the cell's text sits inside its row.</param>
     /// <param name="ShadingColourIndex">Its <c>\clcbpat</c> colour index, or null for none.</param>
     /// <param name="Borders">Its four borders, in left, right, top, bottom order.</param>
+    /// <param name="TextDirection">Which way its text runs — the <c>\cltx*</c> family.</param>
     private readonly record struct CellDefinition(
         int RightEdge,
         bool MergesFirst,
@@ -625,7 +629,8 @@ public sealed partial class RtfDocumentReader
         int?[]? Padding = null,
         Layout.VerticalTextAlignment VerticalAlignment = Layout.VerticalTextAlignment.Top,
         int? ShadingColourIndex = null,
-        (int Twips, int? ColourIndex, bool IsNone)[]? Borders = null);
+        (int Twips, int? ColourIndex, bool IsNone)[]? Borders = null,
+        Layout.CellTextDirection TextDirection = Layout.CellTextDirection.LeftToRight);
 
     private sealed class CellDraft
     {
@@ -657,6 +662,9 @@ public sealed partial class RtfDocumentReader
 
         /// <summary>Where its text sits when the row is taller than its content.</summary>
         public Layout.VerticalTextAlignment VerticalAlignment { get; set; }
+
+        /// <summary>Which way its text runs; upright for almost every cell.</summary>
+        public Layout.CellTextDirection TextDirection { get; set; }
 
         public List<ContentNode> Content { get; } = [];
 

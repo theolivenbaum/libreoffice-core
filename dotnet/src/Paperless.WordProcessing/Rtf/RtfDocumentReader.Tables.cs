@@ -109,7 +109,8 @@ public sealed partial class RtfDocumentReader
             [.. table.PendingCellPadding],
             table.PendingCellAlignment,
             table.PendingCellShading,
-            [.. table.PendingCellBorders]));
+            [.. table.PendingCellBorders],
+            table.PendingCellTextDirection));
         ClearPendingCellFlags(table);
     }
 
@@ -200,6 +201,7 @@ public sealed partial class RtfDocumentReader
         table.PendingCellVerticalFirst = false;
         table.PendingCellVerticalMerged = false;
         table.PendingCellAlignment = VerticalTextAlignment.Top;
+        table.PendingCellTextDirection = CellTextDirection.LeftToRight;
         table.PendingCellShading = null;
         table.PendingBorderSide = null;
         Array.Clear(table.PendingCellBorders);
@@ -332,6 +334,7 @@ public sealed partial class RtfDocumentReader
             table.RowCells[index].ContinuesMergeAbove = definition.VerticalMerged;
             table.RowCells[index].Padding = PaddingOf(definition, table);
             table.RowCells[index].VerticalAlignment = definition.VerticalAlignment;
+            table.RowCells[index].TextDirection = definition.TextDirection;
             table.RowCells[index].Shading = ColourAt(definition.ShadingColourIndex);
             table.RowCells[index].Borders = BordersOf(definition);
         }
@@ -585,7 +588,8 @@ public sealed partial class RtfDocumentReader
                     cell.VerticalAlignment,
                     [.. cell.LayoutBlocks],
                     cell.Shading,
-                    cell.Borders));
+                    cell.Borders,
+                    cell.TextDirection));
             }
 
             layoutRows.Add(new RtfLayoutRow(
