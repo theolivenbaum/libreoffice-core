@@ -356,18 +356,26 @@ internal static class OdsPrintSetup
 
     /// <summary>Reads <c>table:print-ranges</c>, which is a space-separated list.</summary>
     /// <remarks>
+    /// <para>
     /// In the OOO reference syntax, so each range reads <c>Sheet.$A$1:$D$7</c> with the sheet
     /// name and the dollars both optional. Only the cell part is used: a print range naming
     /// another sheet is not something Calc produces, and taking the addresses without checking
     /// the name is what makes a range written without one work.
+    /// </para>
+    /// <para>
+    /// <strong>The separator is a space and a sheet name may hold one</strong>, which is why the
+    /// split goes through <see cref="SheetAddress.SplitList"/> rather than
+    /// <c>string.Split(' ')</c>. Calc's export quotes such a name — <c>'PROPS (Light)'.AS1</c> —
+    /// and a naive split cuts it at the space, leaving fragments of which only the last
+    /// <em>parses</em>, as the single cell the range ended at. That is silent: a valid range
+    /// comes back, the sheet paginates to one page, and nothing reports a problem.
+    /// </para>
     /// </remarks>
     private static List<SheetRange> ReadPrintAreas(XElement table)
     {
         List<SheetRange> areas = [];
-        string? ranges = Attribute(table, "print-ranges");
-        if (string.IsNullOrWhiteSpace(ranges)) return areas;
 
-        foreach (string range in ranges.Split(' ', StringSplitOptions.RemoveEmptyEntries))
+        foreach (string range in SheetAddress.SplitList(Attribute(table, "print-ranges"), ' '))
         {
             if (SheetAddress.TryParseRange(range, out SheetRange parsed)) areas.Add(parsed);
         }

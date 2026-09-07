@@ -904,10 +904,8 @@ public sealed partial class OdtLayoutSource
                 ? Content
                 : null;
 
-            if (OdfFrames.Read(anchor.Element, _styles, content, anchor.Offset, _pictures) is { } frame)
-            {
-                frames.Add(frame);
-            }
+            frames.AddRange(
+                OdfFrames.ReadAll(anchor.Element, _styles, content, anchor.Offset, _pictures));
         }
 
         return frames;

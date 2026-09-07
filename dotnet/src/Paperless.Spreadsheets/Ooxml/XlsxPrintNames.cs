@@ -108,25 +108,9 @@ internal static class XlsxPrintNames
     /// </summary>
     /// <remarks>
     /// A sheet called <c>Q1, Q2</c> is legal and is written quoted, so splitting on every comma
-    /// tears its name in half and loses the range.
+    /// tears its name in half and loses the range. ODF has the same problem with a space, so the
+    /// splitting itself is <see cref="SheetAddress.SplitList"/>'s and only the separator is this
+    /// format's.
     /// </remarks>
-    private static List<string> Split(string value)
-    {
-        List<string> parts = [];
-        bool quoted = false;
-        int start = 0;
-
-        for (int at = 0; at < value.Length; at++)
-        {
-            if (value[at] == '\'') quoted = !quoted;
-            else if (value[at] == ',' && !quoted)
-            {
-                parts.Add(value[start..at]);
-                start = at + 1;
-            }
-        }
-
-        parts.Add(value[start..]);
-        return [.. parts.Select(part => part.Trim()).Where(part => part.Length > 0)];
-    }
+    private static List<string> Split(string value) => SheetAddress.SplitList(value, ',');
 }
