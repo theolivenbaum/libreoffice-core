@@ -95,6 +95,36 @@ public static class OdfNamespaces
     /// </summary>
     public const string LoExt = "urn:org:documentfoundation:names:experimental:office:xmlns:loext:1.0";
 
+    /// <summary>
+    /// True for the namespace of a table element, which is <em>either</em> <c>table:</c> or
+    /// <c>loext:</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// ODF puts a table in the <c>table:</c> namespace, and ODF 1.3 does not allow one everywhere
+    /// LibreOffice can put one — inside a drawing shape's text, most of all. LibreOffice therefore
+    /// writes such a table as <c>loext:table</c>, with <c>loext:table-row</c>,
+    /// <c>loext:table-cell</c> and the rest beneath it, and reads the two spellings as one thing:
+    /// <c>XMLTextImportHelper::CreateTextChildContext</c> falls the two element tokens through to the
+    /// same <c>CreateTableChildContext</c> —
+    /// <c>case XML_ELEMENT(TABLE, XML_TABLE): case XML_ELEMENT(LO_EXT, XML_TABLE):</c>,
+    /// <c>xmloff/source/text/txtimp.cxx</c>:1787-1795.
+    /// </para>
+    /// <para>
+    /// The <em>attributes</em> stay in <c>table:</c> — a <c>loext:table-cell</c> carries
+    /// <c>table:style-name</c> and <c>table:number-columns-spanned</c> — so only the element names
+    /// move, which is why this asks about a namespace rather than about a name.
+    /// </para>
+    /// <para>
+    /// It is not a curiosity of the specification: <b>seven of the 338 converted <c>.odt</c> hold a
+    /// <c>loext:table</c></b> and one of them draws 41 of its 1099 characters without it, because
+    /// every table of a roadmap diagram is one.
+    /// </para>
+    /// </remarks>
+    /// <param name="namespaceName">The element's namespace.</param>
+    public static bool IsTable(string? namespaceName)
+        => namespaceName is Table or LoExt;
+
     /// <summary>LibreOffice's Calc extension namespace, mostly duplicating value types.</summary>
     public const string CalcExt = "urn:org:documentfoundation:names:experimental:calc:xmlns:calcext:1.0";
 

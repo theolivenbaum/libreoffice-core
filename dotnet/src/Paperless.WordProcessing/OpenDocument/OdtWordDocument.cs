@@ -2,6 +2,7 @@ using Paperless.Core.Diagnostics;
 using Paperless.Core.Documents;
 using Paperless.Core.Extraction;
 using Paperless.Core.Formats;
+using Paperless.Core.Units;
 using System.Xml.Linq;
 using Paperless.OpenDocument;
 using Paperless.OpenDocument.Styles;
@@ -125,13 +126,124 @@ public sealed class OdtWordDocument : IWordProcessingDocument, IPaginatedDocumen
 
         Paginator paginator = new(pagination);
 
+        List<PaginatedSection> paginated = [];
+
+        for (int index = 0; index < masters.Count; index++)
+        {
+            WritingSection stated = index < Sections.Count ? Sections[index] : Sections[^1];
+            (PageFurnitureSet? furniture, Length header, Length footer) =
+                Furnished(source, masters[index], stated.Page.TextWidth);
+
+            paginated.Add(new PaginatedSection(
+                GrownTo(stated, _inner.File.Styles, masters[index], header, footer), furniture));
+        }
+
         return new WordProcessingPages(
-            paginator.Paginate(
-                blocks,
-                [.. masters.Select((master, index) => new PaginatedSection(
-                    index < Sections.Count ? Sections[index] : Sections[^1],
-                    Furniture(source, master)))]),
-            paginator.Blocks ?? blocks);
+            paginator.Paginate(blocks, paginated), paginator.Blocks ?? blocks);
+    }
+
+    /// <summary>
+    /// The section re-read with its dynamic header and footer grown to the height their content needs.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <see cref="OdfPageGeometry"/> can only read what the file <em>states</em>, and for a dynamic
+    /// height — <c>fo:min-height</c> rather than <c>svg:height</c> — the file states a floor.
+    /// LibreOffice sizes the frame to its content and floors it at that minimum:
+    /// <c>SwHeadFootFrame::FormatPrt</c> takes <c>nHeight = lcl_CalcContentHeight(*this)</c> whenever
+    /// <c>!HasFixSize()</c> and raises it to <c>nMinHeight</c> only if it falls short
+    /// (<c>sw/source/core/layout/hffrm.cxx</c>:114-145). So the rule
+    /// <c>total = max(min-height, content + (dynamic-spacing ? 0 : gap))</c> — which
+    /// <see cref="OdfPageGeometry"/> already states and whose first half
+    /// <c>OdfHeaderDynamicSpacingTests</c> pins — needs the content, and the content can be measured
+    /// here, where the walk that reads the header's blocks has already run.
+    /// </para>
+    /// <para>
+    /// It is not a refinement. LibreOffice's exporter writes <c>fo:min-height="0.0398in"</c> — two and
+    /// a half points — for a running head of any height, so a nine-paragraph header was being given
+    /// three points of room and everything below it sat a hundred points too high on every page.
+    /// <b>Thirty of the converted corpus's failing <c>.odt</c> declare a dynamic header or footer whose
+    /// content plainly outruns its stated minimum</b>, and closing it moved seven of them onto the
+    /// reference and none off it.
+    /// </para>
+    /// <para>
+    /// Two limits of the model, both deliberate. The height is one number per <em>section</em> where
+    /// Writer sizes each page's header to its own content, so a document whose first-page header
+    /// differs in height from its default one is laid out on the default one's — the slot the
+    /// overwhelming majority of its pages use. And the growth is refused outright if it would leave
+    /// the body less than a line of room, which is a guard against a malformed file rather than a
+    /// rule: Writer has no such cap and simply lets the body shrink.
+    /// </para>
+    /// </remarks>
+    /// <param name="stated">The section as the file states it, used when the growth is refused.</param>
+    /// <param name="styles">The document's styles, to re-read the geometry through.</param>
+    /// <param name="master">The master page the section is on.</param>
+    /// <param name="header">The height the header's content needs, or zero when it has none.</param>
+    /// <param name="footer">The same for the footer.</param>
+    private static WritingSection GrownTo(
+        WritingSection stated,
+        OdfStyles styles,
+        OdfMasterPage? master,
+        Length header,
+        Length footer)
+    {
+        if (header <= Length.Zero && footer <= Length.Zero) return stated;
+
+        WritingSection grown = OdfPageGeometry.Read(styles, master, header, footer);
+        PageGeometry page = grown.Page;
+
+        // One line of body text, so a header measured absurdly tall cannot leave a page with nothing to
+        // paginate into and no way to terminate.
+        Length room = page.Size.Height - page.Margins.Top - page.Margins.Bottom;
+
+        return room < Length.FromPoints(12) ? stated : grown;
+    }
+
+    /// <summary>
+    /// One master page's furniture, and how tall its header's and footer's content actually are.
+    /// </summary>
+    /// <remarks>
+    /// The heights are the <see cref="PageFurnitureSlot.Default"/> slot's where it exists and the
+    /// tallest slot's otherwise, for the reason <see cref="GrownTo"/> gives: one number has to serve
+    /// every page of the section, and the default slot is the one most of them use.
+    /// </remarks>
+    /// <param name="source">The walk that reads the blocks.</param>
+    /// <param name="master">The master page, or null.</param>
+    /// <param name="width">The width the furniture is laid out at, which is the body's text width.</param>
+    private static (PageFurnitureSet? Set, Length Header, Length Footer) Furnished(
+        OdtLayoutSource source, OdfMasterPage? master, Length width)
+    {
+        PageFurnitureSet? set = Furniture(source, master);
+        if (set is null || master is null) return (set, Length.Zero, Length.Zero);
+
+        Length header = Extent(source, master.Header, master.LeftHeader, master.FirstHeader, width);
+        Length footer = Extent(source, master.Footer, master.LeftFooter, master.FirstFooter, width);
+
+        return (set, header, footer);
+    }
+
+    /// <summary>The height one furniture flow's content needs, laid out at a width.</summary>
+    /// <param name="source">The walk that reads the blocks.</param>
+    /// <param name="preferred">The default slot's element, whose height wins when it exists.</param>
+    /// <param name="even">The even-page slot's element.</param>
+    /// <param name="first">The first-page slot's element.</param>
+    /// <param name="width">The width to lay out at.</param>
+    private static Length Extent(
+        OdtLayoutSource source, XElement? preferred, XElement? even, XElement? first, Length width)
+    {
+        if (width <= Length.Zero) return Length.Zero;
+        if (preferred is not null) return HeightOf(source, preferred, width);
+
+        return Length.Max(
+            even is null ? Length.Zero : HeightOf(source, even, width),
+            first is null ? Length.Zero : HeightOf(source, first, width));
+    }
+
+    /// <summary>One flow's laid-out height.</summary>
+    private static Length HeightOf(OdtLayoutSource source, XElement element, Length width)
+    {
+        List<PageBlock> blocks = source.ReadFlow(element);
+        return blocks.Count == 0 ? Length.Zero : FlowLayouter.HeightOf(blocks, width);
     }
 
     /// <summary>

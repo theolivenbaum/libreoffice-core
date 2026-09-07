@@ -315,6 +315,14 @@ internal static class OdfFrames
             {
                 return element;
             }
+
+            // A shape whose whole content is a table has no paragraph of its own, and a roadmap
+            // diagram's boxes are written exactly that way — see OdfNamespaces.IsTable for why the
+            // element is usually spelled `loext:table` in this position.
+            if (OdfNamespaces.IsTable(child.Name.NamespaceName) && child.Name.LocalName == "table")
+            {
+                return element;
+            }
         }
 
         return null;

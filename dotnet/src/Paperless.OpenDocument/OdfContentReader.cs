@@ -189,10 +189,15 @@ public sealed partial class OdfContentReader
                     return;
             }
         }
+        else if (OdfNamespaces.IsTable(ns) && name == "table")
+        {
+            // Either spelling, because LibreOffice writes a table inside a drawing shape's text as
+            // `loext:table` — see OdfNamespaces.IsTable.
+            ReadTable(element, target);
+            return;
+        }
         else if (ns == OdfNamespaces.Table)
         {
-            if (name == "table") { ReadTable(element, target); return; }
-
             // Everything else at table level in a spreadsheet body — named expressions,
             // database ranges, data pilot tables, calculation settings — is not content.
             return;

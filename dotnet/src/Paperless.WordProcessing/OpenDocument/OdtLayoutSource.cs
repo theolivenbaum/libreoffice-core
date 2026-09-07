@@ -113,6 +113,7 @@ public sealed partial class OdtLayoutSource
         _endnotes = NumberingIn(stylesRoot, "endnote", NoteNumbering.Endnotes);
         _blanksAreTransparentToHeight =
             Setting(settings, "IgnoreTabsAndBlanksForLineCalculation") == "true";
+        _shrinksJustifiedBlanks = ShrinksJustifiedBlanks(settings);
     }
 
     /// <summary>
@@ -125,6 +126,16 @@ public sealed partial class OdtLayoutSource
     /// instead of quietly diverging from it. See <see cref="PageParagraph.BlanksAreTransparentToHeight"/>.
     /// </remarks>
     private readonly bool _blanksAreTransparentToHeight;
+
+    /// <summary>
+    /// Whether a justified line may squeeze its blanks below their natural width, as the document's
+    /// settings say.
+    /// </summary>
+    /// <remarks>
+    /// See <see cref="ShrinksJustifiedBlanks(XElement?)"/>, which is where the rule is stated; the value
+    /// is resolved once per document because the setting is document-wide.
+    /// </remarks>
+    private readonly bool _shrinksJustifiedBlanks;
 
     /// <summary>
     /// Whether two consecutive paragraphs' spacings add rather than the larger one winning, as the
@@ -213,6 +224,44 @@ public sealed partial class OdtLayoutSource
     /// <param name="settings">The document's <c>office:settings</c>, or null.</param>
     internal static bool KeepsParagraphSpacingAtPages(XElement? settings)
         => Setting(settings, "AddParaTableSpacingAtStart") != "false";
+
+    /// <summary>
+    /// Whether a justified line may squeeze its blanks below their natural width to fit another word, as
+    /// the document's settings say.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Writer's <c>JUSTIFY_LINES_WITH_SHRINKING</c>, which ODF spells <c>JustifyLinesWithShrinking</c> and
+    /// which <c>SwXMLImport::SetConfigurationSettings</c> (<c>sw/source/filter/xml/xmlimp.cxx</c>:1238)
+    /// sets straight through as a document property — it is in none of that function's exclusion lists and
+    /// none of its "use the old behaviour when the item is missing" cases, so an absent item leaves the
+    /// member at its own default. That default is <b>false</b>
+    /// (<c>mbJustifyLinesWithShrinking = false</c>, <c>sw/source/core/inc/DocumentSettingManager.hxx</c>:180),
+    /// which is why this is the one compatibility flag in this file whose absent case is <em>off</em>
+    /// rather than on.
+    /// </para>
+    /// <para>
+    /// It is the ODF spelling of what <c>compatibilityMode</c> 15 gives a DOCX
+    /// (<see cref="ParagraphFormat.ShrinksJustifiedBlanks"/>), and LibreOffice's own export writes it into
+    /// <c>settings.xml</c> for every Word file it converts — <b>161 of the 338 converted <c>.odt</c></b>
+    /// state it true. Reading it wrongly does not move a line by a fraction of a point: a line that cannot
+    /// squeeze holds one word fewer, so the paragraph sets in more lines and the document paginates longer.
+    /// </para>
+    /// <para>
+    /// The <em>paragraph</em>-level spelling of the same thing, <c>loext:word-spacing-minimum</c>, is a
+    /// second and independent way in: <c>SwTextPortion::Format_</c>
+    /// (<c>sw/source/core/text/portxt.cxx</c>:546-562) shrinks when the document setting is on
+    /// <em>and</em> the paragraph states no word-spacing bounds of its own — its <c>bOldInterop</c>, the
+    /// "support old ODT documents" case — <em>or</em> when the paragraph states bounds that are not all
+    /// 100%, whatever the document setting says. On the converted corpus the second clause adds nothing:
+    /// all 51 documents stating <c>loext:word-spacing-minimum</c> state it as <c>75%</c>, which is the
+    /// floor <see cref="JustificationShrink.MinimumBlankProportion"/> already applies, and all 51 also
+    /// state the document setting. It is deliberately not read.
+    /// </para>
+    /// </remarks>
+    /// <param name="settings">The document's <c>office:settings</c>, or null.</param>
+    internal static bool ShrinksJustifiedBlanks(XElement? settings)
+        => Setting(settings, "JustifyLinesWithShrinking") == "true";
 
     /// <summary>One <c>config:config-item</c>'s value from a document's settings, or null when absent.</summary>
     /// <remarks>
@@ -486,7 +535,7 @@ public sealed partial class OdtLayoutSource
                 continue;
             }
 
-            if (ns == OdfNamespaces.Table && name == "table")
+            if (OdfNamespaces.IsTable(ns) && name == "table")
             {
                 // A table goes in whole, as a grid. It is dropped when the caller is filling a flow's
                 // paragraph list, which cannot hold one — a table inside a header or inside another table
@@ -597,7 +646,11 @@ public sealed partial class OdtLayoutSource
         _endnoteNumber += walker.EndnotesSeen;
 
         (PageLabel? label, ParagraphFormat format) =
-            ListFormatting(OdfParagraphFormats.Resolve(_styles, styleName), text, face, wantsLabel);
+            ListFormatting(
+                OdfParagraphFormats.Resolve(_styles, styleName, _shrinksJustifiedBlanks),
+                text,
+                face,
+                wantsLabel);
 
         // The nested flows are read with the list suspended: a paragraph inside this one's footnote or
         // text box is not an item of the list this paragraph is in, and would otherwise take its indents.
