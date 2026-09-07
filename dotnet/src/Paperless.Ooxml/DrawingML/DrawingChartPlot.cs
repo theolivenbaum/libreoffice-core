@@ -324,6 +324,9 @@ public static class DrawingChartPlot
             ValueLabelPosition = LabelPositionOf(axes.Value),
             ValueAxisCrossing = CrossingOf(axes.Value),
             SecondaryLabelPosition = LabelPositionOf(axes.Secondary),
+            CategoryLabelPosition = LabelPositionOf(axes.Domain ?? axes.Category),
+            CategoryAxisCrossing = CrossingOf(axes.Domain ?? axes.Category),
+            CategoryCrossesAt = CrossesAt(axes.Domain ?? axes.Category),
             Legend = LegendOf(Child(chart, "legend")),
             Background = FillOf(Child(chartSpace, "spPr"), theme)
                          ?? DrawingChartAutoFormat.FrameFillOf(
@@ -1001,6 +1004,21 @@ public static class DrawingChartPlot
             "max" => ChartAxisCrossing.Maximum,
             _ => ChartAxisCrossing.Automatic,
         };
+
+    /// <summary>The value an axis states its line stands at, or null when it names an end.</summary>
+    /// <remarks>
+    /// <c>c:crossesAt</c>, which <c>bManualCrossing</c> gives precedence over <c>c:crosses</c>
+    /// (<c>oox/source/drawingml/chart/axisconverter.cxx:443-455</c>). It is read for the
+    /// <em>category</em> axis, where the crossing axis is numeric and the value is a real one; on
+    /// a value axis it would be a category index and no corpus chart states one.
+    /// </remarks>
+    private static double? CrossesAt(XElement? axis)
+        => double.TryParse(
+               Value(Child(axis, "crossesAt")),
+               NumberStyles.Float, CultureInfo.InvariantCulture, out double at)
+           && double.IsFinite(at)
+            ? at
+            : null;
 
     private static ChartValueLabelPosition LabelPositionOf(XElement? axis)
         => Value(Child(axis, "tickLblPos")) switch

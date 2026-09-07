@@ -670,6 +670,58 @@ public sealed partial record ChartPlot
     /// <summary>The same statement made by a secondary value axis.</summary>
     public ChartValueLabelPosition SecondaryLabelPosition { get; init; }
 
+    /// <summary>
+    /// Where the <em>category</em> axis' own tick labels sit along the value axis.
+    /// </summary>
+    /// <remarks>
+    /// <c>c:catAx/c:tickLblPos</c>, the counterpart of <see cref="ValueLabelPosition"/> one axis
+    /// over. <c>nextTo</c> — the default, and what nearly every chart states — puts them beside
+    /// the axis <em>line</em>, wherever <see cref="CategoryAxisCrossing"/> has put that;
+    /// <c>low</c> and <c>high</c> send them to an end of the value axis whatever the line does.
+    /// <c>getLabelLineIntersectionValue</c> (<c>chart2/source/view/axes/VCartesianAxis.cxx</c>:1103-1113)
+    /// is the one function that decides it: the two outside positions answer the value axis'
+    /// minimum and maximum outright, and <c>NEAR_AXIS</c> falls through to
+    /// <c>getAxisIntersectionValue</c>, which is the axis line's own.
+    /// </remarks>
+    public ChartValueLabelPosition CategoryLabelPosition { get; init; }
+
+    /// <summary>Where the category axis' line stands along the value axis.</summary>
+    /// <remarks>
+    /// <para>
+    /// <c>c:catAx/c:crosses</c>. <strong><see cref="ChartAxisCrossing.Automatic"/> is a real value
+    /// here and not a synonym for the minimum</strong>, which is what separates this from
+    /// <see cref="ValueAxisCrossing"/>: <c>autoZero</c> asks for <em>value zero on the crossing
+    /// axis</em> — <c>m_pfMainLinePositionAtOtherAxis = 0.0</c>,
+    /// <c>chart2/source/view/axes/VAxisProperties.cxx</c>:224-225 — and the crossing axis of a
+    /// category axis is a value axis, whose scale usually contains zero. A value axis crossing a
+    /// <em>category</em> axis clamps to the minimum because a category axis' own scale starts at a
+    /// half; this one does not.
+    /// </para>
+    /// <para>
+    /// It is clamped into the value axis' range by <c>VCartesianAxis::get2DAxisMainLine</c>
+    /// (<c>:1253-1256</c>), so a chart whose values are all positive draws its category axis along
+    /// the bottom exactly as before, and only a chart whose values span zero moves.
+    /// </para>
+    /// <para>
+    /// Measured on <c>Demick_JetBlue.pptx</c> page 5, whose column chart runs
+    /// −44 587 … 1 200 000: 26.2.4.2 draws the plot from y = 214.58 to 401.56 and its category
+    /// axis line at <strong>y = 374.83</strong>, which is the <code>$-</code> gridline, with the
+    /// category labels hanging from that line inside the plot. Drawing them at the plot's bottom
+    /// edge instead is legible by accident and is a whole band of the frame out.
+    /// </para>
+    /// </remarks>
+    public ChartAxisCrossing CategoryAxisCrossing { get; init; }
+
+    /// <summary>
+    /// The value the category axis' line stands at, when the file states one rather than an end.
+    /// </summary>
+    /// <remarks>
+    /// <c>c:catAx/c:crossesAt</c>, which is <c>ChartAxisPosition_VALUE</c> and outranks
+    /// <c>c:crosses</c> — <c>bManualCrossing</c> at
+    /// <c>oox/source/drawingml/chart/axisconverter.cxx</c>:443-455. Null when the file states none.
+    /// </remarks>
+    public double? CategoryCrossesAt { get; init; }
+
     /// <summary>Which end of the category axis the value axis itself stands at.</summary>
     /// <remarks>
     /// <c>c:valAx/c:crosses</c>; see <see cref="ChartAxisCrossing"/>. A secondary axis takes the

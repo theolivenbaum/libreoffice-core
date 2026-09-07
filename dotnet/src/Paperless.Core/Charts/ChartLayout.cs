@@ -1246,7 +1246,7 @@ public static partial class ChartLayout
 
             if (domain is { } across) AddDomainAxis(plot, area, across, columns, lines, labels);
             else AddCategoryAxis(
-                    plot, area, categories, columns, arranged, measurer, lines, labels);
+                    plot, area, scale, categories, columns, arranged, measurer, lines, labels);
 
             AddDataTable(plot, frame, area, categories, columns, measurer, lines, labels);
         }
@@ -1875,6 +1875,23 @@ public static partial class ChartLayout
                         ? layout.Reserved
                         : labelHeight;
 
+        // A category label that hangs from a line *inside* the plot takes no band off it.
+        // `VDiagram::adjustInnerSize` shrinks the inner rectangle by how far the drawn labels
+        // overflow the available one (`chart2/source/view/diagram/VDiagram.cxx`:661-669), and
+        // labels drawn inside overflow nothing. Only a strictly interior line changes anything:
+        // at an edge — which is where the clamp puts it for every chart whose values are all of
+        // one sign — the band is the one the axis has always taken. Measured on
+        // `Demick_JetBlue.pptx` page 5, where 26.2.4.2's plot runs to y = 401.56 with the axis
+        // line and its labels at y = 374.83 inside it, and ours stopped at 376.18 with the
+        // labels below at 383.
+        double labelsAlong = CategoryLabelsAt(plot, scale);
+        if (categoryLabels && labelsAlong > 0.0 && labelsAlong < 1.0)
+        {
+            categoryLabel = Length.Zero;
+            categoryHeight = Length.Zero;
+            categorySpace = Length.Zero;
+        }
+
         if (columns)
         {
             // The room the value labels take is on the side they are drawn on, which is the side
@@ -1997,6 +2014,56 @@ public static partial class ChartLayout
 
         return atLogicalMaximum != plot.CategoriesReversed;
     }
+
+    /// <summary>
+    /// Where along the value axis the <em>category</em> axis' own line stands, 0 at the plot's
+    /// bottom (or left) and 1 at its top (or right).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>VCartesianAxis::getAxisIntersectionValue</c>
+    /// (<c>chart2/source/view/axes/VCartesianAxis.cxx</c>:1092-1101) answers
+    /// <c>m_pfMainLinePositionAtOtherAxis</c> when the axis states a crossing, and
+    /// <c>AxisProperties::initAxisPositioning</c> sets that to the stated value for
+    /// <c>ChartAxisPosition_VALUE</c> and to <strong>zero</strong> for
+    /// <c>ChartAxisPosition_ZERO</c> (<c>VAxisProperties.cxx</c>:214-225), which is what
+    /// <c>c:crosses val="autoZero"</c> — the default — maps to. <c>get2DAxisMainLine</c> then
+    /// clamps it into the crossing axis' range (<c>:1253-1256</c>).
+    /// </para>
+    /// <para>
+    /// <strong>So a chart whose values span zero draws its category axis inside the plot</strong>,
+    /// and one whose values are all of a sign draws it along an edge exactly as before — the
+    /// clamp is what makes this safe to apply to every chart rather than to the ones a file
+    /// marks.
+    /// </para>
+    /// </remarks>
+    private static double CategoryAxisAt(ChartPlot plot, ChartScaleResult scale)
+    {
+        double along = plot.CategoryAxisCrossing switch
+        {
+            ChartAxisCrossing.Minimum => scale.Fraction(scale.Minimum),
+            ChartAxisCrossing.Maximum => scale.Fraction(scale.Maximum),
+            _ when plot.CategoryCrossesAt is { } stated => scale.Fraction(stated),
+            _ => scale.Fraction(0.0),
+        };
+
+        return double.IsFinite(along) ? Math.Clamp(along, 0.0, 1.0) : 0.0;
+    }
+
+    /// <summary>Where the category axis' <em>labels</em> hang from, on the same scale.</summary>
+    /// <remarks>
+    /// <c>getLabelLineIntersectionValue</c> (<c>VCartesianAxis.cxx</c>:1103-1113): the two outside
+    /// positions answer the crossing axis' minimum and maximum outright and <c>nextTo</c> falls
+    /// through to the axis line's own value, so a file can send the labels to an edge while the
+    /// line stays where it crosses.
+    /// </remarks>
+    private static double CategoryLabelsAt(ChartPlot plot, ChartScaleResult scale)
+        => plot.CategoryLabelPosition switch
+        {
+            ChartValueLabelPosition.Low => scale.Fraction(scale.Minimum),
+            ChartValueLabelPosition.High => scale.Fraction(scale.Maximum),
+            _ => CategoryAxisAt(plot, scale),
+        };
 
     /// <summary>The value axis: its line, its ticks, its gridlines and its labels.</summary>
     /// <remarks>
@@ -2306,6 +2373,7 @@ public static partial class ChartLayout
     private static void AddCategoryAxis(
         ChartPlot plot,
         DocRect area,
+        ChartScaleResult scale,
         int categories,
         bool columns,
         ChartAxisLabelLayout? arranged,
@@ -2317,16 +2385,26 @@ public static partial class ChartLayout
         Length inner = InnerTick(plot.CategoryTicks);
         ChartGrid stroke = plot.CategoryAxisLine;
 
+        // The axis' line stands where it crosses the value axis and its labels hang from their
+        // own line, which is usually the same one. Both are clamped into the plot, so a chart
+        // whose values are all of a sign is drawn exactly as it was before. See CategoryAxisAt.
+        Length axisAt = columns
+            ? area.Bottom - area.Height * CategoryAxisAt(plot, scale)
+            : area.Left + area.Width * CategoryAxisAt(plot, scale);
+        Length labelAt = columns
+            ? area.Bottom - area.Height * CategoryLabelsAt(plot, scale)
+            : area.Left + area.Width * CategoryLabelsAt(plot, scale);
+
         if (plot.CategoryAxisVisible)
         {
             lines.Add(columns
                 ? new ChartLine(
-                    new DocPoint(area.Left, area.Bottom),
-                    new DocPoint(area.Right, area.Bottom),
+                    new DocPoint(area.Left, axisAt),
+                    new DocPoint(area.Right, axisAt),
                     stroke.Colour, stroke.Width, stroke.Dash)
                 : new ChartLine(
-                    new DocPoint(area.Left, area.Top),
-                    new DocPoint(area.Left, area.Bottom),
+                    new DocPoint(axisAt, area.Top),
+                    new DocPoint(axisAt, area.Bottom),
                     stroke.Colour, stroke.Width, stroke.Dash));
         }
 
@@ -2384,8 +2462,8 @@ public static partial class ChartLayout
                 if (plot.CategoryAxisVisible && outer + inner > Length.Zero)
                 {
                     lines.Add(new ChartLine(
-                        new DocPoint(x, area.Bottom - inner),
-                        new DocPoint(x, area.Bottom + outer),
+                        new DocPoint(x, axisAt - inner),
+                        new DocPoint(x, axisAt + outer),
                         stroke.Colour, stroke.Width, stroke.Dash));
                 }
             }
@@ -2403,8 +2481,8 @@ public static partial class ChartLayout
                 if (plot.CategoryAxisVisible && outer + inner > Length.Zero)
                 {
                     lines.Add(new ChartLine(
-                        new DocPoint(area.Left - outer, y),
-                        new DocPoint(area.Left + inner, y),
+                        new DocPoint(axisAt - outer, y),
+                        new DocPoint(axisAt + inner, y),
                         stroke.Colour, stroke.Width, stroke.Dash));
                 }
             }
@@ -2479,7 +2557,7 @@ public static partial class ChartLayout
                 labels.Add(new ChartLabel(
                     text,
                     new DocPoint(
-                        area.Left - outer - LabelSpacing,
+                        labelAt - outer - LabelSpacing,
                         area.Bottom - area.Height * centre),
                     ChartLabelAnchor.RightMiddle,
                     plot.LabelSize,
@@ -2489,7 +2567,7 @@ public static partial class ChartLayout
             }
 
             Length x = area.Left + area.Width * centre;
-            Length top = area.Bottom + outer + LabelSpacing;
+            Length top = labelAt + outer + LabelSpacing;
 
             // The second row of a staggered axis sits one row below the first.
             if (layout.Staggered && at / rhythm % 2 == 1) top += layout.Reserved / 2;
