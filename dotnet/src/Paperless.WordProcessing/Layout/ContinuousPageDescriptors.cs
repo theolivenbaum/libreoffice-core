@@ -131,6 +131,13 @@ public static class ContinuousPageDescriptors
             margins = margins with { Left = own.Page.Margins.Left, Right = own.Page.Margins.Right };
         }
 
+        // The furniture goes with it, and it is taken from the *resolved* previous section rather than
+        // from what that section stated. That is what makes the carry follow the descriptor chain
+        // instead of the section chain, and the two genuinely differ: §17.10.1 has a DOCX section
+        // inherit any slot it does not name, so hdss-bulletin's third section would otherwise inherit
+        // the second's running head — the very head whose descriptor has just been found to reach no
+        // page. `InheritOrFinalizePageStyles` hands on the page *style*, and an orphaned style is still
+        // orphaned when the next section inherits its name.
         return section with
         {
             Section = own with
