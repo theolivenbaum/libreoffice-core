@@ -112,6 +112,18 @@ public sealed partial class RtfDocumentReader
     /// <summary>The document's <c>\htmautsp</c>; see <see cref="AddsParagraphSpacing"/>.</summary>
     private bool _htmlAutoSpacing;
 
+    /// <summary>The document's <c>\deff</c>: the font a run that names none is set in.</summary>
+    /// <remarks>
+    /// Not font zero. LibreOffice puts <c>\deff</c>'s <em>name</em> into the default character state
+    /// as <c>w:rFonts/@ascii</c> when the font table closes — <c>RTFDocumentImpl::beforePopState</c>,
+    /// <c>sw/source/writerfilter/rtftok/rtfdocumentimpl.cxx</c>:2494-2500 — and <c>\plain</c>
+    /// restores that state (<c>rtfdispatchflag.cxx</c>:575-583). Taking font zero instead draws every
+    /// unstated run in whatever the first font-table entry happens to be, which in every file
+    /// LibreOffice writes is <c>Times New Roman</c>: <strong>215 of the 338 converted corpus
+    /// <c>.rtf</c> declare a <c>\deff</c> naming a different face from their <c>\f0</c></strong>.
+    /// </remarks>
+    private int _defaultFontIndex;
+
     private int _colourRed;
     private int _colourGreen;
     private int _colourBlue;
@@ -375,6 +387,11 @@ public sealed partial class RtfDocumentReader
         // property and \pich is not a paragraph one, and both share their prefix with nothing else.
         if (HandlePictureWord(token)) return;
 
+        // Inside a {\stylesheet} entry, remember that the entry mentioned this word at all. The
+        // merge through \sbasedon needs "the style said nothing" kept apart from "the style said
+        // the default", and RTF's toggles cannot express that in the group state alone.
+        state.StyleSheetStated?.Add(token.Name);
+
         switch (token.Name)
         {
             // ---- document-level settings
@@ -395,6 +412,11 @@ public sealed partial class RtfDocumentReader
                 return;
             case "uc":
                 state.UnicodeSkip = Math.Clamp(token.Parameter ?? 1, 0, 32);
+                return;
+            case "deff":
+                // The default font, which is where an unstated run starts rather than font zero.
+                _defaultFontIndex = Math.Max(token.Parameter ?? 0, 0);
+                state.FontIndex = _defaultFontIndex;
                 return;
             case "ftnstart":
                 // The first footnote's number, one-based — unlike ODF's `text:start-value`, which is an
@@ -504,6 +526,7 @@ public sealed partial class RtfDocumentReader
                 return;
             case "stylesheet":
                 state.Destination = RtfDestination.StyleSheet;
+                state.StyleSheetStated = [];
                 return;
             case "info":
                 state.Destination = RtfDestination.Info;
@@ -763,9 +786,27 @@ public sealed partial class RtfDocumentReader
                     CurrentFlow.TableLevelIndex = 0;
                 }
 
+                // "Reset currently selected paragraph style as well. By default the style with
+                // index 0 is applied" — `sw/source/writerfilter/rtftok/rtfdispatchflag.cxx`:600-614.
+                // So a paragraph that names no style is not unstyled: it is in style zero, and
+                // takes that style's formatting.
+                SelectParagraphStyle(state, 0);
+
                 return;
             case "plain":
                 state.ResetCharacter();
+
+                // \plain restores the *default* character state and not merely the toggles:
+                // `m_aStates.top().getCharacterSprms() = getDefaultState().getCharacterSprms()`,
+                // `rtfdispatchflag.cxx`:575-583, and the default state carries \deff's face. Leaving
+                // the font and the size where the previous run put them lets a `\f0\fs18` written
+                // for one empty table cell set the face of every cell after it.
+                state.FontIndex = _defaultFontIndex;
+                state.FontSizeHalfPoints = null;
+
+                // The paragraph style sits under the direct formatting rather than beside it, so
+                // clearing the direct half exposes the style's again.
+                ReapplyStyleCharacters(state);
                 return;
             case "par":
                 EmitParagraph(state);
@@ -786,7 +827,7 @@ public sealed partial class RtfDocumentReader
                 }
                 else
                 {
-                    state.ParagraphStyleId = token.Parameter ?? 0;
+                    SelectParagraphStyle(state, token.Parameter ?? 0);
                 }
                 return;
             case "cs":
@@ -1164,6 +1205,16 @@ public sealed partial class RtfDocumentReader
                 // paragraph at every section boundary — while a producer writing text straight into \sect
                 // still gets its last paragraph closed.
                 FinishParagraph(CurrentFlow, state, force: false);
+
+                // And any table still open with it. RTF marks no end to a table — a paragraph back
+                // at the enclosing level is what closes one — so `…\row\pard \sect` leaves the
+                // table open across the break, and `FinishTable` then stamps it with the section
+                // index it reads *now*, which is the next one. Every block on both sides of the
+                // break then claims one section and the `\sbkpage` page break never happens:
+                // measured on a two-section probe as one page against 26.2.4.2's two, and
+                // `Annex-10…GCAA.rtf` is 156 sections written in exactly that shape.
+                if (state.Destination is RtfDestination.Body) CloseTablesDeeperThan(CurrentFlow, 0);
+
                 _sectionIndex++;
                 return;
 
