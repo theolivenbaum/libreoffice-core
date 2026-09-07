@@ -114,7 +114,16 @@ internal static class OdfParagraphFormats
     private static readonly Length DefaultSize = Length.FromPoints(12);
 
     /// <summary>Resolves a paragraph style's layout properties.</summary>
-    internal static ParagraphFormat Resolve(OdfStyles styles, string? styleName)
+    /// <param name="styles">The document's styles.</param>
+    /// <param name="styleName">The paragraph's own style, automatic or named.</param>
+    /// <param name="shrinksJustifiedBlanks">
+    /// True when a justified line in this document may squeeze its blanks below their natural width,
+    /// which the document's <c>JustifyLinesWithShrinking</c> setting decides. See
+    /// <see cref="OdtLayoutSource.ShrinksJustifiedBlanks"/> and
+    /// <see cref="ParagraphFormat.ShrinksJustifiedBlanks"/>.
+    /// </param>
+    internal static ParagraphFormat Resolve(
+        OdfStyles styles, string? styleName, bool shrinksJustifiedBlanks = false)
     {
         ArgumentNullException.ThrowIfNull(styles);
 
@@ -155,6 +164,11 @@ internal static class OdfParagraphFormats
             ClampsTabsAtLineEdge = true,
             SpillsTrailingNoBreakSpace = true,
             DefaultTabInterval = TabInterval(styles),
+
+            // A document-wide setting rather than anything the paragraph states; see
+            // OdtLayoutSource.ShrinksJustifiedBlanks for what turns it on and what it costs when it is
+            // read wrongly.
+            ShrinksJustifiedBlanks = shrinksJustifiedBlanks,
         };
     }
 

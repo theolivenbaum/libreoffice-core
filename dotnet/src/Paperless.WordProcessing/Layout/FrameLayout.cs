@@ -681,6 +681,71 @@ internal sealed class FrameResolution
             }
         }
 
+        // And the frames anchored inside another frame's own text, which is the case a table in a text
+        // box makes ordinary: the outer frame's rectangle has to exist before an inner frame can be
+        // placed against it, so this runs after the loops above rather than beside them. Each round of
+        // the loop places the frames one nesting level deeper and enqueues whatever it placed, since a
+        // frame it placed may itself hold text holding a frame.
+        //
+        // Writer draws no distinction of its own here — an anchored object belongs to the page whatever
+        // it is nested in, exactly as the flow loop above says — and the omission was silent in the way
+        // a missing anchored object always is: the outer frame is drawn, filled and stroked, and only
+        // its inner shapes' text is absent. Measured on the converted `.odt` corpus, where LibreOffice's
+        // exporter writes a Word text box holding a table as exactly this shape: eight documents hold
+        // 857 alphanumeric characters in a shape nested inside a frame, **six of them were failing the
+        // gate for exactly that many**, and on three the loss was the document's whole shortfall
+        // against the reference to the character.
+        List<(int Page, PlacedFrame Frame)> pending = [];
+
+        foreach ((int pageIndex, List<PlacedFrame> placed) in byPage)
+        {
+            foreach (PlacedFrame frame in placed) pending.Add((pageIndex, frame));
+        }
+
+        for (int depth = 0; depth < FlowLayouter.MaxNesting && pending.Count > 0; depth++)
+        {
+            List<(int Page, PlacedFrame Frame)> deeper = [];
+
+            foreach ((int pageIndex, PlacedFrame outer) in pending)
+            {
+                if (outer.Content is not { } content) continue;
+
+                byPage.TryGetValue(pageIndex, out List<PlacedFrame>? before);
+                int already = before?.Count ?? 0;
+
+                foreach (PlacedFlow flow in Inside(content))
+                {
+                    foreach (PlacedLine line in flow.Lines)
+                    {
+                        if (line.ParagraphIndex < 0 || line.ParagraphIndex >= flow.Blocks.Count) continue;
+                        if (flow.Blocks[line.ParagraphIndex] is not PageParagraph paragraph) continue;
+                        if (paragraph.Frames.Count == 0) continue;
+
+                        HangInline(paragraph, pageIndex, flow.Area, line);
+
+                        if (!line.StartsParagraph) continue;
+
+                        PlaceFrames(
+                            paragraph,
+                            pageIndex,
+                            pages[pageIndex],
+                            flow.Area,
+                            flow.Area.Y + line.ParagraphTop,
+                            flow.Area.Y + line.Top);
+                    }
+                }
+
+                if (!byPage.TryGetValue(pageIndex, out List<PlacedFrame>? after)) continue;
+
+                for (int index = already; index < after.Count; index++)
+                {
+                    deeper.Add((pageIndex, after[index]));
+                }
+            }
+
+            pending = deeper;
+        }
+
         Dictionary<int, FrameObstacles> byBlock = [];
 
         // In block order, because the signature is compared position by position and a dictionary's
@@ -815,6 +880,23 @@ internal sealed class FrameResolution
             {
                 foreach (PlacedFlow flow in CellFlows(inner, nesting + 1)) yield return flow;
             }
+        }
+    }
+
+    /// <summary>One placed frame's own flows: its text, and the cells of every table inside it.</summary>
+    /// <remarks>
+    /// The frame-shaped twin of <see cref="FlowsOn"/>, and separate from it because a frame's content is
+    /// not on the page's own lists — it hangs off the <see cref="PlacedFrame"/>, which exists only once
+    /// the frame has been placed.
+    /// </remarks>
+    /// <param name="content">The frame's laid-out content.</param>
+    private static IEnumerable<PlacedFlow> Inside(PlacedFlow content)
+    {
+        yield return content;
+
+        foreach (PlacedTable table in content.Tables)
+        {
+            foreach (PlacedFlow flow in CellFlows(table, 0)) yield return flow;
         }
     }
 

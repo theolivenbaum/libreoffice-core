@@ -121,7 +121,7 @@ public sealed partial class OdfContentReader
 
             foreach (XElement child in container.Elements())
             {
-                if (child.Name.NamespaceName != OdfNamespaces.Table) continue;
+                if (!OdfNamespaces.IsTable(child.Name.NamespaceName)) continue;
 
                 switch (child.Name.LocalName)
                 {
@@ -234,7 +234,7 @@ public sealed partial class OdfContentReader
 
             foreach (XElement child in rowElement.Elements())
             {
-                if (child.Name.NamespaceName != OdfNamespaces.Table) continue;
+                if (!OdfNamespaces.IsTable(child.Name.NamespaceName)) continue;
 
                 bool covered = child.Name.LocalName == "covered-table-cell";
                 if (!covered && child.Name.LocalName != "table-cell") continue;

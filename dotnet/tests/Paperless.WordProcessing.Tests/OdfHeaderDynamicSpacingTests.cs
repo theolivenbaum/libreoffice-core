@@ -55,31 +55,36 @@ public sealed class OdfHeaderDynamicSpacingTests
     }
 
     /// <summary>
-    /// And a header that turns the flag off is not read the same way.
+    /// And a header that turns the flag off adds the gap to its content, which is 41.80 pt here.
     /// </summary>
     /// <remarks>
     /// <para>
-    /// This pins that the attribute is read at all — that the eaten gap above is the flag's doing
-    /// and not a blanket change — rather than pinning the unflagged number, which is still an
-    /// approximation. The exact answer there is <c>max(min-height, content + gap)</c> and the
-    /// content cannot be measured before the page the header sits on is known, so the older
-    /// <c>minimum + gap</c> stands: this fixture's second page drops 56.70 pt where 26.2.4.2 drops
-    /// 41.80, one header line too many.
+    /// The unflagged branch of the same formula: <c>max(min-height, content + gap)</c> — 1 cm of
+    /// floor against one 11 pt line plus 1 cm of gap — and 26.2.4.2 drops 41.80 pt on this
+    /// fixture's second page. It is asserted as a number rather than as a difference from the
+    /// flagged page because both halves are now exact.
     /// </para>
     /// <para>
-    /// Left as it was deliberately. Writer writes <c>style:dynamic-spacing</c> on everything it
-    /// exports and writes it <c>true</c>; across the 338 converted <c>.odt</c> exactly one header
-    /// style says <c>false</c> and one omits it, so correcting the unflagged branch would move
-    /// nothing measured and would change a reading no measurement here covers.
+    /// <b>It was not, until the content could be measured.</b> This assertion used to read
+    /// <c>add - eat &gt; 1 cm</c>, and its own remarks said the exact answer needed a content
+    /// height that could not be had before the page the header sits on was known — so the older
+    /// <c>minimum + gap</c> stood and the tree drew 56.70 pt against the reference's 41.80, one
+    /// header line too many. The content is measured in <c>OdtWordDocument.GrownTo</c>, which
+    /// re-reads the geometry once the walk that produces the header's blocks has run, and both
+    /// branches then land on the reference. The old assertion could not survive that: closing the
+    /// gap narrows the two readings from 28.35 pt apart to 13.45.
     /// </para>
     /// </remarks>
     [Fact]
-    public void AHeaderThatTurnsTheFlagOffIsNotReadTheSameWay()
+    public void AHeaderThatTurnsTheFlagOffAddsItsGapToItsContent()
     {
         (double eat, double add) = HeaderDrops();
 
-        // 1 cm of gap separates the two readings at the very least, and does here.
-        (add - eat).ShouldBeGreaterThan(Centimetre - 0.5);
+        // 26.2.4.2: 41.80 pt, which is one 13.45 pt line plus the 1 cm gap.
+        add.ShouldBe(41.80, 0.5);
+
+        // And the flag is still what separates them, which is the whole point of the pair.
+        (add - eat).ShouldBeGreaterThan(1.0);
     }
 
     /// <summary>

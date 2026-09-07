@@ -41,7 +41,17 @@ internal static class OdfPageGeometry
     /// </summary>
     /// <param name="styles">The document's styles, for the page layout the master names.</param>
     /// <param name="master">The master page, or null to get the defaults.</param>
-    internal static WritingSection Read(OdfStyles styles, OdfMasterPage? master)
+    /// <param name="headerContent">
+    /// How tall the header's own content is, when the caller has laid it out. Zero — the default —
+    /// means it has not, and a dynamic height then falls back to what the file states; see
+    /// <see cref="FurnitureExtent"/>. Extraction never measures it and must not be made to.
+    /// </param>
+    /// <param name="footerContent">The same for the footer.</param>
+    internal static WritingSection Read(
+        OdfStyles styles,
+        OdfMasterPage? master,
+        Length headerContent = default,
+        Length footerContent = default)
     {
         ArgumentNullException.ThrowIfNull(styles);
 
@@ -65,10 +75,10 @@ internal static class OdfPageGeometry
         // than a style in its own right. A master page with no header contributes nothing, which is
         // right: there is no header area to leave room for.
         Length headerHeight = master?.HasHeader() == true
-            ? FurnitureExtent(layout?.HeaderProperties)
+            ? FurnitureExtent(layout?.HeaderProperties, headerContent)
             : Core.Units.Length.Zero;
         Length footerHeight = master?.HasFooter() == true
-            ? FurnitureExtent(layout?.FooterProperties)
+            ? FurnitureExtent(layout?.FooterProperties, footerContent)
             : Core.Units.Length.Zero;
 
         PageGeometry page = new()
@@ -294,11 +304,14 @@ internal static class OdfPageGeometry
     ///   </item>
     /// </list>
     /// <para>
-    /// The dynamic case therefore needs the header's content laid out to be exact, which cannot happen
-    /// before the page it sits on is known. The declared minimum is used instead — the same
-    /// approximation LibreOffice's own DOC exporter falls back to, and which its comment calls
-    /// "totally nonoptimum, but the best we can do"
-    /// (<c>sw/source/filter/ww8/writerwordglue.cxx</c>).
+    /// The dynamic case therefore needs the header's content laid out, which is what
+    /// <paramref name="content"/> is: <c>SwHeadFootFrame::FormatPrt</c> takes
+    /// <c>nHeight = lcl_CalcContentHeight(*this)</c> whenever <c>!HasFixSize()</c> and raises it to the
+    /// stated minimum only if it falls short (<c>sw/source/core/layout/hffrm.cxx</c>:114-145). With no
+    /// content measured the declared minimum stands in for it — the same approximation LibreOffice's own
+    /// DOC exporter falls back to, and which its comment calls "totally nonoptimum, but the best we can
+    /// do" (<c>sw/source/filter/ww8/writerwordglue.cxx</c>) — and that is what every caller but the
+    /// layout gets.
     /// </para>
     /// <para>
     /// <strong>Whether the spacing is then added on top of the minimum is
@@ -320,13 +333,16 @@ internal static class OdfPageGeometry
     /// matters: Writer writes the attribute on everything it exports and writes it <c>true</c>.
     /// </para>
     /// <para>
-    /// The unflagged branch keeps the older <c>minimum + gap</c> and is still an approximation — the
-    /// formula wants the content, which cannot be had before the page the header sits on is known, and
-    /// <c>minimum + gap</c> overshoots it by the difference between the two whenever the minimum alone
-    /// would have covered the content (56.70 against the reference's 41.80 on the first shape above).
-    /// Left alone deliberately: one header style in the 338 converted <c>.odt</c> says <c>false</c> and
-    /// one omits the attribute, so no measurement here reaches it, and erring high leaves text below a
-    /// header rather than through it.
+    /// <strong>Both branches are now exact, because the content is measured.</strong> The formula
+    /// wants a content height, and the paragraph above used to say it could not be had before the page
+    /// the header sits on is known — so the unflagged branch kept the older <c>minimum + gap</c> and
+    /// overshot by the difference (56.70 against the reference's 41.80 on the first shape above), and
+    /// the flagged branch quietly took the floor as the height. Neither is true of a header: its blocks
+    /// are read by the same walk the body's are, its width is the body's text width whatever the
+    /// pagination does, and nothing about its height depends on which page it lands on.
+    /// <see cref="OdtWordDocument"/> lays it out once and re-reads the geometry with the answer, which
+    /// is what <paramref name="content"/> carries. A caller that does not measure it — extraction, which
+    /// must not pay for a layout — passes zero and gets exactly the readings this file gave before.
     /// </para>
     /// <para>
     /// Reading the flag at all is the difference between a body that starts where the file says and one
@@ -336,7 +352,7 @@ internal static class OdfPageGeometry
     /// fifteen.
     /// </para>
     /// </remarks>
-    private static Length FurnitureExtent(OdfPropertySet? properties)
+    private static Length FurnitureExtent(OdfPropertySet? properties, Length content)
     {
         if (properties is null) return Core.Units.Length.Zero;
 
@@ -349,7 +365,18 @@ internal static class OdfPageGeometry
             OdfValue.ParseLength(properties.Get(OdfNamespaces.FoCompatible, "min-height")))
             ?? Core.Units.Length.Zero;
 
-        return EatsSpacing(properties) ? declared : declared + FurnitureSpacing(properties);
+        bool eats = EatsSpacing(properties);
+        Length gap = FurnitureSpacing(properties);
+
+        // With the content measured, the formula above is exact and no approximation is needed in
+        // either branch. Without it — which is every caller that is not laying the document out — the
+        // older readings stand unchanged, so nothing that never measures the content moves.
+        if (content > Core.Units.Length.Zero)
+        {
+            return Core.Units.Length.Max(declared, eats ? content : content + gap);
+        }
+
+        return eats ? declared : declared + gap;
     }
 
     /// <summary>

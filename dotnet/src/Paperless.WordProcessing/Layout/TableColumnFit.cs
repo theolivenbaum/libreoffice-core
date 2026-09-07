@@ -73,6 +73,32 @@ public sealed record TableColumnFit
     public required IReadOnlyList<bool> IsAuto { get; init; }
 
     /// <summary>
+    /// True for each column whose declared width is a <em>proportion</em> rather than a length.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// ODF's <c>style:rel-column-width="2677*"</c>, which
+    /// <c>SvXMLImportItemMapper</c> reads into the column's <c>SwFormatFrameSize</c> as a width of 2677
+    /// with <c>SwFrameSize::Variable</c> (<c>sw/source/filter/xml/xmlimpit.cxx</c>:971-986), and which
+    /// <c>SwXMLTableColContext</c> then passes to <c>InsertColumn</c> as
+    /// <c>bRelWidth = true</c> (<c>xmltbli.cxx</c>:694-714). It is the same *kind* of width a column
+    /// stating nothing gets — that one arrives as <c>MINLAY</c>, relative — so the distribution below
+    /// treats the two together and they differ only in the number they bring.
+    /// </para>
+    /// <para>
+    /// Empty, the default, means <see cref="IsAuto"/> decides: a column that stated nothing is relative
+    /// and every other column is absolute, which is what every caller but the ODF one wants.
+    /// </para>
+    /// <para>
+    /// Not reading it was worth a great deal on the converted corpus: <b>2399 columns in 24 documents
+    /// state <c>style:rel-column-width</c> and no <c>style:column-width</c></b> — 1069 of them in
+    /// <c>FAA 2025-26 Holdover Tables.odt</c> alone — and a column whose stated proportion is discarded
+    /// falls back to <c>MINLAY</c>, so every such table came out with equal columns.
+    /// </para>
+    /// </remarks>
+    public IReadOnlyList<bool> IsRelative { get; init; } = [];
+
+    /// <summary>
     /// The table's own declared width, or null when it states none and takes whatever it is given.
     /// </summary>
     /// <remarks>
@@ -113,6 +139,12 @@ public sealed record TableColumnFit
         bool[] auto = new bool[count];
         for (int i = 0; i < count; i++) auto[i] = i < IsAuto.Count && IsAuto[i];
 
+        bool[] proportional = new bool[count];
+        for (int i = 0; i < count; i++)
+        {
+            proportional[i] = auto[i] || (i < IsRelative.Count && IsRelative[i]);
+        }
+
         int total = TableWidth is { } stated
             ? (int)Math.Clamp(stated.Twips, 0, int.MaxValue)
             : (int)Math.Clamp(available.Twips, 0, int.MaxValue);
@@ -120,7 +152,7 @@ public sealed record TableColumnFit
         if (total <= 0) return declared;
 
         int[] result = Rule == TableWidthRule.OpenDocument
-            ? ResolveOpenDocument(widths, auto, total, TableWidth is not null)
+            ? ResolveOpenDocument(widths, auto, proportional, total, TableWidth is not null)
             : ResolveWord(widths, auto, total);
 
         return [.. result.Select(twips => Length.FromTwips(twips))];
@@ -149,19 +181,25 @@ public sealed record TableColumnFit
     /// </remarks>
     /// <param name="widths">Each column's declared width in twips.</param>
     /// <param name="auto">True for each column that stated none.</param>
+    /// <param name="proportional">
+    /// True for each column whose width is a proportion rather than a length — every
+    /// <paramref name="auto"/> column and every one stating <c>style:rel-column-width</c>.
+    /// </param>
     /// <param name="total">The width to fill.</param>
     /// <param name="tableIsAbsolute">True when the table itself stated a width to be honoured.</param>
-    private static int[] ResolveOpenDocument(int[] widths, bool[] auto, int total, bool tableIsAbsolute)
+    private static int[] ResolveOpenDocument(
+        int[] widths, bool[] auto, bool[] proportional, int total, bool tableIsAbsolute)
     {
         int count = widths.Length;
 
         // InsertColumn clamps every declared width onto [MINLAY, MAX_WIDTH] (xmltbli.cxx:1333). A column
-        // stating nothing arrives as MINLAY, relative.
+        // stating nothing arrives as MINLAY, relative; one stating a proportion arrives as that
+        // proportion, also relative.
         int[] column = new int[count];
         bool[] relative = new bool[count];
         for (int i = 0; i < count; i++)
         {
-            relative[i] = auto[i];
+            relative[i] = proportional[i];
             column[i] = auto[i] ? MinLay : Math.Clamp(widths[i], MinLay, ushort.MaxValue);
         }
 
