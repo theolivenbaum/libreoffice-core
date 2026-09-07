@@ -127,3 +127,66 @@ That is the split to hold on to: **a blind reading is very good at direction and
 "the bars overshoot the plot upward", "the reference clips at the left" — and cannot
 establish cause.** Every reading above was turned into a named hypothesis and handed to a
 round to measure, and none of them was acted on as a diagnosis.
+
+
+---
+
+# A second pass, on slides — and a negative result worth more than the pass
+
+2026-09-07. The words track had been ranked by ink and read (`probes/words-ink-r67/`),
+and it produced page borders — a whole unimplemented feature. **The slides track never
+had been**, so eight of its *gate-passing* documents were rendered both ways against
+26.2.4.2 and ranked by the worst page's ink fraction at 30 dpi.
+
+    3.108  p36  39/39  Technical_Report_Elements[1].pptx     <- 3.3x the next
+    0.930  p2   7/7    manufacturing_process_simulation_working_group_overview_2023.pptx
+    0.919  p6   15/15  5b_upasana_dasgupta_-_liability_and_registration.pptx
+    0.883  p7   27/27  Tax factsheet 2022 (1).pptx
+    0.869  p12  21/21  BHCA Part II webinar #2 - 10.2020.pptx
+    0.796  p6   26/26  Fundamentals_Module_1_basics.ppt
+    0.733  p16  40/40  introduction_to_bea_tuxedo.ppt
+    0.446  p7   18/18  7-Zulkefli_Part147n66_IKMAS.pptx
+
+The outlier went to a fresh reviewer under the usual constraints. It reported **no text
+differences whatever** — every string, weight, slant, colour and size matching — and four
+geometric ones: the slide shorter in ours, the section view ~15% taller in the reference,
+the end-view circle ~15-20% larger in ours, and the isometric slightly wider in ours. It
+then flagged, unprompted, that *"those two point in opposite directions"* and named three
+possibilities it could not separate: non-uniform scaling, independently placed sub-images,
+or its own misjudgement at that resolution.
+
+**It was the third, and all four readings are refuted.** Both renderings are `720 x 540`
+with 39 pages; `pdfimages -list` gives the same two images at the same `1440 x 872`; and
+the placement transforms pulled straight out of both content streams agree on **all eight
+placements to within 0.2 pt** in width, height, position *and* aspect:
+
+    ours   Im3: w=632.25 h=382.84 at x=216.47 y=11.45  aspect=1.6515
+    ref26  Im209: w=632.07 h=382.79 at x=216.54 y=11.51  aspect=1.6512
+
+A 100 dpi difference image is diffuse over almost the whole page — bbox
+`(10, 137, 905, 746)` — with a worst band of 182 sampled pixels. That is anti-aliasing on
+thin vector line art, not structure.
+
+## What this says about the instrument, which is the reason to write it down
+
+**A threshold-based ink fraction over-ranks a page dense with thin vector strokes.** This
+page is an engineering drawing: hundreds of hairlines, dimension ladders and hatching, and
+a half-pixel difference in how each is anti-aliased moves the fraction of sub-200 pixels a
+long way while moving nothing a reader would see. The document is *correct*, and it
+out-ranked its nearest neighbour 3.3 to 1.
+
+Two consequences for a later round:
+
+- **Do not rank line-art pages with a crude ink fraction.** `compare-images.py`'s
+  `ink_delta` normalises differently and `verdict.py` adds a comparability screen; use
+  those rather than a hand-rolled threshold, which is what this pass did and what
+  `dotnet/CLAUDE.md` has warned against before for a different reason.
+- **A blind reading that names its own alternatives is doing its job even when every one of
+  its observations is wrong.** This reviewer's four geometric claims were all mistaken, and
+  it still cost nothing to check them, because it said which measurement would separate
+  them. The cheap refutation — eight transforms out of two content streams — took one
+  command.
+
+The other seven documents were not read; on this evidence their 0.4-0.9% is very likely
+the same anti-aliasing floor rather than seven defects, and a round taking them should
+re-rank with a metric that is not fooled by hairlines before reading any of them.
