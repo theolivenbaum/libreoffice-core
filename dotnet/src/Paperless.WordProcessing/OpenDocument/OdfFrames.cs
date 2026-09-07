@@ -126,13 +126,17 @@ internal static class OdfFrames
         string? inheritedAnchor)
     {
         Length? width = Measure(element, "width");
-        Length? height = Measure(element, "height");
-        if (width is not { } frameWidth || height is not { } frameHeight) return null;
+        if (width is not { } frameWidth) return null;
 
         OdfGraphicStyle style = Placed(GraphicStyle(styles, StyleName(element)), outer);
 
         XElement? box = element.Element(XName.Get("text-box", OdfNamespaces.Draw))
                         ?? ShapeTextBody(element);
+
+        // svg:height is optional and a frame written without one grows to its text. Read after the
+        // box, because the box is what says how tall an unstated height starts out.
+        if ((Measure(element, "height") ?? AutoHeight(box)) is not { } frameHeight) return null;
+
         XElement? image = element.Element(XName.Get("image", OdfNamespaces.Draw));
         FramePicture picture =
             image is not null && pictures is not null ? pictures.Read(element) : FramePicture.None;
@@ -166,6 +170,41 @@ internal static class OdfFrames
             Name = element.Attribute(XName.Get("name", OdfNamespaces.Draw))?.Value,
             Blocks = box is not null && content is not null ? content(box) : [],
         };
+    }
+
+    /// <summary>
+    /// The height a frame starts at when it states none, or null when it cannot grow to one.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>svg:height</c> is optional on <c>draw:frame</c> (ODF 1.3 §10.4.2 makes both lengths
+    /// optional) and Writer leaves it off a frame whose height is its content's — the shape a text
+    /// box or a framed table has after "autofit height". What it writes instead is the floor, on the
+    /// box: <c>&lt;draw:text-box fo:min-height="0in"&gt;</c>. The frame is <c>SwFrameSize::Minimum</c>
+    /// vertically and grows from there.
+    /// </para>
+    /// <para>
+    /// <strong>Requiring both lengths therefore dropped the frame and everything inside it</strong>,
+    /// which for these documents is not a decoration: 49 of the 338 converted <c>.odt</c> hold 58 such
+    /// frames between them carrying <strong>50 942 alphanumeric characters</strong>, and in ten of
+    /// them the frame is the page — <c>020_Project_Timeline_Template_Modern_Theme</c> rendered 0
+    /// characters against the reference's 316, and <c>ESPN-R - MCF - RA - Ed1</c> keeps 21 623 in a
+    /// single one. Nothing reported it: an anchored element that cannot be measured is skipped, and a
+    /// page with no frame on it looks like a page whose author put no frame on it.
+    /// </para>
+    /// <para>
+    /// Null rather than zero when there is no text box at all, so a picture or a shape written without
+    /// a height keeps being skipped: those have nothing to grow from, and a zero-tall image is not an
+    /// improvement on an absent one.
+    /// </para>
+    /// </remarks>
+    private static Length? AutoHeight(XElement? box)
+    {
+        if (box is null) return null;
+
+        return OdfWriterUnits.ToCore(
+                   OdfValue.ParseLength(box.Attribute(XName.Get("min-height", OdfNamespaces.FoCompatible))?.Value))
+               ?? Core.Units.Length.Zero;
     }
 
     /// <summary>
