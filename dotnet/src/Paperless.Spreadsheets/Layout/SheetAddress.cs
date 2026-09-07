@@ -34,6 +34,58 @@ public static class SheetAddress
     /// <summary>The last row of a sheet, zero-based.</summary>
     public const int MaxRow = 1048575;
 
+    /// <summary>
+    /// Splits a list of ranges on a separator that is not inside a quoted sheet name.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The two formats separate differently — ODF's <c>table:print-ranges</c> uses a space and a
+    /// SpreadsheetML <c>definedName</c> a comma — but a sheet name carrying the separator is
+    /// legal in both and is written quoted in both, so splitting on every occurrence tears the
+    /// name in half and loses the range. <c>Sales 2024</c> is an ordinary sheet name and
+    /// <c>'Sales 2024'.A1:'Sales 2024'.D7</c> is three space-separated fragments to a naive
+    /// split, of which the last one parses — as the single cell <c>D7</c>.
+    /// </para>
+    /// <para>
+    /// Calc reads it the same way: <c>ScRangeStringConverter::GetRangeListFromString</c> walks
+    /// the string with <c>GetTokenByOffset</c>, whose <c>IndexOf</c> carries a <c>bQuoted</c>
+    /// flag toggled by every apostrophe and stops at the separator only outside one
+    /// (<c>sc/source/core/tool/rangeutl.cxx</c>:552-576, :35-56). The separator defaults to a
+    /// space and the quote to an apostrophe (<c>sc/inc/rangeutl.hxx</c>:119-120). Toggling on
+    /// each apostrophe is also how the OOO convention's doubled <c>''</c> escape inside a name
+    /// comes out right: two toggles leave the flag where it was.
+    /// </para>
+    /// </remarks>
+    /// <param name="value">The list text.</param>
+    /// <param name="separator">The character the list is separated by.</param>
+    public static List<string> SplitList(string? value, char separator)
+    {
+        List<string> parts = [];
+        if (string.IsNullOrEmpty(value)) return parts;
+
+        bool quoted = false;
+        int start = 0;
+
+        for (int at = 0; at < value.Length; at++)
+        {
+            if (value[at] == '\'') quoted = !quoted;
+            else if (value[at] == separator && !quoted)
+            {
+                Add(value[start..at]);
+                start = at + 1;
+            }
+        }
+
+        Add(value[start..]);
+        return parts;
+
+        void Add(string part)
+        {
+            string trimmed = part.Trim();
+            if (trimmed.Length > 0) parts.Add(trimmed);
+        }
+    }
+
     /// <summary>Parses a range, with or without a sheet qualifier.</summary>
     /// <param name="text">The range text.</param>
     /// <param name="range">The parsed range, when this returns true.</param>
