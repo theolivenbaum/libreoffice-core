@@ -784,6 +784,19 @@ drawn nowhere; it is **285 of 302** after the master's running objects, `style:s
   and a reader consulting the first attribute alone concludes it does not autofit. `SlideAutofit`
   had been a full port since round 52 and the ODF path reached none of it; the attribute appears
   **3515 times in all 302** of the column, and wiring it moved the gate 259 → 283.
+- **And reading both spellings is not enough — the *level* has to be decided before the
+  spelling.** Where the two spellings are one item rather than two properties, resolving each
+  independently through the parent chain lets an outer style's spelling beat an inner style's.
+  `style:font-name` and `fo:font-family` are that case: `style:font-name` is imported through
+  `XMLTextImportPropertyMapper::handleSpecialItem`'s `CTF_FONTNAME` branch, which fills the
+  `CTF_FONTFAMILYNAME` slot beside it (`xmloff/source/text/txtimppr.cxx`:58-101), and
+  `fo:font-family` writes that same slot — so a child stating either shadows whatever its parent
+  stated. LibreOffice writes the named style with both spellings and the automatic styles with
+  `style:font-name` alone, so an inherited `fo:font-family` wins nearly everywhere the question is
+  asked the wrong way: **290 of 307 `.ods` and 109 of 338 `.odt`** of the converted corpus hold at
+  least one style where the two sit at different levels. It draws every such sheet in the document
+  default's face, and a narrower face wraps fewer lines, which shortens every measured row height on
+  it. `probes/odf-rowpitch-r72/`.
 
 **And a shadow's blur radius decides whether the shadow's *text* is real text**, which is the
 sharpest example this project has of a one-attribute defect that no gate column can see and that
@@ -1487,6 +1500,18 @@ above is true only of `/c/sandbox/workdir/refpdfs-*`. Round 69 re-scored the she
 script. It is sound whenever the diff under test cannot touch `soffice`, which a change confined
 to `dotnet/src` cannot, and it applies the gate's own verdict rule to exactly the reference bytes
 the scoreboard was built from. Check the bank before budgeting for a reference render.
+
+**But a bank built with `SWEEP_ONLY` is a claim about the documents on the list and nothing else.**
+Round 71's `/home/user/odsgap-work/bank/ours-head2` is a full render at one binary with **49**
+documents re-rendered at the next, and that round proved its last fix's confinement by diffing that
+bank against the one it was seeded from — which is circular, because the off-list rows are the same
+bytes by construction. Rendering the whole ODF half at `6ab0681b9` gives `.odt` **259** of 338
+where the bank scores 257, and `TE.CAO.00125 Foreign Part 145 approvals - OJT Logbook.odt`, one of
+the documents whose rendering differs, holds **no `draw:frame` at all** — so the fix under test
+could not have reached it. The same bank's original-track half differs from a clean base render on
+**22 of 645**, of which 15 are `.docx` that nothing in that round's diff could touch. The check
+that is not circular is a full render, and on this machine it costs about forty minutes for 645
+documents at three workers. `probes/odf-rowpitch-r72/results.md` §6.
 
 ### A Calc drawing shape's text and a Calc *cell's* are three different rulers, and two of them were guesses
 

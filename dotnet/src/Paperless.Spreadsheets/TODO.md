@@ -2394,13 +2394,36 @@ Deliberate deviations from the port, both narrow:
 
 Not yet, and why:
 
-- **A header or footer taller than its declared height is under-measured.** Calc recomputes a
-  dynamic band's height from the text in it and floors the result at the declared height
-  (`UpdateHFHeight`, `printfun.cxx:846`). Every file LibreOffice writes declares 0.75 cm and puts
-  one line of ten-point text in it, which measures well under that — so the declared value is the
-  answer for all of them, and a header of several lines is the case this gets wrong. Fixing it
-  needs the header's field language parsed and its text laid out, which is the same work as
-  drawing it.
+- **A header or footer taller than its declared height is under-measured, and "a header of
+  several lines" is not the case that matters.** Calc's band is
+  `max(nManHeight, maxTextHeight + nDistance)` — `nHeight = nMaxHeight + rParam.nDistance`, then
+  `if (nHeight < nManHeight) nHeight = nManHeight` (`UpdateHFHeight`,
+  `sc/source/ui/view/printfun.cxx`:838-850). ODF states both terms directly:
+  `fo:min-height` is `nManHeight` and the header's `fo:margin-bottom` (the footer's
+  `fo:margin-top`) is `nDistance`. `OdsPrintSetup.BandHeight` reads the first alone, on the
+  reasoning that the gap is already inside the declared height — which is true only while
+  `text + gap` stays under it.
+
+  **It very often does not, and the term that varies is the gap rather than the text.** An `.ods`
+  Calc converted from a workbook carries the workbook's own header margin, so the pair is
+  routinely `fo:min-height="0.2953in"` (21.26 pt) with `fo:margin-bottom="0.361in"` (25.99 pt) —
+  a gap larger than the whole declared band. Censused over `/home/user/corpus-odf`
+  (`probes/odf-rowpitch-r72/hfcensus.py`, counting one line as 11.5 pt): **58 of the 307 `.ods`
+  declare a band smaller than one line plus its gap**, the worst by 17.68 pt.
+
+  Measured on `activespecs.ods`, whose sheet is `qryDocCntrl` and whose header is that sheet's
+  name: 26.2.4.2 puts the header at the 36 pt top margin and the first cell row at 72.69, a band
+  of **36.69 pt** against the declared 21.26. We start the body at 57.27 and therefore fit three
+  more rows on every page — **254 pages against 266**. `PA_Delaware`, `fy2010-aip-grants`,
+  `fy2011-aip-grants`, `fy20-may20-sep20`, `Hazard Analysis Template` and
+  `2025_Active_Civil_Airmen_Statistics_FINAL` all show the same sign, and the last of those is the
+  one document the allocated-column row-height fix pushed one page too far.
+
+  The blast radius of fixing it is bounded by the `max`: on the other 249 the declared height
+  already wins and nothing moves. What it needs is the band's own text height, which is
+  `SheetPageDecoration.TextHeight`'s question and not the reader's — so the seat is the layout,
+  not `OdsPrintSetup`. A one-line estimate from the band font's metrics would do for all 58, and
+  the number to fit it against is the 10.70 pt of text that `activespecs`' 36.69 − 25.99 leaves.
 - **The paper size default is locale-dependent and A4 is assumed.** Calc's is
   `SvxPaperInfo::GetDefaultPaperSize()`, which is Letter in an American locale; the same missing
   locale infrastructure that keeps the two built-in number-format tables apart is what keeps this
