@@ -594,6 +594,17 @@ public sealed partial class RtfDocumentReader
         /// <summary><c>\trhdr</c>: the row repeats as a header at the top of every page.</summary>
         public bool RowIsHeader { get; set; }
 
+        /// <summary>
+        /// The row definition's <c>\tblpPr</c> half — the six control-word families that make a row
+        /// part of a <em>positioned</em> table, or null when the definition stated none.
+        /// </summary>
+        /// <remarks>
+        /// Null rather than a flag on the level, because "was one of these words seen for this row"
+        /// is the whole of the question <see cref="Layout.PageTable.IsPositioned"/> asks, and a row
+        /// definition is restated from scratch at every <c>\trowd</c>.
+        /// </remarks>
+        public RowPosition? RowPositioned { get; set; }
+
         /// <summary><c>\trkeep</c>: the row's content may not be broken across a page.</summary>
         /// <remarks>
         /// Named for keeping rather than for splitting because that is what the control word says, and
@@ -601,6 +612,46 @@ public sealed partial class RtfDocumentReader
         /// <c>LN_CT_TrPrBase_cantSplit</c> (<c>rtftok/rtfdispatchflag.cxx</c>).
         /// </remarks>
         public bool RowIsKeptTogether { get; set; }
+    }
+
+    /// <summary>
+    /// Where a row definition said its table goes, when it said anything at all.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// RTF's <em>Positioned Wrapped Tables</em> vocabulary, which LibreOffice's tokeniser turns
+    /// straight into OOXML's <c>w:tblpPr</c> — <c>\tpvpg</c> is <c>vertAnchor="page"</c>,
+    /// <c>\tphmrg</c> is <c>horzAnchor="margin"</c>, <c>\tposxc</c> is <c>tblpXSpec="center"</c>,
+    /// <c>\tposy</c> is <c>tblpY</c> (<c>sw/source/writerfilter/rtftok/rtfdispatchflag.cxx</c>:39-115
+    /// and <c>rtfdispatchvalue.cxx</c>:1802-1837). So the two readers of the two spellings of one
+    /// document reach <see cref="Layout.PageTable"/> by the same route and must agree there.
+    /// </para>
+    /// <para>
+    /// Stated per <em>row</em> in RTF and per <em>table</em> in OOXML, and every producer restates it
+    /// identically on every row of the table; the first row's is what the table takes, exactly as
+    /// <c>\trleft</c> is.
+    /// </para>
+    /// </remarks>
+    private sealed class RowPosition
+    {
+        /// <summary><c>\tpvpg</c>, <c>\tpvmrg</c>, <c>\tpvpara</c>; null when none was stated.</summary>
+        public Layout.FrameVerticalOrigin? VerticalAnchor { get; set; }
+
+        /// <summary>
+        /// True for <c>\tphpg</c> — the one horizontal anchor whose rectangle is the sheet rather than
+        /// the text area, which <see cref="Layout.PageTable.HorizontalPosition"/> cannot express and so
+        /// suppresses, as the DOCX reader does for <c>horzAnchor="page"</c>.
+        /// </summary>
+        public bool HorizontalAnchorIsPage { get; set; }
+
+        /// <summary><c>\tposxc</c> and <c>\tposxr</c> and friends; null when the row stated a distance.</summary>
+        public Layout.FrameHorizontalAlignment? HorizontalSpec { get; set; }
+
+        /// <summary><c>\tposy</c>, in twips, measured from <see cref="VerticalAnchor"/>.</summary>
+        public int VerticalOffset { get; set; }
+
+        /// <summary><c>\tdfrmtxtBottom</c>, in twips: the gap the flow keeps below the fly.</summary>
+        public int BottomFromText { get; set; }
     }
 
     /// <summary>A cell's declaration from <c>\cellx</c> and the merge flags before it.</summary>
@@ -700,6 +751,12 @@ public sealed partial class RtfDocumentReader
         /// The row's declared height in twips, from <c>\trrh</c>; zero for none, negative for an exact height.
         /// </summary>
         public int Height { get; init; }
+
+        /// <summary>
+        /// Where the row's table is placed, when the definition made it a positioned one — see
+        /// <see cref="RowPosition"/>. Null for an ordinary table in the flow.
+        /// </summary>
+        public RowPosition? Position { get; init; }
 
         public List<CellDraft> Cells { get; } = [];
     }

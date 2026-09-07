@@ -284,13 +284,30 @@ public readonly record struct RtfLayoutBlock
 /// <param name="ColumnFit">
 /// How to size the columns when the <c>\cellx</c> edges stated none, and null when they stated them all.
 /// </param>
+/// <param name="IsPositioned">
+/// True when the row definitions made this a <em>positioned</em> table — RTF's Positioned Wrapped
+/// Tables, which LibreOffice's importer turns into <c>w:tblpPr</c> and Writer into a fly holding a
+/// table. See <see cref="Layout.PageTable.IsPositioned"/>, which is where it ends up.
+/// </param>
+/// <param name="VerticalOrigin">What <paramref name="VerticalOffset"/> is measured from.</param>
+/// <param name="VerticalOffset"><c>\tposy</c>: how far below that origin the table's top goes.</param>
+/// <param name="HorizontalPosition">
+/// <c>\tposxc</c> and friends: the edge the table aligns against instead of taking
+/// <paramref name="LeftIndent"/>, and null when it stated none or anchored to the page.
+/// </param>
+/// <param name="LowerSpacing"><c>\tdfrmtxtBottom</c>: the gap the flow keeps below the fly.</param>
 public sealed record RtfLayoutTable(
     IReadOnlyList<Core.Units.Length> ColumnWidths,
     IReadOnlyList<RtfLayoutRow> Rows,
     int HeaderRowCount,
     Core.Units.Length LeftIndent,
     int SectionIndex = 0,
-    Layout.TableColumnFit? ColumnFit = null);
+    Layout.TableColumnFit? ColumnFit = null,
+    bool IsPositioned = false,
+    Layout.FrameVerticalOrigin VerticalOrigin = Layout.FrameVerticalOrigin.Paragraph,
+    Core.Units.Length VerticalOffset = default,
+    Layout.FrameHorizontalAlignment? HorizontalPosition = null,
+    Core.Units.Length LowerSpacing = default);
 
 /// <summary>One row of an RTF table.</summary>
 /// <param name="Cells">Its cells, left to right; a cell covered by a merge above is absent.</param>

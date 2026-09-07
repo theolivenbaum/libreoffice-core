@@ -889,6 +889,55 @@ public sealed partial class RtfDocumentReader
             case "trleft":
                 DefinitionTarget(CurrentFlow).RowLeftEdge = token.Parameter ?? 0;
                 return;
+
+            // ---- positioned ("wrapped") tables. Every one of these words makes the row's table a fly,
+            // because every one of them writes into `w:tblpPr` in LibreOffice's own importer — including
+            // the four \tdfrmtxt* distances, which state no position at all. Mirrored rather than
+            // narrowed: `DocxLayoutSource` asks exactly "is there a tblpPr", so narrowing here would make
+            // the two readers of one document disagree. It cannot bite on the corpus either way — of the
+            // 22 720 row definitions in the 328 converted RTF, **1135 state a real position and not one
+            // states a \tdfrmtxt* distance without one** (`probes/rtf-gate-r71/census.py`).
+            case "tpvpg" or "tpvmrg" or "tpvpara":
+                Position(CurrentFlow).VerticalAnchor = token.Name switch
+                {
+                    "tpvpg" => FrameVerticalOrigin.Page,
+                    "tpvmrg" => FrameVerticalOrigin.PageMargin,
+                    _ => FrameVerticalOrigin.Paragraph,
+                };
+                return;
+            case "tphpg" or "tphmrg" or "tphcol":
+                Position(CurrentFlow).HorizontalAnchorIsPage = token.Name is "tphpg";
+                return;
+            case "tposxc" or "tposxr":
+                // Only these two. `\tposxl`, `\tposxi` and `\tposxo` are tokenised by LibreOffice and
+                // then dispatched nowhere (`rtfdispatchflag.cxx`:82-101 names centre and right and no
+                // other), so they reach no `w:tblpXSpec` and no `w:tblpPr` — reading them here would
+                // both invent an alignment the reference does not apply and turn a table into a fly
+                // that the reference leaves in the flow. None of the three occurs in the corpus.
+                Position(CurrentFlow).HorizontalSpec = token.Name is "tposxc"
+                    ? FrameHorizontalAlignment.Centre
+                    : FrameHorizontalAlignment.Right;
+                return;
+            case "tposy":
+                Position(CurrentFlow).VerticalOffset = token.Parameter ?? 0;
+                return;
+            case "tdfrmtxtBottom":
+                Position(CurrentFlow).BottomFromText = token.Parameter ?? 0;
+                return;
+            // The rest of what does reach `w:tblpPr`, and is not read past that. `\tposx` is the
+            // horizontal distance, which `PageTable` takes from the row's own `\trleft`; `\tposyc` and
+            // `\tposyb` name a vertical edge, which is `w:tblpYSpec` and which neither reader honours;
+            // and `\tdfrmtxtTop`, `Left` and `Right` are distances the flow keeps beside a fly it cannot
+            // wrap into. Consumed rather than dropped, because writing a `tblpPr` is the whole of what
+            // makes the row's table a fly and each of these five writes one.
+            case "tposx" or "tposyc" or "tposyb"
+              or "tdfrmtxtTop" or "tdfrmtxtLeft" or "tdfrmtxtRight":
+                _ = Position(CurrentFlow);
+                return;
+            // `\tposnegx`, `\tposnegy`, `\tposyt`, `\tposyil`, `\tposyin` and `\tposyout` are
+            // deliberately absent: LibreOffice's tokeniser recognises all six and its dispatchers handle
+            // none of them, so each is dropped and none makes a table positioned. Not one occurs in the
+            // corpus's 22 720 row definitions (`probes/rtf-gate-r71/census.py`).
             case "trgaph":
                 // Half the gap between two cells, so it is the padding on each side of one. RTF's oldest
                 // spelling of cell padding and the one LibreOffice writes.

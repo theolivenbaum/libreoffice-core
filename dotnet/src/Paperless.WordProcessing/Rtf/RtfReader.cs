@@ -245,6 +245,11 @@ public sealed class RtfDocument : IWordProcessingDocument, IPaginatedDocument
             Rows = rows,
             HeaderRowCount = table.HeaderRowCount,
             LeftIndent = table.LeftIndent,
+            HorizontalPosition = table.HorizontalPosition,
+            IsPositioned = table.IsPositioned,
+            VerticalOffset = table.VerticalOffset,
+            VerticalOrigin = table.VerticalOrigin,
+            LowerSpacing = table.LowerSpacing,
             JoinsBordersLikeWord = true,
             MinHeightIncludesInsets = true,
         };
