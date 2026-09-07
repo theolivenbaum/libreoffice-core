@@ -456,6 +456,44 @@ Three things this changes about how a round is run:
    (measured by sign: page 1 reads *ink missing from ours*, page 2 reads *ink we draw*, in the same
    regions) and a per-page pagination difference on `hdss-bulletin-issue-285` that is not a
    one-way drift. See `probes/words-ink-r67/`.
+
+   **Both of those are now settled and neither was any of the candidates named with it.** The cover
+   art was **the anchor character**: the DOCX walk emitted one `U+0001` per `w:drawing`, floating or
+   inline, and Writer inserts that character for `FLY_AS_CHAR` alone (`SwFormatFlyCnt` and
+   `GetCharOfTextAttr`, `sw/source/core/txtnode/thints.cxx`:3633-3652, put in by
+   `SwDoc::SetFlyFrameAnchor`, `docfly.cxx`:337-348). A control character is zero-width, so what the
+   four `wp:anchor` runs before that document's cover picture cost was a **break opportunity** — an
+   inline object widens every prefix past its boundary, so a picture wider than the measure is placed
+   anyway on a line it starts and pushed onto the next line when anything precedes it. `|ink|%`
+   against 26.2.4.2 **35.91 → 2.37**, gate `MATCH 314` unchanged, 12 of 338 renderings moved and
+   their total ink 63.31 → 29.11. The two candidates carried with it are both refuted: the frame at
+   `posOffset` 733.5 pt is 40.5 pt tall on a 792 pt page and is `wp:wrapNone`, and our
+   first-on-the-page overflow rule already matches 26.2.4.2 on four authored cases. `w:titlePg` is
+   real but is a *different* defect — see the next paragraph.
+
+   `hdss-bulletin-issue-285` is **furniture height, with the sign the other way**: we draw
+   `header2.xml` on nine of ten pages and the reference draws it on none, so our body starts 43.54 pt
+   lower from page 2 on. The section that names that header is a `continuous` break, and changing
+   only `<w:type w:val="continuous"/>` to a page break makes the reference draw it on nine pages
+   exactly as we do. **Diagnosed and left**; reach 16 of 272 DOCX.
+   `probes/words-firstpage-r70/` and `probes/words-continuous-header-r70/`.
+
+   Two more rules fell out of those two documents, both measured and one left:
+
+   - **A content-anchored frame is captured on its page and a page-anchored one is not.**
+     `SwAnchoredObjectPosition::ImplAdjustVertRelPos` (`anchoredobjectposition.cxx`:504-667) pulls an
+     object back inside the page frame — bottom corrected first, then top — and
+     `SwToLayoutAnchoredObjectPosition` never calls it. **Which formats do it is the DOC/DOCX
+     distinction**: `sw/source/writerfilter/filter/WriterFilter.cxx`:332 sets
+     `DoNotCaptureDrawObjsOnPage` for every writerfilter import, DOCX *and* RTF, and the WW8 and ODF
+     filters do not. Clamping every format instead moves 30 renderings against 3 and takes several
+     DOCX shape templates away from the reference. `probes/words-apo-capture-r70/`.
+   - **`w:titlePg` with a header (or footer) declared and no `first` one still costs the first page an
+     empty one's height** — one empty paragraph in the document's `header`- (`footer`-) named
+     paragraph style, drawn as nothing. `SectionPropertyMap::CloseSectionGroup` sets
+     `PROP_HEADER_NO_FIRST` rather than turning the header off (`dmapper/PropertyMap.cxx`:596-618).
+     12 corpus DOCX each way; it only moves a page where `w:header + one empty line > w:top`.
+     **Left.** `probes/words-firstpage-r70/`.
 2. **Looking gives direction and kind; it does not give cause.** *"Every line breaks earlier in
    the reference, so our glyphs are narrower"* is a lead that no ink percentage contains. But an
    image cannot tell a picture bullet from a character bullet in a substituted symbol font.

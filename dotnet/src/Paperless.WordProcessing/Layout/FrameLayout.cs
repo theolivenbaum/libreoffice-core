@@ -51,6 +51,11 @@ public static class FrameLayout
     /// reserved room did to it. Only <see cref="FrameVerticalOrigin.PageMargin"/> uses it, and it
     /// defaults to the stated text area, which is what the two are on a page whose furniture fits.
     /// </param>
+    /// <param name="capturesOnPage">
+    /// Whether a content-anchored frame is pulled back inside the page —
+    /// <c>SwAnchoredObjectPosition::ImplAdjustVertRelPos</c>. See
+    /// <see cref="PaginationOptions.CapturesAnchoredObjectsOnPage"/> for which formats set it.
+    /// </param>
     public static DocRect Place(
         PageFrame frame,
         PageGeometry geometry,
@@ -58,7 +63,8 @@ public static class FrameLayout
         Length anchorTop,
         bool rightHandPage = true,
         Length? anchorLineTop = null,
-        DocRect? bodyArea = null)
+        DocRect? bodyArea = null,
+        bool capturesOnPage = true)
     {
         ArgumentNullException.ThrowIfNull(frame);
         ArgumentNullException.ThrowIfNull(geometry);
@@ -140,7 +146,67 @@ public static class FrameLayout
         };
 
         return new DocRect(
-            x + frame.GroupOffset.X, y + frame.GroupOffset.Y, frame.Size.Width, frame.Size.Height);
+            x + frame.GroupOffset.X,
+            capturesOnPage ? CapturedOnPage(frame, page, y + frame.GroupOffset.Y) : y + frame.GroupOffset.Y,
+            frame.Size.Width,
+            frame.Size.Height);
+    }
+
+    /// <summary>
+    /// A content-anchored frame pulled back inside the page it is on.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>SwAnchoredObjectPosition::ImplAdjustVertRelPos</c>
+    /// (<c>sw/source/core/objectpositioning/anchoredobjectposition.cxx</c>:504-667), which is what its
+    /// own comment calls <em>"adjust calculated vertical in order to keep object inside 'page'
+    /// alignment layout frame"</em>. Two corrections in order: the bottom first —
+    /// <c>nTopOfAnch + nAdjustedRelPosY + aObjSize.Height() &gt; aPgAlignArea.Bottom()</c> pulls the
+    /// object up until its bottom rests on the area's — and then the top, which pushes it back down if
+    /// the first correction has taken it above. A frame taller than the page therefore ends flush with
+    /// the top and overflows the bottom, which is the order the C++ applies and not an accident of it.
+    /// </para>
+    /// <para>
+    /// <b>The area is the whole page, and only a content anchor is captured.</b>
+    /// <c>SwToLayoutAnchoredObjectPosition</c> — a <c>FLY_AT_PAGE</c> fly — never calls this at all
+    /// (<c>tolayoutanchoredobjectposition.cxx</c>:100-131 sets the position and then only grows the
+    /// page in browse mode), so a page-anchored frame may hang off the sheet and is left alone here.
+    /// The area is <c>rPageFrame.getFrameArea()</c> whenever
+    /// <c>CONSIDER_WRAP_ON_OBJECT_POSITION</c> is set, which every Word import sets; the narrowing to
+    /// the body frame beside it is DOCX <c>compatibilityMode</c> 15 and non-wrap-through only, and is
+    /// deliberately not reproduced — it can only clamp <em>further</em>, so leaving it out cannot put a
+    /// frame outside the page.
+    /// </para>
+    /// <para>
+    /// The one escape is <c>SwAnchoredObject::IsDraggingOffPageAllowed</c>
+    /// (<c>sw/source/core/layout/anchoredobject.cxx</c>:790-801), which needs
+    /// <c>DisableOffPagePositioning</c> — an ODF settings flag defaulting to false
+    /// (<c>DocumentSettingManager.cxx</c>:100) that no DOC or DOCX import sets. So it does not arise
+    /// for the formats this reader reads.
+    /// </para>
+    /// <para>
+    /// Measured on <c>words/done-013/doc/omrIMInterpretiveGuideLine.doc</c> against 26.2.4.2 with the
+    /// tarball's <c>LiberationSansNarrow</c> moved aside, so the two stacks resolve the same faces.
+    /// Its <c>COMMENTS AND QUESTIONS</c> block is a WW8 APO — <c>sprmPDyaAbs</c> 100.90 pt from a
+    /// paragraph whose top is 666.45 pt down a 792 pt page, 36.00 pt tall — so its stated bottom is
+    /// 803.35, <b>11.35 pt below the sheet</b>, and its second line was drawn at a baseline of −0.70.
+    /// The reference draws the same block with its bottom flush at 791.95. Every one of page 1's other
+    /// 30 lines already agreed to 0.05 pt in both directions; the frame was the only thing that did
+    /// not.
+    /// </para>
+    /// </remarks>
+    /// <param name="frame">The frame, for its anchor and its height.</param>
+    /// <param name="page">The page rectangle, which is the area a frame is captured in.</param>
+    /// <param name="y">The position the origin and the offset gave it.</param>
+    private static Length CapturedOnPage(PageFrame frame, DocRect page, Length y)
+    {
+        if (frame.Anchor is not (FrameAnchor.Paragraph or FrameAnchor.Character)) return y;
+
+        Length height = frame.Size.Height;
+        if (y + height > page.Bottom) y = page.Bottom - height;
+        if (y < page.Y) y = page.Y;
+
+        return y;
     }
 }
 
@@ -202,12 +268,18 @@ internal sealed class FrameResolution
     /// Whether a table inside a frame grows its cells by their last paragraph's proportional line
     /// spacing — see <see cref="PaginationOptions.AddsCellLineSpacing"/>.
     /// </param>
+    /// <param name="capturesOnPage">
+    /// Whether a content-anchored frame is pulled back inside its page — see
+    /// <see cref="PaginationOptions.CapturesAnchoredObjectsOnPage"/>, which is where the rule and the
+    /// formats it applies to are written out.
+    /// </param>
     public static FrameResolution Of(
         IReadOnlyList<PageBlock> blocks,
         IReadOnlyList<PaginatedSection> sections,
         IReadOnlyList<LaidOutPage> pages,
         bool collapsesSpacing = false,
-        bool addsCellLineSpacing = false)
+        bool addsCellLineSpacing = false,
+        bool capturesOnPage = true)
     {
         Dictionary<int, Placement> placements = [];
 
@@ -270,7 +342,8 @@ internal sealed class FrameResolution
                     anchorTop,
                     rightHandPage: page.Number % 2 == 1,
                     anchorLineTop: anchorLineTop,
-                    bodyArea: page.BodyArea);
+                    bodyArea: page.BodyArea,
+                    capturesOnPage: capturesOnPage);
 
                 frames++;
                 signature.Add(area.X.Emu);

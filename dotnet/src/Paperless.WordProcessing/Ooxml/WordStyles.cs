@@ -418,6 +418,123 @@ public sealed class WordStyles
         }
 
         CompleteOneSidedSpacing(declared);
+        DropForwardInheritedContextualSpacing(declared);
+    }
+
+    /// <summary>
+    /// Turns <c>w:contextualSpacing</c> off on a paragraph style that would only have inherited it
+    /// from a parent declared <em>after</em> it, and that sets a margin of its own.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The same read-modify-write <see cref="CompleteOneSidedSpacing"/> models, seen from its other
+    /// side. LibreOffice keeps both vertical margins <em>and</em> the contextual flag in one item —
+    /// <c>SvxULSpaceItem</c>, whose <c>bContext</c> is what <c>SwFlowFrame::CalcUpperSpace</c> reads
+    /// as <c>GetULSpace().GetContext()</c> (<c>sw/source/core/layout/flowfrm.cxx</c>:1533, 1620-1627)
+    /// — while writerfilter sets the three through separate UNO properties. Setting a margin on a
+    /// style therefore reads the item as it resolves <em>at that moment</em>, changes one field and
+    /// puts the whole item back on the style, where it shadows the parent's. A parent declared later
+    /// has contributed nothing yet, so its contextual flag never reaches the child.
+    /// </para>
+    /// <para>
+    /// Measured on 26.2.4.2 with one authored document rendered twice, differing only in where the
+    /// parent style sits in <c>word/styles.xml</c> — three paragraphs per style, 10 pt, so a
+    /// suppressed gap is a pitch of 11.50 pt and an honoured <c>w:after="240"</c> is 23.50
+    /// (<c>probes/words-firstpage-r70/</c>, <c>ctx-lpfirst</c> and <c>ctx-lplast</c>):
+    /// </para>
+    /// <code>
+    ///   child style                        parent first   parent last
+    ///   sets w:ind only                       11.50          11.50     no item of its own
+    ///   sets w:spacing w:before="0"           11.50          11.50     item replaced, after 0 either way
+    ///   sets w:spacing w:after="240"          11.50        * 23.50     item replaced, flag lost
+    ///   the parent itself                     11.50          11.50
+    /// </code>
+    /// <para>
+    /// Only the starred row moves, and the <c>w:ind</c> row is the control that says the
+    /// <c>w:basedOn</c> link itself is intact: the child takes the parent's 1440-twip indent under
+    /// both orders, so this is one item's flag and not style inheritance failing.
+    /// </para>
+    /// <para>
+    /// <strong>Reach: one corpus document.</strong> Censused over all 272 DOCX-family files for a
+    /// paragraph style that sets a <c>w:spacing</c> margin, does not state
+    /// <c>w:contextualSpacing</c>, and has an ancestor that does and is declared later —
+    /// <c>PES-Technical-Report-Template_Jan_2019.docx</c> alone, whose <c>Heading9</c> (its bullet
+    /// style, declared tenth) is based on <c>ListParagraph</c> (declared 114th). Suppressing the
+    /// 12 pt between its bullets fits an extra bullet on several pages and costs the document the
+    /// fourteenth page the reference has.
+    /// </para>
+    /// </remarks>
+    /// <param name="declared">The paragraph styles of one <c>w:styles</c>, in declaration order.</param>
+    private static void DropForwardInheritedContextualSpacing(List<WordStyle> declared)
+    {
+        Dictionary<string, int> position = new(StringComparer.Ordinal);
+        Dictionary<string, WordStyle> byId = new(StringComparer.Ordinal);
+        for (int i = 0; i < declared.Count; i++)
+        {
+            position.TryAdd(declared[i].StyleId, i);
+            byId.TryAdd(declared[i].StyleId, declared[i]);
+        }
+
+        for (int i = 0; i < declared.Count; i++)
+        {
+            WordStyle style = declared[i];
+            if (style.ParagraphProperties is not { } properties) continue;
+
+            // A style stating the flag itself settles it, whichever way; nothing is inherited.
+            if (Word.Child(properties, "contextualSpacing") is not null) continue;
+
+            // Without a margin of its own the style has no item of its own, so it inherits the
+            // parent's whole — flag included — however the two were ordered.
+            if (Word.Child(properties, "spacing") is not { } spacing) continue;
+            if (Word.Attribute(spacing, "before") is null
+                && Word.Attribute(spacing, "beforeAutospacing") is null
+                && Word.Attribute(spacing, "after") is null
+                && Word.Attribute(spacing, "afterAutospacing") is null)
+            {
+                continue;
+            }
+
+            if (style.BasedOn is not { Length: > 0 } parentId) continue;
+
+            // A parent already read is an ordinary inheritance: the read-modify-write picks up the
+            // flag exactly as the layering would.
+            if (position.TryGetValue(parentId, out int parentAt) && parentAt < i) continue;
+
+            if (!InheritsContextualSpacingOn(byId, parentId)) continue;
+
+            XElement replacement = new(properties);
+            replacement.Add(new XElement(
+                Word.Name("contextualSpacing"), new XAttribute(Word.Name("val"), "0")));
+            style.ReplaceParagraphProperties(replacement);
+        }
+    }
+
+    /// <summary>
+    /// Whether the style chain starting at <paramref name="styleId"/> turns
+    /// <c>w:contextualSpacing</c> on — the flag the style below it would otherwise have inherited.
+    /// </summary>
+    /// <param name="byId">The declared paragraph styles, by id.</param>
+    /// <param name="styleId">Where to start the walk.</param>
+    private static bool InheritsContextualSpacingOn(
+        Dictionary<string, WordStyle> byId, string? styleId)
+    {
+        HashSet<string> visited = new(StringComparer.Ordinal);
+
+        for (int depth = 0; depth < MaxBasedOnDepth; depth++)
+        {
+            if (styleId is not { Length: > 0 }) return false;
+            if (!byId.TryGetValue(styleId, out WordStyle? style)) return false;
+            if (!visited.Add(styleId)) return false;
+
+            if (Word.Child(style.ParagraphProperties, "contextualSpacing") is { } stated)
+            {
+                return Word.IsOn(stated);
+            }
+
+            styleId = style.BasedOn;
+        }
+
+        return false;
     }
 
     /// <summary>

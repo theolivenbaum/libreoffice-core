@@ -13,12 +13,18 @@ namespace Paperless.WordProcessing.Tests;
 /// </summary>
 /// <remarks>
 /// <para>
-/// The reader emits one anchor character per <c>w:drawing</c>, floating or inline, because a frame's
-/// offset has to mean the same thing wherever it was counted. That made every such paragraph look
-/// text-bearing, so it took the <em>body</em> character style instead of the mark's — and where the mark
-/// states a smaller size than the document default, the paragraph came out several times too tall.
+/// The reader used to emit one anchor character per <c>w:drawing</c>, floating or inline, because a
+/// frame's offset has to mean the same thing wherever it was counted. That made every such paragraph
+/// look text-bearing, so it took the <em>body</em> character style instead of the mark's — and where the
+/// mark states a smaller size than the document default, the paragraph came out several times too tall.
 /// Writer's import puts a <c>wp:anchor</c> into a fly and leaves the paragraph it was written in empty,
 /// which is why the mark is what sizes it there.
+/// </para>
+/// <para>
+/// <b>A floating drawing now emits no character at all</b>, which is the same rule stated at its
+/// source rather than compensated for afterwards — see <see cref="FloatingAnchorLineBreakTests"/> for
+/// the citation and for what the character cost besides the height. These four assertions are
+/// unchanged by that and are kept as the height half of it.
 /// </para>
 /// <para>
 /// Measured on <c>088_Printable_Graph_Paper_Template_Quality_layout_33051f6e.docx</c> against the

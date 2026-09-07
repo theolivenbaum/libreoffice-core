@@ -181,6 +181,9 @@ public sealed class RtfDocument : IWordProcessingDocument, IPaginatedDocument
 
         PaginationOptions pagination = PaginationOptions.Word with
         {
+            // RTF goes through writerfilter exactly as DOCX does, so it takes the same
+            // `DoNotCaptureDrawObjsOnPage` — see `PaginationOptions.CapturesAnchoredObjectsOnPage`.
+            CapturesAnchoredObjectsOnPage = false,
             CollapsesSpacing = !_addsParagraphSpacing,
             MaxPages = options?.MaxPages is > 0 ? options.MaxPages : PaginationOptions.Word.MaxPages,
         };
