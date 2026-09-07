@@ -231,6 +231,60 @@ format (Paperless reads), macro execution (never — Paperless only reports that
    `DrawnExtent` intersects a shape's extent with the plot rather than trusting it. Clipping the
    geometry itself is left.
 
+   ***Done for a line and a scatter, and the reference clips the geometry rather than painting
+   under a clip path.*** `ChartClipping` is Liang–Barsky per segment (`Clipping.cxx`:47-128) with
+   chart2's own piece joining (`:340-421`), against the plot rectangle — which is what
+   `getScaledLogicClipDoubleRect` (`PlottingPositionHelper.cxx`:295-311) maps onto. Two details
+   decide it. **A line that leaves the plot and comes back is two strokes with no chord across the
+   gap**, because `bSplitPiecesToDifferentPolygons` defaults to *true* (`Clipping.hxx`:51) and only
+   the two *filled*-polygon callers pass false. And **the bounding-box short circuit is the
+   reference's own** (`Clipping.cxx`:350-365), which is why this is free: a series that fits its
+   plot is returned untouched, so **174 of the 176 chart documents and 180 of the 182 chart-bearing
+   converted-ODF files do not change by a byte**, and the two movers are the same documents in both
+   columns. Beside it, `AreaChart::createShapes` puts a point in the polygon and only *then* asks
+   `isLogicVisible` (`:715`), and `if( !bIsVisible ) continue;` (`:760-761`) sits above the symbol,
+   the error bars **and** the data label — so an out-of-range point holds its place in the line and
+   gets no mark of its own. On `171128IPAP.pptx` slide 38 the three series now run 119.55 … 615.56
+   against 26.2.4.2's 119.54 … 615.49, where they ran −866.50 … 758.03 on a 720 pt page; all four
+   renderings improve and no page or alphanumeric count moves. **The area, net/radar and regression
+   clips are still open**, and so is the splined line: that chart's three series state
+   `c:smooth val="1"` and 26.2.4.2 draws 801 segments through 132 points where we draw 131.
+   `probes/chart-resid-r75/results.md` §1.
+
+   **And a chart's range excludes the cells of hidden rows and columns, which is not a chart rule
+   the record had.** `ScChart2DataSequence::BuildDataCache` asks `ColHidden` and `RowHidden` per
+   cell and `continue`s past a hidden one — dropped from the sequence, not blanked
+   (`sc/source/ui/unoobj/chart2uno.cxx`:2636-2646) — unless the diagram says `IncludeHiddenCells`,
+   which the OOXML importer sets to `!c:plotVisOnly`
+   (`oox/source/drawingml/chart/chartspaceconverter.cxx`:264). **`plotVisOnly`'s own default is
+   `!bMSO2007Document`** (`chartspacefragment.cxx`:130-131, `chartspacemodel.cxx`:30), so it is the
+   Office generation and not a constant. `TODO.batches.md`'s *"`plotVisOnly` is refuted"* is a claim
+   about `029_Annual_budget`, whose sheet hides nothing, and does not generalise: the attribute is
+   exactly what decides `053_Personal_asset_inventory`, `026_Monthly_cash_flow_statement` and
+   `027_Simple_personal_cash_flow_statement`. **Reach is 4 of 947** and in every one of the four
+   *every* cell of the sequence is hidden; the fourth, `055_Project_timeline_with_milestones`,
+   states `val="0"` and is the control that must not move. **And `053`'s missing seventh category
+   was never the `Assets` table-name collision** the previous round diagnosed — renaming that table
+   and deleting it outright both leave 26.2.4.2's rendering unchanged, as does removing the
+   `pivotTable` part; unhiding columns H and I is what makes it draw seven. Two neighbouring rules
+   in the same loop answer *nothing survived* differently, and that is measured rather than derived:
+   a range wholly inside a totals row resolves to an **empty** sequence and the chart draws nothing,
+   a range wholly hidden resolves to **null** and the cached points stand.
+   `probes/chart-resid-r75/results.md` §2.
+
+   **The wrap-restart defect does not exist and should not be sent after again.** *"An axis whose
+   labels wrap does not restart the wrap when the layout is retried, so the wrapped width from an
+   earlier attempt survives into the final one"* is false at both seats. `nLimitedSpaceForText`
+   comes from `nScreenDistanceBetweenTicks` (`VCartesianAxis.cxx`:749), which `createLabels`
+   computes **once** at `:1733` and passes unchanged into every attempt of
+   `while (!createTextShapes(…)) {}` (`:1753-1755`) — **the reference deliberately does not widen
+   the wrap when the rhythm rises** — and the line-break restart drops every shape
+   (`removeTextShapesFromTicks()`, `:903`) before turning breaking off. `ChartAxisLabels.Resolve`
+   matches it: `spacing` is loop-invariant and `Wrap` is recomputed from the *original* strings
+   every attempt. What the same loop *does* carry forward, on purpose, is `m_nRhythm`,
+   `m_bLineBreakAllowed`, `m_fRotationAngleDegree` and `m_eStaggering`, because the same
+   `AxisLabelProperties` object is passed each time. `probes/chart-resid-r75/results.md` §3.
+
    **Reach and cost, measured rather than censused**: of the 176 chart-bearing documents, **24
    renderings move** and the other 152 do not change by a byte; 13 improve against 26.2.4.2, 8
    worsen, 3 are level, and the sum of their means goes 157.46 → 154.45. **No gate verdict moves in
