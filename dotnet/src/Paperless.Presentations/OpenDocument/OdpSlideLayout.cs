@@ -45,7 +45,22 @@ internal sealed partial class OdpSlideLayout
         _file = file;
         _fonts = fonts;
         _fills = new OdpFills(file);
+        _fonts.EmbeddedFaces = EmbeddedFaceOf;
     }
+
+    /// <summary>
+    /// The document's own face for a request, from <c>svg:font-face-uri</c>.
+    /// </summary>
+    /// <remarks>
+    /// Lazily and once: the declarations are in <c>office:font-face-decls</c>, a document that
+    /// never draws with an embedded family never opens one of the parts, and a document that
+    /// embeds nothing pays a dictionary miss. See <see cref="OdfEmbeddedFonts"/> for which name
+    /// is the key and why the style comes out of the face rather than off the declaration.
+    /// </remarks>
+    private string? EmbeddedFaceOf(string family, int weight, bool isItalic)
+        => (_embeddedFonts ??= OdfEmbeddedFonts.Read(_file)).FaceKeyFor(family, weight, isItalic);
+
+    private OdfEmbeddedFonts? _embeddedFonts;
 
     /// <summary>Lays out every <c>draw:page</c> in the document body.</summary>
     public List<LaidOutSlide> Layout()
