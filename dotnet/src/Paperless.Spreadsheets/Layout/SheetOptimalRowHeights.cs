@@ -483,10 +483,18 @@ internal static class SheetOptimalRowHeights
                 // states 285.1 twips for the row — one line — and its PDF holds
                 // `19090-105 (SCD604-85001-23)` as a single run with no space in it.
                 //
-                // ODF is the one importer that disagrees: `ScXMLImport` makes a cell of several
-                // `text:p` a multi-paragraph edit cell whatever the wrap says. The sheets track
-                // holds no `.ods`, so this is an unmeasured deviation rather than a measured one,
-                // and `SheetHardBreakTests` records the same gap on the drawing side.
+                // ODF disagrees about the *drawing* and not about this, which is measured rather
+                // than inferred and is the opposite of the natural reading. `ScXMLImport` makes a
+                // cell of several `text:p` — or of one holding a raw newline — a multi-paragraph
+                // edit cell whatever the wrap says (`PushParagraphEnd`, `xmlcelli.cxx`:610-636),
+                // and `SheetLayout.CellBreaksStartLines` draws every one of those paragraphs. The
+                // row it sits in still takes **one** line, and the rest overflow it. Measured on
+                // `Capability_List…unsorted.ods`, whose fifteen two-paragraph cells 26.2.4.2 draws
+                // as two lines each inside rows it leaves 14.23 pt tall — page 11 has
+                // `19090-105 (SCD` at 239.26 and `604-85001-23)` at 252.75 in a row that starts at
+                // 238.52 and ends at 252.75, so the second line is drawn over the row beneath.
+                // Giving the row the paragraphs' height instead made that document 150 pages
+                // against the reference's 147.
                 bool breaks =
                     SheetTextLayout.Breaks(format, cell.Value is not null and not string)
                     && !sheet.HoldsField(cell.Row, cell.Column);

@@ -310,7 +310,11 @@ public sealed partial class OdfContentReader
         // already run through its number format. Keeping them rather than re-deriving the
         // text from the value is what makes extraction agree with what the authoring
         // application showed.
+        // SuspendReading clears the verbatim flag, so it is set after the suspend and
+        // restored by the resume; a shape anchored inside the cell suspends again and is
+        // therefore read with ordinary collapsing.
         ReadingState state = SuspendReading();
+        _cellVerbatim = CellTextIsVerbatim;
         ReadBlocks(cellElement, cell);
         ResumeReading(state);
 

@@ -26,15 +26,16 @@
                                                               Oscar Papa
   Row 6  three paragraphs, the first bold                   — the rich-cell path, three lines
 
-  Row 2 is here as a measurement rather than as an assertion, and the test says so: ODF's
-  importer disagrees with the other two about it. It makes a multi-paragraph edit cell whatever
-  the wrap option says, which is the three lines above. BIFF and SpreadsheetML both fold the
-  same content onto one paragraph when the cell does not wrap — `SetSingleLine(!GetLineBreak())`
-  in sc/source/filter/excel/xihelper.cxx:250-256, and `bSingleLine = !mbWrapText` in
-  sc/source/filter/oox/sheetdatabuffer.cxx:120-135, which a string holding U+000A always
-  reaches because RichString::extractPlainString refuses it (richstring.cxx:363-378). Since the
-  sheets corpus is entirely .xls and .xlsx, what we do — one line — is what those two ask for,
-  and only the ODF side is unimplemented.
+  Row 2 is the case the two families answer differently, and this file is ODF, so its three
+  lines are asserted. BIFF and SpreadsheetML fold the same content onto one paragraph when the
+  cell does not wrap — `SetSingleLine(!GetLineBreak())` in sc/source/filter/excel/xihelper.cxx:246-256,
+  and `bSingleLine = !mbWrapText` in sc/source/filter/oox/sheetdatabuffer.cxx:120-135, which a
+  string holding U+000A always reaches because RichString::extractPlainString refuses it
+  (richstring.cxx:363-378); under EEControlBits::SINGLELINE the EditEngine does not look for a
+  separator at all (editeng/source/editeng/impedit2.cxx:2876). Calc's ODF filter never calls
+  SetSingleLine, so a break makes a paragraph whatever the wrap option says. Re-rendered under
+  26.2.4.2 in round 77: every one of this file's 22 lines is where 24.2.7.2 put it, row 2's
+  three included.
 -->
 <office:document xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0"
  xmlns:style="urn:oasis:names:tc:opendocument:xmlns:style:1.0"

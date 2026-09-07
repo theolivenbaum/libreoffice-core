@@ -104,6 +104,7 @@ public sealed class OdsSpreadsheetDocument : IPaginatedDocument
                 Formats = formats,
                 RichText = rich,
                 Drawings = OdsDrawings.Read(document.File, table),
+                CellBreaksStartLines = true,
                 FileName = fileName ?? string.Empty,
             });
 
