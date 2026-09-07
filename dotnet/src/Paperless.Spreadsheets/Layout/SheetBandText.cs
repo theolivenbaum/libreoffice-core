@@ -89,17 +89,25 @@ internal static class SheetBandText
         => metrics with { Grid = MetricGrid.Chart };
 
     /// <summary>
-    /// The same metrics with no device at all — the arithmetic chart text used before round 60,
-    /// kept for the <em>drawing shape</em> text that also asks for it.
+    /// The same metrics with no device at all, which is what a <em>drawing shape's</em> text is
+    /// measured on.
     /// </summary>
     /// <remarks>
-    /// <b>This is a preserved behaviour and not a measured one.</b> A Calc drawing object's text
-    /// is an EditEngine text like a chart's, but it is formatted against the draw layer's own
-    /// reference device rather than <c>chart2</c>'s, and which device that is on 26.2.4.2 has not
-    /// been measured on this project. Round 60 moved chart text onto
-    /// <see cref="MetricGrid.Chart"/> and deliberately left shape text exactly where it was, so
-    /// that a chart fix could not silently move every text box in the corpus. Naming it separately
-    /// is what makes the untested half visible; see <see cref="ShapeLineHeightAt(Length, string?)"/>.
+    /// <para>
+    /// <b>The absent device is now measured and it really is absent.</b> A Calc drawing object's
+    /// text is an EditEngine text like a chart's, but it is formatted against the draw layer's own
+    /// reference device rather than <c>chart2</c>'s — <c>ScDocument::GetVirtualDevice_100th_mm</c>,
+    /// <c>RefDevMode::MSO1</c> at 8640 dpi (<c>sc/source/core/data/documen8.cxx</c>:182-193),
+    /// whose pixel is 0.008 pt and so is indistinguishable from no grid at any size a workbook
+    /// uses. Round 60 moved chart text onto <see cref="MetricGrid.Chart"/> and deliberately left
+    /// shape text ungridded without knowing whether that was right; round 69 scored the two
+    /// against 26.2.4.2 over sixteen text boxes and no grid wins — putting these metrics through
+    /// <see cref="MetricGrid.Spreadsheet"/>, as a <em>cell's</em> go, is four times worse.
+    /// </para>
+    /// <para>
+    /// What was wrong was the leading, not the device; see
+    /// <see cref="ShapeLineHeightAt(Length, string?)"/>, which carries the measurement.
+    /// </para>
     /// </remarks>
     private static LineMetrics Ungridded(LineMetrics metrics) => metrics with { Grid = null };
 
@@ -274,17 +282,38 @@ internal static class SheetBandText
     /// How tall one line of a Calc <em>drawing shape's</em> text is, at a size.
     /// </summary>
     /// <remarks>
-    /// The arithmetic <see cref="ChartLineHeightAt(Length)"/> had before round 60 — the face's own
-    /// <c>ascent + descent + lineGap</c>, on no device — kept under its own name so that the shape
-    /// path is visibly a separate, <b>unmeasured</b> claim rather than an accident of sharing a
-    /// function with the chart path. See the remark on <see cref="Ungridded(LineMetrics)"/> for
-    /// what is and is not known about it.
+    /// <para>
+    /// <strong>Ascent plus descent, on no device, and <em>without</em> the external leading.</strong>
+    /// This carried the leading until round 69, under its own name because that half had never been
+    /// measured — it was the arithmetic <see cref="ChartLineHeightAt(Length)"/> had before round 60,
+    /// kept where it could be seen rather than shared. It is measured now, and the leading is not in
+    /// it: a Calc drawing object's text is an EditEngine text, <c>IsAddExtLeading()</c> is false
+    /// there, and <see cref="MetricGrid"/>'s other EditEngine users have said so all along.
+    /// </para>
+    /// <para>
+    /// Measured on a probe workbook of sixteen wrapping text boxes — four faces × four sizes,
+    /// nothing else on the sheet and no print scale, so a baseline pitch is read straight off the
+    /// reference's own text origins. Against 26.2.4.2, over 19 boxes: <c>ascent + descent</c> is
+    /// right to a mean of <strong>0.008 pt</strong> and a worst case of 0.02, which is the
+    /// hundredth-of-a-millimetre the size itself is quantised to; carrying the leading is out by a
+    /// mean of <strong>0.237 pt</strong> and by <strong>1.02 pt</strong> at 24 pt; and putting the
+    /// metrics through <see cref="MetricGrid.Spreadsheet"/> as a cell's are is out by 0.035 and
+    /// wrong in both directions. So the device is <em>not</em> the missing half here, and the
+    /// leading was.
+    /// </para>
+    /// <para>
+    /// <strong>Why it survived nine rounds: two of the four faces have no line gap.</strong>
+    /// Carlito's is zero and DejaVu Sans' is zero, so the two rules agree exactly on them and
+    /// disagree by 3.8% on both Liberation faces — which is what made this visible on
+    /// <c>070_Equipment_inventory_list…xlsx</c>, whose slicer notices fall back to Liberation Serif,
+    /// and invisible on the Carlito workbooks the shape path was built against.
+    /// </para>
     /// </remarks>
     /// <param name="size">The em size.</param>
     /// <param name="family">The family name, or null for the furniture's own face.</param>
     public static Length ShapeLineHeightAt(Length size, string? family)
         => FaceFor(family).Metrics is { } metrics
-            ? Ungridded(metrics).ScaledLineHeight(size)
+            ? Height(Ungridded(metrics), size)
             : size * 1.15;
 
     /// <inheritdoc cref="ShapeLineHeightAt(Length, string?)"/>
@@ -296,8 +325,19 @@ internal static class SheetBandText
     /// </param>
     public static Length ShapeLineHeightAt(Length size, string? family, bool bold)
         => FaceFor(family, bold).Metrics is { } metrics
-            ? Ungridded(metrics).ScaledLineHeight(size)
+            ? Height(Ungridded(metrics), size)
             : size * 1.15;
+
+    /// <summary>Ascent plus descent, each scaled on its own, with no external leading.</summary>
+    /// <remarks>
+    /// Spelled out rather than reached through <c>ScaledLineHeight</c>, because that function's
+    /// ungridded branch is <c>ascent + descent + lineGap</c> and the leading is exactly what an
+    /// EditEngine line does not have. On a grid the two would have to be one call — the device
+    /// rounds the height and the ascent and leaves the descent as the remainder — and no grid is
+    /// what the measurement above says this path takes.
+    /// </remarks>
+    private static Length Height(LineMetrics metrics, Length size)
+        => metrics.ScaledAscent(size) + metrics.ScaledDescent(size);
 
     /// <inheritdoc cref="AscentAt(Length)"/>
     /// <param name="size">The em size.</param>

@@ -39,12 +39,20 @@ namespace Paperless.Spreadsheets.Tests;
 /// <strong>The fixture is four cells and changes one thing at a time.</strong> All four bodies are
 /// one 20 pt Liberation Sans run in a 300 pt-wide shape stating <c>vertOverflow="clip"</c>; the
 /// face is named rather than inherited so the arithmetic below is not at the mercy of what a
-/// theme resolves to. Liberation Sans at 20 pt is an 18.11 pt ascent, a 23.00 pt line and a
+/// theme resolves to. Liberation Sans at 20 pt is an 18.11 pt ascent, a <b>22.34</b> pt line and a
 /// 4.24 pt ink descender on <c>p</c> and <c>y</c>.
+/// </para>
+/// <para>
+/// <strong>That line was 23.00 pt when this fixture was built and the four outcomes did not
+/// move.</strong> Round 69 measured the shape line height off 26.2.4.2 and took the external
+/// leading out of it — <see cref="SheetChartDeviceMetricTests"/> carries the measurement — which
+/// is Liberation Sans' 67/2048, 0.65 pt at 20 pt. Every one of the four cases keeps its side of
+/// its own threshold by more than that, which is the property the fixture was designed for and is
+/// worth stating: the numbers below are recomputed, not the outcomes.
 /// </para>
 /// <list type="bullet">
 /// <item><description>
-/// <c>rect</c>, 27.5 pt tall, <c>CAPSFIT</c>. Room is 27.5 − 7.2 = 20.30 pt, so the 23.00 pt line
+/// <c>rect</c>, 27.5 pt tall, <c>CAPSFIT</c>. Room is 27.5 − 7.2 = 20.30 pt, so the 22.34 pt line
 /// overflows and the clip engages; the ink reaches 18.11 pt and is drawn.
 /// </description></item>
 /// <item><description>
