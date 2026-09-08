@@ -544,8 +544,23 @@ public readonly record struct SlideEscapement(int Percent, int Proportion)
 /// </para>
 /// <para>
 /// A <c>text:a</c> inside a draw shape's text is one: <c>xmloff/source/text/txtparai.cxx</c>
-/// :1352-1370 builds an <c>XMLUrlFieldImportContext</c> whenever the cursor has no
+/// :1352-1374 builds an <c>XMLUrlFieldImportContext</c> whenever the cursor has no
 /// <c>HyperLinkURL</c> property, which is every Draw and Impress text and no Writer one.
+/// </para>
+/// <para>
+/// So is a run carrying an <c>a:hlinkClick</c>, through the other importer:
+/// <c>TextRun::insertAt</c> builds a <c>com.sun.star.text.TextField.URL</c> whose
+/// <c>Representation</c> is the run's own <c>a:t</c>
+/// (<c>oox/source/drawingml/textrun.cxx</c>:88, :149-157) — <strong>one field per
+/// <c>a:r</c></strong>, so a link PowerPoint split across runs is several fields and fills
+/// exactly as one does. Which elements qualify is <see cref="DrawingHyperlink.MakesField"/>'s
+/// answer and not the element's presence.
+/// </para>
+/// <para>
+/// A Writer hyperlink is <em>not</em> one, in a paragraph or inside a text box, and neither is a
+/// <c>.ppt</c>'s here yet although LibreOffice's own <c>.ppt</c> filter makes one
+/// (<c>filter/source/msfilter/svdfppt.cxx</c>:6936). See
+/// <c>probes/pptx-field-r82/results.md</c>, which measured all three.
 /// </para>
 /// </param>
 public readonly record struct SlideTextRun(

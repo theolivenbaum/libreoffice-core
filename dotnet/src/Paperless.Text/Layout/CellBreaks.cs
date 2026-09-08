@@ -51,6 +51,11 @@ public readonly record struct CellBrokenSpan(int Start, int Length)
 /// <summary>
 /// Adds the break opportunities a <see cref="CellBrokenSpan"/> carries to a paragraph's own.
 /// </summary>
+/// <remarks>
+/// They are <em>added</em>, never substituted, which is what keeps a stretch that fits its line
+/// inert: the fill takes the last opportunity that fits, so one inside a stretch is only ever
+/// chosen when the stretch itself does not fit the room left.
+/// </remarks>
 internal static class CellBreaks
 {
     /// <summary>
@@ -69,7 +74,8 @@ internal static class CellBreaks
     }
 
     /// <summary>
-    /// The paragraph's break opportunities with a cell boundary added inside every stretch.
+    /// The paragraph's break opportunities with every stretch's own start, and every cell boundary
+    /// inside it, added to them.
     /// </summary>
     /// <remarks>
     /// The boundaries are grapheme clusters rather than UTF-16 indices, which is what
@@ -94,6 +100,25 @@ internal static class CellBreaks
         {
             int start = Math.Max(0, span.Start);
             int end = Math.Min(text.Length, span.End);
+
+            // The stretch's own start is always one of them. `lineBreaksList.push_back(0)` is
+            // unconditional in the branch — *"always add 1st line break (safe, we already know we
+            // are larger than nXWidth)"* — and it is what carries the whole field onto the next
+            // line when even its first cell does not fit and the line already has content
+            // (`bFieldStartNextLine`, `impedit3.cxx`:1148-1149 and :1173-1180). It is
+            // reachable only in that case: a fill takes the last opportunity that fits, so the
+            // stretch's start can only win when nothing inside the stretch does.
+            //
+            // Measured on `probes/pptx-field-r82/`'s `g23`, where a `(` immediately precedes the
+            // link and is therefore no break opportunity of its own: 26.2.4.2 leaves the `(` at
+            // the end of the line and puts the whole link on the next one, and without this the
+            // line breaks in front of the `(` instead.
+            if (start > 0 && start < text.Length)
+            {
+                added[start] = true;
+                any = true;
+            }
+
             if (end - start <= 1) continue;
 
             TextElementEnumerator cells =
