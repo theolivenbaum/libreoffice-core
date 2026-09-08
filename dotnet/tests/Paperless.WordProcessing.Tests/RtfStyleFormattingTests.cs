@@ -100,7 +100,7 @@ public sealed class RtfStyleFormattingTests
     /// <c>getDefaultSPRM</c> answers <c>24</c> — twelve points — for a size
     /// (<c>sw/source/writerfilter/rtftok/rtfsprm.cxx</c>:158-161), and
     /// <c>cloneAndDeduplicateSprm</c>'s <em>"not found - try to override style with default"</em>
-    /// branch (:311-327) writes it over the paragraph for every property the <em>named</em> style
+    /// branch (:319-327) writes it over the paragraph for every property the <em>named</em> style
     /// states. Only the ancestors' statements escape it.
     /// </remarks>
     [Fact]

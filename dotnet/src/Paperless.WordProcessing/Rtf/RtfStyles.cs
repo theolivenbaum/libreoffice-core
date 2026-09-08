@@ -12,7 +12,7 @@ namespace Paperless.WordProcessing.Rtf;
 /// names.</strong> That asymmetry is measured — 53 one-page probes in
 /// <c>probes/rtf-resid-r80/genmatrix.py</c>, thirteen paragraph properties against 26.2.4.2 — and it
 /// is not a quirk of the corpus: it is <c>cloneAndDeduplicateSprm</c>
-/// (<c>sw/source/writerfilter/rtftok/rtfsprm.cxx</c>:283-339), whose <em>"not found - try to
+/// (<c>sw/source/writerfilter/rtftok/rtfsprm.cxx</c>:290-340), whose <em>"not found - try to
 /// override style with default"</em> branch writes <c>getDefaultSPRM</c>'s value onto the paragraph
 /// as direct formatting for every paragraph property the <em>named</em> style states and the
 /// paragraph does not. So the named style's own <c>\sb \sa \li \ri \fi \sl</c> are each reset to

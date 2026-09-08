@@ -58,7 +58,7 @@ Every citation below was opened and read in `/home/user/libreoffice-core` at the
 ### 1. A paragraph takes nothing from the paragraph properties of the style it *names*
 
 The seat is `cloneAndDeduplicateSprm`
-(`sw/source/writerfilter/rtftok/rtfsprm.cxx`:283-339). `RTFDocumentImpl::getProperties`
+(`sw/source/writerfilter/rtftok/rtfsprm.cxx`:290-340). `RTFDocumentImpl::getProperties`
 (`rtfdocumentimpl.cxx`:534-637) ends with
 
 ```cpp
@@ -75,7 +75,7 @@ RTFValue::Pointer_t const pDefault(getDefaultSPRM(rSprm.first, nStyleType));
 if (pDefault) { ret.set(rSprm.first, pDefault); }
 ```
 
-branch (:311-327) and writes RTF's default onto the paragraph as **direct** formatting. The
+branch (:319-327) and writes RTF's default onto the paragraph as **direct** formatting. The
 ancestors' statements are not in `aStyleSprms` — `lcl_copyFlatten` is given the named entry alone —
 so they are never visited and reach the paragraph through Writer's own style chain.
 

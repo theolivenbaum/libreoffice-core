@@ -16,7 +16,7 @@ namespace Paperless.WordProcessing.Tests;
 /// The rule is not "the style's formatting cascades". A paragraph's direct formatting is rebuilt
 /// from RTF's own defaults for every property the style it <em>names</em> states —
 /// <c>cloneAndDeduplicateSprm</c>'s <em>"not found - try to override style with default"</em>
-/// branch, <c>sw/source/writerfilter/rtftok/rtfsprm.cxx</c>:311-327, over the table in
+/// branch, <c>sw/source/writerfilter/rtftok/rtfsprm.cxx</c>:319-327, over the table in
 /// <c>getDefaultSPRM</c> (:154-224) — and only the ancestors' statements escape it, because
 /// <c>lcl_copyFlatten</c> (<c>rtfdocumentimpl.cxx</c>:490-514) hands that branch the named entry's
 /// own <c>pPr</c> and nothing above it.
