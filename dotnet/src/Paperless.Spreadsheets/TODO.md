@@ -2443,11 +2443,15 @@ Not yet, and why:
   read the attribute once. `SIL_TDB648.ods` **60 → 92 pages against 88**.
   `probes/ods-page-r77/results.md` §2.
 
-  **What is still not read is every other `draw:` element.** 380 `draw:custom-shape`, 148
-  `draw:a`, 78 `draw:control`, 31 `draw:connector` and 17 `draw:line` sit directly in cells of
-  that column and the reader looks for `draw:frame` alone — no fill, no outline, no text. It is
-  the ODF twin of *a worksheet shape's fill and outline are not read at all*, and no gate column
-  can see it.
+  ~~**What is still not read is every other `draw:` element.**~~ **Read now, round 82.**
+  `OdsDrawings.Shapes` yields every `draw:` element a cell holds rather than `draw:frame` alone.
+  Round 77's figures here were counted over a cell's *direct* children and one of them was
+  doubled; recounted, the direct-child census is **371 `draw:custom-shape`, 72 `draw:a`, 72
+  `draw:control`, 31 `draw:connector` and 17 `draw:line`**, and descending through the two
+  transparent wrappers it is **604 custom shapes, 41 lines, 31 connectors and 72 controls**.
+  **All of the text is in the custom shapes** — 137 of the 604 carry ink, in 32 documents — and
+  none of the other three kinds carries a single character, which is why this round drew the text
+  and left the fill and the outline. See the two entries below.
 
 - **An ODF sheet's automatic row heights are recalculated for its first 200 rows only, and this
   tree recalculates every one of them.** `ScXMLTableRowContext` excludes a block ending past row
@@ -2493,17 +2497,40 @@ Not yet, and why:
   exists, the binary says what it does, and the reference PDF settles it — `fy20-may20-sep20.xlsx`
   has a second column band whose content stops at row 76, and LibreOffice prints two pages of that
   band against a full 94.
-- **A shape anchored in a cell reaches that cell's text, and the layout measures it.**
-  `OdfContentReader.ReadShape` appends a `draw:frame`'s or `draw:custom-shape`'s paragraphs to the
-  `ContentTableCell` it is anchored in — which is right for extraction and wrong for
-  `SheetOptimalRowHeights` and `SheetTextOverflow`, both of which take `cell.GetText()` as the
-  cell's own text. In Calc a drawing object is in the drawing layer and
-  `ScColumn::GetOptimalHeight` never sees it. **Reach 253 cells in 46 of the 307 converted
-  `.ods`**, and it cost two page counts once a multi-paragraph cell started sizing its row
-  (round 80): `EHEST-Pre-departure-checklist` 27 pages against 24 and
-  `SSRO_Quarterly_Statistical_Bulletin_Q3201617_DATA` 11 against 4, neither of which holds a
-  multi-paragraph *cell* at all. Fixing it needs a marker the reader does not currently emit.
-  `dotnet/probes/ods-resid-r80/results.md` §5.
+- ~~**A shape anchored in a cell reaches that cell's text, and the layout measures it.**~~
+  **Done, round 82.** `OdfContentReader` wraps a spreadsheet cell's `draw:` child in a
+  `SectionKind.Frame` section, `ContentTableCell.GetOwnText()` skips it, and every cell question in
+  this module asks that instead of `GetText()` — the used range, the last data row per column, the
+  optimal row height and the print-area overflow, plus the HTML writer and a chart's cached range.
+  Extraction is unchanged. `EHEST-Pre-departure-checklist` went 27 pages against 24 to **24**, and
+  `SSRO_Quarterly_Statistical_Bulletin_Q3201617_DATA` 11 against 4 to **4**.
+  `dotnet/probes/ods-draw-r82/results.md` §1.
+- **A worksheet shape with no text and no picture is not drawn and does not widen the block.**
+  `OdsDrawings.Read` answers null for one, so it is absent from `SheetDrawingArea` as well —
+  and `ScDrawLayer::GetPrintArea` (`drwlayer.cxx`:1344-1424) widens the printed block to cover
+  **every** object on the draw page, whatever it holds. **467 of the 604 `draw:custom-shape` in
+  the cells of the converted `.ods` carry no ink**, along with 72 `draw:control`, 41 `draw:line`
+  and 31 `draw:connector`. Giving them an extent means giving them something to paint at the same
+  time, which is the fill and outline item below; doing the first without the second adds blank
+  paper.
+- **An ODF shape's fill and outline are read for nothing.** `OdsShapeText` already resolves the
+  shape's `draw:style-name` graphic style for its insets and adjustments, and that style states
+  `draw:fill`, `draw:fill-color`, `draw:fill-gradient-name`, `draw:stroke` and `svg:stroke-color`
+  beside them — 137 of 137 inked shapes state the first two. `SheetDrawing.Fill` and `.Stroke`
+  exist and are set only by `XlsxNoteCaptions`. No gate column can see a fill, which is why this
+  is recorded rather than done.
+- **A preset's adjustment values are not carried across from ODF.** `OdsShapeText.Preset` maps
+  `draw:type="ooxml-roundRect"` onto `CustomShapeGeometry`'s `roundRect` and resolves it at the
+  preset's *default* adjustment, because ODF states the adjustments as `draw:modifiers` in the
+  shape's own coordinate space where DrawingML's guides are hundred-thousandths. A round rectangle
+  at the wrong adjustment gets a text rectangle a few points too wide, which changes where its
+  text wraps and — on a shape stating `style:overflow-behavior="clip"` — how many of its lines
+  survive. `076_Inventory_list_accessibility_guide…ods` draws 4932 characters against 26.2.4.2's
+  4782 and its fourteen shapes are all `roundRect` or `round1Rect`.
+- **A `text:tab` inside a sheet shape contributes nothing.** Measured on 26.2.4.2 as 1.09 pt of
+  advance and no character, on a shape whose paragraph style states no tab stops; a shape that
+  *does* state tab stops is unreached by the corpus and unimplemented. 30 tabs in 5 of the 307.
+  `OdsShapeText.Append`.
 - **The used area counts cells with content only.** Calc's own search also counts a cell carrying
   nothing but a style, because its attribute array knows about it. The content tree records no
   formatting, so a sheet whose last two columns are empty-but-shaded comes out narrower here.

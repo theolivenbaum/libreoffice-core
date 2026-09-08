@@ -199,7 +199,7 @@ internal static class SheetTextOverflow
                 if (cell.Value is not null and not string) continue;
                 if (sheet.Grid.Columns.IsHidden(cell.Column)) continue;
 
-                string text = cell.GetText();
+                string text = cell.GetOwnText();
                 if (text.Length == 0) continue;
 
                 // Nothing overflows into an occupied cell, and checking first is what keeps a

@@ -111,6 +111,28 @@ public sealed partial class OdfContentReader
     /// </remarks>
     public bool CellTextIsVerbatim { get; set; }
 
+    /// <summary>
+    /// True when a drawing shape anchored in a table cell is read as a flow of its own rather
+    /// than as part of the cell's text.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A spreadsheet is the one family that anchors a drawing <em>inside</em> a table cell:
+    /// LibreOffice's Calc exporter writes a cell-anchored object as a child of the
+    /// <c>table:table-cell</c> it is fastened to (<c>sc/source/filter/xml/xmlexprt.cxx</c>,
+    /// <c>WriteShapes</c>), so a walk that reads the cell reads the shape. Its paragraphs belong
+    /// in the cell for extraction — the words really are in that cell of that sheet — and belong
+    /// nowhere near it for layout, because in Calc the object is in the drawing layer and no cell
+    /// question can see it. See <see cref="ContentTableCell.GetOwnText"/>.
+    /// </para>
+    /// <para>
+    /// Set by the ODS reader alone. In a word-processing document a shape is anchored inside a
+    /// paragraph and already hoists to a frame section of its own
+    /// (<see cref="ReadAnchoredShape"/>), so nothing there reaches this.
+    /// </para>
+    /// </remarks>
+    public bool CellShapesAreOwnFlow { get; set; }
+
     private readonly List<int> _listCounters = [];
     private OdfListStyle? _currentListStyle;
     private int _listLevel;
@@ -239,7 +261,7 @@ public sealed partial class OdfContentReader
         }
         else if (ns is OdfNamespaces.Draw or OdfNamespaces.Dr3d)
         {
-            ReadShape(element, target);
+            ReadCellAnchoredShape(element, target);
             return;
         }
         else if (ns == OdfNamespaces.Office)
@@ -951,6 +973,44 @@ public sealed partial class OdfContentReader
         }
 
         _hoisted.Add(frame);
+    }
+
+    /// <summary>
+    /// Reads a shape that a block-level walk found, keeping a spreadsheet cell's shape text out
+    /// of the cell's own.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The section is added only once the shape turns out to hold something, so a picture-only
+    /// frame — which contributes a <see cref="ContentImage"/> and no text — is unaffected, and a
+    /// shape holding nothing at all leaves the cell exactly as it was.
+    /// </para>
+    /// <para>
+    /// The reading state is suspended around the walk for the same reason
+    /// <see cref="ReadAnchoredShape"/> suspends it: the shape's paragraphs are ordinary
+    /// <c>xmloff</c> text and are collapsed like any other, where the cell's own are taken
+    /// verbatim. See <see cref="CellTextIsVerbatim"/>, whose remarks have always said so.
+    /// </para>
+    /// </remarks>
+    private void ReadCellAnchoredShape(XElement shape, ContentNode target)
+    {
+        if (!CellShapesAreOwnFlow || target is not ContentTableCell cell)
+        {
+            ReadShape(shape, target);
+            return;
+        }
+
+        ContentSection frame = new()
+        {
+            Kind = SectionKind.Frame,
+            Name = Attribute(shape, OdfNamespaces.Draw, "name"),
+        };
+
+        ReadingState state = SuspendReading();
+        ReadShape(shape, frame);
+        ResumeReading(state);
+
+        if (frame.Children.Count > 0) cell.Children.Add(frame);
     }
 
     /// <summary>

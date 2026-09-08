@@ -527,7 +527,7 @@ public static class SheetHtmlWriter
         ContentTableCell? cell = sheet.CellAt(row, column);
         SheetCellFormat format = sheet.Formats.At(row, column);
         SheetCellDecoration decoration = sheet.Formatting.At(row, column);
-        string text = cell?.GetText() ?? string.Empty;
+        string text = cell?.GetOwnText() ?? string.Empty;
 
         // The same predicate the drawn cell aligns by — `SheetTextLayout.Place`'s
         // `cell.Value is not null and not string` — so the two agree about every cell. It takes in

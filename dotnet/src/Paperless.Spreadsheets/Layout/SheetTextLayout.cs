@@ -168,7 +168,7 @@ internal static class SheetTextLayout
     /// </remarks>
     /// <param name="cell">The neighbouring cell, or null when the sheet has nothing there.</param>
     public static bool IsAvailable(ContentTableCell? cell)
-        => cell is null || (cell.Value is null && cell.GetText().Length == 0);
+        => cell is null || (cell.Value is null && cell.GetOwnText().Length == 0);
 
     /// <summary>Draws one cell's text, or nothing when there is none to draw.</summary>
     /// <param name="sink">Where to draw.</param>

@@ -84,4 +84,56 @@ public sealed class ContentTableCellTextTests
 
         row.GetText().TrimEnd('\n').ShouldNotContain("\n");
     }
+
+    /// <summary>
+    /// A shape anchored in the cell is in the cell's text and not in its own.
+    /// </summary>
+    /// <remarks>
+    /// The two answers exist because two callers want different ones: a caller indexing a
+    /// spreadsheet wants the text box's words under the cell they are anchored in, and a renderer
+    /// wants what Calc's cell storage holds, which is not the drawing layer. See
+    /// <see cref="ContentTableCell.GetOwnText"/>.
+    /// </remarks>
+    [Fact]
+    public void AFrameSectionIsInTheCellsTextAndNotInItsOwn()
+    {
+        ContentTableCell cell = Cell("Alpha");
+        ContentSection frame = new() { Kind = SectionKind.Frame };
+        ContentParagraph inside = new();
+        inside.Children.Add(new ContentRun { Text = "Bravo" });
+        frame.Children.Add(inside);
+        cell.Children.Add(frame);
+
+        cell.GetText().ShouldBe("Alpha\nBravo");
+        cell.GetOwnText().ShouldBe("Alpha");
+    }
+
+    /// <summary>A cell holding nothing but a shape has no text of its own.</summary>
+    /// <remarks>
+    /// This is the case that decides a page count: such a cell used to count as content, so it
+    /// widened the used area, sized its row by the shape's paragraphs and spilled the shape's
+    /// longest line across the columns beside it.
+    /// </remarks>
+    [Fact]
+    public void ACellHoldingOnlyAShapeHasNoTextOfItsOwn()
+    {
+        ContentTableCell cell = new();
+        ContentSection frame = new() { Kind = SectionKind.Frame };
+        ContentParagraph inside = new();
+        inside.Children.Add(new ContentRun { Text = "Bravo" });
+        frame.Children.Add(inside);
+        cell.Children.Add(frame);
+
+        cell.GetText().ShouldBe("Bravo");
+        cell.GetOwnText().ShouldBeEmpty();
+    }
+
+    /// <summary>The own text drops exactly one terminator, as the whole text does.</summary>
+    [Fact]
+    public void TheOwnTextDropsOneTerminatorToo()
+    {
+        Cell("Alpha", "Bravo", string.Empty).GetOwnText().ShouldBe("Alpha\nBravo\n");
+        Cell("Alpha").GetOwnText().ShouldBe("Alpha");
+        Cell(string.Empty).GetOwnText().ShouldBe(string.Empty);
+    }
 }
