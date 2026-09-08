@@ -73,6 +73,14 @@ can call it — DOCX does today, through `WordThemeColour`; XLSX's `theme=` inde
       a caller: nothing reads `a:lnRef`/`a:fillRef`/`a:effectRef` yet, and until something does
       there is no colour to pass in.
 - [ ] Format scheme: `fillStyleLst`, `lnStyleLst`, `effectStyleLst`, `bgFillStyleLst`
+
+> **Checked 2026-09-08 and the two items above are out of date, though not closed here.**
+> `a:fillRef` and `a:lnRef` *are* read — `DrawingML/DiagramStyles.cs`:77-78 — and
+> `DrawingML/DrawingStyleMatrix.cs` exists and was used by the round that landed worksheet shape
+> fill (`probes/sheet-fill-r84/`), which measured the matrix as deciding 86 shapes in 3 documents
+> because 497 of the 583 shapes stating an `xdr:style` also state a fill of their own that wins.
+> So "what is missing is a caller" no longer holds. Left unticked because the round that owns this
+> should say what of the format scheme remains, rather than a passer-by guessing.
 - [x] The font scheme, in `DrawingFontScheme`, hung off `DrawingTheme.Fonts` as a non-positional
       member so that every caller constructing a theme from a colour scheme alone keeps compiling.
       Six typefaces, major and minor across Latin, East Asian and complex script — and it exists for

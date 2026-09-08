@@ -3058,6 +3058,17 @@ file's margins alone would give and matches LibreOffice's 21.11 pt to within 0.1
       output area (`sc/source/ui/view/output2.cxx:1595-2290`). The fix is a per-page lead-in of
       the columns left of the band, drawn for their overflow alone. **Not chart-related**: that
       sheet holds no drawing at all
+
+      > **REFUTED 2026-09-08 — do not implement this fix.** A later round measured that the
+      > lead-in loop is behind `!bTaggedPDF` (`sc/source/ui/view/output2.cxx`:1541-1543),
+      > `UseTaggedPDF` defaults **true**, and every reference PDF this project compares against is
+      > therefore tagged. `Layout/SpreadsheetPages.cs`:325-365 carries the measurement in full,
+      > including the control: rendering `essd-16-3433-2024-t02.xlsx` through the same 26.2.4.2
+      > with only that filter option changed gives `439 / 0 / 0 / 0` tagged and
+      > `439 / 315 / 152 / 49` untagged, and the untagged figures are ours to within a word.
+      > Drawing the lead-in anyway put **617 words of another column's spill on five pages of
+      > `RCO_VOR_Master_List_082824.xlsx` that LibreOffice leaves blank**. The entry is kept
+      > because the *diagnosis* above is correct and worth reading; only its proposed fix is wrong.
 - [ ] **Two smaller word-count differences from the same whole-corpus sweep**, neither a cascade:
       `sheet-features.ods` renders **46 words against the reference's 45** — one *more*, the
       direction that usually means a cell the reference suppresses rather than one we invent — and

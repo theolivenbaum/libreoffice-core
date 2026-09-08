@@ -275,6 +275,14 @@ picture agree with LibreOffice's, and both are invisible until the colours are c
       image draws. At the cap the grid is drawn as far as it goes and the rest is left unpainted,
       which is visible and therefore reportable, unlike stretching the tile.
 - [ ] **Nothing in any reader emits a `GradientPaint`, a `BitmapPaint` or a `RasterImage` yet.**
+      **Checked 2026-09-08: half of this is now false and half still holds.** The three paint types
+      live in `Paperless.Core` — `Graphics/Paint.cs`:68 and :137, `Graphics/GlyphRun.cs`:217 — so a
+      reader emits them without referencing this library at all, and three do:
+      `Presentations/Ooxml/PptxSlideLayout.cs`, `MsBinary/PptFills.cs` and
+      `OpenDocument/OdpSlideLayout.cs`. What *is* still true is the ProjectReference: none of
+      `Paperless.WordProcessing`, `Paperless.Spreadsheets` or `Paperless.Presentations` references
+      `Paperless.Rendering`, so the **decoder** (`Images/RasterImageDecoder.cs`) is what they cannot
+      reach. Reword this item around the decoder rather than the paints.
       The decoder is public in this library and `Paperless.WordProcessing`,
       `Paperless.Spreadsheets` and `Paperless.Presentations` have no `ProjectReference` on
       `Paperless.Rendering` — one line each, and the reason a `p:pic`, a `w:drawing` and a

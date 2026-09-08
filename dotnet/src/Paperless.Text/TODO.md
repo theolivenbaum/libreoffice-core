@@ -393,6 +393,14 @@ gaps:
 - [ ] Tab stops. `ParagraphFormat` carries them and the default interval; nothing advances to them yet,
       and doing it properly means the line filler has to be tab-aware, since a tab's width depends on
       where in the line it falls.
+
+> **Checked 2026-09-08, and only partly.** `Layout/TabRuler.cs` exists and is referenced from
+> `SlideTextLayout` and `ParagraphFormat`, so "nothing advances to them yet" is stale; the fidelity
+> suite's four open `TabStopComparisonTests` failures are about *which* stop a list label advances
+> to, which is a different question from none at all. For justification I could **not** confirm the
+> stretching: `Layout/JustificationShrink.cs` implements LibreOffice's *shrink* rule, and I found no
+> code spreading a line's slack. Both items are left unticked deliberately — the checks above are a
+> passer-by's, not the owning round's.
 - [ ] Whether space-before collapses against the previous paragraph's space-after. Word takes the
       larger, Writer adds them, and which applies is a compatibility flag — so it belongs to whatever
       assembles paragraphs into a page and knows the flag, not to the paragraph.
