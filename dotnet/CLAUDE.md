@@ -2264,6 +2264,55 @@ outline for 438 of the 644; `CustomShapeGeometry` already answers `FillOutline` 
 No gate column can see any of it — a fill and an outline add no glyphs and no pages — which is
 the `w:pgBorders` shape again and the argument for ranking on ink.
 
+### A wrapping cell whose text begins outside its own column draws nothing at all
+
+**Only a wrapping cell is clipped to its column, and only a wrapping cell has a paper.**
+`DrawEditParam::calcPaperSize` (`sc/source/ui/view/output2.cxx`:2684-2700) gives the EditEngine
+`rAlignRect.GetWidth() − nLeftM − nRightM` under `if (rParam.mbBreak)` alone; a cell that does not
+wrap keeps the initial `Size(1000000, 1000000)` and writes across whatever is beside it.
+`calcMargins` (`:2665-2682`) adds `ATTR_INDENT` to whichever side the cell is aligned to, so an
+indented cell in a narrow column reaches a **negative** paper — and a negative paper does not stop
+the breaking: `ImpEditEngine::calculateMaxLineWidth` (`editeng/source/editeng/impedit3.cxx`:530-545)
+ends with `if (nMaxLineWidth <= 0) nMaxLineWidth = 1;`, so every character takes a line of its own.
+What suppresses the cell is **where the block starts**: laid out at the cell's left edge plus margin
+plus indent, it meets nothing of the cell's own rectangle once that is past the column's right edge,
+and `DrawText_ToRectangle` returns on `!aContentRange.overlaps(aClipRange)` (`impedit3.cxx`:3408-3440).
+
+**The predicate a reading of `calcPaperSize` suggests — "the paper is not positive" — is wrong, and
+it fits the first eight measurements.** Eight column widths of `075_Idea_planner_tasks` put the step
+between 5.25 pt and 6.11 pt of column against a margin and indent of 5.70 pt, which both candidate
+cliffs straddle. `features/sheet-narrow-wrap.fods` separates them: a **1.42 pt column with no
+indent** has a negative paper and 26.2.4.2 draws `N A R R O W` on six lines in it. Four variants
+with `indent="1"` removed are drawn in full at every width. `SheetTextLayout.StartsOutsideItsCell`
+is `margin + indent >= column width` for that reason. Reach on the gate is **one document in 947 and
+one in the 307 converted `.ods`**, both the same workbook, and both gain their verdict;
+21 of 21 one-attribute variants agree with 26.2.4.2 afterwards. `probes/xlsx-chart-r84/`.
+
+### To ask whether a workbook's divergence is its chart's, take the chart out
+
+**`strip-charts.py` removes every `xdr:` anchor holding a `graphicFrame` and leaves the sheet
+alone**, so the chart's own contribution is the difference between the two renderings on each side
+separately — no guess about where on the page the chart sits. Over the thirteen `.xlsx` gate
+failures the brief called "charts in workbooks": **six are the chart and nothing else, one is a
+slicer's fallback shape, and six are the sheet with the chart taking no part.** Three of the
+thirteen — and both of the two non-`chartset` `.xlsx` failures — hold **no chart part at all**;
+`chartset-*` is a batch name and not a census, so census the zip before believing a batch label.
+
+**Two of the six chart rows are a measured ceiling and cannot be won.** On
+`057_Simple_balance_sheet` we draw twenty category labels as real text turned 45° and 26.2.4.2
+draws **no turned text at all** on that page while carrying 331 glyph-sized filled paths against our
+114 — the shear rule this file already records, arriving on the sheets track. `065_Weight_loss_tracker`
+is the same shape, 120 fills against 12. Closing either would mean outlining glyphs to make a
+text-extraction gate greener.
+
+**And the volatile-date class is not what a `chartset` failure is made of.** Ten of the thirteen
+carry `TODAY()`; freezing each at the serial its own cache was built with (`devolatile.py`) moves
+**one** verdict and leaves the other nine's glyph deltas within five of where they were. A changed
+date changes *which* characters are drawn and not *how many* — `4/14/2017` and `8/24/2026` are both
+eight alphanumerics — so a volatile workbook drifts in ink and barely at all in the column the gate
+scores. The corollary is the useful half: **`TODAY()` can be frozen at the file's own cached serial**,
+which makes the reference recompute what the author saw and turns a decaying row into a stable one.
+
 ### Stored evidence decays silently, and the prose knows it while the data does not
 
 Three cases surfaced in a single day: a `words-after.tsv` carrying numbers from a sweep that
