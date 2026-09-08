@@ -1,5 +1,26 @@
 # The chartset cluster: a volatile-date confound and an axis-density defect
 
+> **RETRACTED IN PART, 2026-09-08.** The confound below stands and was confirmed. **The defect
+> below does not.** Round `chart-axis-r87` refuted it on two counts, both mine:
+>
+> 1. **`MaximumAutoIntervalCount = 10` is not a constant standing in for a rule.** It is the
+>    *first* pass, which is exactly what `VCartesianAxis.cxx:1563-1564` returns while nothing has
+>    been measured, and `ChartLayout.IntervalsThatFit` has been the port of
+>    `estimateMaximumAutoMainIncrementCount` — available length over label height, clamped into
+>    `[2,10]` — since before this probe was written. I read the constant and did not read the
+>    caller.
+> 2. **The step formula quoted below is the logarithmic routine.** A linear axis takes
+>    `calculateExplicitIncrementAndScaleForLinear`, which normalises the distance to
+>    1/2/5 × 10ᵏ and climbs that ladder (`ScaleAutomatism.cxx:882-910`). I read
+>    `calculateExplicitIncrementAndScaleForLogarithmic`, whose tail converts back to a logarithmic
+>    scale, and did not notice which function I was in.
+>
+> The witness's real seat is the worksheet's **print zoom** reaching a device-quantised label
+> height: every length in a chart's composition scales with the zoom and cancels, and the interval
+> cap is a ratio of a length to a height that does not. See `probes/chart-axis-r87/results.md`,
+> merged at `47259cf60`. The +18 decomposition below is right; the mechanism under it is not.
+
+
 Scope: the 14 `chartset` rows among the 33 original-corpus failures at
 `probes/orig-gate-r83`. Measured from that run's own renders; nothing rebuilt.
 
