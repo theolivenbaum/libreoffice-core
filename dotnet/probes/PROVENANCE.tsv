@@ -775,6 +775,31 @@ dotnet/probes/sheet-fill-r84/orig-words-after.tsv	2026-09-08	current	26.2.4.2	pr
 dotnet/probes/sheet-fill-r84/results.md	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
 dotnet/probes/sheet-fill-r84/score-bank.py	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
 dotnet/probes/sheet-fill-r84/sweep-ours.sh	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/ppt-fit-r85/autofit-trace.patch	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.Presentations/Layout/SlideTextLayout.cs;dotnet/src/Paperless.Presentations/MsBinary/PptSlideLayout.cs
+dotnet/probes/ppt-fit-r85/baselines.py	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.Presentations/Layout/SlideTextLayout.cs;dotnet/src/Paperless.Presentations/MsBinary/PptSlideLayout.cs
+dotnet/probes/ppt-fit-r85/census.py	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.Presentations/Layout/SlideTextLayout.cs;dotnet/src/Paperless.Presentations/MsBinary/PptSlideLayout.cs
+dotnet/probes/ppt-fit-r85/hash-list.sh	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.Presentations/Layout/SlideTextLayout.cs;dotnet/src/Paperless.Presentations/MsBinary/PptSlideLayout.cs
+dotnet/probes/ppt-fit-r85/odp-base.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.Presentations/Layout/SlideTextLayout.cs;dotnet/src/Paperless.Presentations/MsBinary/PptSlideLayout.cs
+dotnet/probes/ppt-fit-r85/odp-head.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.Presentations/Layout/SlideTextLayout.cs;dotnet/src/Paperless.Presentations/MsBinary/PptSlideLayout.cs
+dotnet/probes/ppt-fit-r85/paths.py	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.Presentations/Layout/SlideTextLayout.cs;dotnet/src/Paperless.Presentations/MsBinary/PptSlideLayout.cs
+dotnet/probes/ppt-fit-r85/persist.py	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.Presentations/Layout/SlideTextLayout.cs;dotnet/src/Paperless.Presentations/MsBinary/PptSlideLayout.cs
+dotnet/probes/ppt-fit-r85/placeholder-census.py	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.Presentations/Layout/SlideTextLayout.cs;dotnet/src/Paperless.Presentations/MsBinary/PptSlideLayout.cs
+dotnet/probes/ppt-fit-r85/placeholder-census.txt	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.Presentations/Layout/SlideTextLayout.cs;dotnet/src/Paperless.Presentations/MsBinary/PptSlideLayout.cs
+dotnet/probes/ppt-fit-r85/results.md	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.Presentations/Layout/SlideTextLayout.cs;dotnet/src/Paperless.Presentations/MsBinary/PptSlideLayout.cs
+dotnet/probes/ppt-fit-r85/sample-base.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.Presentations/Layout/SlideTextLayout.cs;dotnet/src/Paperless.Presentations/MsBinary/PptSlideLayout.cs
+dotnet/probes/ppt-fit-r85/sample-head.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.Presentations/Layout/SlideTextLayout.cs;dotnet/src/Paperless.Presentations/MsBinary/PptSlideLayout.cs
+dotnet/probes/ppt-fit-r85/score.py	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.Presentations/Layout/SlideTextLayout.cs;dotnet/src/Paperless.Presentations/MsBinary/PptSlideLayout.cs
+dotnet/probes/ppt-fit-r85/size-sweep.sh	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.Presentations/Layout/SlideTextLayout.cs;dotnet/src/Paperless.Presentations/MsBinary/PptSlideLayout.cs
+dotnet/probes/ppt-fit-r85/sizes-base.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.Presentations/Layout/SlideTextLayout.cs;dotnet/src/Paperless.Presentations/MsBinary/PptSlideLayout.cs
+dotnet/probes/ppt-fit-r85/sizes-head.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.Presentations/Layout/SlideTextLayout.cs;dotnet/src/Paperless.Presentations/MsBinary/PptSlideLayout.cs
+dotnet/probes/ppt-fit-r85/sizes-ref.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.Presentations/Layout/SlideTextLayout.cs;dotnet/src/Paperless.Presentations/MsBinary/PptSlideLayout.cs
+dotnet/probes/ppt-fit-r85/sizes.py	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.Presentations/Layout/SlideTextLayout.cs;dotnet/src/Paperless.Presentations/MsBinary/PptSlideLayout.cs
+dotnet/probes/ppt-fit-r85/slides-base.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.Presentations/Layout/SlideTextLayout.cs;dotnet/src/Paperless.Presentations/MsBinary/PptSlideLayout.cs
+dotnet/probes/ppt-fit-r85/slides-head.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.Presentations/Layout/SlideTextLayout.cs;dotnet/src/Paperless.Presentations/MsBinary/PptSlideLayout.cs
+dotnet/probes/ppt-fit-r85/sweep-ours.sh	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.Presentations/Layout/SlideTextLayout.cs;dotnet/src/Paperless.Presentations/MsBinary/PptSlideLayout.cs
+dotnet/probes/ppt-fit-r85/wrap-census.py	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.Presentations/Layout/SlideTextLayout.cs;dotnet/src/Paperless.Presentations/MsBinary/PptSlideLayout.cs
+dotnet/probes/ppt-fit-r85/wrap-census.txt	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.Presentations/Layout/SlideTextLayout.cs;dotnet/src/Paperless.Presentations/MsBinary/PptSlideLayout.cs
+dotnet/probes/ppt-fit-r85/wrap_shim.py	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.Presentations/Layout/SlideTextLayout.cs;dotnet/src/Paperless.Presentations/MsBinary/PptSlideLayout.cs
 dotnet/probes/rtf-htmautsp-r85/after-rtf.tsv	2026-09-08	current	26.2.4.2	present	current	
 dotnet/probes/rtf-htmautsp-r85/base-rtf.tsv	2026-09-08	current	26.2.4.2	present	current	
 dotnet/probes/rtf-htmautsp-r85/bodypict-after.txt	2026-09-08	current	26.2.4.2	present	current	

@@ -2245,8 +2245,26 @@ which is the honest state of them.
 
 ### Small differences that are measured and not yet closed
 
-- [ ] **The largest unexplained group on the track is not a chart at all: it is a `.ppt` outline
-      placeholder we do not shrink and the reference does.** Written down as a *measurement with
+- [x] **The largest unexplained group on the track is not a chart at all: it is a `.ppt` outline
+      placeholder we do not shrink and the reference does.** ***Closed in round 85 — the seat is
+      the line EditEngine *appends*, and it is in `SlideTextLayout` rather than in `SlideAutofit`.***
+      `ImpEditEngine::CreateAndInsertEmptyLine` (`impedit3.cxx`:1851-1996) measures an empty
+      paragraph's line, and the line after a trailing hard break, with its own copy of the
+      line-spacing arms: **no `SvxInterLineSpaceRule::Off` arm at all**, no `scaleYSpacingValue`
+      anywhere, whole-percent truncating integer arithmetic for `Prop`, and `Prop` skipped for the
+      body's first paragraph. So such a line keeps its full height while every other line in the
+      body is tightened by the fit's `fSpacingY`. Beside it, a paragraph's own space is a whole
+      hundredth of a millimetre and the scale **truncates** it (`impedit2.cxx`:4792-4802).
+      Established at the reference on the witness's own bullet pitches — 75.912 pt and 68.741 pt
+      resolve to 1029 / 1143 / 253 units with no free parameter, and the last baseline then lands
+      within **0.010 pt** of 26.2.4.2's. Row 0 goes from 12758 (fits by 113) to 13239 (overflows)
+      and the reference's row 1 is taken. **Slides 293 of 302 and `.odp` 295 of 302 before and
+      after, no page count and no verdict moved; 15 of the 56 differing dominant sizes fixed and
+      none newly wrong, total absolute size error 222.92 → 159.96 pt over 4530 pages.**
+      `probes/ppt-fit-r85/results.md`.
+
+      *The measurement that stood here, kept because the corrections below are the round's
+      result:* Written down as a *measurement with
       no diagnosis attached*, because it was found while choosing what to work and nothing has
       instrumented our own autofit against it.
 
@@ -2295,7 +2313,29 @@ which is the honest state of them.
         is the first thing to check against `impedit3.cxx`:1555-1600, which scales a *stated*
         proportional line spacing and the paragraph's own space.
 
-- [ ] **`Autofits`' wrap test is wrong for an outline placeholder, and the seat's own comment
+      ***Closed in round 85, and the last of those bullets is wrong.*** `Spaced` is a faithful
+      transcription and LibreOffice does apply `fSpacingY` to every **ordinary** line's height
+      (`impedit3.cxx`:1583-1600). The line it does not apply it to is the one
+      `CreateAndInsertEmptyLine` appends, which never reaches those arms at all — the witness's
+      body holds four such lines among ten and `4 × (1220 − 1098) = 488` less seven units of
+      truncated paragraph space is the whole of round 84's 113. `SlideAutofit` itself is
+      correct as it stands.
+
+- [x] ~~**`Autofits`' wrap test is wrong for an outline placeholder, and the seat's own comment
+      denies the reach it has.**~~ ***Refuted in round 85: the seat's comment is right and this
+      entry is withdrawn.*** The wrap decides `bAutoGrowWidth` only for a shape whose text kind was
+      rewritten to Rectangle, and that rewrite has exactly one condition —
+      `!aTextObj.GetOEPlaceHolderAtom() || nPlaceholderId == PptPlaceholder::NONE`
+      (`svdfppt.cxx`:1043-1047). **All 55 of the `wrapNone` Body shapes carry no
+      `OEPlaceholderAtom` at all**, which is precisely the case where the reference takes the wrap,
+      so the two rules never disagree on this corpus
+      (`probes/ppt-fit-r85/placeholder-census.py`). Corroborated at the reference: over every page
+      of both decks the drawn text sizes match 26.2.4.2 exactly, the sole exception being two
+      classes on page 6 of `Fundamentals_Module_1_basics.ppt` that are an **embedded chart** we
+      draw as text and the reference does not draw at all — so that page is not a fit case either.
+      The withdrawn reading follows.
+
+      **`Autofits`' wrap test is wrong for an outline placeholder, and the seat's own comment
       denies the reach it has.** `svdfppt.cxx`:1053-1055 derives `bAutoGrowWidth = !bWordWrap`
       **only** for a custom shape whose text kind resolved to Rectangle; every other branch — which
       is every real Body, HalfBody or QuarterBody placeholder — sets `bAutoGrowWidth = false` at

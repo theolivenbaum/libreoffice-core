@@ -276,10 +276,11 @@ public static partial class SlideTextLayout
         List<Block> blocks = [];
         Length total = Length.Zero;
 
-        foreach (SlideParagraph paragraph in body.Paragraphs)
+        for (int index = 0; index < body.Paragraphs.Count; index++)
         {
+            SlideParagraph paragraph = body.Paragraphs[index];
             Block? block = Measure(
-                paragraph, body, width, fonts, scaling, fontIndependentLineSpacing,
+                paragraph, body, width, fonts, scaling, fontIndependentLineSpacing, index,
                 body.Wraps ? null : available);
             if (block is null) continue;
 
@@ -831,6 +832,7 @@ public static partial class SlideTextLayout
         SlideFonts fonts,
         Scaling scaling,
         bool fontIndependentLineSpacing,
+        int paragraphIndex,
         Length? alignAgainst = null)
     {
         List<FormattedRun> runs = [];
@@ -890,10 +892,17 @@ public static partial class SlideTextLayout
 
         List<PlacedLine> lines = [];
         bool firstLine = true;
-        foreach (LineBox unaligned in laid.Lines)
+        for (int index = 0; index < laid.Lines.Count; index++)
         {
+            LineBox unaligned = laid.Lines[index];
             LineBox box = Realigned(unaligned, format, alignAgainst, firstLine);
             firstLine = false;
+
+            // The line EditEngine appends for an empty paragraph, or after a paragraph's trailing
+            // hard line break, is measured by a different function and takes none of the fit's
+            // line-spacing scale. See Appended.
+            bool appended = index == laid.Lines.Count - 1 && box.Line.Start >= box.Line.End;
+
             if (!fontIndependentLineSpacing)
             {
                 // The face's own metrics — but its ascent and descent only, with no external
@@ -923,17 +932,19 @@ public static partial class SlideTextLayout
                 // directions; without it, 195 of 195.
                 if (faceLine.Twips == faceHeight.Twips) faceLine = faceHeight;
 
-                lines.Add(Spaced(
-                    new PlacedLine(
-                        box,
-                        ascent > Length.Zero ? ascent : box.Baseline,
-                        faceLine,
-                        faceHeight),
-                    scaling));
+                Length faceAscent = ascent > Length.Zero ? ascent : box.Baseline;
+
+                lines.Add(appended
+                    ? Appended(box, faceAscent, faceHeight, paragraph, paragraphIndex)
+                    : Spaced(
+                        new PlacedLine(box, faceAscent, faceLine, faceHeight),
+                        scaling));
                 continue;
             }
 
-            Length em = LargestSize(runs, styles, box.Line.Start, box.Line.VisibleEnd);
+            Length em = appended && paragraph.Text.Length > 0
+                ? EndSize(runs, styles)
+                : LargestSize(runs, styles, box.Line.Start, box.Line.VisibleEnd);
 
             // An autofitted body that is not being scaled measures its lines at the *device's*
             // realisation of the em rather than at the em. See DeviceRealised.
@@ -948,6 +959,12 @@ public static partial class SlideTextLayout
             // height the reference cannot represent, and the error accumulates down the block.
             Length natural = Length.FromMm100(
                 (long)Math.Floor((em.Mm100 * LineHeightFactor) + 0.5));
+
+            if (appended)
+            {
+                lines.Add(Appended(box, em, natural, paragraph, paragraphIndex));
+                continue;
+            }
 
             // EditEngine takes one of two branches here, and they are not the same arithmetic.
             // A paragraph that states a proportional line spacing takes
@@ -1069,10 +1086,34 @@ public static partial class SlideTextLayout
     /// flag is set.
     /// </para>
     /// </remarks>
+    /// <remarks>
+    /// <para>
+    /// <strong>The scale truncates, it does not round, and the space is a whole hundredth of a
+    /// millimetre before it is scaled at all.</strong> <c>scaleYSpacingValue</c> answers a
+    /// <c>double</c> and every caller in <c>CalcHeight</c> assigns it to an integer —
+    /// <c>sal_uInt16 nUpper = scaleYSpacingValue(rULItem.GetUpper())</c> and
+    /// <c>rPortion.mnHeight += scaleYSpacingValue(rULItem.GetLower())</c>
+    /// (<c>editeng/source/editeng/impedit2.cxx</c>:4792-4802) — so the fraction is dropped. The
+    /// unscaled value is an integer too, because a <c>SvxULSpaceItem</c> holds it in the model's
+    /// own map unit.
+    /// </para>
+    /// <para>
+    /// Measured on page 2 of <c>2015-Civil-Rights-Website-training.ppt</c>, whose outline states
+    /// 8 pt of space before every paragraph — 282 units — and whose fit answers a spacing scale of
+    /// nine tenths. The reference's bullet-to-bullet distance puts the scaled space at
+    /// <strong>253</strong> units, where <c>fround(253.8)</c> would be 254; over that slide's
+    /// seven gaps the difference is 0.198 pt in where the last baseline lands, and the reference's
+    /// is reproduced to 0.010 pt only with the truncation.
+    /// </para>
+    /// </remarks>
     private static Length ScaledSpace(Length space, Scaling scaling)
-        => scaling.Spacing is <= 0 or 1.0 || space.Emu == 0
-            ? space
-            : Length.FromMm100((long)Rounded(space.Mm100 * scaling.Spacing));
+    {
+        if (space.Emu == 0) return space;
+
+        double scale = scaling.Spacing is <= 0 or > 1.0 ? 1.0 : scaling.Spacing;
+
+        return Length.FromMm100((long)(space.Mm100 * scale));
+    }
 
     /// <summary>
     /// The tallest ascent and the tallest ascent-plus-descent among the runs a line touches.
@@ -1477,6 +1518,100 @@ public static partial class SlideTextLayout
 
         return em + (height - natural);
     }
+
+    /// <summary>
+    /// The line EditEngine <em>appends</em> — for an empty paragraph, and after a paragraph's
+    /// trailing hard line break — which is measured by a different rule from every other line.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>It never picks up the shrink-to-fit's line-spacing scale.</strong>
+    /// <c>ImpEditEngine::CreateAndInsertEmptyLine</c>
+    /// (<c>editeng/source/editeng/impedit3.cxx</c>:1851-1996) is reached twice — from
+    /// <c>createLinesForEmptyParagraph</c> (<c>:514-524</c>) for a paragraph with no characters,
+    /// and from the end of <c>CreateLines</c> (<c>:1843-1844</c>) when the paragraph's last line
+    /// ended on an <c>EE_FEATURE_LINEBR</c> (<c>:1088-1094</c>) — and it carries its own copy of
+    /// the four line-spacing arms. That copy has <strong>no
+    /// <c>SvxInterLineSpaceRule::Off</c> arm at all</strong>, and none of its three arms calls
+    /// <c>scaleYSpacingValue</c>, so <c>fSpacingY</c> reaches such a line by no route whatever.
+    /// The ordinary arms are <c>:1528-1602</c>, and every one of those does.
+    /// </para>
+    /// <para>
+    /// Three further differences come with it, and all three are in the same block
+    /// (<c>:1912-1972</c>). <c>Min</c> and <c>Fix</c> take the paragraph's stated height
+    /// <em>raw</em> where the ordinary arms scale it. <c>Prop</c> is whole-percent integer
+    /// arithmetic — <c>nH = nTxtHeight * GetPropLineSpace() / 100</c>, which truncates — where the
+    /// ordinary arm is <c>fround</c> of a double. And <c>Prop</c> is skipped entirely for the
+    /// <em>first</em> paragraph of the body, under the comment "Not the very first line": the test
+    /// is <c>nPara || pTmpLine-&gt;GetStartPortion()</c>, and a freshly constructed
+    /// <c>EditLine</c> has a start portion of zero, so it reduces to the paragraph index.
+    /// </para>
+    /// <para>
+    /// <strong>This is what decides a nearly-full autofitted box, and it decides it in the
+    /// direction that makes the box overflow.</strong> Measured on page 2 of
+    /// <c>slides/done-013/ppt/2015-Civil-Rights-Website-training.ppt</c>, an outline placeholder
+    /// of 12870 units holding four empty paragraphs among its eight: at the fit's first level —
+    /// full size, nine-tenths spacing — every one of its ten lines was being scaled to 1098 units,
+    /// which fits by 113. Leaving the four appended lines at the 1220 that their own 90 per cent
+    /// gives them puts that level at 13239, which overflows, so the reference's next level is
+    /// taken and 30 pt is drawn where this tree drew 32. Its four bullet-to-bullet distances are
+    /// <c>1029 + 253 + 1143 + 253</c> and <c>1029 + 1143 + 253</c> units — 75.912 pt and
+    /// 68.741 pt — which is the text line and the appended line disagreeing by 114 units, and the
+    /// last baseline lands within <strong>0.010 pt</strong> of the reference's once both rules are
+    /// in place.
+    /// </para>
+    /// <para>
+    /// The bullet area's own height can raise such a line further
+    /// (<c>:1974-1985</c>, which halves the difference into the ascent). That is deliberately not
+    /// modelled: no measured case needs it, and the witness above is reproduced without it.
+    /// </para>
+    /// </remarks>
+    private static PlacedLine Appended(
+        LineBox box, Length em, Length natural, SlideParagraph paragraph, int paragraphIndex)
+    {
+        // SvxLineSpaceRule::Min and ::Fix, impedit3.cxx:1928-1950 -- the stated height, unscaled,
+        // with the ascent moved by the whole of the change. Neither is guarded by the paragraph
+        // index.
+        if (paragraph.LineSpacing.Mode is LineSpacingMode.Exact or LineSpacingMode.AtLeast
+            && paragraph.LineSpacing.Value > Length.Zero)
+        {
+            Length stated = paragraph.LineSpacing.Value;
+
+            return paragraph.LineSpacing.Mode == LineSpacingMode.AtLeast && stated <= natural
+                ? new PlacedLine(box, em, natural, natural)
+                : new PlacedLine(box, em + (stated - natural), stated, natural);
+        }
+
+        // SvxInterLineSpaceRule::Prop, impedit3.cxx:1951-1969. Not for the body's first paragraph.
+        if (paragraphIndex != 0 && Proportion(paragraph.LineSpacing) is { } proportion)
+        {
+            long percent = (long)Rounded(proportion * 100.0);
+            Length height = Length.FromMm100(natural.Mm100 * percent / 100);
+
+            // nDiff = GetHeight() - nH, capped at the ascent so it cannot go negative.
+            Length drop = natural - height;
+            if (drop > em) drop = em;
+
+            return new PlacedLine(box, em - drop, height, natural);
+        }
+
+        return new PlacedLine(box, em, natural, natural);
+    }
+
+    /// <summary>
+    /// The em an appended line after a trailing line break is measured at: the paragraph's
+    /// <em>last</em> run's size.
+    /// </summary>
+    /// <remarks>
+    /// <c>CreateAndInsertEmptyLine</c> seeks the cursor to the paragraph's end for such a line and
+    /// to position zero for an empty paragraph —
+    /// <c>SeekCursor(pNode, bLineBreak ? pNode-&gt;Len() : 0, aTmpFont)</c>
+    /// (<c>impedit3.cxx</c>:1896) — so the two ends of a paragraph whose runs differ in size give
+    /// different answers. <see cref="LargestSize"/> already answers the first run for an empty
+    /// range, which is the second case.
+    /// </remarks>
+    private static Length EndSize(List<FormattedRun> runs, List<RunStyle> styles)
+        => runs.Count > 0 ? Nominal(runs, styles, runs.Count - 1) : Length.FromPoints(18);
 
     /// <summary>
     /// Applies the fit's spacing scale to a line, which moves its baseline as well as its box.
