@@ -364,12 +364,32 @@ state a negative offset against their paragraph, and the reference splits neithe
 * **`slcc-architecture-uu-architecture`**, above: a positioned table cannot push the flow down the
   way a frame's obstacle does, and on this one document that is worth a page. Seat
   `Paginator.PlaceFloatedTable`'s `RunsIntoTheFly` guard and `FrameObstacles`.
-* **A shape that over-draws.** Seven `chartset` templates draw 3 % to 43 % more than the reference —
-  `051_Organogram_Template_Basic_Theme` 86 characters against 60, `031_Venn_Diagram` 304 against
-  249, `040_Venn_Diagram` 294 against 240, `055_Organogram` 470 against 402, `011_Project_Timeline`
-  993 against 885, `016` 653 against 633, `018` 442 against 421 — and their shapes carry
-  `draw:auto-grow-height="false"` with an `fo:min-height`. That is the `draw:custom-shape` autofit
-  and clip rule round 75 also left; untouched here.
+* **A shape that "over-draws" — and the brief's framing of that group is at least partly wrong.**
+  The eight `chartset` templates in the column draw 3 % to 43 % more alphanumeric characters than
+  the reference by the gate's own count. Not touched here, but screened, because the screen is one
+  measurement and it changes what the next round should look for: counting each rendering's text
+  characters **and its glyph-sized filled paths** side by side (PyMuPDF, first page onwards) gives
+
+  | document | ours text | ours outlined | ref text | ref outlined |
+  |---|---:|---:|---:|---:|
+  | `051_Organogram_Template_Basic_Theme` | 86 | 0 | 49 | **29** |
+  | `055_Organogram_Template_Horizontal_Structure` | 470 | 0 | 300 | **37** |
+  | `016_Project_Timeline_Template_Complete_Guide` | 653 | 28 | 625 | 32 |
+  | `031_Venn_Diagram_Template_Blue_Theme` | 304 | 0 | 240 | 3 |
+  | `040_Venn_Diagram_Template_Three_Circle` | 294 | 0 | 231 | 3 |
+  | `011_Project_Timeline_Template_Beautiful_Theme` | 1065 | 0 | 832 | 0 |
+  | `018_Project_Timeline_Template_Editable_Format` | 453 | 0 | 432 | 0 |
+  | `024_Unit_Circle_Chart_Colorful_Circles` | 517 | 0 | **552** | 0 |
+
+  On `051` the reference draws `Te` where the shape's text is `Text`, and on four of its shapes a
+  bare `t` on the second line — and it **outlines 29 glyph-sized paths** that `pdftotext` cannot
+  see, which is most of the 37-character "excess". That is the raster ceiling and the shear rule
+  this file already records (`VclProcessor2D::RenderTextSimpleOrDecoratedPortionPrimitive2D`,
+  `drawinglayer/source/processor2d/vclprocessor2d.cxx`:126-141), not an autofit defect, and
+  **`024` draws 35 characters *fewer* than the reference**, so the group is not one sign let alone
+  one cause. The `draw:custom-shape` autofit and clip rule round 75 left is still open and the four
+  documents that carry no outlines at either side — `011`, `018`, `031`, `040` — are the ones to
+  work it on. Count the reference's outlines before calling one of these an over-draw.
 * **`A_320.odt`, 134 pages against 118**, and the `150_5300_13_*` family with it. Untouched.
 * **The slides half of the vertical writing mode**: 63 `loext:writing-mode="bt-lr"` and 3
   `tb-rl90` on `style:graphic-properties` in 5 and 3 of the 302 `.odp`, plus 414 `style:tb-rl` on
@@ -458,6 +478,8 @@ defaults instead, and the reference's evidence for the rule is the corpus docume
 | `tdrange.py`, `td-base.tsv` | text drawn below the sheet, read off `Td` **and** `Tm` |
 | `belowsheet.py`, `below-base.tsv` | how many glyphs of it there are, per document |
 | `tmrange.py`, `offsheet.py` | the two instruments that answered wrongly; kept as the record |
+| `overdraw.py`, `overdraw.tsv` | text against outlined glyphs over the eight templates the gate says we over-draw |
+| `census-writingmode.py`, `census-writingmode-all.py` | the writing-mode censuses, `.odt` and then `.ods`/`.odp` |
 | `rows-before.tsv` | the `.odt` column at `e6be864e4` |
 | `rows-writingmode.tsv` | with the cell writing mode alone |
 | `rows-after.tsv` | with both changes |

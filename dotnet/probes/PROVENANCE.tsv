@@ -744,3 +744,5 @@ dotnet/probes/odt-split-r82/tmrange.py	2026-09-08	current	26.2.4.2	present	curre
 dotnet/probes/odt-split-r82/unsplit-control.txt	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
 dotnet/probes/odt-split-r82/unsplit.py	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
 dotnet/probes/odt-split-r82/unsplit.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/odt-split-r82/overdraw.py	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/odt-split-r82/overdraw.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md

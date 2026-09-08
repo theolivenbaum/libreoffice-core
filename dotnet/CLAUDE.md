@@ -1059,6 +1059,15 @@ Two rules from it are general enough to carry:
     page each. `DoNotBreakWrappedTables` is a document-level veto over every
     `may-break-between-pages` in the file, tested before the fly is looked at (`fly.cxx`:696-700),
     and **30 of the 338 state it**. Both default to false.
+  - **A "shape that over-draws" may be a reference that outlines its glyphs, and the check is one
+    measurement.** Screened over the eight `chartset` templates the `.odt` gate reads as drawing
+    3 % to 43 % too much: on `051_Organogram_Template_Basic_Theme` 26.2.4.2 draws 49 characters as
+    text and **29 glyph-sized filled paths**, which is most of the 37-character "excess", and on
+    `055_Organogram_Template_Horizontal_Structure` 37 more; `024_Unit_Circle_Chart_Colorful_Circles`
+    draws **35 characters fewer** than the reference, so the group is not even one sign. Count the
+    reference's outlines before working one of these — `probes/odt-split-r82/overdraw.py` does it —
+    and take `011`, `018`, `031` and `040`, which carry none on either side, as the four that really
+    are an autofit or clip question.
   - **The instrument that shows a fly's tail drawn below the sheet has to read `Td` as well as
     `Tm`, and `get_text` cannot see it at all.** PyMuPDF clips text to the page, so it reports a few
     descender-sized overhangs and none of the real thing; a content-stream scan matching only `Tm`
