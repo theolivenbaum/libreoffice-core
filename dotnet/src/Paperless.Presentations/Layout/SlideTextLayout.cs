@@ -768,6 +768,18 @@ public static partial class SlideTextLayout
     /// and keeping their text makes 26.2.4.2 wrap at the same places this tree does and draw every
     /// pitch at 1.2 em. See <c>probes/odp-visual-r80/</c>.
     /// </para>
+    /// <para>
+    /// <strong>One stretch per run, and adjacent runs are not merged</strong> — which is what the
+    /// DrawingML importer produces, one <c>com.sun.star.text.TextField.URL</c> per <c>a:r</c>
+    /// (<c>oox/source/drawingml/textrun.cxx</c>:149-157). Measured: a link split across two runs
+    /// and the same link in one are drawn span for span identically by 26.2.4.2, because a break
+    /// at the junction is never the one the fill wants. <c>probes/pptx-field-r82/</c>'s <c>v8</c>.
+    /// </para>
+    /// <para>
+    /// A one-character run is skipped because nothing inside it can break; the only thing it
+    /// forgoes is the stretch's own start, which is an opportunity for exactly one line in a
+    /// hundred thousand and which no corpus document reaches.
+    /// </para>
     /// </remarks>
     /// <returns>
     /// Null when the paragraph holds no field, which is the overwhelming majority and is the whole

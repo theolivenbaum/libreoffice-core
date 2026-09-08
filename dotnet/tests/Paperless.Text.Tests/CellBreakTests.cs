@@ -91,17 +91,52 @@ public class CellBreakTests
             .Count.ShouldBe(1);
     }
 
-    /// <summary>A break is never offered at the stretch's own start or end.</summary>
+    /// <summary>A break at the stretch's own start or end is not a break <em>inside</em> it.</summary>
     /// <remarks>
-    /// Strictly inside, so that a stretch abutting text does not gain an opportunity the text
-    /// around it did not have — and so that a one-character field is inert.
+    /// Strictly inside, which is what the two consumers of this predicate want: a line beginning at
+    /// the stretch's start is the line the field <em>starts</em> on and not one it spilled onto, so
+    /// it takes an ordinary line height, and the solidus glue at an edge belongs to the text around
+    /// the stretch. It is <em>not</em> a statement about which opportunities exist — see
+    /// <see cref="TheStretchesOwnStartIsAnOpportunity"/>.
     /// </remarks>
     [Fact]
-    public void TheStretchesOwnEdgesAreNotOpportunities()
+    public void TheStretchesOwnEdgesAreNotBreaksInsideIt()
     {
         new CellBrokenSpan(4, 6).BreaksInside(4).ShouldBeFalse();
         new CellBrokenSpan(4, 6).BreaksInside(5).ShouldBeTrue();
         new CellBrokenSpan(4, 6).BreaksInside(10).ShouldBeFalse();
+    }
+
+    /// <summary>
+    /// The stretch's own start is an opportunity, so a field whose first cell does not fit moves
+    /// down whole even where the language offers no break in front of it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>lineBreaksList.push_back(0)</c> is unconditional in the branch — <em>"always add 1st line
+    /// break"</em> — and it is what <c>bFieldStartNextLine</c> uses
+    /// (<c>editeng/source/editeng/impedit3.cxx</c>:1148-1149, :1173-1180).
+    /// </para>
+    /// <para>
+    /// The text here is the shape a corpus deck actually writes: a link inside brackets, where the
+    /// opening bracket is <c>OP</c> and so prohibits a break after itself. 26.2.4.2 leaves the
+    /// <c>(</c> at the end of the line and puts the whole link on the next one; without this the
+    /// line breaks in front of the bracket. Measured on <c>probes/pptx-field-r82/</c>'s <c>g23</c>.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void TheStretchesOwnStartIsAnOpportunity()
+    {
+        const string text = "aaa bbb (https://example.org/x";
+        int link = text.IndexOf("https", StringComparison.Ordinal);
+
+        (LineFiller filler, MeasuredParagraph measured, Length width) = Fill(text, text[..link]);
+
+        // Room for everything up to and including the bracket, and not for the link's first
+        // character. Without the stretch the only opportunity there is in front of the bracket.
+        filler.Fill(measured, width)[0].End.ShouldBe(8);
+        filler.Fill(measured, width, cellBroken: [new CellBrokenSpan(link, text.Length - link)])[0]
+            .End.ShouldBe(link);
     }
 
     /// <summary>

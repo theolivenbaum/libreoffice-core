@@ -1125,12 +1125,43 @@ the ordinary pitch is 17.773 — and **the formatter never sees a spill line**, 
 anchors the block and that the shrink-to-fit search measures counts the field's line once and the
 spill hangs out of the bottom of a middle- or bottom-anchored box.
 
-***The `.pptx` side is the same rule and is deliberately untouched.***
-`oox/source/drawingml/textrun.cxx`:149 builds a `com.sun.star.text.TextField.URL` for any run
-carrying an `a:hlinkClick`, so a DrawingML hyperlink is a field exactly as a `text:a` is.
-**2293 `a:hlinkClick` on the slides of 95 of the corpus's 251 `.pptx`-family decks** — larger than
-the ODF reach. Nothing sets `SlideTextRun.IsField` from `PptxTextBody`; it is one line and a
-measurement.
+***The `.pptx` side is the same rule and is now closed too — and the test is not the element.***
+`TextRun::insertAt` branches on whether the run's own **hyperlink property map is empty**
+(`oox/source/drawingml/textrun.cxx`:88) and builds a `com.sun.star.text.TextField.URL` whose
+`Representation` is the run's own `a:t` when it is not (`:149-157`), imposing the theme's `hlink`
+colour and an automatic underline in the same branch (`:162-168`). So **one field per `a:r`** —
+a link PowerPoint split across runs is several fields and fills exactly as one does — and **an
+`a:hlinkClick` that states nothing is not a hyperlink at all**: `HyperLinkContext`
+(`oox/source/drawingml/hyperlinkcontext.cxx`:40-156) records a property only for a resolvable `r:id`, a `tooltip`, a
+`tgtFrame`, an `action`, an `invalidUrl`, `history` off, `highlightClick`/`endSnd` on, or an
+`a:extLst`, and `<a:hlinkClick r:id=""/>` — what PowerPoint writes to *clear* an inherited link —
+leaves the map empty, so 26.2.4.2 draws such a run black, word-broken and not underlined.
+`DrawingHyperlink.MakesField` is that test and `PptxTextBody` sets `SlideTextRun.IsField` from it.
+
+**The reach figure that stood here counted the wrong elements.** Of the 2537 `a:hlinkClick` in the
+251 `.pptx`, **1922 sit on a `p:cNvPr`** — a click action on the *shape*, not text — 7 on an
+`a:endParaRPr`, which carries no run, and only **608 on an `a:rPr` in 138 documents**, of which 416
+are on a slide proper in 89. **Count the parent element, not the string.**
+
+**And the rule is far wider than "a long URL", because the cell opportunities are *added* to the
+paragraph's**: a hyperlink run of any length moves the break whenever the line's boundary falls
+inside it. 375 of the 416 slide hyperlink runs are under 40 characters and **117 of the 251 decks
+still change**, every one of them a deck with a text-run `a:hlinkClick` and none of the other 113.
+One more entry was needed for it — `lineBreaksList`'s unconditional first, `push_back(0)`, which is
+what carries a whole field onto the next line when even its first cell does not fit and the line
+has content (`bFieldStartNextLine`, `impedit3.cxx`:1148-1149, :1173-1180); `CellBreaks.Merge` offers the
+stretch's own start for that reason.
+
+**The three adjacent formats each answer differently, and all three were measured at the
+reference.** A **`.docx`** hyperlink is *not* a field — in a paragraph or inside a `wps` text box,
+whose content is a Writer fly's text and not EditEngine's, so all four probes are span-identical.
+An **`.xlsx`** *cell* hyperlink is one, and the cell break fires there too (`insertHyperlink`,
+`sc/source/filter/oox/worksheethelper.cxx`:1062-1080); `SheetLayout.HoldsField` already models the
+painted consequence and is left as it is. A **`.ppt`** hyperlink is one as well
+(`filter/source/msfilter/svdfppt.cxx`:6936, :7069-7090) and **this tree does not read the record at
+all** — no `InteractiveInfo`/`ExHyperlink` anywhere under `dotnet/src` — so on the **17 of 51 `.ppt`
+that carry a text-range hyperlink** it is neither a field nor blue nor underlined. Left with its
+seat. `probes/pptx-field-r82/results.md`.
 
 **And an ODF bullet level's Private Use Area slot and its colour are both read now.**
 `OdfListStyle.FormatLabel` is the *extraction* answer and puts the bullet through
