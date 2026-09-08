@@ -56,6 +56,11 @@ public static class FrameLayout
     /// <c>SwAnchoredObjectPosition::ImplAdjustVertRelPos</c>. See
     /// <see cref="PaginationOptions.CapturesAnchoredObjectsOnPage"/> for which formats set it.
     /// </param>
+    /// <param name="capturesMarginBands">
+    /// Whether a frame stated against a margin band, and wrapped around by the text, is pulled back
+    /// inside the body — see <see cref="PaginationOptions.CapturesMarginBandObjects"/>, which is where
+    /// the rule, its two C++ seats and the reason it is applied no more widely are written out.
+    /// </param>
     public static DocRect Place(
         PageFrame frame,
         PageGeometry geometry,
@@ -64,7 +69,8 @@ public static class FrameLayout
         bool rightHandPage = true,
         Length? anchorLineTop = null,
         DocRect? bodyArea = null,
-        bool capturesOnPage = true)
+        bool capturesOnPage = true,
+        bool capturesMarginBands = false)
     {
         ArgumentNullException.ThrowIfNull(frame);
         ArgumentNullException.ThrowIfNull(geometry);
@@ -73,11 +79,34 @@ public static class FrameLayout
         DocRect text = geometry.TextArea;
         DocRect body = bodyArea ?? text;
 
+        // The two margin *bands* are their own alignment areas rather than the page — `PAGE_LEFT` is
+        // `GetLeftMargin(page)` wide from the sheet's left edge and `PAGE_RIGHT` is
+        // `GetRightMargin(page)` wide from `GetPrtRight(page)`
+        // (`sw/source/core/objectpositioning/anchoredobjectposition.cxx`:769-788). Only the y and the
+        // height of these rectangles are unused, so they carry the page's.
+        //
+        // Measured in `dotnet/probes/frame-area-r85/`, a 40 x 20 pt band on A4 with 72 pt margins.
+        // Band left edge in points, both installed references identical on every row:
+        //
+        //   fixture                    reference   ours before
+        //   h-leftmargin-0                  0.00          0.00   <- an offset agrees by accident
+        //   h-leftmargin-centre            16.00        277.75
+        //   h-leftmargin-right             32.00        555.25
+        //   h-rightmargin-0               523.25          0.00
+        //   h-rightmargin-centre          539.25        277.75
+        //   h-outsidemargin-0              72.00          0.00
+        //
+        // `h-leftmargin-0` is why reading only offsets would have missed this: the band and the page
+        // share a left edge, so the defect is invisible until something is aligned in it.
         DocRect horizontal = frame.HorizontalOrigin switch
         {
             FrameHorizontalOrigin.Page => page,
             FrameHorizontalOrigin.PageMargin => text,
             FrameHorizontalOrigin.Column => column,
+            FrameHorizontalOrigin.LeftMarginArea =>
+                new DocRect(page.X, page.Y, text.X - page.X, page.Height),
+            FrameHorizontalOrigin.RightMarginArea =>
+                new DocRect(text.Right, page.Y, page.Right - text.Right, page.Height),
             _ => column,
         };
 
@@ -110,10 +139,30 @@ public static class FrameLayout
         // of one line inside a 64.6 pt reservation moves nothing. Horizontally there is no such rule —
         // the header/footer walk in the horizontal case is guarded by `aRectFnSet.IsVert()`
         // (the same file, :824), so it applies to a vertical writing mode only.
+        //
+        // The two vertical margin bands are bounded by the *body*, so they are the complement of
+        // `PageMargin` above and move with a running head that outgrew its reserved room in the same
+        // way. `PAGE_PRINT_AREA_TOP` runs from the sheet's top to the body's top — see
+        // `FrameVerticalOrigin.TopMarginArea` for why the layout's own switch does not say so — and
+        // `PAGE_PRINT_AREA_BOTTOM` from the body's bottom to the sheet's.
+        //
+        // Same probe, a 60 x 20 pt band, both installed references identical on every row:
+        //
+        //   fixture                    reference   ours before
+        //   v-topmargin-0                   0.00         72.00
+        //   v-topmargin-centre             26.00        411.00
+        //   v-topmargin-bottom             52.00        750.00
+        //   v-bottommargin-0              770.00         72.00
+        //   v-bottommargin-centre         796.00        411.00
+        //   v-bottommargin-bottom         821.75        750.00
         DocRect vertical = frame.VerticalOrigin switch
         {
             FrameVerticalOrigin.Page => page,
             FrameVerticalOrigin.PageMargin => body,
+            FrameVerticalOrigin.TopMarginArea =>
+                new DocRect(page.X, page.Y, page.Width, body.Y - page.Y),
+            FrameVerticalOrigin.BottomMarginArea =>
+                new DocRect(page.X, body.Bottom, page.Width, page.Bottom - body.Bottom),
             FrameVerticalOrigin.Line =>
                 new DocRect(column.X, lineTop, column.Width, text.Bottom - lineTop),
             _ => new DocRect(column.X, anchorTop, column.Width, text.Bottom - anchorTop),
@@ -148,9 +197,23 @@ public static class FrameLayout
         Length placedX = x + frame.GroupOffset.X;
         Length placedY = y + frame.GroupOffset.Y;
 
+        // Whether this frame is captured at all, and in what. `DisableOffPagePositioning` exempts a
+        // *wrap-through* object and nothing else (`IsDraggingOffPageAllowed`,
+        // `sw/source/core/layout/anchoredobject.cxx`:790-801), so a DOCX frame the text wraps around
+        // is captured although `capturesOnPage` is off for that format; and the area it is captured
+        // in narrows from the sheet to the body under `compatibilityMode` 15, for every vertical
+        // origin except the sheet and the margin area (`anchoredobjectposition.cxx`:562-573). Only
+        // the two margin bands take it here, and `PaginationOptions.CapturesMarginBandObjects`
+        // measures why the wider rule is left. The horizontal capture never narrows —
+        // `ImplAdjustHoriRelPos` (:674-722) takes the page frame's own rectangle with no such branch.
+        bool inBody = capturesMarginBands
+            && frame.Wrap != TextWrap.Through
+            && frame.VerticalOrigin
+                is FrameVerticalOrigin.TopMarginArea or FrameVerticalOrigin.BottomMarginArea;
+
         return new DocRect(
-            capturesOnPage ? CapturedOnPageAcross(frame, page, placedX) : placedX,
-            capturesOnPage ? CapturedOnPage(frame, page, placedY) : placedY,
+            capturesOnPage || inBody ? CapturedOnPageAcross(frame, page, placedX) : placedX,
+            capturesOnPage || inBody ? CapturedOnPage(frame, inBody ? body : page, placedY) : placedY,
             frame.Size.Width,
             frame.Size.Height);
     }
@@ -203,15 +266,18 @@ public static class FrameLayout
     /// </para>
     /// </remarks>
     /// <param name="frame">The frame, for its anchor and its height.</param>
-    /// <param name="page">The page rectangle, which is the area a frame is captured in.</param>
+    /// <param name="area">
+    /// The rectangle the frame is captured in: the sheet, or the page's body under DOCX
+    /// <c>compatibilityMode</c> 15 — see <see cref="PaginationOptions.CapturesMarginBandObjects"/>.
+    /// </param>
     /// <param name="y">The position the origin and the offset gave it.</param>
-    private static Length CapturedOnPage(PageFrame frame, DocRect page, Length y)
+    private static Length CapturedOnPage(PageFrame frame, DocRect area, Length y)
     {
         if (frame.Anchor is not (FrameAnchor.Paragraph or FrameAnchor.Character)) return y;
 
         Length height = frame.Size.Height;
-        if (y + height > page.Bottom) y = page.Bottom - height;
-        if (y < page.Y) y = page.Y;
+        if (y + height > area.Bottom) y = area.Bottom - height;
+        if (y < area.Y) y = area.Y;
 
         return y;
     }
@@ -387,13 +453,18 @@ internal sealed class FrameResolution
     /// <see cref="PaginationOptions.CapturesAnchoredObjectsOnPage"/>, which is where the rule and the
     /// formats it applies to are written out.
     /// </param>
+    /// <param name="capturesMarginBands">
+    /// Whether a frame stated against a margin band and wrapped around by the text is pulled back
+    /// inside the body — see <see cref="PaginationOptions.CapturesMarginBandObjects"/>.
+    /// </param>
     public static FrameResolution Of(
         IReadOnlyList<PageBlock> blocks,
         IReadOnlyList<PaginatedSection> sections,
         IReadOnlyList<LaidOutPage> pages,
         bool collapsesSpacing = false,
         bool addsCellLineSpacing = false,
-        bool capturesOnPage = true)
+        bool capturesOnPage = true,
+        bool capturesMarginBands = false)
     {
         Dictionary<int, Placement> placements = [];
 
@@ -475,7 +546,8 @@ internal sealed class FrameResolution
                     rightHandPage: page.Number % 2 == 1,
                     anchorLineTop: anchorLineTop,
                     bodyArea: page.BodyArea,
-                    capturesOnPage: capturesOnPage);
+                    capturesOnPage: capturesOnPage,
+                    capturesMarginBands: capturesMarginBands);
 
                 frames++;
                 signature.Add(area.X.Emu);

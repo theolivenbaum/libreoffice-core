@@ -340,6 +340,15 @@ public sealed class OoxmlWordDocument : IWordProcessingDocument, IPaginatedDocum
             // `PaginationOptions.CapturesAnchoredObjectsOnPage`.
             CapturesAnchoredObjectsOnPage = false,
 
+            // ...but that flag exempts a *wrap-through* object and nothing else:
+            // `IsDraggingOffPageAllowed` (`sw/source/core/layout/anchoredobject.cxx`:790-801) is
+            // `bDisablePositioning && bIsWrapThrough`, a conjunction. A DOCX text box stating
+            // `wp:wrapSquare` is still pulled back inside its area, and under `compatibilityMode` 15
+            // that area is the *body* rather than the sheet
+            // (`anchoredobjectposition.cxx`:562-573). Applied only to the two margin bands here, for
+            // the reason `PaginationOptions.CapturesMarginBandObjects` measures.
+            CapturesMarginBandObjects = compatibility.CompatibilityMode >= 15,
+
             // LibreOffice's PARA_SPACE_MAX means the two spacings *add*; when it is off the larger
             // wins, which is Word's behaviour. Its OOXML exporter writes
             // w:doNotUseHTMLParagraphAutoSpacing exactly when the flag is on (docxexport.cxx), so

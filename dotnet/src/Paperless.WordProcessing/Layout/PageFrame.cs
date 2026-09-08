@@ -80,6 +80,29 @@ public enum FrameHorizontalOrigin
 
     /// <summary>The anchoring character's position.</summary>
     Character,
+
+    /// <summary>
+    /// The band between the sheet's left edge and the text area: OOXML's <c>leftMargin</c>, and VML's
+    /// <c>left-margin-area</c> and <c>outer-margin-area</c>.
+    /// </summary>
+    /// <remarks>
+    /// <c>RelOrientation::PAGE_LEFT</c>, whose alignment area is the page's <em>left margin</em> and
+    /// not the page — <c>nWidth = GetLeftMargin(page)</c> against an offset at the page's left edge
+    /// (<c>sw/source/core/objectpositioning/anchoredobjectposition.cxx</c>:769-778). So an offset
+    /// against it and an offset against the page agree, and every other alignment does not.
+    /// </remarks>
+    LeftMarginArea,
+
+    /// <summary>
+    /// The band between the text area and the sheet's right edge: OOXML's <c>rightMargin</c>, and
+    /// VML's <c>right-margin-area</c> and <c>inner-margin-area</c>.
+    /// </summary>
+    /// <remarks>
+    /// <c>RelOrientation::PAGE_RIGHT</c> — <c>nWidth = GetRightMargin(page)</c> measured from
+    /// <c>GetPrtRight(page)</c> (the same file, :779-788), so even a plain offset starts at the text
+    /// area's right edge rather than at the sheet's left one.
+    /// </remarks>
+    RightMarginArea,
 }
 
 /// <summary>What a frame's vertical position is measured from.</summary>
@@ -96,6 +119,44 @@ public enum FrameVerticalOrigin
 
     /// <summary>The anchoring line's top, which for a one-line anchor is the paragraph's.</summary>
     Line,
+
+    /// <summary>
+    /// The band between the sheet's top edge and the body: OOXML's <c>topMargin</c>, VML's
+    /// <c>top-margin-area</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>RelOrientation::PAGE_PRINT_AREA_TOP</c>, and reading the layout's own switch is not enough
+    /// to get it right: <c>GetVertAlignmentValues</c> puts it in the <em>same case</em> as
+    /// <c>PAGE_FRAME</c> and answers the whole page's height
+    /// (<c>sw/source/core/objectpositioning/anchoredobjectposition.cxx</c>:327-335), which would make
+    /// a centred frame land halfway down the sheet. The positioner overrides that for exactly this
+    /// relation: <c>SwToContentAnchoredObjectPosition::CalcPosition</c> substitutes
+    /// <c>nHeightBetweenOffsetAndMargin</c> — the offset plus
+    /// <c>page-&gt;GetTopMargin() + headerFrame-&gt;GetPaintArea().Height()</c>, which is the body's
+    /// own top — for the alignment height under both <c>CENTER</c> and <c>BOTTOM</c>
+    /// (<c>tocntntanchoredobjectposition.cxx</c>:305-306, :367-370 and :407-410).
+    /// </para>
+    /// <para>
+    /// The two readings differ by the length of a page and the measurement settles it: on A4 with a
+    /// 72 pt top margin, a 20 pt band centred against <c>topMargin</c> is drawn by both installed
+    /// references at <b>26.00 pt</b> — <c>(72 − 20) / 2</c> — and not at 410.95.
+    /// </para>
+    /// </remarks>
+    TopMarginArea,
+
+    /// <summary>
+    /// The band between the body and the sheet's bottom edge: OOXML's <c>bottomMargin</c>, VML's
+    /// <c>bottom-margin-area</c>.
+    /// </summary>
+    /// <remarks>
+    /// <c>RelOrientation::PAGE_PRINT_AREA_BOTTOM</c>, whose origin is
+    /// <c>PrtWithoutHeaderAndFooter().Bottom</c> — the body's bottom, not the page's print area's
+    /// (<c>tocntntanchoredobjectposition.cxx</c>:617-628) — and whose height is the bottom margin with
+    /// each footer frame's height added back
+    /// (<c>anchoredobjectposition.cxx</c>:365-389), which reaches the sheet's own edge.
+    /// </remarks>
+    BottomMarginArea,
 }
 
 /// <summary>How a frame sits inside its horizontal origin.</summary>

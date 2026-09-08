@@ -73,6 +73,49 @@ public sealed record PaginationOptions
     public bool CapturesAnchoredObjectsOnPage { get; init; } = true;
 
     /// <summary>
+    /// Whether a frame stated against a <em>margin band</em>, and wrapped around by the text, is
+    /// pulled back inside the page's body.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Two C++ facts meet here and neither is the flag above.
+    /// <c>SwAnchoredObject::IsDraggingOffPageAllowed</c>
+    /// (<c>sw/source/core/layout/anchoredobject.cxx</c>:790-801) is
+    /// <c>bDisablePositioning &amp;&amp; bIsWrapThrough</c> — a conjunction — so
+    /// <c>DisableOffPagePositioning</c> exempts a <em>wrap-through</em> object and nothing else, and a
+    /// DOCX frame stating <c>wp:wrapSquare</c> is captured although
+    /// <see cref="CapturesAnchoredObjectsOnPage"/> is off for that format. And the area it is captured
+    /// in is not the sheet: <c>ImplAdjustVertRelPos</c>
+    /// (<c>sw/source/core/objectpositioning/anchoredobjectposition.cxx</c>:562-573) narrows it to the
+    /// page body frame under its own comment — <em>"Instead of using the top of the page as the
+    /// vertical limit, DOCX compatibilityMode 15 started to use the text body as the vertical limit for
+    /// most paragraph or line-oriented anchored non-wrapthrough objects"</em> — for every vertical
+    /// relation except <c>PAGE_FRAME</c> and <c>PAGE_PRINT_AREA</c> (:564-565).
+    /// </para>
+    /// <para>
+    /// <b>This is deliberately narrower than that rule, and the narrowing is measured rather than
+    /// cautious.</b> The C++ captures every non-wrap-through content-anchored frame, whatever its
+    /// origin. Applied that widely to this tree it moves <b>10 of the 338</b> words renderings and is
+    /// net worse against 26.2.4.2: the three documents this exists for improve (mean page ink
+    /// 1.347 → 0.588, 2.302 → 0.868, 3.065 → 2.441), and <c>b053-19</c> goes 11.254 → 19.508 and
+    /// <c>023_Unit_Circle_Chart_Circular_Percentage</c> 10.820 → 16.524. The likely missing half is
+    /// <c>bCheckBottom = !DoesObjFollowsTextFlow()</c>
+    /// (<c>tocntntanchoredobjectposition.cxx</c>:457): a frame that follows the text flow has its
+    /// <em>bottom</em> correction skipped, and <c>PROP_FOLLOW_TEXT_FLOW</c> is written only for an
+    /// anchor inside a table (<c>GraphicImport.cxx</c>:1316-1318, :1859-1861), so the pool default
+    /// decides everywhere else. Establishing that is its own round; until then the capture is applied
+    /// where this round measured it — the two margin bands — and nowhere else, which regresses nothing
+    /// because those two origins reach nothing that was placed before.
+    /// </para>
+    /// <para>
+    /// Set for a DOCX stating <c>compatibilityMode</c> 15 or more. Below 15 the C++ area is the sheet
+    /// rather than the body, which for a top-margin band changes nothing at the top and only clamps a
+    /// frame hanging off the bottom; no corpus document exercises it, so it is left.
+    /// </para>
+    /// </remarks>
+    public bool CapturesMarginBandObjects { get; init; }
+
+    /// <summary>
     /// Whether a page-anchored fly may hang below the body into the bottom margin and the footer area
     /// rather than being split there.
     /// </summary>
@@ -660,7 +703,7 @@ public sealed class Paginator
         // the blocks instead returned early on exactly those documents and left their frames unplaced.
         FrameResolution resolution = FrameResolution.Of(
             blocks, withFrames, pages, _options.CollapsesSpacing, _options.AddsCellLineSpacing,
-            _options.CapturesAnchoredObjectsOnPage);
+            _options.CapturesAnchoredObjectsOnPage, _options.CapturesMarginBandObjects);
         if (resolution.IsEmpty) return Numbered(pages, blocks);
 
         for (int pass = 0; pass < MaxFramePasses; pass++)
@@ -680,7 +723,7 @@ public sealed class Paginator
 
             FrameResolution settled = FrameResolution.Of(
                 blocks, withFrames, next, _options.CollapsesSpacing, _options.AddsCellLineSpacing,
-                _options.CapturesAnchoredObjectsOnPage);
+                _options.CapturesAnchoredObjectsOnPage, _options.CapturesMarginBandObjects);
             pages = next;
 
             bool converged = settled.SameAs(resolution);
