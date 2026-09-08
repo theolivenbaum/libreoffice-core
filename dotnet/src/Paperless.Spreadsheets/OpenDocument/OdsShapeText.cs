@@ -157,7 +157,7 @@ internal static class OdsShapeText
             ClipsVerticalOverflow =
                 Graphic(styles, graphicStyle, OdfNamespaces.Style, "overflow-behavior").Is("clip"),
 
-            Preset = Preset(shape),
+            Preset = OdsShapeInk.Preset(shape),
         };
     }
 
@@ -171,39 +171,6 @@ internal static class OdsShapeText
            && shape.Element(XName.Get("text-box", OdfNamespaces.Draw)) is { } box
             ? box
             : shape;
-
-    /// <summary>
-    /// The DrawingML preset an ODF enhanced geometry names, or null when it names none this
-    /// tree's geometry table knows.
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// A custom shape LibreOffice imported from OOXML keeps the preset's name with an
-    /// <c>ooxml-</c> prefix — <c>ooxml-roundRect</c>, <c>ooxml-round1Rect</c> — so stripping the
-    /// prefix names the same entry <see cref="Paperless.Ooxml.DrawingML.CustomShapeGeometry"/>
-    /// holds. That matters because a preset states its own text rectangle and it is usually not
-    /// the bounding box; see <see cref="SheetShapeText.Preset"/>.
-    /// </para>
-    /// <para>
-    /// A shape drawn in LibreOffice itself carries a native name instead — <c>mso-spt202</c> is
-    /// the text box, whose text rectangle <em>is</em> the box — and an unknown name falls back to
-    /// the box, so naming one costs nothing.
-    /// </para>
-    /// <para>
-    /// The adjustment values are deliberately not carried across. ODF states them as
-    /// <c>draw:modifiers</c> in the shape's own coordinate space, where DrawingML's guides are
-    /// hundred-thousandths, so the preset is resolved at its default adjustment.
-    /// </para>
-    /// </remarks>
-    private static string? Preset(XElement shape)
-    {
-        XElement? geometry = shape.Element(XName.Get("enhanced-geometry", OdfNamespaces.Draw));
-        if (geometry is null) return null;
-        if (Attribute(geometry, OdfNamespaces.Draw, "type") is not { Length: > 0 } type) return null;
-
-        const string prefix = "ooxml-";
-        return type.StartsWith(prefix, StringComparison.Ordinal) ? type[prefix.Length..] : null;
-    }
 
     /// <summary>
     /// The alignment the shape imposes on every paragraph, or null when each decides for itself.

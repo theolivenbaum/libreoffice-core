@@ -2021,8 +2021,13 @@ Nothing in `Paperless.MsBinary` changed. **`apron-area.xls` was 294 words agains
 431/431, exactly, page for page.** Twenty-six of the sixty-two corpus `.xls` files carry a drawing
 and twenty carry a `TXO`.
 
-Only the text is drawn, not the shape's fill or its outline — which is the SpreadsheetML path's
-limit too, so the two formats produce the same page from the same document.
+~~Only the text is drawn, not the shape's fill or its outline — which is the SpreadsheetML path's
+limit too, so the two formats produce the same page from the same document.~~ **Closed in round
+84**: all three spreadsheet readers now read a shape's fill, outline and geometry, and paint it
+through the shape's own preset. `probes/sheet-fill-r84/results.md`. What the BIFF path still does
+not do is Escher's rotation (property 4), a group's leaves (they carry no `ftCmo`), and keeping a
+shape that carries no ink at all — the last of which is measured and deliberate; see
+`XlsShapeInkTests`.
 
 **A ruled but empty cell is inside the printed area, and a workbook of forms is mostly that.**
 `ScTable::GetPrintArea` runs two passes over the same columns: the first finds the last row and
@@ -2079,7 +2084,9 @@ Left open, and found while doing the above:
   state `DIRECTLY` and want no series, so nothing here reaches it — but an embedded worksheet chart
   would, and those are not read at all yet either (they arrive through `OBJ` type 5 and the chart
   substream that follows it, which the drawing collector now sees and ignores).
-- **A shape's fill and outline are not drawn**, on either Excel path.
+- ~~**A shape's fill and outline are not drawn**, on either Excel path.~~ Closed in round 84 for
+  both, and for ODF beside them. Left: `a:blipFill` and `a:pattFill` on a shape, an
+  `a:effectRef` shadow, an `a:ln/a:tailEnd` arrowhead, and Escher's own rotation.
 - **`CHLINEFORMAT`'s palette colour is not read**, so a gridline is always black.
 - **A merge anchored in a hidden *row* is still lost.** `GetMergeOrigin` walks up as well as left
   and the port still only walks left. No corpus document reaches it.

@@ -200,14 +200,31 @@ internal static class OdsDrawings
     /// </summary>
     /// <remarks>
     /// <para>
-    /// Three kinds of element reach this and only the first two draw anything today: a frame
-    /// holding a picture or an embedded object, and a shape carrying text. A shape carrying
-    /// neither — an empty rectangle, a connector, a line, a form control — is answered null
-    /// rather than as an extentless drawing, which keeps it out of
-    /// <see cref="Layout.SheetDrawingArea"/> as well. That is a deliberate under-count:
-    /// <c>ScDrawLayer::GetPrintArea</c> widens the printed block to cover <em>every</em> object,
-    /// so such a shape does reach the reference's page count. It has nothing to paint here, and
-    /// the module's TODO carries the fill and outline that would give it something.
+    /// Four kinds of element reach this: a frame holding a picture, a frame holding an embedded
+    /// object, a shape carrying text, and — since round 84 — a shape carrying nothing but a fill
+    /// or an outline. That last one is the largest of the four: censused over the 307 converted
+    /// <c>.ods</c>, <b>444 custom shapes in 26 documents carry ink and no text</b>, against 198
+    /// that carry both.
+    /// </para>
+    /// <para>
+    /// <strong>Answering null for one of those cost a page count as well as a picture</strong>,
+    /// because a drawing reaches the printed block through a different route from every cell
+    /// question: <c>ScDrawLayer::GetPrintArea</c> takes the bounding rectangle of <em>every</em>
+    /// object on the sheet's draw page — its only exclusion is the hidden-comment layer, and the
+    /// line above the layer test reads <c>//TODO: test Flags (hidden?)</c>
+    /// (<c>sc/source/core/data/drwlayer.cxx</c>:1397-1414) — and
+    /// <c>ScDocument::GetPrintArea</c> maxes that into the cells' answer
+    /// (<c>documen2.cxx</c>:644-664). So a shape the reader drops narrows the print area of every
+    /// sheet carrying one, which is what <see cref="Layout.SheetDrawingArea"/> already says and
+    /// this reader was quietly defeating.
+    /// </para>
+    /// <para>
+    /// A shape carrying <em>none</em> of the four is still answered null, and that remains a
+    /// deliberate under-count of the same rule: a <c>draw:control</c>, and any shape whose style
+    /// states <c>draw:fill="none"</c> and <c>draw:stroke="none"</c>, is an object on Calc's draw
+    /// page and widens its block. Counting them is a change of a different size — 78 controls and
+    /// 630 unfilled shapes in the column — and it is measured rather than assumed in
+    /// <c>probes/sheet-fill-r84</c>.
     /// </para>
     /// </remarks>
     /// <param name="file">The document, for its package and its styles.</param>
@@ -238,6 +255,11 @@ internal static class OdsDrawings
             width = placed.Width;
             height = placed.Height;
         }
+
+        // Read before the branches below because a shape's ink is the same question whatever
+        // else it holds, and because the fill of a frame that turns out to hold a picture is
+        // simply unused rather than wrong.
+        OdsShapeInk.Ink ink = OdsShapeInk.Read(file.Styles, frame);
 
         SheetDrawing drawing = new()
         {
@@ -310,11 +332,63 @@ internal static class OdsDrawings
         // A shape that embeds nothing may still carry text, and a text box is exactly that: an
         // `mso-spt202` or `ooxml-rect` custom shape whose `text:p` children are its body. That
         // text is the shape's, not the anchoring cell's — see OdsShapeText.
+        //
+        // And it may carry ink instead of, or as well as, that text: 444 of the column's custom
+        // shapes are inked and textless.
+        //
+        // **A shape with neither is still a drawing**, and answering null for one was costing a
+        // page. Every object on Calc's draw page widens the printed block —
+        // `ScDrawLayer::GetPrintArea` skips only `SC_LAYER_HIDDEN`
+        // (`sc/source/core/data/drwlayer.cxx`:1397-1414) — so a rectangle stating
+        // `draw:fill="none" draw:stroke="none"` past the last cell keeps a page alive with
+        // nothing on it. Measured on `features/sheet-shape-ink.ods`, whose fifth shape is exactly
+        // that: 26.2.4.2 prints **two** pages, the second of them empty, and this reader printed
+        // one until it stopped dropping the shape. The SpreadsheetML reader has always kept
+        // one — an `xdr:sp` produces a drawing whatever it holds — which is why the same fixture
+        // as `.xlsx` was already two pages of two.
         if (image is null)
         {
-            return OdsShapeText.Read(file.Styles, frame) is { } text
-                ? drawing with { Text = text }
-                : null;
+            SheetShapeText? shapeText = OdsShapeText.Read(file.Styles, frame);
+
+            // **A turned shape's ink goes on a part, for the reason a turned picture's does.**
+            // `Placement` answers the *bounding* box of the transform, which is what the print
+            // area and the empty-page test want and what a rotated star does not fill: painting
+            // the geometry into it draws a star as much as 20% too large and squared up.
+            // `SheetDrawingPart` is the only thing that carries an angle, so the shape's own
+            // untuned rectangle is centred in the box and turned there — the same arithmetic the
+            // picture branch below does. **Reach: 255 turned `draw:custom-shape` in 8 of the 307
+            // converted `.ods`**, 242 of them the reward-chart template's own stamps.
+            if (turned is { Degrees: not 0 } inked && ink.HasInk)
+            {
+                return drawing with
+                {
+                    Text = shapeText,
+                    Parts =
+                    [
+                        new SheetDrawingPart(
+                            Fraction(inked.Width - inked.Shape.Width, 2 * inked.Width),
+                            Fraction(inked.Height - inked.Shape.Height, 2 * inked.Height),
+                            Fraction(inked.Shape.Width, inked.Width),
+                            Fraction(inked.Shape.Height, inked.Height),
+                            inked.Degrees)
+                        {
+                            Fill = ink.Fill,
+                            Stroke = ink.Stroke,
+                            StrokeWidth = ink.StrokeWidth,
+                            Preset = ink.Preset,
+                        },
+                    ],
+                };
+            }
+
+            return drawing with
+            {
+                Text = shapeText,
+                Fill = ink.Fill,
+                Stroke = ink.Stroke,
+                StrokeWidth = ink.StrokeWidth,
+                Preset = ink.Preset,
+            };
         }
 
         (RasterImage? raster, Lazy<VectorImage>? vector) = Load(file, image);
