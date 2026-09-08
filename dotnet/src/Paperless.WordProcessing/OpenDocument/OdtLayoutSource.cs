@@ -124,6 +124,7 @@ public sealed partial class OdtLayoutSource
             Setting(settings, "IgnoreTabsAndBlanksForLineCalculation") == "true";
         _shrinksJustifiedBlanks = ShrinksJustifiedBlanks(settings);
         _breaksWrappedTables = BreaksWrappedTables(settings);
+        _tabsRelativeToIndent = TabsRelativeToIndent(settings);
     }
 
     /// <summary>
@@ -146,6 +147,16 @@ public sealed partial class OdtLayoutSource
     /// is resolved once per document because the setting is document-wide.
     /// </remarks>
     private readonly bool _shrinksJustifiedBlanks;
+
+    /// <summary>
+    /// Whether a tab stop's position is measured from the paragraph's own indent, as the document's
+    /// settings say.
+    /// </summary>
+    /// <remarks>
+    /// See <see cref="TabsRelativeToIndent(XElement?)"/>; the value is resolved once per document because
+    /// the setting is document-wide.
+    /// </remarks>
+    private readonly bool _tabsRelativeToIndent;
 
     /// <summary>
     /// Whether two consecutive paragraphs' spacings add rather than the larger one winning, as the
@@ -313,6 +324,40 @@ public sealed partial class OdtLayoutSource
     /// <param name="settings">The document's <c>office:settings</c>, or null.</param>
     internal static bool ShrinksJustifiedBlanks(XElement? settings)
         => Setting(settings, "JustifyLinesWithShrinking") == "true";
+
+    /// <summary>
+    /// Whether a tab stop's declared position is measured from the paragraph's own left indent or from
+    /// the text area's edge, as the document's settings say.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>SwTextFormatter::NewTabPortion</c> takes the tab origin as
+    /// <c>m_pFrame-&gt;getFrameArea().Left() + (bTabsRelativeToIndent ? GetTabLeft() : 0)</c>
+    /// (<c>sw/source/core/text/txttab.cxx</c>:94-98, under the comment <em>"#i24363# tab stops relative
+    /// to indent"</em>), where <c>GetTabLeft()</c> is the paragraph's own text-left margin
+    /// (<c>SwTextNode::GetLeftMarginForTabCalculation</c>, <c>ndtxt.cxx</c>:3573-3593). So the flag moves
+    /// every stop of an indented paragraph by that indent, and a tab that lands on the first stop under
+    /// one rule lands on the second under the other.
+    /// </para>
+    /// <para>
+    /// <b>Absent means true</b>: <c>mbTabRelativeToIndent(true)</c>
+    /// (<c>sw/source/core/doc/DocumentSettingManager.cxx</c>:80), which is Writer's own answer for a
+    /// document it created. Every Word-family importer turns it off — <c>ww8par.cxx</c>:1951 for a
+    /// <c>.doc</c> and <c>DomainMapper</c>'s constructor for DOCX and RTF
+    /// (<c>sw/source/writerfilter/dmapper/DomainMapper.cxx</c>:128-132) — and LibreOffice's ODF export
+    /// writes the resulting flag into <c>settings.xml</c>, so a <c>.odt</c> converted from a Word file
+    /// carries <c>false</c> and must be laid out the way the Word file is. <b>All 338 converted
+    /// <c>.odt</c> state it false</b>, which is what the corpus's provenance predicts and not a rarity.
+    /// </para>
+    /// <para>
+    /// The reach is narrower than that census, because the two rules differ only for a paragraph that
+    /// both holds a tab and carries a non-zero left indent: <b>38 of the 338 hold one, 3728 paragraphs
+    /// in all</b>. <c>probes/odt-page-r87/census-tabs.py</c>.
+    /// </para>
+    /// </remarks>
+    /// <param name="settings">The document's <c>office:settings</c>, or null.</param>
+    internal static bool TabsRelativeToIndent(XElement? settings)
+        => Setting(settings, "TabsRelativeToIndent") != "false";
 
     /// <summary>One <c>config:config-item</c>'s value from a document's settings, or null when absent.</summary>
     /// <remarks>
@@ -867,7 +912,8 @@ public sealed partial class OdtLayoutSource
 
         (PageLabel? label, ParagraphFormat format) =
             ListFormatting(
-                OdfParagraphFormats.Resolve(_styles, styleName, _shrinksJustifiedBlanks),
+                OdfParagraphFormats.Resolve(
+                    _styles, styleName, _shrinksJustifiedBlanks, _tabsRelativeToIndent),
                 text,
                 face,
                 wantsLabel);

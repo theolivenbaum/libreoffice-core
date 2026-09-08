@@ -871,3 +871,21 @@ dotnet/probes/rtf-htmautsp-r85/super-after.txt	2026-09-08	current	26.2.4.2	prese
 dotnet/probes/rtf-htmautsp-r85/sweep-orig-hash.sh	2026-09-08	current	26.2.4.2	present	current	
 dotnet/probes/rtf-htmautsp-r85/sweep-ours.sh	2026-09-08	current	26.2.4.2	present	current	
 dotnet/probes/rtf-htmautsp-r85/window-after.txt	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/odt-page-r87/agree.py	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.WordProcessing/TODO.md
+dotnet/probes/odt-page-r87/anchor.py	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.WordProcessing/TODO.md
+dotnet/probes/odt-page-r87/census-tabs.py	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.WordProcessing/TODO.md
+dotnet/probes/odt-page-r87/confinement.txt	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.WordProcessing/TODO.md
+dotnet/probes/odt-page-r87/movers.list	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.WordProcessing/TODO.md
+dotnet/probes/odt-page-r87/movers.py	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.WordProcessing/TODO.md
+dotnet/probes/odt-page-r87/movers.txt	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.WordProcessing/TODO.md
+dotnet/probes/odt-page-r87/pagediff.py	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.WordProcessing/TODO.md
+dotnet/probes/odt-page-r87/render-list.sh	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.WordProcessing/TODO.md
+dotnet/probes/odt-page-r87/residual-startx.txt	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.WordProcessing/TODO.md
+dotnet/probes/odt-page-r87/residual.list	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.WordProcessing/TODO.md
+dotnet/probes/odt-page-r87/results.md	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.WordProcessing/TODO.md
+dotnet/probes/odt-page-r87/rows-after.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.WordProcessing/TODO.md
+dotnet/probes/odt-page-r87/rows-before.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.WordProcessing/TODO.md
+dotnet/probes/odt-page-r87/rows.py	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.WordProcessing/TODO.md
+dotnet/probes/odt-page-r87/startx.py	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.WordProcessing/TODO.md
+dotnet/probes/odt-page-r87/startx.txt	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.WordProcessing/TODO.md
+dotnet/probes/odt-page-r87/sweep-odt-ours.sh	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.WordProcessing/TODO.md

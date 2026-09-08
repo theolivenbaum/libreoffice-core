@@ -262,6 +262,24 @@ Order chosen so each is verifiable before the next gets harder.
       `left-margin = space + width, first-line = -width` (`xmloff/source/style/xmlnumi.cxx:433`). Reading
       only the first spelling leaves every list in a LibreOffice-written `.odt` at the margin, and the file
       contains no attribute whose absence says so.
+- [x] **`TabsRelativeToIndent`, which decides what a tab stop's position is measured from.**
+      `SwTextFormatter::NewTabPortion` takes the tab origin as
+      `m_pFrame->getFrameArea().Left() + (bTabsRelativeToIndent ? GetTabLeft() : 0)`
+      (`sw/source/core/text/txttab.cxx`:94-98, `#i24363#`), where `GetTabLeft()` is the paragraph's own
+      text-left margin (`SwTextNode::GetLeftMarginForTabCalculation`, `ndtxt.cxx`:3573-3593), and the same
+      flag moves `nLeftMarginTabPos`, the position the hanging-indent overrule falls back to
+      (`txttab.cxx`:222-285, `#i115705#`). **Absent means true** — `mbTabRelativeToIndent(true)`,
+      `DocumentSettingManager.cxx`:80 — and every Word-family importer sets it false: `ww8par.cxx`:1951
+      for a `.doc`, `DomainMapper`'s own constructor for DOCX and RTF
+      (`sw/source/writerfilter/dmapper/DomainMapper.cxx`:128-132). This tree's three Word readers each
+      set `ParagraphFormat.TabsRelativeToIndent` false by hand; **the ODF reader never set it at all**, so
+      every `.odt` LibreOffice exported from a Word file — which states the flag in `settings.xml`, all
+      338 of the converted corpus — laid its tabs out by Writer's native rule instead. The reach is
+      narrower than that census: the two rules differ only for a paragraph holding both a tab and a
+      non-zero left indent, which is **38 of the 338, 3728 paragraphs**. `A_320.odt` holds 1041 of them
+      and went **134 pages against 26.2.4.2's 118 to 118 of 118**, glyphs 89754 → 88938 against 88958,
+      with its own `.doc` spelling page- and glyph-exact throughout as the control.
+      `probes/odt-page-r87/results.md`; `OdtTabSettingsTests`.
 
 ### DOCX — extraction done
 - [x] `document.xml` body; `styles.xml`; `numbering.xml`; parts located by relationship with
