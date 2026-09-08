@@ -7,6 +7,7 @@ using Paperless.Core.Units;
 using Paperless.OpenDocument;
 using Paperless.OpenDocument.Styles;
 using Paperless.Presentations.Layout;
+using Paperless.Text.Fonts;
 using Paperless.Text.Layout;
 
 namespace Paperless.Presentations.OpenDocument;
@@ -160,7 +161,7 @@ internal static class OdfTextBody
         Length space = Measure(definition, "space-before");
         Length label = Measure(definition, "min-label-width");
 
-        return new ListLabel(space + label, -label, Marker(definition, level, style));
+        return new ListLabel(space + label, -label, Marker(file, definition, level, style));
 
         static Length Measure(OdfListLevel definition, string name)
             => OdfValue.ParseLength(
@@ -201,13 +202,35 @@ internal static class OdfTextBody
     /// here are all ones so that <see cref="OdfListStyle.FormatLabel"/> returns the bullet without
     /// pretending to number anything.
     /// </remarks>
-    private static SlideMarker? Marker(OdfListLevel definition, int level, OdfListStyle style)
+    private static SlideMarker? Marker(
+        OdfFile file, OdfListLevel definition, int level, OdfListStyle style)
     {
         if (definition.Kind != OdfListLabelKind.Bullet) return null;
         if (style.FormatLabel(level, [1, 1, 1, 1, 1, 1, 1, 1, 1, 1]) is not { Length: > 0 } text)
             return null;
 
-        return new SlideMarker(text, definition.Typeface, definition.RelativeSize ?? 1.0);
+        string? family = Family(file, definition.Typeface);
+
+        // A recodeable face keeps its Private Use Area slot, because `SlideTextLayout` needs the
+        // slot and the family together to reach the OpenSymbol glyph holding the same picture.
+        //
+        // `FormatLabel` is the *extraction* answer and collapses the slot to U+2022
+        // (`OutlineNumbers.NormaliseBullet`), which is right for an index — a Wingdings slot means
+        // nothing to a consumer — and wrong for a rendering, where it turned every green check
+        // mark on `redac-sas-201509-asisp-research.odp` page 7 into a black dot. The deck reader
+        // reached the same fork from the other side and took the other branch
+        // (`PptxTextBody.Marked`); this is the ODF statement of it.
+        //
+        // Censused over the converted corpus: **3598 bullet levels in 74 of the 302 `.odp` state a
+        // Private Use Area character**, every one of them in the F000 block, and every family they
+        // name has a recode table but one — `CommonBullets`, once.
+        if (definition.BulletCharacter is { Length: 1 } slot
+            && SymbolFontRecode.IsRecodeable(family))
+        {
+            text = definition.Prefix + slot + definition.Suffix;
+        }
+
+        return new SlideMarker(text, family, definition.RelativeSize ?? 1.0, definition.Colour);
     }
 
     /// <summary>
@@ -462,6 +485,33 @@ internal static class OdfTextBody
                     text.Append(LineSeparator);
                     break;
 
+                // A hyperlink, and in a *draw* shape's text that is a field rather than a
+                // character property. `txtparai.cxx`:1352-1370 asks the cursor for a
+                // `HyperLinkURL` property and builds an `XMLImpHyperlinkContext_Impl` when it has
+                // one and an `XMLUrlFieldImportContext` when it does not — Writer's text cursor has
+                // it and Draw's, Impress's and Calc's do not, so every slide's `text:a` becomes a
+                // `com.sun.star.text.TextField.URL` whose `Representation` is the element's own
+                // content (`txtfldi.cxx`:2907-2918).
+                //
+                // Two things follow and neither is visible in the formatting: the field is one
+                // portion, so an over-long one is filled to the *character* rather than moved down
+                // or broken at a separator, and the lines it spills onto are stacked one ascent
+                // apart. Both live in `SlideTextLayout`; all that is read here is which characters
+                // are the field.
+                //
+                // The content is flattened, which is what the reference does — a
+                // `XMLTextFieldImportContext` overrides `characters` and nothing else, so a
+                // `text:span` nested inside a `text:a` contributes no formatting of its own. No
+                // document of the converted corpus has one: 665 `text:a` in 156 of the 302 `.odp`
+                // and not a single nested span.
+                case "a":
+                    string linked = child.Value;
+                    if (linked.Length == 0) break;
+
+                    runs.Add(Run(file, cascade, text.Length, linked.Length) with { IsField = true });
+                    text.Append(linked);
+                    break;
+
                 default:
                     // A field, a bookmark, a note anchor: whatever text it carries is its own.
                     Collect(file, child, cascade, text, runs, fields, ref lastSpan);
@@ -589,10 +639,15 @@ internal static class OdfTextBody
     private static string? Family(OdfFile file, string? fontName)
     {
         if (fontName is null) return null;
-        if (!file.Styles.FontFaces.TryGetValue(fontName, out OdfFontFace? face)) return fontName;
 
-        string? family = face.FontFamily;
-        if (string.IsNullOrEmpty(family)) return fontName;
+        // `fo:font-family` states the list directly and `style:font-name` names a declaration that
+        // holds one, so the same trimming has to happen on both paths: a level writing
+        // `fo:font-family="&apos;Wingdings 2&apos;"` — 721 of the converted corpus's bullet levels
+        // do — asks for a family whose name is not `'Wingdings 2'`.
+        string family = file.Styles.FontFaces.TryGetValue(fontName, out OdfFontFace? face)
+                        && !string.IsNullOrEmpty(face.FontFamily)
+            ? face.FontFamily
+            : fontName;
 
         int comma = family.IndexOf(',', StringComparison.Ordinal);
         if (comma >= 0) family = family[..comma];

@@ -530,6 +530,24 @@ public readonly record struct SlideEscapement(int Percent, int Proportion)
 /// — which a reader cannot know.
 /// </para>
 /// </param>
+/// <param name="IsField">
+/// Whether the run is a <em>field</em> rather than ordinary text — a hyperlink, in every reader
+/// that sets this.
+/// <para>
+/// It is not a formatting property: it changes how the run breaks and how the lines it spills
+/// onto are stacked. EditEngine holds a field as a single portion whose text is broken at every
+/// cell when it does not fit (<c>editeng/source/editeng/impedit3.cxx</c>:1101-1200), and draws
+/// each of those continuation lines one <em>ascent</em> below the last rather than one line
+/// height (<c>:3778-3795</c>, <em>“only use GetMaxAscent(), pLine->GetHeight() will not proceed
+/// as needed”</em>). See <see cref="SlideTextLayout"/> for both halves and for what they were
+/// measured against.
+/// </para>
+/// <para>
+/// A <c>text:a</c> inside a draw shape's text is one: <c>xmloff/source/text/txtparai.cxx</c>
+/// :1352-1370 builds an <c>XMLUrlFieldImportContext</c> whenever the cursor has no
+/// <c>HyperLinkURL</c> property, which is every Draw and Impress text and no Writer one.
+/// </para>
+/// </param>
 public readonly record struct SlideTextRun(
     int Start,
     int Length,
@@ -543,7 +561,8 @@ public readonly record struct SlideTextRun(
     bool IsStruckThrough = false,
     bool IsShadowed = false,
     SlideEscapement Escapement = default,
-    SlideSymbolFont? SymbolFont = null)
+    SlideSymbolFont? SymbolFont = null,
+    bool IsField = false)
 {
     /// <summary>One past the run's last character.</summary>
     public int End => Start + Length;

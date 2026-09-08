@@ -289,6 +289,11 @@ public sealed class ParagraphLayouter
     /// whose whole content is an inline picture. Proportional line spacing is a percentage of the text
     /// height, and such a line has none of its own.
     /// </param>
+    /// <param name="cellBroken">
+    /// The stretches that break between characters rather than between words, or null when there are
+    /// none. A slide's hyperlink is one, because it is an EditEngine field; see
+    /// <see cref="CellBrokenSpan"/>.
+    /// </param>
     public LaidOutParagraph Layout(
         MeasuredParagraph measured,
         ParagraphFormat? format = null,
@@ -296,7 +301,8 @@ public sealed class ParagraphLayouter
         string? language = null,
         ParagraphFormat? follows = null,
         ILineObstacles? obstacles = null,
-        Length? emSize = null)
+        Length? emSize = null,
+        IReadOnlyList<CellBrokenSpan>? cellBroken = null)
     {
         ArgumentNullException.ThrowIfNull(measured);
 
@@ -323,7 +329,8 @@ public sealed class ParagraphLayouter
             paragraph.FirstLineWidth(areaWidth),
             language,
             paragraph,
-            wrapped is null ? null : wrapped.WidthOfLine);
+            wrapped is null ? null : wrapped.WidthOfLine,
+            cellBroken);
 
         List<LineBox> boxes = new(lines.Count);
         Length top = Length.Zero;

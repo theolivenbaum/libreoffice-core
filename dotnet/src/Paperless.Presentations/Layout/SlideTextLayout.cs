@@ -117,14 +117,23 @@ public static partial class SlideTextLayout
 
             if (index != 0) top += block.SpaceBefore;
 
-            bool first = true;
-            foreach (PlacedLine line in block.Lines)
-            {
-                if (first) EmitMarker(placed, block, line, area.X, top, fonts, body.Device);
+            IReadOnlyList<PlacedLine> lines = block.Lines;
 
-                Emit(placed, block, line, area.X, top, first);
-                first = false;
-                top += line.Height;
+            for (int line = 0; line < lines.Count; line++)
+            {
+                if (line == 0) EmitMarker(placed, block, lines[0], area.X, top, fonts, body.Device);
+
+                Emit(placed, block, lines[line], area.X, top, line == 0);
+
+                // A field's continuation line is one *ascent* below its predecessor, not one line
+                // height: EditEngine draws it inside the line that holds the field, and the only
+                // distance it has to move by is `pLine->GetMaxAscent()`
+                // (`editeng/source/editeng/impedit3.cxx`:3778-3795, whose comment says so —
+                // "pLine->GetHeight() will not proceed as needed ... a compressed look").
+                // See `ContinuesField`.
+                top += line + 1 < lines.Count && lines[line + 1].ContinuesField
+                    ? lines[line].Ascent
+                    : lines[line].Height;
             }
 
             if (index != blocks.Count - 1) top += block.SpaceAfter;
@@ -743,6 +752,59 @@ public static partial class SlideTextLayout
     }
 
     /// <summary>
+    /// The stretches of a paragraph that are fields, and so break between characters.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A field is one portion to EditEngine, and an over-long one is not moved down and not
+    /// offered to the break iterator: it is filled to the cell
+    /// (<c>editeng/source/editeng/impedit3.cxx</c>:1101-1200). So <em>“the reference breaks a long
+    /// URL at any character where we break only at <c>-</c> and <c>/</c>”</em> is not a URL rule
+    /// and not a hyphenation rule.
+    /// </para>
+    /// <para>
+    /// Established by variant rather than by reading: on
+    /// <c>0335fab9-79f0-4944-b92c-f223837ca2d8.odp</c> page 6, stripping the <c>text:a</c> elements
+    /// and keeping their text makes 26.2.4.2 wrap at the same places this tree does and draw every
+    /// pitch at 1.2 em. See <c>probes/odp-visual-r80/</c>.
+    /// </para>
+    /// </remarks>
+    /// <returns>
+    /// Null when the paragraph holds no field, which is the overwhelming majority and is the whole
+    /// cost of this on everything else — the shrink-to-fit search measures a body once per
+    /// candidate scale, so a per-paragraph allocation here would be paid a dozen times a shape.
+    /// </returns>
+    private static List<CellBrokenSpan>? Fields(SlideParagraph paragraph)
+    {
+        List<CellBrokenSpan>? fields = null;
+
+        foreach (SlideTextRun run in paragraph.Runs)
+        {
+            if (!run.IsField || run.Length <= 1) continue;
+
+            fields ??= [];
+            fields.Add(new CellBrokenSpan(run.Start, run.Length));
+        }
+
+        return fields;
+    }
+
+    /// <summary>Whether a line starting at an index is a field's spill rather than its own line.</summary>
+    /// <remarks>
+    /// Strictly inside: a line that begins exactly where a field begins is the line the field
+    /// starts on, which is an ordinary one.
+    /// </remarks>
+    private static bool ContinuesField(IReadOnlyList<CellBrokenSpan> fields, int start)
+    {
+        foreach (CellBrokenSpan field in fields)
+        {
+            if (field.BreaksInside(start)) return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
     /// Breaks one paragraph into lines and gives each the height EditEngine would.
     /// </summary>
     /// <remarks>
@@ -810,8 +872,9 @@ public static partial class SlideTextLayout
         MeasuredParagraph measured = MeasuredParagraph.Measure(
             paragraph.Text, runs, itemisation: new ItemisationOptions { GlyphFallback = fonts.Fallback });
         ParagraphLayouter layouter = new(first);
+        List<CellBrokenSpan>? fields = Fields(paragraph);
         LaidOutParagraph laid = layouter.Layout(
-            measured, format, width, paragraph.Language);
+            measured, format, width, paragraph.Language, cellBroken: fields);
 
         List<PlacedLine> lines = [];
         bool firstLine = true;
@@ -928,8 +991,32 @@ public static partial class SlideTextLayout
             lines.Add(paragraph.LineSpacingStated ? plain : Spaced(plain, scaling));
         }
 
+        // A line that starts inside a field is one the field spilled onto, and is stacked by a
+        // different rule. Marked after the fact rather than inside the four arms above, so that the
+        // heights they compute — which are the *enclosing* line's and are what the spill is measured
+        // from — stay exactly as they were.
+        if (fields is not null)
+        {
+            for (int index = 0; index < lines.Count; index++)
+            {
+                if (ContinuesField(fields, lines[index].Box.Line.Start))
+                {
+                    lines[index] = lines[index] with { ContinuesField = true };
+                }
+            }
+        }
+
+        // Deliberately not the lines a field spilled onto. EditEngine's formatter never sees them
+        // — the whole field is one portion of one `EditLine`, and the sub-lines exist only in the
+        // painter — so the height that anchors the block and that the shrink-to-fit search measures
+        // counts the field's line once. Measured on `field-variants.py`'s `v4`/`v6` against
+        // 26.2.4.2: a middle-anchored box whose second paragraph is a URL spilling onto three
+        // visual lines is centred as though it held two, and the spill hangs below the box.
         Length total = Length.Zero;
-        foreach (PlacedLine line in lines) total += line.Height;
+        foreach (PlacedLine line in lines)
+        {
+            if (!line.ContinuesField) total += line.Height;
+        }
 
         return new Block(
             paragraph, measured, styles, lines,
@@ -1930,6 +2017,16 @@ public static partial class SlideTextLayout
     /// it because the bullet is centred on the text rather than on the line: a paragraph set at
     /// 150% keeps its marker where single spacing would have put it.
     /// </param>
+    /// <param name="ContinuesField">
+    /// Whether the line is the spill of a field that began on an earlier one — see
+    /// <see cref="SlideTextRun.IsField"/>. Such a line is a line to the painter and not to the
+    /// formatter: it is stacked one ascent below its predecessor and contributes nothing to the
+    /// block's measured height.
+    /// </param>
     private readonly record struct PlacedLine(
-        LineBox Box, Length Ascent, Length Height, Length TextHeight);
+        LineBox Box,
+        Length Ascent,
+        Length Height,
+        Length TextHeight,
+        bool ContinuesField = false);
 }

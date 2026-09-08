@@ -444,7 +444,24 @@ internal static class OdfEnhancedGeometry
 
         Parse(text, values, space, coordinates, segments);
 
-        double[] subViews = Numbers(Attribute(geometry, "sub-view-size"));
+        // `drawooo:`, not `draw:`. LibreOffice's own exporter writes this one in the extension
+        // namespace — `rExport.AddAttribute(XML_NAMESPACE_DRAW_EXT, XML_SUB_VIEW_SIZE, …)`,
+        // `xmloff/source/draw/shapeexport.cxx`:5006, under a comment that says *"export
+        // draw:sub-view-size"* and does not — and the importer reads whichever namespace the token
+        // arrives in. **5673 occurrences in 178 of the converted corpus's documents (151 of the 302
+        // `.odp`, 23 `.odt`, 4 `.ods`) and not one `draw:` spelling anywhere.** The ODF-namespace
+        // form is read as well, for a file some other producer wrote.
+        //
+        // It is the fifth instance of the rule `dotnet/CLAUDE.md` records against
+        // `drawooo:display`, `loext:shadow-blur`, `chartext:coordinate-region` and
+        // `text:line-break`, and the most expensive: a sub-view size is what a shape imported from
+        // OOXML states its coordinate space in, because such a shape carries
+        // `svg:viewBox="0 0 0 0"`. Without it every one of them is drawn at the size of its own
+        // bounding box in hundredths of a millimetre instead — a fraction of its real extent — so a
+        // master page's decorative artwork shrinks to a few points in a corner.
+        double[] subViews = Numbers(
+            Attribute(geometry, "sub-view-size", OdfNamespaces.DrawExtension)
+            ?? Attribute(geometry, "sub-view-size"));
 
         List<PresetPath> paths = [];
         List<PresetCommand> commands = [];

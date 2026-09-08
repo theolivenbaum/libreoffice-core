@@ -217,13 +217,18 @@ public sealed class LineFiller
     /// case, where every line but the first gets the same width; it exists for text flowing round a
     /// floating frame, where the width depends on how far down the paragraph the line sits.
     /// </param>
+    /// <param name="cellBroken">
+    /// The stretches that break between characters rather than between words, or null when there are
+    /// none — which is every paragraph a word processor lays out. See <see cref="CellBrokenSpan"/>.
+    /// </param>
     public List<TextLine> Fill(
         MeasuredParagraph measured,
         Length availableWidth,
         Length? firstLineWidth = null,
         string? language = null,
         ParagraphFormat? tabs = null,
-        Func<int, IReadOnlyList<TextLine>, Length>? widthOfLine = null)
+        Func<int, IReadOnlyList<TextLine>, Length>? widthOfLine = null,
+        IReadOnlyList<CellBrokenSpan>? cellBroken = null)
     {
         ArgumentNullException.ThrowIfNull(measured);
 
@@ -234,7 +239,8 @@ public sealed class LineFiller
             language,
             measured.WidthBetween,
             tabs,
-            widthOfLine);
+            widthOfLine,
+            cellBroken);
     }
 
     /// <summary>
@@ -304,7 +310,8 @@ public sealed class LineFiller
         string? language,
         Func<int, int, Length> widthBetween,
         ParagraphFormat? tabs = null,
-        Func<int, IReadOnlyList<TextLine>, Length>? widthOfLine = null)
+        Func<int, IReadOnlyList<TextLine>, Length>? widthOfLine = null,
+        IReadOnlyList<CellBrokenSpan>? cellBroken = null)
     {
         List<TextLine> lines = [];
         if (text.Length == 0)
@@ -318,6 +325,14 @@ public sealed class LineFiller
 
         IReadOnlyList<int> opportunities = _breaker.FindBreakOpportunities(text, language);
         HashSet<int> mandatory = [.. _breaker.FindMandatoryBreaks(text, language)];
+
+        // A field's own stretches break at every cell, which is a break the iterator does not
+        // offer and cannot be asked for: it is added here rather than in the breaker because it
+        // belongs to the *content* — one range of one paragraph — and not to the language's rules.
+        if (cellBroken is { Count: > 0 })
+        {
+            opportunities = CellBreaks.Merge(opportunities, cellBroken, text);
+        }
 
         // A justified paragraph in a file that asks for Word 2013's justification may overrun its room
         // by whatever squeezing its blanks recovers. Resolved once per paragraph rather than per
@@ -443,7 +458,8 @@ public sealed class LineFiller
             int chopEnd = chosen;
             bool forceChop = false;
 
-            if (chosen > lineStart && chosen < text.Length && text[chosen - 1] == '/')
+            if (chosen > lineStart && chosen < text.Length && text[chosen - 1] == '/'
+                && !CellBreaks.BreaksInside(cellBroken, chosen))
             {
                 int glued = GluedAcrossSolidus(text, chosen);
 
