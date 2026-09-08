@@ -871,3 +871,14 @@ dotnet/probes/rtf-htmautsp-r85/super-after.txt	2026-09-08	current	26.2.4.2	prese
 dotnet/probes/rtf-htmautsp-r85/sweep-orig-hash.sh	2026-09-08	current	26.2.4.2	present	current	
 dotnet/probes/rtf-htmautsp-r85/sweep-ours.sh	2026-09-08	current	26.2.4.2	present	current	
 dotnet/probes/rtf-htmautsp-r85/window-after.txt	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/chart-axis-r87/axes-chartset.txt	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/chart-axis-r87/axisticks.py	2026-09-08	current	26.2.4.2	present	current	dotnet/probes/chart-axis-r87/results.md
+dotnet/probes/chart-axis-r87/census.py	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/chart-axis-r87/movers.py	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/chart-axis-r87/results.md	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.Core/Charts/ChartPlot.cs;dotnet/src/Paperless.Core/Charts/ChartLayout.cs;dotnet/tests/Paperless.Core.Tests/ChartAxisIntervalZoomTests.cs
+dotnet/probes/chart-axis-r87/rows-after.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/probes/chart-axis-r87/results.md
+dotnet/probes/chart-axis-r87/rows-before.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/probes/chart-axis-r87/results.md
+dotnet/probes/chart-axis-r87/score-axes.py	2026-09-08	current	26.2.4.2	present	current	dotnet/probes/chart-axis-r87/results.md
+dotnet/probes/chart-axis-r87/sweep-ours.py	2026-09-08	current	26.2.4.2	present	current	dotnet/probes/chart-axis-r87/results.md
+dotnet/probes/chart-axis-r87/vary-h.py	2026-09-08	current	26.2.4.2	present	current	dotnet/probes/chart-axis-r87/results.md
+dotnet/probes/chart-axis-r87/vary-h.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/probes/chart-axis-r87/results.md

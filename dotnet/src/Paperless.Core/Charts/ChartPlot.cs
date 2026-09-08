@@ -1058,6 +1058,35 @@ public sealed partial record ChartPlot
     /// <summary>The size the axis labels are set at; the default is 10 pt.</summary>
     public Length LabelSize { get; init; } = Length.FromPoints(10);
 
+    /// <summary>
+    /// The zoom already applied to every type size in this plot, or 1 when none was.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>A chart is laid out at the size its own file states, and whatever scales the
+    /// picture afterwards is not part of that.</strong> A worksheet's print zoom is the case that
+    /// exists: <c>ScPrintFunc</c> scales the output device and the chart's primitives ride that
+    /// transform, but <c>chart2</c> has already composed the chart on its own draw page at the
+    /// stated type size and knows nothing about it. <c>SheetChart</c> takes the zoom through the
+    /// type sizes instead of pushing a transform at the sink, so that every glyph run stays in
+    /// page coordinates — and this records what it multiplied by, so the one measurement that is
+    /// <em>not</em> proportional to the type size can be taken at the size the chart states.
+    /// </para>
+    /// <para>
+    /// <strong>Which measurement, and why it is not proportional.</strong> A chart's text is
+    /// measured on a 96 dpi device, so a face is instantiated at a whole number of pixels and its
+    /// line height is <c>round(asc) + round(desc)</c> of them — see
+    /// <c>MetricGrid.Chart.PixelEmScale</c> and this file's own notes on the vertical. That
+    /// rounding makes the line height a step function of the size rather than a fixed fraction of
+    /// the em: DejaVu Sans answers 1.2266 em at 11 pt and 1.0670 em at 7.04 pt, which is the same
+    /// type at a 64% print zoom. Every length in the composition scales with the zoom and cancels;
+    /// <see cref="ChartLayout"/>'s interval cap is a <em>ratio</em> of a length to that height, so
+    /// it does not, and a chart on a zoomed sheet drew a denser axis than the reference for that
+    /// reason alone.
+    /// </para>
+    /// </remarks>
+    public double TypeScale { get; init; } = 1.0;
+
     /// <summary>Whether the axis labels — and the data labels — are set in the bold face.</summary>
     /// <remarks>
     /// <para>
