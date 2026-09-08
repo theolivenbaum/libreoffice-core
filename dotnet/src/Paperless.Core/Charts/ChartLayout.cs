@@ -1587,6 +1587,18 @@ public static partial class ChartLayout
     /// <c>108.8 / 17.5</c> does not.
     /// </para>
     /// <para>
+    /// <strong>And a print zoom must not reach it, which is what
+    /// <see cref="ChartPlot.TypeScale"/> is for.</strong> Every other length here is scaled by
+    /// the zoom on both sides of a comparison and cancels; this one is a ratio of a length to a
+    /// <em>device-quantised</em> height, and that height is not a fixed fraction of the em. On
+    /// <c>040_Blood_pressure_tracker</c> — one page, a fit-to-width sheet drawn at 64% — the same
+    /// axis reads 8.84 label heights at the stated 11 pt and 10.16 at the zoomed 7.04, so the cap
+    /// came out 10 where 26.2.4.2's is 8, and its secondary value axis was drawn <c>62 64 … 80</c>
+    /// against the reference's <c>60 65 70 75 80</c>. Rendering the same workbook with its
+    /// <c>fitToPage</c> removed produced the reference's axis before this was corrected, which is
+    /// what identified the zoom rather than the cap as the seat.
+    /// </para>
+    /// <para>
     /// <strong>And it is what separates a chart from a smaller copy of the same chart.</strong>
     /// <c>chart-bar-deck.odp</c> and <c>chart-bar-sheet.ods</c> hold the same eight numbers,
     /// peaking at 168, and LibreOffice labels the deck <c>0 20 … 180</c> over an axis 242 pt long
@@ -1606,13 +1618,20 @@ public static partial class ChartLayout
         if (plot.ValueScale.MajorUnit is { } stated && stated > 0.0)
             return ChartScale.MaximumAutoIntervalCount;
 
+        // The size the chart's file states, which is the size chart2 measures at. Where a print
+        // zoom has already been through the type sizes it has been through `area` too, so it
+        // cancels out of every other quantity in this file and does not cancel out of this one:
+        // see ChartPlot.TypeScale.
+        double zoom = plot.TypeScale is > 0.0 and < double.PositiveInfinity ? plot.TypeScale : 1.0;
+        Length modelSize = zoom == 1.0 ? plot.LabelSize : plot.LabelSize / zoom;
+
         Length available;
         Length needed;
 
         if (columns)
         {
             available = area.Height;
-            needed = measurer.Measure("0", plot.LabelSize, plot.IsLabelBold).Height;
+            needed = measurer.Measure("0", modelSize, plot.IsLabelBold).Height;
         }
         else
         {
@@ -1622,11 +1641,14 @@ public static partial class ChartLayout
             foreach (double tick in scale.MajorTicks())
             {
                 Length width = measurer.Measure(
-                    ChartDataLabel.Write(tick, plot.ValueFormat), plot.LabelSize,
+                    ChartDataLabel.Write(tick, plot.ValueFormat), modelSize,
                     plot.IsLabelBold).Width;
                 if (width > needed) needed = width;
             }
         }
+
+        // Back into the coordinates `available` is in, so the two are comparable again.
+        if (zoom != 1.0) needed *= zoom;
 
         if (needed <= Length.Zero) return ChartScale.MaximumAutoIntervalCount;
 
