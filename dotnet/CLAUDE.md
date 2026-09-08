@@ -1185,6 +1185,22 @@ REF_SOFFICE=/opt/libreoffice26.2/program/soffice \
 Read that second line before you read the table. A stored sweep that does not record it cannot be
 attributed to a reference at all.
 
+**Before you rebuild, check the sweep is finished — and check it with a file, not a clock.** The
+gate measures `dotnet/tools/Paperless.Cli/…/Paperless.Cli` in the tree it runs from, so a rebuild
+mid-sweep swaps the binary and the rows either side describe different programs. On 2026-09-07 a
+merge was built in this tree at 22:37 against a sweep started at 21:16; it survived only because
+every render had already finished, which was luck. The two facts that settle it:
+
+```sh
+ls -t <outdir>/ours/*.pdf | head -1 | xargs stat -c %y   # newest render
+stat -c %y dotnet/tools/Paperless.Cli/bin/Debug/net10.0/linux-x64/Paperless.Cli
+```
+
+If the newest render is older than the binary, every row predates the rebuild and the run is
+clean. `pgrep` alone is not enough — a finished sweep can leave a process behind, and a live one
+can be between documents. And a completed run is still worth this check, because the contamination
+is invisible in the table it produces.
+
 **And `timeout 240 soffice` never bounded `soffice`.** `soffice` execs `oosplash`, which *ignores
 SIGTERM*, and GNU `timeout` without `-k` sends SIGTERM once and then waits forever. On
 `sheets/done-016/ods/STC_WebList.ods` the reference render hung for **87 minutes** with its
