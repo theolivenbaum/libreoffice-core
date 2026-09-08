@@ -1,5 +1,6 @@
 using System.Text;
 using System.Xml.Linq;
+using Paperless.Core.Graphics;
 using Paperless.Core.Numbering;
 
 namespace Paperless.OpenDocument.Styles;
@@ -59,7 +60,30 @@ public sealed class OdfListLevel
             ?? textProperties?.Attribute(XName.Get("font-name", OdfNamespaces.Style))?.Value;
         RelativeSize = OdfValue.ParsePercentage(
             textProperties?.Attribute(XName.Get("font-size", OdfNamespaces.FoCompatible))?.Value);
+
+        // `style:use-window-font-color="true"` is ODF's *automatic* colour and is written on every
+        // level LibreOffice generates that does not colour its bullet, so it has to be read before
+        // `fo:color` rather than instead of it: a level stating both means the automatic one.
+        Colour =
+            OdfValue.ParseBoolean(textProperties?.Attribute(
+                XName.Get("use-window-font-color", OdfNamespaces.Style))?.Value) == true
+                ? null
+                : OdfValue.ParseColour(
+                    textProperties?.Attribute(XName.Get("color", OdfNamespaces.FoCompatible))?.Value);
     }
+
+    /// <summary>
+    /// The colour the label is drawn in, or null when it takes its item's own.
+    /// </summary>
+    /// <remarks>
+    /// The counterpart of DrawingML's <c>a:buClr</c>, which the deck reader has read since it was
+    /// written. It is not a decoration: a level that states one commonly states a colour the body
+    /// text does not use at all — <c>redac-sas-201509-asisp-research.odp</c> page 7 draws green
+    /// check marks over black text — so a reader that drops it draws the whole list in one colour.
+    /// <strong>22 436 bullet levels in all 302 of the converted corpus's <c>.odp</c> state
+    /// <c>fo:color</c>.</strong>
+    /// </remarks>
+    public Colour? Colour { get; }
 
     /// <summary>
     /// The face the label itself is set in, when the level states one directly.

@@ -806,6 +806,16 @@ rows, not an error, so it reads as documents that could not be rendered.
 per worker slot. Prefer it, and if you write your own, key the directory on something unique to
 the item rather than on a slot index.
 
+**The same collision happens between two *runs*, and it reads as a catastrophic regression.**
+Round 80 started an `.odp` sweep, believed it dead — it had stopped at 267 of 302 rows and did not
+appear in `ps` under the pattern that was grepped — deleted the directory and restarted into the
+same path. Both runs then appended to one `rows.tsv` and each `rm -rf`'d the other's `t0`/`t1`
+between documents: **27 of 302 rows came back `ours-failed` and 4 documents were scored twice**,
+and every one of the 27 rendered correctly on its own. **The check is not `pgrep`** — the harness
+wraps a background command in a shell whose command line the obvious pattern does not match — but
+the row file's own growth: *a directory that gains rows after its sweep has been declared finished
+has a second writer in it.* Restart into a **fresh** directory rather than reusing one.
+
 ### A sweep and a rebuild must never overlap
 
 `batch-check.sh` reads `PAPERLESS_CLI` per document, so a rebuild that lands mid-sweep swaps
@@ -914,19 +924,39 @@ drawn nowhere; it reached 285 of 302 on the master's running objects, `style:shr
 `loext:shadow-blur`, reached 289 of 302 on the chart reader's axis resolution,
 `draw:text-rotate-angle` and `text:line-break` (`probes/odp-chart-r72`), and is **295 of 302**
 after an ODF document's own embedded fonts and an empty paragraph's height
-(`probes/odp-embed-r79`). Two rules from it are general enough to carry:
+(`probes/odp-embed-r79`). **It is still 295 of 302 after round 80, and that is the point of that
+round rather than a failure of it**: a break position, a bullet's picture, a marker's colour and a
+shape's extent add no glyphs and no pages, so no gate column can see any of them. The seven that
+remain are six raster-ceiling documents where *we draw more* and one glyph-exact `unembedded`.
+Two rules from it are general enough to carry:
 
 - **An ODF attribute LibreOffice's own exporter writes is very often not in the namespace the
   specification puts it in, and the ODF-namespace spelling then appears in no real file at all.**
-  Four instances are now in the tree and they were each found by a different round the hard way:
+  Five instances are now in the tree and they were each found by a different round the hard way:
   `drawooo:display` for `draw:display` (`OdpSlideLayout.IsPrinted`, 887 occurrences and not one
   `draw:` spelling), `loext:shadow-blur` for `draw:shadow-blur` (`sdpropls.cxx`:169; 1252 non-zero
   occurrences in 120 of the 302, and **zero** `draw:shadow-blur` anywhere),
-  `chartext:coordinate-region` (`OdfNamespaces.ChartExtension`), and **`text:line-break`** for an
+  `chartext:coordinate-region` (`OdfNamespaces.ChartExtension`), **`text:line-break`** for an
   axis' line breaking (`xmloff/source/chart/PropertyMaps.cxx`:188 maps `PROP_TextBreak` under
-  `XML_NAMESPACE_TEXT`; 379 statements in 92 of the 302). **Grep the corpus for both
-  spellings before implementing an ODF attribute**, and read `sdpropls.cxx`'s `GMAPV` rows and
+  `XML_NAMESPACE_TEXT`; 379 statements in 92 of the 302), and **`drawooo:sub-view-size`** for a
+  custom shape's coordinate space (`shapeexport.cxx`:5006 writes `XML_NAMESPACE_DRAW_EXT` **under
+  a comment that says it writes `draw:sub-view-size`**; **5673 occurrences in 178 documents — 151
+  of the 302 `.odp`, 23 `.odt`, 4 `.ods` — and not one `draw:` spelling**). **Grep the corpus for
+  both spellings before implementing an ODF attribute**, and read `sdpropls.cxx`'s `GMAPV` rows and
   `xmloff/source/chart/PropertyMaps.cxx`'s, which name the namespace each property is exported in.
+
+  **The fifth is the most expensive, because the attribute it hides is what makes a shape the
+  right size.** A `draw:custom-shape` LibreOffice imported from OOXML carries
+  `svg:viewBox="0 0 0 0"` and states its real space per subpath in `sub-view-size`;
+  `EnhancedCustomShape2d::SetPathSize` (`EnhancedCustomShape2d.cxx`:650-670) takes it whenever both
+  numbers are non-zero. Read in the wrong namespace every such shape falls back to its own bounding
+  box in hundredths of a millimetre and is drawn at a fraction of its extent — on `Sean Monogue`'s
+  master, four freeforms at 20 × 24 and 12 × 12 points instead of 89.86 × 105.59 and 50.97 × 51.73.
+  The importer itself is namespace-blind (`EASGet(nToken)` reduces the token to its *local name*,
+  `EnhancedCustomShapeToken.cxx`:200-203), which is why the wrong spelling costs LibreOffice
+  nothing and costs a reader everything. Its reach here is the `.odp` alone:
+  **`OdfEnhancedGeometry` has two callers and both are `OdpSlideLayout`**, and all 26 of the
+  `.odt`/`.ods` that state one render byte-identically before and after.
 
   **The fourth is the one to remember, because it wears a different disguise.** The first three
   look like a wrong prefix; this one looked like an attribute that does not exist —
@@ -1024,15 +1054,51 @@ that hides it is a *bare* `<text:p/>`, which does take the shape's default and o
 renderers already agreed. Measured over ten one-attribute variants of one slide, 10 of 10 exact.
 
 **A `text:a` in slide text is an EditEngine *field*, and that explains two things an image
-cannot.** The `EE_FEATURE_FIELD` branch sizes its portion straight from `QuickGetTextSize`
-(`impedit3.cxx`:1100-1104) and, unlike the ordinary text branch at `:1256-1259`, never applies
-the fixed cell height — so a line holding a hyperlink is `1.0 em` tall where its neighbours are
-`1.2 em`. And an over-long field is broken at **cell boundaries** through
-`nextCharacters(…, SKIPCELL, …)` into an `ExtraPortionInfo::lineBreaksList` (`:1131-1200`), which
-is a break opportunity at *every character*. So *"the reference breaks a long URL mid-token"* is
-not a URL rule or a hyphenation rule; it is what a field does. Established by variant — stripping
-the `<text:a>` elements and keeping their text makes 26.2.4.2 draw every pitch at 1.2 em.
-**Reach 485 in 107 of the 302 `.odp`, and left**: it needs a portion kind in `SlideTextLayout`.
+cannot.** `txtparai.cxx`:1352-1370 asks the cursor for a `HyperLinkURL` property and builds an
+`XMLUrlFieldImportContext` when it has none, which is every Draw, Impress and Calc text and no
+Writer one. An over-long field is broken at **cell boundaries** through
+`nextCharacters(…, SKIPCELL, …)` into an `ExtraPortionInfo::lineBreaksList`
+(`impedit3.cxx`:1101-1200) — a break opportunity at *every character* — and it is neither moved
+onto the next line nor offered to the break iterator at all. So *"the reference breaks a long URL
+mid-token"* is not a URL rule or a hyphenation rule; it is what a field does. Established by
+variant — stripping the `<text:a>` elements and keeping their text makes 26.2.4.2 draw every pitch
+at 1.2 em. **Reach 665 in 156 of the 302 `.odp`** (the "485 in 107" that stood here counted
+`content.xml` alone), and **closed**: `SlideTextRun.IsField`, `CellBrokenSpan` and
+`PlacedLine.ContinuesField`. `0335fab9…odp` page 6 goes from four lines short to **fifteen lines
+agreeing with 26.2.4.2 character for character and every baseline to 0.001 pt**.
+
+***And the other half of it is a paint-time rule, not the one this file used to give.*** The
+1.0 em pitch was recorded here as *"a field portion is the one portion kind that is never given
+the fixed cell height"*. It is not: `RecalcFormatterFontMetrics` (`impedit3.cxx`:3119-3183) runs
+over every portion of the line whose kind is not `LINEBREAK`, a `FIELD` included, so the line
+holding a field is 1.2 em like any other. What is short is the **spill** — the lines the field
+overflows onto — and the distance is `aTmpPos += MoveToNextLine(aStartPos, nMaxAscent, nColumn)`
+(`:3793`, whose own comment says *"only use GetMaxAscent(), pLine->GetHeight() will not proceed as
+needed"*). Two consequences the old reading does not predict, both measured on
+`probes/odp-visual-r80/field-variants.py`: the distance is the **ascent**, which equals the em
+only under fixed cell height — with the flag off 26.2.4.2 draws the spill 14.400 pt apart where
+the ordinary pitch is 17.773 — and **the formatter never sees a spill line**, so the height that
+anchors the block and that the shrink-to-fit search measures counts the field's line once and the
+spill hangs out of the bottom of a middle- or bottom-anchored box.
+
+***The `.pptx` side is the same rule and is deliberately untouched.***
+`oox/source/drawingml/textrun.cxx`:149 builds a `com.sun.star.text.TextField.URL` for any run
+carrying an `a:hlinkClick`, so a DrawingML hyperlink is a field exactly as a `text:a` is.
+**2293 `a:hlinkClick` on the slides of 95 of the corpus's 251 `.pptx`-family decks** — larger than
+the ODF reach. Nothing sets `SlideTextRun.IsField` from `PptxTextBody`; it is one line and a
+measurement.
+
+**And an ODF bullet level's Private Use Area slot and its colour are both read now.**
+`OdfListStyle.FormatLabel` is the *extraction* answer and puts the bullet through
+`OutlineNumbers.NormaliseBullet`, which collapses a Wingdings slot to U+2022 — right for an index
+and a black dot where the reference draws a green check mark. `OdfTextBody.Marker` takes the raw
+`text:bullet-char` instead when the level's family has a recode table, exactly as
+`PptxTextBody.Marked` does; **3598 bullet levels in 74 of the 302 `.odp` state a Private Use Area
+character**, every one in the F000 block. Beside it, `fo:color` on the level's own
+`style:text-properties` — with `style:use-window-font-color="true"` meaning the item's own colour
+— is DrawingML's `a:buClr` and nothing read it: **22 436 bullet levels in all 302 state one.**
+The picture is checked rather than assumed: a 600 dpi crop of the recoded check mark is
+byte-identical to 26.2.4.2's. `probes/odp-visual-r80/`.
 
 **`style:font-independent-line-spacing` is honoured only on the shape's `draw:text-style-name`
 paragraph style.** The flag is EditEngine-wide (`SetFixedCellHeight`), so it belongs to the
