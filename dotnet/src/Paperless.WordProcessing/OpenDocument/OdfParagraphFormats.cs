@@ -122,8 +122,18 @@ internal static class OdfParagraphFormats
     /// <see cref="OdtLayoutSource.ShrinksJustifiedBlanks"/> and
     /// <see cref="ParagraphFormat.ShrinksJustifiedBlanks"/>.
     /// </param>
+    /// <param name="tabsRelativeToIndent">
+    /// True when this document's tab stops are measured from the paragraph's own indent, which the
+    /// document's <c>TabsRelativeToIndent</c> setting decides. Writer's own default and therefore this
+    /// one; every <c>.odt</c> LibreOffice exported from a Word file states <c>false</c>. See
+    /// <see cref="OdtLayoutSource.TabsRelativeToIndent(System.Xml.Linq.XElement?)"/> and
+    /// <see cref="ParagraphFormat.TabsRelativeToIndent"/>.
+    /// </param>
     internal static ParagraphFormat Resolve(
-        OdfStyles styles, string? styleName, bool shrinksJustifiedBlanks = false)
+        OdfStyles styles,
+        string? styleName,
+        bool shrinksJustifiedBlanks = false,
+        bool tabsRelativeToIndent = true)
     {
         ArgumentNullException.ThrowIfNull(styles);
 
@@ -169,6 +179,10 @@ internal static class OdfParagraphFormats
             // OdtLayoutSource.ShrinksJustifiedBlanks for what turns it on and what it costs when it is
             // read wrongly.
             ShrinksJustifiedBlanks = shrinksJustifiedBlanks,
+
+            // Also document-wide, and the one flag every Word-family reader in this tree already sets
+            // by hand: an ODF document states it outright, so it is read rather than assumed.
+            TabsRelativeToIndent = tabsRelativeToIndent,
         };
     }
 
