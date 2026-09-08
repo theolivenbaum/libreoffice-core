@@ -405,6 +405,7 @@ public sealed partial class OdtLayoutSource
                     RowSpan = rowSpan,
                     Padding = Padding(styleName),
                     VerticalAlignment = VerticalAlignment(styleName),
+                    TextDirection = TextDirection(styleName),
                     Shading = Shading(styleName),
                     Borders = Borders(styleName),
                 });
@@ -524,6 +525,76 @@ public sealed partial class OdtLayoutSource
             "bottom" => VerticalTextAlignment.Bottom,
             _ => VerticalTextAlignment.Top,
         };
+
+    /// <summary>
+    /// Which way a cell's text runs, from <c>writing-mode</c> on its <c>style:table-cell-properties</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Writer's own ODF filter maps <em>both</em> spellings of the attribute onto one item: its table-cell
+    /// item map holds <c>style:writing-mode</c> and <c>loext:writing-mode</c> side by side, each against
+    /// <c>RES_FRAMEDIR</c> (<c>sw/source/filter/xml/xmlitemm.cxx</c>:281-282), and the value handler takes
+    /// <c>bt-lr</c> as <c>SvxFrameDirection::Vertical_LR_BT</c> and <c>tb-rl90</c> as
+    /// <c>Vertical_RL_TB90</c> whichever namespace carried them
+    /// (<c>sw/source/filter/xml/xmlimpit.cxx</c>:1008-1030), leaving every other value to the ordinary
+    /// <c>XML_TYPE_TEXT_WRITING_MODE_WITH_DEFAULT</c> handler.
+    /// </para>
+    /// <para>
+    /// So here the extension namespace is chosen by the <em>value</em> and not by the property, which is a
+    /// shape none of this project's recorded ODF namespace surprises has: the exporter writes the attribute
+    /// as <c>style:</c> for every value ODF 1.3 defines and as <c>loext:</c> for the two it does not —
+    /// <c>sw/source/filter/xml/xmlexpit.cxx</c>:193-220 for this item, and
+    /// <c>SvXMLExportPropertyMapper::_exportXML</c>'s <c>CheckExtendedNamespace</c>
+    /// (<c>xmloff/source/style/xmlexppr.cxx</c>:947-952 and :1108-1118) for every other, under a comment
+    /// saying there is no generic mechanism for it. Measured on 26.2.4.2 with one cell per spelling in one
+    /// table: <c>style:writing-mode="bt-lr"</c> and <c>loext:writing-mode="bt-lr"</c> are drawn identically,
+    /// so the extension namespace is an export convention and not an import requirement — and reading only
+    /// the specification's spelling finds none of the 86 turned cells the converted corpus holds.
+    /// </para>
+    /// <para>
+    /// The two spellings are therefore one property and are resolved together, the <em>level</em> before the
+    /// spelling, so an outer style's spelling cannot beat an inner style's.
+    /// </para>
+    /// <para>
+    /// <c>tb-lr</c> is a third direction and not one of the two: 26.2.4.2 turns it clockwise like
+    /// <c>tb-rl</c> but stacks the lines <em>rightwards</em>. It is answered as
+    /// <see cref="CellTextDirection.TopToBottomRightToLeft"/>, which is right about the glyphs and about the
+    /// break and wrong only about which way a second line goes; upright — what LibreOffice's own DOCX
+    /// importer does with the corresponding <c>tbLrV</c>, <em>"we can't handle these"</em> — would be wrong
+    /// about all three. No document of the converted corpus states it on a cell.
+    /// </para>
+    /// </remarks>
+    private CellTextDirection TextDirection(string? styleName)
+    {
+        OdfProperty stated = _styles.ResolveWithoutDefaults(
+            styleName, OdfStyleFamily.TableCell, OdfPropertyKind.TableCell, WritingModeSpellings, out _);
+
+        if (!stated.HasValue)
+        {
+            stated = _styles.ResolveFromDefaults(
+                OdfStyleFamily.TableCell, OdfPropertyKind.TableCell, OdfNamespaces.Style, "writing-mode");
+        }
+
+        return stated.Value switch
+        {
+            "bt-lr" => CellTextDirection.BottomToTopLeftToRight,
+            "tb-rl" or "tb-rl90" or "tb-lr" or "tb" => CellTextDirection.TopToBottomRightToLeft,
+            _ => CellTextDirection.LeftToRight,
+        };
+    }
+
+    /// <summary>
+    /// The two spellings of <c>writing-mode</c>, the extension one first.
+    /// </summary>
+    /// <remarks>
+    /// Order decides only what a single style stating both would answer, which no exporter writes; the
+    /// extension spelling leads because it is the one that carries a turned value.
+    /// </remarks>
+    private static readonly (string Namespace, string Name)[] WritingModeSpellings =
+    [
+        (OdfNamespaces.LoExt, "writing-mode"),
+        (OdfNamespaces.Style, "writing-mode"),
+    ];
 
     /// <summary>
     /// The colour behind a cell's text, or null when it has none.

@@ -108,7 +108,8 @@ public sealed class OdtWordDocument : IWordProcessingDocument, IPaginatedDocumen
                 .ToDictionary(pair => pair.Name!, pair => pair.index, StringComparer.Ordinal),
             stylesRoot: _inner.File.StylesRoot,
             pictures: new OdfPictures(_inner.File, _laidOut),
-            settings: _inner.File.Settings);
+            settings: _inner.File.Settings,
+            sectionMargins: [.. Sections.Select(section => section.Page.Margins.Left)]);
 
         List<PageBlock> blocks = source.Read(body);
 
@@ -121,6 +122,11 @@ public sealed class OdtWordDocument : IWordProcessingDocument, IPaginatedDocumen
             // Keeping it is the ODF default too, and the preset had the opposite — see
             // OdtLayoutSource.KeepsParagraphSpacingAtPages, which measures what an absent item means.
             KeepsSpacingAtTopOfPage = OdtLayoutSource.KeepsParagraphSpacingAtPages(_inner.File.Settings),
+            // The deadline a split floating table is cut at — the body's print bottom, or the page's
+            // when the document carries Word's pre-2013 rule. See
+            // OdtLayoutSource.FliesMayOverlapTheBottomMargin.
+            FliesMayOverlapTheBottomMargin =
+                OdtLayoutSource.FliesMayOverlapTheBottomMargin(_inner.File.Settings),
             MaxPages = options?.MaxPages is > 0 ? options.MaxPages : PaginationOptions.Default.MaxPages,
         };
 

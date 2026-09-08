@@ -101,6 +101,94 @@ internal static class OdfFrames
         }
     }
 
+    /// <summary>
+    /// Where a fly holding nothing but a table puts that table, or null when the element is not one.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A <em>floating table</em> is one object with two spellings. Word states it on the table itself as
+    /// <c>w:tblpPr</c> and LibreOffice's DOCX importer turns that into a fly holding a table
+    /// (<c>TablePositionHandler::getTablePosition</c>), always splittable —
+    /// <c>sw/source/writerfilter/dmapper/DomainMapperTableHandler.cxx</c>:1765, <em>"A text frame created
+    /// for floating tables is always allowed to split"</em>. ODF states the same object the other way up:
+    /// a <c>draw:frame</c> whose <c>draw:text-box</c> holds one table and whose element carries
+    /// <c>loext:may-break-between-pages="true"</c>
+    /// (<c>xmloff/source/text/XMLTextFrameContext.cxx</c>:1104-1107 reads both that spelling and the
+    /// <c>draw:</c> one into <c>IsSplitAllowed</c>; <c>xmloff/source/text/txtparae.cxx</c>:3115-3119
+    /// writes it, in the extension namespace and only when true).
+    /// </para>
+    /// <para>
+    /// They are the same object and this engine already models it — as a <em>positioned block table</em>
+    /// rather than as a frame, because that is the model that splits: <c>Paginator.PlaceFloatedTable</c>
+    /// carries the rows a page cannot take and <c>ContinueFloatedTables</c> puts them at the top of the
+    /// next one, starting a page of its own when the flow has none left. Read as an ordinary frame
+    /// instead, the same table is measured whole and its tail is drawn off the bottom of the sheet.
+    /// </para>
+    /// <para>
+    /// The refusals are <c>SwFlyFrame::IsFlySplitAllowed</c>'s
+    /// (<c>sw/source/core/layout/fly.cxx</c>:689-737): the anchor must be at-content —
+    /// <c>text:anchor-type</c> <c>paragraph</c> or <c>char</c>, since <c>IsFlyAtContentFrame</c> is what
+    /// the first test asks — and a fly in a header, a footer, a footnote or a multi-column section is
+    /// refused whatever it states. The last three are the caller's to enforce, because only the caller
+    /// knows which flow it is walking; the anchor and the attribute are here.
+    /// </para>
+    /// <para>
+    /// <b>All 51 such frames in the converted corpus hold a table and nothing else</b> — not one holds a
+    /// paragraph — so the "or a paragraph flow" arm this could grow has no witness and is deliberately
+    /// absent rather than written blind.
+    /// </para>
+    /// </remarks>
+    /// <param name="element">The candidate <c>draw:frame</c>.</param>
+    /// <param name="styles">The document's styles, for the frame's own graphic style.</param>
+    public static FloatingTableFrame? FloatingTable(XElement element, OdfStyles styles)
+    {
+        ArgumentNullException.ThrowIfNull(element);
+        ArgumentNullException.ThrowIfNull(styles);
+
+        if (element.Name != XName.Get("frame", OdfNamespaces.Draw)) return null;
+        if (AnchorType(element) is not ("paragraph" or "char")) return null;
+        if (!MayBreakBetweenPages(element)) return null;
+        if (Measure(element, "width") is not { } width) return null;
+
+        XElement? box = element.Element(XName.Get("text-box", OdfNamespaces.Draw));
+        if (box is null) return null;
+
+        XElement? table = null;
+        foreach (XElement child in box.Elements())
+        {
+            if (child.Name.LocalName != "table" || !OdfNamespaces.IsTable(child.Name.NamespaceName))
+                return null;
+            if (table is not null) return null;
+
+            table = child;
+        }
+
+        if (table is null) return null;
+
+        OdfGraphicStyle style = GraphicStyle(styles, StyleName(element));
+
+        return new FloatingTableFrame(
+            table,
+            width,
+            HorizontalAlignmentOf(style.HorizontalPosition),
+            Measure(element, "x") ?? Length.Zero,
+            style.HorizontalRelative is "page",
+            VerticalOriginOf(style.VerticalRelative),
+            Measure(element, "y") ?? Length.Zero,
+            style.Spacing.Bottom);
+    }
+
+    /// <summary>
+    /// Whether the frame says its fly may be broken across pages.
+    /// </summary>
+    /// <remarks>
+    /// Both spellings, because the importer reads both — the extension one is what LibreOffice's own
+    /// exporter writes and the <c>draw:</c> one is what a producer following a later specification would.
+    /// </remarks>
+    private static bool MayBreakBetweenPages(XElement element)
+        => element.Attribute(XName.Get("may-break-between-pages", OdfNamespaces.LoExt))?.Value == "true"
+           || element.Attribute(XName.Get("may-break-between-pages", OdfNamespaces.Draw))?.Value == "true";
+
     /// <summary>A group nested deeper than this is not read; real documents nest two or three.</summary>
     private const int MaxGroupNesting = 16;
 
@@ -627,3 +715,38 @@ internal static class OdfFrames
         }
     }
 }
+
+/// <summary>
+/// A <c>draw:frame</c> that is a floating table: the table it holds, and where its fly puts it.
+/// </summary>
+/// <remarks>
+/// The fields are exactly what <see cref="PageTable"/> needs to be a positioned table, which is this
+/// engine's model of the same object — see <see cref="OdfFrames.FloatingTable"/> for why the two
+/// spellings are one thing and for the refusals the caller still has to apply.
+/// </remarks>
+/// <param name="Table">The <c>table:table</c> — or <c>loext:table</c> — element inside the fly.</param>
+/// <param name="Width">The fly's <c>svg:width</c>, which is the room the table has across.</param>
+/// <param name="Horizontal">
+/// How the fly is aligned across whatever it is relative to. <see cref="FrameHorizontalAlignment.Offset"/>
+/// is ODF's <c>from-left</c>, the one value that uses <see cref="HorizontalOffset"/> at all.
+/// </param>
+/// <param name="HorizontalOffset">The fly's <c>svg:x</c>, meaningful only under <c>from-left</c>.</param>
+/// <param name="HorizontalFromSheet">
+/// True when <c>style:horizontal-rel="page"</c>, so the offset is measured from the sheet's own left edge
+/// rather than from the text area's — the same distinction OOXML draws with <c>w:horzAnchor="page"</c>.
+/// </param>
+/// <param name="VerticalOrigin">What <see cref="VerticalOffset"/> is measured down from.</param>
+/// <param name="VerticalOffset">The fly's <c>svg:y</c>.</param>
+/// <param name="LowerSpacing">
+/// The fly's <c>fo:margin-bottom</c>: the room it keeps clear below itself, which belongs to the frame
+/// rather than to the table and is OOXML's <c>w:bottomFromText</c>.
+/// </param>
+internal readonly record struct FloatingTableFrame(
+    XElement Table,
+    Length Width,
+    FrameHorizontalAlignment Horizontal,
+    Length HorizontalOffset,
+    bool HorizontalFromSheet,
+    FrameVerticalOrigin VerticalOrigin,
+    Length VerticalOffset,
+    Length LowerSpacing);

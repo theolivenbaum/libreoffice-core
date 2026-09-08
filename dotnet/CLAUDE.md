@@ -1011,6 +1011,71 @@ Two rules from it are general enough to carry:
   the cause was found, because all three shared the defect. LibreOffice's own exporter always
   names `Frame`, so no real document is affected; **every hand-built `draw:frame` probe must name
   a parent style**, and the same trap is waiting in `.odp` and `.ods`.
+- **And the sixth instance of the namespace rule is not a name at all — it is a *value*.**
+  `writing-mode` is exported as `style:` for every value ODF 1.3 defines and as `loext:` for the two
+  it does not, `bt-lr` and `tb-rl90`: `CheckExtendedNamespace` re-qualifies the attribute inside
+  `SvXMLExportPropertyMapper::_exportXML` (`xmloff/source/style/xmlexppr.cxx`:947-952 and
+  :1108-1118, under a comment saying there is no generic mechanism for it), and Writer's own table
+  item map does the same by hand (`sw/source/filter/xml/xmlexpit.cxx`:193-220). **The importer reads
+  both spellings** — `xmlitemm.cxx`:281-282 holds `style:writing-mode` and `loext:writing-mode` side
+  by side against `RES_FRAMEDIR`, and `xmlimpit.cxx`:1008-1030 takes the value whichever namespace
+  carried it — and 26.2.4.2 draws the two identically, measured one cell per spelling. So the
+  extension namespace is an export convention, and **grepping the corpus for the attribute name
+  finds it and tells you nothing**: the converted `.odt` state `style:writing-mode` on 14 264 table
+  cells of which 14 261 say `lr-tb`, while all 86 `bt-lr` cells — in 11 documents — are `loext:`.
+  Reading only the specification's spelling drew each of them a glyph per line.
+  `probes/odt-split-r82/results.md` §1.
+
+- **An ODF `draw:frame` holding nothing but a table is OOXML's `w:tblpPr`, and this engine already
+  splits one.** LibreOffice's DOCX importer turns a positioned table into a fly holding a table and
+  marks it splittable without exception (`DomainMapperTableHandler.cxx`:1765); its ODF export writes
+  that fly back out as a `draw:frame` carrying `loext:may-break-between-pages="true"` **on the
+  element**, not on its graphic style (`txtparae.cxx`:3115-3119 writes it, and
+  `XMLTextFrameContext.cxx`:1104-1107 reads that spelling and the `draw:` one alike). One object,
+  two spellings. `Paginator.PlaceFloatedTable` has carried the rows a page cannot take since the
+  round that closed `Case-Study-Heathrow-Airport.docx`, and `ContinueFloatedTables` places them at
+  the top of the next page — **starting pages that no block created** when the body's flow has run
+  out. **So "a fly's continuation needs pages no block created and obstacles keyed by page" is not
+  the blocker two rounds recorded: the blocker was the ODF reader, which routed the same object
+  through the frame path.** `OdfFrames.FloatingTable` and `OdtLayoutSource.Floated`; `.odt`
+  **281 → 290**, the original `.docx`/`.doc` track 338 of 338 rows identical and the converted
+  `.rtf` column 338 of 338 identical.
+
+  Three things fell out of it and each is worth more than the fix:
+
+  - **What splitting is worth is measurable at the reference, and it is six rows rather than the
+    13 and 24 two rounds recorded.** Strip `loext:may-break-between-pages` from the file, render the
+    patched document through 26.2.4.2 and compare: a document whose counts do not move is one the
+    reference never split. Of the 20 failing rows holding a splittable fly, **six** move — and on
+    four of those the reference *with splitting off* reproduces this tree's own page and glyph
+    counts **exactly**, which is as clean a statement as this corpus offers that splitting was the
+    whole of the gap. All 51 splittable flies in the column hold a table and nothing else, so the
+    paragraph-flow slicer a round could have written would have reached nothing.
+    `probes/odt-split-r82/unsplit.py`.
+  - **Two document settings decide more of it than the attribute does.** `TabOverMargin` picks the
+    deadline a split fly is cut at — the page's bottom rather than the body's, `GetFlyAnchorBottom`
+    and `isLegacyBehavior`, `sw/source/core/layout/fly.cxx`:101-162 — and **177 of the 338 `.odt`
+    state it true, 161 false**; reading it as absent split three graph-paper templates onto a second
+    page each. `DoNotBreakWrappedTables` is a document-level veto over every
+    `may-break-between-pages` in the file, tested before the fly is looked at (`fly.cxx`:696-700),
+    and **30 of the 338 state it**. Both default to false.
+  - **A "shape that over-draws" may be a reference that outlines its glyphs, and the check is one
+    measurement.** Screened over the eight `chartset` templates the `.odt` gate reads as drawing
+    3 % to 43 % too much: on `051_Organogram_Template_Basic_Theme` 26.2.4.2 draws 49 characters as
+    text and **29 glyph-sized filled paths**, which is most of the 37-character "excess", and on
+    `055_Organogram_Template_Horizontal_Structure` 37 more; `024_Unit_Circle_Chart_Colorful_Circles`
+    draws **35 characters fewer** than the reference, so the group is not even one sign. Count the
+    reference's outlines before working one of these — `probes/odt-split-r82/overdraw.py` does it —
+    and take `011`, `018`, `031` and `040`, which carry none on either side, as the four that really
+    are an autofit or clip question.
+  - **The instrument that shows a fly's tail drawn below the sheet has to read `Td` as well as
+    `Tm`, and `get_text` cannot see it at all.** PyMuPDF clips text to the page, so it reports a few
+    descender-sized overhangs and none of the real thing; a content-stream scan matching only `Tm`
+    finds **one** document in 338, because Writer's PDF writer positions most text objects with
+    `Td`. Matching both finds 30, Heathrow's page one reaching y = −945.6 and `ESPN-R`'s page 41
+    −6732.1. This round nearly published *"round 77's observation no longer holds"* on the strength
+    of the `Tm`-only scan. `probes/odt-split-r82/tdrange.py`; the two wrong instruments are kept
+    beside it.
 
 **An ODF document's own embedded fonts were never loaded, and the seat is `svg:font-face-uri`.**
 A `style:font-face` that carries a face holds one `svg:font-face-uri` per style under an
