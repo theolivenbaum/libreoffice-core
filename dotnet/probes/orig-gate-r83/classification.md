@@ -3,6 +3,11 @@
 Rows: `rows.tsv` in this directory — 947 documents, reference **26.2.4.2**
 (`/opt/libreoffice26.2/program/soffice`), the calibration target. **914 match, 33 do not.**
 
+> **Rows closed since this run.** This file is a snapshot of `rows.tsv` and its table is not
+> re-measured; check here before treating a row below as open.
+> - `040_Blood_pressure_tracker` (`words`, +18) — closed by the print-zoom interval cap,
+>   `probes/chart-axis-r87`, merged at `47259cf60`.
+
 This supersedes the classification written against `orig-gate-r81`, which used the 24.2.7.2
 reference and reported 76 failures. Two of that document's three "diagnosed outliers" do not
 exist against 26.2.4.2 and must not be dispatched:
