@@ -156,7 +156,7 @@ internal sealed class XlsxChartRanges(XlsxFile file, XlsxSheetReader reader)
 
                 if (!index.TryGetValue((row, column), out ContentTableCell? cell)) continue;
 
-                string shown = cell.GetText();
+                string shown = cell.GetOwnText();
                 if (shown.Length > 0) { labels[^1] = shown; any = true; }
 
                 if (NumberOf(cell.Value) is { } number) { numbers[^1] = number; any = true; }

@@ -276,7 +276,12 @@ public sealed class SheetLayout
                     // search does count formatted-but-empty cells; the content tree does not
                     // record formatting, so this is the narrower of the two answers and is
                     // recorded in the module's TODO as a known difference.
-                    if (cell.Value is null && cell.GetText().Length == 0) continue;
+                    //
+                    // A shape anchored in the cell is not content either: `ScTable::GetCellArea`
+                    // walks the columns' cell storage and an object is in the drawing layer, which
+                    // reaches the page through `ScDrawLayer::GetPrintArea` instead. Hence
+                    // GetOwnText rather than GetText, here and at every other cell question.
+                    if (cell.Value is null && cell.GetOwnText().Length == 0) continue;
 
                     int columnEnd = cell.Column + Math.Max(1, cell.ColumnSpan) - 1;
                     int rowEnd = cell.Row + Math.Max(1, cell.RowSpan) - 1;
@@ -325,7 +330,7 @@ public sealed class SheetLayout
                 foreach (ContentTableCell cell in row.Children.OfType<ContentTableCell>())
                 {
                     // The same "is this content" test UsedRange makes, for the same reason.
-                    if (cell.Value is null && cell.GetText().Length == 0) continue;
+                    if (cell.Value is null && cell.GetOwnText().Length == 0) continue;
 
                     int rowEnd = cell.Row + Math.Max(1, cell.RowSpan) - 1;
                     int columnEnd = cell.Column + Math.Max(1, cell.ColumnSpan) - 1;

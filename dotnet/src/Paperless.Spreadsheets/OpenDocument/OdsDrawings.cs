@@ -11,7 +11,8 @@ using Paperless.Vector;
 namespace Paperless.Spreadsheets.OpenDocument;
 
 /// <summary>
-/// The pictures anchored on one ODF sheet: <c>draw:frame</c> inside a <c>table:table-cell</c>.
+/// The drawings anchored on one ODF sheet: any <c>draw:</c> element inside a
+/// <c>table:table-cell</c> or a <c>table:shapes</c>.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -105,9 +106,9 @@ internal static class OdsDrawings
         XElement? shapes = table.Element(XName.Get("shapes", OdfNamespaces.Table));
         if (shapes is null) return;
 
-        foreach (XElement frame in Frames(shapes))
+        foreach (XElement shape in Shapes(shapes))
         {
-            if (Read(file, frame, 0, 0, sheetAnchored: true) is { } drawing) drawings.Add(drawing);
+            if (Read(file, shape, 0, 0, sheetAnchored: true) is { } drawing) drawings.Add(drawing);
         }
     }
 
@@ -123,9 +124,9 @@ internal static class OdsDrawings
 
             int repeat = Repeat(cell, "number-columns-repeated");
 
-            foreach (XElement frame in Frames(cell))
+            foreach (XElement shape in Shapes(cell))
             {
-                if (Read(file, frame, row, column) is { } drawing) drawings.Add(drawing);
+                if (Read(file, shape, row, column) is { } drawing) drawings.Add(drawing);
             }
 
             column += Math.Min(repeat, MaxRepeat);
@@ -135,8 +136,7 @@ internal static class OdsDrawings
     }
 
     /// <summary>
-    /// The <c>draw:frame</c> elements a cell or a <c>table:shapes</c> holds, however they are
-    /// wrapped.
+    /// The drawing elements a cell or a <c>table:shapes</c> holds, however they are wrapped.
     /// </summary>
     /// <remarks>
     /// <para>
@@ -163,24 +163,58 @@ internal static class OdsDrawings
     /// The <c>table:end-cell-address</c> LibreOffice writes on the group is its cached bounding
     /// anchor for that same union.
     /// </para>
+    /// <para>
+    /// <strong>Every drawing element is yielded, not only <c>draw:frame</c>.</strong> A frame is
+    /// ODF's wrapper for an <em>embedded</em> thing — a picture, a chart, an OLE object — and a
+    /// shape drawn on the sheet is not embedded in anything: a text box is a
+    /// <c>draw:custom-shape</c>, and rectangles, ellipses, lines, connectors and form controls are
+    /// each their own element. Calc reads all of them through one shape context
+    /// (<c>ScXMLTableRowCellContext</c> hands any <c>draw:</c> child to
+    /// <c>XMLShapeImportHelper</c>) and prints them all through <c>PrintDrawingLayer</c>.
+    /// Censused over the 307 converted <c>.ods</c>: <strong>604 <c>draw:custom-shape</c> in 54
+    /// documents</strong> sit in cells, of which 137 in 32 documents carry text, against 495
+    /// frames of which none does. <see cref="Read(OdfFile, XElement, int, int, bool)"/> decides
+    /// what each of them is worth drawing.
+    /// </para>
     /// </remarks>
-    private static IEnumerable<XElement> Frames(XElement container)
+    private static IEnumerable<XElement> Shapes(XElement container)
     {
         foreach (XElement child in container.Elements())
         {
             if (child.Name.NamespaceName != OdfNamespaces.Draw) continue;
 
-            if (child.Name.LocalName == "frame")
+            if (child.Name.LocalName is "g" or "a")
+            {
+                foreach (XElement nested in Shapes(child)) yield return nested;
+            }
+            else
             {
                 yield return child;
-            }
-            else if (child.Name.LocalName is "g" or "a")
-            {
-                foreach (XElement nested in Frames(child)) yield return nested;
             }
         }
     }
 
+    /// <summary>
+    /// Reads one drawing element into the drawing it puts on the sheet, or null when it puts
+    /// nothing there.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Three kinds of element reach this and only the first two draw anything today: a frame
+    /// holding a picture or an embedded object, and a shape carrying text. A shape carrying
+    /// neither — an empty rectangle, a connector, a line, a form control — is answered null
+    /// rather than as an extentless drawing, which keeps it out of
+    /// <see cref="Layout.SheetDrawingArea"/> as well. That is a deliberate under-count:
+    /// <c>ScDrawLayer::GetPrintArea</c> widens the printed block to cover <em>every</em> object,
+    /// so such a shape does reach the reference's page count. It has nothing to paint here, and
+    /// the module's TODO carries the fill and outline that would give it something.
+    /// </para>
+    /// </remarks>
+    /// <param name="file">The document, for its package and its styles.</param>
+    /// <param name="frame">The <c>draw:</c> element.</param>
+    /// <param name="row">The zero-based row of the anchoring cell.</param>
+    /// <param name="column">Its zero-based column.</param>
+    /// <param name="sheetAnchored">True for a <c>table:shapes</c> child, which names no cell.</param>
     private static SheetDrawing? Read(
         OdfFile file, XElement frame, int row, int column, bool sheetAnchored = false)
     {
@@ -217,7 +251,25 @@ internal static class OdsDrawings
 
         // A sheet-anchored frame states no end cell — it is not fastened to the grid at all — so
         // the two-cell reading below is not even attempted for one.
+        //
+        // **Nor is it attempted for a shape whose rectangle came from a `draw:transform`, because
+        // the two are the same rectangle stated twice and combining them is a union of both.**
+        // A turned shape states no `svg:x`, so its top-left corner is the transform's — which may
+        // be well to the *left* of the anchor cell — while `table:end-cell-address` is Calc's
+        // cached far corner for the same object. Taking one from each gives a box neither of them
+        // describes. Measured on `Foreign_SA-CAT-I_and_CAT-II-III_Pub_0.ods`, whose `TextBox 1` is
+        // turned a half turn and states an end cell of AS3: the columns to AS are 47.73 inches
+        // where the shape's own `svg:width` is 23.66, and the union widened the printed block far
+        // enough to cost **four pages against 26.2.4.2's sixteen**. 26.2.4.2 prints sixteen with
+        // the end cell present and sixteen with it deleted, so the end cell decides nothing there.
+        //
+        // The end cell does decide the box of a shape that states `svg:x`, and that is measured
+        // rather than assumed — `probes/ods-draw-r82/endcell.py` puts a right-aligned text box
+        // 1 inch wide at A2 with an end cell of E2 and 26.2.4.2 draws its line at x 289.644
+        // against 73.644 without the end cell, which is the four inches the end cell states.
+        // **Reach: 2 shapes in 2 of the 307 converted `.ods` state both.**
         if (!sheetAnchored
+            && turned is null
             && EndCell(Attribute(frame, OdfNamespaces.Table, "end-cell-address")) is { } end)
         {
             drawing = drawing with
@@ -255,7 +307,15 @@ internal static class OdsDrawings
             return chart with { Image = fallback, Vector = drawn };
         }
 
-        if (image is null) return null;
+        // A shape that embeds nothing may still carry text, and a text box is exactly that: an
+        // `mso-spt202` or `ooxml-rect` custom shape whose `text:p` children are its body. That
+        // text is the shape's, not the anchoring cell's — see OdsShapeText.
+        if (image is null)
+        {
+            return OdsShapeText.Read(file.Styles, frame) is { } text
+                ? drawing with { Text = text }
+                : null;
+        }
 
         (RasterImage? raster, Lazy<VectorImage>? vector) = Load(file, image);
 

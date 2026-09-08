@@ -442,7 +442,7 @@ internal static class SheetOptimalRowHeights
                 if (cell.Column < range.FirstColumn || cell.Column > range.LastColumn) continue;
                 if (IsExcludedByMerge(merges, cell.Row, cell.Column)) continue;
 
-                string text = cell.GetText();
+                string text = cell.GetOwnText();
                 if (text.Length == 0) continue;
 
                 SheetCellFormat format = formats.At(cell.Row, cell.Column);

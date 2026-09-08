@@ -58,6 +58,10 @@ public sealed class OdsReader : OdfReader
         // cell's text:p is a line of its own rather than a space; see CellTextIsVerbatim.
         reader.CellTextIsVerbatim = true;
 
+        // And a drawing anchored in a cell is in the drawing layer rather than in the cell, so
+        // its paragraphs are kept in a frame section of their own; see CellShapesAreOwnFlow.
+        reader.CellShapesAreOwnFlow = true;
+
         int index = 0;
         foreach (XElement table in body.Elements(XName.Get("table", OdfNamespaces.Table)))
         {

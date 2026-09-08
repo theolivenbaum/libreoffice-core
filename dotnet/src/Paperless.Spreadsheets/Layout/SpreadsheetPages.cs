@@ -418,7 +418,7 @@ internal sealed class SheetPageDrawing(SheetLayout sheet, SheetPagePlacement pla
                         continue;
                     }
 
-                    string text = cell.GetText();
+                    string text = cell.GetOwnText();
                     if (text.Length == 0) continue;
 
                     DrawCell(text, cell, column, row, sink, BandOf(bands, column));
@@ -760,7 +760,7 @@ internal sealed class SheetPageDrawing(SheetLayout sheet, SheetPagePlacement pla
         if (cell is null || SheetTextLayout.IsAvailable(cell)) return;
         if (sheet.Grid.Columns.IsHidden(at)) return;
 
-        string text = cell.GetText();
+        string text = cell.GetOwnText();
         if (text.Length == 0) return;
 
         // A merge anywhere between the two suppresses the trail-in: Calc asks
@@ -874,7 +874,7 @@ internal sealed class SheetPageDrawing(SheetLayout sheet, SheetPagePlacement pla
         // was dropped as trailing padding — has no text to draw and no cell to draw it as.
         if (sheet.CellAt(merge.FirstRow, merge.FirstColumn) is not { } origin) return;
 
-        string text = origin.GetText();
+        string text = origin.GetOwnText();
         if (text.Length == 0) return;
 
         DrawCell(

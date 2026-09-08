@@ -1144,11 +1144,75 @@ cell's longest paragraph makes this tree print the reference's 39 and 21.
 
 **A census of "multi-line cells" that looks only for a raw newline understates the reach by
 two-thirds**, because a cell with several `text:p` children is equally a multi-paragraph edit cell:
-649 raw-newline cells against 1246 several-paragraph ones over the same 33 documents. And a
-`draw:` shape anchored in a cell contributes `text:p` elements that are **not** the cell's —
-`OdfContentReader.ReadShape` appends them to it anyway, which is right for extraction and is what
-made two documents' rows too tall once a paragraph count started sizing them. 253 such cells in 46
-of the 307.
+649 raw-newline cells against 1246 several-paragraph ones over the same 33 documents.
+
+**And a `draw:` shape anchored in a cell is in the drawing layer, so no cell question may see it.**
+ODF fastens a cell-anchored object by *containment* — `ScXMLExport`'s `WriteShapes` puts it inside
+the `table:table-cell` it belongs to — and a reader that walks the cell therefore finds the shape's
+paragraphs among the cell's. Calc never does: `ScColumn::GetOptimalHeight` walks the column's own
+cell storage (`sc/source/core/data/column2.cxx`:894-949), `ScTable::GetCellArea` counts cells rather
+than objects (`table1.cxx`:1091-1120), `ExtendPrintArea` spills a *cell's* string (`:2127`), and an
+object reaches the page only through `ScDrawLayer::GetPrintArea` (`drwlayer.cxx`:1344-1424), which
+`ScDocument::GetPrintArea` maxes in afterwards (`documen2.cxx`:644-664). Reading the shape as cell
+text made its row a line per paragraph, spilled its longest line across the neighbours, and made a
+cell holding nothing else count as content — `SSRO_Quarterly_Statistical_Bulletin_Q3201617_DATA.ods`
+was **11 pages against 4** and drew 1244 of the reference's 2779 characters. **Closed**:
+`ContentTableCell.GetOwnText()` skips a `SectionKind.Frame` child and every cell question in
+`Paperless.Spreadsheets` asks it, while `GetText()` is unchanged so extraction still finds the words
+under that cell.
+
+**Which meant the shape had to be drawn, and the sheet reader read only `draw:frame`.** Censused
+over the 307 converted `.ods`, walking through the transparent `draw:g` and `draw:a` wrappers:
+**604 `draw:custom-shape` in the cells of 54 documents, of which 137 in 32 carry ink**, against
+495 frames, 72 `draw:control`, 41 `draw:line` and 31 `draw:connector` that carry **none**. So the
+text is entirely in the custom shapes; `OdsShapeText` builds the same `SheetShapeText` the
+SpreadsheetML and BIFF readers build and `SheetShapePainter` already knew how to draw. `.ods`
+**255 → 268 of 307**, sixteen verdicts gained and none lost, and the original `.xls`/`.xlsx` track
+byte-identical on all 307. `probes/ods-draw-r82/results.md`.
+
+- ***Two of the four styles a shape's text could inherit from do not reach it, and that is
+  measured.*** On a **Calc** sheet a run's size, face and weight come from the paragraph's own
+  `text:style-name` and its spans' and from nowhere else: neither the shape's `draw:style-name`
+  graphic style's `style:text-properties` nor its `draw:text-style-name` paragraph style carries.
+  Four one-attribute variants of `features/sheet-shape-text.fods` — removing the graphic style's
+  `fo:font-size="18pt"`, changing it to 8 pt, putting 14 pt on the text style, removing
+  `draw:text-style-name` outright — leave 26.2.4.2's rendering identical, and the paragraph naming
+  no style of its own is drawn at **11.99 pt in Liberation Serif**, which is the EditEngine pool's
+  12 pt and `DefaultFontType::LATIN_TEXT`. The control moves: the same style named on the `text:p`
+  centres that line and sets it at its own size and face. `SdXMLShapeContext::SetStyle` resolves
+  `draw:text-style-name` in the *shape import's* automatic-styles context
+  (`xmloff/source/draw/ximpshap.cxx`:740-757), and Calc registers its paragraph automatic styles
+  elsewhere. **A slide is the other way round**, which is why `OdfTextBody` resolves four levels and
+  `OdsShapeText` resolves two — so do not "fix" one by copying the other.
+- ***The box properties do come from the graphic style, and one of them is the fourth disguise
+  again.*** The four `fo:padding-*` are the insets and default to **zero**
+  (`SDRATTR_TEXT_LEFTDIST`, `svx/source/svdraw/svdattr.cxx`:247-250) rather than to DrawingML's
+  tenth and twentieth of an inch; `fo:wrap-option` is `PROP_TextWordWrap` and defaults on (`:267`);
+  `draw:textarea-vertical-align` defaults TOP (`include/svx/sdtaitm.hxx`:38) and
+  `draw:textarea-horizontal-align` defaults **BLOCK** (`:64`), under which each paragraph's own
+  `fo:text-align` decides. And **`style:overflow-behavior` is ODF's spelling of DrawingML's
+  `vertOverflow="clip"`** — the same `PROP_TextClipVerticalOverflow`, mapped at
+  `xmloff/source/draw/sdpropls.cxx`:159 through a named boolean whose true token is `clip` and whose
+  false one is `auto-create-new-frame` (`xmloff/source/style/prhdlfac.cxx`:483-487). **95 of the 137
+  inked shapes state it.** It is on a `style:graphic-properties` between two `draw:` attributes, so
+  nothing about where it sits suggests it exists at all — the same disguise `text:line-break` wore.
+- ***A turned shape's rectangle is its `draw:transform`'s, and the end cell must not be added to
+  it.*** A shape stating a transform states no `svg:x`, so its top-left corner comes from the
+  transform — which a half turn puts to the *left* of the anchor cell — while
+  `table:end-cell-address` is Calc's cached far corner for the same object. Taking one from each
+  gives a rectangle neither describes: on `Foreign_SA-CAT-I_and_CAT-II-III_Pub_0.ods` the union ran
+  47.73 inches of columns where the shape is 23.66 wide and cost **four pages against 26.2.4.2's
+  sixteen**. 26.2.4.2 prints sixteen with the end cell and sixteen without it. **The control is the
+  other way round and matters**: a text box stating `svg:x` *is* resized by its end cell — a
+  1-inch box at A2 on 1-inch columns with `table:end-cell-address="Probe.E2"` has its right-aligned
+  line drawn at x 289.644 against 73.644 without it, and this tree answers 289.686 and 73.686. Reach
+  2 shapes in 2 of the 307. `probes/ods-draw-r82/endcell.py`.
+- ***A `text:tab` in a sheet shape draws no glyph and is not in the reference's text layer***, and
+  costs only 1.09 pt of advance — measured character by character, `the` ending at 244.642 and
+  `shape` beginning at 245.735. 30 tabs in 5 of the 307. ***And a percentage `fo:font-size` is of
+  the parent style, not of the enclosing level***: a span stating `50%` inside a paragraph style
+  stating 14 pt is drawn at **14 pt**, because an automatic text style has no parent to take a
+  proportion of.
 
 **An empty ODF paragraph is as tall as its own empty `text:span`, not as the shape's default.**
 LibreOffice writes an empty line as `<text:p><text:span text:style-name="T15"/></text:p>` and

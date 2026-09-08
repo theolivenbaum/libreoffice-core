@@ -312,6 +312,48 @@ public sealed class ContentTableCell : ContentNode
         base.AppendText(builder);
         if (builder.Length > start && builder[^1] == '\n') builder.Length--;
     }
+
+    /// <summary>
+    /// The cell's own text, without the text of any shape anchored in it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A spreadsheet anchors a drawing object by <em>containment</em>: an ODF
+    /// <c>draw:custom-shape</c> or <c>draw:frame</c> is a child of the <c>table:table-cell</c> it
+    /// is fastened to, so the reader finds its paragraphs while reading the cell and keeps them
+    /// there, which is what a caller indexing the document wants — the words are in that cell of
+    /// that sheet.
+    /// </para>
+    /// <para>
+    /// A renderer wants the other answer. In Calc a drawing object is in the drawing layer and no
+    /// cell question can see it: <c>ScColumn::GetOptimalHeight</c> walks the column's own cell
+    /// storage (<c>sc/source/core/data/column2.cxx</c>:894-949), <c>ScTable::GetCellArea</c>
+    /// counts cells rather than objects (<c>table1.cxx</c>:1091-1120), and an object reaches the
+    /// page through <c>ScDrawLayer::GetPrintArea</c> instead. So every question about what the
+    /// cell itself holds — how tall its row is, how far its string spills, whether the used area
+    /// reaches it — has to be asked without the shape, and the shape has to be drawn as a
+    /// drawing.
+    /// </para>
+    /// <para>
+    /// The shape's text is a <see cref="SectionKind.Frame"/> section among the cell's children,
+    /// which is the same marker the word-processing path already uses for a text box; a section
+    /// of any kind inside a cell is a flow of its own rather than the cell's text, so all of them
+    /// are skipped here. <see cref="ContentNode.GetText"/> keeps its answer, so extraction is
+    /// unchanged.
+    /// </para>
+    /// </remarks>
+    public string GetOwnText()
+    {
+        System.Text.StringBuilder builder = new();
+        foreach (ContentNode child in Children)
+        {
+            if (child is ContentSection) continue;
+            child.AppendText(builder);
+        }
+
+        if (builder.Length > 0 && builder[^1] == '\n') builder.Length--;
+        return builder.ToString();
+    }
 }
 
 /// <summary>A spreadsheet error value.</summary>
