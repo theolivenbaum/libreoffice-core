@@ -133,6 +133,34 @@ public static class PptRecordTypes
     /// <summary>Marks the position of the page's footer inside a run's text.</summary>
     public const ushort FooterMCAtom = 4090;
 
+    /// <summary>The document's list of external objects, hyperlinks among them.</summary>
+    public const ushort ExObjList = 1033;
+
+    /// <summary>One external hyperlink of the <see cref="ExObjList"/>.</summary>
+    public const ushort ExHyperlink = 4055;
+
+    /// <summary>
+    /// An <see cref="ExHyperlink"/>'s own identifier, which an
+    /// <see cref="InteractiveInfoAtom"/> names.
+    /// </summary>
+    public const ushort ExHyperlinkAtom = 4051;
+
+    /// <summary>An interactive action attached to a shape or to a range of its text.</summary>
+    public const ushort InteractiveInfo = 4082;
+
+    /// <summary>Which <see cref="ExHyperlink"/> an <see cref="InteractiveInfo"/> names.</summary>
+    public const ushort InteractiveInfoAtom = 4083;
+
+    /// <summary>
+    /// The character range an <see cref="InteractiveInfo"/> covers, when it covers text.
+    /// </summary>
+    /// <remarks>
+    /// It is a <em>sibling</em> of the <see cref="InteractiveInfo"/> rather than a child, and
+    /// must be the very next record for the range to be read at all
+    /// (<c>filter/source/msfilter/svdfppt.cxx:6911-6921</c>).
+    /// </remarks>
+    public const ushort TxInteractiveInfoAtom = 4063;
+
     /// <summary>One of the document's three slide lists, distinguished by the header instance.</summary>
     public const ushort SlideListWithText = 4080;
 

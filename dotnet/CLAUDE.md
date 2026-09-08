@@ -1287,10 +1287,37 @@ whose content is a Writer fly's text and not EditEngine's, so all four probes ar
 An **`.xlsx`** *cell* hyperlink is one, and the cell break fires there too (`insertHyperlink`,
 `sc/source/filter/oox/worksheethelper.cxx`:1062-1080); `SheetLayout.HoldsField` already models the
 painted consequence and is left as it is. A **`.ppt`** hyperlink is one as well
-(`filter/source/msfilter/svdfppt.cxx`:6936, :7069-7090) and **this tree does not read the record at
-all** — no `InteractiveInfo`/`ExHyperlink` anywhere under `dotnet/src` — so on the **17 of 51 `.ppt`
-that carry a text-range hyperlink** it is neither a field nor blue nor underlined. Left with its
-seat. `probes/pptx-field-r82/results.md`.
+(`filter/source/msfilter/svdfppt.cxx`:6936, :7069-7090), and **it is now read**:
+`PptHyperlinks`, `PptHyperlinkRange` and `PptTextBody`'s split. `probes/pptx-field-r82/results.md`
+and `probes/ppt-autofit-r84/results.md`.
+
+***And the `.ppt`'s condition is not in the record at all — it is whether the deck declares the
+hyperlink the record names.*** `PPTTextObj` searches `SdrPowerPointImport::m_aHyperList` for an
+entry whose index matches the `InteractiveInfoAtom`'s `exHyperlinkId`, and everything that makes
+the run a field happens inside that loop (`svdfppt.cxx`:6907-6941); the list is built from the
+`_PID_HLINKS` blob of `\005DocumentSummaryInformation` and indexed from the `ExObjList`'s
+`ExHyperlinkAtom`s (`sd/source/filter/ppt/pptin.cxx`:353-547). **Three of the corpus's 51 `.ppt`
+state 60 text ranges and declare no hyperlink whatsoever** — 57 of them in `BUS-Chapter 05.ppt` —
+and 26.2.4.2 draws every one in the body's own colour, word-broken and unlinked. The reach figure
+that stood here, *"17 of 51, 91 atoms"*, was a byte-pattern scan for record type 4063 and is wrong
+in both directions: **the live record tree holds 171 ranges in 23 documents, of which 111 in 20
+resolve.** A `.ppt` census that walks the stream instead of the persist directory counts orphaned
+objects — on `080214-Intl-pol-frameworks…ppt` a dead `ExObjList` declares one link where the live
+one declares two.
+
+***Two more legacy-only rules came with it.*** A hyperlink's emphasis is **replaced** rather than
+added to — `:7054-7056` sets the underline bit in the attribute mask and then *assigns*
+`mnFlags = 1 << PPT_CharAttr_Underline`, so a bold linked run is drawn light — and a soft bullet
+whose paragraph opens on a link keeps **the colour the link replaced**, not the scheme's hyperlink
+slot (`:6037-6042`).
+
+***And 26.2.4.2 declines to make a field on five decks whose ids do resolve, for a reason nobody
+has named.*** Established by a one-attribute variant series on `RESPA_-_Section_8_Webinar.ppt`:
+rewriting one `exHyperlinkId` to the file's first two `ExHyperlinkAtom` values makes a field and
+every other value in the list does not, so the reference behaves as though `m_aHyperList` held two
+entries where the file declares ten. The `_PID_HLINKS` count, the blob's declared size, the
+dictionary read and the `ExObjList`'s shape are each refuted by measurement. It costs 26 reference
+spans against the 56 the rule gains. `probes/ppt-autofit-r84/patch-id.py`.
 
 **And an ODF bullet level's Private Use Area slot and its colour are both read now.**
 `OdfListStyle.FormatLabel` is the *extraction* answer and puts the bullet through

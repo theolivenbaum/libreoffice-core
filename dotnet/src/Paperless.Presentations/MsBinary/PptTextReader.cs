@@ -21,19 +21,63 @@ namespace Paperless.Presentations.MsBinary;
 /// The shape's <c>ExtendedParagraphAtom</c> entries, which a character run selects into by index.
 /// Empty when the shape carries none.
 /// </param>
+/// <param name="Hyperlinks">
+/// The character ranges the shape's text-range hyperlinks cover, when the deck declares the
+/// hyperlinks they name. Empty for extraction, which resolves no fields.
+/// </param>
 public sealed record PptTextRun(
     PptTextKind Kind,
     string Text,
     IReadOnlyList<PptParagraphRun> Paragraphs,
     IReadOnlyList<PptCharacterRun> Characters,
     PptTextRuler? Ruler = null,
-    IReadOnlyList<PptExtendedParagraph>? Extended = null)
+    IReadOnlyList<PptExtendedParagraph>? Extended = null,
+    IReadOnlyList<PptHyperlinkRange>? Hyperlinks = null)
 {
+    /// <summary>Whether the character at a position is inside a text-range hyperlink.</summary>
+    /// <param name="position">A position in <see cref="Text"/>.</param>
+    public bool IsLinked(int position)
+    {
+        if (Hyperlinks is not { Count: > 0 } ranges) return false;
+
+        foreach (PptHyperlinkRange range in ranges)
+        {
+            if (position >= range.Start && position < range.End) return true;
+        }
+
+        return false;
+    }
+
     /// <summary>The extension a character run selects, or null when it selects none.</summary>
     /// <param name="index">The run's <see cref="PptCharacterRun.ExtendedIndex"/>.</param>
     public PptExtendedParagraph? ExtensionAt(int index)
         => Extended is { } entries && index >= 0 && index < entries.Count ? entries[index] : null;
 }
+
+/// <summary>
+/// One text-range hyperlink: the characters of a shape's text that are drawn as a field.
+/// </summary>
+/// <remarks>
+/// <para>
+/// <strong>A <c>.ppt</c> hyperlink is an EditEngine field, exactly as a DrawingML one is.</strong>
+/// <c>PPTTextObj</c>'s <c>PPT_PST_InteractiveInfo</c> case builds a
+/// <c>SvxFieldItem(SvxURLField(…), EE_FEATURE_FIELD)</c> for the range
+/// (<c>filter/source/msfilter/svdfppt.cxx</c>:6936) and the second seat splits it across the
+/// <c>PPTCharPropSet</c>s the range covers, giving each its own field whose representation is
+/// that portion's own characters (<c>:7069</c> for a portion the range swallows whole and
+/// <c>:7090</c> for the one it ends inside). So the range becomes <em>one field per character
+/// run</em>, which is the same shape as DrawingML's one field per <c>a:r</c>.
+/// </para>
+/// <para>
+/// The record pair is <c>InteractiveInfo</c> and a <em>sibling</em>
+/// <c>TxInteractiveInfoAtom</c> holding two 32-bit character positions; a zero end means no
+/// range at all and no entry is made (<c>:6926-6933</c>). Whether the pair becomes a field is
+/// decided elsewhere — see <see cref="PptHyperlinks"/>.
+/// </para>
+/// </remarks>
+/// <param name="Start">The first character the link covers.</param>
+/// <param name="End">One past the last.</param>
+public readonly record struct PptHyperlinkRange(int Start, int End);
 
 /// <summary>
 /// One shape's <c>TextRulerAtom</c>: per-outline-level indents that override the master's.
@@ -315,12 +359,17 @@ public static class PptTextReader
     /// The shape's <c>ExtendedParagraphAtom</c> entries, which live outside this range — see
     /// <see cref="ReadExtendedParagraphs"/>.
     /// </param>
+    /// <param name="hyperlinks">
+    /// The identifiers the deck's <c>ExObjList</c> declares, from <see cref="PptHyperlinks"/>.
+    /// Null for extraction, which draws nothing and so needs no field.
+    /// </param>
     public static PptTextRun? Read(
         DffRecordBuffer stream,
         int start,
         int end,
         PptFieldValues fields = default,
-        IReadOnlyList<PptExtendedParagraph>? extended = null)
+        IReadOnlyList<PptExtendedParagraph>? extended = null,
+        IReadOnlySet<uint>? hyperlinks = null)
     {
         ArgumentNullException.ThrowIfNull(stream);
 
@@ -329,10 +378,42 @@ public static class PptTextReader
         DffRecordHeader? style = null;
         PptTextRuler? ruler = null;
         List<(int Position, string Value)>? markers = null;
+        List<PptHyperlinkRange>? links = null;
+
+        // The identifier of the InteractiveInfo the walk has just stepped over, because the
+        // range it covers is in the record *after* it rather than inside it: LibreOffice seeks
+        // to the end of the container and requires the very next header to be a
+        // TxInteractiveInfoAtom, putting the record back and giving up on the range when it is
+        // not (svdfppt.cxx:6911-6921).
+        uint? pending = null;
 
         foreach (DffRecordHeader record in stream.Range(start, end))
         {
             ReadOnlySpan<byte> content = stream.Content(record);
+
+            uint? previous = pending;
+            pending = null;
+
+            if (record.Type == PptRecordTypes.InteractiveInfo)
+            {
+                pending = HyperlinkReference(stream, record);
+                continue;
+            }
+
+            if (record.Type == PptRecordTypes.TxInteractiveInfoAtom
+                && previous is { } reference
+                && hyperlinks is not null
+                && hyperlinks.Contains(reference)
+                && content.Length >= 8)
+            {
+                int from = (int)DffRecordBuffer.ReadUInt32(content);
+                int to = (int)DffRecordBuffer.ReadUInt32(content[4..]);
+
+                // A zero end is not a range: LibreOffice makes no field entry for one, so the
+                // text it would have covered is drawn exactly as it stands.
+                if (to > from && from >= 0) (links ??= []).Add(new PptHyperlinkRange(from, to));
+                continue;
+            }
 
             switch (record.Type)
             {
@@ -387,9 +468,30 @@ public static class PptTextReader
                 ? ReadStyle(stream.Content(header), text.Length)
                 : ([], []);
 
-        if (markers is not null) text = Substitute(text, markers, paragraphs, characters);
+        if (markers is not null) text = Substitute(text, markers, paragraphs, characters, links);
 
-        return new PptTextRun(kind, text, paragraphs, characters, ruler, extended);
+        return new PptTextRun(kind, text, paragraphs, characters, ruler, extended, links);
+    }
+
+    /// <summary>
+    /// Which hyperlink an <c>InteractiveInfo</c> names, or null when it names none.
+    /// </summary>
+    /// <remarks>
+    /// <c>exHyperlinkId</c> is the second word of the <c>InteractiveInfoAtom</c>, after the
+    /// sound reference (<c>ReadPptInteractiveInfoAtom</c>,
+    /// <c>filter/source/msfilter/svdfppt.cxx:227-240</c>).
+    /// </remarks>
+    private static uint? HyperlinkReference(DffRecordBuffer stream, DffRecordHeader info)
+    {
+        foreach (DffRecordHeader child in stream.Children(info))
+        {
+            if (child.Type != PptRecordTypes.InteractiveInfoAtom) continue;
+
+            ReadOnlySpan<byte> content = stream.Content(child);
+            return content.Length >= 8 ? DffRecordBuffer.ReadUInt32(content[4..]) : null;
+        }
+
+        return null;
     }
 
     /// <summary>
@@ -566,7 +668,8 @@ public static class PptTextReader
         string text,
         List<(int Position, string Value)> markers,
         List<PptParagraphRun> paragraphs,
-        List<PptCharacterRun> characters)
+        List<PptCharacterRun> characters,
+        List<PptHyperlinkRange>? links = null)
     {
         markers.Sort(static (a, b) => b.Position.CompareTo(a.Position));
 
@@ -579,6 +682,21 @@ public static class PptTextReader
 
             int delta = value.Length - 1;
             if (delta == 0) continue;
+
+            // A hyperlink range is stated in the characters the file holds, and a running field
+            // is one character there and several on the page. The markers are applied from the
+            // end backwards for exactly this reason, so a range wholly before the marker needs
+            // no correction, one wholly after it moves, and one straddling it grows.
+            if (links is not null)
+            {
+                for (int i = 0; i < links.Count; i++)
+                {
+                    PptHyperlinkRange range = links[i];
+                    int from = range.Start > position ? range.Start + delta : range.Start;
+                    int to = range.End > position ? range.End + delta : range.End;
+                    links[i] = new PptHyperlinkRange(from, to);
+                }
+            }
 
             if (Covering(paragraphs, position, static r => r.Length) is { } p)
             {

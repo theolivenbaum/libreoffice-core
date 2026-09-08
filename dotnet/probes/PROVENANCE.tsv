@@ -746,3 +746,14 @@ dotnet/probes/odt-split-r82/unsplit.py	2026-09-08	current	26.2.4.2	present	curre
 dotnet/probes/odt-split-r82/unsplit.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
 dotnet/probes/odt-split-r82/overdraw.py	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
 dotnet/probes/odt-split-r82/overdraw.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/ppt-autofit-r84/results.md	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md;dotnet/src/Paperless.Presentations/TODO.md
+dotnet/probes/ppt-autofit-r84/census.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md;dotnet/src/Paperless.Presentations/TODO.md
+dotnet/probes/ppt-autofit-r84/reach.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md;dotnet/src/Paperless.Presentations/TODO.md
+dotnet/probes/ppt-autofit-r84/mover-scores.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md;dotnet/src/Paperless.Presentations/TODO.md
+dotnet/probes/ppt-autofit-r84/sizes.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md;dotnet/src/Paperless.Presentations/TODO.md
+dotnet/probes/ppt-autofit-r84/size-census.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md;dotnet/src/Paperless.Presentations/TODO.md
+dotnet/probes/ppt-autofit-r84/autofit-trace.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md;dotnet/src/Paperless.Presentations/TODO.md
+dotnet/probes/ppt-autofit-r84/linkverdict.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md;dotnet/src/Paperless.Presentations/TODO.md
+dotnet/probes/ppt-autofit-r84/linkcolour.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md;dotnet/src/Paperless.Presentations/TODO.md
+dotnet/probes/ppt-autofit-r84/stream-scan-census.tsv	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md;dotnet/src/Paperless.Presentations/TODO.md
+dotnet/probes/ppt-autofit-r84/wrap-census.txt	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md;dotnet/src/Paperless.Presentations/TODO.md
