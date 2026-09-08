@@ -1569,6 +1569,27 @@ font while a round is live** -- every round measures against a reference bank ta
 as they stood, and changing them mid-flight silently rewrites the control.
 ```
 
+### The sixth confound is not a font: `TODAY()` is recalculated on load
+
+The reference recalculates volatile formulas when it opens a file; we render the cached value
+the file was saved with. So on any document containing `TODAY()` or `NOW()` the reference prints
+*today's* date and we print the date of the last save, and every derived cell moves with it --
+`065_Weight_loss_tracker` shows `04/08/26 Tuesday` on the reference against `08/21/22 Sunday`
+on ours, weekday included.
+
+**Ten of the fourteen `chartset` failures in `probes/orig-gate-r83` carry one.** Census a
+suspect row before reading its glyph delta:
+
+```sh
+unzip -p FILE 'xl/worksheets/*.xml' | grep -o 'TODAY()\|NOW()' | wc -l
+```
+
+This confound is worse than the font ones in one specific way: it is **not reproducible**. The
+five font confounds give the same wrong number every run, so a before/after comparison still
+cancels them. A volatile date gives a *different* number tomorrow, so two sweeps taken on
+different days disagree on these rows for no reason connected to any change. Never attribute a
+delta on such a row to a patch without re-measuring both sides the same day.
+
 **Move the Latin Noto aside too, and leave the script-specific Noto in place.** The line above
 was written for the metric-compatible duplicates, and it is not sufficient. The tarball also
 ships `NotoSans-*` and `NotoSerif-*`, which duplicate *nothing* on this system, so they are not
