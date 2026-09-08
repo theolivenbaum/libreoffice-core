@@ -281,9 +281,40 @@ internal sealed class XlsDrawingCollector(
             // `PrintedRange` and a sheet whose only content is a chart has no printed range at all.
             // Calc has the object on its draw page, so `ScDocument::GetPrintArea` takes the maximum
             // of the cells' extent and the drawing layer's (`documen2.cxx:649-658`) and finds one.
+            // The fourth is a shape carrying nothing but a fill or an outline, which was read as
+            // nothing in all three of this project's spreadsheet formats until round 84.
+            //
+            // **A shape carrying none of the four is still dropped, and that is measured rather
+            // than chosen.** `ScDrawLayer::GetPrintArea` widens the printed block to cover every
+            // object on the draw page (`sc/source/core/data/drwlayer.cxx`:1397-1414), so the
+            // reference does keep such a shape — 26.2.4.2 prints its own `.xls` of
+            // `features/sheet-shape-ink.xlsx` on **two** pages, the second empty, because the
+            // rightmost object there is a rectangle with no fill and no line, and this reader
+            // prints one. Keeping every shape reproduces that fixture and **costs two gate
+            // verdicts on the corpus** — `activespecs.xls` 267 pages against 266 and
+            // `orbus_togaf_tool_csq.xls` 74 against 75.
+            //
+            // The reason is that BIFF has two guards before an object reaches the draw page and
+            // this reader has neither. `IsProcessSdrObj()` is `mbProcessSdr && !mbHidden`
+            // (`sc/source/filter/inc/xiescher.hxx`:118), so a *hidden* BIFF object is not
+            // processed at all — the opposite of the DrawingML rule, where a shape whose
+            // `cNvPr` says `hidden="1"` still moves the page break. And
+            // `XclImpDrawObjBase::IsValidSize` (`xiescher.cxx`:414-420) rejects an anchor under
+            // 3/100 mm by 1/100 mm, dropped by `ProcessObj` at `:3658-3665` under a comment
+            // naming the class: *"invisible phantom objects from deleted rows or columns"*. A
+            // guard on the anchor's own cell span was tried and reaches neither document, so the
+            // phantoms here are not zero-span; finding what they are is the seat this leaves.
+            //
+            // **The ODF path is not the same question and is not gated this way**, because
+            // Calc's ODF import has no such guard: `ScXMLTableRowCellContext` hands every
+            // `draw:` child to `XMLShapeImportHelper` and every one of them is inserted.
             SheetPicture picture = PictureOf(shape);
-            if (picture.IsEmpty && entry.Text is not { Length: > 0 } && entry.Type != ChartObject)
+            EscherInk.Ink ink = EscherInk.Read(shape.Properties);
+            if (picture.IsEmpty && entry.Text is not { Length: > 0 } && entry.Type != ChartObject
+                && !ink.HasInk)
+            {
                 continue;
+            }
 
             // A cell comment is not a shape on the page. Its `ftCmo` type is 25
             // (`EXC_OBJTYPE_NOTE`, `sc/source/filter/inc/xlescher.hxx:69`) and Calc's importer
@@ -295,6 +326,7 @@ internal sealed class XlsDrawingCollector(
             if (entry.Type == NoteObject) continue;
 
             if (ClientAnchor(buffer, shape) is not { } anchor) continue;
+
             if (place(anchor) is not { } placed) continue;
 
             drawings.Add(placed with
@@ -309,6 +341,12 @@ internal sealed class XlsDrawingCollector(
                 // gained a picture by some other route cannot silently lose its crop.
                 Crop = EscherPicture.Crop(shape.Properties),
                 Name = NameOf(shape),
+
+                // Escher states a shape *type* rather than a DrawingML preset name, so the ink is
+                // painted through the anchor's box; see `SheetShapeInk`, which falls back to it.
+                Fill = ink.Fill,
+                Stroke = ink.Stroke,
+                StrokeWidth = ink.StrokeWidth,
 
                 // A form control the file marks unprintable is on the screen and not on the
                 // paper. It stays in the model rather than being dropped, because its anchor

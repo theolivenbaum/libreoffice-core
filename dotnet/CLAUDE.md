@@ -2248,21 +2248,60 @@ long stretches, so the excess is inserted at page boundaries rather than accumul
 our 169 pages carry fewer than 12 lines against none of the reference's 148; and that our body
 starts 12 pt higher on every page although the document declares no `{\header}` group at all.
 
-### A worksheet shape's fill and outline are not read at all, and the gate cannot see it
+### A worksheet shape's fill and outline are read now, in all three formats — and the reach census that briefed it was misread
 
-`SheetDrawing.Fill` and `.Stroke` exist and are set from exactly one place — `XlsxNoteCaptions`,
-for shown cell comments. Every `xdr:sp` on every worksheet is drawn as bare text over whatever is
-under it. Censused whole-corpus (`probes/overflow-r69/census.py shapebox`): **644 worksheet
-shapes in 49 documents**, of which 421 declare an `a:solidFill`, 205 an `a:ln/a:solidFill` and
-**583 an `xdr:style`** — a theme `fillRef`/`lnRef` and nothing else. Of the 626 explicit colour
-references, **332 are `schemeClr`**, so over half the work is theme-colour resolution before any
-of it is drawing. The presets are 28 distinct shapes including `star5`, `heart`, `cloud` and
-`irregularSeal1`, so the rectangle `SheetPageGraphics` strokes for a note caption is the wrong
-outline for 438 of the 644; `CustomShapeGeometry` already answers `FillOutline` and
-`StrokeOutline` for them.
+**Closed in round 84.** `SheetDrawing.Fill` and `.Stroke` had exactly one writer,
+`XlsxNoteCaptions`, and every other shape on every worksheet was drawn as bare text over whatever
+was under it. All three readers now answer the fill, the outline, the line width and the shape's
+own preset, and `SheetShapeInk` paints it through `CustomShapeGeometry`'s two outlines.
+`probes/sheet-fill-r84/results.md`.
 
-No gate column can see any of it — a fill and an outline add no glyphs and no pages — which is
-the `w:pgBorders` shape again and the argument for ranking on ink.
+**The census the brief carried is right and the inference from it is wrong, and the correction is
+the general point.** *644 worksheet shapes in 49 documents, 421 an `a:solidFill`, 205 an
+`a:ln/a:solidFill`, 583 an `xdr:style`, 332 `schemeClr`, 28 presets* all reproduce exactly. But
+*"over half the work is theme-colour resolution"* conflated the **colour** scheme with the
+**format matrix**: resolved per shape rather than counted per element, **497 of the 583 styled
+shapes also state a fill of their own and it wins** (`Shape::getActualFillProperties`,
+`oox/source/drawingml/shape.cxx`:2816-2841), so the matrix decides **86 shapes in 3 documents**
+while theme *colour* resolution is needed on nearly all 421. **Count the property that survives
+the merge, not the element that states it.**
+
+Three figures the census did not have decided the shape of the work: **174 of the 644 sit inside
+an `xdr:grpSp`** and 98 say `a:grpFill`, so the ink has to live on `SheetDrawingPart` as well as
+on the anchor; **31 shapes in 3 documents are turned into `[45°, 135°)` or `[225°, 315°)`**, where
+Excel writes the anchor for the *turned* rectangle and Calc reflects it in `y = x` before drawing
+(`sc/source/filter/oox/drawingfragment.cxx`:299-330) — without which an organisation chart's
+elbow connectors run off the top of the page; and `a:xfrm/@flipH`/`@flipV` mirror the geometry
+*before* `@rot` turns it, so a connector written `rot="10800000" flipH="1" flipV="1"` is the
+identity and honouring the rotation alone reflects it twice.
+
+**And "an inked-but-textless shape does not widen the printed block" was true of two readers of
+the three.** `ScDrawLayer::GetPrintArea` covers every object on the draw page and excludes only
+the hidden-comment layer (`sc/source/core/data/drwlayer.cxx`:1397-1414); the SpreadsheetML reader
+has always produced a drawing for every `xdr:sp`, the ODF one answered null for a shape with
+neither text nor a picture, and the BIFF one still does. The ODF half is closed —
+**444 custom shapes in 26 of the 307 converted `.ods` carry ink and no text** and were drawn
+nowhere and counted nowhere — and the BIFF half is deliberately left, because keeping every BIFF
+shape **costs two gate verdicts**: that path has neither of LibreOffice's two guards,
+`IsProcessSdrObj()`'s `!mbHidden` (`sc/source/filter/inc/xiescher.hxx`:118 — a hidden BIFF object
+is dropped where a hidden DrawingML one is kept, which is the two formats disagreeing) and
+`IsValidSize`'s phantom test (`xiescher.cxx`:414-420, 3658-3665). Calc's ODF import has no
+equivalent guard, which is why the same change is right there and wrong here.
+
+**No gate column can see any of it** — a fill and an outline add no glyphs and no pages — so the
+round is scored on PDF marks and pixels: the whole-corpus gate is **914 of 947 before and after**,
+**35 of the 307 sheets renderings changed and not one changed a page, word or glyph count**, and
+the words and slides tracks are byte-identical document for document. That is the `w:pgBorders`
+shape again and the argument for ranking on ink.
+
+**Two instrument notes worth more than the numbers.** A filled-path count is *not* comparable
+between the two sides wherever a gradient is involved: 26.2.4.2 writes a themed gradient as a Form
+XObject full of band fills (`Do`) and this tree writes one PDF shading (`sh`), which on one
+organisation chart reads as 914 fills against 159. **Count `sh` and `Do` before calling a fill
+count a defect**; the comparable column there is the strokes, 123 against 128. And a hand-built
+flat `.ods` shape probe is a trap of its own — a `draw:custom-shape` whose `draw:enhanced-geometry`
+names an `ooxml-` type and states no `draw:enhanced-path` is drawn by 26.2.4.2 as **nothing at
+all**, silently, so the fixture for this was authored as `.xlsx` and converted.
 
 ### A wrapping cell whose text begins outside its own column draws nothing at all
 

@@ -199,15 +199,129 @@ public sealed record SheetDrawing
 
     /// <summary>The colour the shape's box is filled with, or null when it is not filled.</summary>
     /// <remarks>
-    /// Carried for the shapes whose fill is part of what they say rather than decoration around
-    /// it — a shown cell comment is the case that put it here, since a caption drawn as bare text
-    /// over the cells under it is unreadable where they hold anything. Nothing reads it for a
-    /// picture or a chart, both of which paint their own ground.
+    /// <para>
+    /// A shown cell comment is the case that put this here — a caption drawn as bare text over the
+    /// cells under it is unreadable where they hold anything — but it is no longer only that.
+    /// Every worksheet shape carries its own fill and outline and every one of them was read as
+    /// nothing: censused whole-corpus, <b>644 <c>xdr:sp</c> in 49 documents</b>, of which 421
+    /// state an <c>a:solidFill</c> of their own and 54 more take one out of the theme's format
+    /// matrix. Nothing reads this for a picture or a chart, both of which paint their own ground.
+    /// </para>
+    /// <para>
+    /// The interior and the outline are two properties rather than one paint because a shape may
+    /// state either alone, and because an absent fill is not a white one: a shape stating
+    /// <c>a:noFill</c> shows whatever is under it, which on a sheet is the cells.
+    /// </para>
     /// </remarks>
     public Colour? Fill { get; init; }
 
+    /// <summary>
+    /// The ramp the box is filled with, or null when its fill is flat or absent.
+    /// </summary>
+    /// <remarks>
+    /// Carried unplaced, exactly as <c>PageFrame.Gradient</c> is and for the same reason: a
+    /// <see cref="GradientPaint"/> holds absolute points and a sheet drawing has no rectangle
+    /// until the page's own columns are known. <see cref="SheetPageGraphics"/> supplies the
+    /// rectangle. Set only where <see cref="Fill"/> is not — a fill is one kind or the other.
+    /// </remarks>
+    public GradientDescription? Gradient { get; init; }
+
     /// <summary>The colour of the box's outline, or null when it has none.</summary>
     public Colour? Stroke { get; init; }
+
+    /// <summary>
+    /// How wide the outline is stroked; zero for a hairline.
+    /// </summary>
+    /// <remarks>
+    /// Zero and absent are one answer here on purpose. A comment caption's border is
+    /// <c>svg:stroke-width="0in"</c> in LibreOffice's own export, which is a hairline rather than
+    /// an absent line, and a DrawingML <c>a:ln</c> stating no <c>w</c> takes the theme's width —
+    /// which the reader resolves before setting this, so a zero arriving here really is "as thin
+    /// as the device draws".
+    /// </remarks>
+    public Length StrokeWidth { get; init; }
+
+    /// <summary>
+    /// The preset whose outline the fill and stroke are painted through, or null for the box.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>A worksheet shape is not usually a rectangle.</strong> The 644 corpus shapes name
+    /// <b>28 distinct presets</b> — <c>star5</c>, <c>heart</c>, <c>cloud</c>,
+    /// <c>irregularSeal1</c>, <c>lightningBolt</c> and the rest — and only 206 of them are
+    /// <c>rect</c>, so filling the anchor's box instead draws a coloured rectangle where the file
+    /// states a star. <see cref="Paperless.Ooxml.DrawingML.CustomShapeGeometry"/> resolves every
+    /// one of them and has since the slide side needed it.
+    /// </para>
+    /// <para>
+    /// <c>rect</c> itself is deliberately left null by the readers, which is what
+    /// <c>DocxFrames.PresetGeometry</c> does and for the same reason: it evaluates to the bounding
+    /// box the fallback already paints, so naming it would build a four-point path to arrive
+    /// exactly where not naming it arrives.
+    /// </para>
+    /// <para>
+    /// Distinct from <see cref="SheetShapeText.Preset"/>, which answers a different question about
+    /// the same attribute — that one is the rectangle the <em>text</em> is laid out in, and a
+    /// preset's text rectangle is usually not its outline. A shape carrying both text and ink sets
+    /// both.
+    /// </para>
+    /// </remarks>
+    public string? Preset { get; init; }
+
+    /// <summary>The <c>a:avLst</c> the shape states, overriding the preset's own defaults.</summary>
+    public IReadOnlyDictionary<string, double>? Adjustments { get; init; }
+
+    /// <summary>True when the shape's geometry is mirrored across its vertical centre line.</summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>A connector states its direction as a flip, and drawing one without the flip puts
+    /// the elbow on the wrong side.</strong> <c>a:xfrm/@flipH</c> and <c>@flipV</c> mirror the
+    /// shape's own coordinate space before <c>@rot</c> turns it, so the three compose — the
+    /// <c>bentConnector3</c> that joins an organisation chart's boxes is written
+    /// <c>rot="10800000" flipH="1" flipV="1"</c>, whose net effect is the identity, and honouring
+    /// the rotation alone leaves the path mirrored in both axes.
+    /// </para>
+    /// <para>
+    /// Applied to the resolved outline rather than to the anchor's rectangle, because the
+    /// rectangle is symmetric and only the geometry inside it is not. A shape with no preset is
+    /// unaffected either way.
+    /// </para>
+    /// </remarks>
+    public bool FlipHorizontal { get; init; }
+
+    /// <inheritdoc cref="FlipHorizontal"/>
+    /// <summary>True when the shape's geometry is mirrored across its horizontal centre line.</summary>
+    public bool FlipVertical { get; init; }
+
+    /// <summary>
+    /// True when the anchor describes the shape's rectangle <em>after</em> a quarter turn, so the
+    /// rectangle has to be reflected in the line <c>y = x</c> before the shape is drawn in it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>Excel rewrites a shape's anchor cells when it is turned through a quarter, and
+    /// Calc undoes that before drawing anything.</strong>
+    /// <c>sc/source/filter/oox/drawingfragment.cxx</c>:299-330 tests the shape's own rotation for
+    /// <c>[45°, 135°)</c> or <c>[225°, 315°)</c> and, inside that range, moves the anchor
+    /// rectangle by <c>X += (w − h)/2</c>, <c>Y += (h − w)/2</c> and swaps its width and height —
+    /// its comment says the anchor Excel wrote "contains the original not-rotated shape" only
+    /// outside that range, and that rotating the already-rotated rectangle "is an incorrect 180
+    /// degrees rotation". Which is exactly the symptom: without it an elbow connector's short leg
+    /// points away from the box it joins.
+    /// </para>
+    /// <para>
+    /// It is a property of the <em>anchor</em> rather than of the geometry, so it moves the
+    /// rectangle every part, picture and text body inside the drawing is placed in, and it is set
+    /// by the SpreadsheetML reader alone: ODF states a turned shape's rectangle with a
+    /// <c>draw:transform</c>, which needs no such correction, and BIFF's client anchor states the
+    /// unrotated rectangle outright. <b>Reach: 31 shapes in 3 corpus documents</b> — 24
+    /// <c>xdr:sp</c>, 6 <c>xdr:cxnSp</c> and one <c>xdr:pic</c>.
+    /// </para>
+    /// </remarks>
+    public bool QuarterTurnedAnchor { get; init; }
+
+    /// <summary>True when there is a fill or an outline to paint.</summary>
+    public bool HasInk => Fill is not null || Gradient is not null || Stroke is not null;
 
     /// <summary>
     /// The cell a shown comment's caption hangs off, or null for every other drawing.
@@ -295,8 +409,50 @@ public readonly record struct SheetDrawingPart(
     /// </remarks>
     public double Opacity { get; init; } = 1;
 
+    /// <summary>The colour this leaf's own box is filled with, or null when it is not filled.</summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>A grouped shape's fill is the leaf's, and there is one of it per leaf.</strong>
+    /// <see cref="SheetDrawing.Fill"/> belongs to the anchor, and an <c>xdr:grpSp</c> anchor holds
+    /// many shapes with many fills — which is why the ink is stated here as well rather than only
+    /// there. Censused whole-corpus, <b>174 of the 644 worksheet <c>xdr:sp</c> sit inside a
+    /// group</b>, in 6 documents; reading the anchor alone would draw none of them.
+    /// </para>
+    /// <para>
+    /// It is also where a <em>turned</em> top-level shape's ink goes, because a part is the one
+    /// thing that carries an angle: <c>XlsxDrawings.Parts</c> already answers a single part
+    /// restating the frame for a shape with an <c>a:xfrm/@rot</c>, and painting the fill on the
+    /// drawing would draw it upright inside the turned shape's bounding box.
+    /// </para>
+    /// </remarks>
+    public Colour? Fill { get; init; }
+
+    /// <summary>The ramp this leaf is filled with, or null when its fill is flat or absent.</summary>
+    public GradientDescription? Gradient { get; init; }
+
+    /// <summary>The colour of this leaf's outline, or null when it has none.</summary>
+    public Colour? Stroke { get; init; }
+
+    /// <summary>How wide that outline is stroked; zero for a hairline.</summary>
+    public Length StrokeWidth { get; init; }
+
+    /// <summary>The preset the leaf's ink is painted through, or null for its box.</summary>
+    public string? Preset { get; init; }
+
+    /// <summary>The <c>a:avLst</c> the leaf states, overriding the preset's own defaults.</summary>
+    public IReadOnlyDictionary<string, double>? Adjustments { get; init; }
+
     /// <summary>True when there is something here to paint.</summary>
     public bool HasPicture => Image is not null || Vector is not null;
+
+    /// <inheritdoc cref="SheetDrawing.FlipHorizontal"/>
+    public bool FlipHorizontal { get; init; }
+
+    /// <inheritdoc cref="SheetDrawing.FlipVertical"/>
+    public bool FlipVertical { get; init; }
+
+    /// <summary>True when this leaf carries a fill or an outline of its own.</summary>
+    public bool HasInk => Fill is not null || Gradient is not null || Stroke is not null;
 }
 
 /// <summary>

@@ -81,6 +81,11 @@ public static class XlsxReader
             DrawingFontScheme? themeFonts = DrawingFontScheme.Read(
                 Drawing.Child(Drawing.Child(file.ThemeRoot, "themeElements"), "fontScheme"));
 
+            // And its third: the format matrix a worksheet shape's `xdr:style` indexes for its
+            // fill and its outline. 583 of the corpus's 644 worksheet shapes state one, and
+            // without this the 86 of them that state no fill of their own draw nothing at all.
+            DrawingStyleMatrix? themeStyles = DrawingStyleMatrix.Read(file.ThemeRoot);
+
             // What lets a chart's c:f name a cell rather than a cache. It is handed the same
             // reader this loop uses, and the loop hands it each sheet as it parses one, so a
             // workbook with no chart in it never parses a sheet twice and never pays for an
@@ -118,7 +123,7 @@ public static class XlsxReader
                 // after the front layer (`printfun.cxx:1704-1713`), so the captions go last and
                 // cover whatever they overlap.
                 SheetDrawings drawings = XlsxDrawings.Read(
-                    file.Package, entry.PartName, theme, themeFonts, ranges);
+                    file.Package, entry.PartName, theme, themeFonts, ranges, themeStyles);
 
                 // The legacy VML drawing beside it, which holds the camera-tool pictures and OLE
                 // previews Calc draws and the DrawingML part does not reach — its `a14` twin is

@@ -64,6 +64,10 @@ public static class XlsbReader
             DrawingFontScheme? themeFonts = DrawingFontScheme.Read(
                 Drawing.Child(Drawing.Child(file.ThemeRoot, "themeElements"), "fontScheme"));
 
+            // And its format matrix, for a shape whose `xdr:style` names its fill and outline out
+            // of the theme rather than stating them. The drawing part is XML in an XLSB too.
+            DrawingStyleMatrix? themeStyles = DrawingStyleMatrix.Read(file.ThemeRoot);
+
             foreach (XlsxSheetEntry entry in file.Sheets)
             {
                 ContentSection section = new()
@@ -103,7 +107,7 @@ public static class XlsbReader
                     // 8 words and a page on `sc/qa/unit/data/xlsb/tdf108017_calcProtection.xlsb`:
                     // its chart read into nothing and its second page never existed.
                     Drawings = XlsxDrawings.Read(
-                        file.PackageHandle, entry.PartName, theme, themeFonts),
+                        file.PackageHandle, entry.PartName, theme, themeFonts, null, themeStyles),
                     FileName = source.FileName ?? string.Empty,
                 });
 
