@@ -195,12 +195,15 @@ bug on the original track. Note that two of these nine are **page-exact** — `A
 and `150_5335_5a` one page short — so the group is defined by where the text sits rather than by the
 pagination, which is the point of ranking this way.
 
-**The other 38 are within about 4 pt of the reference on every line they draw**, so whatever ends
-their pages is not where the text starts. Eight of them are the `chartset` templates whose "excess"
-is 26.2.4.2 outlining its own glyphs, measured in `probes/odt-split-r82/overdraw.py`; those
-templates are also why a \|Δx\| ranking has to be read with the matched-line count beside it, since
-outlined text is absent from the reference's text layer altogether and only a handful of lines
-match.
+**Of the other 38, four have a large mean over too few matched lines to trust** —
+`011_Project_Timeline_Template_Beautiful_Theme` (341.96 pt over 100 lines), the two Venn templates
+(108.7 over 4) and `644730BRI0mna000BOX361539B00public0` (90.42 over 19) — and the remaining **34
+are within 4.5 pt of the reference on every line they draw**, so whatever ends their pages is not
+where the text starts. Eight of the 38 are the `chartset` templates whose "excess" is 26.2.4.2
+outlining its own glyphs, measured in `probes/odt-split-r82/overdraw.py`, and three of the four
+untrustworthy means are among them: outlined text is absent from the reference's text layer
+altogether, so only a handful of lines match and the mean is noise. **Read a \|Δx\| ranking with the
+matched-line count beside it** — that is the instrument note this table exists to carry.
 
 ### One reading refuted on the way
 
