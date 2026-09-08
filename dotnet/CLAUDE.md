@@ -1052,13 +1052,30 @@ Two rules from it are general enough to carry:
     whole of the gap. All 51 splittable flies in the column hold a table and nothing else, so the
     paragraph-flow slicer a round could have written would have reached nothing.
     `probes/odt-split-r82/unsplit.py`.
-  - **Two document settings decide more of it than the attribute does.** `TabOverMargin` picks the
+  - **Three document settings decide more of it than the attribute does.** `TabOverMargin` picks the
     deadline a split fly is cut at — the page's bottom rather than the body's, `GetFlyAnchorBottom`
     and `isLegacyBehavior`, `sw/source/core/layout/fly.cxx`:101-162 — and **177 of the 338 `.odt`
     state it true, 161 false**; reading it as absent split three graph-paper templates onto a second
     page each. `DoNotBreakWrappedTables` is a document-level veto over every
     `may-break-between-pages` in the file, tested before the fly is looked at (`fly.cxx`:696-700),
     and **30 of the 338 state it**. Both default to false.
+    The third is `TabsRelativeToIndent`, and it is the one that defaults the *other* way. It decides
+    whether a tab stop's stated position is measured from the paragraph's own indent or from the text
+    area's edge -- `frameArea.Left() + (bTabsRelativeToIndent ? GetTabLeft() : 0)`,
+    `sw/source/core/text/txttab.cxx`:94-98 -- and **absent means true**
+    (`DocumentSettingManager.cxx`:80), because that is Writer's native answer. Every Word-family
+    importer sets it false (`ww8par.cxx`:1951; `DomainMapper.cxx`:128-132), and the ODF export writes
+    the result into `settings.xml`, so **all 338 converted `.odt` state it false** and a reader that
+    does not look laid every one of them out by the wrong rule. The reach is narrower than that
+    census -- the two rules differ only where a paragraph holds both a tab and a non-zero indent, 38
+    documents and 3728 paragraphs -- but on `A_320.odt` it was the whole of a 16-page gap.
+    **The general lesson is the default direction.** `TabOverMargin` and `DoNotBreakWrappedTables`
+    default false, so failing to read them is failing to turn something on, and the damage is
+    confined to files that state them. This one defaults *true*, so failing to read it silently
+    applies Writer's own rule to documents that explicitly asked for Word's -- and it does that on
+    every converted file in the corpus at once. When you meet a new `config-item`, establish its
+    default before you estimate its reach; a true default makes an unread setting a whole-track
+    defect rather than a rare one.
   - **A "shape that over-draws" may be a reference that outlines its glyphs, and the check is one
     measurement.** Screened over the eight `chartset` templates the `.odt` gate reads as drawing
     3 % to 43 % too much: on `051_Organogram_Template_Basic_Theme` 26.2.4.2 draws 49 characters as
