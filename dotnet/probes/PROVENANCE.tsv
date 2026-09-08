@@ -775,3 +775,54 @@ dotnet/probes/sheet-fill-r84/orig-words-after.tsv	2026-09-08	current	26.2.4.2	pr
 dotnet/probes/sheet-fill-r84/results.md	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
 dotnet/probes/sheet-fill-r84/score-bank.py	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
 dotnet/probes/sheet-fill-r84/sweep-ours.sh	2026-09-08	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/rtf-htmautsp-r85/after-rtf.tsv	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-htmautsp-r85/base-rtf.tsv	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-htmautsp-r85/bodypict-after.txt	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-htmautsp-r85/bytediff.py	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-htmautsp-r85/census-all.py	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.WordProcessing/Rtf/RtfDocumentReader.cs
+dotnet/probes/rtf-htmautsp-r85/census-all.txt	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-htmautsp-r85/census.py	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-htmautsp-r85/census.txt	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-htmautsp-r85/column.txt	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-htmautsp-r85/compare.py	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-htmautsp-r85/compareab.py	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-htmautsp-r85/confinement.txt	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-htmautsp-r85/del-ref.txt	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-htmautsp-r85/genbodypict.py	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-htmautsp-r85/gendel.py	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-htmautsp-r85/genhead.py	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-htmautsp-r85/genlist.py	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-htmautsp-r85/genlistn.py	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-htmautsp-r85/genmove.py	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-htmautsp-r85/genown.py	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-htmautsp-r85/genpict.py	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-htmautsp-r85/genprefix.py	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-htmautsp-r85/genresidual.py	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-htmautsp-r85/genrow.py	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-htmautsp-r85/gensuffix.py	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-htmautsp-r85/gensuper.py	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-htmautsp-r85/genwindow.py	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-htmautsp-r85/head-ref.txt	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-htmautsp-r85/list-ref.txt	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-htmautsp-r85/listn-ref.txt	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-htmautsp-r85/measureab.py	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-htmautsp-r85/move-ref.txt	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-htmautsp-r85/orig-after.tsv	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-htmautsp-r85/orig-base.tsv	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-htmautsp-r85/oursrender.sh	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-htmautsp-r85/own-ref.txt	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-htmautsp-r85/pages.py	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-htmautsp-r85/pict-ref.txt	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-htmautsp-r85/prefix-ref.txt	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-htmautsp-r85/refrender.sh	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-htmautsp-r85/residual-ref.txt	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-htmautsp-r85/results.md	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.WordProcessing/Rtf/RtfDocumentReader.cs
+dotnet/probes/rtf-htmautsp-r85/row-after.txt	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-htmautsp-r85/rowcuts.py	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-htmautsp-r85/scan.py	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-htmautsp-r85/score.py	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-htmautsp-r85/snap.py	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-htmautsp-r85/super-after.txt	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-htmautsp-r85/sweep-orig-hash.sh	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-htmautsp-r85/sweep-ours.sh	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-htmautsp-r85/window-after.txt	2026-09-08	current	26.2.4.2	present	current	

@@ -75,6 +75,27 @@ public sealed partial class RtfDocumentReader
 
         /// <summary>A shape property's value, from <c>{\sv …}</c>.</summary>
         ShapePropertyValue,
+
+        /// <summary>
+        /// The list table and the list-override table: read for nothing, but <em>dispatched</em>.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// Not <see cref="Skip"/>, and the distinction is the whole of round 85.
+        /// <c>RTFTokenizer::dispatchKeyword</c> returns before it looks a keyword up at all when the
+        /// destination is <c>Destination::SKIP</c>
+        /// (<c>sw/source/writerfilter/rtftok/rtftokenizer.cxx</c>:2156-2164), so nothing inside a
+        /// header, a footer or a private extension has any effect whatsoever. A list table is
+        /// <c>Destination::LISTTABLE</c> rather than <c>SKIP</c>, so every control word in it
+        /// <em>is</em> dispatched — including the ones that end the document's first run.
+        /// </para>
+        /// <para>
+        /// Paperless still reads nothing out of either table, so this behaves as <see cref="Skip"/>
+        /// everywhere text or paragraphs are concerned. What it carries is the right to close the
+        /// settings window: see <see cref="_firstRunSeen"/>.
+        /// </para>
+        /// </remarks>
+        ListTable,
     }
 
     /// <summary>
@@ -963,7 +984,8 @@ public sealed partial class RtfDocumentReader
     private void EmitParagraph(GroupState state)
     {
         if (state.Destination is RtfDestination.Skip or RtfDestination.FontTable
-            or RtfDestination.StyleSheet or RtfDestination.Picture) return;
+            or RtfDestination.StyleSheet or RtfDestination.Picture
+            or RtfDestination.ListTable) return;
 
         NoteBodyContent();
         FinishParagraph(CurrentFlow, state, force: true);
@@ -982,6 +1004,36 @@ public sealed partial class RtfDocumentReader
     private void NoteBodyContent()
     {
         if (_flows.Count > 0 && ReferenceEquals(CurrentFlow, _flows[0])) NoteFirstRun();
+    }
+
+    /// <summary>
+    /// Records that a control word which ends the document's first run has been dispatched.
+    /// </summary>
+    /// <param name="state">The group the word was written in.</param>
+    /// <remarks>
+    /// <para>
+    /// Two things have to be true before such a word counts, and they have different causes.
+    /// It must be in a destination the RTF importer <em>dispatches</em> at all —
+    /// <c>RTFTokenizer::dispatchKeyword</c> returns before looking a keyword up inside a
+    /// <c>Destination::SKIP</c> group (<c>rtftokenizer.cxx</c>:2156-2164) — and a style-sheet
+    /// entry is excluded by the caller itself
+    /// (<c>rtfdispatchflag.cxx</c>:891, <c>if (!isStyleSheetImport())</c>).
+    /// </para>
+    /// <para>
+    /// And it must be in the document's own flow. LibreOffice makes a header, a footer, a note
+    /// and a shape's text <c>Destination::SKIP</c> where the group is written and re-parses each
+    /// as a <em>substream</em>, for which <c>outputSettingsTable</c> returns immediately
+    /// (<c>rtfdocumentimpl.cxx</c>:414-418); this reader gives each a <see cref="Flow"/> of its
+    /// own instead, so the flow is where the same question is asked.
+    /// <c>FRE-03_mcar_part-3_and_IS_v2.9.rtf</c> is the witness: it writes <c>\super</c> at byte
+    /// 330901 inside a <c>{\header}</c> and <c>\htmautsp</c> at 331546, 26.2.4.2 honours the
+    /// word, and counting the header's <c>\super</c> costs that document three pages.
+    /// </para>
+    /// </remarks>
+    private void NoteSettingsWindowClosed(GroupState state)
+    {
+        if (state.Destination is RtfDestination.Skip or RtfDestination.StyleSheet) return;
+        NoteBodyContent();
     }
 
     /// <summary>Records the document's first run. See <see cref="_firstRunSeen"/>.</summary>

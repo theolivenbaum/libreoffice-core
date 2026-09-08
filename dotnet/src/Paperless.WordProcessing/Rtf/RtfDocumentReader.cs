@@ -124,10 +124,28 @@ public sealed partial class RtfDocumentReader
     /// written after that is stored and never sent.
     /// </para>
     /// <para>
-    /// What counts as that run is wider than body text: <c>checkFirstRun</c> has nine callers, and
-    /// they include <c>resolvePict</c>. A <c>{\header}</c> group does <em>not</em> count, because a
-    /// substream is re-parsed when its section ends rather than where the group appears; that half
-    /// is measured as well as read (<c>probes/rtf-resid-r80</c>, <c>htm-afterheader</c>).
+    /// What counts as that run is wider than body text. <c>checkFirstRun</c> has <strong>thirteen</strong>
+    /// call sites, every one of them re-read for round 85: <c>\footnote</c>
+    /// (<c>rtfdispatchdestination.cxx</c>:264), <c>\shptxt</c>/<c>\dptxbxtext</c> (:405),
+    /// <c>\super</c> (<c>rtfdispatchflag.cxx</c>:893), <c>\dptxbx</c> (:1103), <c>\par</c>
+    /// (<c>rtfdispatchsymbol.cxx</c>:133), <c>\cell</c>/<c>\nestcell</c> (:250), <c>\column</c>
+    /// (:518), <c>\page</c> (:574), <c>tableBreak</c> and <c>parBreak</c>
+    /// (<c>rtfdocumentimpl.cxx</c>:724 and :732), <c>resolvePict</c> (:1297), <c>text</c> (:1706)
+    /// and <c>RTFFrame::setSprm</c> (:4137).
+    /// </para>
+    /// <para>
+    /// None of them fires inside a <c>Destination::SKIP</c> group, because
+    /// <c>RTFTokenizer::dispatchKeyword</c> returns before looking the keyword up
+    /// (<c>rtftokenizer.cxx</c>:2156-2164). That is why a <c>{\header}</c> group does <em>not</em>
+    /// count — not because a substream is re-parsed later — and it is also why a list table does:
+    /// <c>LISTTABLE</c> is a destination of its own. See <see cref="RtfDestination.ListTable"/>.
+    /// </para>
+    /// <para>
+    /// Seven of the thirteen can only stand in a document's <em>body</em>, where the word is
+    /// already too late by every other rule, which is why <c>\super</c> is the one that matters:
+    /// it is the only caller LibreOffice's own RTF export writes into a preamble. Censused over
+    /// the 338 converted corpus <c>.rtf</c>, 308 state the word and <strong>exactly one</strong>
+    /// has any caller before it (<c>probes/rtf-htmautsp-r85/census-all.py</c>).
     /// </para>
     /// </remarks>
     private bool _firstRunSeen;
@@ -536,7 +554,14 @@ public sealed partial class RtfDocumentReader
                 // recorded against a number rather than a person.
                 state.Destination = RtfDestination.RevisionTable;
                 return;
-            case "listtable" or "listoverridetable" or "rsidtbl"
+            case "listtable" or "listoverridetable":
+                // Neither is read, and neither may be skipped either: a list table is
+                // `Destination::LISTTABLE` and not `Destination::SKIP`, so its control words are
+                // dispatched and one of them ends the document's first run. See
+                // RtfDestination.ListTable and _firstRunSeen.
+                state.Destination = RtfDestination.ListTable;
+                return;
+            case "rsidtbl"
                  or "generator" or "filetbl" or "themedata" or "colorschememapping"
                  or "datastore" or "latentstyles" or "xmlnstbl" or "pgptbl":
                 state.Destination = token.Name == "generator"
@@ -553,7 +578,7 @@ public sealed partial class RtfDocumentReader
                 return;
             case "pict":
                 // A picture is one of `checkFirstRun`'s callers — `RTFDocumentImpl::resolvePict`
-                // ends with it (`rtfdocumentimpl.cxx`:1296) — so a `{\pict}` in the body closes the
+                // ends with it (`rtfdocumentimpl.cxx`:1297) — so a `{\pict}` in the body closes the
                 // window on the document's settings exactly as a word of text does.
                 //
                 // Only a body one. A `{\*\listtable{\*\listpicture{\*\shppict{\pict …}}}}` does
@@ -913,6 +938,20 @@ public sealed partial class RtfDocumentReader
                 state.SmallCapitals = token.Parameter != 0;
                 return;
             case "super":
+                // `\super` is one of `checkFirstRun`'s thirteen callers, and the only one that can
+                // stand in a document's preamble: `RTFDocumentImpl::dispatchFlag`'s `SUPER` case
+                // sends the settings table for anything that is not a style-sheet entry
+                // (`sw/source/writerfilter/rtftok/rtfdispatchflag.cxx`:887-895, under a comment
+                // about a document that starts with a footnote). `\sub` and `\nosupersub` beside
+                // it do not, which is why only this arm notes the run.
+                //
+                // Its reach is a *list level*. LibreOffice's own RTF export writes `\super` into a
+                // numbering level whose text is superscript, and a list table is dispatched rather
+                // than skipped — so a `\htmautsp` written after the list table, which is where
+                // that exporter writes it, is never read. `150-5370-10H.rtf` states `\super` at
+                // byte 222775 in `{\*\listtable{\list{\listlevel …}}}` and `\htmautsp` at
+                // 266199, and 26.2.4.2 draws it in 746 pages with the word and 746 without it.
+                NoteSettingsWindowClosed(state);
                 state.VerticalPosition = token.Parameter == 0 ? 0 : 1;
                 return;
             case "sub":
