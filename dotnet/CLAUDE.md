@@ -1185,6 +1185,23 @@ REF_SOFFICE=/opt/libreoffice26.2/program/soffice \
 Read that second line before you read the table. A stored sweep that does not record it cannot be
 attributed to a reference at all.
 
+**A gate run under CPU contention undercounts, and it undercounts on the REFERENCE side — which
+looks exactly like our regression.** Measured 2026-09-08: the same corpus at two commits scored
+`.ods` 234 then 225, and the nine lost rows were eight `ref-failed` plus one `ours-failed`. Nothing
+had regressed; three rounds were building and sweeping in their own worktrees and the reference's
+renders hit the 240 s bound. `REF-CANNOT-RENDER` went 2 → 13 in the same run and is the tell.
+
+So **never compare two sweeps on their match totals alone.** Exclude every row that failed on
+either side in *either* run and compare what is left:
+
+```sh
+awk -F'\t' '$7 ~ /failed/{print $1}' A/rows.tsv B/rows.tsv | sort -u > /tmp/bad
+awk -F'\t' 'NR==FNR{bad[$0];next} !($1 in bad) && $7=="match"' /tmp/bad A/rows.tsv | wc -l
+```
+
+A row that is `match` in one run and `ref-failed` in the other is evidence about the box, not
+about the tree.
+
 **Before you rebuild, check the sweep is finished — and check it with a file, not a clock.** The
 gate measures `dotnet/tools/Paperless.Cli/…/Paperless.Cli` in the tree it runs from, so a rebuild
 mid-sweep swaps the binary and the rows either side describe different programs. On 2026-09-07 a
