@@ -798,6 +798,7 @@ public sealed partial class RtfDocumentReader
                 // Hidden text is not displayed by any reader, so extracting it would inject text
                 // the document does not show.
                 if (state.Hidden) return;
+                NoteBodyContent();
                 AppendToParagraph(state, text);
                 return;
 
@@ -964,8 +965,27 @@ public sealed partial class RtfDocumentReader
         if (state.Destination is RtfDestination.Skip or RtfDestination.FontTable
             or RtfDestination.StyleSheet or RtfDestination.Picture) return;
 
+        NoteBodyContent();
         FinishParagraph(CurrentFlow, state, force: true);
     }
+
+    /// <summary>
+    /// Records that the body has produced content, which closes the window in which a document
+    /// setting can still be stated. See <see cref="_firstRunSeen"/>.
+    /// </summary>
+    /// <remarks>
+    /// Only the body's own flow counts <em>as text</em>. A header, a footer, a note or a shape's
+    /// text is a <em>substream</em> to the importer this follows, resolved when the section that
+    /// names it ends rather than where its group was written. A picture is not gated this way and
+    /// calls <see cref="NoteFirstRun"/> directly.
+    /// </remarks>
+    private void NoteBodyContent()
+    {
+        if (_flows.Count > 0 && ReferenceEquals(CurrentFlow, _flows[0])) NoteFirstRun();
+    }
+
+    /// <summary>Records the document's first run. See <see cref="_firstRunSeen"/>.</summary>
+    private void NoteFirstRun() => _firstRunSeen = true;
 
     /// <summary>
     /// Materialises the half-built paragraph, if there is one.
@@ -1907,6 +1927,13 @@ public sealed partial class RtfDocumentReader
             SmallCapitals = Said("scaps") ? state.SmallCapitals : null,
             ForegroundColourIndex = Said("cf") ? state.ForegroundColourIndex : null,
             LanguageId = Said("lang", "langnp") ? state.LanguageId : null,
+
+            // The paragraph half. Three properties, not the whole of `\pard`'s vocabulary, and
+            // which three is measured against 26.2.4.2 rather than chosen — see
+            // `RtfStyleFormatting`'s own remarks and `probes/rtf-resid-r80`.
+            Alignment = Said("ql", "qr", "qc", "qj", "qd", "qk") ? state.Alignment : null,
+            SpaceBeforeTwips = Said("sb") ? state.SpaceBefore : null,
+            KeepWithNext = Said("keepn") ? state.KeepWithNext : null,
         };
     }
 
@@ -1933,9 +1960,13 @@ public sealed partial class RtfDocumentReader
     /// </remarks>
     private void SelectParagraphStyle(GroupState state, int id)
     {
-        Withdraw(state, _styles.FormattingOf(state.ParagraphStyleId));
+        RtfStyleFormatting outgoing = _styles.ContributionOf(state.ParagraphStyleId);
+        WithdrawCharacters(state, outgoing);
+        WithdrawParagraph(state, outgoing);
         state.ParagraphStyleId = id;
-        Apply(state, _styles.FormattingOf(id));
+        RtfStyleFormatting incoming = _styles.ContributionOf(id);
+        ApplyCharacters(state, incoming);
+        ApplyParagraph(state, incoming);
     }
 
     /// <summary>
@@ -1943,16 +1974,53 @@ public sealed partial class RtfDocumentReader
     /// </summary>
     /// <remarks>
     /// The style sits under the direct formatting rather than beside it, so clearing the direct
-    /// half exposes the style's again.
+    /// half exposes the style's again. Only the character half: <c>\plain</c> resets character
+    /// formatting and leaves the paragraph's alone, which is why <c>\pard\plain \sN</c> and
+    /// <c>\pard\sN\plain</c> place a paragraph identically.
     /// </remarks>
     private void ReapplyStyleCharacters(GroupState state)
-        => Apply(state, _styles.FormattingOf(state.ParagraphStyleId));
+        => ApplyCharacters(state, _styles.ContributionOf(state.ParagraphStyleId));
 
-    private static void Apply(GroupState state, RtfStyleFormatting f)
+    /// <summary>
+    /// Lays a paragraph style's alignment, space before and keep-with-next over the group state,
+    /// where the direct control words that follow the <c>\sN</c> then override them.
+    /// </summary>
+    private static void ApplyParagraph(GroupState state, RtfStyleFormatting f)
+    {
+        if (f.Alignment is { } alignment) state.Alignment = alignment;
+        if (f.SpaceBeforeTwips is { } before) state.SpaceBefore = before;
+        if (f.KeepWithNext is { } keep) state.KeepWithNext = keep;
+    }
+
+    /// <summary>
+    /// Undoes what a paragraph style's paragraph half contributed, returning each property it set
+    /// to the value <see cref="GroupState.ResetParagraph"/> leaves.
+    /// </summary>
+    private static void WithdrawParagraph(GroupState state, RtfStyleFormatting f)
+    {
+        if (f.Alignment is not null) state.Alignment = TextAlignment.Start;
+        if (f.SpaceBeforeTwips is not null) state.SpaceBefore = null;
+        if (f.KeepWithNext is not null) state.KeepWithNext = false;
+    }
+
+    /// <summary>
+    /// Lays a paragraph style's character contribution over the group state, where the direct
+    /// control words that follow the <c>\sN</c> then override it.
+    /// </summary>
+    /// <remarks>
+    /// The font <em>face</em> is deliberately not among them, and that is measured: <c>\deff</c>'s
+    /// name sits in the importer's default character state
+    /// (<c>RTFDocumentImpl::beforePopState</c>,
+    /// <c>sw/source/writerfilter/rtftok/rtfdocumentimpl.cxx</c>:2494-2500), which every group state
+    /// is copied from, so every run carries it as direct formatting and no style's <c>\f</c> can
+    /// beat it. Four probes over a document whose <c>\deff</c>, whose style's <c>\f</c> and whose
+    /// <c>Times New Roman</c> default are three different faces answer <c>\deff</c>'s in all four
+    /// — style's own or inherited, with <c>\plain</c> and without.
+    /// </remarks>
+    private static void ApplyCharacters(GroupState state, RtfStyleFormatting f)
     {
         if (f.IsEmpty) return;
 
-        if (f.FontIndex is { } font) state.FontIndex = font;
         if (f.FontSizeHalfPoints is { } size) state.FontSizeHalfPoints = size;
         if (f.Bold is { } bold) state.Bold = bold;
         if (f.Italic is { } italic) state.Italic = italic;
@@ -1965,14 +2033,13 @@ public sealed partial class RtfDocumentReader
     }
 
     /// <summary>
-    /// Undoes what a paragraph style contributed, returning each property it set to the value a
-    /// bare <c>\pard\plain</c> leaves.
+    /// Undoes what a paragraph style's character half contributed, returning each property it set
+    /// to the value a bare <c>\pard\plain</c> leaves.
     /// </summary>
-    private void Withdraw(GroupState state, RtfStyleFormatting f)
+    private static void WithdrawCharacters(GroupState state, RtfStyleFormatting f)
     {
         if (f.IsEmpty) return;
 
-        if (f.FontIndex is not null) state.FontIndex = _defaultFontIndex;
         if (f.FontSizeHalfPoints is not null) state.FontSizeHalfPoints = null;
         if (f.Bold is not null) state.Bold = false;
         if (f.Italic is not null) state.Italic = false;

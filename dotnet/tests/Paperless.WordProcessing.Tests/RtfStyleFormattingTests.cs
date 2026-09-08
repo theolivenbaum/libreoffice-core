@@ -65,36 +65,63 @@ public sealed class RtfStyleFormattingTests
             .ShouldBe([Length.FromPoints(20), Length.FromPoints(12)]);
 
     /// <summary>
-    /// A paragraph style's font reaches a run that names none.
+    /// A paragraph style's font <em>face</em> reaches no run at all — <c>\deff</c>'s wins.
     /// </summary>
+    /// <remarks>
+    /// The reading this replaces was that a style's face reaches a run that names none. It does
+    /// not, at any level of the chain: <c>\deff</c>'s name is put into the importer's default
+    /// character state (<c>rtfdocumentimpl.cxx</c>:2494-2500), every group state is copied from
+    /// that state, and a run therefore carries the face as <em>direct</em> formatting that no style
+    /// can beat. Measured on four probes whose <c>\deff</c>, whose style's <c>\f</c> and whose
+    /// <c>Times New Roman</c> fallback are three different faces — style's own or inherited, with
+    /// <c>\plain</c> and without — 26.2.4.2 answers <c>\deff</c>'s in all four
+    /// (<c>probes/rtf-resid-r80</c>, the <c>d-*</c> family).
+    /// </remarks>
     [Fact]
-    public void AParagraphStylesFaceReachesARunThatNamesNoFont()
+    public void AParagraphStylesFaceReachesNoRun()
         => First(
                 @"\pard\plain\s2\fs20 MARKER\par",
                 styles: @"{\s2\snext2\f2 Boxed;}")
-            .Family.ShouldBe("Liberation Mono");
+            .Family.ShouldBe("Liberation Sans");
 
-    /// <summary>And it is inherited through <c>\sbasedon</c>, which is how the export writes it.</summary>
-    /// <remarks>
-    /// <c>\s24 Table Paragraph</c> in a LibreOffice export is <c>\sbasedon0</c> and states only its
-    /// indent; the face is three links up the chain, in <c>\s0 Normal</c>.
-    /// </remarks>
+    /// <summary>Nor does an inherited one, which is the same rule one link up.</summary>
     [Fact]
-    public void AStyleInheritsItsFaceThroughSbasedon()
+    public void AnInheritedFaceReachesNoRunEither()
         => First(
                 @"\pard\plain\s3\fs20 MARKER\par",
                 styles: @"{\s2\snext2\f2 Middle;}{\s3\sbasedon2\snext3\li85 Boxed;}")
-            .Family.ShouldBe("Liberation Mono");
+            .Family.ShouldBe("Liberation Sans");
 
     /// <summary>
-    /// <c>\pard</c> selects style zero, so <c>\s0</c>'s face beats <c>\deff</c>'s.
+    /// A style's own <c>\fs</c> does not reach a paragraph that names that style, and an
+    /// ancestor's does.
+    /// </summary>
+    /// <remarks>
+    /// <c>getDefaultSPRM</c> answers <c>24</c> — twelve points — for a size
+    /// (<c>sw/source/writerfilter/rtftok/rtfsprm.cxx</c>:158-161), and
+    /// <c>cloneAndDeduplicateSprm</c>'s <em>"not found - try to override style with default"</em>
+    /// branch (:311-327) writes it over the paragraph for every property the <em>named</em> style
+    /// states. Only the ancestors' statements escape it.
+    /// </remarks>
+    [Fact]
+    public void AStylesOwnSizeIsReplacedByTheDefaultAndAnInheritedOneIsNot()
+    {
+        First(@"\pard\plain\s2 MARKER\par", styles: @"{\s2\snext2\fs36 Big;}")
+            .Size.ShouldBe(Length.FromPoints(12));
+
+        First(@"\pard\plain\s3 MARKER\par",
+                styles: @"{\s2\snext2\fs36 Big;}{\s3\sbasedon2\snext3\li85 Child;}")
+            .Size.ShouldBe(Length.FromPoints(18));
+    }
+
+    /// <summary>
+    /// <c>\pard</c> selects style zero, and style zero's own statements are therefore the named
+    /// style's — so a bare paragraph takes none of them.
     /// </summary>
     [Fact]
-    public void PardSelectsStyleZero()
-        => First(
-                @"\pard\plain\fs20 MARKER\par",
-                styles: @"{\s0\snext0\f2 Normal;}")
-            .Family.ShouldBe("Liberation Mono");
+    public void PardSelectsStyleZeroAndTakesNoneOfItsOwnStatements()
+        => First(@"\pard\plain MARKER\par", styles: @"{\s0\snext0\fs36 Normal;}")
+            .Size.ShouldBe(Length.FromPoints(12));
 
     /// <summary>
     /// A style replaces the one before it rather than piling onto it.
@@ -102,15 +129,16 @@ public sealed class RtfStyleFormattingTests
     /// <remarks>
     /// <c>\pard</c> selects style zero and the <c>\sN</c> after it selects another, so accumulating
     /// the two would leave style zero's bold on a paragraph in a style that inherits nothing from it.
+    /// The bold is stated one link up in both, because a style's own statement never reaches the
+    /// paragraph that names it.
     /// </remarks>
     [Fact]
     public void ASelectedStyleReplacesTheOneBefore()
     {
         Formatting formatting = First(
             @"\pard\plain\s3\fs20 MARKER\par",
-            styles: @"{\s0\snext0\b\f0 Normal;}{\s3\snext3\f2 Boxed;}");
+            styles: @"{\s1\snext1\b Bold;}{\s0\sbasedon1\snext0 Normal;}{\s3\snext3 Boxed;}");
 
-        formatting.Family.ShouldBe("Liberation Mono");
         formatting.Weight.ShouldBe(400);
     }
 

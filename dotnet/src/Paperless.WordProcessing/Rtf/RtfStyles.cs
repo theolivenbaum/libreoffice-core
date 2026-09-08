@@ -1,3 +1,5 @@
+using Paperless.Text.Layout;
+
 namespace Paperless.WordProcessing.Rtf;
 
 /// <summary>
@@ -5,16 +7,39 @@ namespace Paperless.WordProcessing.Rtf;
 /// </summary>
 /// <remarks>
 /// <para>
-/// <strong>Character formatting only, and that is measured rather than chosen.</strong> A style's
-/// paragraph formatting cannot be resolved from the <c>\sbasedon</c> chain, because dmapper maps an
-/// RTF style <em>name</em> onto Writer's built-in style of that name —
-/// <c>StyleSheetTable::ConvertStyleName</c>, <c>sw/source/writerfilter/dmapper/StyleSheetTable.cxx</c>:1620-1660,
-/// <c>{ "heading 5", "Heading 5" }</c> — and a pool style brings its own vertical spacing, which
-/// <c>setParentStyle</c> (:1156-1170) does not override. On <c>DEP2008-1900.rtf</c> the RTF chain
-/// gives <c>\s5 heading 5</c> the <c>\sa160</c> its <c>\sbasedon0</c> parent states and 26.2.4.2
-/// draws no space after the heading at all. Over the converted corpus's 336 scoreable <c>.rtf</c>,
-/// carrying the paragraph half as well scores <strong>247</strong> where carrying the character
-/// half alone scores <strong>254</strong>, against a base of 243.
+/// <strong>The character half resolves through the whole <c>\sbasedon</c> chain; the paragraph half
+/// is three properties and reaches a paragraph only from the chain <em>above</em> the style it
+/// names.</strong> That asymmetry is measured — 53 one-page probes in
+/// <c>probes/rtf-resid-r80/genmatrix.py</c>, thirteen paragraph properties against 26.2.4.2 — and it
+/// is not a quirk of the corpus: it is <c>cloneAndDeduplicateSprm</c>
+/// (<c>sw/source/writerfilter/rtftok/rtfsprm.cxx</c>:283-339), whose <em>"not found - try to
+/// override style with default"</em> branch writes <c>getDefaultSPRM</c>'s value onto the paragraph
+/// as direct formatting for every paragraph property the <em>named</em> style states and the
+/// paragraph does not. So the named style's own <c>\sb \sa \li \ri \fi \sl</c> are each reset to
+/// RTF's default before they can reach the text, and an ancestor's are not, because
+/// <c>lcl_copyFlatten</c> (<c>rtfdocumentimpl.cxx</c>:490-514) flattens only the entry's own
+/// <c>pPr</c> into the set that branch walks.
+/// </para>
+/// <para>
+/// Which properties survive follows from the same function's table, and the probes agree with it
+/// property for property. <c>getDefaultSPRM</c> (<c>rtfsprm.cxx</c>:154-224) answers a default for
+/// <c>ind</c>'s three children and for <c>spacing</c>'s <em>after</em> alone — the
+/// <c>LN_CT_PPrBase_spacing</c> case returns a value carrying <c>after = 0</c> and nothing else, and
+/// it is taken before the per-attribute recursion, so <em>before</em> is never visited. It answers
+/// nothing for <c>jc</c>, <c>keepNext</c> or <c>tabs</c>. Measured, one property per probe:
+/// <c>\qc \qr \qj</c> and <c>\sb</c> reach the paragraph from an ancestor and
+/// <c>\sa \li \ri \fi \sl</c> reach it from nowhere; <c>\keepn</c> reaches it from the named style
+/// as well, which is why it is the one member here resolved over the whole chain.
+/// </para>
+/// <para>
+/// <strong>The earlier reading — "character formatting only" — was right about the effect and wrong
+/// about the cause, and the cause is what decides which properties to carry.</strong> It attributed
+/// the whole of it to <c>StyleSheetTable::ConvertStyleName</c>
+/// (<c>sw/source/writerfilter/dmapper/StyleSheetTable.cxx</c>:1620-1660) mapping an RTF style
+/// <em>name</em> onto Writer's built-in style of that name, so that a pool style's own vertical
+/// spacing beat the <c>\sbasedon</c> chain. That mapping is real, but it is not what suppresses the
+/// spacing: a style called <c>Centered</c> maps onto no pool style at all and its own <c>\sb480</c>
+/// is dropped just the same, while the identical <c>\sb480</c> one level up is honoured.
 /// </para>
 /// <para>
 /// Every member is nullable, and that is the whole point of the type: RTF writes a style as the
@@ -56,6 +81,29 @@ public sealed record RtfStyleFormatting
     /// <summary><c>\lang</c>.</summary>
     public int? LanguageId { get; init; }
 
+    /// <summary>The alignment one of the <c>\q</c> words gave, by page side.</summary>
+    /// <remarks>
+    /// Carried because <c>LN_CT_PPrBase_jc</c> has no entry in <c>getDefaultSPRM</c>, so nothing
+    /// overrides it on the way to the paragraph. Reaches the text from an ancestor only.
+    /// </remarks>
+    public TextAlignment? Alignment { get; init; }
+
+    /// <summary>The space above the paragraph in twips, from <c>\sb</c>.</summary>
+    /// <remarks>
+    /// Its sibling <c>\sa</c> is deliberately absent: <c>getDefaultSPRM</c>'s value for the whole
+    /// <c>spacing</c> node is <c>after = 0</c>, which is written over any style's space after and
+    /// leaves its space before alone. Reaches the text from an ancestor only.
+    /// </remarks>
+    public int? SpaceBeforeTwips { get; init; }
+
+    /// <summary><c>\keepn</c>.</summary>
+    /// <remarks>
+    /// The one paragraph property a style states <em>for itself</em> and still reaches the text,
+    /// because <c>keepNext</c> is a plain value with no default and no children, so
+    /// <c>cloneAndDeduplicateSprm</c>'s not-found branch writes nothing over it.
+    /// </remarks>
+    public bool? KeepWithNext { get; init; }
+
     /// <summary>True when the entry stated nothing this type carries.</summary>
     public bool IsEmpty => this == Empty;
 
@@ -78,6 +126,9 @@ public sealed record RtfStyleFormatting
         SmallCapitals = SmallCapitals ?? parent.SmallCapitals,
         ForegroundColourIndex = ForegroundColourIndex ?? parent.ForegroundColourIndex,
         LanguageId = LanguageId ?? parent.LanguageId,
+        Alignment = Alignment ?? parent.Alignment,
+        SpaceBeforeTwips = SpaceBeforeTwips ?? parent.SpaceBeforeTwips,
+        KeepWithNext = KeepWithNext ?? parent.KeepWithNext,
     };
 }
 
@@ -134,13 +185,30 @@ public sealed class RtfStyles
     private readonly Dictionary<int, RtfStyle> _paragraphStyles = [];
     private readonly Dictionary<int, RtfStyle> _characterStyles = [];
     private readonly Dictionary<int, RtfStyleFormatting> _resolved = [];
+    private readonly Dictionary<int, RtfStyleFormatting> _resolvedContribution = [];
 
     /// <summary>Records a style definition read from the stylesheet.</summary>
+    /// <remarks>
+    /// A <c>\sbasedon</c> naming a style the sheet has not reached yet is dropped, because the
+    /// importer resolves it to a <em>name</em> where it stands —
+    /// <c>pIntValue = new RTFValue(getStyleName(nParam))</c>,
+    /// <c>sw/source/writerfilter/rtftok/rtfdispatchvalue.cxx</c>:131-134 — and a style not yet read
+    /// has no name to give, so <c>StyleSheetTable</c> never calls <c>setParentStyle</c> for it.
+    /// Measured: a child declared before its parent takes nothing from it
+    /// (<c>probes/rtf-resid-r80</c>, <c>o-childfirst</c>), where a child declared after it, with an
+    /// unrelated entry in between, takes everything (<c>s-gap</c>).
+    /// </remarks>
     internal void Add(int id, RtfStyle style)
     {
+        if (style.BasedOn is { } parent && !_paragraphStyles.ContainsKey(parent))
+        {
+            style = style with { BasedOn = null };
+        }
+
         if (style.IsCharacterStyle) _characterStyles[id] = style;
         else _paragraphStyles[id] = style;
         _resolved.Clear();
+        _resolvedContribution.Clear();
     }
 
     /// <summary>The paragraph style with this <c>\s</c> id, or null.</summary>
@@ -179,6 +247,67 @@ public sealed class RtfStyles
         for (int i = chain.Count - 1; i >= 0; i--) result = chain[i].Over(result);
 
         _resolved[id] = result;
+        return result;
+    }
+
+    /// <summary>
+    /// What a paragraph naming this style actually takes from it, which is not the whole
+    /// <c>\sbasedon</c> merge <see cref="FormattingOf"/> answers.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Three classes, and which property is in which is measured rather than chosen — see the
+    /// table in <see cref="RtfStyleFormatting"/>'s own remarks. Most properties are honoured only
+    /// when an <em>ancestor</em> states them, because the named style's own statement is written
+    /// back over the paragraph as RTF's default. A few — the ones <c>getDefaultSPRM</c> answers
+    /// nothing for — are honoured wherever in the chain they are stated. The font <em>face</em> is
+    /// in neither class: no style's face ever reaches a run.
+    /// </para>
+    /// <para>
+    /// A null member means "leave the paragraph where <c>\pard\plain</c> left it", which is the
+    /// same value the reset would write, so the two cases need not be told apart downstream.
+    /// </para>
+    /// </remarks>
+    public RtfStyleFormatting ContributionOf(int id)
+    {
+        if (_resolvedContribution.TryGetValue(id, out RtfStyleFormatting? cached)) return cached;
+
+        bool known = _paragraphStyles.TryGetValue(id, out RtfStyle style);
+        RtfStyleFormatting own = known ? style.Formatting : RtfStyleFormatting.Empty;
+        RtfStyleFormatting inherited = known && style.BasedOn is { } parent && parent != id
+            ? FormattingOf(parent)
+            : RtfStyleFormatting.Empty;
+        RtfStyleFormatting chain = FormattingOf(id);
+
+        // A property the *named* style states is dropped and the ancestors' value with it, because
+        // the reset is written over the paragraph as direct formatting; a property only an ancestor
+        // states is honoured. Null therefore means "leave the paragraph at what \pard\plain left",
+        // which is the same value the reset writes.
+        static T? Inherited<T>(T? own, T? inherited) where T : struct
+            => own is null ? inherited : null;
+
+        RtfStyleFormatting result = new()
+        {
+            // Not the face: no style's font reaches a run at all -- see the type's remarks.
+            FontSizeHalfPoints = Inherited(own.FontSizeHalfPoints, inherited.FontSizeHalfPoints),
+            Bold = Inherited(own.Bold, inherited.Bold),
+            Italic = Inherited(own.Italic, inherited.Italic),
+            Underline = Inherited(own.Underline, inherited.Underline),
+            ForegroundColourIndex =
+                Inherited(own.ForegroundColourIndex, inherited.ForegroundColourIndex),
+            Alignment = Inherited(own.Alignment, inherited.Alignment),
+            SpaceBeforeTwips = Inherited(own.SpaceBeforeTwips, inherited.SpaceBeforeTwips),
+
+            // The properties `getDefaultSPRM` answers nothing for: the named style's own statement
+            // survives, so these resolve over the whole chain.
+            Capitals = chain.Capitals,
+            SmallCapitals = chain.SmallCapitals,
+            Strike = chain.Strike,
+            LanguageId = chain.LanguageId,
+            KeepWithNext = chain.KeepWithNext,
+        };
+
+        _resolvedContribution[id] = result;
         return result;
     }
 
