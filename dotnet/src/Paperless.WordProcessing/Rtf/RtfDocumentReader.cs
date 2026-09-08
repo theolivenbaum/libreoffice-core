@@ -112,6 +112,26 @@ public sealed partial class RtfDocumentReader
     /// <summary>The document's <c>\htmautsp</c>; see <see cref="AddsParagraphSpacing"/>.</summary>
     private bool _htmlAutoSpacing;
 
+    /// <summary>
+    /// True once the document has had its first run, which is when RTF's settings stop being
+    /// readable.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The RTF importer emits its whole settings table at the document's first run —
+    /// <c>RTFDocumentImpl::checkFirstRun</c> calls <c>outputSettingsTable</c>
+    /// (<c>sw/source/writerfilter/rtftok/rtfdocumentimpl.cxx</c>:414-435) — so a settings word
+    /// written after that is stored and never sent.
+    /// </para>
+    /// <para>
+    /// What counts as that run is wider than body text: <c>checkFirstRun</c> has nine callers, and
+    /// they include <c>resolvePict</c>. A <c>{\header}</c> group does <em>not</em> count, because a
+    /// substream is re-parsed when its section ends rather than where the group appears; that half
+    /// is measured as well as read (<c>probes/rtf-resid-r80</c>, <c>htm-afterheader</c>).
+    /// </para>
+    /// </remarks>
+    private bool _firstRunSeen;
+
     /// <summary>The document's <c>\deff</c>: the font a run that names none is set in.</summary>
     /// <remarks>
     /// Not font zero. LibreOffice puts <c>\deff</c>'s <em>name</em> into the default character state
@@ -532,6 +552,15 @@ public sealed partial class RtfDocumentReader
                 state.Destination = RtfDestination.Info;
                 return;
             case "pict":
+                // A picture is one of `checkFirstRun`'s callers — `RTFDocumentImpl::resolvePict`
+                // ends with it (`rtfdocumentimpl.cxx`:1296) — so a `{\pict}` in the body closes the
+                // window on the document's settings exactly as a word of text does.
+                //
+                // Only a body one. A `{\*\listtable{\*\listpicture{\*\shppict{\pict …}}}}` does
+                // not, which is measured rather than assumed: `probes/rtf-resid-r80`'s
+                // `p-listpicture` puts that group before a `\htmautsp` and 26.2.4.2 still honours
+                // the word, while `p-bodypict` puts a bare `{\pict}` there and it does not.
+                if (state.Destination is RtfDestination.Body) NoteFirstRun();
                 state.Destination = RtfDestination.Picture;
                 BeginPicture();
                 return;
@@ -688,7 +717,13 @@ public sealed partial class RtfDocumentReader
             // exactly as \htmautsp does. Measured — both put the reference's paragraph boundaries at
             // 24.00 pt where their absence gives 32.00 pt — which is why this is not `Parameter != 0`.
             case "htmautsp":
-                _htmlAutoSpacing = true;
+                // And deliberately ignoring it once the body has begun: the RTF importer sends its
+                // settings table from `checkFirstRun` (`rtfdocumentimpl.cxx`:414-435), so a
+                // `\htmautsp` written after the document's first run is set on an
+                // `m_aSettingsTableSprms` nobody reads again. `rtfsprm.cxx`:238-241 says so in a
+                // comment of its own — "\htmautsp arrives after the style table, so only the
+                // non-style value is correct".
+                if (!_firstRunSeen) _htmlAutoSpacing = true;
                 return;
 
             case "li":
