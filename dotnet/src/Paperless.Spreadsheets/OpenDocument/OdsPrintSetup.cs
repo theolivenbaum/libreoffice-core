@@ -282,6 +282,50 @@ internal static class OdsPrintSetup
         return (mode, percentage, count, wide, tall);
     }
 
+    /// <summary>
+    /// The last row of an ODF sheet whose automatic height Calc recomputes on load.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>An ODF sheet recalculates its automatic row heights for its first two hundred rows
+    /// and keeps the writer's own measurement for the rest.</strong>
+    /// <c>ScXMLTableRowContext::endFastElement</c> adds each row block to the recalculation ranges
+    /// and then takes it straight back out again when the block ends past row 200 and its style
+    /// carries a stored height alongside the optimal flag — <c>maRanges.setFalse(nFirstRow,
+    /// nCurrentRow)</c>, <c>sc/source/filter/xml/xmlrowi.cxx</c>:215-244 and the test itself at
+    /// <c>:228</c>, under the comment <em>"recalc only the first 200 row in case of optimal
+    /// document loading"</em>. The rows are
+    /// zero-based there: <c>nFirstRow = nCurrentRow − nRepeatedRows + 1</c> and both are clamped
+    /// against <c>pDoc-&gt;MaxRow()</c>.
+    /// </para>
+    /// <para>
+    /// <strong>The test reads as "a style with no height", and it means the opposite.</strong>
+    /// <c>ScXMLRowImportPropertyMapper::finished</c> (<c>sc/source/filter/xml/xmlstyli.cxx</c>:245-258)
+    /// moves a stored <c>style:row-height</c> <em>into</em> the optimal-height property and clears
+    /// the height one whenever <c>style:use-optimal-row-height</c> is true, so
+    /// <c>FindProperty(CTF_SC_ROWHEIGHT)</c> is null for exactly the styles that state both — and
+    /// the <c>CTF_SC_ROWOPTIMALHEIGHT</c> it then reads is the height, which <c>any2bool</c> takes
+    /// as true whenever it is non-zero. A style stating the flag and <em>no</em> height has both
+    /// properties cleared, is not found either, and falls through to <c>setTrue</c>: it is
+    /// recalculated wherever it sits.
+    /// </para>
+    /// <para>
+    /// <strong>It is worth twenty pages on one corpus document and the boundary is visible in the
+    /// reference's own PDF.</strong> Every row of
+    /// <c>Laser Report 2024 FOIA __Oct (1).ods</c> states <c>style:row-height="0.2189in"</c> with
+    /// the optimal flag, one <c>table:table-row</c> element each. 26.2.4.2 draws its first 201
+    /// rows on a 15.0 pt pitch — the recomputed height of their 10 pt text — and every row after
+    /// them on the stated 15.75, which is 48 rows to a page and then 46; we recomputed all of
+    /// them and printed 486 pages against 506. <c>dotnet/probes/ods-resid-r80/</c>.
+    /// </para>
+    /// <para>
+    /// The rule is the <em>importer's</em> and belongs here rather than in
+    /// <see cref="Layout.SheetOptimalRowHeights"/>, which serves all four readers: the two Excel
+    /// filters recalculate every automatic row and have no such limit.
+    /// </para>
+    /// </remarks>
+    private const int RecalculatedRowLimit = 200;
+
     private readonly record struct Axes(
         List<SheetSizeRun> Columns,
         List<SheetSizeRun> Rows,
@@ -345,6 +389,10 @@ internal static class OdsPrintSetup
                     Describe(child, OdfStyleFamily.TableRow, OdfPropertyKind.TableRow,
                              "row-height", out Length? size, out bool hidden, out bool breaks,
                              out bool optimal);
+
+                    // The 200-row rule: below it the stored height is a cache Calc throws away,
+                    // and past it the stored height stands. See `RecalculatedRowLimit`.
+                    if (size is not null && row - 1 > RecalculatedRowLimit) optimal = false;
 
                     if (size is { } tall)
                         rows.Add(new SheetSizeRun(first, row - 1, tall, hidden, optimal));

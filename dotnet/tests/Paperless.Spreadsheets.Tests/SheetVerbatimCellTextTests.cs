@@ -170,36 +170,33 @@ public sealed class SheetVerbatimCellTextTests
     }
 
     /// <summary>
-    /// The paragraphs of a non-wrapping cell are drawn a line apart, and the row keeps the height
-    /// it had.
+    /// The paragraphs of a non-wrapping cell are drawn a line apart, and the row is as tall as
+    /// all of them.
     /// </summary>
     /// <remarks>
     /// <para>
     /// <c>sheet-cell-break-height.fods</c> is four rows, the second holding
     /// <c>Alpha\nBravo\nCharlie</c> in a cell that does not wrap and a row asking for an automatic
     /// height. 26.2.4.2 draws the three at 70.54, 81.74 and 92.94 and starts row 3 at 105.15 — it
-    /// gave the row all three lines. We draw the three where it draws them, to 0.03 pt, and give
-    /// the row one line, so our row 3 starts at 82.90.
+    /// gave the row all three lines, which is <strong>34.61 pt</strong> below <c>Alpha</c>.
     /// </para>
     /// <para>
-    /// <strong>That second half is stated as a measurement rather than asserted as correct, and
-    /// the reason it is not simply fixed is a rule this tree does not model.</strong> An ODF
-    /// sheet's automatic row heights are recalculated for its <em>first 200 rows only</em>:
-    /// <c>ScXMLTableRowContext</c> excludes a block ending past row 200 from the recalc ranges
-    /// whenever its style carries a stored height and the optimal flag
-    /// (<c>sc/source/filter/xml/xmlrowi.cxx</c>:218-243 — <c>rRecalcRanges.at(nSheet).maRanges
-    /// .setFalse(nFirstRow, nCurrentRow)</c> — with
-    /// <c>ScXMLRowImportPropertyMapper::finished</c> (<c>xmlstyli.cxx</c>:245-258) removing
-    /// <c>CTF_SC_ROWHEIGHT</c> from exactly such a style so that the test above it fires).
-    /// <see cref="SheetOptimalRowHeights"/> recalculates every optimal row, so giving a
-    /// multi-paragraph cell its paragraphs' height moved
-    /// <c>Capability_List_9-14-2022_Dallas_Combined-Aircraft_Manuf_unsorted.ods</c> — 3 700 rows,
-    /// fifteen of them two-paragraph, all far below row 200 — from the reference's 147 pages to
-    /// 150. The two rules have to land together or not at all.
+    /// <strong>Both halves are now asserted, and they had to land together.</strong> The height is
+    /// <c>pEngine-&gt;GetTextHeight()</c> over as many paragraphs as the importer made
+    /// (<c>ScColumn::GetNeededSize</c>, <c>sc/source/core/data/column2.cxx</c>:571-577), and Calc's
+    /// ODF filter makes one per hard break where the two Excel filters make one in all —
+    /// see <see cref="SheetOptimalRowHeights"/>'s <c>StandingEditLine</c>. On its own that moved
+    /// <c>Capability_List_9-14-2022_Dallas_Combined-Aircraft_Manuf_unsorted.ods</c> — fifteen
+    /// two-paragraph cells, all past row 200 — from the reference's 147 pages to 150, because an
+    /// ODF sheet recalculates its automatic row heights for its <em>first 200 rows only</em> and
+    /// those rows keep the height the writer stored. That rule is
+    /// <c>OdsPrintSetup.RecalculatedRowLimit</c> and
+    /// <c>dotnet/tests/corpus/features/sheet-row-height-limit.fods</c> is its own fixture; this
+    /// file is four rows, so it is on the recalculating side of the boundary.
     /// </para>
     /// </remarks>
     [Fact]
-    public void TheParagraphsAreDrawnALineApartAndTheRowKeepsItsHeight()
+    public void TheParagraphsAreDrawnALineApartAndTheRowIsAsTallAsAllOfThem()
     {
         List<DrawnGlyphRun> drawn = Drawn("sheet-cell-break-height.fods");
 
@@ -212,11 +209,8 @@ public sealed class SheetVerbatimCellTextTests
         (bravo.Origin.Y - alpha.Origin.Y).Points.ShouldBe(11.197, 0.05);
         (charlie.Origin.Y - bravo.Origin.Y).Points.ShouldBe(11.197, 0.05);
 
-        // The measurement, not the target. 26.2.4.2 puts `three` 34.61 pt below `Alpha`, having
-        // given row 2 all three lines; we put it 12.39 pt below, one single-line row down. Pinned
-        // as "one row and not three" so that the day the 200-row rule lands this fails and is
-        // rewritten rather than quietly passing at either value.
+        // 26.2.4.2's own figure: `three` sits 34.61 pt below `Alpha`, three lines and a margin.
         DrawnGlyphRun three = drawn.Single(r => r.Text == "three");
-        (three.Origin.Y - alpha.Origin.Y).Points.ShouldBe(12.387, 0.05);
+        (three.Origin.Y - alpha.Origin.Y).Points.ShouldBe(34.61, 0.35);
     }
 }

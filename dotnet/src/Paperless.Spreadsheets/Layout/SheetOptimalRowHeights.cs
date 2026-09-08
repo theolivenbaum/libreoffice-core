@@ -483,18 +483,23 @@ internal static class SheetOptimalRowHeights
                 // states 285.1 twips for the row — one line — and its PDF holds
                 // `19090-105 (SCD604-85001-23)` as a single run with no space in it.
                 //
-                // ODF disagrees about the *drawing* and not about this, which is measured rather
-                // than inferred and is the opposite of the natural reading. `ScXMLImport` makes a
-                // cell of several `text:p` — or of one holding a raw newline — a multi-paragraph
-                // edit cell whatever the wrap says (`PushParagraphEnd`, `xmlcelli.cxx`:610-636),
-                // and `SheetLayout.CellBreaksStartLines` draws every one of those paragraphs. The
-                // row it sits in still takes **one** line, and the rest overflow it. Measured on
-                // `Capability_List…unsorted.ods`, whose fifteen two-paragraph cells 26.2.4.2 draws
-                // as two lines each inside rows it leaves 14.23 pt tall — page 11 has
-                // `19090-105 (SCD` at 239.26 and `604-85001-23)` at 252.75 in a row that starts at
-                // 238.52 and ends at 252.75, so the second line is drawn over the row beneath.
-                // Giving the row the paragraphs' height instead made that document 150 pages
-                // against the reference's 147.
+                // ODF disagrees, and it disagrees about the height as well as about the drawing.
+                // `ScXMLImport` makes a cell of several `text:p` — or of one holding a raw
+                // newline — a multi-paragraph edit cell whatever the wrap says (`PushParagraphEnd`,
+                // `xmlcelli.cxx`:610-636), `SheetLayout.CellBreaksStartLines` draws every one of
+                // those paragraphs, and `GetNeededSize`'s height branch is
+                // `pEngine->GetTextHeight()` (`column2.cxx:571-577`) — so N paragraphs are N lines
+                // of row. See `StandingEditLine`.
+                //
+                // **That half only became implementable once the 200-row rule was.** Giving every
+                // such row the paragraphs' height on its own made
+                // `Capability_List…unsorted.ods` 150 pages against the reference's 147, because
+                // 26.2.4.2 draws its fifteen two-paragraph cells as two lines each inside rows it
+                // leaves 14.23 pt tall — page 11 has `19090-105 (SCD` at 239.26 and
+                // `604-85001-23)` at 252.75 in a row spanning 238.52 to 252.75, so the second line
+                // is painted over the row beneath. Those rows are past row 200 and keep their
+                // stored height; the rule that says so is `OdsPrintSetup.RecalculatedRowLimit`,
+                // and it reaches this routine as the rows' optimal flag being false.
                 bool breaks =
                     SheetTextLayout.Breaks(format, cell.Value is not null and not string)
                     && !sheet.HoldsField(cell.Row, cell.Column);
@@ -530,7 +535,9 @@ internal static class SheetOptimalRowHeights
                     : direct
                         ? RotatedHeight(format, text, breaks)
                         : standing
-                            ? StandingEditLine(format, portions)
+                            ? StandingEditLine(
+                                format, portions,
+                                ParagraphsOf(text, sheet.CellBreaksStartLines))
                             : WrappedHeight(
                                 cell, format, text, portions, columns, sheet.MergedRanges);
 
@@ -794,12 +801,23 @@ internal static class SheetOptimalRowHeights
     /// <c>EditTextObject</c> by both importers, and <c>ScColumn::GetOptimalHeight</c> clears
     /// <c>bStdOnly</c> for one (<c>column2.cxx:930-935</c>), so it is measured through
     /// <c>GetNeededSize</c>'s EditEngine branch whatever its wrap flag says. Nothing is broken
-    /// there — the cell is in single-line mode, which is why a hard break inside it starts no
-    /// line — so the answer is one EditEngine line: the largest ascent and the largest descent
-    /// over its portions, each quantised to whole device pixels, plus a pixel of margin either
-    /// side. That is <see cref="RichPixels"/> over a single range, written out here rather than
-    /// routed through <see cref="WrappedHeight"/> because there is no paper to compute and no
-    /// line to find.
+    /// for <em>width</em> there — the paper is a million units across — so the answer is one
+    /// EditEngine line per paragraph: the largest ascent and the largest descent over its
+    /// portions, each quantised to whole device pixels, plus a pixel of margin either side. That
+    /// is <see cref="RichPixels"/> over a single range, written out here rather than routed
+    /// through <see cref="WrappedHeight"/> because there is no paper to compute and no line to
+    /// find.
+    /// </para>
+    /// <para>
+    /// <strong>How many paragraphs there are is the importer's answer and not the string's.</strong>
+    /// The BIFF and SpreadsheetML filters set <c>SetSingleLine</c> for a cell that does not wrap,
+    /// so its hard break stays inside one paragraph and the height is one line; Calc's ODF filter
+    /// never calls it, so the same characters are several paragraphs and
+    /// <c>pEngine-&gt;GetTextHeight()</c> is that many lines. Measured on
+    /// <c>dotnet/tests/corpus/features/sheet-cell-break-height.fods</c>, whose row 2 holds three
+    /// paragraphs in a 6 cm non-wrapping cell: 26.2.4.2 starts row 3 <strong>34.61 pt</strong>
+    /// below row 2 — three lines of 11.197 pt and a margin — against the 12.39 pt a single line
+    /// gives.
     /// </para>
     /// <para>
     /// It is not the arithmetic height and the gap is not small. Measured on
@@ -824,8 +842,13 @@ internal static class SheetOptimalRowHeights
     /// </remarks>
     /// <param name="format">The cell's format, for its face, size and margins.</param>
     /// <param name="portions">Its formatting runs, or null when the break alone made it an edit cell.</param>
+    /// <param name="paragraphs">
+    /// How many paragraphs the importer made of the cell. One for the two Excel families, whose
+    /// filters put the engine into single-line mode, and one per hard break for ODF — see
+    /// <see cref="SheetLayout.CellBreaksStartLines"/>.
+    /// </param>
     private static int StandingEditLine(
-        SheetCellFormat format, IReadOnlyList<SheetTextPortion>? portions)
+        SheetCellFormat format, IReadOnlyList<SheetTextPortion>? portions, int paragraphs)
     {
         MetricGrid grid = new(ScreenDpi);
         long ascent = 0;
@@ -844,8 +867,27 @@ internal static class SheetOptimalRowHeights
                 descent, grid.ToPixels(face.Metrics.Descent, face.Metrics.UnitsPerEm, size));
         }
 
-        long pixels = ascent + descent;
+        long pixels = (ascent + descent) * Math.Max(1, paragraphs);
         return pixels <= 0 ? 0 : (int)((pixels + (2 * MarginPixelsOf(format))) / PixelsPerTwip);
+    }
+
+    /// <summary>How many paragraphs the importer made of a cell's text.</summary>
+    /// <remarks>
+    /// The same <c>\n</c>/<c>\r\n</c>/<c>\r</c> split every other count of a cell's paragraphs
+    /// makes, and it answers one whenever the importer left the engine in single-line mode.
+    /// </remarks>
+    private static int ParagraphsOf(string text, bool breaksStartLines)
+    {
+        if (!breaksStartLines) return 1;
+
+        int count = 1;
+        for (int at = 0; at < text.Length; at++)
+        {
+            if (text[at] == '\n') count++;
+            else if (text[at] == '\r') { count++; if (at + 1 < text.Length && text[at + 1] == '\n') at++; }
+        }
+
+        return count;
     }
 
     /// <summary>

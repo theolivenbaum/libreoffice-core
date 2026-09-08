@@ -12,7 +12,7 @@ namespace Paperless.Spreadsheets.Layout;
 /// of it — so the printed area is wider than the area that holds cells. <c>AdjustPrintArea</c>
 /// calls <c>ScTable::ExtendPrintArea</c> for exactly this
 /// (<c>sc/source/core/data/table1.cxx:2127</c>, and the per-cell rule in
-/// <c>MaybeAddExtraColumn</c> at <c>:2217</c>), and without it a sheet of long strings comes out
+/// <c>MaybeAddExtraColumn</c> at <c>:2218</c>), and without it a sheet of long strings comes out
 /// a page narrower than the reference.
 /// </para>
 /// <para>
@@ -100,6 +100,76 @@ internal static class SheetTextOverflow
         return Length.FromPoints((pixels & 0xFFFF) * 72.0 / ReferenceDeviceDpi);
     }
 
+    /// <summary>
+    /// How wide the cell's text is for the purpose of overflow: its widest paragraph where the
+    /// importer made several, and the whole string where it made one.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>A cell the importer stored as an <c>EditTextObject</c> is measured by the
+    /// EditEngine, and the EditEngine answers the widest <em>paragraph</em> rather than the
+    /// length of the string.</strong> <c>ScColumn::GetNeededSize</c> takes the edit branch for
+    /// <c>CELLTYPE_EDIT</c> (<c>sc/source/core/data/column2.cxx</c>:297-300), formats the cell
+    /// against a paper 1000000 units wide (<c>:447</c>) so that nothing is broken for width, and
+    /// reads the width off <c>pEngine-&gt;CalcTextWidth()</c> (<c>:565</c>) —
+    /// <c>ImpEditEngine::CalcTextWidth</c> being a maximum over the paragraphs
+    /// (<c>editeng/source/editeng/impedit2.cxx</c>:3507-3525). So a cell of thirty short
+    /// paragraphs spills as far as its longest line and not as far as their sum.
+    /// </para>
+    /// <para>
+    /// <strong>Which cells those are is the importer's decision and not the cell's</strong>, and
+    /// it is the same distinction <see cref="SheetLayout.CellBreaksStartLines"/> already carries:
+    /// Calc's ODF filter hands a multi-line string to the engine with single-line mode off, so it
+    /// becomes one paragraph per break, while the BIFF and SpreadsheetML filters set
+    /// <c>SetSingleLine</c> for a cell that does not wrap and the break stays inside one paragraph
+    /// — which is one line, and therefore the whole string. Measuring the whole string in both is
+    /// what this did before, and it is right for exactly one of the two.
+    /// </para>
+    /// <para>
+    /// <strong>It is the whole of <c>CIS_Debian_Linux_8_Benchmark_v1.0.0.ods</c>'s 88 pages
+    /// against 61</strong>, established on the reference rather than inferred. Not one of its 361
+    /// multi-paragraph cells wraps, so nothing else keeps the spill in check, and 68 of the
+    /// <c>Level 2</c> sheet's 382 paragraphs carry a raw newline. Rewriting every newline in the file as a space
+    /// — one paragraph per cell, the same characters — makes 26.2.4.2 itself render
+    /// <c>Level 1</c> in <strong>51</strong> pages and <c>Level 2</c> in <strong>36</strong>,
+    /// which are this tree's two counts exactly; keeping only each cell's longest paragraph
+    /// leaves the reference at its own 39 and 21. <c>dotnet/probes/ods-resid-r80/</c>.
+    /// </para>
+    /// </remarks>
+    /// <param name="text">The cell's display text.</param>
+    /// <param name="format">Its format, for the face and size.</param>
+    /// <param name="breaksStartLines">
+    /// Whether this workbook's importer makes a paragraph of each hard break — true for ODF and
+    /// false for the two Excel families.
+    /// </param>
+    private static Length WidestParagraph(string text, SheetCellFormat format, bool breaksStartLines)
+    {
+        SheetFace? face = SheetFonts.For(format);
+
+        if (!breaksStartLines || text.AsSpan().IndexOfAny('\n', '\r') < 0)
+            return SheetText.Measure(text, face, format.FontSize);
+
+        Length widest = Length.Zero;
+
+        // `\r\n` is one break, as it is everywhere else a cell's paragraphs are counted; an empty
+        // paragraph measures nothing and cannot be the widest, so it needs no special case.
+        int at = 0;
+        while (at <= text.Length)
+        {
+            int end = at;
+            while (end < text.Length && text[end] is not ('\n' or '\r')) end++;
+
+            Length width = SheetText.Measure(text[at..end], face, format.FontSize);
+            if (width > widest) widest = width;
+
+            if (end < text.Length && text[end] == '\r' && end + 1 < text.Length && text[end + 1] == '\n')
+                end++;
+            at = end + 1;
+        }
+
+        return widest;
+    }
+
     /// <summary>The cell text margin either side, which counts towards the width needed.</summary>
     /// <remarks>
     /// The cell's own <c>ATTR_MARGIN</c> rather than the pool default, because an <c>.xls</c>
@@ -152,7 +222,7 @@ internal static class SheetTextOverflow
                 if (!widths.TryGetValue((text, format), out Length width))
                 {
                     width = CachedTextWidth(
-                        SheetText.Measure(text, SheetFonts.For(format), format.FontSize)
+                        WidestParagraph(text, format, sheet.CellBreaksStartLines)
                         + CellMarginsOf(format) + format.Indent);
                     widths[(text, format)] = width;
                 }
