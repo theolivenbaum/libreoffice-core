@@ -96,6 +96,17 @@ public sealed record RtfStyleFormatting
     /// </remarks>
     public int? SpaceBeforeTwips { get; init; }
 
+    /// <summary>The space below the paragraph in twips.</summary>
+    /// <remarks>
+    /// No RTF <c>\sa</c> ever reaches this — <c>getDefaultSPRM</c>'s value for the whole
+    /// <c>spacing</c> node is <c>after = 0</c>, which is written over any style's space after.
+    /// It carries one thing only: the space below that Writer's own <em>Heading</em> pool style
+    /// gives a style whose <c>\sbasedon</c> did not resolve. That is not an RTF sprm at all, so
+    /// nothing in <c>cloneAndDeduplicateSprm</c>'s table can overwrite it. See
+    /// <see cref="RtfStyles.PoolFormattingOf"/>.
+    /// </remarks>
+    public int? SpaceAfterTwips { get; init; }
+
     /// <summary><c>\keepn</c>.</summary>
     /// <remarks>
     /// The one paragraph property a style states <em>for itself</em> and still reaches the text,
@@ -128,6 +139,7 @@ public sealed record RtfStyleFormatting
         LanguageId = LanguageId ?? parent.LanguageId,
         Alignment = Alignment ?? parent.Alignment,
         SpaceBeforeTwips = SpaceBeforeTwips ?? parent.SpaceBeforeTwips,
+        SpaceAfterTwips = SpaceAfterTwips ?? parent.SpaceAfterTwips,
         KeepWithNext = KeepWithNext ?? parent.KeepWithNext,
     };
 }
@@ -211,6 +223,60 @@ public sealed class RtfStyles
         _resolvedContribution.Clear();
     }
 
+    /// <summary>
+    /// What Writer's own style pool gives a paragraph style whose <c>\sbasedon</c> did not
+    /// resolve, or null when the name is not one the pool answers.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>A style whose name is one of Word's is not created: Writer's existing style of that
+    /// name is reused, and it keeps its own parent when the entry states no usable
+    /// <c>\sbasedon</c>.</strong> <c>StyleSheetTable::ApplyStyleSheets</c>
+    /// (<c>sw/source/writerfilter/dmapper/StyleSheetTable.cxx</c>:1099-1121) converts the entry's
+    /// name through <c>ConvertStyleName</c> (<c>:1620-1660</c>, whose map holds
+    /// <c>heading 1</c>…<c>heading 9</c> and <c>Heading 1</c>…<c>Heading 9</c>), and where
+    /// <c>xStyles->hasByName</c> answers yes it takes that style, resets its own properties and
+    /// leaves the parent alone — the one branch that would clear it needs
+    /// <c>m_bHasImportedDefaultParaProps</c>, which only an OOXML <c>w:docDefaults</c> sets
+    /// (<c>:653-667</c>), so for RTF it is never true. A resolvable <c>\sbasedon</c> replaces the
+    /// parent instead (<c>:1156-1169</c>), which is why this is a fallback and not an override.
+    /// </para>
+    /// <para>
+    /// Every heading maps to a pool style whose parent is <em>Heading</em>, and
+    /// <c>SwPoolFormatId::COLL_HEADLINE_BASE</c>
+    /// (<c>sw/source/core/doc/DocumentStylePoolManager.cxx</c>:768-819) is where the four values
+    /// below come from: <c>SvxFontHeightItem aFntSize(PT_14, …)</c> at <c>:809</c>,
+    /// <c>SvxULSpaceItem aUL(PT_12, PT_6, …)</c> at <c>:810</c> and
+    /// <c>SvxFormatKeepItem(true, RES_KEEP)</c> at <c>:814</c>. The per-level percentages in
+    /// <c>aHeadlineSizes</c> (<c>:107-115</c>) do <em>not</em> arrive with them: the import resets
+    /// the level style's own properties, so <c>heading 1</c> through <c>heading 9</c> all answer
+    /// 14 pt. Measured on the reference, nine levels and four properties —
+    /// <c>probes/rtf-holdover-r87/</c>.
+    /// </para>
+    /// </remarks>
+    internal static RtfStyleFormatting? PoolFormattingOf(string name)
+    {
+        // Word strips whitespace around style names before the name is looked up
+        // (rtfdocumentimpl.cxx:1594), and ConvertStyleName's map is case-sensitive with an entry
+        // for each of the two spellings a file actually uses.
+        string trimmed = name.Trim();
+        if (trimmed.Length != 9) return null;
+        if (trimmed[0] is not ('h' or 'H')) return null;
+        if (!trimmed.AsSpan(1, 7).SequenceEqual("eading ")) return null;
+        if (trimmed[8] is < '1' or > '9') return null;
+
+        return HeadingPool;
+    }
+
+    /// <summary>Writer's <em>Heading</em> pool style, as an RTF style's inherited half.</summary>
+    private static readonly RtfStyleFormatting HeadingPool = new()
+    {
+        FontSizeHalfPoints = 28,
+        SpaceBeforeTwips = 240,
+        SpaceAfterTwips = 120,
+        KeepWithNext = true,
+    };
+
     /// <summary>The paragraph style with this <c>\s</c> id, or null.</summary>
     public RtfStyle? ParagraphStyle(int id)
         => _paragraphStyles.TryGetValue(id, out RtfStyle style) ? style : null;
@@ -241,6 +307,10 @@ public sealed class RtfStyles
             if (!_paragraphStyles.TryGetValue(styleId, out RtfStyle style)) break;
             chain.Add(style.Formatting);
             current = style.BasedOn;
+
+            // The style at the top of the chain named no parent this sheet could resolve, so
+            // Writer's own style of that name keeps the pool parent it came with.
+            if (style.BasedOn is null && PoolFormattingOf(style.Name) is { } pool) chain.Add(pool);
         }
 
         // Nearest ancestor last, so each generation lays its own statements over its parent's.
@@ -276,6 +346,7 @@ public sealed class RtfStyles
         RtfStyleFormatting own = known ? style.Formatting : RtfStyleFormatting.Empty;
         RtfStyleFormatting inherited = known && style.BasedOn is { } parent && parent != id
             ? FormattingOf(parent)
+            : known ? PoolFormattingOf(style.Name) ?? RtfStyleFormatting.Empty
             : RtfStyleFormatting.Empty;
         RtfStyleFormatting chain = FormattingOf(id);
 
@@ -297,6 +368,9 @@ public sealed class RtfStyles
                 Inherited(own.ForegroundColourIndex, inherited.ForegroundColourIndex),
             Alignment = Inherited(own.Alignment, inherited.Alignment),
             SpaceBeforeTwips = Inherited(own.SpaceBeforeTwips, inherited.SpaceBeforeTwips),
+
+            // Only ever the pool's, and the paragraph's own `\sa` still overrides it.
+            SpaceAfterTwips = inherited.SpaceAfterTwips,
 
             // The properties `getDefaultSPRM` answers nothing for: the named style's own statement
             // survives, so these resolve over the whole chain.

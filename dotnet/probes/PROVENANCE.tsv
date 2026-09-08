@@ -871,3 +871,20 @@ dotnet/probes/rtf-htmautsp-r85/super-after.txt	2026-09-08	current	26.2.4.2	prese
 dotnet/probes/rtf-htmautsp-r85/sweep-orig-hash.sh	2026-09-08	current	26.2.4.2	present	current	
 dotnet/probes/rtf-htmautsp-r85/sweep-ours.sh	2026-09-08	current	26.2.4.2	present	current	
 dotnet/probes/rtf-htmautsp-r85/window-after.txt	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-holdover-r87/after-rtf.tsv	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-holdover-r87/confine-odt-after.tsv	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-holdover-r87/confine-odt-base.tsv	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-holdover-r87/confine-orig-after.tsv	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-holdover-r87/confine-orig-base.tsv	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-holdover-r87/expand.py	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-holdover-r87/fwcensus.py	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-holdover-r87/genbookmarks.py	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-holdover-r87/genstyles.py	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-holdover-r87/head-rtf.tsv	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-holdover-r87/patchref.py	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-holdover-r87/poolcensus.py	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-holdover-r87/readstyles.py	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-holdover-r87/results.md	2026-09-08	current	26.2.4.2	present	current	dotnet/src/Paperless.WordProcessing/Rtf/RtfStyles.cs;dotnet/CLAUDE.md;dotnet/src/Paperless.WordProcessing/TODO.md
+dotnet/probes/rtf-holdover-r87/score.py	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-holdover-r87/sweep-hash.sh	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/rtf-holdover-r87/sweep-ours.sh	2026-09-08	current	26.2.4.2	present	current	

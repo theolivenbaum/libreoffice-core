@@ -2,6 +2,7 @@ using System.Text;
 using Paperless.Core.Documents;
 using Paperless.Core.Graphics;
 using Paperless.Core.Units;
+using Paperless.Text.Layout;
 using Paperless.WordProcessing.Layout;
 using Shouldly;
 
@@ -178,6 +179,118 @@ public sealed class RtfStyleFormattingTests
                 styles: @"{\s2\snext2\f2 Boxed;}")
             .Family.ShouldBe("Liberation Serif");
 
+    /// <summary>
+    /// A style named after one of Word's headings whose <c>\sbasedon</c> the sheet cannot resolve
+    /// keeps Writer's own <em>Heading</em> pool parent, which is fourteen points.
+    /// </summary>
+    /// <remarks>
+    /// Both spellings of "cannot resolve" are here, because the RTF files that show it use the
+    /// second: <c>\sbasedon</c> absent, and <c>\sbasedon</c> naming a style declared <em>later</em>
+    /// in the same sheet — which <c>getStyleName</c> (<c>rtfdocumentimpl.cxx</c>:873-885) answers
+    /// the empty string for, so <c>lcl_findParentStyle</c> (<c>:275-298</c>) finds nothing.
+    /// <c>StyleSheetTable::ApplyStyleSheets</c> then reuses Writer's existing <c>Heading 4</c> and
+    /// leaves its parent alone (<c>StyleSheetTable.cxx</c>:1099-1121), and that parent is
+    /// <c>COLL_HEADLINE_BASE</c> at <c>PT_14</c>
+    /// (<c>DocumentStylePoolManager.cxx</c>:768-819, <c>:809</c>).
+    /// </remarks>
+    [Fact]
+    public void AHeadingWhoseParentDoesNotResolveTakesWritersPoolHeadingSize()
+    {
+        First(@"\pard\plain\s4 MARKER\par", styles: @"{\s0\snext0\f0\fs20 Normal;}{\s4\snext0 heading 4;}")
+            .Size.ShouldBe(Length.FromPoints(14));
+
+        First(
+            @"\pard\plain\s4 MARKER\par",
+            styles: @"{\s0\snext0\f0\fs20 Normal;}{\s4\sbasedon9\snext0 heading 4;}"
+                    + @"{\s9\sbasedon0\snext9\fs18\b Notes;}")
+            .Size.ShouldBe(Length.FromPoints(14));
+    }
+
+    /// <summary>A <c>\sbasedon</c> the sheet <em>can</em> resolve replaces that pool parent.</summary>
+    /// <remarks>
+    /// The same two entries in the other order: <c>setParentStyle</c>
+    /// (<c>StyleSheetTable.cxx</c>:1156-1169) puts the named style in the pool parent's place, so
+    /// nine points reach the paragraph and fourteen does not. This is the control that keeps the
+    /// rule a fallback rather than an override.
+    /// </remarks>
+    [Fact]
+    public void AResolvableParentReplacesThePoolHeading()
+        => First(
+                @"\pard\plain\s4 MARKER\par",
+                styles: @"{\s0\snext0\f0\fs20 Normal;}{\s9\sbasedon0\snext9\fs18\b Notes;}"
+                        + @"{\s4\sbasedon9\snext0 heading 4;}")
+            .Size.ShouldBe(Length.FromPoints(9));
+
+    /// <summary>
+    /// Only a name Writer answers takes it, and only when the style states no size of its own.
+    /// </summary>
+    /// <remarks>
+    /// Two controls in one, and each was measured against 26.2.4.2 rather than reasoned about. A
+    /// style called <c>Widget Heading</c> matches nothing in <c>ConvertStyleName</c>'s map
+    /// (<c>StyleSheetTable.cxx</c>:1620-1660), so it is inserted as a new style and its paragraph
+    /// keeps what <c>\pard\plain</c> left, which is RTF's own <c>\fs24</c>. And a heading stating
+    /// its <em>own</em> <c>\fs20</c> reaches neither ten points nor fourteen but the same twelve,
+    /// because a named style's own character size never reaches its paragraphs at all — the rule
+    /// this file already carries.
+    /// </remarks>
+    [Fact]
+    public void APoolHeadingNeitherRenamedNorRestatedIsTheOnlyOneThatTakesIt()
+    {
+        First(@"\pard\plain\s7 MARKER\par", styles: @"{\s0\snext0\f0\fs20 Normal;}{\s7\snext0 Widget Heading;}")
+            .Size.ShouldBe(Length.FromPoints(12));
+
+        First(@"\pard\plain\s4 MARKER\par", styles: @"{\s0\snext0\f0\fs20 Normal;}{\s4\snext0\fs20 heading 4;}")
+            .Size.ShouldBe(Length.FromPoints(12));
+    }
+
+    /// <summary>
+    /// The pool heading brings its spacing with it: twelve points above and six below.
+    /// </summary>
+    /// <remarks>
+    /// <c>SvxULSpaceItem aUL(PT_12, PT_6, RES_UL_SPACE)</c>
+    /// (<c>DocumentStylePoolManager.cxx</c>:810). The space <em>below</em> is the one this cannot
+    /// carry through <c>\sa</c>: an RTF style's own space after is written back as zero by
+    /// <c>getDefaultSPRM</c>, and the pool's is not an RTF sprm at all. Measured as the distance
+    /// between the paragraph after the heading and the heading itself, against the same document
+    /// with the style renamed.
+    /// </remarks>
+    [Fact]
+    public void ThePoolHeadingBringsTwelvePointsAboveSixBelowAndKeepWithNext()
+    {
+        ParagraphFormat heading = Formats(
+            @"\pard\plain\s4 HEAD\par",
+            @"{\s0\snext0\f0\fs20 Normal;}{\s4\snext0 heading 4;}")[0];
+
+        heading.SpaceBefore.ShouldBe(Length.FromPoints(12));
+        heading.SpaceAfter.ShouldBe(Length.FromPoints(6));
+        heading.KeepWithNext.ShouldBeTrue();
+
+        // The same paragraph under a name Writer answers nothing for: it takes none of the three,
+        // and a `\sa` written after the `\s` still beats the pool's.
+        ParagraphFormat plain = Formats(
+            @"\pard\plain\s7 HEAD\par",
+            @"{\s0\snext0\f0\fs20 Normal;}{\s7\snext0 Widget Heading;}")[0];
+
+        plain.SpaceBefore.ShouldBe(Length.Zero);
+        plain.SpaceAfter.ShouldBe(Length.Zero);
+        plain.KeepWithNext.ShouldBeFalse();
+
+        Formats(
+                @"\pard\plain\s4\sb0\sa0 HEAD\par",
+                @"{\s0\snext0\f0\fs20 Normal;}{\s4\snext0 heading 4;}")[0]
+            .SpaceAfter.ShouldBe(Length.Zero);
+    }
+
+    /// <summary>The resolved layout format of each body paragraph that carries text.</summary>
+    private static IReadOnlyList<ParagraphFormat> Formats(string body, string styles)
+    {
+        using DocumentSource source = DocumentSource.FromStream(
+            new MemoryStream(Encoding.ASCII.GetBytes(Wrap(body, styles))), "styles.rtf");
+        using IDocument document = new WordProcessingReader().Read(source);
+        WordProcessingPages pages = (WordProcessingPages)((IPaginatedDocument)document).Layout();
+        return [.. pages.Paragraphs.Where(p => p.Text.Length > 0).Select(p => p.Format)];
+    }
+
     /// <summary>The face, size and weight one paragraph's text is set in.</summary>
     /// <param name="Family">The family the document asked for, before substitution.</param>
     /// <param name="Size">The em size.</param>
@@ -193,19 +306,8 @@ public sealed class RtfStyleFormattingTests
     /// </summary>
     private static IReadOnlyList<Formatting> Read(string body, string styles = "")
     {
-        // \deff1 rather than \deff0, so "the default font" and "font zero" are two different
-        // answers and a test cannot pass by taking the wrong one.
-        string rtf =
-            @"{\rtf1\ansi\deff1"
-            + @"{\fonttbl{\f0\froman Liberation Serif;}{\f1\fswiss Liberation Sans;}"
-            + @"{\f2\fmodern Liberation Mono;}}"
-            + (styles.Length == 0 ? string.Empty : @"{\stylesheet" + styles + "}")
-            + @"\paperw11906\paperh16838\margl1440\margr1440\margt1440\margb1440\sectd"
-            + body
-            + "}";
-
         using DocumentSource source = DocumentSource.FromStream(
-            new MemoryStream(Encoding.ASCII.GetBytes(rtf)), "styles.rtf");
+            new MemoryStream(Encoding.ASCII.GetBytes(Wrap(body, styles))), "styles.rtf");
         using IDocument document = new WordProcessingReader().Read(source);
         WordProcessingPages pages = (WordProcessingPages)((IPaginatedDocument)document).Layout();
 
@@ -222,4 +324,18 @@ public sealed class RtfStyleFormattingTests
                         paragraph.Font?.RequestedFamily, paragraph.EmSize, paragraph.Font?.Weight ?? 400)),
         ];
     }
+
+    /// <summary>One body in a document with three faces and an optional stylesheet.</summary>
+    /// <remarks>
+    /// <c>\deff1</c> rather than <c>\deff0</c>, so "the default font" and "font zero" are two
+    /// different answers and a test cannot pass by taking the wrong one.
+    /// </remarks>
+    private static string Wrap(string body, string styles)
+        => @"{\rtf1\ansi\deff1"
+           + @"{\fonttbl{\f0\froman Liberation Serif;}{\f1\fswiss Liberation Sans;}"
+           + @"{\f2\fmodern Liberation Mono;}}"
+           + (styles.Length == 0 ? string.Empty : @"{\stylesheet" + styles + "}")
+           + @"\paperw11906\paperh16838\margl1440\margr1440\margt1440\margb1440\sectd"
+           + body
+           + "}";
 }
