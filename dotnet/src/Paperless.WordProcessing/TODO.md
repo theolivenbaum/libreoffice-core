@@ -720,6 +720,42 @@ Order chosen so each is verifiable before the next gets harder.
 - [x] Font family names from the font table, which the reader previously discarded because extraction
       never needs them — a run's font does not change its text. A name can arrive in several text chunks
       and ends at a semicolon, so it is accumulated rather than assigned.
+- [x] **A style named after one of Word's headings whose `\sbasedon` does not resolve keeps Writer's own
+      pool parent, which is 14 pt, 12 pt above, 6 pt below and keep-with-next.** Round 80 established that
+      a forward `\sbasedon` — a style based on one declared later in the same `{\stylesheet}` — is dropped,
+      because `getStyleName` (`rtfdocumentimpl.cxx`:873-885) turns the index into a name where the word is
+      dispatched (`rtfdispatchvalue.cxx`:131-134) and a style not yet read has no name to give. What it did
+      not have is what the importer does *instead*: `StyleSheetTable::ApplyStyleSheets`
+      (`dmapper/StyleSheetTable.cxx`:1099-1121) converts the entry's name through `ConvertStyleName`
+      (`:1620-1660`) and, where Writer already has a style of that name, reuses it, resets its own
+      properties and **leaves its parent alone** — the branch that would clear it needs
+      `m_bHasImportedDefaultParaProps`, which only an OOXML `w:docDefaults` sets (`:653-667`). `Heading 4`'s
+      parent is `Heading`, and `SwPoolFormatId::COLL_HEADLINE_BASE`
+      (`sw/source/core/doc/DocumentStylePoolManager.cxx`:768-819) states `PT_14` at `:809`,
+      `SvxULSpaceItem(PT_12, PT_6)` at `:810` and `SvxFormatKeepItem(true)` at `:814`; the per-level
+      percentages of `aHeadlineSizes` (`:107-115`) do **not** arrive with them, so all nine levels answer
+      14 pt. A `\sbasedon` that resolves replaces that parent (`:1156-1169`), and a style stating its own
+      `\fs` still reaches its paragraphs with neither — the round-80 rule. Reach **17 of the 338 converted
+      `.rtf`**; `.rtf` gate **259 → 260 of 336**, `Sample_SQMS_Program` 60/77 → 77/77, and on
+      `24-25_FAA_Holdover_Tables` it is 37 of the 67 pages. `probes/rtf-holdover-r87/results.md` §2.
+- [ ] **`REF` expands from the bookmark, and the RTF import hands the bookmarks the wrong names.** RTF
+      sends a bookmark half's *name* before its *id* (`lcl_getBookmarkProperties`,
+      `rtfdocumentimpl.cxx`:224-236, whose comment says the name "should be sent first"; the halves at
+      `:2735-2764`). `DomainMapper_Impl::SetBookmarkName` (`DomainMapper_Impl.cxx`:9426-9447) is written
+      for OOXML's opposite order — `w:bookmarkStart` states `w:id` then `w:name` — so it looks up
+      `m_sCurrentBkmkId`, *the previously opened start*, and writes the incoming name onto **that**,
+      reaching `m_sCurrentBkmkName` only when the map misses. Every name therefore lands one bookmark
+      early. A bookmark that ends up spanning into another node makes
+      `SwGetRefFieldType::FindAnchor` answer `*pEnd = -1` (`reffld.cxx`:1588) and
+      `SwGetRefField::UpdateField` read that as *to the end of the paragraph* (`:604-607`), so
+      `REF _Ref107225632 \h` draws `Table 48: Snowfall Intensities as a Function of Prevailing Visibility`
+      where the file's `\fldrslt` says `Table 48` and the `.odt` twin draws `Table 48`. Reproduced in
+      three lines of RTF by `probes/rtf-holdover-r87/genbookmarks.py`; two starts alone come out as two
+      bookmarks called `R1` and `R1 Copy 1`. **Reach is 11 of the 338 `.rtf`** and two of them are the
+      holdover pair, which state 332 and 365 `REF` fields; substituting the reference's expansions by hand
+      takes `24-25_FAA_Holdover_Tables` from 158 pages to **219 against the reference's 223**, with the
+      alphanumeric distance at 0.80 %. It moves no gate verdict on its own, which is why it is here rather
+      than built. `probes/rtf-holdover-r87/results.md` §1.
 
 ## Layout engine
 

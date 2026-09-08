@@ -2041,6 +2041,7 @@ public sealed partial class RtfDocumentReader
     {
         if (f.Alignment is { } alignment) state.Alignment = alignment;
         if (f.SpaceBeforeTwips is { } before) state.SpaceBefore = before;
+        if (f.SpaceAfterTwips is { } after) state.SpaceAfter = after;
         if (f.KeepWithNext is { } keep) state.KeepWithNext = keep;
     }
 
@@ -2052,6 +2053,7 @@ public sealed partial class RtfDocumentReader
     {
         if (f.Alignment is not null) state.Alignment = TextAlignment.Start;
         if (f.SpaceBeforeTwips is not null) state.SpaceBefore = null;
+        if (f.SpaceAfterTwips is not null) state.SpaceAfter = null;
         if (f.KeepWithNext is not null) state.KeepWithNext = false;
     }
 

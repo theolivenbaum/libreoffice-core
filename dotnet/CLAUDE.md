@@ -2286,6 +2286,81 @@ long stretches, so the excess is inserted at page boundaries rather than accumul
 our 169 pages carry fewer than 12 lines against none of the reference's 148; and that our body
 starts 12 pt higher on every page although the document declares no `{\header}` group at all.
 
+### An RTF style that names one of Word's keeps Writer's style, and a dropped `\sbasedon` therefore lands on a *pool* parent rather than on nothing
+
+Round 80 established the first half: `\sbasedon N` is converted to a **name** where the control word
+is dispatched (`pIntValue = new RTFValue(getStyleName(nParam))`,
+`sw/source/writerfilter/rtftok/rtfdispatchvalue.cxx`:131-134), and `getStyleName`
+(`rtfdocumentimpl.cxx`:873-885) reads a map filled one entry at a time as each stylesheet entry
+*ends* (`:1594`) — so a style based on one declared **later in the same `{\stylesheet}`** resolves to
+the empty string and `lcl_findParentStyle` (`:275-298`) finds no parent. **54 of the 338 converted
+`.rtf` hold at least one such forward reference.**
+
+**What that round did not have is that "no parent" is not where such a style ends up.**
+`StyleSheetTable::ApplyStyleSheets`
+(`sw/source/writerfilter/dmapper/StyleSheetTable.cxx`:1099-1121) converts the entry's name through
+`ConvertStyleName` (`:1620-1660`, a two-hundred-name map holding `heading 1`…`heading 9` and
+`Heading 1`…`Heading 9`, `Normal`→`Standard`, `Body Text`→`Text Body` and the rest) and, where
+`xStyles->hasByName` answers yes, **reuses Writer's existing style of that name**, resets its own
+properties and leaves its parent alone. The one branch that would clear the parent needs
+`m_bHasImportedDefaultParaProps`, which only an OOXML `w:docDefaults` sets (`:653-667`) — never RTF.
+A `\sbasedon` that *does* resolve calls `setParentStyle` and takes the pool parent's place
+(`:1156-1169`), so this is a fallback and not an override.
+
+`Heading 4`'s parent is `Heading`, and `SwPoolFormatId::COLL_HEADLINE_BASE`
+(`sw/source/core/doc/DocumentStylePoolManager.cxx`:768-819) is where four values a paragraph can take
+come from: `SvxFontHeightItem aFntSize(PT_14, …)` at `:809`,
+`SvxULSpaceItem aUL(PT_12, PT_6, RES_UL_SPACE)` at `:810` and `SvxFormatKeepItem(true, RES_KEEP)` at
+`:814`. **The per-level percentages in `aHeadlineSizes` (`:107-115`) do not arrive with them** — the
+import resets the level style's own properties — so `heading 1` through `heading 9` all answer 14 pt
+rather than 18.2, 16.1, 14.1 and so on. Measured against 26.2.4.2 on nine levels, both spellings of
+"does not resolve", a control name Writer answers nothing for, and twenty files sweeping a page
+boundary for the keep-with-next; `.rtf` gate **259 → 260 of 336**, reach **17 of 338**.
+`probes/rtf-holdover-r87/results.md` §2.
+
+**Two traps in measuring it.** A style's own `\fs` still reaches no paragraph, so a heading that
+states one gets neither its own size nor the pool's but `\pard\plain`'s 12 pt — the pool sits in the
+*inherited* half, which is the half round 80's rule lets through. And `\sa`'s absence from
+`RtfStyleFormatting` is a statement about **RTF sprms**: `getDefaultSPRM` writes `after = 0` over a
+style's space after, and the pool's six points is not an sprm at all, so it needs a carrier of its
+own.
+
+### An RTF `REF` field expands from its bookmark, and writerfilter gives the bookmarks the wrong names
+
+**The reference draws more text from an RTF than the same document's `.odt` twin, and the extra text
+is real.** On `24-25_FAA_Holdover_Tables` 26.2.4.2 draws `Table 48: Snowfall Intensities as a
+Function of Prevailing Visibility` 422 times where the `.odt` draws the short `Table 48` — the file
+states `{\field{\*\fldinst  REF _Ref107225632 \\h }{\fldrslt Table 48}}` and the bookmark covers
+`Table 48` alone.
+
+RTF sends a bookmark half's **name before its id** (`lcl_getBookmarkProperties`,
+`sw/source/writerfilter/rtftok/rtfdocumentimpl.cxx`:224-236, whose own comment says the name
+*"should be sent first"*; the two halves at `:2735-2764`), and `DomainMapper::lcl_attribute`
+(`dmapper/DomainMapper.cxx`:340-347) routes them to `SetBookmarkName` and `StartOrEndBookmark`. But
+`SetBookmarkName` (`DomainMapper_Impl.cxx`:9426-9447) is written for OOXML, where `w:bookmarkStart`
+states `w:id` **then** `w:name`: it looks up `m_sCurrentBkmkId` — *the previously opened start* — and
+where that start is still open writes the incoming name onto **it**, reaching `m_sCurrentBkmkName`
+only when the map misses. **So every name lands one bookmark early**, and a paragraph opening five
+bookmarks hands out five names one place shifted. Three lines of RTF reproduce it
+(`probes/rtf-holdover-r87/genbookmarks.py`); with two starts the importer emits two bookmarks called
+`R1` and `R1 Copy 1`, which is the same fault with nowhere to hide.
+
+A bookmark that thereby ends in a different text node from its start makes
+`SwGetRefFieldType::FindAnchor` answer `*pEnd = -1` (`sw/source/core/fields/reffld.cxx`:1588) and
+`SwGetRefField::UpdateField`'s `Bookmark` case read that as *to the end of the paragraph*
+(`nEnd = nNumEnd<0 ? nLen : nNumEnd`, `:604-607`).
+
+**Reach is 11 of the 338 `.rtf` and it is left open**: substituting the reference's expansions by
+hand takes `24-25_FAA_Holdover_Tables` from 158 pages to **219 against 223** and its alphanumeric
+distance to 0.80 %, which is inside the band but still fails on pages, so no verdict moves.
+
+**The instrument for both of these is worth more than either.** `soffice --convert-to fodt` on the
+`.rtf` prints the reference's own answer for every bookmark, every style name and every parent, in
+eight seconds on a six-megabyte file and with no rendering at all. It is what turned "the reference
+draws a longer string" into a named permutation and "the heading is two points bigger" into a pool
+parent, and it should be the first call in any round that suspects an RTF *import* rather than a
+layout.
+
 ### A worksheet shape's fill and outline are read now, in all three formats — and the reach census that briefed it was misread
 
 **Closed in round 84.** `SheetDrawing.Fill` and `.Stroke` had exactly one writer,
