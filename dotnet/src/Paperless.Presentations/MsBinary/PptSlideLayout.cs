@@ -82,6 +82,12 @@ internal sealed class PptSlideLayout
 
     private PptStyleSheet? _defaultStyles;
     private PptFontTable _fontTable = PptFontTable.Empty;
+
+    /// <summary>
+    /// The identifiers of the hyperlinks the deck declares, which is what makes a text range's
+    /// <c>InteractiveInfo</c> a field. See <see cref="PptHyperlinks"/>.
+    /// </summary>
+    private IReadOnlySet<uint> _hyperlinks = new HashSet<uint>();
     private Dictionary<int, EscherBlip>? _blips;
     private PptHeadersFooters _deckHeadersFooters = PptHeadersFooters.None;
     private bool _titlePlaceholdersOmitted;
@@ -123,6 +129,7 @@ internal sealed class PptSlideLayout
 
         DocSize size = SlideSize(pages);
         _fontTable = PptFontTable.Read(_stream, pages.Environment);
+        _hyperlinks = PptHyperlinks.Read(_stream, pages.Document);
         _blips = ReadBlips(pages);
         _deckHeadersFooters = DeckHeadersFooters(pages);
         _titlePlaceholdersOmitted = TitlePlaceholdersOmitted(pages);
@@ -1560,7 +1567,7 @@ internal sealed class PptSlideLayout
                 : null;
         }
 
-        return PptTextReader.Read(_stream, start, end, context.Fields, extended);
+        return PptTextReader.Read(_stream, start, end, context.Fields, extended, _hyperlinks);
     }
 
     /// <summary>
@@ -1577,11 +1584,18 @@ internal sealed class PptSlideLayout
             if (record.Type == PptRecordTypes.SlidePersistAtom) break;
             if (record.Type != PptRecordTypes.TextHeaderAtom) continue;
 
-            if (start >= 0) return PptTextReader.Read(_stream, start, record.Position, fields);
+            if (start >= 0)
+            {
+                return PptTextReader.Read(
+                    _stream, start, record.Position, fields, null, _hyperlinks);
+            }
+
             if (matches++ == reference) start = record.Position;
         }
 
-        return start >= 0 ? PptTextReader.Read(_stream, start, entry.TextEnd, fields) : null;
+        return start >= 0
+            ? PptTextReader.Read(_stream, start, entry.TextEnd, fields, null, _hyperlinks)
+            : null;
     }
 
     /// <summary>

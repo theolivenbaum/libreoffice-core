@@ -2270,6 +2270,56 @@ which is the honest state of them.
       own scale for that shape beside the reference's 0.9691 rather than to theorise about
       either.
 
+      ***Instrumented in round 84, and four of the numbers above are wrong.***
+      `probes/ppt-autofit-r84/results.md` §2.
+
+      - **The `.ppt` reach is 25 pages over 18 documents, not 303 over 91** — that figure is the
+        whole slides track's, and its two named worst documents contribute two pages each.
+        Measured over all 1534 pages of the 51 `.ppt`, none failing on either side
+        (`size-sweep.sh`, `size-census.tsv`): the reference is smaller on 19 and larger on 6, and
+        **22 of the 25 are one `constScaleLevels` step apart.**
+      - **The 31.01 pt is stale.** 26.2.4.2 draws that shape at **29.99**, which is
+        `round(32 × 0.925)` — row 1 of the table — and the stated size really is 32 pt, read out
+        of LibreOffice's own `--convert-to odp`. **0.9691 is not producible by any row of
+        `constScaleLevels` under `setRoundFontSizeToPt(true)`** (`svdotext.cxx`:1231), which is
+        what should have flagged it: the figure predates round `slides-r52`, which replaced
+        24.2.7.2's bisection with the table.
+      - **`Autofits` is right on the worked case and `SlideAutofit` is wrong, by 0.32 pt.**
+        Instrumenting `Solve` prints `size=32.00 unscaled=14176 avail=12871 row=0`: the fit does
+        fire, and row 0's height — `14176 × 0.9 = 12758` — fits the 12871 box by **113 units of a
+        hundredth of a millimetre, 0.875% of it**, where the reference finds it overflows. So the
+        defect is the *height measured at row 0*, not the table and not the decision to fit. Over
+        899 traced fits on those 18 documents, only **6 of the 124 row-0 answers** fit by less
+        than 2%, so it is a small error deciding a handful of nearly-full boxes rather than a
+        systematic offset. `SlideTextLayout.Spaced` scaling **every** line's height by `fSpacingY`
+        is the first thing to check against `impedit3.cxx`:1555-1600, which scales a *stated*
+        proportional line spacing and the paragraph's own space.
+
+- [ ] **`Autofits`' wrap test is wrong for an outline placeholder, and the seat's own comment
+      denies the reach it has.** `svdfppt.cxx`:1053-1055 derives `bAutoGrowWidth = !bWordWrap`
+      **only** for a custom shape whose text kind resolved to Rectangle; every other branch — which
+      is every real Body, HalfBody or QuarterBody placeholder — sets `bAutoGrowWidth = false` at
+      `:1084` whatever the wrap says. `PptSlideLayout.Autofits` requires `Wraps(shape)` and its
+      doc-comment says *"No deck in the slides corpus holds that combination"*. It does: of the
+      **1401** body-kind shapes in the 51 `.ppt`, **55 state `wrapNone` in 2 documents** —
+      `Architecture.ppt` and `Fundamentals_Module_1_basics.ppt` — and **25** of those also leave
+      `fFitShapeToText` clear, so they would newly autofit. The census does not yet test "is a
+      custom shape with no placeholder atom", which is the one case where the wrap really decides,
+      so 25 is an upper bound. `Fundamentals_Module_1_basics.ppt` page 6 is one of the three pages
+      in the size census whose ratio is no table step at all.
+      `probes/ppt-autofit-r84/wrap-census.py`.
+
+- [x] **A `.ppt` text-range hyperlink is an EditEngine field, and this reader read no
+      `InteractiveInfo` at all.** Closed in round 84: `PptHyperlinks`, `PptHyperlinkRange`,
+      `PptTextBody`'s split at the link boundaries, the scheme's hyperlink slot, the forced
+      underline, the emphasis replacement and the bullet's pre-link colour. The condition is not
+      the record but whether the deck *declares* the hyperlink the record names — three of the 51
+      `.ppt` state 60 ranges and declare none, and 26.2.4.2 draws all 60 as ordinary text.
+      Confinement is exact: 20 of 51 `.ppt` move, they are exactly the 20 the census predicts,
+      no page count moves and the other six tracks are byte-identical. **+30 reference spans over
+      the 23 documents that state a range, 9 better and 5 worse.** The five that worsen are the
+      open residual recorded in `dotnet/CLAUDE.md`. `probes/ppt-autofit-r84/results.md` §1.
+
 - [x] **An OOXML chart's automatic text is 18 pt bold for the main title and 10 pt bold for an
       axis title; we drew 13 pt and 9 pt with no weight at all.** `ChartPlot.TitleSize`'s 13 pt
       default cited `chart2/source/model/main/Title.cxx`, which is the chart2 *model* default and
