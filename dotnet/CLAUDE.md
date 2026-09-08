@@ -1011,6 +1011,50 @@ The symptom is a PDF that draws the reader's own substitute for a family the doc
 and **the only gate column that can see it is `unembedded`**. Naming the keepers is now what this
 tree does too.
 
+**An ODF sheet recalculates its automatic row heights for its first 200 rows only, and past them
+the writer's stored height stands.** `ScXMLTableRowContext::endFastElement` adds every row block to
+the recalculation ranges and then takes it straight back out when the block ends past row 200 and
+its style states a height *and* the optimal flag — `maRanges.setFalse(nFirstRow, nCurrentRow)`,
+`sc/source/filter/xml/xmlrowi.cxx`:215-244, the test at `:228`, under the comment *"recalc only the
+first 200 row in case of optimal document loading"*. **The test reads as "a style with no
+`CTF_SC_ROWHEIGHT`" and means the opposite**: `ScXMLRowImportPropertyMapper::finished`
+(`xmlstyli.cxx`:245-258) moves the stated height *into* the optimal-height property and clears the
+height one for exactly those styles, and the `any2bool` that follows is then reading the height. A
+style stating the flag and no height has both cleared and is recalculated wherever it sits. The
+rows are zero-based, so rows 0–200 are recomputed and 201 onwards is not — measured on a 206-row
+probe where 26.2.4.2's baseline gap steps from 12.78 pt to the stated 21.60 exactly between `r200`
+and `r201` (`dotnet/tests/corpus/features/sheet-row-height-limit.fods`). **Reach 182 744 rows in
+166 of the 307 converted `.ods`**, and it cuts both ways: `Laser Report 2024 FOIA __Oct (1).ods`
+was 486 pages against 506 because we recomputed a shorter row, and
+`afn-afn-20250801-fy25-jan25-mar25.ods` was 282 against 270 because we recomputed a taller one. It
+is the **importer's** rule — the BIFF and SpreadsheetML filters have no such limit —
+so it belongs in `OdsPrintSetup` and not in `SheetOptimalRowHeights`.
+`probes/ods-resid-r80/results.md` §2.
+
+**And a Calc cell the importer made several paragraphs of is measured by the EditEngine, which
+answers the widest *paragraph* and a line per paragraph — not the whole string and not one line.**
+`ScColumn::GetNeededSize` takes the edit branch for `CELLTYPE_EDIT` (`column2.cxx`:297-300),
+formats against a paper 1000000 units wide (`:447`), and reads `pEngine->CalcTextWidth()` (`:565`,
+a maximum over the paragraphs, `editeng/source/editeng/impedit2.cxx`:3507-3525) for the width and
+`pEngine->GetTextHeight()` (`:571-577`) for the height. **Which cells those are is the importer's
+answer**: Calc's ODF filter never calls `SetSingleLine`, so a hard break or a second `text:p` makes
+a paragraph, while the BIFF and SpreadsheetML filters do call it for a non-wrapping cell and the
+break stays a character inside one line. Measuring the whole string instead is the whole of
+`CIS_Debian_Linux_8_Benchmark_v1.0.0.ods`'s 88 pages against 61, established at the reference with
+no free parameter: rewriting every newline in that file as a space makes **26.2.4.2 itself** print
+its two sheets in 51 and 36 pages, which were this tree's counts exactly, and keeping only each
+cell's longest paragraph makes this tree print the reference's 39 and 21.
+**The 246 styled-but-empty columns two rounds blamed for it are irrelevant** — deleting them leaves
+26.2.4.2 at 61. `probes/ods-resid-r80/results.md` §1 and §3.
+
+**A census of "multi-line cells" that looks only for a raw newline understates the reach by
+two-thirds**, because a cell with several `text:p` children is equally a multi-paragraph edit cell:
+649 raw-newline cells against 1246 several-paragraph ones over the same 33 documents. And a
+`draw:` shape anchored in a cell contributes `text:p` elements that are **not** the cell's —
+`OdfContentReader.ReadShape` appends them to it anyway, which is right for extraction and is what
+made two documents' rows too tall once a paragraph count started sizing them. 253 such cells in 46
+of the 307.
+
 **An empty ODF paragraph is as tall as its own empty `text:span`, not as the shape's default.**
 LibreOffice writes an empty line as `<text:p><text:span text:style-name="T15"/></text:p>` and
 EditEngine measures it from the character attributes at the paragraph's own position

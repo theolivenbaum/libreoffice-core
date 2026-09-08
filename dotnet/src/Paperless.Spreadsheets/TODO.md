@@ -2493,6 +2493,17 @@ Not yet, and why:
   exists, the binary says what it does, and the reference PDF settles it — `fy20-may20-sep20.xlsx`
   has a second column band whose content stops at row 76, and LibreOffice prints two pages of that
   band against a full 94.
+- **A shape anchored in a cell reaches that cell's text, and the layout measures it.**
+  `OdfContentReader.ReadShape` appends a `draw:frame`'s or `draw:custom-shape`'s paragraphs to the
+  `ContentTableCell` it is anchored in — which is right for extraction and wrong for
+  `SheetOptimalRowHeights` and `SheetTextOverflow`, both of which take `cell.GetText()` as the
+  cell's own text. In Calc a drawing object is in the drawing layer and
+  `ScColumn::GetOptimalHeight` never sees it. **Reach 253 cells in 46 of the 307 converted
+  `.ods`**, and it cost two page counts once a multi-paragraph cell started sizing its row
+  (round 80): `EHEST-Pre-departure-checklist` 27 pages against 24 and
+  `SSRO_Quarterly_Statistical_Bulletin_Q3201617_DATA` 11 against 4, neither of which holds a
+  multi-paragraph *cell* at all. Fixing it needs a marker the reader does not currently emit.
+  `dotnet/probes/ods-resid-r80/results.md` §5.
 - **The used area counts cells with content only.** Calc's own search also counts a cell carrying
   nothing but a style, because its attribute array knows about it. The content tree records no
   formatting, so a sheet whose last two columns are empty-but-shaded comes out narrower here.
