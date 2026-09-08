@@ -2229,25 +2229,64 @@ is read and verified, so what remains is the filling of pages rather than the me
     states it on **347** VML shapes across **34** documents and turning all of them is its own round.
     Fifteen of the 347 are these watermarks, all at `rotation:315`.
 
-- **`RelOrientation::PAGE_PRINT_AREA` starts below the header for LibreOffice and at `w:top` for
-  us, and it moves every margin-relative frame in a document with a tall header.** Measured on an
-  isolated one-page probe with an empty header (A4, `w:top` = `w:header` = 708 twips): the reference
-  centres a `mso-position-vertical:center` shape at y = 409.08 pt and we centre it at 402.48 — a
-  gap of **6.6 pt, exactly half of one empty header line**. On
-  `DOA_Template_Form_Type_Certification_Programme`, whose header is a three-row table, the same gap
-  is 76.6 pt and the watermark lands **34.7 pt high**, which is the whole of why that one document
-  scored worse when its watermark started being drawn. It reaches DrawingML frames as well as VML
-  ones and wants its own probe and its own sweep.
+- **[DONE] `RelOrientation::PAGE_PRINT_AREA` runs from the header frame's bottom to the footer
+  frame's top, not from `w:top` to `w:bottom`.** Closed in `dccc5be0a` with
+  `probes/words-margin-print-area/`; the area is `LaidOutPage.BodyArea`, which is the same quantity
+  `Paginator.PushedDownBy` and `PulledUpBy` already move. `SwAnchoredObjectPosition::GetVertAlignmentValues`
+  (`sw/source/core/objectpositioning/anchoredobjectposition.cxx`:336-364) is one seat and
+  `SwToContentAnchoredObjectPosition::CalcPosition` (`tocntntanchoredobjectposition.cxx`:597-616,
+  through `SwPageFrame::PrtWithoutHeaderAndFooter()`) is the other.
 
-- **`wp:effectExtent` is not added to an inline drawing's *horizontal* position, and the reference
-  adds it.** Measured on the WordArt catalogue at 200 dpi: its unwarped gradient-text boxes on page
-  3 span x 229.68..359.64 pt for us and 240.84..370.80 for the reference — the same 10.8 pt as their
-  `wp:effectExtent` — while y matches to the pixel. `FrameLayout` places every frame at the *outer*
-  corner because `probes/words-inline-effectextent/` measured the reference laying a `wps:txbx`
-  shape's text out there vertically; that probe never varied x. Warped bodies are moved by the
-  extent inside `DocxFontwork` because for them the draw-shape rule applies unambiguously, and the
-  general case is left alone: it reaches every inline drawing in the corpus and wants its own round
-  and its own probe.
+  **Re-measured at `6a6f18d9a` in `probes/frame-area-r85/`**: 8 of 8 fixtures agree with *both*
+  installed references within the 0.25 pt raster quantum, and
+  `DOA_Template_Form_Type_Certification_Programme` scores **9.891** against 26.2.4.2 — 1.348 below
+  the 11.239 the watermark round regressed it to and **1.069 below the 10.960 it regressed it from**.
+  All five of that round's documents are now below both of its stored figures. The 6.6 pt and 34.7 pt
+  figures above are from a tree three fixes old and do not reproduce; neither does the 16.56 pt that
+  replaced them.
+
+- **[DONE] `wp:effectExtent`'s *left* edge moves an inline drawing and its right edge does not.**
+  Closed with `probes/words-inline-effectextent/` §*Horizontally* — `make-x-fixture.py` and
+  `measure-x.py`, which the earlier fixtures never exercised because they varied `t` and `b` only.
+  `PageFrame.InlineOffset` is `(EffectExtent.Left, 0)` for an upright drawing;
+  `SwAsCharAnchoredObjectPosition::CalcPosition`
+  (`sw/source/core/objectpositioning/ascharanchoredobjectposition.cxx`:129-133) adjusts by
+  `nLRSpaceLeft` and by `nULSpaceUpper` alike, and only the vertical half is lost again when
+  `SwTextBoxHelper` fails to carry it to a `wps:txbx`'s TextBox fly — which is why
+  `PageFrame.InlineInkOffset` is a second rectangle rather than part of the first.
+
+  **Re-measured at `6a6f18d9a` in `probes/frame-area-r85/`**: 8 of 8 horizontal fixtures agree with
+  both references, and on `WordArt_Shapes_Arrows_Catalog1.docx` the drawn ink columns agree with
+  26.2.4.2 on **52 of 52 pages** at 200 dpi. The 229.68..359.64 quoted above does not reproduce.
+
+- **A `relativeFrom` naming a margin *band* is read now, and the wider capture rule it exposed is
+  left with its seat.** `topMargin`, `bottomMargin`, `leftMargin`, `rightMargin`, `insideMargin` and
+  `outsideMargin` had all been read as the page or the margin area. They are six different
+  rectangles — `PositionHandler::lcl_attribute`
+  (`sw/source/writerfilter/dmapper/GraphicHelpers.cxx`:57-135), and VML's own crossed-over mapping at
+  `oox/source/vml/vmlshape.cxx`:616-700 — and this tree agreed with 26.2.4.2 on **10 of 34** fixtures
+  before and on **34 of 34** after. `probes/frame-area-r85/`.
+
+  **What is left is the capture, not the origins.** The reference clamps *every* non-wrap-through
+  content-anchored frame into its page — `IsDraggingOffPageAllowed`
+  (`sw/source/core/layout/anchoredobject.cxx`:790-801) is `bDisablePositioning && bIsWrapThrough`, a
+  conjunction this tree read as the flag alone — and under `compatibilityMode` 15 into the page's
+  *body* (`anchoredobjectposition.cxx`:562-573). Applied that widely it moves 10 of the 338 words
+  renderings and is net worse: `b053-19` goes 11.254 to 19.508 of page ink against 26.2.4.2 and
+  `023_Unit_Circle_Chart_Circular_Percentage` 10.820 to 16.524, while the three documents it exists
+  for improve. **The likely missing half is `bCheckBottom = !DoesObjFollowsTextFlow()`**
+  (`tocntntanchoredobjectposition.cxx`:457), which skips the *bottom* correction for a frame that
+  follows the text flow — and `PROP_FOLLOW_TEXT_FLOW` is written only for an anchor inside a table
+  (`GraphicImport.cxx`:1316-1318, :1859-1861), so the pool default decides it everywhere else. Until
+  that is established the capture is applied to the two margin bands alone, which regresses nothing
+  because no frame reached those origins before.
+
+- **`wp14:sizeRelH` and `wp14:sizeRelV` are unread, and the reach is three documents.** 1873
+  `sizeRel*` elements in 146 of the 272 corpus DOCX, of which exactly **three carry a non-zero
+  percentage**: a width on `ABCD-FE-01-00 Flight Envelope` and a height on `HC-Bulletin-template` and
+  `fleetfastfacts16nov2023`. `GraphicImport.cxx`:1455-1480 is the seat, and it maps a *relative
+  size*'s `topMargin` to `PAGE_PRINT_AREA_BOTTOM` rather than to `_TOP` — read that before
+  implementing it rather than after.
 
 - **`w14:textFill`, `w14:textOutline` and `w14:shadow` on a run are correctly ignored, and that is a
   measurement rather than an omission.** The same catalogue states 104 `w14:textFill` (102 of them

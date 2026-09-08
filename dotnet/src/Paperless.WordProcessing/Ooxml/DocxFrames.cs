@@ -1316,8 +1316,15 @@ internal static class DocxFrames
             "page" => FrameHorizontalOrigin.Page,
             "margin" => FrameHorizontalOrigin.PageMargin,
             "character" => FrameHorizontalOrigin.Character,
-            "leftMargin" or "rightMargin" or "insideMargin" or "outsideMargin" =>
-                FrameHorizontalOrigin.Page,
+            "leftMargin" => FrameHorizontalOrigin.LeftMarginArea,
+            "rightMargin" => FrameHorizontalOrigin.RightMarginArea,
+            // `insideMargin` is the page frame with a page toggle, which this model expresses through
+            // the inside/outside *alignments* and a right-hand page, so the origin is the sheet.
+            "insideMargin" => FrameHorizontalOrigin.Page,
+            // And `outsideMargin` reaches no case at all: `PositionHandler::lcl_attribute` warns and
+            // leaves `m_nRelation` at its `RelOrientation::FRAME` default, which is the text column
+            // (`sw/source/writerfilter/dmapper/GraphicHelpers.cxx`:130-132). Both installed references
+            // draw a fixture stating it at the column's own left edge, 72.00 pt, and not at 0.
             _ => FrameHorizontalOrigin.Column,
         };
 
@@ -1351,7 +1358,12 @@ internal static class DocxFrames
         FrameVerticalOrigin origin = position.Attribute("relativeFrom")?.Value switch
         {
             "page" => FrameVerticalOrigin.Page,
-            "margin" or "topMargin" or "bottomMargin" => FrameVerticalOrigin.PageMargin,
+            "margin" => FrameVerticalOrigin.PageMargin,
+            // Not the same rectangle as `margin`, and not each other's: the two margin bands lie
+            // either side of the body. `GraphicHelpers.cxx`:74-80 maps them to
+            // `PAGE_PRINT_AREA_TOP` and `PAGE_PRINT_AREA_BOTTOM`.
+            "topMargin" => FrameVerticalOrigin.TopMarginArea,
+            "bottomMargin" => FrameVerticalOrigin.BottomMarginArea,
             "line" => FrameVerticalOrigin.Line,
             _ => FrameVerticalOrigin.Paragraph,
         };

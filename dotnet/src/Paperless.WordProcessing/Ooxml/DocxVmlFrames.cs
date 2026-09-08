@@ -922,15 +922,29 @@ internal static class DocxVmlFrames
 
     /// <summary>What <c>margin-left</c> is measured from.</summary>
     /// <remarks>
+    /// <para>
     /// <c>mso-position-horizontal-relative</c>, whose default is <c>text</c> — the column the anchor
     /// sits in — and not the page. <c>char</c> is the anchor character's own position, which the column
     /// is the nearest origin this model has.
+    /// </para>
+    /// <para>
+    /// VML has its own mapping and it is <em>not</em> the DrawingML one with different spellings:
+    /// <c>lcl_SetAnchorType</c> (<c>oox/source/vml/vmlshape.cxx</c>:687-692) pairs
+    /// <c>inner-margin-area</c> with <c>right-margin-area</c> under <c>PAGE_RIGHT</c> and
+    /// <c>outer-margin-area</c> with <c>left-margin-area</c> under <c>PAGE_LEFT</c> — a crossover
+    /// against DrawingML, where <c>insideMargin</c> is the page and <c>outsideMargin</c> is the
+    /// column. Measured on a 40 pt band on A4 with 72 pt margins, both installed references identical:
+    /// <c>inner-margin-area</c> is drawn at <b>523.25 pt</b> and <c>outer-margin-area</c> at
+    /// <b>0.00</b>.
+    /// </para>
     /// </remarks>
     private static FrameHorizontalOrigin HorizontalOriginOf(Dictionary<string, string> style)
         => style.GetValueOrDefault("mso-position-horizontal-relative") switch
         {
             "page" => FrameHorizontalOrigin.Page,
             "margin" => FrameHorizontalOrigin.PageMargin,
+            "left-margin-area" or "outer-margin-area" => FrameHorizontalOrigin.LeftMarginArea,
+            "right-margin-area" or "inner-margin-area" => FrameHorizontalOrigin.RightMarginArea,
             _ => FrameHorizontalOrigin.Column,
         };
 
@@ -938,13 +952,17 @@ internal static class DocxVmlFrames
     /// <remarks>
     /// <c>mso-position-vertical-relative</c>. Its default is <c>text</c>, which is the anchor
     /// paragraph — the origin a negative <c>margin-top</c> is measured up from, and these templates
-    /// use negative ones freely.
+    /// use negative ones freely. The two margin-area spellings are the same two relations DrawingML's
+    /// <c>topMargin</c> and <c>bottomMargin</c> name (<c>vmlshape.cxx</c>:633-640), so unlike the
+    /// horizontal pair above this axis does not cross over.
     /// </remarks>
     private static FrameVerticalOrigin VerticalOriginOf(Dictionary<string, string> style)
         => style.GetValueOrDefault("mso-position-vertical-relative") switch
         {
             "page" => FrameVerticalOrigin.Page,
             "margin" => FrameVerticalOrigin.PageMargin,
+            "top-margin-area" => FrameVerticalOrigin.TopMarginArea,
+            "bottom-margin-area" => FrameVerticalOrigin.BottomMarginArea,
             _ => FrameVerticalOrigin.Paragraph,
         };
 
