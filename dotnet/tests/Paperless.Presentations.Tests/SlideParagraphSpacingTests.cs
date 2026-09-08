@@ -96,7 +96,13 @@ public class SlideParagraphSpacingTests
             fonts);
 
         // Two gaps of 11.2 after plus 6.4 before, and nothing outside the first and last.
-        (spaced - bare).Points.ShouldBe(2 * (11.2 + 6.4), 0.001);
+        //
+        // In the draw layer's own unit rather than in points, because that is the unit a
+        // `SvxULSpaceItem` holds: 11.2 pt is 395 hundredths of a millimetre and 6.4 pt is 226, so
+        // the two gaps are 1242 units — 35.206 pt, not 35.200. See `SlideTextLayout.ScaledSpace`,
+        // which quantises the space before it scales it because `ImpEditEngine::CalcHeight` reads
+        // an integer out of the item.
+        (spaced - bare).Mm100.ShouldBe(2 * (395 + 226));
     }
 
     /// <summary>

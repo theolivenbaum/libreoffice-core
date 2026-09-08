@@ -1506,15 +1506,27 @@ internal sealed class PptSlideLayout
     /// for either (fdo#41245 — "autofit text only if there is no auto grow height and width").
     /// </para>
     /// <para>
-    /// <strong>The wrap half of that is an approximation, and the direction it errs in is
-    /// known.</strong> The reference derives auto-grow-<em>width</em> from the wrap only where the
-    /// shape is a custom shape holding plain rectangle text; a true outline placeholder takes
-    /// <c>bAutoGrowWidth = false</c> whatever its wrap says, so LibreOffice would shrink it even
-    /// unwrapped. Paperless does not model "is a custom shape" here, so a non-wrapping outline
-    /// placeholder is left alone where the reference shrinks it. No deck in the slides corpus
-    /// holds that combination — the track went from 44 to 46 matching PPT documents with none
-    /// moving the other way — but it is a difference rather than a simplification, and it is the
-    /// first place to look if one turns up.
+    /// <strong>The wrap half of that is an approximation, and the corpus does not witness the
+    /// difference — measured, after a round was briefed that it does.</strong> The reference
+    /// derives auto-grow-<em>width</em> from the wrap only where the object it built is an
+    /// <c>SdrObjCustomShape</c> <em>and</em> the text kind had been rewritten to Rectangle
+    /// (<c>svdfppt.cxx</c>:1053-1055); every other branch sets <c>bAutoGrowWidth = false</c>
+    /// (<c>:1084</c>) and the wrap decides nothing. The rewrite happens on exactly one condition —
+    /// <c>!aTextObj.GetOEPlaceHolderAtom() || nPlaceholderId == PptPlaceholder::NONE</c>
+    /// (<c>:1043-1047</c>) — so the two rules disagree only on a Body-kind text that <em>names
+    /// itself a placeholder</em> and states <c>wrapNone</c>.
+    /// </para>
+    /// <para>
+    /// <strong>The corpus holds no such shape.</strong> Of 1401 Body/HalfBody/QuarterBody shapes in
+    /// the 51 <c>.ppt</c>, 55 state <c>wrapNone</c> — in <c>Architecture.ppt</c> and
+    /// <c>Fundamentals_Module_1_basics.ppt</c> — and <strong>every one of the 55 carries no
+    /// <c>OEPlaceholderAtom</c> at all</strong>, which is precisely the case where the reference
+    /// takes the wrap. Corroborated at the reference: over every page of both decks, the set of
+    /// drawn text sizes agrees with 26.2.4.2's exactly, the one exception being two classes on
+    /// page 6 of <c>Fundamentals</c> that are an embedded chart the reference does not draw as text
+    /// at all. <c>probes/ppt-fit-r85/placeholder-census.py</c>; round 84's
+    /// <em>"55 shapes in 2 documents would newly autofit"</em> counted the wrap and not the
+    /// placeholder atom, and is withdrawn.
     /// </para>
     /// <para>
     /// Measured on <c>berlin.ppt</c>, whose 29 slides are all outline placeholders: without this

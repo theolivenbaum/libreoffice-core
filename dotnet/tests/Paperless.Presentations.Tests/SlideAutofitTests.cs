@@ -367,16 +367,28 @@ public class SlideAutofitTests
     /// are the wiring and not the fit.
     /// </para>
     /// <para>
-    /// 12 pt is 423.33 hundredths of a millimetre; unscaled it reaches the page as 424 and the two
-    /// scaled values are round(423 x 0.9) = 381 and round(423 x 0.8) = 338, because the scale is
-    /// applied to the whole unit the draw layer holds. The
-    /// gap between the last line of one paragraph and the first of the next is one line plus that
-    /// space, so subtracting the pitch leaves the space alone.
+    /// 12 pt is 423.33 hundredths of a millimetre; the draw layer holds it as <strong>423</strong>
+    /// and the two scaled values are <c>trunc(423 x 0.9) = 380</c> and <c>trunc(423 x 0.8) = 338</c>.
+    /// The gap between the last line of one paragraph and the first of the next is one line plus
+    /// that space, so subtracting the pitch leaves the space alone.
+    /// </para>
+    /// <para>
+    /// <strong>The first two of those moved in round 85, and both halves of the move are the same
+    /// citation.</strong> They were 424 and 381 — an unquantised space, and a scale that rounded.
+    /// <c>ImpEditEngine::CalcHeight</c> reads the item into an integer of the model's own unit and
+    /// then assigns the scaled <c>double</c> to another one —
+    /// <c>sal_uInt16 nUpper = scaleYSpacingValue(rULItem.GetUpper())</c>,
+    /// <c>editeng/source/editeng/impedit2.cxx</c>:4792-4802 — so the value is a whole unit before
+    /// the scale and the fraction is dropped after it. Measured at the reference on page 2 of
+    /// <c>2015-Civil-Rights-Website-training.ppt</c>, whose 282-unit space comes back as
+    /// <strong>253</strong> and not 254; over that slide's seven gaps the difference is 0.198 pt
+    /// in where the last baseline lands. The 120 pt row is the control that does not move, because
+    /// <c>423 x 0.8</c> is 338.4 and both readings answer 338.
     /// </para>
     /// </remarks>
     [Theory]
-    [InlineData(300, 424)]
-    [InlineData(220, 381)]
+    [InlineData(300, 423)]
+    [InlineData(220, 380)]
     [InlineData(120, 338)]
     public void TheFitsSpacingScaleReachesAParagraphsOwnSpace(
         double boxHeightPoints, long expectedSpaceMm100)
