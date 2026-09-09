@@ -81,16 +81,20 @@ internal static class OdfPageGeometry
             ? FurnitureExtent(layout?.FooterProperties, footerContent)
             : Core.Units.Length.Zero;
 
+        DocSize size = new(
+            Dimension(properties, "page-width") ?? PageGeometry.Default.Size.Width,
+            Dimension(properties, "page-height") ?? PageGeometry.Default.Size.Height);
+        Length marginLeft = (Length(properties, "margin-left") ?? PageMargins.Default.Left)
+                            + BorderBand(borders?.Left, properties, "left");
+        Length marginRight = (Length(properties, "margin-right") ?? PageMargins.Default.Right)
+                             + BorderBand(borders?.Right, properties, "right");
+
         PageGeometry page = new()
         {
-            Size = new DocSize(
-                Dimension(properties, "page-width") ?? PageGeometry.Default.Size.Width,
-                Dimension(properties, "page-height") ?? PageGeometry.Default.Size.Height),
+            Size = size,
             Margins = new PageMargins(
-                (Length(properties, "margin-left") ?? PageMargins.Default.Left)
-                    + BorderBand(borders?.Left, properties, "left"),
-                (Length(properties, "margin-right") ?? PageMargins.Default.Right)
-                    + BorderBand(borders?.Right, properties, "right"),
+                marginLeft,
+                marginRight,
                 headerDistance + headerHeight,
                 footerDistance + footerHeight),
             HeaderDistance = headerDistance,
@@ -112,6 +116,7 @@ internal static class OdfPageGeometry
                 : null,
             Columns = ColumnCount(properties),
             ColumnGap = ColumnGap(properties),
+            ColumnRuler = ColumnRulerOf(properties, size.Width - marginLeft - marginRight),
 
             // The page layout's own writing mode, which is a different statement from a paragraph's
             // and does a different thing: it reverses the order of the section's columns. The
@@ -474,7 +479,7 @@ internal static class OdfPageGeometry
     /// <c>style:column</c> children — a layout with unequal columns lists them and need not repeat the
     /// number.
     /// </remarks>
-    private static int ColumnCount(OdfPropertySet? properties)
+    internal static int ColumnCount(OdfPropertySet? properties)
     {
         if (properties?.Child(OdfNamespaces.Style, "columns") is not { } columns) return 1;
 
@@ -490,6 +495,107 @@ internal static class OdfPageGeometry
     }
 
     /// <summary>
+    /// The columns as the file states them, one by one, or null when it does not state them that way.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b><c>fo:column-gap</c> wins outright, and this is the whole of the rule.</b>
+    /// <c>XMLTextColumnsContext::endFastElement</c> takes the per-column descriptions only when
+    /// <c>!bAutomatic &amp;&amp; maColumns.size() == nCount</c>, and <c>bAutomatic</c> is set by the mere
+    /// <em>presence</em> of <c>fo:column-gap</c> (<c>xmloff/source/text/XMLTextColumnsContext.cxx</c>
+    /// :216-222, :268-315). Everything else takes <c>setColumnCount</c> and an automatic distance, which
+    /// is even columns — so a file stating both a gap and unequal <c>style:rel-width</c> is drawn with
+    /// <em>even</em> columns, and reading its widths would be wrong. Censused over the 338 converted
+    /// <c>.odt</c>: 125 <c>style:columns</c> state a gap, of which 45 also state unequal widths that
+    /// LibreOffice ignores, and 21 state per-column widths with no gap — the ones this reads.
+    /// </para>
+    /// <para>
+    /// A <c>style:rel-width</c> is the column's <em>outer</em> width, its own two indents included:
+    /// <c>SwFormatCol::Calc</c> apportions the frame between the wish widths and then takes each
+    /// column's left and right margin off its own share, and the DOCX importer builds the same shape
+    /// (<c>pColumn[nCol].Width = (fWidth + fLeft + fRight) * fRel</c>,
+    /// <c>dmapper/PropertyMap.cxx</c>:868-874). So the text width is the apportioned share less the
+    /// column's <c>fo:start-indent</c> and <c>fo:end-indent</c>, and the gap between two columns is the
+    /// first's end indent plus the second's start indent.
+    /// </para>
+    /// <para>
+    /// A start indent on the <em>first</em> column and an end indent on the <em>last</em> have nowhere to
+    /// go in a <see cref="ColumnRuler"/>, which measures from the text area's own edge; both are zero in
+    /// every one of the 21, because that is how LibreOffice's exporter splits a gap.
+    /// </para>
+    /// </remarks>
+    /// <param name="properties">The <c>style:page-layout-properties</c> or <c>style:section-properties</c>.</param>
+    /// <param name="measure">The width the columns have to fill.</param>
+    internal static ColumnRuler? ColumnRulerOf(OdfPropertySet? properties, Length measure)
+    {
+        if (properties?.Child(OdfNamespaces.Style, "columns") is not { } columns) return null;
+        if (columns.Attribute(XName.Get("column-gap", OdfNamespaces.FoCompatible)) is not null) return null;
+
+        List<XElement> stated = [.. columns.Elements(XName.Get("column", OdfNamespaces.Style))];
+        int count = ColumnCount(properties);
+
+        if (count < 2 || stated.Count != count || measure <= Core.Units.Length.Zero) return null;
+
+        long[] relative = new long[count];
+        Length[] starts = new Length[count];
+        Length[] ends = new Length[count];
+        long total = 0;
+        int described = 0;
+
+        for (int i = 0; i < count; i++)
+        {
+            string? text = stated[i].Attribute(XName.Get("rel-width", OdfNamespaces.Style))?.Value;
+            int star = text?.IndexOf('*') ?? -1;
+            if (star > 0 && long.TryParse(text.AsSpan(0, star), out long width) && width > 0)
+            {
+                relative[i] = width;
+                total += width;
+                described++;
+            }
+
+            starts[i] = Indent(stated[i], "start-indent");
+            ends[i] = Indent(stated[i], "end-indent");
+        }
+
+        // A column with no width of its own takes the average of those that have one, and a set with none
+        // is shared evenly — which is what xmloff's own fill-in does (`:288-306`).
+        if (described < count)
+        {
+            long each = total == 0 ? 1 : total / Math.Max(described, 1);
+            for (int i = 0; i < count; i++)
+            {
+                if (relative[i] == 0) { relative[i] = each; total += each; }
+            }
+        }
+
+        List<Length> widths = new(count);
+        List<Length> gaps = new(Math.Max(count - 1, 0));
+        Length taken = Core.Units.Length.Zero;
+
+        for (int i = 0; i < count; i++)
+        {
+            // The last column takes what the others left, so the apportioning cannot lose an EMU.
+            Length outer = i == count - 1
+                ? measure - taken
+                : Core.Units.Length.FromEmu((long)(measure.Emu * (double)relative[i] / total));
+            taken += outer;
+
+            Length width = outer - starts[i] - ends[i];
+            widths.Add(width > Core.Units.Length.Zero ? width : Core.Units.Length.Zero);
+            if (i < count - 1) gaps.Add(ends[i] + starts[i + 1]);
+        }
+
+        return new ColumnRuler(widths, gaps);
+    }
+
+    /// <summary>One of a <c>style:column</c>'s two indents, nought when it states none.</summary>
+    private static Length Indent(XElement column, string localName)
+        => OdfWriterUnits.ToCore(
+               OdfValue.ParseLength(
+                   column.Attribute(XName.Get(localName, OdfNamespaces.FoCompatible))?.Value))
+           ?? Core.Units.Length.Zero;
+
+    /// <summary>
     /// The gap between columns.
     /// </summary>
     /// <remarks>
@@ -497,7 +603,7 @@ internal static class OdfPageGeometry
     /// margin on each column, in which case the first column's right margin is representative. Taking
     /// it from the first rather than averaging keeps the common case exact.
     /// </remarks>
-    private static Length ColumnGap(OdfPropertySet? properties)
+    internal static Length ColumnGap(OdfPropertySet? properties)
     {
         if (properties?.Child(OdfNamespaces.Style, "columns") is not { } columns)
         {

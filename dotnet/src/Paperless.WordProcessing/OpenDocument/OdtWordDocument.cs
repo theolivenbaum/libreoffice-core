@@ -109,7 +109,8 @@ public sealed class OdtWordDocument : IWordProcessingDocument, IPaginatedDocumen
             stylesRoot: _inner.File.StylesRoot,
             pictures: new OdfPictures(_inner.File, _laidOut),
             settings: _inner.File.Settings,
-            sectionMargins: [.. Sections.Select(section => section.Page.Margins.Left)]);
+            sectionMargins: [.. Sections.Select(section => section.Page.Margins.Left)],
+            sectionCount: masters.Count);
 
         List<PageBlock> blocks = source.Read(body);
 
@@ -142,6 +143,16 @@ public sealed class OdtWordDocument : IWordProcessingDocument, IPaginatedDocumen
 
             paginated.Add(new PaginatedSection(
                 GrownTo(stated, _inner.File.Styles, masters[index], header, footer), furniture));
+        }
+
+        // The sections a text:section asked for, derived from the master each one sits on so that they
+        // keep its paper, its running heads and the header height measured above. They are numbered after
+        // the masters because the walk allocated them that way, and every one of them breaks continuously:
+        // a Writer text section starts where the flow reaches it.
+        foreach (OdtColumnSection derived in source.ColumnSections)
+        {
+            PaginatedSection master = paginated[Math.Clamp(derived.Master, 0, paginated.Count - 1)];
+            paginated.Add(new PaginatedSection(Derived(master.Section, derived.Geometry), master.Furniture));
         }
 
         return new WordProcessingPages(
@@ -181,6 +192,50 @@ public sealed class OdtWordDocument : IWordProcessingDocument, IPaginatedDocumen
     /// rule: Writer has no such cap and simply lets the body shrink.
     /// </para>
     /// </remarks>
+    /// <summary>
+    /// A master's section wearing what a <c>text:section</c> does to it, reached by a continuous break.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The indents are added to the master's margins rather than replacing them, because that is how the
+    /// file states them — LibreOffice's importers put the <em>difference</em> between the section's own
+    /// margins and the page style's on the section format, and its ODF export writes that difference out;
+    /// see <see cref="OdfSectionGeometry"/> for the two citations.
+    /// </para>
+    /// <para>
+    /// Everything else is the master's: the paper, the vertical margins, the running heads and the page
+    /// numbering all belong to the sheet the section sits on, and a section frame changes none of them.
+    /// A null geometry is the section that closes a <c>text:section</c>, which is the master's own
+    /// geometry with a continuous break so that leaving the columns does not start a page.
+    /// </para>
+    /// </remarks>
+    /// <param name="master">The section of the master page the text section sits on.</param>
+    /// <param name="geometry">What the <c>text:section</c> states, or null to restore the master's.</param>
+    private static WritingSection Derived(WritingSection master, OdfSectionGeometry? geometry)
+    {
+        PageMargins margins = master.Page.Margins with
+        {
+            Left = master.Page.Margins.Left + (geometry?.IndentLeft ?? Length.Zero),
+            Right = master.Page.Margins.Right + (geometry?.IndentRight ?? Length.Zero),
+        };
+
+        return master with
+        {
+            Break = SectionBreak.Continuous,
+            IsTextSection = true,
+            RestartPageNumberAt = null,
+            BalancesColumns = geometry?.BalancesColumns ?? false,
+            Page = master.Page with
+            {
+                Margins = margins,
+                Columns = geometry?.Columns ?? 1,
+                ColumnGap = geometry?.ColumnGap ?? Length.Zero,
+                ColumnRuler = geometry?.RulerFor(
+                    master.Page.Size.Width - margins.Left - margins.Right - master.Page.Gutter),
+            },
+        };
+    }
+
     /// <param name="stated">The section as the file states it, used when the growth is refused.</param>
     /// <param name="styles">The document's styles, to re-read the geometry through.</param>
     /// <param name="master">The master page the section is on.</param>

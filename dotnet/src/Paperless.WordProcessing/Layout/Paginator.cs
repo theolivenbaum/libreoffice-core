@@ -1252,17 +1252,31 @@ public sealed class Paginator
                 // 36 pt to 574 pt and pages two and three from 72 pt to 539 pt. Switching at the break put
                 // page one at 72 pt, which is a tenth of the measure lost on every line of it.
                 // Columns are the exception and change at once, because Writer *does* start a text section
-                // for them mid-page.
+                // for them mid-page — and where the section is a text section outright
+                // (`WritingSection.IsTextSection`, which is what a `text:section` is) its own indents
+                // change with them, since a `SwSectionFrame` is laid out inside the body rather than
+                // being the body. Its paper and its vertical margins still belong to the sheet.
                 page = kind == SectionBreak.Continuous && !pageIsEmpty
                     ? page with
                     {
+                        Margins = geometry.IsTextSection
+                            ? page.Margins with
+                            {
+                                Left = geometry.Page.Margins.Left,
+                                Right = geometry.Page.Margins.Right,
+                            }
+                            : page.Margins,
                         Columns = geometry.Page.Columns,
                         ColumnGap = geometry.Page.ColumnGap,
                         ColumnRuler = geometry.Page.ColumnRuler,
                     }
                     : geometry.Page;
 
-                deferredPage = kind == SectionBreak.Continuous && !pageIsEmpty ? geometry.Page : null;
+                // A text section has nothing left to hand the next sheet: its indents and its columns have
+                // already been taken above, and the paper it sits on is the paper it started on.
+                deferredPage = kind == SectionBreak.Continuous && !pageIsEmpty && !geometry.IsTextSection
+                    ? geometry.Page
+                    : null;
                 sectionFirstPage = pages.Count;
 
                 // A restart of the page numbering also decides which side of the sheet the section wants,
