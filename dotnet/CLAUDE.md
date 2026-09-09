@@ -1121,7 +1121,7 @@ LibreOffice ignores) and 5 in 4 documents state widths with no gap and are appor
 (`pColumn[nCol].Width = (fWidth + fLeft + fRight) * fRel`, `dmapper/PropertyMap.cxx`:868-874), so the
 text width is the share less that column's `fo:start-indent` and `fo:end-indent` and the gap is the
 first's end indent plus the second's start indent. Reach **33 of the 338 converted `.odt`**, of which
-22 are `chartset` templates with no flowed text; **11 renderings move**, mean |Δx| from 26.2.4.2
+23 are `chartset` templates with no flowed text; **11 renderings move**, mean |Δx| from 26.2.4.2
 **8.593 → 4.083 pt**, `.odt` gate 291 → 292. `.ods` and `.odp` hold no `text:section` at all.
 `probes/odt-startx-r88/results.md`.
 

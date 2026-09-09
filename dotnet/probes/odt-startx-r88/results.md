@@ -257,7 +257,7 @@ Per document, of the 11: **7 better, 4 worse** (`startx.txt`). `ABCD-SDE-23-00` 
 pt, `JEMIT_Template` 33.83 → **2.27**, `644730BRI` 65.54 → **10.02**, `022_Unit_Circle_Chart` 21.26 →
 8.75.
 
-Only 11 of the 33 columned documents move at all, and the reason is worth recording: **22 of the 33
+Only 11 of the 33 columned documents move at all, and the reason is worth recording: **23 of the 33
 are the `chartset` templates** — Organogram, Unit Circle, Storyboard, Venn — whose single page is
 drawings with almost no flowed text, so a two-column section over nothing changes nothing.
 
