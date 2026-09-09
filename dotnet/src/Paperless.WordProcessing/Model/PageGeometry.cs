@@ -786,6 +786,33 @@ public sealed record WritingSection
     /// </remarks>
     public bool BalancesColumns { get; init; }
 
+    /// <summary>
+    /// True when the section is a Writer <em>text section</em> rather than a page style, so its own
+    /// horizontal geometry applies where it starts instead of on the next sheet.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A continuous section normally inherits the page style of the section above it, which is why a
+    /// change of margins waits for the next page — see the note beside the break handling in
+    /// <c>Paginator</c>. A multi-column stretch is the exception, and it is an exception because Writer
+    /// models it as a different object: <c>SectionPropertyMap::CloseSectionGroup</c> says so in as many
+    /// words — <em>"prefer setting column properties into a section, not a page style if at all
+    /// possible"</em> (<c>sw/source/writerfilter/dmapper/PropertyMap.cxx</c>:1905-1913) — and the WW8
+    /// importer does the same, putting the <em>difference</em> between the Word section's margins and
+    /// the page style's onto that section's own <c>SvxLRSpaceItem</c>:
+    /// <c>nSectionLeft = rSection.GetPageLeft() - nPageLeft</c>
+    /// (<c>sw/source/filter/ww8/ww8par6.cxx</c>:735-745). A <c>SwSectionFrame</c> begins where the flow
+    /// reaches it, so both its columns and its indents take effect mid-page.
+    /// </para>
+    /// <para>
+    /// ODF states that object directly, as a <c>text:section</c> whose section style carries
+    /// <c>style:columns</c> and <c>fo:margin-left</c>/<c>fo:margin-right</c>; those margins are stated
+    /// <em>relative to the page's</em>, which is why the reader adds them to the master's own before
+    /// handing the geometry over. Default false, so nothing but a reader that says otherwise changes.
+    /// </para>
+    /// </remarks>
+    public bool IsTextSection { get; init; }
+
     /// <summary>True when the section's first page uses the <c>First</c> furniture slot.</summary>
     public bool HasDifferentFirstPage { get; init; }
 

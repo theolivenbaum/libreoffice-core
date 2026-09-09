@@ -1094,6 +1094,51 @@ Two rules from it are general enough to carry:
     of the `Tm`-only scan. `probes/odt-split-r82/tdrange.py`; the two wrong instruments are kept
     beside it.
 
+**An ODF `text:section` is a Writer text section, and a multi-column stretch inside a page is the one
+thing that object exists for.** The ODF reader walked straight through the element, so a two-column
+section was laid out one column wide across the whole measure. Both Word importers reach for the same
+object and say so: `SectionPropertyMap::CloseSectionGroup` — *"prefer setting column properties into a
+section, not a page style if at all possible"* — then `appendTextSectionAfter`
+(`sw/source/writerfilter/dmapper/PropertyMap.cxx`:1905-1913), and `wwSectionManager::InsertSection`
+builds a `SwSectionFormat`, puts the section's **difference** from the page style's margins on it as an
+`SvxLRSpaceItem` — `nSectionLeft = rSection.GetPageLeft() - nPageLeft` — and only then calls `SetCols`
+(`sw/source/filter/ww8/ww8par6.cxx`:735-745). LibreOffice's ODF export writes that back out as a
+section-family style carrying `style:columns` and `fo:margin-left`/`fo:margin-right`, so reading it is
+the exact inverse of what produced the file — on `644730BRI0mna000BOX361539B00public0.odt` the page's
+`0.4165in` and the section's `0.5835in` sum to the round inch its `.doc` declares.
+
+**Three things about it are worth carrying.** *A section frame's geometry applies where the flow
+reaches it*, not on the next sheet — `aRectFnSet.SetLeft(aPrt, rLRSpace.ResolveLeft())` under
+`#109700# LRSpace for sections`, `sw/source/core/layout/sectfrm.cxx`:130-181 — which is the opposite of
+a continuous section's *page style* margins, and `WritingSection.IsTextSection` is what separates the
+two. *The per-column widths are read only where LibreOffice reads them*:
+`XMLTextColumnsContext::endFastElement` takes the `style:column` descriptions under
+`!bAutomatic && maColumns.size() == nCount`, and `bAutomatic` is set by the mere **presence** of
+`fo:column-gap` (`xmloff/source/text/XMLTextColumnsContext.cxx`:216-222, :268-315) — so of the corpus's
+112 section `style:columns`, **107 state a gap and are even (33 of those also state unequal widths that
+LibreOffice ignores) and 5 in 4 documents state widths with no gap and are apportioned**. And a
+`style:rel-width` is the column's *outer* width, its own indents included
+(`pColumn[nCol].Width = (fWidth + fLeft + fRight) * fRel`, `dmapper/PropertyMap.cxx`:868-874), so the
+text width is the share less that column's `fo:start-indent` and `fo:end-indent` and the gap is the
+first's end indent plus the second's start indent. Reach **33 of the 338 converted `.odt`**, of which
+23 are `chartset` templates with no flowed text; **11 renderings move**, mean |Δx| from 26.2.4.2
+**8.593 → 4.083 pt**, `.odt` gate 291 → 292. `.ods` and `.odp` hold no `text:section` at all.
+`probes/odt-startx-r88/results.md`.
+
+**And two instrument corrections came out of it that invalidate a stored ranking.**
+`probes/odt-page-r87/residual-startx.txt`'s columns are *matched, mean before, mean after, within-0.1pt
+before/after* — not *max, mean, pages agreeing*, which is how a brief read them, so
+`011_Project_Timeline_Template_Beautiful_Theme` was carried as "page-exact with a 342 pt error" when it
+is a one-page document failing the gate on **glyphs**. And the 342 pt itself is `difflib` pairing **nine
+identical repeated labels in draw order**: that template's nine `Lorem ipsum` blocks sit at the *same
+nine* x on both sides to 0.10 pt, and the two Venn templates' three labels likewise. Corrected — spans
+merged per baseline, and a unique-line column beside the mean — the three read **0.142, 0.114 and
+0.111 pt**. The second correction is separate and costs as much: **this tree writes a justified line as
+one text object per stretch and 26.2.4.2 as one per line**, so `get_text('dict')` reports 635 "lines"
+against 479 for one page and the matcher pairs a fragment against a whole line. `probes/odt-startx-r88/startx.py`
+is the instrument to reuse; **read a `|Δx|` ranking with the matched-line count and the unique-line
+count beside it.**
+
 **An ODF document's own embedded fonts were never loaded, and the seat is `svg:font-face-uri`.**
 A `style:font-face` that carries a face holds one `svg:font-face-uri` per style under an
 `svg:font-face-src`, naming a package part through `xlink:href` or carrying the bytes as an

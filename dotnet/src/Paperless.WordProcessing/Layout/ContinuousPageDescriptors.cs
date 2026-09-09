@@ -95,6 +95,13 @@ public static class ContinuousPageDescriptors
             PaginatedSection section = resolved is null ? sections[i] : resolved[i];
             if (section.Section.Break != SectionBreak.Continuous) continue;
 
+            // A Writer text section is exempt, and not as a convenience: the whole rule is about a
+            // continuous section whose *page style* reaches no page, and a text section never asked for
+            // one. ODF states such a section directly (`text:section`) and the master page still decides
+            // the paper, the margins and the running head, so there is no descriptor to lose and nothing
+            // to inherit — see WritingSection.IsTextSection.
+            if (section.Section.IsTextSection) continue;
+
             // The guard the else-if states: a section every one of whose slots is still linked to the
             // previous one is never even offered a page style, so there is nothing to attach and no
             // point searching for a break.

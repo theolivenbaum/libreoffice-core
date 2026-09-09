@@ -103,6 +103,11 @@ public sealed partial class OdtLayoutSource
     /// geometry. Read only by <see cref="SectionLeftMargin"/>, for a floating table whose fly measures its
     /// offset from the sheet's own edge.
     /// </param>
+    /// <param name="sectionCount">
+    /// How many sections the caller will lay out — one per master page. A <c>text:section</c> that changes
+    /// the geometry is numbered from here upwards, so a caller that leaves this at nought gets the old
+    /// behaviour, in which such a section is transparent. See <see cref="ColumnSections"/>.
+    /// </param>
     public OdtLayoutSource(
         OdfStyles styles,
         SystemFontResolver? fonts = null,
@@ -110,11 +115,13 @@ public sealed partial class OdtLayoutSource
         XElement? stylesRoot = null,
         OdfPictures? pictures = null,
         XElement? settings = null,
-        IReadOnlyList<Length>? sectionMargins = null)
+        IReadOnlyList<Length>? sectionMargins = null,
+        int sectionCount = 0)
     {
         ArgumentNullException.ThrowIfNull(styles);
         _styles = styles;
         _sectionMargins = sectionMargins ?? [];
+        _sectionCount = sectionCount;
         _pictures = pictures;
         _fonts = fonts ?? new SystemFontResolver(SystemFontIndex.Build());
         _masterPages = masterPages ?? new Dictionary<string, int>(StringComparer.Ordinal);
@@ -453,6 +460,31 @@ public sealed partial class OdtLayoutSource
     /// </remarks>
     private int _sectionIndex;
 
+    /// <summary>
+    /// Which master page the walk is on, which is <see cref="_sectionIndex"/> except inside a
+    /// <c>text:section</c> that changed the geometry — see <see cref="EnterColumnSection"/>.
+    /// </summary>
+    private int _masterIndex;
+
+    /// <summary>The <c>text:section</c> currently open, or null when the walk is not inside one.</summary>
+    private OdfSectionGeometry? _columnGeometry;
+
+    /// <summary>How many sections the caller states, which is where the derived ones are numbered from.</summary>
+    private readonly int _sectionCount;
+
+    /// <summary>The sections the walk derived from a <c>text:section</c>, in the order allocated.</summary>
+    private readonly List<OdtColumnSection> _columnSections = [];
+
+    /// <summary>
+    /// The sections a <c>text:section</c> asked for, numbered from <see cref="_sectionCount"/> upwards.
+    /// </summary>
+    /// <remarks>
+    /// Empty for every document that holds no <c>text:section</c> changing the geometry, which is nearly
+    /// all of them. The caller turns each into a section derived from the master's own, because only the
+    /// caller has the master's geometry; see <see cref="OdtWordDocument.Layout"/>.
+    /// </remarks>
+    internal IReadOnlyList<OdtColumnSection> ColumnSections => _columnSections;
+
     /// <summary>The substitutions made while resolving the document's fonts.</summary>
     /// <remarks>
     /// Worth surfacing rather than swallowing: a substitution that is not metric-compatible changes
@@ -470,6 +502,9 @@ public sealed partial class OdtLayoutSource
         ArgumentNullException.ThrowIfNull(body);
 
         _sectionIndex = 0;
+        _masterIndex = 0;
+        _columnGeometry = null;
+        _columnSections.Clear();
         return WalkBlocks(body, isBody: true);
     }
 
@@ -646,6 +681,13 @@ public sealed partial class OdtLayoutSource
                 continue;
             }
 
+            if (ns == OdfNamespaces.Text && name == "section" && EnterColumnSection(child))
+            {
+                Walk(child, into, depth + 1);
+                LeaveColumnSection();
+                continue;
+            }
+
             if (ns == OdfNamespaces.Text
                 && name is "section" or "index-body"
                     or "table-of-content" or "alphabetical-index" or "illustration-index"
@@ -800,7 +842,7 @@ public sealed partial class OdtLayoutSource
     private Length SectionLeftMargin
         => _sectionMargins.Count == 0
             ? Length.Zero
-            : _sectionMargins[Math.Clamp(_sectionIndex, 0, _sectionMargins.Count - 1)];
+            : _sectionMargins[Math.Clamp(_masterIndex, 0, _sectionMargins.Count - 1)];
 
     /// <summary>
     /// The frames already read as positioned tables, which must not be read as frames as well.
@@ -838,6 +880,64 @@ public sealed partial class OdtLayoutSource
         return frames.Count == 0
             ? paragraph
             : paragraph with { Frames = [.. frames, .. paragraph.Frames] };
+    }
+
+    /// <summary>
+    /// Opens a <c>text:section</c> that changes the geometry, answering the section index to restore.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Answers null — and the walk then treats the element as transparent, exactly as it always has —
+    /// for a section that states one column and no indents, for one nested inside another, and for one
+    /// outside the body. A section in a header, a footer or a table cell is not laid out as its own
+    /// frame here: the flow it belongs to has no page geometry of its own to change.
+    /// </para>
+    /// <para>
+    /// Nesting is refused rather than composed because composing it would need the parent section's
+    /// area as the origin of the child's indents, and nothing in the converted corpus exercises it:
+    /// of 139 <c>text:section</c> elements in 49 of the 338 converted <c>.odt</c>, <b>none</b> is
+    /// inside another and none is inside a table.
+    /// </para>
+    /// </remarks>
+    /// <param name="section">The <c>text:section</c> element.</param>
+    /// <returns>True when the section was opened, and the walk must close it again.</returns>
+    private bool EnterColumnSection(XElement section)
+    {
+        if (!_isBody || _columnGeometry is not null || _sectionCount == 0) return false;
+
+        string? styleName = section.Attribute(XName.Get("style-name", OdfNamespaces.Text))?.Value;
+        if (OdfSectionGeometry.Read(_styles, styleName) is not { } geometry) return false;
+
+        _columnGeometry = geometry;
+        _sectionIndex = AllocateColumnSection(geometry);
+        return true;
+    }
+
+    /// <summary>
+    /// Closes the section <see cref="EnterColumnSection"/> opened, returning the flow to the page.
+    /// </summary>
+    /// <remarks>
+    /// Through a section of its own rather than by restoring the outer index, because the outer index
+    /// names a section whose break is <c>NextPage</c> — returning to it would start a page where the
+    /// file merely ends a columned stretch. The restoring section is the master's geometry with a
+    /// continuous break, which is what leaving a <c>SwSectionFrame</c> does.
+    /// </remarks>
+    private void LeaveColumnSection()
+    {
+        _columnGeometry = null;
+        _sectionIndex = AllocateColumnSection(geometry: null);
+    }
+
+    /// <summary>
+    /// Allocates a section derived from the master the walk is on, and answers its index.
+    /// </summary>
+    /// <param name="geometry">
+    /// The <c>text:section</c>'s own geometry, or null for the section that restores the master's.
+    /// </param>
+    private int AllocateColumnSection(OdfSectionGeometry? geometry)
+    {
+        _columnSections.Add(new OdtColumnSection(_masterIndex, geometry));
+        return _sectionCount + _columnSections.Count - 1;
     }
 
     /// <summary>
@@ -889,8 +989,14 @@ public sealed partial class OdtLayoutSource
             .Attribute(XName.Get("style-name", OdfNamespaces.Text))?.Value;
 
         // A paragraph whose style names a master page moves the document onto that master, and everything
-        // after it follows until another paragraph says otherwise.
-        if (MasterPageOf(styleName) is { } section) _sectionIndex = section;
+        // after it follows until another paragraph says otherwise. Inside a text:section the master
+        // decides the geometry the section's own columns and indents are applied *to*, so a change of
+        // master there needs a section of its own rather than throwing the open one away.
+        if (MasterPageOf(styleName) is { } master && master != _masterIndex)
+        {
+            _masterIndex = master;
+            _sectionIndex = _columnGeometry is { } open ? AllocateColumnSection(open) : master;
+        }
 
         OdfTextStyle text = OdfParagraphFormats.ResolveText(_styles, styleName);
         OpenTypeFace? face = Face(text);
