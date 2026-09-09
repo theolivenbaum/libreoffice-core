@@ -408,6 +408,28 @@ unmeasured. **ODS is not wired at all** — `style:print="… annotations …"` 
 `office:annotation` on the cells would be the two halves, and no corpus spreadsheet asks for it
 there. Worth doing for symmetry, not for a number.
 
+> **"No corpus spreadsheet asks for it there" was a claim about the original corpus, and the
+> converted one refutes it — round 88.** Two of the 307 converted `.ods` state
+> `style:print="annotations …"` on their page layout, **and both are in the failing set**:
+> `Hazard Analysis Template.ods` (`pages,words`, 2 pages against 3, −35.68 % of glyphs) and
+> `RMP 2011-2014 and Inventory.ods` (`pages`, 36 against 38, −0.44 %). The reference's extra
+> pages hold exactly the note text and nothing else — `RMP`'s page 38 is
+> `Inventory / B54: / Elina Zheleva: / ex OPS.026 / …`, four notes with the sheet's own header
+> and footer. The seat on the Calc side is the one this entry already names,
+> `ATTR_PAGE_NOTES` → `aTableParam.bNotes` (`sc/source/ui/view/printfun.cxx`:944), gating
+> `CountNotePages` (`:2557-2600`) and `PrintNotes`/`DoNotes` (`:2004-2067`); on the ODF side it
+> is `PROP_PrintAnnotations` from `style:print`'s `annotations` token
+> (`xmloff/source/style/PageMasterStyleMap.cxx`:80,
+> `xmloff/source/style/PageMasterPropHdlFactory.cxx`:85). So it is worth **two page counts**,
+> and the SpreadsheetML half above still has no witness.
+>
+> **The expensive half is already built.** These two are the ODF twins of the very `.xls` files
+> the section above closed: the `DoNotes` port, the `"GW99999:"` column width, the column-major
+> order and the 200-twip advance all exist and are proven exact on
+> `Hazard Analysis Template.xls`. What the ODF path is missing is only its two *inputs* — the
+> page layout's `style:print` token and the cells' `office:annotation` text, of which
+> `Hazard Analysis Template.ods` holds 16 and `RMP` 12. `probes/ods-track-r88/results.md` §4.
+
 One instrument note for the next agent: **LibreOffice's flat-ODS export drops cell annotations
 entirely.** Measured on two documents whose notes demonstrably print — `office:annotation` appears
 zero times in the `.fods` and twenty-four times in the `.ods` of the same workbook. So the

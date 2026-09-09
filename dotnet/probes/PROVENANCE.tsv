@@ -917,3 +917,14 @@ dotnet/probes/rtf-holdover-r87/results.md	2026-09-08	current	26.2.4.2	present	cu
 dotnet/probes/rtf-holdover-r87/score.py	2026-09-08	current	26.2.4.2	present	current	
 dotnet/probes/rtf-holdover-r87/sweep-hash.sh	2026-09-08	current	26.2.4.2	present	current	
 dotnet/probes/rtf-holdover-r87/sweep-ours.sh	2026-09-08	current	26.2.4.2	present	current	
+dotnet/probes/ods-track-r88/after-rows.tsv	2026-09-09	current	26.2.4.2	present	current	
+dotnet/probes/ods-track-r88/batch-check-tmo.sh	2026-09-09	current	26.2.4.2	present	current	dotnet/CLAUDE.md
+dotnet/probes/ods-track-r88/head-rows.tsv	2026-09-09	current	26.2.4.2	present	current	
+dotnet/probes/ods-track-r88/head-split.txt	2026-09-09	current	26.2.4.2	present	current	
+dotnet/probes/ods-track-r88/join.py	2026-09-09	current	26.2.4.2	present	current	
+dotnet/probes/ods-track-r88/movers.tsv	2026-09-09	current	26.2.4.2	present	current	
+dotnet/probes/ods-track-r88/refail-times.tsv	2026-09-09	current	26.2.4.2	present	current	
+dotnet/probes/ods-track-r88/refail.sh	2026-09-09	current	26.2.4.2	present	current	
+dotnet/probes/ods-track-r88/render-ours.sh	2026-09-09	current	26.2.4.2	present	current	
+dotnet/probes/ods-track-r88/results.md	2026-09-09	current	26.2.4.2	present	current	dotnet/CLAUDE.md;dotnet/src/Paperless.OpenDocument/TODO.md;dotnet/src/Paperless.Spreadsheets/TODO.md
+dotnet/probes/ods-track-r88/score.py	2026-09-09	current	26.2.4.2	present	current	

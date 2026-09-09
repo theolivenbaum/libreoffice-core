@@ -1516,6 +1516,19 @@ awk -F'\t' 'NR==FNR{bad[$0];next} !($1 in bad) && $7=="match"' /tmp/bad A/rows.t
 A row that is `match` in one run and `ref-failed` in the other is evidence about the box, not
 about the tree.
 
+***And the cure is the bound, not patience: every one of those rows renders in seconds.***
+Round 88 took `probes/odf-gate-r80`'s eleven `.ods` `ref-failed` documents and rendered each one
+**alone** through the same 26.2.4.2 with a 900 s bound: **eleven of eleven succeeded, in one to
+three seconds each**, the largest being a 163-page, 189 068-glyph workbook at two seconds. Its
+whole-column re-sweep at `RENDER_TIMEOUT=900` then reported `REF-CANNOT-RENDER 0` over 307
+documents, and the two `ours-failed` rows came back as matches as well. So a `ref-failed` row is
+**not evidence that the document is slow** — it is a wedge, and a wedge is not proportional to
+the work. `probes/ods-track-r88/batch-check-tmo.sh` is `batch-check.sh` with the two hard-coded
+240 s bounds behind `$RENDER_TIMEOUT`; raise it when the box is busy rather than banking the
+failures. **The cost of not doing so is a whole track's headline figure**: that column was
+carried as *225 of 307, the worst track we have* on the strength of r80, and measured **269 of
+307** at the same commit, with the residual 38 rows rather than 82.
+
 **Before you rebuild, check the sweep is finished — and check it with a file, not a clock.** The
 gate measures `dotnet/tools/Paperless.Cli/…/Paperless.Cli` in the tree it runs from, so a rebuild
 mid-sweep swaps the binary and the rows either side describe different programs. On 2026-09-07 a
