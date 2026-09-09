@@ -28,7 +28,8 @@ public class OdfChartPlotTests
     private const string Number = "urn:oasis:names:tc:opendocument:xmlns:datastyle:1.0";
 
     /// <summary>A one-series bar chart with the given extra markup inside the plot area.</summary>
-    private static string Document(string plotExtra, string styles = "", string plotStyle = "") =>
+    private static string Document(
+        string plotExtra, string styles = "", string plotStyle = "", string seriesStyle = "") =>
         $"""
          <office:document xmlns:office="{Office}" xmlns:chart="{Chart}" xmlns:chartooo="{ChartOoo}"
                           xmlns:svg="{Svg}" xmlns:style="{Style}" xmlns:table="{Table}"
@@ -42,7 +43,7 @@ public class OdfChartPlotTests
                  <chart:axis chart:dimension="x" chart:name="primary-x"/>
                  <chart:axis chart:dimension="y" chart:name="primary-y"/>
                  <chart:series chart:values-cell-range-address="local-table.$B$2:.$B$3"
-                               chart:class="chart:bar"/>
+                               chart:class="chart:bar" {seriesStyle}/>
                </chart:plot-area>
                <table:table table:name="local-table">
                  <table:table-row>
@@ -62,9 +63,10 @@ public class OdfChartPlotTests
          </office:document>
          """;
 
-    private static ChartPlot Read(string plotExtra, string styles = "", string plotStyle = "")
+    private static ChartPlot Read(
+        string plotExtra, string styles = "", string plotStyle = "", string seriesStyle = "")
     {
-        XElement document = XElement.Parse(Document(plotExtra, styles, plotStyle));
+        XElement document = XElement.Parse(Document(plotExtra, styles, plotStyle, seriesStyle));
         XElement chart = document.Descendants(XName.Get("chart", Chart)).Single();
 
         return OdfChartPlot.Read(chart, new OdfChartStyles(document))
@@ -100,7 +102,7 @@ public class OdfChartPlotTests
     /// A plot area's <c>chart:data-label-number</c> labels every series under it.
     /// </summary>
     /// <remarks>
-    /// ODF folds OOXML's five flags into two attributes and states them on whichever style is
+    /// ODF spends four attributes on OOXML's five flags and states them on whichever style is
     /// nearest, which for a chart LibreOffice writes is usually the plot area's rather than each
     /// series'. Reading only the series' style finds nothing on the commonest file.
     /// </remarks>
@@ -121,6 +123,84 @@ public class OdfChartPlotTests
         plot.Series[0].Label!.ShowValue.ShouldBeTrue();
         plot.Series[0].Label!.ShowCategory.ShouldBeTrue();
         plot.Series[0].Label!.ShowPercent.ShouldBeFalse();
+    }
+
+    /// <summary>
+    /// <c>chart:data-label-series</c> and <c>chart:data-label-symbol</c> are the other two
+    /// attributes that merge into <c>DataCaption</c>, and the label carries the series' name
+    /// between the category's and the value.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Both are <c>MID_FLAG_MERGE_PROPERTY</c> rows against <c>PROP_DataCaption</c> beside
+    /// <c>data-label-number</c> and <c>data-label-text</c>
+    /// (<c>xmloff/source/chart/PropertyMaps.cxx</c>:247-250), and
+    /// <c>handleSpecialItem</c> sets <c>ChartDataCaption::DATA_SERIES</c> and <c>::SYMBOL</c>
+    /// from them (<c>:975-991</c>). Neither was read, and this reader's own remark asserted the
+    /// first did not exist — it is stated 25 times in 8 of the 307 converted <c>.ods</c>.
+    /// </para>
+    /// <para>
+    /// The order is <c>VSeriesPlotter::createDataLabel</c>'s four-slot list — category, series,
+    /// value, percentage (<c>chart2/source/view/charttypes/VSeriesPlotter.cxx</c>:566-596) — so
+    /// the assertion is on the composed string and not only on the flags.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void ASeriesNameAndItsLegendKeyAreReadFromTheirOwnTwoAttributes()
+    {
+        ChartPlot plot = Read(
+            string.Empty,
+            styles:
+            """
+            <style:style style:name="pa" style:family="chart">
+              <style:chart-properties chart:data-label-number="value" chart:data-label-text="true"
+                                      chart:data-label-series="true"
+                                      chart:data-label-symbol="true"/>
+            </style:style>
+            """,
+            plotStyle: """chart:style-name="pa" """);
+
+        ChartDataLabel label = plot.Series[0].Label.ShouldNotBeNull();
+        label.ShowSeries.ShouldBeTrue();
+        label.ShowLegendKey.ShouldBeTrue();
+
+        label.Compose("Q1", "North", 120, 215).ShouldBe("Q1; North; 120");
+    }
+
+    /// <summary>
+    /// A series style that mentions neither attribute keeps what the plot area said; one stating
+    /// <c>chart:data-label-series="false"</c> clears it.
+    /// </summary>
+    /// <remarks>
+    /// The merge is into one bit field, so <c>SCH_XML_UNSETFLAG</c> on a false clears exactly the
+    /// bit the plot area set and leaves the others (<c>PropertyMaps.cxx</c>:984-991). That is why
+    /// the inheritance here has to be per flag rather than per style — a series style stating only
+    /// <c>chart:label-position</c> must not silently drop the plot area's series name, which is
+    /// the shape LibreOffice writes for the four <c>advanced_excel_pie</c> workbooks.
+    /// </remarks>
+    [Theory]
+    [InlineData("", true)]
+    [InlineData("""chart:data-label-series="false" """, false)]
+    public void ASeriesStyleOverridesTheFlagOnlyWhenItStatesIt(string seriesExtra, bool expected)
+    {
+        ChartPlot plot = Read(
+            string.Empty,
+            styles:
+            $"""
+             <style:style style:name="pa" style:family="chart">
+               <style:chart-properties chart:data-label-number="value"
+                                       chart:data-label-series="true"/>
+             </style:style>
+             <style:style style:name="se" style:family="chart">
+               <style:chart-properties chart:label-position="outside" {seriesExtra}/>
+             </style:style>
+             """,
+            plotStyle: """chart:style-name="pa" """,
+            seriesStyle: """chart:style-name="se" """);
+
+        plot.Series[0].Label.ShouldNotBeNull();
+        plot.Series[0].Label!.ShowSeries.ShouldBe(expected);
+        plot.Series[0].Label!.ShowValue.ShouldBeTrue();
     }
 
     /// <summary>

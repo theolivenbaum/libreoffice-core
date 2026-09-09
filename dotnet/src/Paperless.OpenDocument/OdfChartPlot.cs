@@ -450,15 +450,32 @@ public static class OdfChartPlot
     /// </summary>
     /// <remarks>
     /// <para>
-    /// ODF folds the four OOXML flags into two attributes: <c>chart:data-label-number</c>, whose
-    /// values are <c>none</c>, <c>value</c>, <c>percentage</c> and <c>value-and-percentage</c>,
-    /// and <c>chart:data-label-text</c>, a boolean meaning the category name
-    /// (<c>xmloff/source/chart/SchXMLSeriesHelper</c> and <c>PropertyMap.hxx</c>'s
-    /// <c>Label</c> mapping). There is no separate "series name" flag, which is why nothing here
-    /// sets <see cref="ChartDataLabel.ShowSeries"/>.
+    /// ODF spends <strong>four</strong> attributes on the one <c>DataCaption</c> bit field, not
+    /// two, and all four are merged into it by the same <c>MID_FLAG_MERGE_PROPERTY</c> rows of
+    /// <c>xmloff/source/chart/PropertyMaps.cxx</c>:247-250 —
+    /// <c>chart:data-label-number</c> (<c>none</c>, <c>value</c>, <c>percentage</c>,
+    /// <c>value-and-percentage</c>), <c>chart:data-label-text</c> for the category name,
+    /// <c>chart:data-label-symbol</c> for the legend key, and <c>chart:data-label-series</c> for
+    /// the <em>series</em> name. The last is <c>MAP_SPECIAL_ODF13</c>, so it is newer than the
+    /// other three, and <c>handleSpecialItem</c> sets
+    /// <c>ChartDataCaption::DATA_SERIES</c> and <c>::SYMBOL</c> from them
+    /// (<c>PropertyMaps.cxx</c>:975-991), which
+    /// <c>WrappedDataCaptionProperties</c>' <c>lcl_CaptionToLabel</c> turns into
+    /// <c>DataPointLabel::ShowSeriesName</c> and <c>::ShowLegendSymbol</c>
+    /// (<c>chart2/source/controller/chartapiwrapper/WrappedDataCaptionProperties.cxx</c>:74-90).
     /// </para>
     /// <para>
-    /// A style that states neither attribute inherits the level above rather than defaulting to
+    /// <strong>This remark used to say "there is no separate series name flag", and that was a
+    /// claim about an attribute nobody had grepped for.</strong> It is stated
+    /// <c>chart:data-label-series="true"</c> 25 times in 8 of the 307 converted <c>.ods</c> and
+    /// 11 times in one of the 302 <c>.odp</c>, and it is what puts <c>Actual</c> into every wedge
+    /// label of the four <c>advanced_excel_pie</c> workbooks. <c>chart:data-label-symbol</c> sits
+    /// beside it in the same styles and was equally unread; see
+    /// <see cref="ChartDataLabel.ShowLegendKey"/>, whose own measurements were taken on one of
+    /// those four documents' reference rendering.
+    /// </para>
+    /// <para>
+    /// A style that states none of them inherits the level above rather than defaulting to
     /// showing nothing, which is how a plot area saying <c>chart:data-label-number="value"</c>
     /// labels every series under it.
     /// </para>
@@ -468,9 +485,14 @@ public static class OdfChartPlot
     {
         string? number = styles.Text(style, "data-label-number");
         bool? text = styles.Flag(style, "data-label-text");
+        bool? name = styles.Flag(style, "data-label-series");
+        bool? symbol = styles.Flag(style, "data-label-symbol");
         string? position = styles.Text(style, "label-position");
 
-        if (number is null && text is null && position is null) return inherited;
+        if (number is null && text is null && name is null && symbol is null && position is null)
+        {
+            return inherited;
+        }
 
         bool value = number switch
         {
@@ -491,6 +513,8 @@ public static class OdfChartPlot
             ShowValue = value,
             ShowPercent = percent,
             ShowCategory = text ?? inherited?.ShowCategory ?? false,
+            ShowSeries = name ?? inherited?.ShowSeries ?? false,
+            ShowLegendKey = symbol ?? inherited?.ShowLegendKey ?? false,
             ValueFormat = styles.Format(style) ?? inherited?.ValueFormat,
             Separator = percent && !value ? "\n" : inherited?.Separator ?? "; ",
             Placement = PlacementOf(position) ?? inherited?.Placement,
